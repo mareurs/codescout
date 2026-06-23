@@ -26,6 +26,7 @@ pub mod fs;
 
 pub mod git;
 pub mod hardware;
+pub mod heartbeat;
 pub mod legibility;
 
 #[cfg(feature = "librarian")]

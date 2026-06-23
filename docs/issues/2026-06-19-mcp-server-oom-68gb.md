@@ -141,6 +141,20 @@ Plan (not yet implemented):
    isolation instead of taking down the desktop. Also review why the server runs
    with `oom_score_adj=200`.
 
+**Update (2026-06-23) — Fix 3 (make OOM observable) shipped, and reframed.** Recon found a
+30s RSS heartbeat *already existed* (`src/server.rs`, `--debug`-gated, `tracing::info!` → the
+non-blocking appender). The gap was never "no heartbeat" — it was that the existing one's data
+was **lost on SIGKILL** (non-blocking worker buffer), **undiscoverable** (per-instance log in an
+unknown server-cwd), **gated on `--debug`**, and **never recorded the in-flight operation**.
+Shipped in a new `src/heartbeat.rs`: an **always-on durable sink** that *synchronously* appends +
+flushes one `rss_kb=…` line per 30s tick to a **central, predictable** path
+`~/.cache/codescout/heartbeats/<pid>.log` (mirrors `logging::sync_append`, the panic hook's
+SIGKILL-proof write). Each line carries `op=<tool> op_age_s=<n>` — the in-flight tool, captured at
+the single dispatch chokepoint `CodeScoutServer::call_tool_inner` — so the ramp's top names the
+leaking operation. A startup header records pid/version/**git_sha**/cwd (so a dead instance's build
+is known); stale files are pruned to the 16 most-recent on startup. **Verified:** a `kill -9`'d test
+server's header survived on disk at the central path. The 'optionally abort' soft self-limit and the
+cgroup blast-radius cap (Fix 4) remain deferred.
 ## Tests added
 N/A — not yet fixed (root cause unidentified).
 
@@ -153,14 +167,18 @@ N/A — not yet fixed (root cause unidentified).
 - Raising swap only delays the thrash; the cgroup cap is the real mitigation.
 
 ## Resume
-Concrete next action: implement Fix 3 (periodic `rss_kb=` heartbeat in the server
-loop, e.g. every 30 s via `/proc/self/statm`) so the next occurrence leaves a
-ramp on disk, then watch the fleet. In parallel, audit the largest in-memory
-buffers: grep for `Vec::with_capacity`, `.reserve(`, and full-file reads in
-`src/tools/` and `src/retrieval/`; check whether any tool returns/accumulates an
-unbounded result before the 10 KB inline-buffer cap is applied. Record the
-build commit of long-lived servers going forward.
 
+Fix 3 (a durable, discoverable, always-on, `op=`-tagged RSS heartbeat) **shipped** — see the Fix
+Update above; lives in `src/heartbeat.rs`, wired at `src/server.rs` (`run` spawn + `call_tool_inner`).
+
+**Next concrete action (Fix 1 — the leak, still open):** watch `~/.cache/codescout/heartbeats/`
+across the fleet. When an instance next ramps, its `<pid>.log` shows the RSS climb *and* the `op=`
+tool in flight at the top of the ramp — that finally names the leaking operation. Check whatever
+`op=` reports against the two magnitude-plausible audit leads: `embed_queue` full materialization
+(`src/librarian/indexer.rs:80,207`) and `run_command` stdout pre-materialization
+(`src/tools/run_command/inner.rs:482`). The build commit is now in every heartbeat header, so the
+dead instance's build is known. Optional hardening still open: the soft self-limit abort and the
+cgroup `MemoryMax=`/`MemorySwapMax=0` blast-radius cap (Fix 4).
 ## References
 - Host journal: `journalctl -k --since "2026-06-19 16:20" --until "2026-06-19 16:25"`
 - Logging impl: `src/logging.rs` (debug/diagnostic file layers, `.codescout/` dir, non-blocking appender, panic-hook crash.log)

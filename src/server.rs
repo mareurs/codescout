@@ -623,6 +623,9 @@ impl CodeScoutServer {
             .map(|m| m.keys().map(|k| k.as_str()).collect())
             .unwrap_or_default();
         tracing::info!(tool = %req.name, ?arg_keys, "tool_call");
+        // Record the in-flight tool for the durable heartbeat (OOM forensics):
+        // if RSS climbs during this call, the heartbeat line names the operation.
+        crate::heartbeat::note_tool(&req.name);
         let tool_start = std::time::Instant::now();
 
         let tool = self.resolve_tool(&req.name)?;
@@ -695,45 +698,6 @@ impl CodeScoutServer {
 
         Ok(call_result)
     }
-}
-
-/// Snapshot of `/proc/self/status` memory fields, in kB.
-///
-/// Logged from the heartbeat task so OOM forensics has a per-instance time
-/// series. All four fields default to 0 on platforms that don't expose
-/// `/proc/self/status` (Windows, macOS) or on parse failure — heartbeat
-/// continues regardless.
-#[derive(Default, Copy, Clone)]
-struct SelfMemoryKb {
-    vm_size_kb: u64,
-    vm_rss_kb: u64,
-    vm_data_kb: u64,
-    vm_peak_kb: u64,
-}
-
-fn read_self_memory_kb() -> SelfMemoryKb {
-    let mut out = SelfMemoryKb::default();
-    let Ok(text) = std::fs::read_to_string("/proc/self/status") else {
-        return out;
-    };
-    for line in text.lines() {
-        let Some((key, rest)) = line.split_once(':') else {
-            continue;
-        };
-        let value_kb = rest
-            .split_whitespace()
-            .next()
-            .and_then(|n| n.parse::<u64>().ok())
-            .unwrap_or(0);
-        match key {
-            "VmSize" => out.vm_size_kb = value_kb,
-            "VmRSS" => out.vm_rss_kb = value_kb,
-            "VmData" => out.vm_data_kb = value_kb,
-            "VmPeak" => out.vm_peak_kb = value_kb,
-            _ => {}
-        }
-    }
-    out
 }
 
 /// Returns true for tools that manage their own timeout internally and must not
@@ -1276,12 +1240,13 @@ pub async fn run(
 
     let instance_tag = instance_id.as_deref().unwrap_or("----");
 
+    let project_display = agent
+        .project_root()
+        .await
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+
     if debug {
-        let project_display = agent
-            .project_root()
-            .await
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<none>".to_string());
         tracing::info!(
             pid = std::process::id(),
             version = env!("CARGO_PKG_VERSION"),
@@ -1292,7 +1257,14 @@ pub async fn run(
         );
     }
 
-    // Heartbeat: distinguishes idle from hung.
+    // Always-on durable OOM-forensics heartbeat: a synchronous, SIGKILL-proof
+    // RSS line per tick to <cache>/codescout/heartbeats/<pid>.log. Survives the
+    // kill and the unknown-cwd discoverability gap that lost the 68 GB instance's
+    // diagnostic log. See docs/issues/2026-06-19-mcp-server-oom-68gb.md.
+    crate::heartbeat::spawn_durable(instance_tag.to_owned(), project_display);
+
+    // Heartbeat: distinguishes idle from hung. (Rich fields, --debug only; rides
+    // the lossy non-blocking appender — the durable sink above is the forensic one.)
     if debug {
         let agent_hb = agent.clone();
         let lsp_hb = lsp.clone();
@@ -1310,7 +1282,7 @@ pub async fn run(
                 } else {
                     0
                 };
-                let mem = read_self_memory_kb();
+                let mem = crate::heartbeat::read_self_memory_kb();
                 tracing::info!(
                     instance = %instance_tag_hb,
                     uptime_secs,
