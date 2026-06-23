@@ -69,6 +69,9 @@ time_scope: open-ended
 | F-22 | 2026-06-14 | med | plan-prose | fixed-verified | Bug-file's "offset/limit never parsed anywhere" claim missed `OutputGuard::from_input` (`output.rs:96`); telemetry (191 calls) then resolved the fix to dispatch-layer option (a) |
 | F-21 | 2026-06-14 | low | self-friction | fixed-verified | Off-the-cuff root-cause unification of the open-bug clusters over-generalized; code scout split it (catalog 2+3 share a global-abspath-catalog root; bug 1 + the 06-11 cluster don't) |
 | F-23 | 2026-06-16 | high | codescout-tool | fixed-verified | `edit_code` "AST parse failed" hint named two wrong causes; real cause was AST(annotation-line)/LSP(`fun`-line) start-line gap exceeding the ±1 matcher tolerance on Kotlin methods with 2+ annotations |
+| F-24 | 2026-06-20 | med | plan-prose | fixed-verified | Kotlin `-Xmx2g` fix documented "implemented on experiments" but was an uncommitted working-tree change at recon; concurrent session committed it as `3adb66e7` (incl. test) on `experiments` 2026-06-21 — not yet on master. llm-proxy `2906647`-on-master assertion checked out clean by contrast |
+| F-25 | 2026-06-21 | med | plan-prose | open | Kotlin heap bug's root cause ("no `-Xmx` anywhere") missed kotlin-lsp's `intellij-server.vmoptions -Xmx2048m` — BUT that cap isn't reliably applied to codescout-spawned instances (06-20 GC-sawtooth reached 31 GiB heap despite it), so explicit `JAVA_TOOL_OPTIONS -Xmx2g` (`3adb66e7`) IS load-bearing, not redundant (self-corrected mid-session) |
+| F-26 | 2026-06-21 | med | self-friction | fixed-verified | `replace_symbol_surfaces_stale_error_after_max_retries` failed on `experiments` — ROOT-CAUSED (2026-06-23): hermetic MockLsp test, NOT environmental; `758801d5` (F-23 fix) removed the AST-collection line-gate so `validate_symbol_range` pre-empted the staleness path. Master verified GREEN (still line-gated); orthogonal to the Kotlin cherry-pick. **Fixed `d079c054`** (reorder validators, option a); full suite green |
 
 ## Wins Index
 
@@ -1465,6 +1468,190 @@ internal call on the real file and print its inputs before fixing (R-35, W-17)."
 **Status:** validated — single strong datapoint, cause confirmed by the passing
 regression test built from the dumped values.
 
+## F-24 — Kotlin `-Xmx2g` fix documented "implemented on experiments" but is an uncommitted working-tree change on no branch
+
+**Observed:** 2026-06-20, pre-recon for the proposed "drive the Kotlin heap fix
+to ship" follow-on, after a read-only session summarizing the headroom/llm-proxy work.
+
+**When:** Verifying the git-state assertions I'd made in a summary (llm-proxy
+`2906647` on master; Kotlin Fix 1 "done on experiments, not yet cherry-picked")
+against the substrate — both originally asserted from docs, not from `git`.
+
+**Expected (bug doc + my summary):** `docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`
+§Fix/§Resume state *"Fix 1 is implemented on `experiments` (release binary rebuilt
+via `cargo rb`, symlink intact)"* — i.e. a committed change on the `experiments` branch.
+
+**Got (scouted reality):** The `-Xmx2g` edit is an **uncommitted working-tree change**.
+`git -C codescout status --short src/lsp/servers/mod.rs` → ` M` (modified, unstaged);
+`git log --all -S '-Xmx2g' -- src/lsp/servers/mod.rs` → **empty** (present on no
+branch, not even `experiments`). The working tree IS coherent and compiles — the diff
+adds both the two-arm `-Xmx2g` append and a regression test `kotlin_caps_jvm_heap`
+whose helper `kotlin_java_tool_options` already exists at `mod.rs:367-373` — but none
+of it is committed. `git stash list` empty; reflog tip clean (no concurrent HEAD moves).
+By contrast the llm-proxy assertion checked out clean: `git branch --contains 2906647`
+→ `* master`.
+
+**Probable cause:** Bug-doc §Fix was written optimistically at edit-time ("rebuilt via
+`cargo rb`" describes the *binary* state, conflated with *commit* state). `cargo rb`
+compiles the working tree — it does not require a commit — so a rebuilt+symlinked live
+binary can coexist with an uncommitted source, making "implemented on experiments" feel
+true while `git log` disagrees. Classic R-19: a checkable git-state fact ("it's on
+experiments") asserted from doc prose, not re-derived from `git` this session.
+
+**Workaround:** None needed for correctness (tree compiles). Risk mitigation: commit the
+edit to `experiments` before any branch-switching follow-on. On a shared `experiments`
+branch with concurrent sessions (CLAUDE.md Concurrent-Work Rules), an uncommitted
+working tree is the most loss-prone state — a sibling `git checkout`/`reset`/`stash` in
+another session silently discards it, and there is no commit to recover from.
+
+**Severity:** med — no cascade yet and the tree compiles, but the fix is one stray
+working-tree mutation away from silent loss, and "not yet cherry-picked to master"
+(true) masks the sharper "not yet committed to *any* branch." Controller-absorbable by
+one `git commit`.
+
+**Status:** fixed-verified (commit dimension) — resolved 2026-06-21. A concurrent
+session committed the edit as **`3adb66e7` `fix(lsp): cap kotlin-lsp JVM heap with
+-Xmx2g`** on `experiments` (verified: includes both the two-arm `-Xmx2g` append and the
+`kotlin_caps_jvm_heap` regression test; `git branch --contains 3adb66e7` → `experiments`
+only). At recon time HEAD was the older tip `d11b4bd1` (a clean ancestor of the fix
+commit — verified linear, not divergent), so the working tree was genuinely
+pre-commit; the substrate moved forward right after the scout. The benign branch of the
+loss-risk this entry named. **Residual:** not yet cherry-picked to `master` and not yet
+live-verified via `/mcp` — those remain open in the bug file's §Resume.
+
+**Fix idea / Pointer:** Commit `src/lsp/servers/mod.rs` (the `-Xmx2g` append + the
+`kotlin_caps_jvm_heap` test) to `experiments`, then update the bug file §Fix/§Resume to
+cite the real commit SHA instead of the branch-name claim. Bug file:
+`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`. Substrate scouted this session.
+
+## F-25 — Kotlin heap bug's root cause ("no `-Xmx` anywhere → 25% RAM default") missed the kotlin-lsp distribution's own `intellij-server.vmoptions -Xmx2048m` — but that cap is NOT reliably applied to codescout-spawned instances, so the explicit `-Xmx2g` fix IS load-bearing (self-corrected mid-session)
+
+**Observed:** 2026-06-21, live-verifying the `-Xmx2g` fix (`3adb66e7`) after `cargo rb` + `/mcp`,
+before cherry-picking to master.
+
+**When:** Confirming the spawned `kotlin-lsp` JVM actually tops out at the cap. Found two live
+JVMs, `jcmd`'d both, then read the bug doc's §Evidence to reconcile a contradiction.
+
+**Expected (bug doc §Root cause):** *"No `-Xmx` is appended here or anywhere on the launch path …
+the comment's cap is fictional."* I.e. nothing caps the heap, so it defaults to ~31 GiB.
+
+**Got (scouted reality):** The kotlin-lsp distribution **does** ship a cap —
+`/usr/share/kotlin/kotlin-lsp/bin/intellij-server.vmoptions` contains `-Xmx2048m` (= 2 GiB). So
+"no `-Xmx` anywhere / the cap is fictional" is imprecise: there is one, in the distribution's
+launcher config (codescout's `src/` just doesn't set it). **However**, that vmoptions cap is
+**not reliably applied** to codescout-spawned instances: the bug doc's own §Evidence shows two
+instances reaching a ~35.7 GiB RSS with a **20+ GiB GC sawtooth** (23→27→23 GB) on 2026-06-20 —
+and a multi-GB GC sawtooth can only be reclaimable *Java heap* (native RocksDB/JNI memory is not
+GC-reclaimed), so those JVMs genuinely ran a ~31 GiB heap *despite* the `-Xmx2048m` vmoptions
+being installed since Jun 12. Likely codescout's `--system-path` / `-Duser.home` redirect alters
+how the JetBrains launcher resolves its vmoptions file.
+
+**Probable cause (of the doc imprecision):** The investigation grepped only codescout's own
+launch path (`src/lsp/servers/mod.rs`) and concluded "no `-Xmx` anywhere," never inspecting the
+kotlin-lsp distribution's launcher/vmoptions — the other half of the launch surface (R-3:
+grep the whole launch surface, not just our file). It then under-specified *why* the heap was
+still uncapped in practice (the vmoptions exists but doesn't take).
+
+**Consequences for the fix — CORRECTED (this entry first concluded "redundant"; that was wrong):**
+The explicit `-Xmx2g` goes into `JAVA_TOOL_OPTIONS`, which the JVM **always** honors regardless
+of launcher/vmoptions quirks. Since the distribution's vmoptions cap is demonstrably *not*
+reliable for our instances (the 31 GiB heap happened with it present), our flag is **load-bearing**,
+not defense-in-depth — it is the cap that actually guarantees heap ≤ 2 GiB. Live-confirmed: the
+codescout-repo JVM (PID 4100626, our flag present) `jcmd MaxHeapSize=2147483648`. My initial
+"redundant" read came from one no-flag JVM (PID 4041946, a *different* — backend-kotlin —
+workspace) sitting at 2 GiB; that was the case where vmoptions *did* apply, and I over-generalized
+from it before weighing the GC-sawtooth heap evidence. Self-correction logged.
+
+**Secondary point (still valid):** `-Xmx` bounds only the Java heap. The capped instance's RSS
+(4.16 GiB) = 2 GiB heap + ~2 GiB native (RocksDB JNI / direct buffers / metaspace / code cache),
+which `-Xmx` does not bound. The separate native-growth host-OOM hazard is addressed by making
+`watch_memory` *actuate* (the deferred Fix 2), not by `-Xmx`. (The observed 68 GiB OOM was
+`task=codescout` — our Rust process — unrelated to either.)
+
+**Workaround / correction needed:** Correct the bug doc §Root cause to: (a) the distribution
+*does* ship `-Xmx2048m` in `intellij-server.vmoptions`, so "no `-Xmx` anywhere" is imprecise;
+(b) but it is not reliably applied to codescout-spawned instances (GC-sawtooth → 31 GiB heap
+proof), so an explicit JVM-honored `-Xmx` in `JAVA_TOOL_OPTIONS` is the *reliable* cap →
+Fix 1 is load-bearing and correct; (c) native (off-heap) growth remains, addressed by
+`watch_memory` actuation (Fix 2).
+
+**Severity:** med — the shipped code is correct and load-bearing (decision to ship reinforced),
+so the cost was a near-miss wrong conclusion (caught before any doc rewrite shipped), not broken
+code. Logged as a self-correction exemplar.
+
+**Status:** open — bug-doc §Root cause precision-correction pending; the open *why* (which
+launcher mechanism drops the vmoptions cap) is worth a one-line note but not blocking. Verified
+this session via `jcmd` on both live JVMs, the vmoptions file, and the bug doc's GC-sawtooth
+evidence.
+
+**Fix idea / Pointer:** `/usr/share/kotlin/kotlin-lsp/bin/intellij-server.vmoptions` (`-Xmx2048m`);
+`jcmd <pid> VM.flags`; bug doc §Evidence "Live growth curve" (GC sawtooth); bug file
+`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md` §Root cause + §Fix.
+## F-26 — Full `cargo test` gate on `experiments` has a deterministic, fix-unrelated failure: `replace_symbol_surfaces_stale_error_after_max_retries` — ROOT-CAUSED: not environmental (hermetic MockLspClient); `758801d5` removed the AST-collection line-gate, so `validate_symbol_range` pre-empts the staleness path. Experiments-only; master green; write-refusal safety intact
+
+**Observed:** 2026-06-21, full `cargo test` gate before cherry-picking the Kotlin `-Xmx2g`
+fix (`3adb66e7`) to master. Root-caused 2026-06-23.
+
+**When:** Pre-cherry-pick gate (CLAUDE.md: "cherry-pick to master only after tests + clippy
++ MCP verify").
+
+**Expected (gate):** All tests green on `experiments` HEAD.
+
+**Got:** 1 failure (reproduced in isolation 2×): `tests/symbol_lsp.rs:856
+replace_symbol_surfaces_stale_error_after_max_retries` asserts the error "must still mention
+staleness", but got `"LSP returned suspicious range for 'target' (lines 1-1, but AST shows it
+spans to line 5) …"`.
+
+**Root cause (CONFIRMED — supersedes the initial "environmental / live-kotlin-lsp" guess):**
+The test is **hermetic** — `ctx_with_mock` + `MockLspClient` returns a deliberately stale range
+`(0,0,0,0)` for `target` (real `target` is at lines 3–5). No live kotlin-lsp involved, so the
+failure is pure deterministic code logic, not cold-start/contention. In
+`fetch_validated_symbol`'s retry loop the order is `validate_symbol_range` (suspicious-range
+guard) **then** `validate_symbol_position` (staleness). `validate_symbol_range` calls
+`find_ast_end_line_in`, which commit **`758801d5`** (the F-23 Kotlin annotation-gap fix) changed
+from line-gated collection (`collect_ast_candidates(…, lsp_start, …)`) to ungated
+`collect_by_name` + `name_path`-first resolution. So for the stale `(0,0,0,0)` symbol it now
+resolves the real AST end (line 5) despite the 2-line start gap → `ast_end(4) > sym.end_line(0)`
+→ "suspicious range" bail on attempt 0 → becomes the terminal error after retries, never
+reaching the staleness path. **Verified master is unaffected:** master's `find_ast_end_line_in`
+still calls `collect_ast_candidates(…, lsp_start, …)` (line-gated) → returns `None` for this
+input → `validate_symbol_range` passes → staleness path fires → test passes on master. The only
+symbol-edit-path diff `master..experiments` is `758801d5` (`query.rs`, +118/−43); the test file
+is byte-identical on both.
+
+**Severity:** med → reclassified **low-as-correctness, med-as-gate**: BUG-041's *safety property*
+(refuse the write rather than use stale offsets) is **preserved** — the tool still returns a
+`RecoverableError`; only the message changed, and only for *persistent* staleness (transient
+staleness still refreshes on retry and passes). So this is a stale, over-specific test assertion
+exposed by `758801d5`'s widened AST resolution, not a corruption regression. It does block a
+strict "all-green" gate on `experiments`.
+
+**Impact on the cherry-pick:** NONE — master is green for this test, and the Kotlin fix
+(`3adb66e7` + doc `21eaa696`) touches `mod.rs`/docs, not `query.rs`/`symbol_lsp.rs`. The
+cherry-pick cannot change master's status here. F-26 is an experiments-only follow-up.
+
+**Fix options (Phase 4 — not yet implemented; needs a decision):**
+(a) **Reorder** `fetch_validated_symbol` to run `validate_symbol_position` (staleness) before
+`validate_symbol_range` (suspicious-range) — makes the position-mismatch diagnosis win for stale
+inputs, restoring "stale"; suspicious-range still fires for correctly-positioned-but-truncated
+ranges (doesn't break F-23, whose Kotlin range is correctly positioned). Minimal + arguably more
+correct. **Recommended.**
+(b) Loosen the test to assert the safety property (any `RecoverableError` that refuses the write)
+rather than the exact "stale" string.
+(c) Make `validate_symbol_range` skip when the LSP range looks stale-degenerate (hard to
+distinguish from truncation; least preferred).
+
+**Status:** fixed-verified — fixed on `experiments` by `d079c054` `fix(symbol): order staleness
+check before suspicious-range guard` (reorder, option (a)). The RED test
+(`replace_symbol_surfaces_stale_error_after_max_retries`) now passes; full gate green
+(`cargo fmt` clean, `cargo clippy --all-targets -D warnings` exit 0, `cargo test` 2797 lib +
+all integration binaries, 0 failed). Experiments-only regression that never reached master, so
+no master ship/archive step needed. Cross-ref F-23 (introduced it via `758801d5`), F-18 (the
+live-LSP class I initially misattributed to).
+
+**Fix idea / Pointer:** `src/symbol/query.rs` — `fetch_validated_symbol` (retry loop ordering),
+`validate_symbol_range`, `find_ast_end_line_in` (line-gate removal in `758801d5`);
+`tests/symbol_lsp.rs:824` the test. This session.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
