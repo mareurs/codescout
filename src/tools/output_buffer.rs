@@ -179,6 +179,8 @@ impl OutputBuffer {
                 match std::fs::metadata(path) {
                     Err(_) => {
                         // File gone or unreadable — evict and return None.
+                        // (file entry only: content_hash is None here, so there is
+                        // no content_index slot to clear — see evict_oldest_locked.)
                         inner.order.retain(|k| k != canonical);
                         inner.entries.remove(canonical);
                         return None;
@@ -215,6 +217,7 @@ impl OutputBuffer {
                 }
                 Err(_) => {
                     // Became unreadable between stat and read — evict.
+                    // (file entry only: content_hash is None, no content_index slot.)
                     inner.order.retain(|k| k != canonical);
                     inner.entries.remove(canonical);
                     return None;
