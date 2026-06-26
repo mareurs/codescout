@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[allow(unused_imports)]
 use crate::retrieval::sync::content_hash;
 use crate::tools::RecoverableError;
 use anyhow::Result;
@@ -108,7 +107,6 @@ impl OutputBuffer {
     }
 
     /// Move `id` to the most-recently-used end of `order`.
-    #[allow(dead_code)]
     fn bump_lru_locked(inner: &mut BufferInner, id: &str) {
         if let Some(pos) = inner.order.iter().position(|k| k == id) {
             inner.order.remove(pos);
@@ -117,7 +115,6 @@ impl OutputBuffer {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     fn content_index_len(&self) -> usize {
         self.inner
             .lock()
@@ -226,10 +223,7 @@ impl OutputBuffer {
         }
 
         // Refresh LRU order: move to end.
-        if let Some(pos) = inner.order.iter().position(|k| k == canonical) {
-            inner.order.remove(pos);
-            inner.order.push(canonical.to_string());
-        }
+        Self::bump_lru_locked(&mut inner, canonical);
         inner
             .entries
             .get(canonical)
@@ -278,12 +272,24 @@ impl OutputBuffer {
         id
     }
 
-    /// Store tool output under a `@tool_*` handle.
+    /// Store tool output under a `@tool_*` handle, deduplicating by content.
     ///
-    /// Content goes in `stdout`; `stderr` is empty; `exit_code` is 0.
-    /// The `command` field holds the tool name for diagnostics.
+    /// If `content` is byte-identical to a still-buffered tool entry, the
+    /// existing handle is returned (and bumped to most-recently-used) instead
+    /// of minting a new one. `command` holds the tool name for diagnostics.
     pub fn store_tool(&self, tool_name: &str, content: String) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Content-dedup: identical tool output already buffered → reuse handle.
+        let hash = content_hash(&content);
+        if let Some(existing) = inner.content_index.get(&hash).cloned() {
+            if inner.entries.contains_key(&existing) {
+                Self::bump_lru_locked(&mut inner, &existing); // re-access (ADR-3)
+                return existing;
+            }
+            inner.content_index.remove(&hash); // defensive: stale slot, fall through
+        }
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -292,6 +298,7 @@ impl OutputBuffer {
         let id = format!("@tool_{:08x}", now.wrapping_add(inner.counter) as u32);
 
         Self::evict_oldest_locked(&mut inner);
+
         let entry = BufferEntry {
             command: tool_name.to_string(),
             stdout: content,
@@ -299,10 +306,11 @@ impl OutputBuffer {
             exit_code: 0,
             timestamp: now,
             source_path: None,
-            content_hash: None,
+            content_hash: Some(hash.clone()),
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
+        inner.content_index.insert(hash, id.clone());
         id
     }
 
@@ -1357,5 +1365,44 @@ mod tests {
             rec.hint().unwrap_or("").contains("session resets"),
             "hint should mention session resets"
         );
+    }
+
+    #[test]
+    fn store_tool_dedups_identical_content() {
+        let buf = OutputBuffer::new(10);
+        let id1 = buf.store_tool("symbols", "{\"symbols\":[1,2,3]}".to_string());
+        let id2 = buf.store_tool("symbols", "{\"symbols\":[1,2,3]}".to_string());
+        assert_eq!(id1, id2, "identical tool content must reuse the handle");
+        assert_eq!(
+            buf.content_index_len(),
+            1,
+            "one unique content → one index slot"
+        );
+        assert_eq!(buf.get(&id1).unwrap().stdout, "{\"symbols\":[1,2,3]}");
+    }
+
+    #[test]
+    fn store_tool_distinct_content_distinct_handles() {
+        let buf = OutputBuffer::new(10);
+        let id1 = buf.store_tool("symbols", "A".to_string());
+        let id2 = buf.store_tool("symbols", "B".to_string());
+        assert_ne!(id1, id2, "different content must mint different handles");
+        assert_eq!(buf.content_index_len(), 2);
+    }
+
+    #[test]
+    fn store_tool_dedup_hit_bumps_lru() {
+        let buf = OutputBuffer::new(2);
+        let a = buf.store_tool("t", "A".to_string()); // order [a]
+        let b = buf.store_tool("t", "B".to_string()); // order [a, b], at capacity
+        let a2 = buf.store_tool("t", "A".to_string()); // dedup hit → bump a → [b, a]
+        assert_eq!(a, a2);
+        let c = buf.store_tool("t", "C".to_string()); // evicts order.first() = b
+        assert!(buf.get(&b).is_none(), "b was LRU and should be evicted");
+        assert!(
+            buf.get(&a).is_some(),
+            "a survived because the hit bumped it"
+        );
+        assert!(buf.get(&c).is_some());
     }
 }
