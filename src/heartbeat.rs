@@ -22,10 +22,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Heartbeat tick interval. Matches the existing `--debug` heartbeat cadence.
 const INTERVAL: Duration = Duration::from_secs(30);
 
-/// How many per-instance heartbeat files to retain. OOM-killed instances cannot
-/// clean up their own file, so we prune the oldest on startup. Files are tiny
-/// (~120 B/line); a generous keep-count preserves several past post-mortems.
-const KEEP_FILES: usize = 16;
+/// How many per-instance heartbeat files to retain by count. OOM-killed
+/// instances cannot clean up their own file, so we prune on startup. Files are
+/// tiny (~120 B/line); a generous keep-count preserves several past post-mortems
+/// even on a multi-profile machine running many concurrent servers.
+const KEEP_FILES: usize = 64;
+
+/// Age floor for pruning: never delete a heartbeat file younger than this,
+/// regardless of [`KEEP_FILES`]. A SIGKILLed victim stops writing, so its mtime
+/// freezes at death and it sorts as the *oldest* file — the first prune target
+/// exactly when it is the most valuable. The age floor guarantees a recent
+/// victim's log survives long enough to be read.
+/// See `docs/issues/2026-06-26-heartbeat-prune-evicts-oom-victim.md`.
+const RETAIN: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Most recently dispatched tool name + the unix-seconds it started. Lets a
 /// heartbeat line name the operation in flight while RSS climbs — the single
@@ -131,21 +140,42 @@ fn append(path: &Path, line: &str) {
 }
 
 /// Pure selection half of `prune_stale`: given `(path, mtime)` pairs, return the
-/// paths to delete to retain the `keep` most-recent by mtime. Pure so it is
-/// testable without filesystem mtime timing.
-fn stale_to_remove(mut entries: Vec<(PathBuf, SystemTime)>, keep: usize) -> Vec<PathBuf> {
+/// paths to delete. Retains the `keep` most-recent by mtime **and** any file
+/// younger than `min_age` (relative to `now`) — a SIGKILLed crash victim's mtime
+/// freezes at death and sorts oldest, so the age floor stops it being pruned out
+/// from under a pending post-mortem. Pure so it is testable without fs timing.
+/// See `docs/issues/2026-06-26-heartbeat-prune-evicts-oom-victim.md`.
+fn stale_to_remove(
+    mut entries: Vec<(PathBuf, SystemTime)>,
+    keep: usize,
+    now: SystemTime,
+    min_age: Duration,
+) -> Vec<PathBuf> {
     if entries.len() <= keep {
         return Vec::new();
     }
-    // Newest first, then drop everything past `keep`.
+    // Newest first; the first `keep` are retained outright.
     entries.sort_by_key(|e| std::cmp::Reverse(e.1));
-    entries.into_iter().skip(keep).map(|(p, _)| p).collect()
+    entries
+        .into_iter()
+        .skip(keep)
+        .filter(|(_, mtime)| {
+            // Age floor: only prune genuinely old files. A file younger than
+            // `min_age` — or dated in the future (clock skew makes
+            // `duration_since` err) — is kept.
+            now.duration_since(*mtime)
+                .map(|age| age >= min_age)
+                .unwrap_or(false)
+        })
+        .map(|(p, _)| p)
+        .collect()
 }
 
-/// Keep the `keep` most-recent `*.log` heartbeat files in `dir`; delete the
-/// rest. Mirrors `logging::rotate_diagnostic_logs`. Runs on startup because an
-/// OOM-killed instance can't clean up its own file.
-pub fn prune_stale(dir: &Path, keep: usize) {
+/// Keep the `keep` most-recent `*.log` heartbeat files in `dir`, plus any file
+/// younger than `min_age`; delete the rest. Mirrors `logging::rotate_diagnostic_logs`.
+/// Runs on startup because an OOM-killed instance can't clean up its own file —
+/// and the `min_age` floor keeps that instance's own log readable afterwards.
+pub fn prune_stale(dir: &Path, keep: usize, min_age: Duration) {
     let entries: Vec<(PathBuf, SystemTime)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -156,7 +186,7 @@ pub fn prune_stale(dir: &Path, keep: usize) {
             Some((e.path(), mtime))
         })
         .collect();
-    for path in stale_to_remove(entries, keep) {
+    for path in stale_to_remove(entries, keep, SystemTime::now(), min_age) {
         let _ = std::fs::remove_file(path);
     }
 }
@@ -191,7 +221,7 @@ pub fn spawn_durable(instance: String, project: String) {
         // Can't create the dir — skip instrumentation rather than fail startup.
         return;
     }
-    prune_stale(&dir, KEEP_FILES);
+    prune_stale(&dir, KEEP_FILES, RETAIN);
     let path = heartbeat_path(&dir);
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
@@ -287,7 +317,7 @@ mod tests {
             (PathBuf::from("c.log"), mk(30)),
             (PathBuf::from("d.log"), mk(40)), // newest
         ];
-        let removed = stale_to_remove(entries, 2);
+        let removed = stale_to_remove(entries, 2, mk(1000), Duration::ZERO);
         // Keep the 2 newest (c, d) → remove the 2 oldest (a, b).
         assert_eq!(removed.len(), 2);
         assert!(removed.contains(&PathBuf::from("a.log")));
@@ -301,7 +331,32 @@ mod tests {
             (PathBuf::from("a.log"), mk(10)),
             (PathBuf::from("b.log"), mk(20)),
         ];
-        assert!(stale_to_remove(entries, 16).is_empty());
+        assert!(stale_to_remove(entries, 16, mk(1000), Duration::ZERO).is_empty());
+    }
+
+    #[test]
+    fn stale_to_remove_age_floor_retains_recent_victim() {
+        let mk = |secs: u64| UNIX_EPOCH + Duration::from_secs(secs);
+        let now = mk(1000);
+        let min_age = Duration::from_secs(100);
+        // victim.log is the OLDEST by mtime (frozen at SIGKILL) but RECENT in
+        // absolute terms (age 50s < min_age) — it must survive. Genuinely old
+        // logs (age >= min_age) past `keep` are still pruned.
+        let entries = vec![
+            (PathBuf::from("old1.log"), mk(100)),   // age 900 -> prune
+            (PathBuf::from("old2.log"), mk(200)),   // age 800 -> prune
+            (PathBuf::from("victim.log"), mk(950)), // age  50 -> RETAIN (the fix)
+            (PathBuf::from("fresh.log"), mk(990)),  // newest -> within `keep`
+        ];
+        let removed = stale_to_remove(entries, 1, now, min_age);
+        assert!(
+            !removed.contains(&PathBuf::from("victim.log")),
+            "recent crash victim must survive the prune despite oldest mtime"
+        );
+        assert!(!removed.contains(&PathBuf::from("fresh.log")));
+        assert!(removed.contains(&PathBuf::from("old1.log")));
+        assert!(removed.contains(&PathBuf::from("old2.log")));
+        assert_eq!(removed.len(), 2);
     }
 
     #[test]
@@ -313,7 +368,7 @@ mod tests {
         for i in 0..4 {
             std::fs::write(dir.path().join(format!("{i}.log")), b"x").unwrap();
         }
-        prune_stale(dir.path(), 2);
+        prune_stale(dir.path(), 2, Duration::ZERO);
         let remaining = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(remaining, 2, "prune_stale must retain exactly `keep` files");
     }
