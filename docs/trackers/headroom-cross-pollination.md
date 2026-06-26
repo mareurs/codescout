@@ -70,16 +70,16 @@ codescout evidence: `src/tools/output_buffer.rs:250`.
   one stored entry, and the model can recognize "I've already seen this exact
   output."
 - **Cheaper than it looks:** a SHA-256 content-hash primitive already exists in-tree (not BLAKE3 — BLAKE3 is Headroom's CCR choice; any collision-resistant hash serves equally as a dedup key) —
-  `content_hash(text)` at `src/retrieval/sync.rs:29` (used for embedding dedup).
+  `content_hash(text)` at `src/retrieval/sync.rs:34` (used for embedding dedup).
   It would need wiring into `OutputBuffer::store_tool` / `store`, not authoring
   from scratch.
 - **Priority:** high — strongest of the four; primitive present, shape confirmed.
-- **Status:** candidate (not started)
+- **Status:** candidate (not started). Shape re-verified 2026-06-21 against current code (R-19 datapoint 3): `@tool_*` minting still time+counter at `output_buffer.rs:251`; `content_hash` still SHA-256 at `sync.rs:34` (line cites refreshed from the stale `:29`).
 
 ### C-2 — Error-keyword / path preservation in overflow truncation
 - **Verified shape (corrected by R-19):** codescout's compact summary is
   **per-tool, not generic** — `Tool::format_compact(&self, result) -> Option<String>`
-  at `src/tools/core/types.rs:387`, each tool overrides it (`None` → the generic
+  at `src/tools/core/types.rs:435`, each tool overrides it (`None` → the generic
   "Result stored in @tool_xxx" fallback). `run_command` already prioritizes
   stderr (`src/tools/run_command/tests.rs:2034`).
 - **Actual gap:** there is **no content-level error-keyword preservation
@@ -93,7 +93,7 @@ codescout evidence: `src/tools/output_buffer.rs:250`.
   `MCPToolProfile` (L79), `DEFAULT_MCP_PROFILES` (L99–137; per-family `max_items`,
   `preserve_error_keywords`), `compress_tool_result()` (L352).
 - **Priority:** med — smaller surface than C-1; genuine but narrower than first stated.
-- **Status:** candidate (not started)
+- **Status:** candidate (not started). Shape re-verified 2026-06-21 against current code (R-19 datapoint 3): `format_compact` still a per-tool trait hook at `types.rs:435` (line cite refreshed from the stale `:387`).
 
 ### C-3 — CacheAligner-style prefix stabilization (conceptual)
 - **Observation:** Headroom's **CacheAligner** ("stabilize prefixes so provider
