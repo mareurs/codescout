@@ -1405,4 +1405,32 @@ mod tests {
         );
         assert!(buf.get(&c).is_some());
     }
+
+    #[test]
+    fn eviction_clears_content_index() {
+        let buf = OutputBuffer::new(1);
+        let _a = buf.store_tool("t", "A".to_string());
+        assert_eq!(buf.content_index_len(), 1);
+        // A shell store shares entries/order and evicts the tool entry at cap 1.
+        let _c = buf.store("echo hi".to_string(), "hi".to_string(), String::new(), 0);
+        assert_eq!(
+            buf.content_index_len(),
+            0,
+            "evicting the tool entry must clear its index slot"
+        );
+    }
+
+    #[test]
+    fn dedup_is_tool_only() {
+        let buf = OutputBuffer::new(10);
+        // Shell output: identical stdout must NOT dedup.
+        let c1 = buf.store("cmd".to_string(), "SAME".to_string(), String::new(), 0);
+        let c2 = buf.store("cmd".to_string(), "SAME".to_string(), String::new(), 0);
+        assert_ne!(c1, c2, "store (@cmd_) must not dedup");
+        // File content: identical content under different paths must NOT dedup.
+        // (Do not call get() on these — the fake paths would stat-evict.)
+        let f1 = buf.store_file("/tmp/codescout-a".to_string(), "SAME".to_string());
+        let f2 = buf.store_file("/tmp/codescout-b".to_string(), "SAME".to_string());
+        assert_ne!(f1, f2, "store_file (@file_) must not dedup");
+    }
 }
