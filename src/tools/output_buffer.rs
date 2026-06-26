@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[allow(unused_imports)]
+use crate::retrieval::sync::content_hash;
 use crate::tools::RecoverableError;
 use anyhow::Result;
 use regex::Regex;
@@ -24,6 +26,9 @@ pub struct BufferEntry {
     pub timestamp: u64,
     /// Set only for `@file_*` entries. Enables mtime-based auto-refresh in `get()`.
     pub source_path: Option<PathBuf>,
+    /// SHA-256 of `stdout`, set only for `@tool_*` entries (content-dedup key).
+    /// `None` for every other store kind — the type encodes the store_tool-only scope.
+    pub content_hash: Option<String>,
 }
 
 /// A dangerous command held pending agent acknowledgment.
@@ -49,6 +54,9 @@ struct BufferInner {
     order: Vec<String>,
     max_entries: usize,
     counter: u64,
+    /// Content-hash → handle id, for `@tool_*` dedup. Kept in sync with
+    /// `entries` by `evict_oldest_locked`.
+    content_index: HashMap<String, String>,
     // --- pending-ack store (commands) ---
     pending_acks: HashMap<String, PendingAckCommand>,
     pending_order: Vec<String>,
@@ -67,6 +75,7 @@ impl OutputBuffer {
                 order: Vec::new(),
                 max_entries,
                 counter: 0,
+                content_index: HashMap::new(),
                 pending_acks: HashMap::new(),
                 pending_order: Vec::new(),
                 max_pending: 20,
@@ -74,6 +83,47 @@ impl OutputBuffer {
                 background_order: Vec::new(),
             }),
         }
+    }
+
+    /// Evict the least-recently-used entry from the shared `entries`/`order`
+    /// maps when at capacity, clearing its `content_index` slot if it had one.
+    /// Shared by every store_* method that uses those maps (`store`,
+    /// `store_file`, `store_tool`), so a tool entry evicted by a shell `store`
+    /// never leaves a dangling index slot.
+    fn evict_oldest_locked(inner: &mut BufferInner) {
+        if inner.entries.len() >= inner.max_entries {
+            if let Some(oldest_id) = inner.order.first().cloned() {
+                inner.order.remove(0);
+                if let Some(entry) = inner.entries.remove(&oldest_id) {
+                    if let Some(h) = entry.content_hash {
+                        // Only clear the slot if it still points at the evicted
+                        // id — never invalidate a live, re-pointed slot.
+                        if inner.content_index.get(&h) == Some(&oldest_id) {
+                            inner.content_index.remove(&h);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Move `id` to the most-recently-used end of `order`.
+    #[allow(dead_code)]
+    fn bump_lru_locked(inner: &mut BufferInner, id: &str) {
+        if let Some(pos) = inner.order.iter().position(|k| k == id) {
+            inner.order.remove(pos);
+            inner.order.push(id.to_string());
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn content_index_len(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .content_index
+            .len()
     }
 
     /// Store command output and return an opaque handle (`@cmd_<8hex>`).
@@ -87,13 +137,7 @@ impl OutputBuffer {
         // Truncate to u32 so the hex portion is always exactly 8 characters.
         let id = format!("@cmd_{:08x}", now.wrapping_add(inner.counter) as u32);
 
-        // Evict oldest if at capacity
-        if inner.entries.len() >= inner.max_entries {
-            if let Some(oldest_id) = inner.order.first().cloned() {
-                inner.order.remove(0);
-                inner.entries.remove(&oldest_id);
-            }
-        }
+        Self::evict_oldest_locked(&mut inner);
 
         let entry = BufferEntry {
             command,
@@ -102,6 +146,7 @@ impl OutputBuffer {
             exit_code,
             timestamp: now,
             source_path: None,
+            content_hash: None,
         };
 
         inner.entries.insert(id.clone(), entry);
@@ -210,12 +255,7 @@ impl OutputBuffer {
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@file_{:08x}", now.wrapping_add(inner.counter) as u32);
 
-        if inner.entries.len() >= inner.max_entries {
-            if let Some(oldest_id) = inner.order.first().cloned() {
-                inner.order.remove(0);
-                inner.entries.remove(&oldest_id);
-            }
-        }
+        Self::evict_oldest_locked(&mut inner);
         // Only track source_path for real filesystem paths. Buffer ref paths
         // (starting with '@') have no on-disk representation and must not be
         // stat-checked — doing so evicts the entry on the first get().
@@ -231,6 +271,7 @@ impl OutputBuffer {
             exit_code: 0,
             timestamp: now,
             source_path,
+            content_hash: None,
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
@@ -250,12 +291,7 @@ impl OutputBuffer {
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@tool_{:08x}", now.wrapping_add(inner.counter) as u32);
 
-        if inner.entries.len() >= inner.max_entries {
-            if let Some(oldest_id) = inner.order.first().cloned() {
-                inner.order.remove(0);
-                inner.entries.remove(&oldest_id);
-            }
-        }
+        Self::evict_oldest_locked(&mut inner);
         let entry = BufferEntry {
             command: tool_name.to_string(),
             stdout: content,
@@ -263,6 +299,7 @@ impl OutputBuffer {
             exit_code: 0,
             timestamp: now,
             source_path: None,
+            content_hash: None,
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
