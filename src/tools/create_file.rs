@@ -20,10 +20,7 @@ impl Tool for CreateFile {
 
     fn description(&self) -> &str {
         "Create a new file with the given content. Refuses to overwrite an existing file \
-             unless `overwrite: true` is passed. Creates parent directories as needed. \
-             Writing outside the project root returns an @ack_* handle instead of failing; \
-             re-invoke with path=\"@ack_...\" to write it (approves the directory for the \
-             session) without re-sending content."
+             unless `overwrite: true` is passed. Creates parent directories as needed."
     }
 
     fn input_schema(&self) -> Value {
