@@ -245,27 +245,13 @@ fn guard_structural_rewrite(
             "edit contains a symbol definition ({keyword:?}) — \
              use symbol tools for structural changes"
         ),
-        hint,
+        format!(
+            "{hint} — or, to change only a modifier or keyword on the \
+             declaration line (e.g. `class X` -> `data class X`), make a \
+             single-line edit_file replacement of just that token; \
+             single-line literal edits are allowed."
+        ),
     ))
-}
-
-/// Returns true if any edit in `input` would be rejected by `guard_structural_rewrite`.
-/// Used by `debug_enforce_symbol_tools` to distinguish structural edits (route to
-/// `edit_code`) from literal string substitutions (allow through).
-fn is_structural_edit(input: &Value, path: &str) -> bool {
-    if let Some(edits) = input["edits"].as_array() {
-        return edits.iter().any(|e| {
-            let old = e["old_string"].as_str().unwrap_or("");
-            let new = e["new_string"].as_str().unwrap_or("");
-            guard_structural_rewrite(path, old, new).is_err()
-        });
-    }
-    if let Some(old) = input["old_string"].as_str() {
-        let new = input["new_string"].as_str().unwrap_or("");
-        return guard_structural_rewrite(path, old, new).is_err();
-    }
-    // prepend/append: no old_string, never structural
-    false
 }
 
 pub struct EditFile;
@@ -347,25 +333,6 @@ impl Tool for EditFile {
                     "Use edit_markdown for markdown files",
                     "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace).",
                 ).into());
-            }
-        }
-
-        // Gate: debug_enforce_symbol_tools — block structural edits on source files.
-        // Literal string substitutions (single-line, no definition keywords) are
-        // allowed through; only multi-line edits containing definition keywords are
-        // routed to edit_code.
-        if crate::util::path_security::is_source_path(path) {
-            let security = ctx
-                .agent
-                .security_config_for(ctx.workspace_override.as_deref())
-                .await;
-            if security.debug_enforce_symbol_tools && is_structural_edit(&input, path) {
-                return Err(super::RecoverableError::with_hint(
-                    "edit_file is blocked for structural edits on source code files (debug_enforce_symbol_tools is enabled)",
-                    "Use edit_code(symbol, path, action='replace'|'insert'|'remove'|'rename') \
-                     for structural changes, or edit_code(action='rename') for renames.",
-                )
-                .into());
             }
         }
 

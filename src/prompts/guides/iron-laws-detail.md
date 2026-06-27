@@ -48,14 +48,16 @@ definition. Use `edit_code(symbol="...", action="replace|insert|
 remove|rename", body="...")`. `edit_file` is for imports, literals,
 comments, config-only.
 
-**Gate fires when** `edit_file` is called on a source file AND the
-edit content contains a symbol-definition keyword (`fn `, `struct`,
-`enum`, `impl `, `trait `, `class`, `def `, `interface`,
-`function`, etc.) or overlaps a known symbol range. Error message
+**Gate fires when** `edit_file` is called on a source file AND a
+**multi-line** edit adds or removes a line containing a
+symbol-definition keyword (`fn `, `struct`, `enum`, `impl `, `trait `,
+`class`, `def `, `interface`, `function`, etc.), or the edit overlaps a
+known symbol range. **Single-line literal edits are always allowed** —
+including changing a modifier or keyword on the declaration line
+(e.g. `class X` → `data class X`). Error message
 includes:
 
 > edit contains a symbol definition — use symbol tools
-> edit_file is blocked for structural edits on source code files
 
 **Exceptions:** `edit_file` is allowed for:
 - `insert: "prepend"` / `insert: "append"` at file boundaries
