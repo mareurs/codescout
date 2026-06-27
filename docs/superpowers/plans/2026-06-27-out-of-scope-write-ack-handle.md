@@ -1091,13 +1091,30 @@ Apply the identical replacement to the other `let root … session_roots … val
 ```
 with:
 ```rust
-    let resolved = match crate::tools::resolve_write_or_capture(ctx, "edit_file", &json!({ "path": path }), path).await? {
+    let resolved = match crate::tools::resolve_write_or_capture(ctx, "edit_file", input, path).await? {
         crate::tools::WriteOutcome::Write(p) => p,
         crate::tools::WriteOutcome::Pending(env) => return Ok(env),
     };
 ```
 
-> Note: `perform_edit` is only reached via the single-edit path in `call`, which has already run Phase A. The capture envelope here is a defensive backstop; it stores only `{path}` because `perform_edit` does not hold the full input. In practice the single-edit branch's own resolve site (Step 5) captures first with the full input, so this site's envelope is not normally returned. Confirm `json!` is imported in this file (it is used elsewhere in `mod.rs`); if not, add `use serde_json::json;`.
+`perform_edit` is the **sole** resolver for the single `old_string`/`new_string`
+edit (the most common mode and a mutually-exclusive branch), so it MUST capture
+with the full input — not just `path`. Add an `input: &Value` parameter (before
+`ctx`):
+```rust
+async fn perform_edit(
+    path: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+    input: &Value,
+    ctx: &ToolContext,
+) -> Result<Value> {
+```
+and update the single call site at the end of `call`:
+```rust
+        perform_edit(path, old_string, new_string, replace_all, &input, ctx).await
+```
 
 - [ ] **Step 7: Run tests to verify they pass**
 
