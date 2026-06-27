@@ -220,14 +220,21 @@ create_file(path=/out/plan.md, content=<300 lines>)
       hint: "create_file(path=\"@ack_1a2b\") to write it and approve /out for this session" }
 
 create_file(path="@ack_1a2b")                 # content NOT re-sent
-  → { created: "/out/plan.md", approved_dir: "/out" }
+  → "ok"   (file written at /out/plan.md; /out now a session write root)
 
 create_file(path=/out/notes.md, content=…)    # same dir now approved
-  → { created: "/out/notes.md" }
+  → "ok"
 ```
 
-Replay returns the tool's normal success result, annotated with `approved_dir`
-for transparency.
+Replay returns the tool's **normal** success result unchanged (`create_file`
+returns `"ok"`); the directory grant is conveyed up front by the capture
+envelope's `hint`, so no extra annotation is added to the success result.
+
+> **Ordering constraint:** `maybe_replay_ack` (Phase A) must run *before* any
+> path-shape gate in the tool. `edit_markdown` rejects non-`.md` paths and
+> `edit_file` redirects `.md` paths — both would choke on an `@ack_…` handle in
+> `path`. Phase A runs first, swaps in the stored input (restoring the real
+> path), then the gate sees the real path.
 
 ## 5. Error handling & security
 
