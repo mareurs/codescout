@@ -257,23 +257,32 @@ pub fn validate_read_path(
     Ok(resolved)
 }
 
-/// Validate a path for **write** access.
+/// Outcome of classifying a write target against the project's write policy.
 ///
-/// - Relative paths are resolved against `project_root`.
-/// - The resolved path must be under `project_root` or one of the
-///   configured `extra_write_roots`.
-/// - The deny-list is also checked (writes to `~/.ssh/` are always blocked).
-pub fn validate_write_path(
+/// `OutsideRoot` is the one *approvable* failure — it can be turned into a
+/// pending-ack handle. `Denied` covers the hard failures (empty / null byte /
+/// unresolved `..` / deny-listed location) that must never be approved.
+#[derive(Debug)]
+pub enum WritePathDecision {
+    Allowed(PathBuf),
+    OutsideRoot { resolved: PathBuf },
+    Denied(String),
+}
+
+/// Classify a write target without committing to an error type. The pure core
+/// of `validate_write_path`; lets the ack layer distinguish the approvable
+/// outside-root case from hard denials without matching on bail strings.
+pub fn classify_write_path(
     raw: &str,
     project_root: &Path,
     config: &PathSecurityConfig,
     session_roots: &[PathBuf],
-) -> Result<PathBuf> {
+) -> WritePathDecision {
     if raw.is_empty() {
-        bail!("path must not be empty");
+        return WritePathDecision::Denied("path must not be empty".to_string());
     }
     if raw.contains('\0') {
-        bail!("path contains null byte");
+        return WritePathDecision::Denied("path contains null byte".to_string());
     }
 
     if config.profile == SecurityProfile::Root {
@@ -283,7 +292,7 @@ pub fn validate_write_path(
         } else {
             project_root.join(raw)
         };
-        return Ok(canonicalize_write_target(&resolved));
+        return WritePathDecision::Allowed(canonicalize_write_target(&resolved));
     }
 
     let path = Path::new(raw);
@@ -292,47 +301,30 @@ pub fn validate_write_path(
     } else {
         project_root.join(raw)
     };
-
-    // For write targets the file may not exist yet, canonicalize via parent.
     let resolved = canonicalize_write_target(&resolved);
 
-    // If canonicalization couldn't resolve `..` components (because an
-    // intermediate directory doesn't exist), the path still contains them.
-    // `starts_with` is component-wise and would match the project root prefix
-    // even though `..` would escape it at the OS level.  Reject early.
     if resolved
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        bail!(
+        return WritePathDecision::Denied(format!(
             "write denied: '{}' contains '..' that could not be resolved",
             raw
-        );
+        ));
     }
 
     let project_root = best_effort_canonicalize(project_root);
 
-    // Check deny-list first (blocks writes to ~/.ssh even if somehow under
-    // an extra_write_root).
     let denied = denied_read_paths(config);
     if is_denied(&resolved, &denied) {
-        bail!("write denied: '{}' is in a protected location", raw);
+        return WritePathDecision::Denied(format!(
+            "write denied: '{}' is in a protected location",
+            raw
+        ));
     }
 
-    // Check that the path is under an allowed root.
     let mut allowed = vec![project_root];
-    // System temp directory is always writable — useful for scratch files,
-    // intermediate output, and cross-process coordination without polluting
-    // the project root.
     allowed.push(crate::platform::temp_dir());
-    // CWD at server startup — Claude Code launches MCP servers from the
-    // project directory, so this covers the case where an absolute path
-    // targets the user's working directory even when --project points
-    // elsewhere (e.g. a companion tool project).
-    //
-    // Guard: skip overly broad roots (`/` and `$HOME`).  If CWD happens to be
-    // one of these, adding it as a write root would allow writes anywhere on
-    // the filesystem or inside the entire home directory.
     if let Ok(cwd) = std::env::current_dir() {
         let cwd_canon = best_effort_canonicalize(&cwd);
         let is_broad = cwd_canon == Path::new("/") || home_dir().is_some_and(|h| cwd_canon == h);
@@ -349,14 +341,33 @@ pub fn validate_write_path(
 
     let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root));
     if !under_allowed_root {
-        bail!(
+        return WritePathDecision::OutsideRoot { resolved };
+    }
+
+    WritePathDecision::Allowed(resolved)
+}
+
+/// Validate a path for **write** access.
+///
+/// - Relative paths are resolved against `project_root`.
+/// - The resolved path must be under `project_root` or one of the
+///   configured `extra_write_roots`.
+/// - The deny-list is also checked (writes to `~/.ssh/` are always blocked).
+pub fn validate_write_path(
+    raw: &str,
+    project_root: &Path,
+    config: &PathSecurityConfig,
+    session_roots: &[PathBuf],
+) -> Result<PathBuf> {
+    match classify_write_path(raw, project_root, config, session_roots) {
+        WritePathDecision::Allowed(p) => Ok(p),
+        WritePathDecision::OutsideRoot { .. } => bail!(
             "write denied: '{}' is outside the project root. \
              Call approve_write('<dir>') first to grant write access for this session.",
             raw
-        );
+        ),
+        WritePathDecision::Denied(msg) => bail!("{msg}"),
     }
-
-    Ok(resolved)
 }
 
 /// Validate a path for **session approval** via the `approve_write` tool.
@@ -2191,5 +2202,53 @@ mod tests {
     fn il3_blocks_git_pipe_head_still() {
         // U-16 case: head truncates — still blocked from an unbounded LHS.
         assert!(detect_il3_violation("git log --oneline master..experiments | head -20").is_some());
+    }
+    // ── classify_write_path tests ──────────────────────────────────────
+
+    #[test]
+    fn classify_in_project_is_allowed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let cfg = PathSecurityConfig::default();
+        let decision = classify_write_path("sub/file.rs", root, &cfg, &[]);
+        assert!(
+            matches!(decision, WritePathDecision::Allowed(_)),
+            "got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn classify_outside_root_is_outsideroot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let cfg = PathSecurityConfig::default();
+        // /var is outside the project root, the temp dir, and cwd.
+        let decision = classify_write_path("/var/ce_classify_test/x.rs", root, &cfg, &[]);
+        assert!(
+            matches!(decision, WritePathDecision::OutsideRoot { .. }),
+            "got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn classify_empty_is_denied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = PathSecurityConfig::default();
+        let decision = classify_write_path("", tmp.path(), &cfg, &[]);
+        assert!(
+            matches!(decision, WritePathDecision::Denied(_)),
+            "got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn validate_write_path_still_bails_outside_with_unchanged_message() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = PathSecurityConfig::default();
+        let err = validate_write_path("/var/ce_classify_test/x.rs", tmp.path(), &cfg, &[])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("is outside the project root"), "got: {err}");
+        assert!(err.contains("Call approve_write"), "got: {err}");
     }
 }
