@@ -37,6 +37,26 @@ pub struct PendingAckCommand {
     pub cwd: Option<String>,
     pub timeout_secs: u64,
 }
+/// A pending out-of-scope write held for acknowledgment. Carries the full
+/// original tool input so replay needs no re-sent content.
+#[derive(Debug, Clone)]
+pub struct PendingAckWrite {
+    /// Minting tool name — guards against replaying a handle through a
+    /// different write tool than the one that created it.
+    pub tool_name: String,
+    /// The original tool input, verbatim (includes the large content payload).
+    pub input: serde_json::Value,
+    /// Directory granted as a session write root when the handle is replayed.
+    pub approve_dir: PathBuf,
+}
+
+/// A pending acknowledgment — either a dangerous command or an out-of-scope
+/// write. Both share the buffer's `pending_acks` LRU store and `@ack_` handles.
+#[derive(Debug, Clone)]
+pub enum PendingAck {
+    Command(PendingAckCommand),
+    Write(PendingAckWrite),
+}
 
 /// Thread-safe LRU buffer for command output.
 ///
@@ -56,8 +76,8 @@ struct BufferInner {
     /// Content-hash → handle id, for `@tool_*` dedup. Kept in sync with
     /// `entries` by `evict_oldest_locked`.
     content_index: HashMap<String, String>,
-    // --- pending-ack store (commands) ---
-    pending_acks: HashMap<String, PendingAckCommand>,
+    // --- pending-ack store (commands and writes) ---
+    pending_acks: HashMap<String, PendingAck>,
     pending_order: Vec<String>,
     max_pending: usize,
     // --- background job store ---
@@ -317,6 +337,25 @@ impl OutputBuffer {
         id
     }
 
+    /// Mint a fresh `@ack_` handle and evict the oldest pending entry if at
+    /// capacity. Caller then inserts into `pending_acks` and pushes to
+    /// `pending_order`.
+    fn mint_pending_handle(inner: &mut BufferInner) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        inner.counter = inner.counter.wrapping_add(1);
+        let id = format!("@ack_{:08x}", now.wrapping_add(inner.counter) as u32);
+        if inner.pending_acks.len() >= inner.max_pending {
+            if let Some(oldest) = inner.pending_order.first().cloned() {
+                inner.pending_order.remove(0);
+                inner.pending_acks.remove(&oldest);
+            }
+        }
+        id
+    }
+
     /// Store a dangerous command pending acknowledgment.
     ///
     /// Returns an opaque `@ack_<8hex>` handle. The handle carries the full
@@ -328,28 +367,14 @@ impl OutputBuffer {
         timeout_secs: u64,
     ) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        inner.counter = inner.counter.wrapping_add(1);
-        let id = format!("@ack_{:08x}", now.wrapping_add(inner.counter) as u32);
-
-        // Evict oldest if at capacity
-        if inner.pending_acks.len() >= inner.max_pending {
-            if let Some(oldest) = inner.pending_order.first().cloned() {
-                inner.pending_order.remove(0);
-                inner.pending_acks.remove(&oldest);
-            }
-        }
-
+        let id = Self::mint_pending_handle(&mut inner);
         inner.pending_acks.insert(
             id.clone(),
-            PendingAckCommand {
+            PendingAck::Command(PendingAckCommand {
                 command,
                 cwd,
                 timeout_secs,
-            },
+            }),
         );
         inner.pending_order.push(id.clone());
         id
@@ -358,10 +383,48 @@ impl OutputBuffer {
     /// Retrieve a stored pending ack by handle.
     ///
     /// Does not consume the entry — LRU eviction handles cleanup.
-    /// Returns `None` if the handle is unknown or has been evicted.
+    /// Returns `None` if the handle is unknown, evicted, or refers to a write
+    /// rather than a command.
     pub fn get_dangerous(&self, handle: &str) -> Option<PendingAckCommand> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.pending_acks.get(handle).cloned()
+        match inner.pending_acks.get(handle) {
+            Some(PendingAck::Command(c)) => Some(c.clone()),
+            _ => None,
+        }
+    }
+    /// Store an out-of-scope write pending acknowledgment.
+    ///
+    /// Returns an opaque `@ack_<8hex>` handle. The handle carries the full
+    /// tool input (incl. content), so the ack call re-sends nothing.
+    pub fn store_pending_write(
+        &self,
+        tool_name: String,
+        input: serde_json::Value,
+        approve_dir: PathBuf,
+    ) -> String {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let id = Self::mint_pending_handle(&mut inner);
+        inner.pending_acks.insert(
+            id.clone(),
+            PendingAck::Write(PendingAckWrite {
+                tool_name,
+                input,
+                approve_dir,
+            }),
+        );
+        inner.pending_order.push(id.clone());
+        id
+    }
+
+    /// Retrieve a stored pending write by handle. Returns `None` if the handle
+    /// is unknown, evicted, or refers to a dangerous *command* rather than a
+    /// write.
+    pub fn get_pending_write(&self, handle: &str) -> Option<PendingAckWrite> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        match inner.pending_acks.get(handle) {
+            Some(PendingAck::Write(w)) => Some(w.clone()),
+            _ => None,
+        }
     }
 
     /// Store a background job log path and return a `@bg_<8hex>` handle.
@@ -637,6 +700,15 @@ fn shell_words(s: &str) -> Vec<String> {
         words.push(current);
     }
     words
+}
+/// Returns true when `s` is a bare `@ack_<8hex>` handle.
+pub(crate) fn looks_like_ack_handle(s: &str) -> bool {
+    let s = s.trim();
+    if !s.starts_with("@ack_") {
+        return false;
+    }
+    let suffix = &s[5..]; // after "@ack_"
+    suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -1435,5 +1507,47 @@ mod tests {
         let f1 = buf.store_file("/tmp/codescout-a".to_string(), "SAME".to_string());
         let f2 = buf.store_file("/tmp/codescout-b".to_string(), "SAME".to_string());
         assert_ne!(f1, f2, "store_file (@file_) must not dedup");
+    }
+    #[test]
+    fn store_pending_write_returns_ack_handle_and_round_trips() {
+        let buf = OutputBuffer::new(10);
+        let input = serde_json::json!({ "path": "/out/plan.md", "content": "big content" });
+        let handle = buf.store_pending_write(
+            "create_file".to_string(),
+            input.clone(),
+            std::path::PathBuf::from("/out"),
+        );
+        assert!(handle.starts_with("@ack_"), "got: {handle}");
+        let got = buf
+            .get_pending_write(&handle)
+            .expect("write handle should resolve");
+        assert_eq!(got.tool_name, "create_file");
+        assert_eq!(got.input, input);
+        assert_eq!(got.approve_dir, std::path::PathBuf::from("/out"));
+    }
+
+    #[test]
+    fn get_dangerous_returns_none_for_write_handle() {
+        let buf = OutputBuffer::new(10);
+        let handle = buf.store_pending_write(
+            "create_file".to_string(),
+            serde_json::json!({ "path": "/out/x", "content": "c" }),
+            std::path::PathBuf::from("/out"),
+        );
+        assert!(buf.get_dangerous(&handle).is_none());
+    }
+
+    #[test]
+    fn get_pending_write_returns_none_for_command_handle() {
+        let buf = OutputBuffer::new(10);
+        let handle = buf.store_dangerous("rm -rf /x".to_string(), None, 30);
+        assert!(buf.get_pending_write(&handle).is_none());
+    }
+
+    #[test]
+    fn looks_like_ack_handle_recognizes_format() {
+        assert!(looks_like_ack_handle("@ack_1a2b3c4d"));
+        assert!(!looks_like_ack_handle("@cmd_1a2b3c4d"));
+        assert!(!looks_like_ack_handle("@ack_short"));
     }
 }

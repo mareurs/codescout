@@ -528,13 +528,3 @@ pub(crate) async fn run_command_inner(
         }
     }
 }
-
-/// Returns true when `command` is a bare `@ack_<8hex>` handle.
-pub(crate) fn looks_like_ack_handle(command: &str) -> bool {
-    let s = command.trim();
-    if !s.starts_with("@ack_") {
-        return false;
-    }
-    let suffix = &s[5..]; // after "@ack_"
-    suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_hexdigit())
-}

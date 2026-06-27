@@ -5,7 +5,8 @@ mod inner;
 mod interactive;
 mod output;
 
-use inner::{looks_like_ack_handle, run_command_inner};
+use crate::tools::output_buffer::looks_like_ack_handle;
+use inner::run_command_inner;
 use interactive::run_command_interactive;
 use output::format_run_command;
 
