@@ -524,8 +524,11 @@ impl Tool for EditMarkdown {
 
     fn description(&self) -> &str {
         "Edit a Markdown document by heading. Actions: replace, insert_before, insert_after, \
-         remove, edit. Supports batch mode via edits array. Optional `frontmatter: {set, delete}` \
-         mutates the YAML frontmatter block atomically alongside any body edits."
+             remove, edit. Supports batch mode via edits array. Optional `frontmatter: {set, delete}` \
+             mutates the YAML frontmatter block atomically alongside any body edits. \
+             Writing outside the project root returns an @ack_* handle instead of failing; \
+             re-invoke with path=\"@ack_...\" to write it (approves the directory for the \
+             session) without re-sending content."
     }
 
     fn long_docs(&self) -> Option<&str> {

@@ -43,7 +43,9 @@ read_file("@tool_xyz", start_line=N, end_line=M)  # slice lines
 
 `@cmd_*` buffers come from `run_command`. `@tool_*` buffers come from
 other tools. Both are addressable by any tool that accepts a path.
-`@file_*` and `@ack_*` are sibling handle kinds — same mechanics.
+`@file_*` and `@ack_*` are sibling handle kinds — same mechanics. `@ack_*`
+covers both dangerous commands and out-of-scope writes: re-invoke the tool with
+the handle to acknowledge and proceed.
 
 
 

@@ -268,9 +268,12 @@ impl Tool for EditFile {
 
     fn description(&self) -> &str {
         "Exact string replacement in a file. Whitespace-sensitive. \
-         Use insert: \"prepend\"/\"append\" for file boundaries. \
-         On a whitespace-only mismatch, retries a unique re-indented match in \
-         brace-style languages (exact-only for Python/YAML); 0 or 2+ matches error."
+             Use insert: \"prepend\"/\"append\" for file boundaries. \
+             On a whitespace-only mismatch, retries a unique re-indented match in \
+             brace-style languages (exact-only for Python/YAML); 0 or 2+ matches error. \
+             Writing outside the project root returns an @ack_* handle instead of failing; \
+             re-invoke with path=\"@ack_...\" to write it (approves the directory for the \
+             session) without re-sending content."
     }
 
     fn input_schema(&self) -> Value {
