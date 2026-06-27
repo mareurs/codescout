@@ -613,6 +613,7 @@ impl Tool for EditMarkdown {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         crate::tools::guard_worktree_write(ctx).await?;
+        let input = crate::tools::maybe_replay_ack(ctx, input, "edit_markdown").await?;
         let path = crate::tools::require_str_param(&input, "path")?;
 
         // Gate: .md files only
@@ -624,24 +625,12 @@ impl Tool for EditMarkdown {
             .into());
         }
 
-        let root = ctx
-            .agent
-            .require_project_root_for(ctx.workspace_override.as_deref())
-            .await?;
-        let security = ctx
-            .agent
-            .security_config_for(ctx.workspace_override.as_deref())
-            .await;
-        let session_roots = ctx
-            .agent
-            .session_write_roots_snapshot_for(ctx.workspace_override.as_deref())
-            .await;
-        let resolved = crate::util::path_security::validate_write_path(
-            path,
-            &root,
-            &security,
-            &session_roots,
-        )?;
+        let resolved =
+            match crate::tools::resolve_write_or_capture(ctx, "edit_markdown", &input, path).await?
+            {
+                crate::tools::WriteOutcome::Write(p) => p,
+                crate::tools::WriteOutcome::Pending(env) => return Ok(env),
+            };
 
         let file_content = std::fs::read_to_string(&resolved)?;
 

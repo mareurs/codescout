@@ -95,6 +95,47 @@ async fn test_ctx() -> crate::tools::ToolContext {
         workspace_override: None,
     }
 }
+async fn project_ctx() -> (tempfile::TempDir, crate::tools::ToolContext) {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    (
+        dir,
+        crate::tools::ToolContext {
+            agent,
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        },
+    )
+}
+#[tokio::test]
+async fn edit_markdown_outside_project_returns_pending_ack() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": "/var/outside_ce_md/notes.md",
+                "heading": "## Notes",
+                "action": "replace",
+                "content": "new body"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("out-of-scope edit should return Ok(pending_ack)");
+    let handle = result["pending_ack"].as_str().expect("pending_ack handle");
+    assert!(handle.starts_with("@ack_"), "got: {result}");
+    let stored = ctx.output_buffer.get_pending_write(handle).unwrap();
+    assert_eq!(stored.tool_name, "edit_markdown");
+    assert_eq!(stored.input["content"], json!("new body"));
+}
 
 /// Synthesize markdown content with `lines` total lines and `sections` H2 sections.
 fn synth_md(lines: usize, sections: usize) -> String {
