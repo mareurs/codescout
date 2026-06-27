@@ -676,6 +676,77 @@ async fn memory_read_missing_topic_and_aliases_returns_recoverable() {
 }
 
 #[tokio::test]
+async fn memory_read_missing_topic_embeds_available_and_suggestions() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let tool = Memory;
+
+    for topic in ["iel-solver-debug", "iel-solver-config", "prompt-hamsa"] {
+        let w = tool
+            .call(
+                json!({ "action": "write", "topic": topic, "content": "x" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_memory_write_ok(&w);
+    }
+
+    let err = tool
+        .call(
+            json!({ "action": "read", "topic": "iel-solver-toolkit" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let rec = err
+        .downcast_ref::<RecoverableError>()
+        .expect("missing-topic read should be a RecoverableError");
+    assert!(
+        rec.message.contains("iel-solver-toolkit"),
+        "message should name the missing topic: {}",
+        rec.message
+    );
+
+    // The full store is previewed inline so the caller needn't run `list`.
+    let available = rec.extra["available_topics"]
+        .as_array()
+        .expect("available_topics should be an array");
+    assert_eq!(available.len(), 3, "all topics previewed: {available:?}");
+    assert!(available.iter().any(|t| t == "prompt-hamsa"));
+
+    // Token overlap surfaces the siblings, ranked alphabetically on the tie,
+    // and excludes the unrelated topic.
+    let suggestions = rec.extra["did_you_mean"]
+        .as_array()
+        .expect("did_you_mean should be present when siblings share tokens");
+    assert_eq!(
+        suggestions,
+        &vec![json!("iel-solver-config"), json!("iel-solver-debug")],
+        "siblings ranked, unrelated topic excluded"
+    );
+
+    drop(dir);
+}
+
+#[test]
+fn closest_topics_ranks_by_token_overlap() {
+    let available = vec![
+        "iel-solver-debug-toolkit".to_string(),
+        "iel-solver".to_string(),
+        "research/agent-memory".to_string(),
+        "prompt-hamsa".to_string(),
+    ];
+
+    // Two shared tokens (iel, solver) beats one; unrelated topics dropped.
+    let hits = closest_topics("iel-solver-config", &available);
+    assert_eq!(hits, vec!["iel-solver", "iel-solver-debug-toolkit"]);
+
+    // Nothing shares a token -> no suggestions (full list still shown upstream).
+    assert!(closest_topics("zzz-unrelated", &available).is_empty());
+}
+
+#[tokio::test]
 async fn memory_large_read_buffers_as_file_ref() {
     // Regression: memory(action="read") for large topics must return a @file_* ref
     // rather than {"content":"..."} inline. Without this, call_content wraps the

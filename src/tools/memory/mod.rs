@@ -286,6 +286,60 @@ fn require_topic_param(input: &Value) -> anyhow::Result<&str> {
     .into())
 }
 
+/// Rank `available` topics by shared kebab/slash/underscore token overlap with
+/// `query`, returning up to 3 (best first, alpha-tie-broken). Topic names are
+/// structured (`iel-solver-debug`, `research/agent-memory`), so token overlap
+/// surfaces siblings of a misremembered name far better than raw edit distance.
+fn closest_topics(query: &str, available: &[String]) -> Vec<String> {
+    fn tokens(s: &str) -> Vec<&str> {
+        s.split(['-', '/', '_']).filter(|t| !t.is_empty()).collect()
+    }
+    let q = tokens(query);
+    let mut scored: Vec<(usize, &String)> = available
+        .iter()
+        .map(|t| {
+            (
+                tokens(t).into_iter().filter(|tok| q.contains(tok)).count(),
+                t,
+            )
+        })
+        .filter(|(shared, _)| *shared > 0)
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    scored.into_iter().take(3).map(|(_, t)| t.clone()).collect()
+}
+
+/// Build the "topic not found" error for memory reads. Rather than a bare
+/// warning telling the caller to go run `list`, the response embeds a *preview*
+/// of the store — the full `available_topics` list plus best-effort
+/// `did_you_mean` suggestions — so the caller self-corrects in one round-trip.
+/// Stays a `RecoverableError` (`ok:false`) so genuine misconfiguration (wrong
+/// `project_id`, empty store) still surfaces rather than reading as success.
+fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableError {
+    let suggestions = closest_topics(topic, &available);
+    let hint = if available.is_empty() {
+        "no memory topics exist yet — create one with \
+         memory(action='write', topic=…, content=…)"
+            .to_string()
+    } else if suggestions.is_empty() {
+        format!(
+            "{} topic(s) available — see `available_topics` in this response",
+            available.len()
+        )
+    } else {
+        format!(
+            "did you mean: {}? Full list in `available_topics`",
+            suggestions.join(", ")
+        )
+    };
+    let mut err = RecoverableError::with_hint(format!("topic '{topic}' not found"), hint)
+        .with_extra("available_topics", json!(available));
+    if !suggestions.is_empty() {
+        err = err.with_extra("did_you_mean", json!(suggestions));
+    }
+    err
+}
+
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
 async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
@@ -699,9 +753,9 @@ impl Tool for Memory {
                                 Some(content) => {
                                     apply_sections_filter(content, topic, &sections, &buf)
                                 }
-                                None => Err(RecoverableError::with_hint(
-                                    format!("topic '{}' not found", topic),
-                                    "Use memory(action='list') to see available topics",
+                                None => Err(topic_not_found_error(
+                                    topic,
+                                    p.private_memory.list().unwrap_or_default(),
                                 )
                                 .into()),
                             }
@@ -714,11 +768,10 @@ impl Tool for Memory {
                         Some(content) => {
                             apply_sections_filter(content, topic, &sections, &ctx.output_buffer)
                         }
-                        None => Err(RecoverableError::with_hint(
-                            format!("topic '{}' not found", topic),
-                            "Use memory(action='list') to see available topics",
-                        )
-                        .into()),
+                        None => {
+                            Err(topic_not_found_error(topic, store.list().unwrap_or_default())
+                                .into())
+                        }
                     }
                 }
             }
