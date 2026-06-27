@@ -301,8 +301,13 @@ pub fn classify_write_path(
     } else {
         project_root.join(raw)
     };
+    // For write targets the file may not exist yet, canonicalize via parent.
     let resolved = canonicalize_write_target(&resolved);
 
+    // If canonicalization couldn't resolve `..` components (because an
+    // intermediate directory doesn't exist), the path still contains them.
+    // `starts_with` is component-wise and would match the project root prefix
+    // even though `..` would escape it at the OS level.  Reject early.
     if resolved
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -315,6 +320,8 @@ pub fn classify_write_path(
 
     let project_root = best_effort_canonicalize(project_root);
 
+    // Check deny-list first (blocks writes to ~/.ssh even if somehow under
+    // an extra_write_root).
     let denied = denied_read_paths(config);
     if is_denied(&resolved, &denied) {
         return WritePathDecision::Denied(format!(
@@ -323,8 +330,20 @@ pub fn classify_write_path(
         ));
     }
 
+    // Check that the path is under an allowed root.
     let mut allowed = vec![project_root];
+    // System temp directory is always writable — useful for scratch files,
+    // intermediate output, and cross-process coordination without polluting
+    // the project root.
     allowed.push(crate::platform::temp_dir());
+    // CWD at server startup — Claude Code launches MCP servers from the
+    // project directory, so this covers the case where an absolute path
+    // targets the user's working directory even when --project points
+    // elsewhere (e.g. a companion tool project).
+    //
+    // Guard: skip overly broad roots (`/` and `$HOME`).  If CWD happens to be
+    // one of these, adding it as a write root would allow writes anywhere on
+    // the filesystem or inside the entire home directory.
     if let Ok(cwd) = std::env::current_dir() {
         let cwd_canon = best_effort_canonicalize(&cwd);
         let is_broad = cwd_canon == Path::new("/") || home_dir().is_some_and(|h| cwd_canon == h);
