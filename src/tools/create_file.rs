@@ -41,32 +41,20 @@ impl Tool for CreateFile {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         super::guard_worktree_write(ctx).await?;
+        let input = super::maybe_replay_ack(ctx, input, "create_file").await?;
         let path = super::require_str_param(&input, "path")?;
         let content = super::require_str_param(&input, "content")?;
         let overwrite = super::parse_bool_param(&input["overwrite"]);
-        let root = ctx
-            .agent
-            .require_project_root_for(ctx.workspace_override.as_deref())
-            .await?;
-        let security = ctx
-            .agent
-            .security_config_for(ctx.workspace_override.as_deref())
-            .await;
-        let session_roots = ctx
-            .agent
-            .session_write_roots_snapshot_for(ctx.workspace_override.as_deref())
-            .await;
-        let resolved = crate::util::path_security::validate_write_path(
-            path,
-            &root,
-            &security,
-            &session_roots,
-        )?;
+        let resolved =
+            match super::resolve_write_or_capture(ctx, "create_file", &input, path).await? {
+                super::WriteOutcome::Write(p) => p,
+                super::WriteOutcome::Pending(env) => return Ok(env),
+            };
         if !overwrite && resolved.exists() {
             return Err(super::RecoverableError::with_hint(
                 format!("file already exists: {}", resolved.display()),
                 "Use edit_file to modify, or pass overwrite: true to replace. \
-                 create_file is for new files only.",
+                     create_file is for new files only.",
             )
             .into());
         }

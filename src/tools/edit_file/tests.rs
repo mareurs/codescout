@@ -1678,20 +1678,53 @@ async fn read_file_denies_ssh_key() {
 }
 
 #[tokio::test]
-async fn create_file_outside_project_rejected() {
+async fn create_file_outside_project_returns_pending_ack() {
     let (_dir, ctx) = project_ctx().await;
-    // Use a hardcoded path outside both the project root and /tmp (which is
-    // now an allowed write root).
     let result = CreateFile
         .call(
-            json!({
-                "path": "/var/outside_ce_test/evil.rs",
-                "content": "evil code"
-            }),
+            json!({ "path": "/var/outside_ce_test/evil.rs", "content": "evil code" }),
             &ctx,
         )
-        .await;
-    assert!(result.is_err(), "write outside project should be rejected");
+        .await
+        .expect("out-of-scope write should return Ok(pending_ack), not Err");
+    let handle = result["pending_ack"].as_str().expect("pending_ack handle");
+    assert!(handle.starts_with("@ack_"), "got: {result}");
+    // Content preserved server-side — not discarded.
+    let stored = ctx.output_buffer.get_pending_write(handle).unwrap();
+    assert_eq!(stored.input["content"], json!("evil code"));
+    // Nothing was written.
+    assert!(!std::path::Path::new("/var/outside_ce_test/evil.rs").exists());
+}
+
+#[tokio::test]
+async fn create_file_ack_replay_writes_and_approves_dir() {
+    let (_dir, ctx) = project_ctx().await;
+    // A real, writable directory that is approvable. Mint the handle directly
+    // (a path under the system temp dir is already allowed, so it would not
+    // trigger capture -- minting directly exercises the replay path).
+    let ext = tempfile::tempdir().unwrap();
+    let target = ext.path().join("plan.md");
+    let handle = ctx.output_buffer.store_pending_write(
+        "create_file".to_string(),
+        json!({ "path": target.to_str().unwrap(), "content": "300 lines of plan" }),
+        ext.path().to_path_buf(),
+    );
+
+    let result = CreateFile
+        .call(json!({ "path": handle }), &ctx)
+        .await
+        .expect("replay should succeed");
+    assert_eq!(result, json!("ok"));
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "300 lines of plan"
+    );
+
+    let roots = ctx.agent.session_write_roots_snapshot().await;
+    assert!(
+        roots.iter().any(|r| r == ext.path()),
+        "dir approved: {roots:?}"
+    );
 }
 
 #[tokio::test]
