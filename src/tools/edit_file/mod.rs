@@ -302,6 +302,7 @@ impl Tool for EditFile {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         super::guard_worktree_write(ctx).await?;
+        let input = super::maybe_replay_ack(ctx, input, "edit_file").await?;
         let path = super::require_str_param(&input, "path")?;
         let new_string = input["new_string"].as_str().unwrap_or("");
 
@@ -356,24 +357,11 @@ impl Tool for EditFile {
                 )
                 .into());
             }
-            let root = ctx
-                .agent
-                .require_project_root_for(ctx.workspace_override.as_deref())
-                .await?;
-            let security = ctx
-                .agent
-                .security_config_for(ctx.workspace_override.as_deref())
-                .await;
-            let session_roots = ctx
-                .agent
-                .session_write_roots_snapshot_for(ctx.workspace_override.as_deref())
-                .await;
-            let resolved = crate::util::path_security::validate_write_path(
-                path,
-                &root,
-                &security,
-                &session_roots,
-            )?;
+            let resolved =
+                match super::resolve_write_or_capture(ctx, "edit_file", &input, path).await? {
+                    super::WriteOutcome::Write(p) => p,
+                    super::WriteOutcome::Pending(env) => return Ok(env),
+                };
             let mut content = std::fs::read_to_string(&resolved)?;
 
             // Pre-pass: identify structural edits before applying any. When the
@@ -488,24 +476,11 @@ impl Tool for EditFile {
                 )
                 .into());
             }
-            let root = ctx
-                .agent
-                .require_project_root_for(ctx.workspace_override.as_deref())
-                .await?;
-            let security = ctx
-                .agent
-                .security_config_for(ctx.workspace_override.as_deref())
-                .await;
-            let session_roots = ctx
-                .agent
-                .session_write_roots_snapshot_for(ctx.workspace_override.as_deref())
-                .await;
-            let resolved = crate::util::path_security::validate_write_path(
-                path,
-                &root,
-                &security,
-                &session_roots,
-            )?;
+            let resolved =
+                match super::resolve_write_or_capture(ctx, "edit_file", &input, path).await? {
+                    super::WriteOutcome::Write(p) => p,
+                    super::WriteOutcome::Pending(env) => return Ok(env),
+                };
             let content = std::fs::read_to_string(&resolved)?;
             // Reject librarian-managed artifacts — use artifact(action="update") instead.
             crate::util::librarian_guard::guard_not_librarian_managed(path, &content)?;
@@ -559,7 +534,7 @@ impl Tool for EditFile {
             .into());
         }
 
-        perform_edit(path, old_string, new_string, replace_all, ctx).await
+        perform_edit(path, old_string, new_string, replace_all, &input, ctx).await
     }
 }
 
@@ -568,22 +543,14 @@ async fn perform_edit(
     old_string: &str,
     new_string: &str,
     replace_all: bool,
+    input: &Value,
     ctx: &ToolContext,
 ) -> Result<Value> {
-    let root = ctx
-        .agent
-        .require_project_root_for(ctx.workspace_override.as_deref())
-        .await?;
-    let security = ctx
-        .agent
-        .security_config_for(ctx.workspace_override.as_deref())
-        .await;
-    let session_roots = ctx
-        .agent
-        .session_write_roots_snapshot_for(ctx.workspace_override.as_deref())
-        .await;
     let resolved =
-        crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
+        match crate::tools::resolve_write_or_capture(ctx, "edit_file", input, path).await? {
+            crate::tools::WriteOutcome::Write(p) => p,
+            crate::tools::WriteOutcome::Pending(env) => return Ok(env),
+        };
 
     let content = std::fs::read_to_string(&resolved)?;
 

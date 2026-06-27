@@ -5340,3 +5340,24 @@ async fn normalized_apply_allowed_when_file_already_broken() {
     assert_eq!(result["applied_via"], "whitespace-normalized match");
     assert!(std::fs::read_to_string(&f).unwrap().contains("let x = 2;"));
 }
+
+#[tokio::test]
+async fn edit_file_outside_project_returns_pending_ack() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = EditFile
+        .call(
+            json!({
+                "path": "/var/outside_ce_ef/x.txt",
+                "old_string": "a",
+                "new_string": "b"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("out-of-scope edit should return Ok(pending_ack)");
+    let handle = result["pending_ack"].as_str().expect("pending_ack handle");
+    assert!(handle.starts_with("@ack_"), "got: {result}");
+    let stored = ctx.output_buffer.get_pending_write(handle).unwrap();
+    assert_eq!(stored.tool_name, "edit_file");
+    assert_eq!(stored.input["new_string"], json!("b"));
+}
