@@ -184,8 +184,8 @@ local-database backend. Four stages, each running in a separate process:
    — Source files are split into overlapping text chunks. For languages with
    tree-sitter support, the chunker uses AST boundaries (functions, classes,
    blocks) to create semantically coherent chunks. For other files, it falls
-   back to line-based splitting with configurable `chunk_size` and
-   `chunk_overlap`.
+   back to line-based splitting sized by the configurable `chunk_size`
+   (model-derived by default).
 
 2. **Dense embedding** (`src/retrieval/embedder.rs::EmbedderHttp`) — Each chunk
    is POSTed to a dense embedding service over HTTP. The default stack ships

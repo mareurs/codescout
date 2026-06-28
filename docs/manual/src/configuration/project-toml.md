@@ -56,14 +56,15 @@ drift_detection_enabled = true
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `model` | string | `"ollama:mxbai-embed-large"` | Embedding model. The prefix selects the backend. See [Embedding Backends](embedding-backends.md) for the full list of supported prefixes and models. |
+| `chunk_size` | integer | model-derived | Target characters per chunk. Unset → derived from the model's context window (capped at 4096). Set explicitly to opt into smaller/larger chunks (capped at the model's input limit). |
 | `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index(action: build)` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `workspace(action: status, threshold=...)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
 
-> **Note — chunk size is automatic.** codescout derives the chunk budget
-> directly from the model's published context window using a conservative
-> `max_tokens × 3 chars/token` formula at 85 % utilisation. There is no
-> `chunk_size` or `chunk_overlap` setting — they were removed because manual
-> tuning was error-prone and the model string already encodes everything needed.
-> Existing `project.toml` files containing these keys are silently ignored.
+> **Note — chunk size is automatic by default.** When `chunk_size` is unset,
+> codescout derives the chunk budget from the model's published context window
+> (a conservative `max_tokens × 3 chars/token` formula at 85 % utilisation, capped
+> at 4096 chars). Set `chunk_size` explicitly to override — the value is honoured,
+> capped at the model's input limit. `chunk_overlap` was removed; existing
+> `project.toml` files containing that key are silently ignored.
 
 **Changing the model after indexing:** If you change `model`, you must rebuild the index
 (`index(action: build)` with `force: true`). codescout detects model mismatches and will warn
