@@ -1537,6 +1537,31 @@ async fn run_in_background_rejects_buffer_only() {
     );
 }
 
+#[tokio::test]
+async fn shell_command_mode_disabled_blocks_run_command() {
+    // shell_command_mode = "disabled" is the sole mechanism for turning shell
+    // off — the former shell_enabled master switch was removed as redundant.
+    let (dir, ctx) = project_ctx().await;
+    let root = dir.path().to_path_buf();
+    let security = crate::util::path_security::PathSecurityConfig {
+        shell_command_mode: "disabled".into(),
+        ..Default::default()
+    };
+    let result = run_command_inner(
+        "echo x", "echo x", 30, false, // acknowledge_risk
+        None,  // cwd_param
+        false, // buffer_only
+        false, // run_in_background
+        &root, &security, &ctx,
+    )
+    .await;
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("disabled"),
+        "error should mention shell is disabled, got: {err}"
+    );
+}
+
 /// A command that backgrounds a subprocess with `&` causes the foreground `output()` call
 /// to hang: the background process inherits the stdout pipe FD and keeps it open until it
 /// exits, preventing EOF.  With a short timeout this manifests as `timed_out: true`.

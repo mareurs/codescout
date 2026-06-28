@@ -13,7 +13,7 @@ The permission model is asymmetric by design:
 |---|---|---|
 | **Read** | Permissive — anywhere on disk | Deny-list of sensitive locations |
 | **Write** | Restricted — project root only | Hard boundary; opt-in escapes via config |
-| **Shell** | Disabled by default | Two-field opt-in; cwd sandboxed to project root |
+| **Shell** | Enabled by default | Disable via `shell_command_mode = "disabled"`; cwd sandboxed to project root |
 | **Git** | Enabled | Can disable per-project |
 
 This asymmetry is intentional. An agent doing code intelligence work legitimately
@@ -120,23 +120,22 @@ file_write_enabled = false
 
 ## Shell Policy (`run_command`)
 
-Shell execution is **disabled by default** and requires explicit opt-in:
+Shell execution is **on by default** (`shell_command_mode = "warn"`). To turn shell off,
+set the mode to `"disabled"`:
 
 ```toml
 [security]
-shell_enabled = true
-shell_command_mode = "warn"   # or "unrestricted"
+shell_command_mode = "disabled"
 ```
 
-Both fields must be set. The two-field design lets you grant shell access while
-keeping a reminder in every response (`"warn"`), which is recommended for shared
-or CI environments.
+`"warn"` is the default; `"unrestricted"` currently behaves identically — only `"disabled"`
+changes `run_command` behaviour today.
 
 | `shell_command_mode` | Behaviour |
 |---|---|
+| `"warn"` | Commands run normally. The default. |
+| `"unrestricted"` | Commands run normally. Currently identical to `"warn"`. |
 | `"disabled"` | All calls return an error. |
-| `"warn"` | Commands run; output includes a permissions reminder. |
-| `"unrestricted"` | Commands run; no warning added. |
 
 ### Shell Sandbox
 
@@ -156,7 +155,7 @@ Individual feature categories can be toggled independently:
 ```toml
 [security]
 file_write_enabled = true    # create_file, edit_file, symbol writes
-shell_enabled      = false   # run_command
+shell_command_mode = "warn"  # run_command: "warn" | "unrestricted" | "disabled"
 indexing_enabled   = true    # index(action: build), workspace(action: status)
 ```
 
@@ -168,7 +167,7 @@ intervention.
 
 - **Reads**: anywhere except the built-in credential deny list
 - **Writes**: project root only, by default — hard boundary, not a warning
-- **Shell**: off by default; two-field opt-in; cwd sandboxed to project
+- **Shell**: on by default; disable via `shell_command_mode = "disabled"`; cwd sandboxed to project
 - **Violations**: `RecoverableError` → agent gets a hint, no user interruption, no
   sibling call cancellation
 

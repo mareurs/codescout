@@ -173,18 +173,18 @@ Monitor with `run_command("tail -50 /tmp/codescout-bg-xxxx.log")`.
 
 > See [Security & Permissions](../concepts/security.md) for the full permission model, including write sandboxing and the built-in credential deny list.
 
-Shell execution is **disabled by default**. To enable it, add to `.codescout/project.toml`:
+Shell execution is **on by default** (`shell_command_mode = "warn"`). To turn it off, set the mode to `"disabled"` in `.codescout/project.toml`:
 
 ```toml
 [security]
-shell_command_mode = "warn"   # or "unrestricted"
+shell_command_mode = "disabled"
 ```
 
 | Value | Behaviour |
 |-------|-----------|
-| `"disabled"` | All calls return an error. This is the default. |
-| `"warn"` | Commands execute normally. |
+| `"warn"` | Commands execute normally. This is the default. |
 | `"unrestricted"` | Commands execute normally (alias for `warn`, no functional difference). |
+| `"disabled"` | All calls return an error. |
 
 On Unix the command runs under `sh -c`. On Windows it runs under `cmd /C`.
 
@@ -233,9 +233,9 @@ Dispatched by `action`: `activate`, `status`, or `list_projects`.
         "encoding": "utf-8",
         "tool_timeout_secs": 60
       },
-      "embeddings": { "model": "...", "chunk_size": 512, "chunk_overlap": 64 },
+      "embeddings": { "model": "..." },
       "ignored_paths": { "patterns": ["target/", "*.lock"] },
-      "security": { "shell_command_mode": "warn", "shell_output_limit_bytes": 102400, "shell_enabled": false, "file_write_enabled": true, "indexing_enabled": true }
+      "security": { "shell_command_mode": "warn", "file_write_enabled": true, "indexing_enabled": true }
     }
   }
 }

@@ -23,11 +23,7 @@ pub struct GlobalEmbeddingsSection {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GlobalSecuritySection {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell_enabled: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_command_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell_output_limit_bytes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_dangerous_patterns: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -257,13 +253,13 @@ mod tests {
     fn to_toml_value_security_emits_set_fields() {
         let config = GlobalConfig {
             security: GlobalSecuritySection {
-                shell_enabled: Some(false),
+                file_write_enabled: Some(false),
                 ..Default::default()
             },
             ..Default::default()
         };
         let val = config.to_toml_value();
-        assert_eq!(val["security"]["shell_enabled"].as_bool(), Some(false));
+        assert_eq!(val["security"]["file_write_enabled"].as_bool(), Some(false));
         assert!(val
             .get("security")
             .and_then(|s| s.get("shell_command_mode"))

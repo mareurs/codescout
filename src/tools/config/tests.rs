@@ -751,6 +751,49 @@ fn format_activate_project_auto_libs_all_with_source() {
 async fn activate_project_rw_includes_security_fields() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // A `root` profile must be surfaced on activation — it disables every
+    // path/command gate, so the agent needs to know the sandbox is off.
+    std::fs::write(
+        dir.path().join(".codescout/project.toml"),
+        "[project]\nname = \"test\"\n\n[security]\nprofile = \"root\"\n",
+    )
+    .unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    let result = ActivateProject
+        .call(
+            json!({"path": dir.path().to_str().unwrap(), "read_only": false}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "ok");
+    assert_eq!(
+        result["security_profile"], "root",
+        "RW + root profile should surface security_profile"
+    );
+    assert!(
+        result["shell_enabled"].is_null(),
+        "shell_enabled is no longer reported"
+    );
+}
+
+#[tokio::test]
+async fn activate_project_rw_default_omits_security_profile() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // Default (sandboxed) profile is the common case — it carries no signal,
+    // so the activation card omits security_profile entirely.
     let ctx = ToolContext {
         agent: Agent::new(None).await.unwrap(),
         lsp: lsp(),
@@ -772,12 +815,12 @@ async fn activate_project_rw_includes_security_fields() {
         .unwrap();
     assert_eq!(result["status"], "ok");
     assert!(
-        result["security_profile"].is_string(),
-        "RW should include security_profile"
+        result["security_profile"].is_null(),
+        "RW + default profile should omit security_profile"
     );
     assert!(
-        !result["shell_enabled"].is_null(),
-        "RW should include shell_enabled"
+        result["shell_enabled"].is_null(),
+        "shell_enabled is no longer reported"
     );
 }
 

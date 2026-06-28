@@ -120,16 +120,14 @@ patterns = [
 
 > See [Security & Permissions](../concepts/security.md) for the rationale behind these settings and how the permission model works end-to-end.
 
-Controls what operations the AI agent is permitted to perform. These settings are intentionally
-conservative by default: shell execution is off, file writes are on, git reads are on.
+Controls what operations the AI agent is permitted to perform. These settings are
+conservative by default: shell execution warns before running, file writes are on, git reads are on.
 
 ```toml
 [security]
 denied_read_patterns = []
 extra_write_roots = []
 shell_command_mode = "warn"
-shell_output_limit_bytes = 102400
-shell_enabled = false
 file_write_enabled = true
 indexing_enabled = true
 ```
@@ -139,8 +137,6 @@ indexing_enabled = true
 | `denied_read_patterns` | array of strings | `[]` | Additional path prefixes to block from `read_file` and other read tools, beyond the built-in deny-list (see below). |
 | `extra_write_roots` | array of strings | `[]` | Additional directories where file write tools are allowed. By default writes are restricted to the project root. |
 | `shell_command_mode` | string | `"warn"` | Controls `run_command` behaviour. One of `"unrestricted"`, `"warn"`, or `"disabled"`. |
-| `shell_output_limit_bytes` | integer | `102400` | Maximum bytes captured from shell command stdout or stderr. Output beyond this limit is truncated and flagged in the response. |
-| `shell_enabled` | bool | `false` | Master switch for shell execution. Must be `true` for `run_command` to run any command regardless of `shell_command_mode`. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
 | `indexing_enabled` | bool | `true` | Enables `index(action: build)` and `workspace(action: status)`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
 
@@ -176,35 +172,32 @@ denied_read_patterns = [
 
 ### Shell Command Mode
 
-The `shell_command_mode` field fine-tunes what happens when `run_command` is called
-(assuming `shell_enabled = true`):
+The `shell_command_mode` field fine-tunes what happens when `run_command` is called:
 
 | Value | Behaviour |
 |---|---|
+| `"warn"` | Commands execute normally. This is the default. |
+| `"unrestricted"` | Commands execute normally. Currently identical to `"warn"`. |
 | `"disabled"` | All shell calls return an error immediately. |
-| `"warn"` | Commands execute; a reminder about full user permissions is appended to the response. This is the default. |
-| `"unrestricted"` | Commands execute with no warning added to the output. |
 
-### Enabling Shell Execution
+### Controlling Shell Execution
 
-Shell execution requires two settings to both be enabled:
+Shell execution is **on by default** (`shell_command_mode = "warn"`). To turn it off
+entirely, set the mode to `"disabled"`:
 
 ```toml
 [security]
-shell_enabled = true
-shell_command_mode = "warn"   # or "unrestricted"
+shell_command_mode = "disabled"
 ```
 
-The two-field design means you can grant shell access (`shell_enabled = true`) while still
-keeping the warning visible (`shell_command_mode = "warn"`), which is recommended for shared
-or CI environments.
+With `"disabled"`, every `run_command` call returns an error immediately. `"warn"` (the
+default) and `"unrestricted"` currently behave the same — both run the command.
 
 ---
 
 ## Complete Example
 
-A complete `project.toml` for a Rust service that uses local CPU embeddings and has shell
-execution enabled for running tests:
+A complete `project.toml` for a Rust service that uses local CPU embeddings:
 
 ```toml
 [project]
@@ -234,8 +227,6 @@ patterns = [
 [security]
 denied_read_patterns = ["~/.config/stripe"]
 shell_command_mode = "warn"
-shell_output_limit_bytes = 204800
-shell_enabled = true
 file_write_enabled = true
 indexing_enabled = true
 ```

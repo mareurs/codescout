@@ -2177,7 +2177,9 @@ mod tests {
     async fn shell_tool_allowed_by_default() {
         let (_dir, server) = make_server().await;
         let security = server.agent.security_config().await;
-        assert!(security.shell_enabled);
+        // Shell is allowed by default: shell_command_mode defaults to "warn"
+        // and check_tool_access no longer gates run_command.
+        assert_eq!(security.shell_command_mode, "warn");
         assert!(crate::util::path_security::check_tool_access("run_command", &security).is_ok());
     }
 

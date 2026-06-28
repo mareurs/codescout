@@ -433,14 +433,16 @@ async fn build_activation_response(
         languages,
         read_only,
         memories,
-        security,
+        security_profile,
         stored_onboarding_version,
     ) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let memories = p.memory.list().unwrap_or_default();
-            let security = if !p.read_only {
-                Some((p.config.security.profile, p.config.security.shell_enabled))
+            // Only carry the security profile out of the project lock; it is
+            // surfaced later only when it departs from the sandboxed default.
+            let security_profile = if !p.read_only {
+                Some(p.config.security.profile)
             } else {
                 None
             };
@@ -451,7 +453,7 @@ async fn build_activation_response(
                 p.config.project.languages.clone(),
                 p.read_only,
                 memories,
-                security,
+                security_profile,
                 p.config.project.onboarding_version,
             ))
         })
@@ -555,9 +557,14 @@ async fn build_activation_response(
         result["workspace"] = json!(ws);
     }
 
-    if let Some((profile, shell)) = security {
-        result["security_profile"] = json!(profile);
-        result["shell_enabled"] = json!(shell);
+    // Surface `security_profile` only when it departs from the sandboxed
+    // `default` — `root` disables every path/command gate, which is worth
+    // flagging on activation. `shell_enabled` is intentionally omitted: it has
+    // defaulted to true for all projects, so reporting it carried no signal.
+    if let Some(profile) = security_profile {
+        if profile != crate::util::path_security::SecurityProfile::Default {
+            result["security_profile"] = json!(profile);
+        }
     }
 
     if !auto_registered.is_empty() {

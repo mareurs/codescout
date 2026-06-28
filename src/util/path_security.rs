@@ -71,10 +71,6 @@ pub struct PathSecurityConfig {
     pub extra_write_roots: Vec<PathBuf>,
     /// Shell command mode: "unrestricted", "warn" (default), "disabled"
     pub shell_command_mode: String,
-    /// Max bytes for shell command stdout/stderr (default 100KB)
-    pub shell_output_limit_bytes: usize,
-    /// Enable shell command execution (default: false)
-    pub shell_enabled: bool,
     /// Enable file write tools (default: true)
     pub file_write_enabled: bool,
     /// Enable semantic search and indexing tools (default: true)
@@ -93,8 +89,6 @@ impl Default for PathSecurityConfig {
             profile: SecurityProfile::Default,
             extra_write_roots: Vec::new(),
             shell_command_mode: "warn".into(),
-            shell_output_limit_bytes: 100 * 1024,
-            shell_enabled: true,
             file_write_enabled: true,
             indexing_enabled: true,
             library_paths: Vec::new(),
@@ -488,11 +482,6 @@ pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
 /// Returns Ok(()) if allowed, or an error message explaining how to enable it.
 pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result<()> {
     match tool_name {
-        "run_command" if !config.shell_enabled => {
-            bail!(
-                    "Shell commands are disabled. Set security.shell_enabled = true in .codescout/project.toml to enable."
-                );
-        }
         "approve_write" | "create_file" | "edit_file" | "edit_code" | "library"
         | "edit_markdown"
             if !config.file_write_enabled =>
@@ -1332,22 +1321,6 @@ mod tests {
     // ── Tool access controls ─────────────────────────────────────────────
 
     #[test]
-    fn shell_enabled_by_default() {
-        let config = PathSecurityConfig::default();
-        assert!(config.shell_enabled);
-        assert!(check_tool_access("run_command", &config).is_ok());
-    }
-
-    #[test]
-    fn shell_disabled_when_configured() {
-        let config = PathSecurityConfig {
-            shell_enabled: false,
-            ..PathSecurityConfig::default()
-        };
-        assert!(check_tool_access("run_command", &config).is_err());
-    }
-
-    #[test]
     fn file_write_enabled_by_default() {
         let config = PathSecurityConfig::default();
         assert!(config.file_write_enabled);
@@ -1408,7 +1381,6 @@ mod tests {
     #[test]
     fn read_tools_always_allowed() {
         let config = PathSecurityConfig {
-            shell_enabled: false,
             file_write_enabled: false,
             indexing_enabled: false,
             ..PathSecurityConfig::default()
@@ -1440,23 +1412,6 @@ mod tests {
         assert!(
             home.is_some(),
             "home_dir() returned None — deny-list will be empty (security bug)"
-        );
-    }
-
-    #[test]
-    fn check_tool_access_error_message_includes_config_hint() {
-        let config = PathSecurityConfig {
-            shell_enabled: false,
-            ..PathSecurityConfig::default()
-        };
-        let err = check_tool_access("run_command", &config).unwrap_err();
-        assert!(
-            err.to_string().contains("shell_enabled"),
-            "error should mention config key"
-        );
-        assert!(
-            err.to_string().contains("project.toml"),
-            "error should mention config file"
         );
     }
 

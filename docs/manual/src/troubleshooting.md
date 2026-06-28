@@ -346,20 +346,17 @@ extra_write_roots = ["/path/to/other/directory"]
 
 ### Shell commands return "shell execution is disabled"
 
-Shell execution requires two settings to both be enabled.
+`shell_command_mode` is set to `"disabled"`, which blocks every `run_command` call.
 
-**Fix:** Set both fields in `project.toml`:
+**Fix:** Set the mode to `"warn"` (the default) or `"unrestricted"` in `project.toml`:
 
 ```toml
 [security]
-shell_enabled = true
 shell_command_mode = "warn"   # or "unrestricted"
 ```
 
-`shell_enabled` is the master switch (default: `false`). `shell_command_mode`
-controls whether a warning is appended to shell output (default: `"warn"`).
-Even with `shell_enabled = true`, setting `shell_command_mode = "disabled"`
-blocks all shell calls.
+`shell_command_mode` controls `run_command`: `"warn"` (the default) and `"unrestricted"`
+both run commands normally; `"disabled"` blocks all shell calls.
 
 ---
 

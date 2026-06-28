@@ -151,12 +151,6 @@ pub struct SecuritySection {
     /// Shell command mode: "unrestricted", "warn" (default), "disabled"
     #[serde(default = "default_shell_mode")]
     pub shell_command_mode: String,
-    /// Max bytes for shell command stdout/stderr (default 100KB)
-    #[serde(default = "default_shell_output_limit")]
-    pub shell_output_limit_bytes: usize,
-    /// Enable shell command execution (default: true)
-    #[serde(default = "default_true")]
-    pub shell_enabled: bool,
     /// Enable file write tools: create_file, edit_file, symbol write tools (default: true)
     #[serde(default = "default_true")]
     pub file_write_enabled: bool,
@@ -182,8 +176,6 @@ impl Default for SecuritySection {
             profile: crate::util::path_security::SecurityProfile::Default,
             extra_write_roots: Vec::new(),
             shell_command_mode: default_shell_mode(),
-            shell_output_limit_bytes: default_shell_output_limit(),
-            shell_enabled: true,
             file_write_enabled: true,
             indexing_enabled: true,
             shell_dangerous_patterns: Vec::new(),
@@ -195,10 +187,6 @@ impl Default for SecuritySection {
 
 fn default_shell_mode() -> String {
     "warn".into()
-}
-
-fn default_shell_output_limit() -> usize {
-    100 * 1024 // 100KB
 }
 
 fn default_true() -> bool {
@@ -223,8 +211,6 @@ impl SecuritySection {
                 .map(std::path::PathBuf::from)
                 .collect(),
             shell_command_mode: self.shell_command_mode.clone(),
-            shell_output_limit_bytes: self.shell_output_limit_bytes,
-            shell_enabled: self.shell_enabled,
             file_write_enabled: self.file_write_enabled,
             indexing_enabled: self.indexing_enabled,
             library_paths: Vec::new(),
@@ -613,7 +599,6 @@ mod tests {
             sec.indexing_enabled,
             "indexing_enabled should default to true"
         );
-        assert!(sec.shell_enabled, "shell_enabled should default to true");
     }
 
     #[test]
@@ -622,7 +607,6 @@ mod tests {
         let cfg = ProjectConfig::default_for("test-project".into());
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
-        assert!(cfg.security.shell_enabled);
     }
 
     #[test]
@@ -633,7 +617,6 @@ mod tests {
         let cfg: ProjectConfig = toml::from_str(toml).unwrap();
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
-        assert!(cfg.security.shell_enabled);
     }
 
     #[test]
@@ -740,7 +723,7 @@ fetch_timeout_secs = 120
 
     #[test]
     fn security_profile_defaults_to_default() {
-        let toml_str = "[project]\nname = \"test\"\n\n[security]\nshell_enabled = true\n";
+        let toml_str = "[project]\nname = \"test\"\n\n[security]\nshell_command_mode = \"warn\"\n";
         let config: ProjectConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(
             config.security.profile,
@@ -1036,7 +1019,7 @@ model = "local:AllMiniLML6V2Q"
         std::fs::create_dir_all(&global_dir).unwrap();
         std::fs::write(
             global_dir.join("config.toml"),
-            "[security]\nshell_enabled = false\n",
+            "[security]\nfile_write_enabled = false\n",
         )
         .unwrap();
         std::env::set_var("HOME", dir.path());
@@ -1059,7 +1042,7 @@ model = "local:AllMiniLML6V2Q"
             Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
             None => std::env::remove_var("XDG_CONFIG_HOME"),
         }
-        assert!(!cfg.security.shell_enabled);
+        assert!(!cfg.security.file_write_enabled);
         assert_eq!(cfg.embeddings.model, "project-model");
     }
 
@@ -1090,7 +1073,7 @@ model = "local:AllMiniLML6V2Q"
             None => std::env::remove_var("XDG_CONFIG_HOME"),
         }
         assert_eq!(cfg.embeddings.model, default_embed_model());
-        assert!(cfg.security.shell_enabled);
+        assert!(cfg.security.file_write_enabled);
     }
 
     #[test]
@@ -1196,7 +1179,7 @@ model = "local:test"
     fn merge_toml_nested_tables_merge_recursively() {
         let base = toml::Value::Table(toml::toml! {
             [security]
-            shell_enabled = false
+            file_write_enabled = false
             shell_command_mode = "warn"
         });
         let overlay = toml::Value::Table(toml::toml! {
@@ -1204,7 +1187,10 @@ model = "local:test"
             shell_command_mode = "unrestricted"
         });
         let merged = super::merge_toml(base, overlay);
-        assert_eq!(merged["security"]["shell_enabled"].as_bool(), Some(false));
+        assert_eq!(
+            merged["security"]["file_write_enabled"].as_bool(),
+            Some(false)
+        );
         assert_eq!(
             merged["security"]["shell_command_mode"].as_str(),
             Some("unrestricted")

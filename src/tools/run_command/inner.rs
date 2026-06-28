@@ -186,24 +186,6 @@ fn inject_tee(
     }
 }
 
-#[allow(dead_code)] // Kept as safety net for byte-level shell_output_limit_bytes config.
-pub(crate) fn truncate_output(output: &str, limit: usize) -> (String, bool) {
-    if output.len() > limit {
-        let safe_end = crate::tools::floor_char_boundary(output, limit);
-        (
-            format!(
-                "{}\n... (truncated, showing first {} of {} bytes)",
-                &output[..safe_end],
-                safe_end,
-                output.len()
-            ),
-            true,
-        )
-    } else {
-        (output.to_string(), false)
-    }
-}
-
 /// Classify a command into a known-slow bucket. Returns a short label used
 /// to tailor the timeout-error hint. Conservative — only matches strong
 /// signals (test runners, build systems, ETL/training pipelines) so the

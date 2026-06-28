@@ -45,14 +45,12 @@ All security settings live in `.codescout/project.toml` under `[security]`:
 ```toml
 [security]
 # Tool category toggles
-shell_enabled = false              # Shell command execution (default: false)
 file_write_enabled = true          # File creation and modification (default: true)
 indexing_enabled = true            # Semantic search indexing (default: true)
 github_enabled = true              # GitHub API tools (default: true)
 
-# Shell command settings (only relevant if shell_enabled = true)
-shell_command_mode = "warn"        # "warn" | "unrestricted" | "disabled"
-shell_output_limit_bytes = 102400  # Max output bytes (default: 100KB)
+# Shell command settings
+shell_command_mode = "warn"        # "warn" | "unrestricted" | "disabled" (default: "warn")
 
 # Path security
 denied_read_patterns = []          # Additional paths to block reads from

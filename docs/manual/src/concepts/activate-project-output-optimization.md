@@ -16,9 +16,8 @@
   "memories": ["architecture", "conventions"],
   "hint": "CWD: /home/user/my-project. Run workspace(action: status) for health checks and memory staleness.",
 
-  // RW only:
-  "security_profile": "default",
-  "shell_enabled": true,
+  // RW only, and only when non-default (omitted for the sandboxed "default"):
+  "security_profile": "root",
 
   // Multi-project workspaces only:
   "workspace": [
@@ -36,7 +35,7 @@
 | Before | After |
 |--------|-------|
 | Full `config` object (all TOML fields) | Slim orientation card |
-| Security fields always present | Security fields only in RW mode |
+| Security fields always present | `security_profile` only in RW mode, and only when non-default (`root`); `shell_enabled` dropped (it defaults to true everywhere, so it carried no signal) |
 | No workspace on activation | `workspace` array included when multi-project |
 | No memory list | `memories` array (topic names) |
 | No index status | `index.status` field |

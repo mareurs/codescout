@@ -48,7 +48,7 @@ Primary writer: codescout server. Resides at `<project_root>/.codescout/`.
 
 | Path | Writer | Readers | Purpose / Schema |
 |---|---|---|---|
-| `project.toml` | codescout `onboarding` tool, codescout config writes | codescout server (config load), companion `detect-tools.sh` (gates onboarding-prompt injection) | TOML config: `[project]` (name, languages), `[lsp.<lang>]` (mux toggle), `[security]` (shell_enabled, indexing_enabled), `[memory]` (drift_detection_enabled). Schema versioned implicitly by codescout MSRV; field additions are minor. |
+| `project.toml` | codescout `onboarding` tool, codescout config writes | codescout server (config load), companion `detect-tools.sh` (gates onboarding-prompt injection) | TOML config: `[project]` (name, languages), `[lsp.<lang>]` (mux toggle), `[security]` (shell_command_mode, indexing_enabled), `[memory]` (drift_detection_enabled). Schema versioned implicitly by codescout MSRV; field additions are minor. |
 | `system-prompt.md` | codescout `onboarding` tool (regenerated when `ONBOARDING_VERSION` bumps) | companion `session-start.sh` (injects into Claude Code session) | Markdown. Free-form. Generated from `src/prompts/onboarding_prompt.md` + `builders.rs::build_system_prompt_draft`. Companion treats as opaque. |
 | `memories/<topic>.md` | codescout `memory(action="write")` | codescout `memory(action="read"|"list")`, companion `session-start.sh` (lists names only — content not parsed) | Markdown with optional frontmatter for anchors. Topic path = filename. |
 | `private-memories/<topic>.md` | codescout `memory(action="write", private=true)` | codescout only | Same as memories/, but auto-gitignored. Companion does not list. |
