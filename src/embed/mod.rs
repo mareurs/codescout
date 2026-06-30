@@ -46,6 +46,32 @@ pub fn lang_for_ext(ext: &str) -> Option<&'static str> {
     })
 }
 
+/// Build a gitignore-style matcher from `[ignored_paths] patterns`, rooted at
+/// `root`. Shared by the code indexer (`crate::retrieval::sync::stream_index`) and
+/// the preflight guard (`crate::embed::preflight::check_index_scope`) so the two
+/// never disagree on what is excluded (the 2026-06-02 walker-divergence class).
+///
+/// Gitignore semantics: a bare `node_modules` prunes any directory of that name at
+/// any depth — pruning happens on the *directory* during the walk (a file under an
+/// ignored dir is never visited, so `Gitignore::matched(file, false)` for it is not
+/// consulted). Fail-soft: an invalid pattern is logged and skipped; a build failure
+/// yields an empty matcher (ignores nothing) rather than aborting the index.
+pub fn build_ignore_matcher(
+    root: &std::path::Path,
+    patterns: &[String],
+) -> ignore::gitignore::Gitignore {
+    let mut b = ignore::gitignore::GitignoreBuilder::new(root);
+    for p in patterns {
+        if let Err(e) = b.add_line(None, p) {
+            tracing::warn!(pattern = %p, error = %e, "skipping invalid ignore pattern");
+        }
+    }
+    b.build().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "ignore matcher build failed; ignoring nothing");
+        ignore::gitignore::Gitignore::empty()
+    })
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -60,5 +86,33 @@ mod tests {
     fn chunk_size_for_local_model_uses_table() {
         let sz = super::chunk_size_for_model("local:JinaEmbeddingsV2BaseCode");
         assert!(sz > 0);
+    }
+
+    #[test]
+    fn ignore_matcher_prunes_bare_name_dir_at_any_depth() {
+        use std::path::Path;
+        let m = super::build_ignore_matcher(
+            Path::new("/proj"),
+            &["node_modules".to_string(), ".venv".to_string()],
+        );
+        // Pruning happens on the directory during the walk.
+        assert!(m.matched("/proj/a/b/node_modules", true).is_ignore());
+        assert!(m.matched("/proj/services/.venv", true).is_ignore());
+        assert!(!m.matched("/proj/src/main.rs", false).is_ignore());
+    }
+
+    #[test]
+    fn ignore_matcher_supports_glob_patterns() {
+        use std::path::Path;
+        let m = super::build_ignore_matcher(Path::new("/proj"), &["**/*.gen.rs".to_string()]);
+        assert!(m.matched("/proj/a/foo.gen.rs", false).is_ignore());
+        assert!(!m.matched("/proj/a/foo.rs", false).is_ignore());
+    }
+
+    #[test]
+    fn ignore_matcher_empty_matches_nothing() {
+        use std::path::Path;
+        let m = super::build_ignore_matcher(Path::new("/proj"), &[]);
+        assert!(!m.matched("/proj/node_modules", true).is_ignore());
     }
 }
