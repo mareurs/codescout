@@ -261,6 +261,9 @@ async fn main() -> Result<()> {
             let opts = codescout::retrieval::sync::SyncOpts {
                 force_reindex: force,
                 record_index_state: true,
+                ignore_patterns: codescout::config::project::ProjectConfig::load_or_default(&root)
+                    .map(|c| c.ignored_paths.patterns)
+                    .unwrap_or_default(),
                 ..Default::default()
             };
             let report = client.sync_project(&project_id, &root, opts).await?;

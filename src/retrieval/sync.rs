@@ -11,6 +11,9 @@ pub struct SyncOpts {
     /// external consumers and `index(action="status")` read). Set by *project*
     /// syncs; left false by *library* syncs so library checkouts aren't polluted.
     pub record_index_state: bool,
+    /// Glob/gitignore-style patterns to exclude from the index walk. Sourced from
+    /// `config.ignored_paths.patterns`; an empty vec ignores nothing.
+    pub ignore_patterns: Vec<String>,
 }
 
 #[derive(Debug, Default)]

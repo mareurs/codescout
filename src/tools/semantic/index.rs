@@ -124,6 +124,9 @@ impl Tool for IndexProject {
             let client = crate::retrieval::client::RetrievalClient::from_env().await?;
             let opts = crate::retrieval::sync::SyncOpts {
                 force_reindex: force,
+                ignore_patterns: crate::config::project::ProjectConfig::load_or_default(&lib_path)
+                    .map(|c| c.ignored_paths.patterns)
+                    .unwrap_or_default(),
                 ..Default::default()
             };
             client

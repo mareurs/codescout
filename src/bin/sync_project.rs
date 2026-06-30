@@ -20,6 +20,9 @@ async fn main() -> Result<()> {
         languages: None,
         force_reindex: false,
         record_index_state: true,
+        ignore_patterns: codescout::config::project::ProjectConfig::load_or_default(&root)
+            .map(|c| c.ignored_paths.patterns)
+            .unwrap_or_default(),
     };
 
     eprintln!(

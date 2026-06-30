@@ -1459,7 +1459,7 @@ impl Agent {
 
     /// Spawn a background library indexing task if auto_index is enabled and library is not yet indexed.
     pub async fn maybe_auto_index_library(&self, lib_name: &str) {
-        let (should_index, _root, entry_path, max_index_bytes) = {
+        let (should_index, _root, entry_path, max_index_bytes, ignore_patterns) = {
             let inner = self.inner.read().await;
             let Some(p) = inner.active_project() else {
                 return;
@@ -1478,6 +1478,7 @@ impl Agent {
                 p.root.clone(),
                 entry.path.clone(),
                 p.config.security.max_index_bytes,
+                p.config.ignored_paths.patterns.clone(),
             )
         };
         if !should_index {
@@ -1546,7 +1547,10 @@ impl Agent {
             crate::heartbeat::note_background_op(&format!("auto_index:{name}"));
             let result = async {
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-                let opts = crate::retrieval::sync::SyncOpts::default();
+                let opts = crate::retrieval::sync::SyncOpts {
+                    ignore_patterns: ignore_patterns.clone(),
+                    ..Default::default()
+                };
                 client
                     .sync_project(&lib_project_id, &entry_path, opts)
                     .await
