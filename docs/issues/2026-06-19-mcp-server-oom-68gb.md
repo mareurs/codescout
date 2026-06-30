@@ -1,15 +1,11 @@
 ---
-status: open
+status: investigating
 opened: 2026-06-19
 closed:
 severity: high
 owner: marius
-related: []
-tags:
-  - memory
-  - oom
-  - mcp-server
-  - stability
+related: ["2026-06-19-kotlin-lsp-uncapped-jvm-heap.md", "2026-06-26-heartbeat-prune-evicts-oom-victim.md"]
+tags: ["memory", "oom", "mcp-server", "stability", "indexing", "backend-kotlin"]
 kind: bug
 ---
 
@@ -71,12 +67,68 @@ output/file into memory, retrieval/embedding batch, or the mux/LSP bridge.
   pressure.
 
 ## Root cause
+
 **Unknown — under investigation.** The process accumulated ~68 GB of anonymous
 heap; total-vm (168 GiB) ≫ rss (65.5 GiB) also suggests large reserved mappings
 (big `Vec`/buffer `reserve`/capacity, or repeated growth). Needs the offending
 instance's diagnostic log to identify the last operation before the climb — but
 that log was not recoverable (see Evidence → "codescout's own logs").
 
+**Update (2026-06-30) — victim project identified; trigger condition narrowed.**
+The dead instance was serving **`~/work/mirela/backend-kotlin`**. The 68 GB was
+**anonymous** heap inside `codescout` itself — *not* the kotlin-LSP JVM child (that is
+the separate issue `2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`) — so it is a
+codescout-side allocation while walking/embedding an effectively unbounded tree.
+
+*Attribution method (the per-instance log was gone, but each project's append-only
+`.codescout/usage.db` survives):*
+
+```bash
+for db in $(find ~ -path '*/.codescout/usage.db'); do
+  sqlite3 "$db" "SELECT '$db' AS proj, id, called_at, tool_name, substr(cc_session_id,1,8)
+    FROM tool_calls WHERE called_at BETWEEN '2026-06-19 12:55' AND '2026-06-19 14:05'
+    ORDER BY called_at;"
+done
+```
+
+`backend-kotlin` is the standout: a `symbols`/`read_file`/`grep` burst ending 12:59:34,
+a `create_file` at **exactly 13:23:33 UTC** (the kill second), then a **40-minute dead
+gap**, resuming 14:03:26 with a `workspace` activate. Across the gap the **Claude Code
+session id changes** (`42f9a5e8 → c66c0d60`) while codescout's project-derived
+`session_id` stays `3acf111b` — i.e. the MCP transport dropped at the kill instant and a
+fresh CC session reconnected. Strong circumstantial attribution (not logged-proven: the
+killed background op left no `tool_calls` row).
+
+*Why this project is magnitude-plausible:* it is a **70 GB** tree, **58 GB under
+`python-services/`** (HuggingFace checkpoints — dozens of 941 MB `optimizer.pt`), and its
+`.codescout/project.toml` has **`[ignored_paths] patterns = []`** (nothing excluded) with
+`indexing_enabled = true`, embeddings on (`jina-embeddings-v2-base-code`), and
+`drift_detection_enabled = true`. `max_index_bytes` (500 MB) caps **per-file** only, so the
+941 MB `.pt` files are skipped individually but **nothing bounds the aggregate** walk/embed
+over that many files. Steady-state RSS for this project is ~100 MB, so the 68 GB was a
+**one-shot pass**, consistent with the `embed_queue` full-materialization lead
+(now confirmed below: `RetrievalClient::sync_project`, `src/retrieval/sync.rs:41`) — not a slow leak. **Implied product gap:** an
+index/embed pass has no aggregate-size budget; a large un-ignored tree blows past the
+per-file cap.
+### Update (2026-06-30, confirmed) — root cause is `sync_project`, not the librarian indexer
+
+A code audit identifies the leak as the **semantic code-index sync**
+`RetrievalClient::sync_project` (`src/retrieval/sync.rs:41`), which buffers the **entire tree**
+before embedding: `local: Vec<(CodePayload, String)>` holds *two* live copies of every chunk's
+content (cloned into `CodePayload.content` + the tuple `String`), then `texts` adds a third and
+`embed_batch` returns all vectors at once — peak memory is **O(all_files)**.
+
+The earlier `src/librarian/indexer.rs:80,207` lead was **wrong**: that is the *markdown-only*
+librarian index (hard `.md` filter, never consults `max_index_bytes`) and cannot ingest the tree's
+source files. The `.pt`/`max_index_bytes` magnitude story is likewise mis-aimed — those checkpoints
+are **never read** (not in `lang_for_ext`); the unbounded axis is the **count** of indexable source
+files (`.py`/`.js`/`.ts`/… under the un-ignored `python-services/` deps), not per-file size.
+
+No `tool_calls` row because the op ran via the background `maybe_auto_index_library`
+(`src/agent/mod.rs:1489`), which spawns `sync_project` with no `check_index_scope` preflight. This
+is the unfinished "streaming pipeline" fix flagged — then wontfix'd — in the predecessor
+`docs/issues/2026-04-18-memory-leak-x-session-freeze.md` (re-opened 2026-06-30). Fix plan: see
+**Resume**.
 ## Evidence
 
 ### Kernel OOM (authoritative). How to retrieve:
@@ -168,17 +220,32 @@ N/A — not yet fixed (root cause unidentified).
 
 ## Resume
 
-Fix 3 (a durable, discoverable, always-on, `op=`-tagged RSS heartbeat) **shipped** — see the Fix
-Update above; lives in `src/heartbeat.rs`, wired at `src/server.rs` (`run` spawn + `call_tool_inner`).
+Fix 3 (a durable, discoverable, always-on, `op=`-tagged RSS heartbeat) **shipped** — lives in
+`src/heartbeat.rs`, wired at `src/server.rs` (`run` spawn + `call_tool_inner`). **Caveat (found
+2026-06-30):** `op=` is fed only at the tool-dispatch chokepoint, so a *background* op (the actual
+leaker here) logs a stale/empty `op=` — being fixed as item 3 below.
 
-**Next concrete action (Fix 1 — the leak, still open):** watch `~/.cache/codescout/heartbeats/`
-across the fleet. When an instance next ramps, its `<pid>.log` shows the RSS climb *and* the `op=`
-tool in flight at the top of the ramp — that finally names the leaking operation. Check whatever
-`op=` reports against the two magnitude-plausible audit leads: `embed_queue` full materialization
-(`src/librarian/indexer.rs:80,207`) and `run_command` stdout pre-materialization
-(`src/tools/run_command/inner.rs:482`). The build commit is now in every heartbeat header, so the
-dead instance's build is known. Optional hardening still open: the soft self-limit abort and the
-cgroup `MemoryMax=`/`MemorySwapMax=0` blast-radius cap (Fix 4).
+**Root cause confirmed (2026-06-30):** the leak is `RetrievalClient::sync_project`
+(`src/retrieval/sync.rs:41`) buffering the **entire tree** before embedding (O(all_files) peak,
+2–3 live content copies + all vectors at once). It is **not** the markdown librarian indexer and
+**not** the `.pt` checkpoints (never read). Reached via the background `maybe_auto_index_library`
+path (`src/agent/mod.rs:1489`) with no `check_index_scope` preflight — hence no `tool_calls` row.
+This is the unfinished "streaming pipeline" fix flagged + wontfix'd in the predecessor
+`2026-04-18-memory-leak-x-session-freeze.md` (re-opened 2026-06-30). See the confirmed-root-cause
+update under **Root cause**.
+
+**Fix in progress (plan `abstract-dazzling-peacock`):**
+1. **Stream `sync_project`** — flush embed→upsert→drop every `FLUSH_BATCH`; peak O(batch). *(core)*
+2. **Gate the background path** — `maybe_auto_index_library` runs `check_index_scope` and skips
+   oversized roots with a warning (no interactive user to confirm).
+3. **Heartbeat background-op tag** — tag `op=` at background spawn sites so a background leaker
+   names itself.
+4. **Deferred:** default-ignore globs (`**/.venv/`, `*.pt`, …); cgroup `MemoryMax`/`MemorySwapMax=0`
+   blast-radius cap; the `oom_score_adj=200` review.
+
+**Immediate user-side mitigation (still valid):** set `[ignored_paths] patterns` in
+`~/work/mirela/backend-kotlin/.codescout/project.toml` to exclude `python-services/` so
+reindex/drift never ingests the dependency tree.
 ## References
 - Host journal: `journalctl -k --since "2026-06-19 16:20" --until "2026-06-19 16:25"`
 - Logging impl: `src/logging.rs` (debug/diagnostic file layers, `.codescout/` dir, non-blocking appender, panic-hook crash.log)

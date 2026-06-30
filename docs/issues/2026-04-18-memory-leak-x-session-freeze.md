@@ -1,13 +1,13 @@
 ---
-status: wontfix
+status: investigating
 opened: 2026-04-18
 severity: critical
 owner: marius
 related: []
 tags: ["memory-leak", "oom", "embeddings", "ptmalloc2", "phase-2"]
-last_observed: 2026-04-30
+last_observed: 2026-06-19
 kind: bug
-closed: 2026-05-28
+closed: ""
 ---
 
 # BUG: codescout memory leak → OOM → X session freeze
@@ -27,6 +27,22 @@ no window manager. Appears as a hard freeze; only a reboot recovers it.
 
 ---
 
+## Re-opened 2026-06-30 — the June OOM fired this issue's re-open trigger
+
+The 2026-06-19 68 GB OOM (`docs/issues/2026-06-19-mcp-server-oom-68gb.md`) matches the Phase 1
+signature in the **Status: zombie** re-open trigger below (indexing-heavy session, catastrophic
+anon-RSS). Per that trigger this issue is flipped `wontfix → investigating` and `last_observed`
+restored to 2026-06-19.
+
+**Confirmed root cause — it was the "remaining fix needed" all along.** The **streaming pipeline**
+this file prescribed (see *Root Cause Hypothesis → Remaining fix needed: streaming pipeline*) was
+never actually implemented. The Apr-18 "streaming refactor" relocated `build_index`
+(`src/embed/index.rs`) into `RetrievalClient::sync_project` (`src/retrieval/sync.rs:41`) but still
+buffers the **entire tree** (`local: Vec<(CodePayload, String)>`, O(all_files) peak). The June
+postmortem confirms this on a 70 GB un-ignored tree, reached via the background
+`maybe_auto_index_library` path with no scope preflight. Fix tracked in the June issue (plan
+`abstract-dazzling-peacock`): stream `sync_project` to O(batch), gate the background path, and close
+the heartbeat's background-op blind spot.
 ## Update 2026-04-30 — Apr-18 fixes were INSUFFICIENT
 
 The streaming pipeline refactor and jemalloc switch (both shipped after 2026-04-18)
