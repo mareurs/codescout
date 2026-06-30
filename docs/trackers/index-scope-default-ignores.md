@@ -11,15 +11,17 @@ related: ["docs/issues/2026-06-19-mcp-server-oom-68gb.md", "docs/issues/2026-04-
 ## Why this exists
 Deferred follow-up from the 68 GB OOM (`docs/issues/2026-06-19-mcp-server-oom-68gb.md`). The
 streaming `sync_project` fix makes indexing OOM-safe (O(batch) peak) and the background preflight
-gate skips oversized roots — but neither *excludes* dependency/artifact trees by default. A large
+gate skips oversized roots — but at the time neither *excluded* dependency/artifact trees by default
+(now wired — see **Status**). A large
 un-ignored tree (e.g. backend-kotlin's `python-services/` with `[ignored_paths] patterns = []`) is
 still walked and embedded in full: wasted embed-server time and a code index polluted with
 dependency source. This tracker holds the UX-policy decision we explicitly deferred, not the crash
 fix (that ships under the OOM issue).
 
 ## Proposal (not yet decided)
-Add a conservative built-in default-ignore set to the indexer walk. Touch points that must stay in
-lockstep (the guard estimate and the actual walk previously diverged — see
+**Wiring is done** (see **Status**). The remaining decision is whether to **expand** the default set
+beyond the current bare dir names. Touch points that must stay in lockstep (the guard estimate and
+the actual walk previously diverged, now unified via `build_ignore_matcher` — see
 `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`):
 - `RetrievalClient::sync_project` (`src/retrieval/sync.rs`) — the actual walk.
 - `check_index_scope` (`src/embed/preflight.rs`) — the preflight size estimate.
@@ -41,5 +43,15 @@ Open questions:
 - cgroup `MemoryMax`/`MemorySwapMax=0` blast-radius cap for MCP servers; review `oom_score_adj=200`.
 
 ## Status
-Open — captured 2026-06-30, deferred during the streaming-fix work stream. **Not blocking** the OOM
-fix: streaming `sync_project` + the background scope gate resolve the crash on their own.
+
+**Code-index wiring SHIPPED (2026-06-30, plan `abstract-dazzling-peacock`, on `experiments`).**
+`sync_project` and `check_index_scope` now honour `[ignored_paths]` via a shared
+`build_ignore_matcher` (gitignore semantics; defaults exclude `.venv`/`node_modules`/`target`/etc.).
+
+**Still open (this tracker):**
+- **Expand the default set** — `**/site-packages/`, `**/models/`, `**/checkpoint-*/`, `*.pt`,
+  `*.safetensors`, `*.onnx`, `*.gguf`. Current defaults are bare dir names only.
+- **Librarian matcher inconsistency** — the librarian markdown indexer shares the `[ignored_paths]`
+  *list* but compiles it with plain `globset::Glob` (`compile_ignore`), so bare names don't match
+  nested dirs there the way the code index's gitignore matcher does. Unify or document.
+- Aggregate walk/embed budget; cgroup `MemoryMax`/`MemorySwapMax=0` cap; `oom_score_adj=200` review.

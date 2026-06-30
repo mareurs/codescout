@@ -240,12 +240,18 @@ update under **Root cause**.
    oversized roots with a warning (no interactive user to confirm).
 3. **Heartbeat background-op tag** — tag `op=` at background spawn sites so a background leaker
    names itself.
-4. **Deferred:** default-ignore globs (`**/.venv/`, `*.pt`, …); cgroup `MemoryMax`/`MemorySwapMax=0`
-   blast-radius cap; the `oom_score_adj=200` review.
+4. **Default-ignore globs (shipped 2026-06-30)** — `sync_project` + `check_index_scope` now honour
+   `[ignored_paths]` via a shared `build_ignore_matcher` (gitignore semantics); the defaults exclude
+   `.venv`/`node_modules`/`target`/etc. **Still deferred:** expanding the default set, the cgroup
+   `MemoryMax`/`MemorySwapMax=0` blast-radius cap, and the `oom_score_adj=200` review
+   (`docs/trackers/index-scope-default-ignores.md`).
 
-**Immediate user-side mitigation (still valid):** set `[ignored_paths] patterns` in
-`~/work/mirela/backend-kotlin/.codescout/project.toml` to exclude `python-services/` so
-reindex/drift never ingests the dependency tree.
+**User-side tuning (now effective):** as of the default-ignore-globs change the code index honours
+`[ignored_paths]` — the defaults already exclude `.venv`/`node_modules`/`target`/etc. To also skip
+backend-kotlin's custom `python-services/`, add it to `[ignored_paths] patterns` in that project's
+`.codescout/project.toml`. **Before that change this was a no-op for the code index** (it only
+affected the librarian markdown indexer), so the original "set `[ignored_paths]`" advice would not
+have helped.
 ## References
 - Host journal: `journalctl -k --since "2026-06-19 16:20" --until "2026-06-19 16:25"`
 - Logging impl: `src/logging.rs` (debug/diagnostic file layers, `.codescout/` dir, non-blocking appender, panic-hook crash.log)
