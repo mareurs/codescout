@@ -94,16 +94,21 @@ pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
 /// to index. Otherwise returns `RequiresConfirmation(PreflightInfo)`; caller
 /// must elicit user confirmation.
 ///
-/// The walker and extension allowlist are kept identical to `sync_project`'s
-/// (via the shared `lang_for_ext`) so the guard's estimate matches what is
-/// actually indexed. They previously diverged — the guard used `hidden(true)`,
-/// applied an `ignored_paths` filter the indexer never honoured, and counted
-/// every file regardless of extension; see
+/// The walker, extension allowlist, and ignore matcher are kept identical to
+/// `sync_project`'s — the shared `lang_for_ext` and `build_ignore_matcher` are the
+/// single sources of truth — so the guard's estimate matches what is actually
+/// indexed. They previously diverged (the guard used `hidden(true)` and applied an
+/// `ignored_paths` filter the indexer didn't honour); the indexer now honours
+/// `ignored_paths` too, via the same `build_ignore_matcher`. See
 /// `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`.
 ///
 /// Per-file `metadata()` errors are silently skipped (matching `WalkBuilder::flatten`).
 /// Only failure to read the root itself propagates as an error.
-pub fn check_index_scope(root: &Path, max_bytes: u64) -> anyhow::Result<PreflightVerdict> {
+pub fn check_index_scope(
+    root: &Path,
+    max_bytes: u64,
+    patterns: &[String],
+) -> anyhow::Result<PreflightVerdict> {
     if !root.exists() {
         anyhow::bail!("project root does not exist: {}", root.display());
     }
@@ -113,10 +118,16 @@ pub fn check_index_scope(root: &Path, max_bytes: u64) -> anyhow::Result<Prefligh
     // whose extension the indexer actually embeds (`crate::embed::lang_for_ext`)
     // are counted. This keeps the estimate faithful to what `sync_project`
     // will index — `.git/` internals and binary blobs are skipped because no
-    // indexable extension matches them, without any bespoke ignore list.
+    // indexable extension matches them, and `build_ignore_matcher` prunes the
+    // configured `[ignored_paths]` dirs (the same matcher the indexer applies).
+    let ignore_matcher = crate::embed::build_ignore_matcher(root, patterns);
     let walker = ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
+        .filter_entry(move |e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            !ignore_matcher.matched(e.path(), is_dir).is_ignore()
+        })
         .build();
 
     let mut file_count: usize = 0;
@@ -312,14 +323,14 @@ mod tests {
     #[test]
     fn check_index_scope_returns_clear_for_small_dir() {
         let dir = make_tempdir_with_bytes(1024); // 1 KB
-        let v = check_index_scope(dir.path(), 500 * 1024 * 1024).unwrap();
+        let v = check_index_scope(dir.path(), 500 * 1024 * 1024, &[]).unwrap();
         assert!(matches!(v, PreflightVerdict::Clear), "got {v:?}");
     }
 
     #[test]
     fn check_index_scope_flags_oversized_dir() {
         let dir = make_tempdir_with_bytes(2048);
-        let v = check_index_scope(dir.path(), 1024).unwrap();
+        let v = check_index_scope(dir.path(), 1024, &[]).unwrap();
         match v {
             PreflightVerdict::RequiresConfirmation(info) => {
                 assert!(info.size_exceeds_threshold);
@@ -352,7 +363,7 @@ mod tests {
         let mut s = std::fs::File::create(dir.path().join("small.rs")).unwrap();
         s.write_all(b"fn main() {}\n").unwrap();
 
-        let v = check_index_scope(dir.path(), 1024).unwrap();
+        let v = check_index_scope(dir.path(), 1024, &[]).unwrap();
         // ignored_big.rs should be gitignored → under threshold → Clear.
         assert!(matches!(v, PreflightVerdict::Clear), "got {v:?}");
     }
@@ -370,7 +381,7 @@ mod tests {
         let mut src = std::fs::File::create(dir.path().join("lib.rs")).unwrap();
         src.write_all(b"fn main() {}\n").unwrap();
 
-        let v = check_index_scope(dir.path(), 1024).unwrap();
+        let v = check_index_scope(dir.path(), 1024, &[]).unwrap();
         // Only lib.rs (~13 B) is counted; data.bin (8 KB) is excluded → Clear.
         assert!(matches!(v, PreflightVerdict::Clear), "got {v:?}");
     }
@@ -389,13 +400,46 @@ mod tests {
         // mandatory file locking.
         std::fs::write(dir.path().join(".config.toml"), vec![b'x'; 2048]).unwrap();
 
-        let v = check_index_scope(dir.path(), 1024).unwrap();
+        let v = check_index_scope(dir.path(), 1024, &[]).unwrap();
         match v {
             PreflightVerdict::RequiresConfirmation(info) => {
                 assert!(info.size_exceeds_threshold);
                 assert_eq!(info.file_count, 1, "hidden .config.toml must be counted");
             }
             other => panic!("expected RequiresConfirmation (hidden file counted), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn check_index_scope_excludes_ignored_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+        // Big ignored file that would trip the tiny threshold if it were counted.
+        std::fs::write(dir.path().join("node_modules/big.js"), vec![b'x'; 4096]).unwrap();
+        // 2 KB threshold; only a.rs (~10 B) counts once node_modules is pruned.
+        let v = check_index_scope(dir.path(), 2048, &["node_modules".to_string()]).unwrap();
+        assert!(
+            matches!(v, PreflightVerdict::Clear),
+            "node_modules must be pruned: {v:?}"
+        );
+    }
+
+    #[test]
+    fn check_index_scope_counts_only_eligible_after_ignore() {
+        // Lockstep with the indexer: the guard counts only files the indexer would
+        // embed — indexable extension AND not under an ignored dir. node_modules/*.js
+        // is indexable-but-ignored, so it must not be counted.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("keep.rs"), "fn k() {}\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+        std::fs::write(dir.path().join("node_modules/skip.js"), "var z = 1;\n").unwrap();
+        // 1-byte threshold forces RequiresConfirmation; assert the eligible count is
+        // exactly 1 (keep.rs), proving node_modules/skip.js was pruned.
+        let v = check_index_scope(dir.path(), 1, &["node_modules".to_string()]).unwrap();
+        match v {
+            PreflightVerdict::RequiresConfirmation(info) => assert_eq!(info.file_count, 1),
+            other => panic!("expected 1 eligible file (keep.rs), got {other:?}"),
         }
     }
 

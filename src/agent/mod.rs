@@ -1495,8 +1495,9 @@ impl Agent {
         // code index. Mirror the `index` tool's preflight; on "needs confirmation",
         // decline. (docs/issues/2026-06-19-mcp-server-oom-68gb.md)
         let scope_root = entry_path.clone();
+        let pf_patterns = ignore_patterns.clone();
         let verdict = tokio::task::spawn_blocking(move || {
-            crate::embed::preflight::check_index_scope(&scope_root, max_index_bytes)
+            crate::embed::preflight::check_index_scope(&scope_root, max_index_bytes, &pf_patterns)
         })
         .await;
         match verdict {

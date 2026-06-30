@@ -191,18 +191,22 @@ impl Tool for IndexProject {
         {
             use crate::embed::preflight::{check_index_scope, PreflightVerdict};
 
-            let max_bytes = ctx
+            let (max_bytes, pf_patterns) = ctx
                 .agent
                 .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                    Ok(p.config.security.max_index_bytes)
+                    Ok((
+                        p.config.security.max_index_bytes,
+                        p.config.ignored_paths.patterns.clone(),
+                    ))
                 })
                 .await
-                .unwrap_or(500 * 1024 * 1024);
+                .unwrap_or((500 * 1024 * 1024, Vec::new()));
             let preflight_root = root.clone();
-            let verdict =
-                tokio::task::spawn_blocking(move || check_index_scope(&preflight_root, max_bytes))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("preflight task join error: {e}"))??;
+            let verdict = tokio::task::spawn_blocking(move || {
+                check_index_scope(&preflight_root, max_bytes, &pf_patterns)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("preflight task join error: {e}"))??;
 
             if let PreflightVerdict::RequiresConfirmation(info) = verdict {
                 tracing::info!(
@@ -277,6 +281,16 @@ impl Tool for IndexProject {
             })
             .await?;
 
+        // Patterns for the index walk (defaults if no config). Fetched here so the
+        // spawned sync task can capture them; the indexer prunes these dirs.
+        let ignore_patterns = ctx
+            .agent
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok(p.config.ignored_paths.patterns.clone())
+            })
+            .await
+            .unwrap_or_default();
+
         // Capture the dirty-files Arc before spawning so the task can clear it on success.
         let dirty_files_arc = ctx
             .agent
@@ -302,6 +316,7 @@ impl Tool for IndexProject {
                 let opts = crate::retrieval::sync::SyncOpts {
                     force_reindex: force,
                     record_index_state: true,
+                    ignore_patterns: ignore_patterns.clone(),
                     ..Default::default()
                 };
                 client.sync_project(&project_id, &root, opts).await
