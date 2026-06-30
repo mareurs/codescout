@@ -82,6 +82,7 @@ async fn stream_index(
     force_reindex: bool,
     chunk_target: usize,
     flush_batch: usize,
+    ignore_patterns: &[String],
 ) -> Result<(usize, usize)> {
     use crate::embed::ast_chunker::split_file;
     use crate::retrieval::payload::CodePayload;
@@ -92,8 +93,13 @@ async fn stream_index(
     let mut pending: Vec<CodePayload> = Vec::new();
     let mut added = 0usize;
 
+    let ignore_matcher = crate::embed::build_ignore_matcher(root, ignore_patterns);
     for entry in ignore::WalkBuilder::new(root)
         .hidden(false) // index tracked dotfiles; gitignore handles exclusions
+        .filter_entry(move |e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            !ignore_matcher.matched(e.path(), is_dir).is_ignore()
+        })
         .build()
         .filter_map(|e| e.ok())
     {
@@ -225,6 +231,7 @@ impl crate::retrieval::client::RetrievalClient {
             opts.force_reindex,
             chunk_target,
             flush_batch,
+            &opts.ignore_patterns,
         )
         .await?;
 
@@ -355,10 +362,20 @@ mod tests {
         let store = RecordingStore::default();
         let emb = FakeEmbedder { dim: 4 };
 
-        let (added, deleted) =
-            stream_index(dir.path(), "p", "coll", &[], &emb, &store, false, 1200, 3)
-                .await
-                .unwrap();
+        let (added, deleted) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            1200,
+            3,
+            &[],
+        )
+        .await
+        .unwrap();
 
         let batches = store.upsert_batches.lock().unwrap().clone();
         // Pre-fix, the whole-tree sync did ONE upsert of every chunk. Streaming must
@@ -398,6 +415,7 @@ mod tests {
             false,
             1200,
             256,
+            &[],
         )
         .await
         .unwrap();
@@ -416,6 +434,7 @@ mod tests {
             false,
             1200,
             256,
+            &[],
         )
         .await
         .unwrap();
@@ -440,6 +459,7 @@ mod tests {
             false,
             1200,
             256,
+            &[],
         )
         .await
         .unwrap();
@@ -464,6 +484,7 @@ mod tests {
             false,
             1200,
             256,
+            &[],
         )
         .await
         .unwrap();
@@ -481,9 +502,83 @@ mod tests {
             true,
             1200,
             256,
+            &[],
         )
         .await
         .unwrap();
         assert_eq!(added2, added1, "force should re-embed all current chunks");
+    }
+
+    #[tokio::test]
+    async fn stream_index_excludes_ignored_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sources(dir.path(), 3); // file_0.rs..file_2.rs at root
+        std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+        std::fs::write(
+            dir.path().join("node_modules/dep.js"),
+            "function x() { return 1; }\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("svc/.venv")).unwrap();
+        std::fs::write(
+            dir.path().join("svc/.venv/lib.py"),
+            "def y():\n    return 2\n",
+        )
+        .unwrap();
+        let emb = FakeEmbedder { dim: 4 };
+
+        let patterns = vec!["node_modules".to_string(), ".venv".to_string()];
+        let store = RecordingStore::default();
+        let (added, _) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            1200,
+            256,
+            &patterns,
+        )
+        .await
+        .unwrap();
+        let ids: Vec<String> = store
+            .upserted
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r.chunk_id.clone())
+            .collect();
+        assert!(
+            ids.iter()
+                .all(|id| !id.contains("node_modules") && !id.contains(".venv")),
+            "ignored dirs must not be indexed: {ids:?}"
+        );
+        assert!(
+            added >= 3,
+            "the 3 root .rs files should still index; added={added}"
+        );
+
+        // With no patterns, the dep files ARE indexed (more chunks).
+        let store2 = RecordingStore::default();
+        let (added2, _) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store2,
+            false,
+            1200,
+            256,
+            &[],
+        )
+        .await
+        .unwrap();
+        assert!(
+            added2 > added,
+            "empty patterns must index everything: {added2} vs {added}"
+        );
     }
 }
