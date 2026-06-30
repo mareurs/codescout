@@ -1459,7 +1459,7 @@ impl Agent {
 
     /// Spawn a background library indexing task if auto_index is enabled and library is not yet indexed.
     pub async fn maybe_auto_index_library(&self, lib_name: &str) {
-        let (should_index, _root, entry_path) = {
+        let (should_index, _root, entry_path, max_index_bytes) = {
             let inner = self.inner.read().await;
             let Some(p) = inner.active_project() else {
                 return;
@@ -1473,13 +1473,68 @@ impl Agent {
             if entry.indexed {
                 return;
             }
-            (true, p.root.clone(), entry.path.clone())
+            (
+                true,
+                p.root.clone(),
+                entry.path.clone(),
+                p.config.security.max_index_bytes,
+            )
         };
         if !should_index {
             return;
         }
 
         let name = lib_name.to_string();
+
+        // Scope guard. This background path has no interactive user to confirm an
+        // oversized/suspicious root, so a giant un-ignored tree must be *skipped*
+        // here rather than walked. The streaming indexer keeps any single pass
+        // memory-safe, but auto-indexing a dependency tree (e.g. a `.venv` with tens
+        // of thousands of files) still wastes embed-server work and pollutes the
+        // code index. Mirror the `index` tool's preflight; on "needs confirmation",
+        // decline. (docs/issues/2026-06-19-mcp-server-oom-68gb.md)
+        let scope_root = entry_path.clone();
+        let verdict = tokio::task::spawn_blocking(move || {
+            crate::embed::preflight::check_index_scope(&scope_root, max_index_bytes)
+        })
+        .await;
+        match verdict {
+            Ok(Ok(crate::embed::preflight::PreflightVerdict::Clear)) => {}
+            Ok(Ok(crate::embed::preflight::PreflightVerdict::RequiresConfirmation(info))) => {
+                tracing::warn!(
+                    library = %name,
+                    root = %info.root.display(),
+                    file_count = info.file_count,
+                    approx_bytes = info.approx_bytes,
+                    "skipping background auto-index: root exceeds scope guard \
+                     (raise security.max_index_bytes or set [ignored_paths] to index it)"
+                );
+                self.set_library_state(
+                    &name,
+                    LibraryIndexState::Failed(
+                        "skipped: root exceeds index scope guard (auto-index declined)".into(),
+                    ),
+                );
+                return;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(library = %name, error = %e, "skipping background auto-index: scope check failed");
+                self.set_library_state(
+                    &name,
+                    LibraryIndexState::Failed(format!("scope check failed: {e}")),
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(library = %name, error = %e, "skipping background auto-index: scope check task error");
+                self.set_library_state(
+                    &name,
+                    LibraryIndexState::Failed(format!("scope check task error: {e}")),
+                );
+                return;
+            }
+        }
+
         let lib_project_id = format!("lib:{}", name);
         self.set_library_state(&name, LibraryIndexState::Indexing { done: 0, total: 0 });
 
@@ -1488,6 +1543,7 @@ impl Agent {
         let sync_abort_for_store = self.active_sync_abort.clone();
         let task = tokio::spawn(async move {
             tracing::info!("Auto-indexing library '{}' in background...", name);
+            crate::heartbeat::note_background_op(&format!("auto_index:{name}"));
             let result = async {
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;
                 let opts = crate::retrieval::sync::SyncOpts::default();

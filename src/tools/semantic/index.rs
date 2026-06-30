@@ -291,6 +291,7 @@ impl Tool for IndexProject {
             let _progress = progress;
 
             tracing::info!("sync task entered");
+            crate::heartbeat::note_background_op(&format!("index:{project_id}"));
             let sync_result = async {
                 tracing::info!("constructing RetrievalClient::from_env");
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;

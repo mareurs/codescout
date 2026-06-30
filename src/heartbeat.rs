@@ -54,6 +54,23 @@ pub fn note_tool(name: &str) {
     }
 }
 
+/// Record that a *background* op — one that never flows through the tool-dispatch
+/// chokepoint (e.g. an auto-index spawned in a `tokio::spawn`) — is now in flight,
+/// so a heartbeat sampled during its ramp names it instead of a stale tool. The
+/// label is prefixed `bg:` to distinguish it from a tool name.
+///
+/// Limitation: `CURRENT_OP` is a single last-writer-wins slot shared with
+/// [`note_tool`]. A background op and concurrent foreground tool calls overwrite
+/// each other, so the heartbeat names whichever was set most recently — enough to
+/// surface a long-running background ramp (the 68 GB OOM op was a background
+/// auto-index with no tool-call row; docs/issues/2026-06-19-mcp-server-oom-68gb.md),
+/// but not a precise concurrent view.
+pub fn note_background_op(label: &str) {
+    if let Ok(mut g) = CURRENT_OP.lock() {
+        *g = Some((format!("bg:{label}"), now_unix()));
+    }
+}
+
 /// `(tool, age_secs)` for the most recent tool, or `("idle", 0)` before any.
 fn current_op() -> (String, u64) {
     match CURRENT_OP.lock().ok().and_then(|g| g.clone()) {
@@ -274,6 +291,14 @@ mod tests {
         // Last-writer-wins.
         note_tool("run_command");
         assert_eq!(current_op().0, "run_command");
+    }
+
+    #[test]
+    fn note_background_op_prefixes_and_is_observable() {
+        // A background op must be nameable in the heartbeat — the 68 GB OOM op was
+        // a background auto-index that the tool-only `note_tool` never recorded.
+        note_background_op("auto_index:foo");
+        assert_eq!(current_op().0, "bg:auto_index:foo");
     }
 
     #[test]
