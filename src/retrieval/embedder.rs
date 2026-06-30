@@ -13,6 +13,26 @@ pub struct EmbedOutput {
     pub sparse: SparseVector,
 }
 
+/// Batch (dense + sparse) embedding seam for the indexing path.
+///
+/// Mirrors [`DenseEmbedder`] but yields the full [`EmbedOutput`] that the code
+/// indexer upserts. It exists so the streaming indexer
+/// (`crate::retrieval::sync::stream_index`) can be unit-tested with a
+/// deterministic fake instead of standing up the HTTP embed servers. Production
+/// uses the impl on [`EmbedderHttp`], which forwards to its inherent
+/// `embed_batch`.
+#[async_trait::async_trait]
+pub trait BatchEmbedder: Send + Sync {
+    async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>>;
+}
+
+#[async_trait::async_trait]
+impl BatchEmbedder for EmbedderHttp {
+    async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>> {
+        self.embed_batch(texts).await
+    }
+}
+
 /// `true` when `url` is `https://…` or targets a loopback host. Mirrors the
 /// codescout-embed `RemoteEmbedder` guard: keep local Ollama / llama.cpp working
 /// while never sending `EMBED_API_KEY` over plaintext HTTP on the network.
