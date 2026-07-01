@@ -734,6 +734,44 @@ fn parse_rejects_non_integer_bracket() {
 }
 
 #[test]
+fn parse_bracket_quoted_key_with_dots() {
+    // Bug 2026-07-01: object keys containing '.' are reachable only via
+    // quoted bracket syntax. Both quote styles; a quoted numeric string
+    // is a Key, not an array Index.
+    assert_eq!(
+        parse_json_path_segments("$[\"2.1.5\"]").unwrap(),
+        vec![Segment::Key("2.1.5".into())]
+    );
+    assert_eq!(
+        parse_json_path_segments("$['1.1']").unwrap(),
+        vec![Segment::Key("1.1".into())]
+    );
+    assert_eq!(
+        parse_json_path_segments("$[\"1\"]").unwrap(),
+        vec![Segment::Key("1".into())]
+    );
+}
+
+#[test]
+fn parse_bracket_quoted_key_then_field() {
+    // Tokenizer must split on '.' only outside brackets.
+    assert_eq!(
+        parse_json_path_segments("$[\"2.1.5\"].x").unwrap(),
+        vec![Segment::Key("2.1.5".into()), Segment::Key("x".into())]
+    );
+}
+
+#[test]
+fn extract_json_path_dotted_string_key() {
+    let content = r#"{"1.1": {"a": 1}, "2.1.5": {"x": 10, "y": 20}}"#;
+    let (result, type_name, count) = extract_json_path(content, "$[\"2.1.5\"]").unwrap();
+    assert!(result.contains("\"x\""));
+    assert!(result.contains("\"y\""));
+    assert_eq!(type_name, "object");
+    assert_eq!(count, Some(2));
+}
+
+#[test]
 fn parse_rejects_negative_zero_slice() {
     let err = parse_json_path_segments("$.a[-0:]").unwrap_err();
     assert!(err.to_string().contains("[-0:]"), "got: {}", err);

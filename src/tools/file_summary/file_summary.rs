@@ -482,6 +482,43 @@ pub fn extract_json_path(
     Ok((pretty, type_name, count))
 }
 
+/// Split a json_path body on `.` separators that sit OUTSIDE `[...]`
+/// brackets, so a quoted bracket key containing dots (e.g. `["2.1.5"]`) is
+/// not fragmented. Bracket depth is tracked; dots inside brackets are kept.
+/// Bug 2026-07-01-read-file-jsonpath-dotted-object-keys-unreachable.
+fn split_on_unbracketed_dot(path: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth: usize = 0;
+    let mut start = 0usize;
+    for (i, c) in path.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            '.' if depth == 0 => {
+                parts.push(&path[start..i]);
+                start = i + 1; // '.' is one byte (ASCII)
+            }
+            _ => {}
+        }
+    }
+    parts.push(&path[start..]);
+    parts
+}
+
+/// If `s` is wrapped in a matching pair of single or double quotes, return
+/// the unquoted inner slice; otherwise `None`. Backs `["key"]` / `['key']`
+/// bracket keys — the only way to address object keys containing `.`.
+fn strip_matching_quotes(s: &str) -> Option<&str> {
+    let b = s.as_bytes();
+    if b.len() >= 2 {
+        let (first, last) = (b[0], b[b.len() - 1]);
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return Some(&s[1..s.len() - 1]);
+        }
+    }
+    None
+}
+
 pub(crate) fn parse_json_path_segments(path: &str) -> Result<Vec<Segment>, RecoverableError> {
     let path = path
         .strip_prefix("$.")
@@ -491,7 +528,7 @@ pub(crate) fn parse_json_path_segments(path: &str) -> Result<Vec<Segment>, Recov
         return Ok(Vec::new());
     }
     let mut segments = Vec::new();
-    for part in path.split('.') {
+    for part in split_on_unbracketed_dot(path) {
         if part.is_empty() {
             continue;
         }
@@ -518,12 +555,18 @@ pub(crate) fn parse_json_path_segments(path: &str) -> Result<Vec<Segment>, Recov
 }
 
 fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
-    let supported_hint = "Supported forms: '.key', '[N]' (non-negative integer), '[-N]' (negative integer), '[-N:]' (last N elements). Other slice/filter forms not supported.";
+    let supported_hint = "Supported forms: '.key', '[\"key\"]' / '['key']' (quoted key — use for keys containing '.'), '[N]' (non-negative integer), '[-N]' (negative integer), '[-N:]' (last N elements). Other slice/filter forms not supported.";
     if inner.is_empty() {
         return Err(RecoverableError::with_hint(
             "unsupported json_path segment '[]'".to_string(),
             supported_hint,
         ));
+    }
+    // Quoted string key: ["key"] or ['key']. Reaches object keys the bare
+    // `.key` form cannot express (dots, leading digits, etc). A quoted
+    // numeric string is a KEY, not an array index.
+    if let Some(key) = strip_matching_quotes(inner) {
+        return Ok(Segment::Key(key.to_string()));
     }
     if inner.chars().all(|c| c.is_ascii_digit()) {
         let n: usize = inner.parse().map_err(|_| {
@@ -573,7 +616,7 @@ fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
 fn unsupported_bracket(s: &str) -> RecoverableError {
     RecoverableError::with_hint(
         format!("unsupported json_path segment near '{}'", s),
-        "Supported forms: '.key', '[N]', '[-N]', '[-N:]'.",
+        "Supported forms: '.key', '[\"key\"]' / '['key']' (quoted key), '[N]', '[-N]', '[-N:]'.",
     )
 }
 
