@@ -32,7 +32,11 @@ impl Tool for Grep {
                 "pattern": { "type": "string", "description": "Regex pattern" },
                 "path": { "type": "string", "description": "File or directory (default: project root)" },
                 "limit": { "type": "integer", "default": 50, "description": "Max matching lines" },
-                "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." }
+                "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." },
+                "ignore_case": { "type": "boolean", "default": false, "description": "Case-insensitive match" },
+                "whole_word": { "type": "boolean", "default": false, "description": "Match whole words only (\\b boundaries)" },
+                "glob": { "type": ["string", "array"], "description": "Restrict to files matching glob(s), e.g. \"*.rs\" or [\"src/**\", \"*.md\"]" },
+                "include_hidden": { "type": "boolean", "default": false, "description": "Also search hidden files/dirs (dotfiles, .github/)" }
             }
         })
     }
@@ -66,16 +70,45 @@ impl Tool for Grep {
         let context_lines = optional_u64_param(&input, "context_lines")
             .unwrap_or(0)
             .min(20) as usize;
-        let (re, is_literal_fallback) = build_grep_regex(pattern, false, false)?;
+        let ignore_case = input
+            .get("ignore_case")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let whole_word = input
+            .get("whole_word")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let include_hidden = input
+            .get("include_hidden")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let globs = parse_globs(&input);
+        let (re, is_literal_fallback) = build_grep_regex(pattern, ignore_case, whole_word)?;
         let mut matches: Vec<Value> = vec![];
         let mut total_match_count = 0usize;
         let mut hit_cap = false;
         let mut skipped_binary = 0usize;
 
-        let walker = ignore::WalkBuilder::new(&search_path)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
+        let mut wb = ignore::WalkBuilder::new(&search_path);
+        wb.hidden(!include_hidden).git_ignore(true);
+        if !globs.is_empty() {
+            let mut ob = ignore::overrides::OverrideBuilder::new(&search_path);
+            for g in &globs {
+                ob.add(g).map_err(|e| {
+                    RecoverableError::with_hint(
+                        format!("invalid glob '{g}': {e}"),
+                        "globs use gitignore syntax, e.g. \"*.rs\" or \"**/*.md\"",
+                    )
+                })?;
+            }
+            wb.overrides(ob.build().map_err(|e| {
+                RecoverableError::with_hint(
+                    format!("invalid glob set: {e}"),
+                    "check the glob patterns",
+                )
+            })?);
+        }
+        let walker = wb.build();
         'outer: for entry in walker.flatten() {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
@@ -439,6 +472,18 @@ fn build_grep_regex(
     Ok((re, is_literal))
 }
 
+/// Collect `glob` param values (single string or array of strings).
+fn parse_globs(input: &Value) -> Vec<String> {
+    match input.get("glob") {
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Grep against a buffer ref (`@tool_*`, `@cmd_*`, `@file_*`).
 ///
 /// `@tool_*` content is JSON; it is pretty-printed before search so
@@ -450,6 +495,14 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     let context_lines = optional_u64_param(input, "context_lines")
         .unwrap_or(0)
         .min(20) as usize;
+    let ignore_case = input
+        .get("ignore_case")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let whole_word = input
+        .get("whole_word")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let raw = ctx
         .output_buffer
@@ -479,7 +532,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         raw
     };
 
-    let (re, is_literal_fallback) = build_grep_regex(pattern, false, false)?;
+    let (re, is_literal_fallback) = build_grep_regex(pattern, ignore_case, whole_word)?;
 
     let mut matches: Vec<Value> = vec![];
     let mut total_match_count = 0usize;
@@ -923,5 +976,63 @@ mod tests {
             !re.is_match("category"),
             "whole_word must not match substrings"
         );
+    }
+
+    #[tokio::test]
+    async fn ignore_case_flag_from_input() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "Hello WORLD\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "world", "path": dir.path().to_str().unwrap(), "ignore_case": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn glob_filters_by_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("keep.rs"), "TARGET\n").unwrap();
+        std::fs::write(dir.path().join("skip.txt"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap(), "glob": "*.rs" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 1, "only the .rs file matches");
+    }
+
+    #[tokio::test]
+    async fn include_hidden_searches_dotfiles() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let off = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            off["total"].as_u64().unwrap(),
+            0,
+            "hidden skipped by default"
+        );
+        let on = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap(), "include_hidden": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(on["total"].as_u64().unwrap(), 1);
     }
 }
