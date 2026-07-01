@@ -36,7 +36,8 @@ impl Tool for Grep {
                 "ignore_case": { "type": "boolean", "default": false, "description": "Case-insensitive match" },
                 "whole_word": { "type": "boolean", "default": false, "description": "Match whole words only (\\b boundaries)" },
                 "glob": { "type": ["string", "array"], "description": "Restrict to files matching glob(s), e.g. \"*.rs\" or [\"src/**\", \"*.md\"]" },
-                "include_hidden": { "type": "boolean", "default": false, "description": "Also search hidden files/dirs (dotfiles, .github/)" }
+                "include_hidden": { "type": "boolean", "default": false, "description": "Also search hidden files/dirs (dotfiles, .github/)" },
+                "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\": ranked files + per-file counts, no line content (tames broad searches)" }
             }
         })
     }
@@ -82,6 +83,7 @@ impl Tool for Grep {
             .get("include_hidden")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let files_mode = input.get("mode").and_then(|v| v.as_str()) == Some("files");
         let globs = parse_globs(&input);
         let (re, is_literal_fallback) = build_grep_regex(pattern, ignore_case, whole_word)?;
         let mut matches: Vec<Value> = vec![];
@@ -109,6 +111,43 @@ impl Tool for Grep {
             })?);
         }
         let walker = wb.build();
+        if files_mode {
+            use std::collections::BTreeMap;
+            let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+            let mut total = 0usize;
+            let mut skipped_binary = 0usize;
+            for entry in walker.flatten() {
+                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    continue;
+                }
+                let Ok(bytes) = std::fs::read(entry.path()) else {
+                    continue;
+                };
+                if bytes.iter().take(8192).any(|&b| b == 0) {
+                    skipped_binary += 1;
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&bytes);
+                let n = text.lines().filter(|l| re.is_match(l)).count();
+                if n > 0 {
+                    total += n;
+                    *counts
+                        .entry(entry.path().display().to_string())
+                        .or_default() += n;
+                }
+            }
+            let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
+            ranked.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+            let files: Vec<Value> = ranked
+                .iter()
+                .map(|(f, c)| json!({ "file": f, "count": c }))
+                .collect();
+            let mut r = json!({ "files": files, "total": total, "files_count": ranked.len() });
+            if skipped_binary > 0 {
+                r["skipped_binary"] = json!(skipped_binary);
+            }
+            return Ok(r);
+        }
         'outer: for entry in walker.flatten() {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
@@ -236,7 +275,8 @@ impl Tool for Grep {
                 let hint = if top.is_empty() {
                     format!(
                         "Showing {} of {} matches across {} files. \
-                         Narrow with a more specific pattern or add path=<file>.",
+                         Narrow with a more specific pattern or add path=<file>. \
+                         Or mode=\"files\" for a per-file count summary.",
                         visible.len(),
                         total,
                         files
@@ -244,7 +284,8 @@ impl Tool for Grep {
                 } else {
                     format!(
                         "Showing {} of {} matches across {} files. \
-                         Narrow with one of: {} — or use a more specific pattern.",
+                         Narrow with one of: {} — or use a more specific pattern. \
+                         Or mode=\"files\" for a per-file count summary.",
                         visible.len(),
                         total,
                         files,
@@ -1034,5 +1075,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(on["total"].as_u64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn mode_files_returns_ranked_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("many.rs"), "X\nX\nX\n").unwrap();
+        std::fs::write(dir.path().join("one.rs"), "X\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "X", "path": dir.path().to_str().unwrap(), "mode": "files" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            r.get("file_groups").is_none(),
+            "files mode has no per-line groups"
+        );
+        let files = r["files"].as_array().unwrap();
+        assert_eq!(
+            files[0]["count"].as_u64().unwrap(),
+            3,
+            "ranked by count desc"
+        );
+        assert_eq!(r["total"].as_u64().unwrap(), 4);
+        assert_eq!(r["files_count"].as_u64().unwrap(), 2);
     }
 }
