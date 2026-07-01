@@ -95,6 +95,7 @@ time_scope: open-ended
 | W-15 | 2026-06-12 | med | Enumerate a prompt surface's full gate set (byte-for-byte slice, snapshot, cap, version-pin, content tests) before editing | Blind edit hits ONBOARDING_VERSION==28 pin + snapshot + "6 memories" surprises as sequential red tests; pre-scout bundled all gate updates into one commit | validated |
 | W-16 | 2026-06-14 | med | Scout each bug's actual body before standing behind a title-derived severity/priority triage of a bug set | Would have carried two wrong facts into a fix-priority recommendation: labeled `7ca71bf7` (catalog staleness) "data-loss" and missed that `3fc22ad2` is already partially fixed (lock-probe shipped 2026-06-11); 2nd same-day recurrence of F-21 | validated |
 | W-17 | 2026-06-16 | med | When a tool's error text names a cause but a higher-level read contradicts it, reproduce the failing internal call on the real file and print its inputs before fixing | Two visible-but-wrong leads (hint said "syntax errors"; archived bug said "backtick mismatch", already shipped) would each have produced a no-op or wrong fix; a throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned AST 214 vs LSP 216 in one run, saving ≥1 wrong fix cycle (~4 round-trips) and a tolerance-widening band-aid | validated |
+| W-18 | 2026-07-01 | med | Pre-impl recon confirms a parser-grammar fix plan is safe + names the regression tests it must keep green | Naive quoted-key fix flips `$.a[abc]`→Key (breaks `tests.rs:731`); blunt tokenizer rewrite breaks `$.a[0][-1]` (`tests.rs:683`); ≥2 red tests found only at cargo test; also pre-empted an over-engineered `Segment::QuotedKey` variant (Key already applies via `obj.get`) | validated |
 
 ## Category conventions
 
@@ -1652,6 +1653,27 @@ live-LSP class I initially misattributed to).
 **Fix idea / Pointer:** `src/symbol/query.rs` — `fetch_validated_symbol` (retry loop ordering),
 `validate_symbol_range`, `find_ast_end_line_in` (line-gate removal in `758801d5`);
 `tests/symbol_lsp.rs:824` the test. This session.
+## W-18 — Pre-implementation recon confirmed a parser-grammar fix plan is safe + named the regression tests a naive fix would break
+
+**Observed:** 2026-07-01, right after filing `docs/issues/2026-07-01-read-file-jsonpath-dotted-object-keys-unreachable.md` (read_file json_path can't reach dotted object keys), before touching its Fix plan. Seam: `parse_json_path_segments` / `parse_bracket` in `src/tools/file_summary/file_summary.rs`.
+
+**Pattern:** Before implementing a filed bug's Fix plan that changes a *parser's accepted grammar*, scout three things beyond the target function body: (a) callers via `references`, (b) the data model it feeds (`Segment` enum + the `resolve_json_segment` apply arm), and (c) every existing test that pins the *current* rejection behavior. Enumerate the old-grammar tests first so the fix is written to keep each green.
+
+**Counterfactual:** The plan adds quoted-bracket-key support to `parse_bracket`. A naive impl that accepts any bracket inner as a key flips `$.a[abc]` from error→`Key("abc")`, breaking `parse_rejects_non_integer_bracket` (`tests.rs:731-733`). A blunt char-split tokenizer rewrite breaks `parse_chained_negative_after_positive` (`$.a[0][-1]`, `tests.rs:681-683`). Both surface only at `cargo test` — ≥2 red tests, each an implement→test→re-read cycle; dispatched to a subagent, the drift lives in two contexts. The scout also confirmed `Segment::Key` already applies via `obj.get(k)` (`resolve_json_segment:585`), so a dotted key needs **no** new enum variant — pre-empting an over-engineered `Segment::QuotedKey` addition.
+
+**Confirming data points:**
+1. `references(parse_json_path_segments)` → 1 internal caller (`extract_json_path:460`) + 13 tests; `parse_bracket` called only from within it. Contained blast radius, no cross-crate threading.
+2. `parse_rejects_non_integer_bracket` (`tests.rs:731`) pins `[abc]`→error — the invariant the plan's "matching-quote strip only" rule preserves.
+3. `parse_chained_negative_after_positive` (`tests.rs:683`) pins `$.a[0][-1]` — the chained-bracket handling the tokenizer rewrite must preserve ("split on `.` outside brackets" does).
+4. `Segment::Key` apply arm (`resolve_json_segment:585`) is a plain `obj.get(k)` — a dotted key string works with the existing variant.
+
+**Impact:** med — saves ≥2 failed-test round-trips and prevents an over-engineered enum variant; would be high if the fix were dispatched to a subagent (drift across two contexts).
+
+**Promote-when:** A second pre-implementation recon on a parser/grammar-change bug catches a regression-test invariant the plan would have broken. Adjacent cluster already large (W-2, W-4, W-9, W-15, W-16 are all "pre-action recon validates a plan/bug claim against reality/tests") — flag for consolidation into one CLAUDE.md rule: *"Before implementing a grammar/parser-change fix, enumerate the tests pinning the current grammar and write the fix to keep each green."*
+
+**Status:** validated
+
+---
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
