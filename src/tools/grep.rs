@@ -66,36 +66,7 @@ impl Tool for Grep {
         let context_lines = optional_u64_param(&input, "context_lines")
             .unwrap_or(0)
             .min(20) as usize;
-        let (re, is_literal_fallback) = match regex::RegexBuilder::new(pattern)
-            .size_limit(1 << 20)
-            .dfa_size_limit(1 << 20)
-            .build()
-        {
-            Ok(re) => (re, false),
-            Err(e) => {
-                if super::is_regex_like(pattern) {
-                    // User intended regex but it's broken — keep the error
-                    return Err(RecoverableError::with_hint(
-                        format!("invalid regex: {e}"),
-                        "patterns are full regex syntax — escape metacharacters like \\( \\. \\[ for literals",
-                    )
-                    .into());
-                }
-                // Plain text with metacharacters — search literally
-                let escaped = regex::escape(pattern);
-                let re = regex::RegexBuilder::new(&escaped)
-                    .size_limit(1 << 20)
-                    .dfa_size_limit(1 << 20)
-                    .build()
-                    .map_err(|e2| {
-                        RecoverableError::with_hint(
-                            format!("invalid pattern even after escaping: {e2}"),
-                            format!("original error: {e}"),
-                        )
-                    })?;
-                (re, true)
-            }
-        };
+        let (re, is_literal_fallback) = build_grep_regex(pattern, false, false)?;
         let mut matches: Vec<Value> = vec![];
         let mut total_match_count = 0usize;
         let mut hit_cap = false;
@@ -417,14 +388,23 @@ fn format_search_context_mode(out: &mut String, matches: &[Value]) {
     }
 }
 
-/// Build a search regex with literal-fallback for plain-text patterns.
-fn build_grep_regex(pattern: &str) -> Result<(regex::Regex, bool)> {
-    match regex::RegexBuilder::new(pattern)
-        .size_limit(1 << 20)
-        .dfa_size_limit(1 << 20)
-        .build()
-    {
-        Ok(re) => Ok((re, false)),
+/// Build a search regex. Resolves the body (raw regex, or escaped literal when
+/// the pattern isn't valid regex and didn't intend to be), then applies
+/// whole-word wrapping and case-insensitivity. Returns (regex, is_literal_fallback).
+fn build_grep_regex(
+    pattern: &str,
+    ignore_case: bool,
+    whole_word: bool,
+) -> Result<(regex::Regex, bool)> {
+    let compile = |p: &str| {
+        regex::RegexBuilder::new(p)
+            .case_insensitive(ignore_case)
+            .size_limit(1 << 20)
+            .dfa_size_limit(1 << 20)
+            .build()
+    };
+    let (body, is_literal) = match compile(pattern) {
+        Ok(_) => (pattern.to_string(), false),
         Err(e) => {
             if super::is_regex_like(pattern) {
                 return Err(RecoverableError::with_hint(
@@ -433,20 +413,21 @@ fn build_grep_regex(pattern: &str) -> Result<(regex::Regex, bool)> {
                 )
                 .into());
             }
-            let escaped = regex::escape(pattern);
-            let re = regex::RegexBuilder::new(&escaped)
-                .size_limit(1 << 20)
-                .dfa_size_limit(1 << 20)
-                .build()
-                .map_err(|e2| {
-                    RecoverableError::with_hint(
-                        format!("invalid pattern even after escaping: {e2}"),
-                        format!("original error: {e}"),
-                    )
-                })?;
-            Ok((re, true))
+            (regex::escape(pattern), true)
         }
-    }
+    };
+    let effective = if whole_word {
+        format!(r"\b(?:{body})\b")
+    } else {
+        body
+    };
+    let re = compile(&effective).map_err(|e| {
+        RecoverableError::with_hint(
+            format!("invalid pattern after processing: {e}"),
+            "with whole_word=true the term is wrapped in \\b(?:…)\\b word boundaries",
+        )
+    })?;
+    Ok((re, is_literal))
 }
 
 /// Grep against a buffer ref (`@tool_*`, `@cmd_*`, `@file_*`).
@@ -489,7 +470,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         raw
     };
 
-    let (re, is_literal_fallback) = build_grep_regex(pattern)?;
+    let (re, is_literal_fallback) = build_grep_regex(pattern, false, false)?;
 
     let mut matches: Vec<Value> = vec![];
     let mut total_match_count = 0usize;
@@ -831,6 +812,25 @@ mod tests {
         assert!(
             hint.contains("matches"),
             "hint must include match counts so the model can pick, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn build_grep_regex_ignore_case_matches_mixed_case() {
+        let (re, _) = build_grep_regex("foo", true, false).unwrap();
+        assert!(re.is_match("FOO"));
+        assert!(re.is_match("foo"));
+        let (cs, _) = build_grep_regex("foo", false, false).unwrap();
+        assert!(!cs.is_match("FOO"), "default must stay case-sensitive");
+    }
+
+    #[test]
+    fn build_grep_regex_whole_word_excludes_substring() {
+        let (re, _) = build_grep_regex("cat", false, true).unwrap();
+        assert!(re.is_match("a cat sat"));
+        assert!(
+            !re.is_match("category"),
+            "whole_word must not match substrings"
         );
     }
 }
