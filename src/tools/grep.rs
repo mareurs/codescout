@@ -251,6 +251,38 @@ impl Tool for Grep {
             total_match_count
         };
 
+        // Index-aware hits: attach enclosing symbol when the result set is
+        // small (no overflow) and the file is a known source language.
+        if context_lines == 0 && !hit_cap && total_match_count <= max {
+            use std::collections::HashMap;
+            use std::path::PathBuf;
+            let mut cache: HashMap<PathBuf, Vec<crate::lsp::symbols::SymbolInfo>> = HashMap::new();
+            for m in matches.iter_mut() {
+                let (Some(file), Some(line)) = (
+                    m.get("file").and_then(|v| v.as_str()).map(PathBuf::from),
+                    m.get("line").and_then(|v| v.as_u64()),
+                ) else {
+                    continue;
+                };
+                let Some(lang) = crate::ast::detect_language(&file) else {
+                    continue;
+                };
+                let syms = cache.entry(file.clone()).or_insert_with(|| {
+                    std::fs::read_to_string(&file)
+                        .ok()
+                        .and_then(|src| {
+                            crate::ast::parser::extract_symbols_from_source(&src, Some(lang), &file)
+                                .ok()
+                        })
+                        .unwrap_or_default()
+                });
+                // grep lines are 1-indexed; SymbolInfo lines are 0-indexed.
+                if let Some(sym) = enclosing_symbol(syms, (line as u32).saturating_sub(1)) {
+                    m["symbol"] = json!(sym);
+                }
+            }
+        }
+
         // Build grouped output (simple mode) or keep flat (context mode).
         let mut result = if context_lines == 0 {
             use crate::tools::file_group::{cap_grouped, group_by_file, groups_to_json};
@@ -511,6 +543,18 @@ fn build_grep_regex(
         )
     })?;
     Ok((re, is_literal))
+}
+
+/// Innermost symbol whose (full) line range contains `line0` (0-indexed).
+/// Recurses into children; returns the fully-qualified `name_path`.
+fn enclosing_symbol(symbols: &[crate::lsp::symbols::SymbolInfo], line0: u32) -> Option<String> {
+    for s in symbols {
+        let start = s.range_start_line.unwrap_or(s.start_line);
+        if line0 >= start && line0 <= s.end_line {
+            return enclosing_symbol(&s.children, line0).or_else(|| Some(s.name_path.clone()));
+        }
+    }
+    None
 }
 
 /// Collect `glob` param values (single string or array of strings).
@@ -1102,5 +1146,77 @@ mod tests {
         );
         assert_eq!(r["total"].as_u64().unwrap(), 4);
         assert_eq!(r["files_count"].as_u64().unwrap(), 2);
+    }
+
+    #[test]
+    fn enclosing_symbol_returns_innermost_name_path() {
+        use crate::lsp::symbols::{SymbolInfo, SymbolKind};
+        fn sym(name_path: &str, start: u32, end: u32, children: Vec<SymbolInfo>) -> SymbolInfo {
+            SymbolInfo {
+                name: name_path.rsplit('/').next().unwrap().to_string(),
+                name_path: name_path.to_string(),
+                kind: SymbolKind::Function,
+                file: std::path::PathBuf::from("x.rs"),
+                start_line: start,
+                end_line: end,
+                range_start_line: None,
+                start_col: 0,
+                children,
+                detail: None,
+            }
+        }
+        // impl Foo (10..30) { fn bar (15..25) { ... } }
+        let syms = vec![sym(
+            "impl Foo",
+            10,
+            30,
+            vec![sym("impl Foo/bar", 15, 25, vec![])],
+        )];
+        assert_eq!(
+            enclosing_symbol(&syms, 20),
+            Some("impl Foo/bar".to_string()),
+            "innermost wins"
+        );
+        assert_eq!(
+            enclosing_symbol(&syms, 12),
+            Some("impl Foo".to_string()),
+            "outer when not in child"
+        );
+        assert_eq!(enclosing_symbol(&syms, 99), None, "outside all symbols");
+    }
+
+    #[tokio::test]
+    async fn grep_attaches_enclosing_symbol_when_small() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("code.rs"),
+            "fn alpha() {\n    let needle = 1;\n}\n",
+        )
+        .unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "needle", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let item = &r["file_groups"][0]["items"][0];
+        assert_eq!(item["symbol"].as_str().unwrap(), "alpha");
+    }
+
+    #[tokio::test]
+    async fn grep_no_symbol_for_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("doc.md"), "# Title\nneedle here\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "needle", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(r["file_groups"][0]["items"][0].get("symbol").is_none());
     }
 }
