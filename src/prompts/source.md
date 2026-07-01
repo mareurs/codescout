@@ -22,7 +22,7 @@ Subagents inherit these rules. Pass them along.
 
 - Know name → symbols(name=X) | symbol_at(path, line, col)
 - Know concept → semantic_search(query)
-- Exact string/regex → grep(pattern, path=optional)
+- Exact string/regex → grep(pattern, ignore_case, glob, mode="files")
 - Who calls X → references(symbol, path) — NOT grep
 - Structural code edit → edit_code | Text/import edit → edit_file
 
