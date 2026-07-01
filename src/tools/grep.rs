@@ -476,6 +476,14 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         serde_json::from_str::<serde_json::Value>(&raw)
             .ok()
             .and_then(|v| serde_json::to_string_pretty(&v).ok())
+            // Materialize escaped newlines inside string values (e.g. an
+            // artifact `body`) so multi-line fields become grep-able lines
+            // rather than one collapsed line. to_string_pretty splits JSON
+            // *structure* but leaves `\n` escaped inside string values.
+            // Search-only text, so the rare literal `\n`-in-data (serialized
+            // `\\n` → backslash+newline) is a cosmetically acceptable trade.
+            // Bug 2026-07-01-grep-buffer-multiline-string-value-collapses.
+            .map(|pretty| pretty.replace("\\n", "\n"))
             .unwrap_or(raw)
     } else {
         raw
@@ -749,6 +757,33 @@ mod tests {
         assert!(
             total > 0,
             "grep should find 'foo_bar_baz' in @tool_* buffer content, got total={total}: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_buffer_ref_matches_multiline_string_value() {
+        // Bug 2026-07-01-grep-buffer-multiline-string-value-collapses.
+        // A multi-line JSON string value (e.g. an artifact `body`) must be
+        // grep-able line-by-line, not collapsed into one physical line by
+        // to_string_pretty (which leaves embedded `\n` escaped).
+        use serde_json::json;
+        let ctx = test_ctx().await;
+        let body: String = (1..=10)
+            .map(|n| format!("## F-{n} — entry {n}\n"))
+            .collect();
+        let raw = json!({ "id": "abc", "title": "session-log", "body": body }).to_string();
+        let buf_id = ctx.output_buffer.store_tool("artifact", raw);
+
+        let tool = Grep;
+        let result = tool
+            .call(json!({ "pattern": "## F-", "path": buf_id }), &ctx)
+            .await
+            .unwrap();
+
+        let total = result.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        assert!(
+            total >= 10,
+            "grep should match each heading line in a multi-line string value, got total={total}: {result}"
         );
     }
 
