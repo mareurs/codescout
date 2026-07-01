@@ -253,7 +253,7 @@ impl Tool for Grep {
 
         // Index-aware hits: attach enclosing symbol when the result set is
         // small (no overflow) and the file is a known source language.
-        if context_lines == 0 && !hit_cap && total_match_count <= max {
+        if context_lines == 0 && !hit_cap {
             use std::collections::HashMap;
             use std::path::PathBuf;
             let mut cache: HashMap<PathBuf, Vec<crate::lsp::symbols::SymbolInfo>> = HashMap::new();
@@ -416,6 +416,7 @@ pub(super) fn format_grep(val: &Value) -> String {
 
     // Dispatch: file_groups[] → simple mode (new shape).
     //           matches[]    → context mode (legacy shape with start_line items).
+    //           files[]      → files mode (per-file ranked counts).
     if let Some(groups) = val["file_groups"].as_array() {
         let files = val["files"].as_u64().unwrap_or(0) as usize;
         format_search_simple_mode(&mut out, groups, total, files);
@@ -423,6 +424,21 @@ pub(super) fn format_grep(val: &Value) -> String {
         let match_word = if total == 1 { "match" } else { "matches" };
         out.push_str(&format!("{total} {match_word}\n"));
         format_search_context_mode(&mut out, flat);
+    } else if let Some(files_arr) = val["files"].as_array() {
+        let files_count = val["files_count"]
+            .as_u64()
+            .unwrap_or(files_arr.len() as u64);
+        out.push_str(&format!("{total} matches in {files_count} files\n"));
+        for f in files_arr {
+            let file = f["file"].as_str().unwrap_or("");
+            let count = f["count"].as_u64().unwrap_or(0);
+            out.push_str(&format!("  {count:>5}  {file}\n"));
+        }
+        if let Some(sb) = val["skipped_binary"].as_u64() {
+            if sb > 0 {
+                out.push_str(&format!("  ({sb} binary file(s) skipped)\n"));
+            }
+        }
     }
 
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
@@ -441,7 +457,10 @@ fn format_search_simple_mode(out: &mut String, file_groups: &[Value], total: usi
     let render_item = |item: &Value| -> String {
         let line = item["line"].as_u64().unwrap_or(0);
         let content = item["content"].as_str().unwrap_or("").trim();
-        format!("  {line:>5}: {content}")
+        match item["symbol"].as_str() {
+            Some(sym) => format!("  {line:>5}: {content}  [{sym}]"),
+            None => format!("  {line:>5}: {content}"),
+        }
     };
 
     out.push_str(&render_grouped(&groups, total, files, noun, render_item));
@@ -736,7 +755,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         result["mode"] = json!("literal_fallback");
         result["reason"] = json!("pattern was not valid regex — searched as literal text");
     }
-    if crate::util::path_security::is_identifier_pattern(pattern) {
+    if total_match_count == 0 && crate::util::path_security::is_identifier_pattern(pattern) {
         let name = pattern.split('|').next().unwrap_or(pattern);
         result["suggestion"] = json!(format!(
             "Pattern looks like a symbol name. Consider: \
@@ -1218,5 +1237,93 @@ mod tests {
             .await
             .unwrap();
         assert!(r["file_groups"][0]["items"][0].get("symbol").is_none());
+    }
+
+    #[tokio::test]
+    async fn mode_files_renders_in_compact_output() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("many.rs"), "X\nX\nX\n").unwrap();
+        std::fs::write(dir.path().join("one.rs"), "X\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "X", "path": dir.path().to_str().unwrap(), "mode": "files" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let text = format_grep(&r);
+        assert!(
+            !text.is_empty() && text != "0 matches",
+            "files-mode output must not be empty, got: {text:?}"
+        );
+        assert!(
+            text.contains("matches in") && text.contains("files"),
+            "expected a 'N matches in M files' header, got: {text}"
+        );
+        assert!(
+            text.contains("many.rs") && text.contains("one.rs"),
+            "expected both files listed with counts, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_output_includes_enclosing_symbol() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("code.rs"),
+            "fn alpha() {\n    let needle = 1;\n}\n",
+        )
+        .unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "needle", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let text = format_grep(&r);
+        assert!(
+            text.contains("[alpha]"),
+            "expected enclosing symbol annotation in compact output, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn buffer_suggestion_absent_when_matches_exist() {
+        let ctx = test_ctx().await;
+        let buf_id = ctx
+            .output_buffer
+            .store_tool("probe", "{\"my_symbol\": \"value here\"}".to_string());
+        let r = Grep
+            .call(json!({ "pattern": "my_symbol", "path": buf_id }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            r.get("suggestion").is_none(),
+            "no suggestion expected when matches exist, got: {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn glob_and_ignore_case_compose() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("keep.rs"), "TaRgEt\n").unwrap();
+        std::fs::write(dir.path().join("skip.txt"), "TaRgEt\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({
+                    "pattern": "target",
+                    "path": dir.path().to_str().unwrap(),
+                    "glob": "*.rs",
+                    "ignore_case": true,
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 1, "result: {r:?}");
     }
 }
