@@ -70,6 +70,7 @@ impl Tool for Grep {
         let mut matches: Vec<Value> = vec![];
         let mut total_match_count = 0usize;
         let mut hit_cap = false;
+        let mut skipped_binary = 0usize;
 
         let walker = ignore::WalkBuilder::new(&search_path)
             .hidden(true)
@@ -79,9 +80,14 @@ impl Tool for Grep {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            let Ok(bytes) = std::fs::read(entry.path()) else {
                 continue;
             };
+            if bytes.iter().take(8192).any(|&b| b == 0) {
+                skipped_binary += 1; // looks binary (NUL byte) — skip
+                continue;
+            }
+            let text = String::from_utf8_lossy(&bytes);
 
             if context_lines == 0 {
                 // Original behaviour: one entry per matching line
@@ -263,7 +269,7 @@ impl Tool for Grep {
             result["mode"] = json!("literal_fallback");
             result["reason"] = json!("pattern was not valid regex — searched as literal text");
         }
-        if crate::util::path_security::is_identifier_pattern(pattern) {
+        if total_match_count == 0 && crate::util::path_security::is_identifier_pattern(pattern) {
             let name = pattern.split('|').next().unwrap_or(pattern);
             result["suggestion"] = json!(format!(
                 "Pattern looks like a symbol name. Consider: \
@@ -271,6 +277,9 @@ impl Tool for Grep {
                  references(symbol='{name}') for direct callers, \
                  call_graph(symbol='{name}', direction='callers') for transitive blast radius."
             ));
+        }
+        if skipped_binary > 0 {
+            result["skipped_binary"] = json!(skipped_binary);
         }
         Ok(result)
     }
@@ -638,6 +647,88 @@ mod tests {
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
             workspace_override: None,
         }
+    }
+    async fn rooted_ctx(root: &std::path::Path) -> ToolContext {
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        ToolContext {
+            agent: Agent::new(Some(root.to_path_buf())).await.unwrap(),
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn suggestion_only_when_zero_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("code.rs"), "fn my_symbol() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let tool = Grep;
+
+        let hit = tool
+            .call(
+                json!({ "pattern": "my_symbol", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            hit.get("suggestion").is_none(),
+            "no suggestion when there are matches"
+        );
+
+        let miss = tool
+            .call(
+                json!({ "pattern": "no_such_symbol_xyz", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            miss.get("suggestion").is_some(),
+            "suggestion expected on zero matches for an identifier"
+        );
+    }
+
+    #[tokio::test]
+    async fn searches_non_utf8_and_skips_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        // latin-1 é (0xE9) around an ASCII target
+        std::fs::write(
+            dir.path().join("latin.txt"),
+            [
+                b'c', b'a', b'f', 0xE9, b' ', b'T', b'A', b'R', b'G', b'E', b'T', b'\n',
+            ],
+        )
+        .unwrap();
+        // binary file with a NUL byte
+        std::fs::write(
+            dir.path().join("blob.bin"),
+            [b'T', b'A', b'R', b'G', b'E', b'T', 0x00, 0x01],
+        )
+        .unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let tool = Grep;
+
+        let r = tool
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            1,
+            "latin-1 file matched, binary file skipped"
+        );
+        assert_eq!(r["skipped_binary"].as_u64().unwrap(), 1);
     }
 
     #[tokio::test]

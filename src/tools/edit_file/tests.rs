@@ -4668,11 +4668,8 @@ fn search_missing_matches_key() {
 async fn grep_identifier_pattern_adds_suggestion() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("code.rs"),
-        "pub struct WriteMemory;\nimpl WriteMemory {}\n",
-    )
-    .unwrap();
+    // Fixture must NOT contain the pattern — suggestion fires only at zero matches (C5 gate).
+    std::fs::write(dir.path().join("code.rs"), "pub struct Placeholder;\n").unwrap();
 
     let result = Grep
         .call(
@@ -4723,11 +4720,8 @@ async fn grep_regex_pattern_no_suggestion() {
 async fn grep_pipe_alternation_suggestion_uses_first_part() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("code.rs"),
-        "struct WriteMemory;\nstruct ReadMemory;\n",
-    )
-    .unwrap();
+    // Fixture must NOT contain the pattern — suggestion fires only at zero matches (C5 gate).
+    std::fs::write(dir.path().join("code.rs"), "struct Placeholder;\n").unwrap();
 
     let result = Grep
         .call(
