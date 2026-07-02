@@ -869,4 +869,75 @@ mod backtick_match_tests {
             "namespace must resolve to its AST end line; got {outer_end:?}"
         );
     }
+    /// Regression for the backend-kotlin "separate `*SpanTest.kt` file" convention
+    /// (e.g. `RoomAvailableSpanOverlapTest.kt`, `SchedulingPolicyConstraintsSpanTest.kt`):
+    /// that workaround was born in the pre-fix era when `edit_code` could not splice a
+    /// new method into a top-level Kotlin test class whose `@Test` methods are
+    /// backtick-named. Both `edit_code` insert gates must now handle that shape, so the
+    /// convention is obsolete:
+    ///   1. `find_unique_symbol_by_name_path` (the "symbol not found" gate) resolves the
+    ///      target whether the query carries backticks (as `symbols()` prints them) or
+    ///      not (as kotlin-lsp / a hand-typed query supplies them).
+    ///   2. `find_ast_end_line_in` (the "AST parse failed" insert-after gate) resolves
+    ///      the method's end line from the LSP-style no-backtick name + `fun`-line start.
+    ///
+    /// Targets the LAST method — the natural append point, and the exact operation the
+    /// convention claims is impossible. Live-confirmed fixed on the real project:
+    /// backend-kotlin `usage.db` row 26319 (2026-06-22, sha 46f48231) spliced a new
+    /// `@Test fun` into a backtick test block via `insert`/`after` and returned ok.
+    #[test]
+    fn backtick_test_class_resolves_for_insert_after_last_method() {
+        // Mirrors RoomAvailableConstraintTest: top-level class, single `@Test` per
+        // method, backtick names. 0-based lines: the last method's `@Test` is line 12,
+        // its `fun` line 13, its closing brace line 15.
+        let source = "class RoomAvailableConstraintTest {\n\n    @Test\n    fun `no penalty when room available and lesson within open window`() {\n        val a = 1\n    }\n\n    @Test\n    fun `penalty when room closed all day`() {\n        val b = 2\n    }\n\n    @Test\n    fun `penalty scales with number of unavailable lessons`() {\n        val c = 3\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("RoomAvailableConstraintTest.kt"),
+        )
+        .unwrap();
+
+        // Gate 1 (resolution): the backtick query — as copied verbatim from symbols() —
+        // resolves to the last method.
+        let with_ticks = find_unique_symbol_by_name_path(
+            &ast_syms,
+            "RoomAvailableConstraintTest/`penalty scales with number of unavailable lessons`",
+        )
+        .expect("backtick name_path must resolve");
+        // The AST function node spans from its `@Test` annotation (line 12), not the
+        // `fun` line — this is the start-line gap kotlin-lsp's `fun`-line start bridges.
+        assert_eq!(
+            with_ticks.start_line, 12,
+            "AST start should be the @Test line"
+        );
+        assert_eq!(
+            with_ticks.end_line, 15,
+            "AST end should be the method's closing brace"
+        );
+
+        // Gate 1 (resolution): the SAME query WITHOUT backticks (the kotlin-lsp form, or
+        // a hand-typed query) must resolve to the same symbol via backtick normalization.
+        let no_ticks = find_unique_symbol_by_name_path(
+            &ast_syms,
+            "RoomAvailableConstraintTest/penalty scales with number of unavailable lessons",
+        )
+        .expect("no-backtick name_path must resolve to the backtick AST symbol");
+        assert_eq!(no_ticks.start_line, with_ticks.start_line);
+
+        // Gate 2 (insert-after end line): kotlin-lsp reports the `fun` line (13) and a
+        // no-backtick name; find_ast_end_line_in must still return the method's end (15),
+        // not None — None is what do_insert surfaces as the misleading "AST parse failed".
+        let end = find_ast_end_line_in(
+            &ast_syms,
+            "penalty scales with number of unavailable lessons",
+            13,
+            Some("RoomAvailableConstraintTest/penalty scales with number of unavailable lessons"),
+        );
+        assert_eq!(
+            end,
+            Some(15),
+            "insert-after the LAST backtick method must resolve its end line; got {end:?}"
+        );
+    }
 }

@@ -156,6 +156,38 @@ when two lessons share same room date and timeslot`) returned `ok:true` (inserte
 line 268); probe reverted, file clean. The end-to-end LSP+AST chain is confirmed.
 Remaining: ship to master via the Standard Ship Sequence and record the master-side SHA
 in the Fix section.
+### 2026-06-23 follow-up — convention now obsolete; regression pinned
+
+A backend-kotlin session (2026-06-23) again created a *separate* `RoomAvailableSpanOverlapTest.kt`
+rather than splice a method into `RoomAvailableConstraintTest`, citing that "the in-place edit
+tooling could not splice a method into that class's backtick-named test block" as the codebase's
+"established convention for SI-5-class span regressions (also `SchedulingPolicyConstraintsSpanTest`)".
+
+Investigated: this is a **stale belief**, not a live limitation. Evidence (all from
+`mirela/backend-kotlin/.codescout/usage.db`):
+
+- The running MCP binary upgraded from the **pre-fix** `eca9902e` (all the 06-15…06-21
+  "AST parse failed" / "symbol not found" rows) to `46f48231` (06-22 onward).
+- Row **26319** (2026-06-22, sha `46f48231`): `edit_code` `action=insert` `position=after` with
+  `symbol = BoxedBlockAnalyzerTest/\`analyze unpacks the solution and sources availability…\``
+  spliced **two** new `@Test fun \`…\`()` methods into a backtick-named test block → **ok**. That
+  is exactly the operation the convention claims is impossible.
+- **No** `edit_code` errors are logged after 2026-06-21; the 06-23 session never actually retried a
+  splice — it followed the convention pre-emptively.
+
+`RoomAvailableConstraintTest` is structurally identical to `BoxedBlockAnalyzerTest` (top-level class,
+single `@Test` per method, backtick names). Its shape — resolve + insert-after the **last** backtick
+method — is now pinned deterministically by
+`src/symbol/query.rs::backtick_match_tests::backtick_test_class_resolves_for_insert_after_last_method`,
+which exercises **both** insert gates: `find_unique_symbol_by_name_path` (resolution, backtick and
+no-backtick query forms — the "symbol not found" gate, previously untested at this layer) and
+`find_ast_end_line_in` (the "AST parse failed" end-line gate).
+
+Action item is **downstream**, not in codescout: retire the separate-`*SpanTest.kt` convention from
+the backend-kotlin project docs so sessions stop creating one-off files for a bug that no longer
+bites. (The still-open contributor noted in the 2026-06-04 file — softening `do_insert`'s misleading
+"AST parse failed / syntax errors" hint — is what seeded this self-perpetuating convention in the
+first place.)
 ## References
 - `src/symbol/query.rs` — `find_ast_end_line_in`, `collect_by_name`, `names_match_ignoring_backticks`
 - `src/symbol/edit.rs` — `editing_end_line_strict`, `ast_confirmed_end_line`
