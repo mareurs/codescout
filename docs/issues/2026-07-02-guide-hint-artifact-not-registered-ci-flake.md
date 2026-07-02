@@ -2,7 +2,7 @@
 status: open
 opened: 2026-07-02
 closed:
-severity: low
+severity: medium
 owner: marius
 related: [docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md]
 tags: [flaky-test, test-env-isolation, librarian]
@@ -12,11 +12,13 @@ kind: bug
 # BUG: guide_hint test flakes on CI with "tool 'artifact' not registered"
 
 ## Summary
-`server::guide_hint_tests::second_artifact_call_no_hint` failed once on CI
-(ubuntu-latest / default, run on 88b8fb27) with `tool 'artifact' not registered`
+`server::guide_hint_tests::second_artifact_call_no_hint` failed on CI
+(ubuntu-latest / default) with `tool 'artifact' not registered`
 from the shared `tool_by_name` helper — the librarian `artifact` tool was absent
-from the freshly constructed `CodeScoutServer`. One-off flake: identical source
-passed the same job at 218e0a4c and passes locally (2987/0/43, multiple runs).
+from the freshly constructed `CodeScoutServer`. Hit 2 of 3 runs on identical
+source (runs on 88b8fb27, its rerun — which failed on the sibling heartbeat race
+instead — and d936eb0f); the same source was green at 218e0a4c and passes
+locally (2987/0/43, multiple runs).
 
 ## Symptom (Effect)
 ```
@@ -43,7 +45,10 @@ Unknown — see Hypotheses tried.
 
 ### One-off vs deterministic
 Same source green at 218e0a4c (ubuntu default success) and in every local full
-gate this session; red once at 88b8fb27 whose diff is CI-yaml + docs only.
+gate this session; red at 88b8fb27, its rerun (heartbeat race instead — see
+related file), and d936eb0f — whose combined diff vs 218e0a4c is CI-yaml + docs
+only. 2-of-3 incidence for this test on current runner conditions: elevated,
+not one-off — severity raised low→medium accordingly.
 
 ### The test IS #[serial]
 src/server.rs:3055-3057 — `#[tokio::test] #[serial]`. But `#[serial]` only
