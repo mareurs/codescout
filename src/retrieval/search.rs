@@ -62,7 +62,9 @@ impl RetrievalClient {
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
+        let mut timer = crate::perf::PhaseTimer::start("semantic_search");
         let q = self.embedder.embed(query).await?;
+        timer.lap("embed");
         let candidates = self
             .code_store
             .query(
@@ -76,15 +78,19 @@ impl RetrievalClient {
                 &opts.exclude_languages,
             )
             .await?;
+        timer.lap("vector_query");
 
         // Lite stack has no reranker server — skip the rerank step entirely.
         if !opts.rerank || self.lite || candidates.is_empty() {
+            timer.finish();
             return Ok(candidates.into_iter().take(opts.limit).collect());
         }
 
         let texts: Vec<String> = candidates.iter().map(|h| h.content.clone()).collect();
         match self.reranker.rerank(query, &texts).await {
             Ok(scores) => {
+                timer.lap("rerank");
+                timer.finish();
                 let mut zipped: Vec<(Hit, f32)> = candidates.into_iter().zip(scores).collect();
                 zipped.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 Ok(zipped
@@ -97,6 +103,8 @@ impl RetrievalClient {
                     .collect())
             }
             Err(e) => {
+                timer.lap("rerank_degraded");
+                timer.finish();
                 tracing::warn!("reranker degraded: {e}");
                 Ok(candidates.into_iter().take(opts.limit).collect())
             }
