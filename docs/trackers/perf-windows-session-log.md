@@ -35,8 +35,7 @@
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-<!-- no wins recorded yet -->
-
+| W-1 | 2026-07-02 | med | Measured dev-loop rebuild before/after toggling `lto = "thin"` -> `false` in `[profile.release]`; gated on >=15% speedup | Without measuring, thin-LTO's ~6s/rebuild tax (33% of single-file-touch wall time) would have stayed invisible, assumed as "standard release hygiene" | validated |
 ---
 
 ## Category conventions
@@ -202,6 +201,28 @@ Codified so the Index column means the same thing across sessions.
 **Status:** open
 
 **Fix idea / Pointer:** Needs its own triage stream (bug files per failing cluster). Not this plan.
+
+---
+## W-1 — Dropping thin-LTO from `[profile.release]` cuts dev-loop rebuild time ~33%
+
+**Observed:** 2026-07-02, Task 9 (build-loop baseline + one lever, thin-LTO)
+
+**Pattern:** Measured the actual live dev loop — `touch src/lib.rs && cargo build --release --features server-stack` (this rebuilds the running MCP binary, `target/release/codescout`) — before and after a single lever change (`lto = "thin"` -> `lto = false`), and gated the keep/revert decision on an empirical >=15% mean speedup rather than assuming LTO's cost was negligible for a fast-iterating local dev loop.
+
+**Counterfactual:** Without measuring, thin-LTO would have stayed in `[profile.release]` on the general assumption that LTO is default release-build hygiene. Every `cargo rb` iteration during active development would keep paying ~18.3s per single-file touch instead of ~12.3s — a ~6s tax per rebuild, compounding across dozens of iterations per session. Evidence: the `cargo build --timings` breakdown (pre-lever) showed the final `codescout "bin"` unit — the codegen+link step where thin-LTO's cross-CGU work happens — consumed 16.22s of the 18.0s total wall time (start offset 1.77s), i.e. LTO dominates the single-crate rebuild; the already-cached dependency graph is not where the time goes.
+
+**Confirming data points:**
+- Baseline (`lto = "thin"`), `touch src/lib.rs`, 2 runs: 18.42s, 18.14s -> mean 18.32s (1.5% spread). A third same-profile run under `--timings` gave 17.99s (Total time in `cargo-timing.html`: 18.0s), consistent with the baseline pair.
+- Post-lever (`lto = false`), `touch src/lib.rs`, 2 steady-state runs: 12.11s, 12.36s -> mean 12.28s (2.0% spread). Build #3 (first post-change build, no touch needed — the profile-fingerprint change alone forced a full dependency recompile) was 110.06s and was correctly excluded as the expected one-time outlier per protocol.
+- Gate math: (18.32 - 12.28) / 18.32 = 32.98% faster, well above the 15% keep threshold.
+- sccache hit rate stayed low throughout (7 hits / 1147 misses, 0.61% cumulative across the whole session including builds, clippy, and test compiles) — confirming the touched `codescout` crate itself, not sccache-cacheable dependency compilation, is what the lever affects.
+- Full pre-commit gate stayed green after the change: `cargo fmt --check` clean, `cargo clippy --release --features server-stack -- -D warnings` clean (45.88s), bare `cargo test` 2983 passed / 0 failed / 43 ignored (matches the project's known-good fingerprint exactly).
+
+**Impact:** med — single lever, ~6s saved per manual dev-loop rebuild on this machine; compounds with the number of `cargo rb` iterations per session.
+
+**Promote-when:** If a future audit finds the un-LTO'd binary's runtime latency (query/search hot paths) measurably regresses in a way that matters for local MCP usage, revisit — thin-LTO could be reintroduced behind a separate pre-ship-only build alias, keeping the fast lever as the default dev-loop profile.
+
+**Status:** validated
 
 ---
 ## Template for new entries

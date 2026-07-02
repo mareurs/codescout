@@ -217,7 +217,11 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
-lto = "thin"
+# LTO off: measured 2026-07-02 (W-1, docs/trackers/perf-windows-session-log.md) —
+# thin-LTO cost ~33% of every dev-loop rebuild (18.3s -> 12.3s without it) and the
+# MCP server is I/O/LSP-bound, not codegen-bound. Re-run the W-1 gate before
+# restoring thin-LTO (e.g. behind a pre-ship-only alias).
+lto = false
 codegen-units = 16
 strip = true
 # Abort on panic rather than unwind — prevents a future panic from leaving the
