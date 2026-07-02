@@ -1041,17 +1041,40 @@ mod tests {
             worktree: None,
         };
         let rendered = build_server_instructions(Some(&status));
-        for dead in [
-            "find_symbol",
-            "list_symbols",
-            "replace_symbol",
-            "insert_code",
-            "rename_symbol",
-            "search_pattern",
-        ] {
+        for &dead in DEPRECATED_TOOL_NAMES {
             assert!(
                 !rendered.contains(dead),
                 "rendered server instructions contains deprecated tool name: {dead}"
+            );
+        }
+    }
+
+    /// Tool names that have been removed/renamed and must never appear in any
+    /// prompt surface the model reads. Single source of truth, shared by the
+    /// rendered-`server_instructions` gate above and the `CLAUDE.md` gate below.
+    const DEPRECATED_TOOL_NAMES: &[&str] = &[
+        "find_symbol",
+        "list_symbols",
+        "replace_symbol",
+        "insert_code",
+        "rename_symbol",
+        "search_pattern",
+    ];
+
+    /// `CLAUDE.md` is injected into every session as a `<system-reminder>` but is
+    /// NOT one of the surfaces scanned by the rendered-instructions gate above
+    /// or by `prompt_surfaces_reference_only_real_tools`. It is prose, so an
+    /// allowlist guard is unusable here — denylist the known-dead names instead.
+    /// (See refactor-log F-9 / F-10.)
+    #[test]
+    fn claude_md_contains_no_deprecated_tool_names() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md");
+        let claude_md =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+        for &dead in DEPRECATED_TOOL_NAMES {
+            assert!(
+                !claude_md.contains(dead),
+                "CLAUDE.md references deprecated tool name: {dead}"
             );
         }
     }

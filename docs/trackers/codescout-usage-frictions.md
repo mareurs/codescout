@@ -1120,3 +1120,30 @@ post_process surface). Bug file:
 **Refined whistle criterion:** whistle `read_file`-on-source ONLY when it is a **full, no-range read of a large indexed source file** (low severity — tool auto-redirects). NEVER whistle: sliced reads, import/glue/header reads, or reads in languages with known extractor gaps.
 
 **Related:** R-32 (recon-patterns, this session). Kin F-22 (sibling session) — `read_file` offset/limit now normalizes to a line slice, which *reinforces* sliced-source-read legitimacy.
+
+### U-28 — `read_markdown` errors are untagged (`err_family` NULL), hiding ~23 live errors/week
+
+**When:** 2026-06-21 Pika re-scan of `.codescout/usage.db` (`id > 6213`, 1,833 new calls, 34 sessions lifetime).
+
+**Iron Law / pattern:** Observability gap, not an Iron Law. `recoverable_error` rows from `read_markdown` carry `err_family = NULL`, so they never appear in the recency rollup that gates every "live friction" verdict. 23 errors/week were invisible until drilled by hand.
+
+**Tool called:** `read_markdown` — **51 lifetime / 23 in last 7d**, the #1 source of `(null)`-family errors (next: `artifact` 29, `symbols` 9, `edit_code` 8, `references`/`read_file`/`edit_markdown` 7 each).
+
+**Sub-signatures (7d):**
+- `file not found: 'CLAUDE.md'` ×10 — relative-path / moved-file reads (some against the just-restructured CLAUDE.md).
+- `read_markdown only supports .md files` ×3 — wrong tool; should be `read_file`.
+- `combined headings span N lines — exceeds inline threshold` ×4 — too many headings per call.
+- `heading '…' not found` ×several — stale heading references.
+- `missing 'path' parameter` ×1.
+
+**Should have called / fix:** Two-sided.
+- *Codescout-side (primary):* tag `read_markdown` errors with `err_family` (`md_file_not_found` / `non_md_file` / `heading_not_found` / `heading_span_over_threshold` / `missing_path`) so they surface in the rollup instead of hiding in `(null)`.
+- *Agent-side:* verify path + heading exist before `read_markdown`; use `read_file` for non-`.md`; read fewer headings per call.
+
+**Whistle delivered:** yes (this entry + `pika_observations` row, `subkind=read_markdown_untagged_errors`).
+
+**Recurrence:** 51 lifetime / 23 in 7d — habit.
+
+**Severity:** med — observability blind spot plus recurring retry-cost; no data loss.
+
+**Status:** open. No hookify rule proposed — the fix is observability (`err_family` tagging), not a deny/warn gate.

@@ -6,114 +6,33 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Development Commands
 
-See codescout memory `development-commands` for the full command reference.
-
-**Always run `cargo fmt`, `cargo clippy`, and `cargo test` before completing any task.**
-
-**On our current stack the release build is `cargo rb`, not `cargo build --release`** (the latter is the lean default repo cloners get). See the `development-commands` memory for what the alias compiles in and why.
-
-**To test changes via the live MCP server, run `cargo rb`, then restart the server with `/mcp`.** The MCP server launches `~/.cargo/bin/codescout` (see the `command` in `~/.claude/.claude.json`), which is a **symlink → `target/release/codescout`**, so a release build alone updates the live binary — no `cargo install` needed. Dev builds (`cargo test`/`cargo build`) are a separate artifact and are NOT picked up.
-
-If the symlink is missing (e.g. after `cargo clean` removed `target/`, or a fresh checkout), recreate it once:
-
-```bash
-ln -sf "$(pwd)/target/release/codescout" ~/.cargo/bin/codescout
-```
-
-Without the symlink, `~/.cargo/bin/codescout` is a stale installed copy and `/mcp` reconnects keep loading old code even after a successful build. (Symlink, not hardlink: `cargo build` rename-replaces the file, so a hardlink would resolve to the old inode.)
-
+**Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` before completing any task.** On our stack the live-MCP release build is `cargo rb` (not `cargo build --release`); after it, run `/mcp` to reconnect. Full command reference (every crate + fixture, `cargo rb` vs lean build) → memory `development-commands`; the binary symlink gotcha → memory `gotchas` (MCP Binary Symlink).
 ## Bug Tracking
 
-**Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`.
+**Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
 
-- **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` for active bugs; `docs/issues/archive/` only after the fix has shipped to `master` (verify via `git branch --contains <fix-sha>`).
-- **Slug:** short kebab-case noun-phrase (3–6 words), e.g. `edit-code-insert-mid-function`, `reindex-cascade-delete-data-loss`.
-- **Status field** in frontmatter: `open` | `investigating` | `fixed` | `mitigated` | `wontfix` | `zombie` (semantics in `_TEMPLATE.md`'s header comment). `zombie` = no longer observed, root cause unconfirmed; pair with `last_observed:` and a re-open trigger.
-- **`closed:` date** in frontmatter alongside any of `fixed` / `mitigated` / `wontfix`.
+Two behaviors are load-bearing and easy to skip:
 
-**Trigger rules — open a bug file for ANY bug noticed during work:**
-- ✓ User explicitly asks ("log this", "open a tracker")
-- ✓ Bug blocking the current task (fix-now or parking-lot)
-- ✓ Incidental bug we won't fix in the current session
-- ✓ Just-fixed bug whose investigation is worth preserving
-- ✓ Tool quirks / misbehaviors (formerly the BUG-XXX log, retired 2026-05-17 — archived at `docs/archive/old-trackers/TODO-tool-misbehaviors.md`)
-- ✗ Pure typos / one-token corrections — commit message is enough
-- ✗ Feature ideas / refactors — those go in `docs/trackers/` or `docs/plans/`
-- ✗ Subjective dislikes that aren't bugs
+- **Capture on notice** — add the bug file the moment a bug is noticed (wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools), not at task end.
+- **Archive only after the fix ships to `master`** (`git branch --contains <fix-sha>`), not when status flips to `fixed`.
 
-**Capture discipline (while working):** add the file the moment the bug is noticed — don't wait until task end. Watch for wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools. Each bug file holds Symptom / Reproduction / Root cause / Evidence / Hypotheses tried / Fix / Tests added / Workarounds / Resume — see `docs/issues/_TEMPLATE.md`.
-
-**Don't add to retired surfaces.** `docs/archive/old-trackers/TODO-tool-misbehaviors.md` and `docs/archive/old-trackers/bug-tracker.md` are historical reference only — do not append. Open a new `docs/issues/<date>-<slug>.md` instead.
+**Open a bug file for ANY bug noticed during work** — including incidental bugs we won't fix and tool quirks/misbehaviors. *Not* for pure typos (commit message suffices) or feature ideas/refactors (→ `docs/trackers/` or `docs/plans/`). Don't append to retired surfaces (`docs/archive/old-trackers/*`) — open a new `docs/issues/<date>-<slug>.md`.
 ## Session Intelligence Trackers
 
 **One-page index of every ID prefix** (F-N / W-N / R-N / U-N / H-N / T-N / BUG) — file, scope, append tool, promotion path — lives in [`docs/TAXONOMY.md`](docs/TAXONOMY.md). Start there when you're not sure which tracker takes an observation.
 
 ### Querying active trackers (librarian)
 
+Frontmatter shape, status vocabulary, archiving-through-the-catalog, and the
+canonical `artifact(action="find", kind="tracker"|"bug", …)` queries live in
+**`get_guide("tracker-conventions")`** — call it when creating, querying, or
+archiving a tracker/bug. The one-page index of every ID prefix
+(F-N / W-N / R-N / T-N / U-N / H-N / BUG) is `docs/TAXONOMY.md`.
 
-The librarian indexes every `docs/trackers/*.md` file with `kind: tracker`,
-and every `docs/issues/*.md` file with `kind: bug`. The canonical
-"what's live right now" query — archived auto-hidden:
-
-```
-artifact(action="find", kind="tracker")
-```
-
-For bugs, swap the kind:
-
-```
-artifact(action="find", kind="bug", status="open")
-```
-
-Until 2026-05-18, bug files lacked `kind:` frontmatter and the default
-classifier rule mapped `docs/issues/**/*.md → kind=tracker`, polluting
-tracker queries. The migration added `kind: bug` to the bug template +
-all 37 existing files. The classifier rule is kept as a defense-in-depth
-fallback for any bug file that omits the field.
-
-**Status vocabulary** (frontmatter `status:` field for trackers):
-
-| Value | Meaning | Visibility |
-|---|---|---|
-| `active` | Living tracker, actively appended to | visible |
-| `draft` | Scoped/watching, not yet active | visible |
-| `archived` | Terminal — work-stream wrapped | **hidden by default** (`HIDDEN_STATUSES` in `find.rs`) |
-| `superseded` | Replaced by a successor artifact | **hidden by default** |
-
-`done`, `in-progress`, etc. are NOT special-cased — they appear as active.
-When a tracker is wrapped, archive it **through the librarian tools**, not by
-hand: `artifact(action="update", id=…, patch={status:"archived"})` (sets the
-catalog row status AND writes frontmatter) then `artifact(action="move", id=…,
-new_rel_path="docs/trackers/archive/…")` (atomic rename + catalog re-point). A
-bare `status:` edit + `git mv` does NOT touch the catalog, and the librarian
-reads visibility from the catalog row — so the tracker keeps showing `active`
-until someone runs `reindex`; and because `id = sha256(abs_path)`
-(`src/librarian/ids.rs`), that reindex mints a NEW id and orphans the row's
-events/augmentation. The catalog status drives visibility now; frontmatter
-status drives it after a reindex. See `docs/trackers/reconnaissance-patterns.md`
-R-25. Verify the returned `new_abs_path` lands inside the project before trusting
-`moved:true` — in a project nested under a registered ancestor `[[roots]]` entry,
-`move` can join `new_rel_path` against the ancestor and silently relocate the
-file outside the repo.
-
-**Frontmatter shape** (required for new trackers):
-
-```yaml
----
-kind: tracker
-status: active           # or draft | archived | superseded
-title: <human title>
-owners: []
-tags:
-  - <topic>
----
-```
-
-The librarian re-allocates `id:` on next `librarian(action="reindex")` if omitted.
+> ⚠️ Archive trackers **through the librarian** — `artifact(action="update", …, patch={status:"archived"})` then `artifact(action="move", …)` — never a bare `status:` edit + `git mv`: `id = sha256(abs_path)`, so a hand-move orphans the catalog row's events/augmentation. Full rationale in `get_guide("tracker-conventions")`.
 
 Two living trackers capture observations from real sessions. Keep them current — they feed
 prompt improvements and skill refactors.
-
 ### Skill Frictions — `docs/trackers/skill-frictions.md`
 
 Rough edges found while using project skills (`/claude-traces`, `/analyze-usage`, etc.).
@@ -219,438 +138,23 @@ all three.
 
 ## Git Workflow
 
-**This is a public repo.** Do not push incomplete or untested work.
+**`master` is protected** — all experimental work on `experiments`; cherry-pick to `master` only after tests + clippy + MCP verify; `experiments` is never deleted; never commit in-progress work directly to `master`.
 
-### Branch Strategy
-
-- **`master` is protected.** Only cherry-picked, thoroughly tested commits land here.
-- **All experimental work goes on the `experiments` branch** (or a dedicated feature branch). Iterate freely there.
-- **Cherry-pick to `master`** only after: all tests pass, clippy clean, manually verified via MCP (`cargo build --release` + `/mcp` restart).
-- **`experiments` is never deleted.** After any merge to `master`, `experiments` continues from the same commit — no recreation, no force-reset.
-- **Before any merge or cherry-pick to `master`**, invoke the Docs Lotus Frog (`/buddy:summon frog`) to: (1) audit experimental features eligible for graduation, and (2) identify documentation gaps in the commits being merged.
-- Never commit directly to `master` for in-progress or exploratory work.
-
-### Release Cycle
-
-Full release checklist — run from `master`, never from `experiments` or feature branches.
-
-```bash
-# 1. Bump version in Cargo.toml
-#    Edit version = "X.Y.Z" in Cargo.toml
-
-# 2. Build release binary and verify
-cargo build --release
-cargo test
-cargo clippy -- -D warnings
-
-# 3. Commit the version bump
-git add Cargo.toml Cargo.lock
-git commit -m "chore: bump version to X.Y.Z"
-
-# 4. Tag the release
-git tag vX.Y.Z
-
-# 5. Publish to crates.io — WORKSPACE PUBLISH ORDER MATTERS
-#    codescout has a path-dep on codescout-embed WITH a version requirement, so
-#    crates.io must already host a matching codescout-embed. If crates/codescout-embed
-#    changed since its last publish, bump + publish it FIRST (crates.io refuses to
-#    re-publish an existing version with changed content), then publish codescout.
-#    A non-compatible embed bump (e.g. 0.1.x -> 0.2.0; ^0.1.0 does NOT allow 0.2.0)
-#    also requires updating codescout's `codescout-embed = { ..., version = "..." }`.
-TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2-)   # -f2- keeps '=' in the token
-CARGO_REGISTRY_TOKEN=$TOKEN cargo publish -p codescout-embed   # FIRST, only if it changed
-CARGO_REGISTRY_TOKEN=$TOKEN cargo publish                      # codescout SECOND
-
-# 6. Push commit + tag
-git push
-git push --tags
-
-# 7. Create GitHub release with release notes
-gh release create vX.Y.Z --title "vX.Y.Z" --notes "release notes here"
-
-# 8. Rebase experiments on the new master
-git checkout experiments && git rebase master
-```
-
-**Notes:**
-- Token is stored in `.env` (gitignored): `CARGO_REGISTRY_TOKEN=...` (use `cut -d= -f2-`, not `-f2` — the token can contain `=`)
-- **Workspace publish order:** publish `codescout-embed` before `codescout` whenever the embed crate changed; crates.io cannot re-publish an existing version with new content. Precedent: v0.15.0 bumped embed 0.1.0 -> 0.2.0.
-- Use semver: patch for bug fixes, minor for new features, major for breaking changes
-- Release notes should list features, dep upgrades, and doc changes
-- Always rebase `experiments` after the release push
-
-### Standard Ship Sequence
-
-When a bug fix or tested feature on `experiments` is ready to land in `master`:
-
-```bash
-# 1. Commit on experiments (tests passing, clippy clean)
-git add <files> && git commit -m "..."
-
-# 2. Cherry-pick to master and push
-git checkout master
-git cherry-pick <commit-sha>
-git push
-
-# 3. Rebase experiments back on master (drops the cherry-picked commit automatically)
-git checkout experiments
-git rebase master
-
-# 4. Migrate closed bug files whose fix shipped (run AFTER the cherry-pick lands on master)
-#    For each <fix-sha> just cherry-picked:
-#    - find docs/issues/<date>-<slug>.md whose Fix section cites <fix-sha>
-#    - confirm: git branch --contains <fix-sha>  → must show 'master'
-#    - if status is `fixed` / `mitigated` / `wontfix`: git mv it to docs/issues/archive/
-#    Skip files still `open` / `investigating` — they stay in docs/issues/ regardless.
-#    Commit the moves separately: docs: archive bug files for fixes shipped in <date>
-
-# 5. (Optional, recommended after large refactors or batched-bug sessions)
-#    Verify doc refs still resolve — bug-file Resume sections cite paths that
-#    src refactors may have moved (F-1 friction, multiple datapoints).
-#    Run from any active project:
-#      mcp call codescout librarian '{"action":"audit_doc_refs","emit_tracker":true}'
-#    Inspect findings JSON. Per-finding actions:
-#      - verdict=missing, severity=high → real drift; fix the doc OR archive the bug
-#      - verdict=ambiguous_basename → doc cites a basename matching multiple files;
-#                                      add a path prefix to disambiguate
-#      - verdict=resolved_basename → audit auto-resolved by basename match; OK
-#                                     (consider adding the prefix anyway for clarity)
-#    The audit covers docs/**/*.md by default (which includes docs/issues/).
-```
-
-This is the default workflow for all completed work. The rebase step keeps `experiments`
-clean — git detects the cherry-pick and skips the duplicate commit automatically. Step 4
-keeps `docs/issues/` showing only bugs whose fix is unreleased — see `_TEMPLATE.md` rule
-*"Archive moves happen after the fix has shipped to master, not when status flips to fixed."*
-Step 5 is the drift-detection step — `audit_doc_refs` is the canonical lint for stale
-path / link / line references across all markdown surfaces.
-
-
-#### After cherry-pick: cite the master SHA, not the experiments-side original
-
-When tracking a multi-fix shipping session (running tally in chat, notes in a tracker, F-N entries citing evidence), record the **master-side SHA** assigned by `cherry-pick` — not the original SHA on `experiments`. After the subsequent `git rebase master`, the experiments-side originals become orphans (rebase detects cherry-picks and drops them via `--reapply-cherry-picks` default-off). `git branch --contains <orphan-sha>` then returns empty for every fix, and the running tally fails the "are they all on master?" audit even though every fix shipped.
-
-**Concrete:**
-
-```bash
-# 2. Cherry-pick — capture the new SHA, do not just use the original
-master_sha=$(git rev-parse HEAD)   # immediately after `git cherry-pick`
-echo "$master_sha"                  # record this in the tally, not the pre-cherry-pick SHA
-```
-
-Or, after the fact: `git log master --oneline --grep="<subject prefix>"` to recover the master SHA by commit message.
-
-Lesson source: 2026-05-23 batched-bug session — 12 fixes shipped, running tally cited the 12 experiments-side SHAs, none survived the rebase. Recovery took a `git log --grep` sweep on master to rebuild the SHA mapping for the user's "are they all done?" check.
-
-**Applies to every SHA-citing surface, not just chat:**
-
-- **Tracker entries** — F-N / W-N / U-N / H-N / R-N — any `**Status:**`, `**Fix idea:**`, or evidence-citing line that names a SHA. After the cherry-pick lands on master, update the citation to the master SHA before committing the tracker entry.
-- **`artifact_event` calls** — `anchor_commit` and `also_mutates` SHAs are written into the catalog DB and outlive rebases. Cite the master SHA.
-- **`docs/issues/<bug>.md` Fix sections** — `_TEMPLATE.md` § "## Fix" mandates the master SHA. New bug files inherit this; older ones may still cite experiments-side SHAs — update opportunistically when touching the file.
-- **ADRs / design docs** citing the implementation commit — same rule.
-
-**Anti-pattern:** writing `Fixed in commit abc1234 on experiments` immediately after committing on experiments. After cherry-pick + rebase, that SHA orphans. Capture the master SHA AFTER the cherry-pick lands and cite that instead. If forensic context matters, prefix explicitly: `experiments-side abc1234, master-side def5678` — never let bare SHAs default to "whichever branch I happened to be on."
-
-**Cross-repo callsites** — when a tracker entry in codescout cites a fix that landed in `codescout-companion` (or vice-versa), use the `<repo>:<sha>` prefix from the "Cross-Repo Commit References" section below: `codescout-companion:0b75991`. A bare SHA implies the current repo.
-### Commit Discipline
-
-- **Batch related changes** into a single well-tested commit rather than committing every incremental step.
-- **Only commit when the full fix/feature is working** — all tests pass, clippy clean, manually verified if applicable.
-- **Do not push after every commit.** Accumulate local commits during a work session; push once when the work is solid.
-- When iterating on a fix, keep working locally until the fix is confirmed, then commit the final state — not every intermediate attempt.
-
-
-### Chained Git Commands — End With a State-Check (added 2026-05-18)
-
-When chaining 4+ git operations with `&&` (e.g. `checkout master && cherry-pick X && push && checkout experiments && rebase && push`), the output stream interleaves all the intermediate results — the final-state confirmation lines (the `..` push outputs) can scroll past mid-output and look like in-progress steps.
-
-**Rule:** end any 4+ step git chain with:
-
-```bash
-git rev-parse master experiments origin/master origin/experiments
-```
-
-Four identical SHAs prove the ship completed; divergent SHAs catch a silent partial failure (e.g. push rejected, rebase paused on conflict you missed).
-
-This is bookkeeping — does not change behavior — but it converts "scan the output stream for success" into "read four lines at the bottom." Encountered 2026-05-18 when a user re-asked "did we cherry-pick to master?" because the success line was buried mid-output.
-
-### Concurrent-Work Rules (added 2026-05-17 after F-13 incident)
-
-When working on a shared branch alongside another active agent or session:
-
-- **Never `git reset` to a relative ref** (`HEAD~N`, `HEAD^`, `@{N}`). Relative refs evaluate at execution time, not observation time — the gap between `git log` (read) and `git reset` (write) is enough for another agent to move HEAD, and your reset will silently traverse their commit.
-- **Always quote an explicit SHA** for destructive ops. Read `git reflog -N` in the *same command* as the reset; copy the target SHA from the reflog output.
-- **Treat your last-observed HEAD as immediately stale.** If any time has elapsed since your last `git log` / `git status`, re-read in the same command as the destructive op.
-- **Before any `git rebase`, `git reset`, `git push --force`, or `git commit --amend`** during concurrent work: scout `git reflog -10` first. If unexpected entries appear (commits you didn't author at the tip), pause and reconcile *before* the destructive op.
-
-This rule comes from F-13: `git reset --soft HEAD~1` erased another session's T-13 commit because HEAD had moved between observation and action. Recovered via reflog-quoted SHA (W-7).
-
-### Cross-Repo Commit References (added 2026-05-17 after F-4 incident)
-
-When a tracker artifact stores commit SHAs as evidence (`evidence_commits`,
-task `notes`, `anchor_commit`, etc.), default reading assumes the SHA
-belongs to the **same repo the tracker lives in**. For cross-repo
-references — common in this workspace, where work spans codescout,
-codescout-companion, buddy, and claude-plugins — prefix the SHA with the
-repo name:
-
-```text
-<repo>:<sha>
-```
-
-Example: `codescout-companion:0b75991`, `buddy:abc1234`. A bare SHA
-implies the current repo. The convention is unenforced; readers
-following citations must notice the prefix. Schema-level enforcement
-(adding a `repo` field to `evidence_commits`) is deferred until a
-third cross-repo confusion lands (currently 1 concrete: F-4 in
-`docs/trackers/archive/artifact-code-linkage-session-log.md`).
-
-When citing a cross-repo SHA in a goal-tracker's progress_log, also
-include the repo name in the `note` body so readers don't have to
-parse the SHA prefix to know which `git log` to consult.
+Full release cycle, standard ship sequence, after-cherry-pick master-SHA rule, chained-git state-check, and concurrent-work reset safety → **`docs/RELEASE.md`**. SHA-citation + cross-repo `<repo>:<sha>` prefix discipline → memory `gotchas`. Commit style → memory `conventions`.
 ## Design Principles
 
-**Progressive Disclosure & Discoverability** — Every tool defaults to the most
-compact useful representation. Details are available on demand via
-`detail_level: "full"` + pagination. When results overflow, responses include
-actionable hints and file distribution maps (`by_file`). See
-`docs/PROGRESSIVE_DISCOVERABILITY.md` for the canonical patterns and
-anti-patterns — **read it before adding or modifying any tool**.
+codescout's conventions and design principles live in memory (auto-listed at session start) — read them when writing codescout code:
 
-**Token Efficiency** — The LLM's context window is a scarce resource. Tools
-minimize output by default: names + locations in exploring mode, full bodies
-only in focused mode. Overflow produces actionable guidance ("showing N of M,
-narrow with..."), not truncated garbage.
+- **`conventions`** — pre-commit gate, error handling (`RecoverableError` vs `anyhow::bail!`), no-echo writes (`json!("ok")`), the `call_content()` MCP entry point, progressive disclosure / two modes, **Agent-Agnostic Design**, testing patterns (three-query sandwich, `EnvGuard`), prompt-surface consistency, commit style.
+- **`architecture`** — module map, key abstractions, data flow, the three prompt surfaces.
 
-**No Echo in Write Responses** — Mutation tools (`create_file`, `edit_file`,
-`replace_symbol`, etc.) must never echo back what the LLM just sent. The caller
-already knows the path, content, and size — reflecting them wastes tokens with
-zero information gain. The only new information after a write is success/failure.
-Return `json!("ok")` for writes; reserve richer responses for cases where the
-tool discovers genuinely new information (e.g. LSP diagnostics after a write).
-
-**Two Modes** — `Exploring` (default): compact, capped at 200 items. `Focused`:
-full detail, paginated via offset/limit. Enforced via `OutputGuard`
-(`src/tools/output.rs`), a project-wide pattern not per-tool logic.
-
-**Tool Selection by Knowledge Level** — Know the name → LSP/AST tools
-(`symbols`, `symbol_at`). Know the concept →
-semantic search first, then drill down. Know nothing → `tree` +
-`symbols` at top level, then semantic search.
-
-**Agent-Agnostic Design** — Tool descriptions, error messages, and server
-instructions are the primary interface for LLMs. They must feel natural for
-Claude Code (our primary consumer) but work for any MCP client (Gemini CLI,
-Cursor, custom agents). In particular:
-- Error hints should name codescout tools (`replace_symbol`, `insert_code`),
-  not host-specific tools (`Edit`, `Write`). The LLM should never be tempted to
-  sidestep codescout by falling back to its host's native file editing.
-- The companion plugin (`codescout-companion`) adds Claude Code–specific
-  enforcement (PreToolUse hooks) but the server itself must be self-contained:
-  its gate logic, error messages, and instructions should guide any LLM toward
-  the right tool without relying on external hooks.
-- **Project workflows, prompts, and standards live in the repo, not in
-  `claude-plugins/`.** codescout is consumed by multiple agents (Claude Code,
-  Copilot, Antigravity, etc.). The source of truth for any project artifact —
-  research quality criteria, save workflows, tracker conventions, etc. — must
-  be a repo file (`docs/...`, `CLAUDE.md`, etc.) any agent can read. Plugin
-  content (skills, slash commands) is allowed *as a thin UX wrapper* over
-  repo-resident content, never as the source of truth. When in doubt: would a
-  Copilot user be locked out? If yes, move it to the repo.
-
-## Testing Patterns
-
-**Cache-invalidation tests use a three-query sandwich** — not two. The structure is:
-1. Query → record baseline state
-2. Mutate the underlying data (disk, cache, external system) without going through the normal notification path
-3. Query again → assert result is **stale** (same as baseline) — this proves the bug exists
-4. Trigger the invalidation (e.g. `did_change`, cache flush)
-5. Query again → assert result is **fresh** (reflects the mutation)
-
-A two-query test (baseline → post-invalidation) only confirms the happy path. The stale-assertion in step 3 is what makes it a *regression* test — it will fail if the underlying system ever changes to eagerly re-read on every query, alerting you that the invalidation logic has become wrong or unnecessary.
-
-See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs` for the canonical example.
-
-**Test helpers that build env-reading objects must isolate env per test.**
-Any helper that constructs an `Agent` (or any object that resolves config
-from process-global env like `LIBRARIAN_DB`, `LIBRARIAN_WORKSPACE`,
-`LIBRARIAN_CWD`) must return an `EnvGuard` and the calling test must
-carry `#[serial_test::serial]`. Exemplars: `EnvGuard` in
-`src/librarian/mod.rs::tests` and `src/server.rs::guide_hint_tests`. See
-[`docs/conventions/test-env-isolation.md`](docs/conventions/test-env-isolation.md)
-for the full rule + diagnostic shape + known cross-module gap.
-
-**Tests that exercise a fallback path gated on an exact-match miss must avoid substring overlap in their fixtures.** When a test exists to drive a branch that only fires when an exact match fails (e.g. `edit_file`'s whitespace-normalized fallback, gated on `content.matches(old_string).count() == 0`), the fixture's `old_string` must NOT be a literal substring of the file — otherwise the exact path fires first and the test silently exercises the *wrong* branch while still passing (green, but false coverage). Under-indentation alone is not enough: `"    x"` is a substring of `"        x"`. Use a fixture with no substring overlap (e.g. **tabs in the file vs spaces in `old_string`**), and assert on a path-specific marker (`applied_via`, the exact error wording) so a mis-route fails loudly instead of passing quietly. This mis-routing recurred 3× in the 2026-06-04 edit_file whitespace-fallback work — caught by spec/holistic review, never by the plan. See `docs/trackers/reconnaissance-patterns.md` R-16.
-## Key Patterns
-
-Load-bearing rules I keep getting wrong otherwise:
-
-- `RecoverableError` for expected, input-driven failures → `isError: false` (sibling calls survive)
-- `anyhow::bail!` for genuine tool failures → `isError: true` (fatal)
-- Write tools return `json!("ok")` — never echo content back
-- `call_content()` is the MCP entry point, NOT `call()` — it handles buffer routing
-
+Before adding or modifying any tool, read `docs/PROGRESSIVE_DISCOVERABILITY.md`. Full error decision tree: `get_guide("error-handling")`. Test isolation: `docs/conventions/test-env-isolation.md`.
 ## Prompt Surface Consistency
 
-The project has **three prompt surfaces** that reference tool names. Two are sliced out of a single editable file via `<!-- @surface NAME -->` markers; the third is code-generated:
-
-- `src/prompts/source.md` — single editable doc, sliced at build time (`build.rs` + `src/prompts/source.rs::extract_surface`) into:
-  - **`server_instructions` surface** — injected once at every MCP session start (not per-request)
-  - **`onboarding_prompt` surface** — one-time onboarding when a project is first activated
-- `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project
-
-See `src/prompts/README.md` for the surface contract + editing rules.
-
-**When tools get renamed/consolidated, all three need coordinated updates.** Files
-closer to the change get updated; distant ones accumulate stale refs ("distance
-from change" problem). The test
-`server::tests::prompt_surfaces_reference_only_real_tools` catches stale
-tool-name mentions across all three surfaces at build time — if it fails,
-either fix the stale reference or (if the token is a non-tool identifier like
-a param name) add it to the test's allowlist.
-
-**Any change to tool behavior or signatures requires a prompt surface review.**
-This includes: adding new tools, renaming tools, changing parameter semantics,
-adding new error/fallback modes, or modifying response shapes. Ask yourself:
-"Does the LLM need to know about this change to use the tool correctly?" If yes,
-update all three surfaces in the same commit.
-
-### Onboarding Version
-
-Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing prompt surfaces
-that produce the **stored per-project system prompt** — i.e. the `onboarding_prompt` surface
-of `source.md` or `build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system prompt
-regeneration for all projects onboarded with the previous version.
-
-**Do NOT bump for `server_instructions` surface changes.** That surface is injected fresh at
-every MCP session start (each `/mcp` connect re-reads the sliced text). There is no cached
-copy — changes take effect immediately on the next connect without any version bump.
-
-### Which surface needs a bump?
-
-| Surface | How delivered | Bump needed? |
-|---|---|---|
-| `server_instructions` surface (slice of `source.md`) | Loaded fresh at every MCP session start | **No** — live on next connect |
-| `onboarding_prompt` surface (slice of `source.md`) | Drives stored system prompt generation | **Yes** — cached per project |
-| `build_system_prompt_draft()` in `builders.rs` | Same — generates stored system prompt | **Yes** — cached per project |
-
-### Bump when
-
-- Tool names change (rename, consolidate)
-- Tool parameter semantics change in the `onboarding_prompt` surface of `source.md` or in `builders.rs`
-- Onboarding prompt templates change in ways that affect the generated system prompt
-
-### Do NOT bump for
-
-- Any change to the `server_instructions` surface of `source.md` (no matter how significant)
-- Bug fixes that don't change tool behavior
-- Internal refactors
-- Memory template changes (memories are re-read during refresh anyway)
-
-**Style guide for prompt surface edits:**
-see `src/prompts/README.md` for the 7 writing rules. Load that only when actually
-editing a prompt surface — it's not needed otherwise.
-### Verify the slice before committing (shared-branch hazard)
-
-The `server_instructions` slice is under a hard **2200-byte cap**, enforced by
-`prompts::redesign_invariants::source_md_under_cap`. The gate is load-bearing —
-it catches over-cap edits that no manual review sees (Claude Code silently
-truncates the MCP `initialize.instructions` field at ~2 KB, cutting *inside*
-the slice rather than just the dynamic suffix).
-
-- **Run `cargo test --lib prompt` before any prompt-surface edit is ready to
-  commit.** If `source_md_under_cap` fails, do NOT raise the cap or bless the
-  snapshot to match — move content to a `get_guide(topic)` and leave a pointer
-  in the slice (`src/prompts/README.md` rule 8).
-- **On a shared branch, re-measure the slice on *current* HEAD.** A concurrent
-  commit can grow the slice under you. `git log --oneline -1` first, then
-  re-check the byte count, before trusting any earlier measurement or running
-  `UPDATE_PROMPT_SNAPSHOTS=1` — otherwise you bless the over-cap state into the
-  fixture and ship a truncated slice.
-
-Datapoints: the gate has fired twice on over-cap prompt edits — F-4 (2026-05-28)
-and F-8/W-5 (2026-05-31) in `docs/trackers/prompt-guide-refactor-session-log.md`.
+Three prompt surfaces (`server_instructions` + `onboarding_prompt` slices of `src/prompts/source.md`, and `build_system_prompt_draft()` in `builders.rs`) must stay tool-name-consistent. Which surfaces exist, when to bump `ONBOARDING_VERSION`, the 2200-byte slice cap + shared-branch verify hazard, and the writing style guide → **`src/prompts/README.md`** (short version: memory `conventions`). Stale tool names are gated by `prompt_surfaces_reference_only_real_tools` (3 surfaces) and `claude_md_contains_no_deprecated_tool_names` (this file).
 ## Companion Plugin: codescout-companion
 
-This project has a companion Claude Code plugin at **`../claude-plugins/codescout-companion/`** that is **always active** when working on codescout. You must be aware of it.
-
-**What it does:**
-- `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session
-- `SubagentStart` hook (`hooks/subagent-guidance.sh`) — same for all subagents
-- `PreToolUse` hook on `Grep|Glob|Read|Bash|Edit|Write` (`hooks/pre-tool-guard.sh`) — **hard-denies (`permissionDecision: deny`) native Read/Grep/Glob/Edit/Write on source files and native Bash**, redirecting to codescout MCP tools
-
-**Full hook inventory** (per `hooks/hooks.json`) — beyond the three above, the plugin wires:
-
-*PreToolUse (guards — hard `permissionDecision: deny`):*
-- `mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)` → `worktree-write-guard.sh` — blocks codescout write tools when in a git worktree until `workspace(activate)` has run (clears the `.cs-worktree-pending` marker).
-- `Bash` → `git-worktree-guard.sh` — denies worktree-ambiguous destructive git verbs from Bash; requires `git -C <path>` (single-worktree repos carved out).
-- `mcp__.*__read_file` → `il4-deny-hook.sh` — IL4: hard-denies `read_file` on `.md` paths, redirecting to `read_markdown`.
-
-*PreToolUse (advisory — `exit 0` + injected hint):*
-- `mcp__.*__run_command` → `il3-warn-hook.sh` — IL3: warns (does not block) when piping unbounded `run_command` output to a log-trimmer; points at the `@cmd_*` buffer. (`il3-deny-hook.sh` exists on disk but is **not** registered — IL3 is warn-only.)
-- `Task` → `pre-task-hint.sh` — on the first subagent dispatch of a session, points at the `reconnaissance` skill.
-- `mcp__codescout__edit_code` → `pre-edit-hint.sh` — on the first shape-changing edit of a session, points at recon-for-shape-changes.
-
-*PostToolUse (state sync):*
-- `EnterWorktree` → `worktree-activate.sh` — injects workspace guidance, drops the `.cs-worktree-pending` write-block marker, symlinks `.codescout/` into the worktree.
-- `mcp__.*__workspace` → `cs-activate-project.sh` — records the declared workspace (statusline) and removes `.cs-worktree-pending` (unblocks write tools).
-
-*Stop:*
-- `goal-stop-hook.sh` — queries codescout goal-tracker artifacts at turn end and surfaces refresh-staleness in the stop reason; fail-open; disable via `.claude/codescout-companion.json {"goal_stop_hook": false}`.
-
-**Critical implication for working on this codebase:**
-The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep`, or `Glob` tools on source code files (`.rs`, `.ts`, `.py`, etc). You will see `PreToolUse:Read hook error` if you try.
-
-**You MUST use codescout's own MCP tools to read source code:**
-- `mcp__codescout__symbols(path)` — see all symbols in a file/dir
-- `mcp__codescout__symbols(name=..., include_body=true)` — read a function body
-- `mcp__codescout__search_pattern(pattern)` — regex search
-- `mcp__codescout__semantic_search(query)` — concept-level search
-- `mcp__codescout__read_file(path)` — for non-source files (markdown, toml, json)
-
-**Cross-repo work (companion: hardened 2026-05-21):**
-The Bash branch of `pre-tool-guard.sh` no longer allows a `cd`-escape. **All native `Bash` is hard-denied and redirected to `run_command`**, whose cwd is sandboxed to the active project. For a sibling repo's git, run from the project root via `run_command(command="git -C /abs/path <subcommand>")` — no `cd` needed. For non-git work in a sibling (or out-of-shape commands like `pushd` / `bash -c '...'`), switch the codescout workspace explicitly:
-
-```
-workspace(action="activate", path="/path/to/sibling", read_only=false)
-# ...do the work...
-workspace(action="activate", path="/home/marius/work/claude/code-explorer", read_only=false)
-```
-
-Per Iron Law 4, restore the original workspace before turn end. The MCP server is shared state — leaving it pointed at a sibling project pollutes the next session. Bug history at `docs/issues/2026-05-20-cross-repo-git-ops-friction.md`.
-
-**Configuration:**
-- Auto-detects codescout from `.mcp.json` or `~/.claude/settings.json`
-- Can be overridden via `.claude/codescout-companion.json`
-- `block_reads: false` in that config to disable blocking (dev/debug use)
-
-### Concurrent multi-workspace: one server, one active project
-
-codescout's active project is **process-global** — one slot per server process. Parallel
-subagents within a single session share that one server, so if they `workspace(activate)`
-*different* paths concurrently it is **last-writer-wins**: a subagent can silently read
-another's worktree. The project `name` is identical across worktrees of one repo, so only the
-full `project_root` reveals the swap.
-
-**Rule:** pin per call. Pass `workspace=<absolute path>` on each tool call that targets a
-specific project — resolution travels with the request, so concurrent subagents on *different*
-workspaces never collide on the one shared slot. Reserve `workspace(action="activate")` for
-sustained single-agent work and restore the home workspace before turn end (Iron Law 4). For
-fully independent parallel work, **separate Claude Code windows** also isolate (separate
-processes → separate slots). The legacy hazard survives only on the *unpinned* path:
-concurrent `activate` of *different* workspaces is still last-writer-wins, and now surfaces a
-`concurrent_activation_warning` pointing at the pin.
-
-The root-cause fix (per-request `workspace` pinning) **shipped** — every pinnable tool now
-advertises the `workspace` param (Phase 5 keystone `1a65bff2` + polish `b13c8c66`, both on
-`master`). Rationale and the concurrent-subagent patterns live in
-[`compact-schemas-and-activate-project-safety.md`](docs/manual/src/concepts/compact-schemas-and-activate-project-safety.md);
-bug history (fixed, archived) at
-`docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`. Phase 4b
-(different-root *write* parallelism) is performance-only and stays deferred —
-`docs/plans/2026-05-30-per-request-workspace-pinning.md`. Separate worktrees of one repo across
-separate processes are fine; the kotlin per-worktree LSP isolation bug is fixed
-(`docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`).
+A companion Claude Code plugin (`../claude-plugins/codescout-companion/`) is **always active** here. The rule that bites mid-task: **native `Read`/`Grep`/`Glob`/`Edit`/`Write` on source files and all native `Bash` are hard-denied — use codescout's MCP tools** (`symbols`, `grep`, `edit_code`, `read_file`/`read_markdown`, `run_command`). Full hook inventory, cross-repo flow, and concurrent-multi-workspace rules → **`docs/architecture/companion-plugin.md`**.
 ## Language-Specific LSP Issues
 
 See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts,
@@ -666,6 +170,9 @@ Files:
 - `docs/ARCHITECTURE.md` — Component details, tech stack, design principles
 - `docs/ROADMAP.md` — Quick status overview
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
+- `docs/RELEASE.md` — Release cycle, ship sequence, git-workflow safety
+- `docs/architecture/companion-plugin.md` — codescout-companion hook inventory + cross-repo flow
+- `src/prompts/README.md` — prompt-surface rules: surfaces, `ONBOARDING_VERSION`, 2200-byte cap, style guide
 
 Memories (Claude auto-loads these; listed for reference):
 

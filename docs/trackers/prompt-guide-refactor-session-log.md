@@ -140,6 +140,7 @@ This measurement must precede the V2 decision.
 | F-7 | 2026-05-28 | med | codescout-tool | fixed-verified | `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body |
 | F-8 | 2026-05-31 | high | 2kb-cap | fixed-verified | Concurrent Phase-5 commit (b13c8c66) pushed slice to 2272 B (over cap) + left snapshot stale; re-scout caught before bless/commit |
 | F-9 | 2026-06-03 | low | get-guide-topic | open | Tool-name drift guard scans 3 surfaces only — `get_guide` body files (`prompts/guides/*.md`) are ungated |
+| F-10 | 2026-06-21 | med | tool-name-gate | mitigated | Module-level `const` used only in `#[cfg(test)]` breaks `clippy -D warnings` (dead_code) |
 
 ## Wins Index
 
@@ -152,6 +153,7 @@ This measurement must precede the V2 decision.
 | W-5 | 2026-05-31 | high | Re-measured byte budget on current HEAD (not a cached count) | Would have blessed snapshot to 2337 B + committed a red branch (cap+snapshot failing); silent prod slice truncation | validated |
 | W-6 | 2026-06-03 | med | Pre-draft scout of which gates apply to a specific prompt-surface | Avoided a fabricated guide byte-cap rationale + skipped manual tool-name verification (stale name would ship unguarded) | validated |
 | W-7 | 2026-06-03 | med-high | Tier guide content by point-of-use frequency (split librarian core vs on-demand runtime) | Every artifact-session carried ~6 KB rarely-needed reference on the auto-inject; split → −31% per-session, runtime now inline-fetch | validated |
+| W-8 | 2026-06-21 | med | Pre-edit scout: confirm a markdown file is/ isn't `include_str!`'d before cutting it | CLAUDE.md cuts could have tripped a byte-cap/snapshot invariant if compiled in; module-level shared const would have broken `clippy -D warnings` | validated |
 
 ---
 
@@ -633,6 +635,48 @@ Symptoms:
 
 **Status:** validated — committed `27bf11dc`, 105 prompt/guide tests green, verified live.
 
+## F-10 — Module-level `const` used only in `#[cfg(test)]` breaks `clippy -D warnings` (dead_code)
+
+**Observed:** 2026-06-21, building the CLAUDE.md deprecated-tool-name gate (task 1 of the Hamsa CLAUDE.md cleanup).
+
+**When:** About to extract the six dead tool names into a shared `DEPRECATED_TOOL_NAMES` const so the existing `rendered_server_instructions_contains_no_deprecated_tool_names` test and the new CLAUDE.md gate could both reference one source of truth. Plan note implied a module-level const in `src/prompts/mod.rs`.
+
+**Expected:** A shared `const DEPRECATED_TOOL_NAMES: &[&str]` at module scope is a harmless refactor.
+
+**Got (scouted):** codescout's completion gate runs `cargo clippy -- -D warnings`. A module-level const referenced only from `#[cfg(test)]` code is `dead_code` in a normal build → clippy promotes the warning to an error → gate fails. The const must live *inside* `#[cfg(test)] mod tests` (where both deprecated-name tests already are), not at module scope.
+
+**Probable cause:** Test-only items at module scope are invisible to `cfg(test)`-gated consumers during ordinary builds; `-D warnings` is unforgiving of the resulting dead_code.
+
+**Workaround:** Declare `DEPRECATED_TOOL_NAMES` at the top of `#[cfg(test)] mod tests` in `src/prompts/mod.rs`; both the existing dead-name test and the new CLAUDE.md gate consume it from there.
+
+**Severity:** med — would have caused a `clippy -D warnings` gate failure + one fix/retry on first `cargo clippy`.
+
+**Status:** mitigated — placement decided pre-edit; build-verification pending the task-1/2 `cargo test` / `clippy` run.
+
+**Fix idea / Pointer:** task 1 (gate) + task 2 (fix names), this session. Sibling of F-9 — CLAUDE.md is a third ungated tool-name surface; this gate closes it via a *denylist* (the allowlist guard F-9 names is unusable on CLAUDE.md's prose).
+
+---
+
+## W-8 — Pre-edit scout confirmed CLAUDE.md is not `include_str!`'d and caught the test-only-const clippy trap
+
+**Observed:** 2026-06-21, before adding the deprecated-tool-name gate + editing CLAUDE.md (Hamsa CLAUDE.md cleanup, tasks 1–4).
+
+**Pattern:** Before editing a markdown file that *might* back a compiled constant, grep `include_str!` across `src/` + full-workspace references to the file, and read the relevant `*_invariants` module — establish whether any compile-time gate asserts on the file before cutting it.
+
+**Counterfactual:** Two avoided costs. (1) If CLAUDE.md had been `include_str!`'d (plausible — `source.md`, `guides/*.md`, `onboarding_prompt.md` all are), the large relocations in tasks 3–4 could have tripped a byte-cap/snapshot invariant mid-cut; the scout proved it is NOT compiled in (absent from the `include_str!` set; `Cargo.toml exclude=["CLAUDE.md"]`; referenced only as prose in `docs/`), so the cuts are gate-free. (2) The module-level shared-const plan would have broken `clippy -D warnings` (F-10); caught before the first edit.
+
+**Confirming data points:**
+1. `include_str!` grep (9 files) — CLAUDE.md absent; `redesign_invariants` asserts only on `build_server_instructions`, never CLAUDE.md.
+2. `Cargo.toml` `exclude=["CLAUDE.md"]` — deliberately out of the crate.
+3. F-10 (this session) — test-only const placement corrected pre-edit.
+
+**Impact:** med — de-risked the four-task cut and prevented one clippy gate failure.
+
+**Promote-when:** a second markdown-cut task scouts include_str!-backing before editing. At 2 datapoints, promote to CLAUDE.md/README: "Before cutting a prompt/markdown surface, confirm whether it backs an `include_str!` constant and which invariants assert on it."
+
+**Status:** validated — single datapoint; both risks resolved against source before any edit.
+
+---
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
