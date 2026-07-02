@@ -542,6 +542,25 @@ fn smart_replace_detection_non_heading() {
     assert!(result.contains("## Setup"));
     assert!(result.contains("#hashtag comment"));
 }
+#[test]
+fn replace_with_deeper_heading_preserves_target_heading() {
+    // Regression for docs/issues/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md:
+    // new content whose first line is a heading at a DEEPER level than the
+    // target is a subsection of the target, not a replacement for the
+    // target's own heading line -- the target heading must survive.
+    let content = "# Title\n## Unreleased\n### Added\nold entry\n## Next\nstuff\n";
+    let result = perform_section_edit(
+        content,
+        "## Unreleased",
+        "replace",
+        Some("### Added\nnew entry\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        "# Title\n## Unreleased\n\n### Added\nnew entry\n## Next\nstuff\n"
+    );
+}
 
 #[test]
 fn heading_inside_code_block_edit() {

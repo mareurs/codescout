@@ -125,10 +125,18 @@ pub fn perform_section_edit_ext(
                 }
             }
 
+            // Only treat the new content's first line as a replacement for the
+            // TARGET heading itself when it's a heading at the SAME level.
+            // A deeper-level heading (e.g. replacing an H2 with content whose
+            // first line is an H3) is a subsection under H2, not a replacement
+            // for H2 -- checking "is this any heading" instead of "is this the
+            // same level as the target" silently deleted the target heading.
+            // See docs/issues/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md.
             let replace_heading = new
                 .lines()
                 .next()
-                .map(|l| heading_level(l.trim_end()).is_some())
+                .and_then(|l| heading_level(l.trim_end()))
+                .map(|lvl| lvl == range.level)
                 .unwrap_or(false);
 
             // F-3: a trailing horizontal-rule separator (`---`, `***`, `___`)

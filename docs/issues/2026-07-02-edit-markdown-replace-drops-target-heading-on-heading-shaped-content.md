@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-07-02
-closed:
+closed: 2026-07-02
 severity: high
 owner: marius
 related: ["2026-05-26-edit-markdown-insert-after-fuses-heading", "2026-05-26-edit-markdown-scoped-edit-fuses-heading"]
@@ -107,7 +107,7 @@ integrity), different mechanism.
    heuristic misfiring, not a missing `ensure_trailing_newline` call.
 
 ## Fix
-*(Proposed — not yet implemented.)* `replace_heading` should only fire when
+**Implemented** on `experiments` (master-side SHA to be recorded after cherry-pick; see CLAUDE.md § "After cherry-pick"). `src/tools/markdown/edit_markdown.rs`, `perform_section_edit_ext`, `"replace"` arm: `replace_heading` should only fire when
 the new content's first heading is at the **same level** as the target
 heading (i.e. genuinely replacing `H`'s own line), not merely *a* heading of
 *any* level. Something like:
@@ -127,12 +127,14 @@ When `include_subsections=true` and the new content's first line is a
 does exactly this — the fix is just gating entry into the wrong branch).
 
 ## Tests added
-N/A — bug not yet fixed. Regression test should cover: `replace` with
-`include_subsections=true` where `content`'s first line is (a) a
-same-level heading (should still replace `H`'s line — today's correct
-behavior), (b) a deeper-level heading (should preserve `H`'s line and nest
-the new content under it — today's bug), (c) plain body text (unaffected,
-already correct).
+`replace_with_deeper_heading_preserves_target_heading`
+(`src/tools/markdown/tests.rs`) covers case (b) -- new content's first line
+is a deeper-level heading than the target; the target heading now survives
+and the new content nests under it. Cases (a) same-level heading and (c)
+plain body text were already covered by pre-existing tests
+(`replace_with_heading`, `nested_section_replace`) and still pass
+unchanged. 148/148 markdown tests green; full suite 2978/2978 (43
+ignored); `cargo fmt` + `clippy --all-targets -D warnings` clean.
 
 ## Workarounds
 When calling `edit_markdown(action="replace", include_subsections=true, ...)`,
@@ -143,10 +145,8 @@ calls instead. Always re-read the heading map after a `replace` with
 `include_subsections=true` to confirm the target heading survived.
 
 ## Resume
-Implement the same-level gate above in `src/tools/markdown/edit_markdown.rs`
-(`perform_section_edit_ext`, `"replace"` arm, ~line 128). Add the three-case
-regression test described in Tests added. Verify against the two sibling
-fusion bugs' existing tests to confirm no regression.
+N/A — fixed. Ship to master via the Standard Ship Sequence and record the
+master-side SHA in this Fix section.
 
 ## References
 - `src/tools/markdown/edit_markdown.rs:78-260` (`perform_section_edit_ext`), `:128-131` (`replace_heading` heuristic)
