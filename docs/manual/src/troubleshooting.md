@@ -307,8 +307,7 @@ codescout start --project /path/to/project
 
 ### "Permission denied" or "Access denied" reading a file
 
-The file is in the built-in deny list or matches a pattern in
-`denied_read_patterns`.
+The file is in the built-in, non-configurable deny list.
 
 The built-in deny list blocks access to sensitive locations regardless of
 configuration:
@@ -328,10 +327,11 @@ configuration:
 On Linux, `/etc/shadow` and `/etc/gshadow` are also blocked. On macOS,
 `/etc/master.passwd` is blocked.
 
-**Fix:** This is intentional security behavior. If you genuinely need access
-to a blocked path, check whether it is in the built-in list (cannot be
-overridden) or in `denied_read_patterns` in `project.toml` (can be removed).
-See [Project Configuration](configuration/project-toml.md) for details.
+**Fix:** This is intentional security behavior and the list is not
+configurable. If you genuinely need unrestricted absolute-path reads, set
+`profile = "root"` in `project.toml` — this disables the deny-list check
+entirely rather than allowlisting one path. See [Project
+Configuration](configuration/project-toml.md) for details.
 
 ### "Access denied" writing a file outside the project
 

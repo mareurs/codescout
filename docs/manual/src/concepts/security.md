@@ -64,21 +64,22 @@ On Linux, `/etc/shadow` and `/etc/gshadow` are also blocked. On macOS,
 accidentally leaking credentials even if pointed at a project that tries to read
 them.
 
-### Extending the Deny List
+### The Deny List Is Not Configurable
 
-To block additional paths specific to your environment, add them to
-`project.toml`:
+The built-in deny list cannot be extended or shrunk via `project.toml` — there
+is no `denied_read_patterns` option (an earlier config field by that name was
+removed when the `profile` system replaced it; docs describing it were stale).
+The only lever is `profile`:
 
 ```toml
 [security]
-denied_read_patterns = [
-    "~/.config/my-app/credentials",
-    "/etc/internal",
-]
+profile = "root"
 ```
 
-Entries are prefix-matched, so `"~/.config/my-app"` blocks everything under
-that directory.
+`profile = "root"` does **not** add a stronger sandbox — it disables the
+deny-list check entirely for absolute-path reads. Reach for it only for
+system-administration projects that legitimately need unrestricted read
+access, and understand it as an opt-out, not an upgrade.
 
 ## Write Policy
 
@@ -87,7 +88,7 @@ that directory.
 boundary**. The check happens before any I/O:
 
 1. **Deny list first** — the target path is checked against the built-in deny
-   list and `denied_read_patterns`. Even `extra_write_roots` cannot bypass this.
+   list. Even `extra_write_roots` cannot bypass this.
 2. **Boundary check** — the canonicalized path must fall under the project root
    or an explicitly configured `extra_write_roots` entry.
 3. **Symlink escape prevention** — the parent directory is canonicalized (not

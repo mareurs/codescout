@@ -126,7 +126,7 @@ conservative by default: shell execution warns before running, file writes are o
 
 ```toml
 [security]
-denied_read_patterns = []
+profile = "default"
 extra_write_roots = []
 shell_command_mode = "warn"
 file_write_enabled = true
@@ -135,7 +135,7 @@ indexing_enabled = true
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `denied_read_patterns` | array of strings | `[]` | Additional path prefixes to block from `read_file` and other read tools, beyond the built-in deny-list (see below). |
+| `profile` | string | `"default"` | `"default"` enforces the built-in read deny-list; `"root"` skips it entirely for absolute-path reads (see [Security & Permissions](../concepts/security.md)). Not a stronger sandbox — a bypass. |
 | `extra_write_roots` | array of strings | `[]` | Additional directories where file write tools are allowed. By default writes are restricted to the project root. |
 | `shell_command_mode` | string | `"warn"` | Controls `run_command` behaviour. One of `"unrestricted"`, `"warn"`, or `"disabled"`. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
@@ -143,33 +143,26 @@ indexing_enabled = true
 
 ### Built-in Read Deny-List
 
-Regardless of `denied_read_patterns`, codescout always blocks reads from these locations:
+codescout always blocks reads from a built-in set of credential and secret
+locations — SSH/cloud/git/package-registry credentials, password managers,
+shell history files, and OS-level secret stores. A representative sample:
 
 ```
 ~/.ssh
 ~/.aws
 ~/.gnupg
 ~/.config/gcloud
-~/.config/gh
 ~/.docker/config.json
 ~/.netrc
 ~/.npmrc
-~/.kube/config
 ```
 
-On Linux, `/etc/shadow` and `/etc/gshadow` are also blocked. On macOS, `/etc/master.passwd`
-is blocked.
-
-Use `denied_read_patterns` to extend this list with additional secrets or sensitive files
-specific to your environment:
-
-```toml
-[security]
-denied_read_patterns = [
-    "~/.config/my-app/credentials",
-    "/etc/private",
-]
-```
+On Linux, `/etc/shadow`, `/etc/sudoers`, and `/proc/self/environ` are also
+blocked; on macOS, `/etc/master.passwd` and `~/Library/Keychains`. The list is
+**not configurable** and grows over time — the authoritative, current list is
+`denied_read_prefixes()` in `src/platform/unix.rs` (and the Windows equivalent).
+The only way to bypass it is `profile = "root"`, which disables the check
+entirely for absolute-path reads rather than extending or shrinking it.
 
 ### Shell Command Mode
 
