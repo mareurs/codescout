@@ -20,6 +20,12 @@ tool-map for the model.
   (`/home/marius/.cargo/bin/codescout`) because `~/.cargo/bin` is not on PATH
   on this machine (F-2). Adjust the `command` in `mcp.json` to your binary
   location if different.
+- `mcp.json` is gitignored (it holds API keys for the `researcher` server) —
+  copy it from `mcp.json.example` before installing:
+
+      cp contrib/pi/mcp.json.example contrib/pi/mcp.json
+
+  then fill in your keys and adjust the `command` paths.
 
 ## Install
 
@@ -32,7 +38,8 @@ directTools cache; on the first session directTools fall back to the proxy
 until the cache is populated).
 
 ## Files
-- `mcp.json` -> `~/.pi/agent/mcp.json` — codescout server (absolute command) + directTools hot-set.
+- `mcp.json` (gitignored, personal — create from `mcp.json.example`) -> `~/.pi/agent/mcp.json` — codescout server (absolute command) + directTools hot-set.
+- `mcp.json.example` — tracked template with placeholder API keys.
 - `codescout-mode.ts` -> `~/.pi/agent/extensions/` — curation + bash nudge.
 - `AGENTS.md` -> `~/.pi/agent/AGENTS.md` — tool-map guidance.
 - `install.sh` — idempotent symlink installer (backs up any existing real AGENTS.md).

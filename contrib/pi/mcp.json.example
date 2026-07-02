@@ -1,0 +1,53 @@
+{
+  "mcpServers": {
+    "codescout": {
+      "command": "/home/marius/.cargo/bin/codescout",
+      "args": ["start"],
+      "lifecycle": "lazy",
+      "directTools": [
+        "grep",
+        "symbols",
+        "symbol_at",
+        "tree",
+        "semantic_search",
+        "references",
+        "read_file",
+        "read_markdown",
+        "edit_code",
+        "edit_file",
+        "edit_markdown"
+      ],
+      "env": {
+        "CODESCOUT_QDRANT_URL": "http://127.0.0.1:6334",
+        "CODESCOUT_EMBEDDER_URL": "http://127.0.0.1:48081",
+        "CODESCOUT_EMBEDDER_MODEL_NAME": "CodeRankEmbed-Q4_K_M.gguf",
+        "CODESCOUT_QUERY_PREFIX": "Represent this query for searching relevant code: ",
+        "CODESCOUT_MODEL_DIM": "768",
+        "CODESCOUT_SPARSE_EMBEDDER_URL": "http://127.0.0.1:48084",
+        "CODESCOUT_BM25_BOOST": "3.0",
+        "CODESCOUT_RERANKER_URL": "http://127.0.0.1:48083",
+        "CODESCOUT_RERANKER_PROTOCOL": "llama-server"
+      }
+    },
+    "researcher": {
+      "command": "/home/marius/work/claude/researcher/target/release/researcher-mcp",
+      "lifecycle": "lazy",
+      "directTools": ["research_run"],
+      "env": {
+        "LLM_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "LLM_MODEL": "gemini-3.1-flash-lite-preview",
+        "LLM_API_KEY": "<your-gemini-api-key>",
+        "LLM_MAX_TOKENS": "4096",
+        "SEARXNG_URL": "http://localhost:4000",
+        "BRAVE_API_KEY": "<your-brave-api-key>",
+        "TAVILY_API_KEY": "<your-tavily-api-key>",
+        "EXA_API_KEY": "<your-exa-api-key>",
+        "EMBED_BASE_URL": "http://localhost:30082",
+        "RERANK_BASE_URL": "http://localhost:30083",
+        "STRIP_THINKING_TOKENS": "false",
+        "LLM_FAST_BASE_URL": "",
+        "LLM_FAST_STAGES": ""
+      }
+    }
+  }
+}

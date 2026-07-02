@@ -12,7 +12,7 @@ Use them instead of bash equivalents.
 ## Searching
 - `semantic_search` — concept-level / natural-language search.
 - `references` — who calls / uses a symbol (NOT bash grep).
-- exact-regex search: codescout `grep` via the `mcp` proxy (not a first-class tool — its bare name clashes with Pi's built-in grep).
+- exact-regex search: `codescout_grep` — direct tool (prefixed to avoid clash with pi's built-in `grep`).
 - Do NOT `rg`/`grep -r`/`find -name` source via bash.
 
 ## Editing
@@ -24,6 +24,10 @@ Use them instead of bash equivalents.
 
 ## Shell
 - `bash` — tests, git, build, and process tasks only.
+
+## Research
+- `researcher_research_run` — direct tool. Use `/research-web` for inline lookups, `/research-subagent` for deep/isolated research.
+- Load `researcher-mcp` skill for tool selection matrix and brief template.
 
 ## Deeper codescout (on demand)
 - Trackers/artifacts, project memory, librarian, workspace, indexing, and other

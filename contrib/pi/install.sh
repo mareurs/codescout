@@ -7,6 +7,11 @@ AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 
 mkdir -p "$AGENT_DIR/extensions"
 
+if [ ! -e "$SRC/mcp.json" ]; then
+  cp "$SRC/mcp.json.example" "$SRC/mcp.json"
+  echo "Created $SRC/mcp.json from mcp.json.example — fill in your API keys before use."
+fi
+
 ln -sf "$SRC/mcp.json" "$AGENT_DIR/mcp.json"
 ln -sf "$SRC/codescout-mode.ts" "$AGENT_DIR/extensions/codescout-mode.ts"
 
