@@ -45,6 +45,17 @@ Full failing set (clustered):
 - `tools::markdown::tests::format_compact_live_renders_claude_md_as_map_shape`
 - `tools::run_command::tests::background_command_with_quotes_captures_output`
 
+**2026-07-02 addendum (post fix-wave):** the C2 fix (59df5c9e) added
+`symbols_overview_glob_marks_grammarless_language_warming_instead_of_dropping_file`,
+which exercises the same wine-broken glob-walk path as the skipped
+`symbols_path_type_glob/directory` cluster and fails under wine identically
+("legacy.c must remain visible" — the wine walker lists no files; reproduced
+locally, 2.03s). Added to the CI skip list — symbols cluster is now 7 entries;
+skip inventory total 21 (20 pre-existing + 1 new-test-same-quirk). Also noticed
+on the gnu *test* compile: three new WIN-23-class dead-code warnings
+(`strip_deleted_suffix`, `stable_codescout_binary`, `resolve_mux_binary` in
+src/lsp/manager.rs — unix-only callers); harmless to the job (no -D warnings)
+but should get `cfg_attr` gating when the wine clusters are next touched.
 ## Reproduction
 On Linux with mingw-w64 + wine + rustup target `x86_64-pc-windows-gnu`:
 
