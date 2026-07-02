@@ -78,6 +78,29 @@ jobs:
           echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       - run: cargo test ${{ matrix.config.flags }}
 
+  windows-gnu:
+    name: Windows-gnu cross (MinGW + wine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - name: Install MinGW + wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 wine wine64
+      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-gnu-cross
+      - name: Cross-build (default features)
+        run: scripts/build-windows.sh build
+      - name: Cross-test under wine (lib only)
+        run: scripts/build-windows.sh test --lib
+
   tool-docs-sync:
     name: Tool Docs Sync
     runs-on: ubuntu-latest
