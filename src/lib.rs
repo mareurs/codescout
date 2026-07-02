@@ -39,6 +39,7 @@ pub mod memory;
 pub mod migrate;
 #[cfg(unix)]
 pub mod peer;
+pub mod perf;
 pub mod platform;
 pub mod prompts;
 pub mod retrieval;

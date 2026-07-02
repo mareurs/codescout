@@ -171,8 +171,10 @@ impl Tool for ActivateProject {
         }
         let root = root.canonicalize().unwrap_or(root);
         let had_home = ctx.agent.home_root().await.is_some();
+        let mut timer = crate::perf::PhaseTimer::start("activate_project");
 
         ctx.agent.activate(root.clone(), read_only).await?;
+        timer.lap("agent_activate");
 
         let prewarm_langs = ctx
             .agent
@@ -192,13 +194,17 @@ impl Tool for ActivateProject {
         };
 
         let concurrent_warning = ctx.agent.note_activation(&root).await;
+        timer.lap("note_activation");
         let auto_registered = crate::library::auto_register::auto_register_deps(&root, ctx).await;
+        timer.lap("auto_register_deps");
         let mut resp = build_activation_response(ctx, scenario, &auto_registered).await?;
+        timer.lap("build_response");
         if let Some(w) = concurrent_warning {
             if let Some(obj) = resp.as_object_mut() {
                 obj.insert("concurrent_activation_warning".to_string(), json!(w));
             }
         }
+        timer.finish();
         Ok(resp)
     }
 
@@ -426,6 +432,7 @@ async fn build_activation_response(
     scenario: HintScenario,
     auto_registered: &[crate::library::auto_register::RegisteredDep],
 ) -> anyhow::Result<Value> {
+    let mut timer = crate::perf::PhaseTimer::start("activation_response");
     let (
         project_name,
         project_root_str,
@@ -459,10 +466,13 @@ async fn build_activation_response(
         })
         .await?;
 
+    timer.lap("project_snapshot");
+
     // has_index probe via Qdrant — best-effort. When the retrieval stack is
     // offline (common in tests), report false rather than erroring out the
     // activation response.
     let has_index = check_has_index(&project_name, &project_root_path).await;
+    timer.lap("check_has_index");
 
     let version_stale = onboarding_version_stale(stored_onboarding_version);
 
@@ -473,6 +483,7 @@ async fn build_activation_response(
     };
 
     let workspace = ctx.agent.workspace_summary().await;
+    timer.lap("workspace_summary");
     let workspace_json = workspace.as_ref().map(|projects| {
         projects
             .iter()
@@ -525,6 +536,7 @@ async fn build_activation_response(
     // to always include.
     let hints =
         crate::mcp_resources::project_hints::probe_project_hints(&project_root_path, &memories);
+    timer.lap("probe_project_hints");
 
     // Legacy sqlite memory db detection — surfaces a one-line migration hint
     // when `.codescout/embeddings/project.db` exists on disk. This file is
@@ -587,6 +599,7 @@ async fn build_activation_response(
         });
     }
 
+    timer.finish();
     Ok(result)
 }
 
