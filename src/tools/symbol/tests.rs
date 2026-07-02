@@ -4927,6 +4927,148 @@ async fn symbols_overview_serves_treesitter_with_warming_hint_during_lsp_cold_st
     );
 }
 
+#[tokio::test]
+async fn symbols_overview_single_file_grammarless_language_errors_recoverably_on_lsp_cold_start() {
+    use crate::lsp::{LspClientOps, LspProvider};
+    use crate::tools::symbol::Symbols;
+
+    // C2: languages with an LSP but no tree-sitter fallback (c/cpp/csharp/ruby)
+    // have nowhere to fall back to when the LSP budget elapses. A budget miss
+    // must surface as a RecoverableError (isError: false, retryable) rather
+    // than a hard error or a silently missing file. Real 2s
+    // LSP_FIRST_CALL_BUDGET applies here (the single-file arm hardcodes the
+    // const — it cannot be injected), so ~2s runtime is expected.
+    struct NeverReady;
+
+    #[async_trait::async_trait]
+    impl LspProvider for NeverReady {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &std::path::Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn LspClientOps>> {
+            std::future::pending().await
+        }
+        async fn notify_file_changed(&self, _path: &std::path::Path) {}
+        async fn shutdown_all(&self) {}
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("legacy.c");
+    std::fs::write(&file, "int main(void) { return 0; }\n").unwrap();
+
+    let lsp: Arc<dyn LspProvider> = Arc::new(NeverReady);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let start = std::time::Instant::now();
+    let err = Symbols
+        .call(json!({"path": "src/legacy.c"}), &ctx)
+        .await
+        .expect_err("expected a RecoverableError for a grammar-less language on cold LSP start");
+    let elapsed = start.elapsed();
+
+    assert!(
+        err.downcast_ref::<crate::tools::RecoverableError>()
+            .is_some(),
+        "grammar-less budget miss must be RecoverableError, got: {err}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("'c'"),
+        "expected the language name in the error: {msg}"
+    );
+    assert!(
+        msg.to_lowercase().contains("starting") || msg.to_lowercase().contains("warming"),
+        "expected a starting/warming message, got: {msg}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "budget-bound error should resolve well within the 2s budget window, took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn symbols_overview_glob_marks_grammarless_language_warming_instead_of_dropping_file() {
+    use crate::lsp::{LspClientOps, LspProvider};
+    use crate::tools::symbol::Symbols;
+
+    // C2 (glob path): a .c file with a still-cold LSP and no tree-sitter
+    // fallback must stay visible in the aggregated glob overview — empty
+    // symbols, marked "lsp": "warming" — rather than being silently dropped
+    // from `files`. Real 2s LSP_FIRST_CALL_BUDGET applies here too.
+    struct NeverReady;
+
+    #[async_trait::async_trait]
+    impl LspProvider for NeverReady {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &std::path::Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn LspClientOps>> {
+            std::future::pending().await
+        }
+        async fn notify_file_changed(&self, _path: &std::path::Path) {}
+        async fn shutdown_all(&self) {}
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(src_dir.join("legacy.c"), "int main(void) { return 0; }\n").unwrap();
+
+    let lsp: Arc<dyn LspProvider> = Arc::new(NeverReady);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = Symbols
+        .call(json!({"path": "src/*.c"}), &ctx)
+        .await
+        .expect("glob overview must succeed even when the language has no grammar fallback");
+
+    let files = result["files"].as_array().expect("files array");
+    let entry = files
+        .iter()
+        .find(|f| f["file"].as_str() == Some("src/legacy.c"))
+        .expect("legacy.c must remain visible in the glob overview");
+    assert_eq!(entry["lsp"].as_str(), Some("warming"));
+    assert_eq!(
+        entry["symbols"].as_array().map(|a| a.len()),
+        Some(0),
+        "grammar-less warming entry must carry an empty symbols array, got: {entry}"
+    );
+}
+
 #[test]
 fn symbols_overview_with_overflow() {
     let val = serde_json::json!({

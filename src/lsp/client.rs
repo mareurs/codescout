@@ -360,7 +360,6 @@ impl LspClient {
     }
 
     /// Start a language server process and perform the LSP initialize handshake.
-    /// Start a language server process and perform the LSP initialize handshake.
     pub async fn start(config: LspServerConfig) -> Result<Self> {
         const SPAWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 

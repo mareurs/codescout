@@ -295,11 +295,26 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                     "file": rel.display().to_string(),
                     "symbols": json_symbols,
                     "lsp": "warming",
+                    "hint": "Language server is starting; symbols served from tree-sitter. \
+                             Re-run shortly for LSP-grade detail.",
                 });
                 if include_docs {
                     entry["docstrings"] = json!(collect_docstrings(file_path));
                 }
                 result.push(entry);
+            } else {
+                // No grammar to fall back on: keep the file visible with an empty,
+                // warming-marked entry instead of silently dropping it.
+                let rel = file_path.strip_prefix(&root).unwrap_or(file_path);
+                result.push(json!({
+                    "file": rel.display().to_string(),
+                    "symbols": [],
+                    "lsp": "warming",
+                    "hint": format!(
+                        "language server for {lang} is still starting; no tree-sitter \
+                         fallback for this language — retry shortly"
+                    ),
+                }));
             }
         }
         let mut result_json = json!({ "pattern": rel_path, "files": result });
@@ -353,6 +368,18 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 symbols
             }
             None => {
+                if ast::get_ts_language(raw_lang).is_none() {
+                    // LSP-configured language with no tree-sitter fallback (c/cpp/csharp/ruby):
+                    // a budget miss is a normal, retryable condition — never a hard error.
+                    return Err(RecoverableError::with_hint(
+                        format!(
+                            "language server for '{raw_lang}' is still starting and there is no \
+                             tree-sitter fallback for this language"
+                        ),
+                        "Retry shortly — the server keeps warming in the background.",
+                    )
+                    .into());
+                }
                 // LSP cold / not configured: serve tree-sitter now; the detached
                 // warm-up (if a server exists) makes the next call LSP-grade.
                 lsp_warming = true;

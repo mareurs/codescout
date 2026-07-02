@@ -233,6 +233,12 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
             out.push('\n');
             out.push_str(&format_overflow(overflow));
         }
+        if val["lsp"].as_str() == Some("warming") {
+            let hint = val["hint"]
+                .as_str()
+                .unwrap_or("served from tree-sitter — re-run shortly for LSP-grade detail");
+            out.push_str(&format!("\n[lsp warming] {hint}"));
+        }
         return out;
     }
 
@@ -295,7 +301,14 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
         };
         let count = symbols.len();
         let sym_word = if count == 1 { "symbol" } else { "symbols" };
-        out.push_str(&format!("\n  {file} — {count} {sym_word}\n"));
+        let warming_suffix = if file_entry["lsp"].as_str() == Some("warming") {
+            " (lsp warming)"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "\n  {file} — {count} {sym_word}{warming_suffix}\n"
+        ));
         format_symbol_tree(&mut out, symbols, 4);
     }
 
@@ -502,5 +515,51 @@ mod tests {
         });
         let result = format_overview_symbols(&val);
         assert!(result.contains("Showing 15 of 23"));
+    }
+
+    #[test]
+    fn format_overview_symbols_file_mode_warming_marker() {
+        let val = serde_json::json!({
+            "file": "src/legacy.c",
+            "symbols": [{ "name": "main", "kind": "function" }],
+            "lsp": "warming",
+            "hint": "Language server is starting; symbols served from tree-sitter. Re-run shortly for LSP-grade detail."
+        });
+        let result = format_overview_symbols(&val);
+        assert!(
+            result.contains("[lsp warming]"),
+            "marker line missing: {result}"
+        );
+        assert!(
+            result.contains("Re-run shortly for LSP-grade detail"),
+            "hint text missing: {result}"
+        );
+    }
+
+    #[test]
+    fn format_overview_symbols_pattern_mode_warming_marker() {
+        let val = serde_json::json!({
+            "pattern": "src/**/*.c",
+            "files": [
+                {
+                    "file": "src/legacy.c",
+                    "symbols": [],
+                    "lsp": "warming"
+                },
+                {
+                    "file": "src/other.rs",
+                    "symbols": [{ "name": "run", "kind": "function" }]
+                }
+            ]
+        });
+        let result = format_overview_symbols(&val);
+        assert!(
+            result.contains("src/legacy.c — 0 symbols (lsp warming)"),
+            "warming suffix missing: {result}"
+        );
+        assert!(
+            !result.contains("src/other.rs — 1 symbol (lsp warming)"),
+            "non-warming file should not get the suffix: {result}"
+        );
     }
 }
