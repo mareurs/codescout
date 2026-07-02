@@ -426,6 +426,97 @@ async fn check_has_index(project_id: &str, _project_root: &std::path::Path) -> b
     }
 }
 
+/// Session-scoped last-known index status per project id. Avoids a vector-store
+/// round-trip on every activation: `index.status` is a hint field where
+/// one-activation staleness is acceptable, a per-activation network probe is not.
+static INDEX_STATUS_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, bool>>,
+> = std::sync::OnceLock::new();
+
+/// A slow or hung vector store must not stall the first activation either.
+const FIRST_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn index_status_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
+    INDEX_STATUS_CACHE.get_or_init(Default::default)
+}
+
+fn index_status_get(project_id: &str) -> Option<bool> {
+    index_status_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(project_id)
+        .copied()
+}
+
+fn index_status_put(project_id: &str, has_index: bool) {
+    index_status_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(project_id.to_string(), has_index);
+}
+
+#[cfg(test)]
+fn index_status_remove(project_id: &str) {
+    index_status_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(project_id);
+}
+
+/// At most one detached refresh per project id at a time (thundering-herd guard).
+static REFRESH_IN_FLIGHT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// Generous bound for the detached refresh — accumulation, not latency, is the risk.
+const BACKGROUND_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn refresh_begin(project_id: &str) -> bool {
+    REFRESH_IN_FLIGHT
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(project_id.to_string())
+}
+
+fn refresh_end(project_id: &str) {
+    REFRESH_IN_FLIGHT
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(project_id);
+}
+
+/// Cached wrapper: cache hit returns immediately and refreshes in a detached
+/// task; first-per-session probe is bounded by `FIRST_PROBE_TIMEOUT`
+/// (timeout => `false`, corrected by the background refresh on the next
+/// activation).
+async fn check_has_index_cached(project_id: &str, project_root: &std::path::Path) -> bool {
+    if let Some(cached) = index_status_get(project_id) {
+        if refresh_begin(project_id) {
+            let pid = project_id.to_string();
+            let root = project_root.to_path_buf();
+            tokio::spawn(async move {
+                if let Ok(fresh) =
+                    tokio::time::timeout(BACKGROUND_REFRESH_TIMEOUT, check_has_index(&pid, &root))
+                        .await
+                {
+                    index_status_put(&pid, fresh);
+                }
+                refresh_end(&pid);
+            });
+        }
+        return cached;
+    }
+    let fresh = tokio::time::timeout(
+        FIRST_PROBE_TIMEOUT,
+        check_has_index(project_id, project_root),
+    )
+    .await
+    .unwrap_or(false);
+    index_status_put(project_id, fresh);
+    fresh
+}
+
 /// Build the activation response JSON for both full-activation and focus-switch paths.
 async fn build_activation_response(
     ctx: &ToolContext,
@@ -471,7 +562,7 @@ async fn build_activation_response(
     // has_index probe via Qdrant — best-effort. When the retrieval stack is
     // offline (common in tests), report false rather than erroring out the
     // activation response.
-    let has_index = check_has_index(&project_name, &project_root_path).await;
+    let has_index = check_has_index_cached(&project_name, &project_root_path).await;
     timer.lap("check_has_index");
 
     let version_stale = onboarding_version_stale(stored_onboarding_version);

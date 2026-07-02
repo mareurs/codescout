@@ -1535,3 +1535,38 @@ fn format_activate_project_prepends_warning_with_none_stored_version() {
         "should show 'none' not 'v0' for null stored_version; got: {compact}"
     );
 }
+
+#[tokio::test]
+#[serial_test::serial]
+async fn index_status_cache_serves_stale_then_refreshes() {
+    // Unique key so the process-global cache can't collide across tests.
+    let pid = format!("cache-sandwich-{}", std::process::id());
+    let root = std::env::temp_dir();
+
+    // 1. Baseline: no entry -> bounded live probe (stack offline in tests => false), cached.
+    assert!(!super::check_has_index_cached(&pid, &root).await);
+    assert_eq!(super::index_status_get(&pid), Some(false));
+
+    // 2. Assert-STALE: seed true; the cached value must be returned even though
+    //    a live probe would say false. Regression step — fails if the cache is
+    //    ever bypassed for an eager re-probe.
+    super::index_status_put(&pid, true);
+    assert!(super::check_has_index_cached(&pid, &root).await);
+
+    // 3. Invalidate -> fresh: remove the entry; next call re-probes (false).
+    super::index_status_remove(&pid);
+    assert!(!super::check_has_index_cached(&pid, &root).await);
+}
+
+#[test]
+fn refresh_in_flight_guard_is_exclusive_per_project() {
+    let pid = format!("refresh-guard-{}", std::process::id());
+    assert!(super::refresh_begin(&pid), "first acquire must succeed");
+    assert!(
+        !super::refresh_begin(&pid),
+        "second acquire while in flight must fail"
+    );
+    super::refresh_end(&pid);
+    assert!(super::refresh_begin(&pid), "acquire after end must succeed");
+    super::refresh_end(&pid);
+}
