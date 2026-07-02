@@ -17,8 +17,8 @@ The server is not registered in your MCP configuration.
 claude mcp list
 ```
 
-You should see `codescout` listed with 28 tools. If it is missing,
-register it:
+You should see `codescout` listed as connected, with its tools available.
+If it is missing, register it:
 
 ```bash
 claude mcp add --global codescout -- codescout start --project .

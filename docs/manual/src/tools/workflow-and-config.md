@@ -159,13 +159,13 @@ Handles expire at end of session. Alternatively, pass `acknowledge_risk: true` o
 
 ```json
 {
-  "status": "running",
-  "log_file": "/tmp/codescout-bg-xxxx.log",
-  "ref_id": "@cmd_a1b2c3"
+  "output_id": "@bg_00000008",
+  "hint": "Process running. Output captured in @bg_00000008 -- use run_command(\"tail -50 @bg_00000008\") or grep/cat as needed.",
+  "stdout": "...partial output so far..."
 }
 ```
 
-Monitor with `run_command("tail -50 /tmp/codescout-bg-xxxx.log")`.
+Monitor with `run_command("tail -50 @bg_00000008")` (substitute the actual `output_id`).
 
 ---
 
