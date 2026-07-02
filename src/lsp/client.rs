@@ -362,6 +362,8 @@ impl LspClient {
     /// Start a language server process and perform the LSP initialize handshake.
     /// Start a language server process and perform the LSP initialize handshake.
     pub async fn start(config: LspServerConfig) -> Result<Self> {
+        const SPAWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
         tracing::info!("Starting LSP server: {} {:?}", config.command, config.args);
 
         let mut cmd = Command::new(&config.command);
@@ -374,9 +376,29 @@ impl LspClient {
         for (key, val) in &config.env {
             cmd.env(key, val);
         }
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("Failed to start LSP server: {}", config.command))?;
+        // WIN-5: the spawn syscall is synchronous (CreateProcessW on Windows) and
+        // can hang under EDR. Run it on a blocking thread, bounded. On timeout the
+        // detached task keeps running; when the syscall eventually returns, the
+        // Child is dropped and kill_on_drop reaps it.
+        let command_name = config.command.clone();
+        let mut child = match tokio::time::timeout(
+            SPAWN_TIMEOUT,
+            tokio::task::spawn_blocking(move || cmd.spawn()),
+        )
+        .await
+        {
+            Err(_elapsed) => anyhow::bail!(
+                "LSP spawn for '{}' exceeded {}s — OS-level process creation hung \
+                 (known cause: EDR interference on Windows; see WIN-5)",
+                command_name,
+                SPAWN_TIMEOUT.as_secs()
+            ),
+            Ok(Err(join_err)) => {
+                return Err(anyhow::anyhow!("LSP spawn task panicked: {join_err}"))
+            }
+            Ok(Ok(spawn_res)) => spawn_res
+                .with_context(|| format!("Failed to start LSP server: {}", command_name))?,
+        };
 
         // These `.take().expect()` calls are infallible: stdin, stdout, and stderr are
         // configured as `Stdio::piped()` in the Command builder immediately above, so
