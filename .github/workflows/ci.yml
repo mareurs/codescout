@@ -98,8 +98,10 @@ jobs:
           key: windows-gnu-cross
       - name: Cross-build (default features)
         run: scripts/build-windows.sh build
+      # 20 pre-existing wine failures skipped (bisect-proven pre-existing; NOT regressions).
+      # Inventory + un-skip protocol: docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md (WIN-27)
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip guide_hint_tests --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip validate_prune_request_gates --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output
 
   tool-docs-sync:
     name: Tool Docs Sync

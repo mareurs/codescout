@@ -29,6 +29,7 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-07-02 | med | plan-prose | fixed-verified | WIN-26 zombie-open: lite stack Phases 0-4 shipped to master but tracker said "Phases 1-3 designed" |
 | F-2 | 2026-07-02 | med | librarian-artifact | fixed-verified | windows tracker augmentation missing; body cites nonexistent artifact id 42dfdfc8b1522192 |
+| F-3 | 2026-07-02 | high | release-pipeline | open | CI on experiments red since 2026-06-22+ across 8 jobs (pre-existing rot, exposed by Task 7 push) |
 
 ## Wins Index
 
@@ -180,6 +181,27 @@ Codified so the Index column means the same thing across sessions.
 **Status:** fixed-verified
 
 **Fix idea / Pointer:** Re-augment `52451519052d207c` with `issues` params rebuilt from the 26-row table (params_path route — payload >9KB), set `entry_collection="issues"`, fix both in-body id references. Candidate task for the perf-windows plan.
+
+---
+## F-3 — CI on experiments has been red since 2026-06-22+ across 8 jobs (pre-existing rot, exposed by Task 7 push)
+
+**Observed:** 2026-07-02, first CI run after pushing Tasks 1-8 (run 28582988236).
+
+**When:** Watching the run that was meant to gate the new windows-gnu job.
+
+**Expected:** Only the new windows-gnu job at risk; rest of the matrix green (local full gate was 2983/0/43).
+
+**Got:** 9 of 15 jobs failed — but the previous run (28039317667, e559c8a8, 2026-06-23, BEFORE this session's work) shows the IDENTICAL failure set minus windows-gnu: Tool Docs Sync, Audit Doc Refs, Test windows-latest/default, and local-embed + no-features configs on all 3 OSes. Only ubuntu/macos default + fmt/clippy/MSRV were green.
+
+**Probable cause:** Fix-then-forget at the CI-matrix level: the non-default feature configs and doc-sync gates rotted while local development gates only exercise default features on Linux.
+
+**Workaround:** Triage scoped to the new windows-gnu job only (20 wine test failures, investigation ongoing); the 8 pre-existing red jobs are explicitly OUT of the perf-windows plan's scope.
+
+**Severity:** high — CI has provided no gate signal on experiments for 9+ days; any regression in non-default configs lands silently.
+
+**Status:** open
+
+**Fix idea / Pointer:** Needs its own triage stream (bug files per failing cluster). Not this plan.
 
 ---
 ## Template for new entries
