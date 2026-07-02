@@ -28,7 +28,7 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-07-02 | med | plan-prose | fixed-verified | WIN-26 zombie-open: lite stack Phases 0-4 shipped to master but tracker said "Phases 1-3 designed" |
-| F-2 | 2026-07-02 | med | librarian-artifact | open | windows tracker augmentation missing; body cites nonexistent artifact id 42dfdfc8b1522192 |
+| F-2 | 2026-07-02 | med | librarian-artifact | fixed-verified | windows tracker augmentation missing; body cites nonexistent artifact id 42dfdfc8b1522192 |
 
 ## Wins Index
 
@@ -177,7 +177,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — silent: an agent following the in-file instructions either errors or creates a divergent fresh augmentation; `entry_filter` consumers get empty results that read as "no open issues".
 
-**Status:** open
+**Status:** fixed-verified
 
 **Fix idea / Pointer:** Re-augment `52451519052d207c` with `issues` params rebuilt from the 26-row table (params_path route — payload >9KB), set `entry_collection="issues"`, fix both in-body id references. Candidate task for the perf-windows plan.
 

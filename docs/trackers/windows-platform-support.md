@@ -59,9 +59,9 @@ to master — the tracker outlives them.
 
 <!-- Rendered mirror of the augmentation `issues` params (tool-usage-patterns
      style). Maintain via:
-       artifact_augment(id="42dfdfc8b1522192", merge=true, params={issues:[...]})
+       artifact_augment(id="52451519052d207c", merge=true, params={issues:[...]})
      then re-sync this table. Filter rows live with:
-       artifact(action="get", id="42dfdfc8b1522192", entry_filter={"status":{"eq":"open"}}) -->
+       artifact(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}}) -->
 
 | id | area | status | summary | ref | since |
 |----|------|--------|---------|-----|-------|
@@ -149,9 +149,9 @@ _WIN-9 and WIN-12 were fixed 2026-06-09 — see History._
 
 When a Windows issue is found or its status changes:
 
-1. `artifact(action="get", id="<id>", entry_filter={...})` — confirm it is not
+1. `artifact(action="get", id="52451519052d207c", entry_filter={...})` — confirm it is not
    already tracked.
-2. `artifact_augment(id="<id>", merge=true, params={issues:[...existing..., {new WIN-N}]})`
+2. `artifact_augment(id="52451519052d207c", merge=true, params={issues:[...existing..., {new WIN-N}]})`
    — next free integer; never reuse or delete; flip status + cite the fixing
    commit (master-side SHA after cherry-pick) in `ref`.
 3. Re-sync the "## Issue index" table above with the render_template columns.
