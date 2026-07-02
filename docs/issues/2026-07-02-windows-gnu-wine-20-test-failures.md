@@ -36,7 +36,7 @@ symbols with file relative_path should find symbols
 Full failing set (clustered):
 - `tools::symbol::tests::` symbols_path_type_{file,glob,directory,nested_directory},
   symbols_name_path_pattern_in_directory, include_docs_attaches_docs_in_search_mode (6)
-- `server::guide_hint_tests::` ×9 — all panic in shared setup at src/server.rs:2966
+- `server::guide_hint_tests::` ×8 — all panic in shared setup at src/server.rs:2966
 - `agent::tests::activate_populates_head_sha` (src/agent/mod.rs:2496)
 - `embed::preflight::tests::check_index_scope_respects_gitignore`
 - `librarian::tools::doctor::tests::validate_prune_request_gates` (also fails on REAL
@@ -104,7 +104,7 @@ None needed for users — wine is a CI proxy; the VDI runs real Windows where on
 the doctor test is affected.
 
 ## Resume
-Pick one cluster (`server::guide_hint_tests` — 9 tests, one shared unwrap at
+Pick one cluster (`server::guide_hint_tests` — 8 tests, one shared unwrap at
 src/server.rs:2966): run under wine with RUST_BACKTRACE=1
 (`scripts/build-windows.sh test guide_hint_tests`), identify the unwrap's env
 dependency (config dir? APPDATA?), fix or gate; then remove its --skip from

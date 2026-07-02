@@ -149,7 +149,7 @@ N/A — fixed. Ship to master via the Standard Ship Sequence and record the
 master-side SHA in this Fix section.
 
 ## References
-- `src/tools/markdown/edit_markdown.rs:78-260` (`perform_section_edit_ext`), `:128-131` (`replace_heading` heuristic)
+- `src/tools/markdown/edit_markdown.rs:78-268` (`perform_section_edit_ext`), `:135-140` (`replace_heading` heuristic, post-fix)
 - `docs/issues/2026-05-26-edit-markdown-insert-after-fuses-heading.md` — related, same file, different mechanism
 - `docs/issues/2026-05-26-edit-markdown-scoped-edit-fuses-heading.md` — related, same file, different mechanism
 - Discovered while editing `CHANGELOG.md`'s `[Unreleased]` section ahead of the `experiments`->`master` promotion this session.

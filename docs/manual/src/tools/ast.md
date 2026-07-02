@@ -17,7 +17,7 @@
 
 ## Why They Were Removed
 
-The offline advantage (no LSP startup) was outweighed by the maintenance cost of a parallel navigation path. `symbols` starts the language server on the first call and keeps it running — subsequent calls are instant. For the initial cold start, the latency difference is negligible for interactive use.
+The offline advantage (no LSP startup) was outweighed by the maintenance cost of a parallel navigation path. `symbols` starts the language server on the first call and keeps it running — subsequent calls are instant. The first call on a cold server is budgeted (2s): if the LSP isn't ready in time, `symbols` overview falls back to tree-sitter output and the response carries `"lsp": "warming"` plus a hint field. The compact text surface renders this too — file mode appends a trailing `[lsp warming] <hint>` line, and pattern/glob mode appends a ` (lsp warming)` suffix to the affected file's summary line. Re-run shortly for LSP-grade detail once the server finishes starting.
 
 See [Symbol Navigation](symbol-navigation.md) for the full `symbols` reference.
 

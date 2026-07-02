@@ -30,6 +30,7 @@
 | F-1 | 2026-07-02 | med | plan-prose | fixed-verified | WIN-26 zombie-open: lite stack Phases 0-4 shipped to master but tracker said "Phases 1-3 designed" |
 | F-2 | 2026-07-02 | med | librarian-artifact | fixed-verified | windows tracker augmentation missing; body cites nonexistent artifact id 42dfdfc8b1522192 |
 | F-3 | 2026-07-02 | high | release-pipeline | open | CI on experiments red since 2026-06-22+ across 8 jobs (pre-existing rot, exposed by Task 7 push) |
+| F-4 | 2026-07-02 | low | plan-prose | mitigated | Spec acceptance criterion named references; delivered scope bounded only symbols overview |
 
 ## Wins Index
 
@@ -223,6 +224,27 @@ Codified so the Index column means the same thing across sessions.
 **Promote-when:** If a future audit finds the un-LTO'd binary's runtime latency (query/search hot paths) measurably regresses in a way that matters for local MCP usage, revisit — thin-LTO could be reintroduced behind a separate pre-ship-only build alias, keeping the fast lever as the default dev-loop profile.
 
 **Status:** validated
+
+---
+## F-4 — Spec acceptance criterion named references; delivered scope bounded only symbols overview
+
+**Observed:** 2026-07-02, final-review fix wave (C1/C2 LSP-warming-marker work).
+
+**When:** Cross-checking the perf-windows plan's acceptance criteria against the shipped LSP-budget code before closing out the fix wave.
+
+**Expected (spec):** "symbols/references first-call bounded" — the acceptance criterion names both `symbols` and `references` as getting the 2s bounded-acquisition treatment.
+
+**Got:** `references.rs` still uses the unbounded `get_lsp_client` path. Descoped deliberately: unlike `symbols`, which can degrade to a tree-sitter overview when the LSP isn't ready, `references` has no AST equivalent to fall back to — bounding it would mean returning nothing instead of a useful (if slower) result. `symbols` search mode (as opposed to overview) is likewise still unbounded, per the plan's own contingency gate.
+
+**Probable cause:** The spec sentence named the two tools together as one acceptance criterion; the bounded-first-call mechanism only has a meaningful fallback for `symbols` overview, so implementation scope narrowed without the spec text being updated to match.
+
+**Workaround:** Recorded here so Task 11's VDI validator knows only `symbols` overview first-calls are 2s-bounded; `references` remains bounded only by the outer 10s LSP spawn timeout.
+
+**Severity:** low
+
+**Status:** mitigated
+
+**Fix idea / Pointer:** If `references` ever gains a tree-sitter/AST fallback, revisit bounding it the same way `symbols` overview is bounded now (`client_within_budget` + warming marker).
 
 ---
 ## Template for new entries
