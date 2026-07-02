@@ -4858,6 +4858,75 @@ async fn symbols_overview_returns_empty_for_empty_file_via_treesitter() {
     );
 }
 
+#[tokio::test]
+async fn symbols_overview_serves_treesitter_with_warming_hint_during_lsp_cold_start() {
+    use crate::lsp::{LspClientOps, LspProvider};
+    use crate::tools::symbol::Symbols;
+
+    // Task 6: when the LSP hasn't started yet, `client_within_budget` waits at
+    // most `LSP_FIRST_CALL_BUDGET` (2s) before giving up. The single-file
+    // overview must then fall back to tree-sitter and mark the response
+    // `"lsp": "warming"` instead of blocking the whole call on the cold start.
+    // `get_or_start` never resolves here, so this test genuinely exercises the
+    // production 2s budget (the single-file arm hardcodes the const — it
+    // cannot be injected) rather than a shortened one; ~2s runtime is expected.
+    struct NeverReady;
+
+    #[async_trait::async_trait]
+    impl LspProvider for NeverReady {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &std::path::Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn LspClientOps>> {
+            std::future::pending().await
+        }
+        async fn notify_file_changed(&self, _path: &std::path::Path) {}
+        async fn shutdown_all(&self) {}
+        // is_ready defaults to `false`, matching a genuinely cold LSP.
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("warming.rs");
+    std::fs::write(&file, "pub fn alpha() {}\npub fn beta() {}\n").unwrap();
+
+    let lsp: Arc<dyn LspProvider> = Arc::new(NeverReady);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = Symbols
+        .call(json!({"path": "src/warming.rs"}), &ctx)
+        .await
+        .expect("call must succeed");
+
+    assert_eq!(
+        result["lsp"].as_str(),
+        Some("warming"),
+        "expected warming marker when LSP budget elapses, got: {result}"
+    );
+    let syms = result["symbols"].as_array().expect("symbols array");
+    assert!(
+        !syms.is_empty(),
+        "expected tree-sitter fallback to populate symbols during LSP cold start, got: {result}"
+    );
+}
+
 #[test]
 fn symbols_overview_with_overflow() {
     let val = serde_json::json!({

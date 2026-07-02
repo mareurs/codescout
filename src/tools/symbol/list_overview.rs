@@ -12,8 +12,8 @@ use crate::tools::output::{OutputGuard, OverflowInfo};
 use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, ToolContext};
 
 use crate::fs::{
-    format_library_path, get_lsp_client, get_path_param, is_glob, resolve_glob_for,
-    resolve_library_roots, resolve_read_path_for, retry_on_mux_disconnect, LspTimer,
+    format_library_path, get_path_param, is_glob, resolve_glob_for, resolve_library_roots,
+    resolve_read_path_for, retry_on_mux_disconnect, LspTimer,
 };
 use crate::symbol::query::{filter_variable_symbols, symbol_to_json};
 
@@ -237,7 +237,15 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             };
             let language_id = crate::lsp::servers::lsp_language_id(lang);
             let mux_override = ctx.agent.lsp_mux_override(lang).await;
-            if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
+            let budget_client = crate::lsp::client_within_budget(
+                ctx.lsp.clone(),
+                lang,
+                &root,
+                mux_override,
+                crate::lsp::LSP_FIRST_CALL_BUDGET,
+            )
+            .await;
+            if let Some(client) = budget_client {
                 let timer = LspTimer::start();
                 if let Ok(symbols) = client.document_symbols(file_path, language_id).await {
                     timer.record(&*ctx.lsp, lang, &root).await;
@@ -265,6 +273,33 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                     }
                     result.push(entry);
                 }
+            } else if let Ok(symbols) = crate::ast::extract_symbols(file_path) {
+                // LSP still warming: serve tree-sitter so the overview is not
+                // blocked or silently missing files; mark the entry.
+                let rel = file_path.strip_prefix(&root).unwrap_or(file_path);
+                let source = if include_body {
+                    std::fs::read_to_string(file_path).ok()
+                } else {
+                    None
+                };
+                let json_symbols: Vec<Value> = symbols
+                    .iter()
+                    .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, false))
+                    .collect();
+                let json_symbols = if lang == "bash" {
+                    filter_variable_symbols(json_symbols)
+                } else {
+                    json_symbols
+                };
+                let mut entry = json!({
+                    "file": rel.display().to_string(),
+                    "symbols": json_symbols,
+                    "lsp": "warming",
+                });
+                if include_docs {
+                    entry["docstrings"] = json!(collect_docstrings(file_path));
+                }
+                result.push(entry);
             }
         }
         let mut result_json = json!({ "pattern": rel_path, "files": result });
@@ -284,31 +319,46 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             .agent
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
-        let (client, lang) = get_lsp_client(
-            &ctx.agent,
-            &*ctx.lsp,
-            &full_path,
-            ctx.workspace_override.as_deref(),
+        let mux_override = ctx.agent.lsp_mux_override(raw_lang).await;
+        let lang = crate::lsp::servers::lsp_language_id(raw_lang).to_string();
+        let mut lsp_warming = false;
+        let symbols = match crate::lsp::client_within_budget(
+            ctx.lsp.clone(),
+            raw_lang,
+            &root,
+            mux_override,
+            crate::lsp::LSP_FIRST_CALL_BUDGET,
         )
-        .await?;
-        let timer = LspTimer::start();
-        // I-4: single-retry on transient LSP-mux disconnect (covers Kotlin LSP
-        // eviction churn). Closure is idempotent — document_symbols is a pure
-        // read of the LSP-side index.
-        let symbols = retry_on_mux_disconnect(
-            &ctx.agent,
-            &*ctx.lsp,
-            &full_path,
-            ctx.workspace_override.as_deref(),
-            client,
-            lang.clone(),
-            |c, l| {
-                let p = full_path.clone();
-                async move { c.document_symbols(&p, &l).await }
-            },
-        )
-        .await?;
-        timer.record(&*ctx.lsp, raw_lang, &root).await;
+        .await
+        {
+            Some(client) => {
+                let timer = LspTimer::start();
+                // I-4: single-retry on transient LSP-mux disconnect (covers Kotlin LSP
+                // eviction churn). Closure is idempotent — document_symbols is a pure
+                // read of the LSP-side index.
+                let symbols = retry_on_mux_disconnect(
+                    &ctx.agent,
+                    &*ctx.lsp,
+                    &full_path,
+                    ctx.workspace_override.as_deref(),
+                    client,
+                    lang.clone(),
+                    |c, l| {
+                        let p = full_path.clone();
+                        async move { c.document_symbols(&p, &l).await }
+                    },
+                )
+                .await?;
+                timer.record(&*ctx.lsp, raw_lang, &root).await;
+                symbols
+            }
+            None => {
+                // LSP cold / not configured: serve tree-sitter now; the detached
+                // warm-up (if a server exists) makes the next call LSP-grade.
+                lsp_warming = true;
+                ast::extract_symbols(&full_path)?
+            }
+        };
         // BUG-054 mitigation: rust-analyzer (and similar LSPs) return Ok(vec![])
         // during cold-start indexing instead of -32800 RequestCancelled,
         // bypassing the cold-start retry budget in `LspClient`. When LSP returns
@@ -395,11 +445,25 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             if include_docs {
                 result["docstrings"] = json!(collect_docstrings(&full_path));
             }
+            if lsp_warming {
+                result["lsp"] = json!("warming");
+                result["hint"] = json!(
+                    "Language server is starting; symbols served from tree-sitter. \
+                     Re-run shortly for LSP-grade detail."
+                );
+            }
             return Ok(result);
         }
         let mut result = json!({ "file": rel_path, "symbols": json_symbols });
         if include_docs {
             result["docstrings"] = json!(collect_docstrings(&full_path));
+        }
+        if lsp_warming {
+            result["lsp"] = json!("warming");
+            result["hint"] = json!(
+                "Language server is starting; symbols served from tree-sitter. \
+                 Re-run shortly for LSP-grade detail."
+            );
         }
         Ok(result)
     } else if full_path.is_dir() {
