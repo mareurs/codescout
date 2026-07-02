@@ -4,6 +4,32 @@ All notable changes to codescout are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **`grep` gained ripgrep-style flags and modes.** `ignore_case`, `whole_word`,
+  `glob`, and `include_hidden` params; `mode="files"` for ranked per-file
+  match counts instead of line-level hits; hits carry their enclosing symbol
+  when the result set is small.
+- **`ignored_paths` config is now honored by the code index.** The embedding
+  indexer, background auto-index, and manual `index(action="build")` all skip
+  configured ignore patterns, matching the file-tree walker's existing
+  behavior.
+- **Out-of-scope writes return a resumable acknowledgment instead of a hard
+  denial.** `create_file`, `edit_file`, and `edit_markdown` now capture the
+  attempted content behind an `@ack_*` handle when a write targets a path
+  outside the active project; re-invoking with the handle replays the
+  original write after `approve_write`.
+- **`artifact` create/update accept custom frontmatter.** New `extra` param
+  round-trips arbitrary YAML keys; `time_scope` is now wired through both
+  `create` and `update` (previously silently dropped on `update`).
+- **Background auto-index now gates on a heartbeat**, tagging the background
+  indexing operation so a crash mid-index is distinguishable in OOM forensics
+  from other work.
+- **`contrib/pi/`** — codescout&lt;-&gt;Pi coding-agent integration: MCP config, a
+  `codescout-mode` extension that promotes a codescout tool hot-set and
+  disables Pi's native `edit`, `AGENTS.md` tool-map guidance, and an
+  idempotent installer.
+
 ### Changed
 
 - **Dense embeddings are now always OpenAI-compatible.** Removed the
@@ -13,6 +39,12 @@ All notable changes to codescout are documented here.
   corporate gateway). The dense leg is one code path now; nothing to
   configure. The reranker protocol toggle
   (`CODESCOUT_RERANKER_PROTOCOL=tei|infinity`) is unchanged.
+- **Output buffers (`@tool_*` handles) dedupe by content hash (C-1)**,
+  avoiding redundant storage when a tool call reproduces an identical large
+  result.
+- **`run_command` background-process heartbeats are now durable and
+  per-operation-tagged**, surviving a `SIGKILL` so OOM forensics can identify
+  which background operation was running at time of death.
 
 ### Fixed
 
@@ -20,6 +52,23 @@ All notable changes to codescout are documented here.
   `HttpDenseEmbedder` (memory / dense-only retrieval) now hits only the
   dense endpoint via `EmbedderHttp::dense_query`, instead of computing a
   sparse vector it immediately discarded.
+- **`edit_code` `insert`/`after` into a Kotlin class with backtick-named
+  `@Test` methods** (`` fun `test name`() ``) now resolves the correct AST
+  end line via `name_path` first, fixing a false "AST parse failed" on the
+  annotation-to-`fun`-line gap.
+- **kotlin-lsp's JVM heap is now capped (`-Xmx2g`)**, closing an
+  unbounded-growth path surfaced during a 2026-06-19 MCP server OOM
+  investigation.
+- **`sync_project` now streams instead of loading the whole project into
+  memory**, bounding indexing at O(batch) — the other fix from the same OOM
+  investigation.
+- **Heartbeat log pruning no longer evicts a recent crash victim's log**
+  before it can be inspected — pruning is now age-floored.
+- **`read_file`'s `json_path` supports quoted keys**, so dotted object keys
+  (e.g. `"a.b.c"`) are reachable without being misparsed as a path
+  separator.
+- **`grep` decodes escaped newlines in `@tool_*` buffers**, so multi-line
+  field values are searchable instead of collapsing to one line.
 
 ### Removed
 
@@ -27,7 +76,26 @@ All notable changes to codescout are documented here.
   `scripts/chunk-model-matrix.py`. The tuned defaults they produced (chunk
   size, `CODESCOUT_BM25_BOOST`) remain baked in; the orchestration harness
   is recoverable from git history.
+- **`shell_enabled` config flag and the vestigial `shell_output_limit_bytes`**
+  — redundant with `shell_command_mode = "disabled"` and dead code
+  respectively.
 
+### Docs
+
+- **`CLAUDE.md` cut from 42KB to 12.5KB** (677→184 lines), relocating Git
+  release/ship procedures to `docs/RELEASE.md`, companion-plugin hook
+  inventory to `docs/architecture/companion-plugin.md`, and prompt-surface
+  operational rules to `src/prompts/README.md`. New gate
+  `claude_md_contains_no_deprecated_tool_names` keeps it tool-name-consistent
+  with the server-instructions prompt surface going forward.
+- **`docs/SECURITY.md`** — vulnerability reporting process and an honest
+  threat-model summary, including previously-undocumented limitations (the
+  dashboard has no built-in auth; the default security profile is a
+  deny-list, not a containment sandbox).
+- Corrected a self-contradicting tool count in `docs/manual/src/architecture.md`
+  and a stale `run_command` background-output example; removed documentation
+  for a `denied_read_patterns` config option that was actually removed from
+  the code in an earlier release.
 ## [0.14.0] — 2026-05-25
 
 ### Added
