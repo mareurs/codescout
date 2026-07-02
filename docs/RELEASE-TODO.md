@@ -1,6 +1,9 @@
 # Release Readiness Checklist
 
-Tracking remaining work items for the first public release of codescout.
+Tracking remaining hardening and documentation work items for codescout.
+Superseded framing: this checklist predates codescout's actual release
+history (0.1.0 shipped 2026-02-25; current version is 0.15.0 per
+`Cargo.toml`) — "first public release" no longer describes reality.
 
 ## Completed
 
@@ -17,17 +20,17 @@ Tracking remaining work items for the first public release of codescout.
 
 - [x] **CI pipeline** — GitHub Actions workflow at `.github/workflows/ci.yml` runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` (3×3 matrix: linux/macos/windows × default/local-embed/no-features), `tool-docs-sync`, `msrv` (1.82), and `audit-doc-refs` (informational) on every PR + push to `master`/`experiments`. Push triggers fixed from the placeholder `main` branch in the same change.
 
+- [x] **CI gate: `audit-doc-refs` at `--fail-on high`** — shipped 2026-05-24 (`2dcaff2a`, closed H-5 in `docs/trackers/codescout-usage-hookify.md`). This item sat unchecked here for 5+ weeks after landing — verify against `.github/workflows/ci.yml` before trusting an open checklist item in this file again.
+- [x] **Per-connection HTTP token validation** — `src/server.rs` HTTP transport wraps `/mcp` in a bearer-auth `axum::middleware::from_fn` layer, constant-time-comparing the `Authorization` header on every request; a mismatch returns 401. Was already true when this item was written; never checked off.
+- [x] **`CHANGELOG.md`** — already existed (583 lines, versioned history back to 0.1.0) when this item was written; the actual gap was that `[Unreleased]` hadn't been updated for the current promotion. Populated 2026-07-02.
+- [x] **Security documentation** — `docs/SECURITY.md` added 2026-07-02: vulnerability reporting process, supported versions, and an honest threat-model table including two known-open limitations (dashboard has no built-in auth; `default` security profile is a deny-list, not a containment sandbox). Configuration detail stays in `docs/manual/src/concepts/security.md`, which also had a stale `denied_read_patterns` reference (a config field removed in `docs/plans/archive/2026-03-20-phase1-security-profiles.md`) corrected in the same pass.
 ## High Priority
 
-- [ ] **CI gate: flip `audit-doc-refs` from informational to `--fail-on high`** — One known historical hi-sev blocks the flip: `docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md:116` cites a since-refactored `src/embed/index.rs`. Reconcile that ADR (archive convention or inline annotation), then in `.github/workflows/ci.yml` change `--fail-on never` → `--fail-on high` and remove the flip-trigger comment. See H-5 in `docs/trackers/codescout-usage-hookify.md`.
 - [ ] **Integration test: path security through MCP** — End-to-end test via `call_tool` flow (server → tool → path validation → error). Current tests validate the path_security module in isolation; need to confirm wiring through the server layer.
 - [ ] **Error message path sanitization** — Error messages leak full filesystem paths (home dirs, mount points) back to the LLM. Relativize paths to project root in tool error responses.
 
 ## Medium Priority
 
-- [ ] **Per-connection token validation for HTTP** — Currently the auth token is generated and displayed but not validated per-request (blocked on rmcp middleware support). Track rmcp upstream for SSE auth hooks.
-- [ ] **CHANGELOG.md** — Document security features, breaking changes, and migration guide for users upgrading from development builds.
-- [ ] **Security documentation** — README section or dedicated `docs/SECURITY.md` explaining the threat model, what's protected, and how to configure `[security]` in `project.toml`.
 - [ ] **Fuzz testing for path validation** — The path security module handles untrusted input from LLMs. Fuzz `validate_read_path` and `validate_write_path` with random/adversarial inputs to find edge cases.
 
 ## Low Priority (Post-v1)
@@ -44,15 +47,17 @@ All security settings live in `.codescout/project.toml` under `[security]`:
 
 ```toml
 [security]
-# Tool category toggles
+profile = "default"                # "default" (deny-list applies) | "root" (deny-list skipped for absolute reads)
 file_write_enabled = true          # File creation and modification (default: true)
 indexing_enabled = true            # Semantic search indexing (default: true)
-github_enabled = true              # GitHub API tools (default: true)
-
-# Shell command settings
 shell_command_mode = "warn"        # "warn" | "unrestricted" | "disabled" (default: "warn")
-
-# Path security
-denied_read_patterns = []          # Additional paths to block reads from
 extra_write_roots = []             # Additional directories allowing writes
+shell_dangerous_patterns = []      # Additional regexes to flag as dangerous shell commands
+write_lock_timeout_secs = 5        # Cross-process write-lock wait before RecoverableError
+max_index_bytes = 524288000        # ~500MB — above this, index(action="build") requires confirmation
 ```
+
+`github_enabled` and `denied_read_patterns` (previously listed here) do not
+exist in the current `SecuritySection` struct (`src/config/project.rs`) —
+removed from this file 2026-07-02. See `docs/SECURITY.md` for the full
+threat model.
