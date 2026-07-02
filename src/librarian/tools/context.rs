@@ -300,7 +300,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             });
             format!(
                 "<!-- [LIVE]: {} | last refreshed: {} | refresh #{} -->\n\
-                 > Prompt: {}\n\n\
+                 > Standing instruction: {}\n\n\
                  {}## {}  — {}/{}  ({})\n{}\n\n",
                 title,
                 refreshed,

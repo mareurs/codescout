@@ -72,7 +72,7 @@ fn archetype_deployment_state() -> Value {
         },
         "render_template_example": "**Flag:** `{{ flag_name }}`  \n\n| env | enabled | since |\n|-----|:-------:|-------|\n{% for env, s in envs|items %}| {{ env }} | {{ \"✅\" if s.enabled else \"❌\" }} | {{ s.since or \"—\" }} |\n{% endfor %}\n_Last changed: {{ last_changed_commit or \"—\" }}_",
         "body_skeleton": "## Why this flag exists\n\n_Brief: what the flag controls, who owns it._\n\n## Rollout plan\n\n_Steps and gates._\n\n## History\n\n_Append dated session blocks: ### YYYY-MM-DD — <event>_",
-        "prompt_template": "Maintain the live state of feature flag `<NAME>` across environments. Pull current values from settings files via `gather_from: file`. When envs disagree with the deployed commit (`gather_from: git_log`), prefer the most recent commit-derived value and note the divergence in body history. Keep params strictly mechanical — narrative belongs in body."
+        "prompt_template": "This tracker is the source of truth for feature flag `<NAME>`'s rollout — read the env table above before relying on the flag. To act: if your target env shows `enabled: false`, the flag is not live there; `since` shows how long the current state has held. To maintain (refresh only): pull current values from settings files via `gather_from: file`; when envs disagree with the deployed commit (`gather_from: git_log`), prefer the most recent commit-derived value and note the divergence in body history; keep params strictly mechanical — narrative belongs in body."
     })
 }
 
@@ -395,15 +395,22 @@ If you're unsure, ask the user which pattern fits before composing.
 
 ## Step 2 — Write the augmentation prompt
 
-The `prompt` field is a standing instruction the augmentation refresh follows. Rules:
+The `prompt` field has **two readers**, and most authors brief only the first:
+1. the **refresh synthesizer** that maintains the tracker (writer), and
+2. **every agent that meets the tracker cold** via the `[LIVE]` block in `librarian(context)` (reader) — it sees this prompt verbatim as a standing instruction.
 
-- **Imperative voice.** "Maintain the F-N table" not "this tracks failures".
-- **Name the gather sources.** Be explicit which gather sources feed which fields. The synthesizer needs to know.
-- **Conflict resolution.** When sources disagree, say which wins. Common: "newer commit beats older params", "params win if `last_seen` is within 24h".
-- **Body vs params boundary.** State the rule: "narrative belongs in body, mechanical state in params".
-- **Length budget hint.** "Body section under 200 lines, params under 50 entries."
+Write **reader-first**: lead with what a consuming agent should *do with* this tracker, then the maintenance rules. A tracker is a skill for its own state; the prompt is how that skill briefs its reader.
 
-The archetype's `prompt_template` is a starting point — customize for the user's domain.
+- **Open with the read/act contract.** One or two sentences: what this tracker is, and the next action a reader takes from it — "To act: take the highest-severity `open` row, read its body section, verify against current code before fixing."
+- **Then the maintenance rules** (these serve the refresh synthesizer):
+  - **Imperative voice.** "Maintain the F-N table" not "this tracks failures".
+  - **Name the gather sources.** Which gather source feeds which field.
+  - **Conflict resolution.** When sources disagree, say which wins ("newer commit beats older params").
+  - **Body vs params boundary.** "narrative belongs in body, mechanical state in params".
+  - **Length budget hint.** "Body section under 200 lines, params under 50 entries."
+- **Escape hatch** — when a tracker's consumers outnumber its maintainers, one line earns its tokens: "Readers: the gather/refresh rules below are not yours."
+
+The archetype's `prompt_template` is a starting point and already leads reader-first — keep that order when you customize.
 
 ## Step 3 — Design the params
 
