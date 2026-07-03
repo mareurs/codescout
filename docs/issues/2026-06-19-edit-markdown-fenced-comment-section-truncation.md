@@ -1,14 +1,18 @@
 ---
+id: null
 kind: bug
-status: open
+status: fixed
 title: edit_markdown/read_markdown section parser treats `# ` comments inside fenced code blocks as headings
 owners: []
 tags:
-  - edit_markdown
-  - read_markdown
-  - markdown-parser
+- edit_markdown
+- read_markdown
+- markdown-parser
+topic: null
+time_scope: null
+closed: '2026-07-03'
+opened: '2026-06-19'
 severity: medium
-opened: 2026-06-19
 ---
 
 # edit_markdown / read_markdown: `# ` lines inside fenced code blocks end the enclosing section early
@@ -86,3 +90,24 @@ Splitter likely in the markdown tooling under `src/` (the code serving
 `read_markdown`/`edit_markdown`). Start: `grep` for the heading/section
 extraction (ATX `#` detection) and add fenced-code tracking. Pair the fix with
 the regression fixture above.
+
+
+## Resolution (2026-07-03)
+
+Found zombie-open during an open-issues triage pass. The parser-level fix
+already shipped independently — commits `8733930a`/`1d489b3d`
+("fix(markdown): treat unbalanced ``` fences as plain text in heading
+parse") — before this bug file was even opened. `parse_all_headings` now
+tracks fence state and both masks fake headings inside a balanced fence
+(`resolve_section_range_balanced_code_fence_still_masks_inner_headings`)
+and tolerates an unbalanced fence without hiding subsequent real headings
+(`resolve_section_range_last_heading_with_unbalanced_code_fence`).
+
+Verified functionally against this bug's exact repro shape (a `### Task 7`
+section containing a fenced ` ```bash ` block with `#!/usr/bin/env bash` and
+a `# comment` line, followed by a paragraph in the same section):
+`read_markdown(heading="### Task 7 something")` now returns the full
+section body through the trailing paragraph, not a truncated slice ending
+at the fenced `#` line.
+
+No code change required here — this entry documents closure only.

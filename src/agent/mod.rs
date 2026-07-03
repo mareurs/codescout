@@ -1648,10 +1648,28 @@ impl Agent {
                             crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
                         let collection = config.collection("memories");
                         let dim = config.model_dim as u64;
-                        let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                            qdrant, collection, dim,
+                        // `QdrantSemanticMemoryStore::new` bootstraps the collection
+                        // (a real network round trip) — bound it so a reachable-but-hung
+                        // Qdrant fails fast instead of blocking up to the 120s operation
+                        // timeout. Timeout is treated exactly like a connect error: it
+                        // flows out as an `Err`, so `get_or_try_init` leaves the cell
+                        // uninitialized and retries on the next call once Qdrant recovers.
+                        let store = match tokio::time::timeout(
+                            crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
+                            crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                                qdrant, collection, dim,
+                            ),
                         )
-                        .await?;
+                        .await
+                        {
+                            Ok(result) => result?,
+                            Err(_) => anyhow::bail!(
+                                "timed out bootstrapping Qdrant memories collection after {:?} \
+                                 (Qdrant reachable but unresponsive?); semantic memory \
+                                 unavailable this session — will retry on next use",
+                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
+                            ),
+                        };
                         anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
                     }
                     #[cfg(not(feature = "server-stack"))]
@@ -1716,6 +1734,8 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "server-stack")]
+    use serial_test::serial;
     use tempfile::tempdir;
 
     /// Canonicalize a path. On macOS this resolves the `/var` → `/private/var`
@@ -1723,6 +1743,31 @@ mod tests {
     /// code paths canonicalize via `std::fs::canonicalize`.
     fn canonical(p: &std::path::Path) -> std::path::PathBuf {
         std::fs::canonicalize(p).expect("path canonicalizes")
+    }
+
+    #[cfg(feature = "server-stack")]
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(feature = "server-stack")]
+    impl EnvGuard {
+        fn set<V: AsRef<std::ffi::OsStr>>(key: &'static str, value: V) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    #[cfg(feature = "server-stack")]
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
     }
 
     #[tokio::test]
@@ -1946,6 +1991,47 @@ mod tests {
             .unwrap();
         // Default config uses directory name
         assert!(!name.is_empty());
+    }
+
+    #[cfg(feature = "server-stack")]
+    #[tokio::test]
+    #[serial]
+    async fn semantic_memory_store_bootstrap_times_out_on_hung_qdrant() {
+        // Regression for docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md:
+        // a reachable-but-unresponsive Qdrant (TCP accepts, no reply) must not
+        // block semantic_memory_store() anywhere near the client's 120s operation
+        // timeout. Black-hole listener mirrors the bug file's own `socat`/`nc -l`
+        // standalone repro.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local_addr");
+        tokio::spawn(async move {
+            loop {
+                if let Ok((_stream, _)) = listener.accept().await {
+                    // Accept and never respond — simulates a wedged Qdrant.
+                    std::future::pending::<()>().await;
+                }
+            }
+        });
+
+        let _backend = EnvGuard::set("CODESCOUT_VECTOR_BACKEND", "qdrant");
+        let _url = EnvGuard::set("CODESCOUT_QDRANT_URL", format!("http://{addr}"));
+
+        let agent = Agent::new(None).await.unwrap();
+        let start = std::time::Instant::now();
+        let result = agent.semantic_memory_store().await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            result.is_err(),
+            "expected a bootstrap-timeout error against a black-hole Qdrant"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(30),
+            "semantic_memory_store() took {elapsed:?} against a black-hole Qdrant \
+             — bootstrap timeout guard regressed (unbounded case blocks up to 120s)"
+        );
     }
 
     #[tokio::test]

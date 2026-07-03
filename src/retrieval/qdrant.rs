@@ -10,6 +10,17 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::Qdrant;
 
+/// Ceiling for a Qdrant *bootstrap* operation — either `QdrantWrap::connect`'s
+/// own connection handshake, or a first-use collection-ensure call such as
+/// `ensure_memories_collection`. Distinct from the 120s *operation* timeout
+/// baked into the qdrant-client builder, which bounds individual RPCs once
+/// connected but does not cover connection establishment itself. A
+/// reachable-but-hung Qdrant (TCP accepts, no reply) would otherwise block a
+/// caller for the full 120s (or longer — connection establishment isn't
+/// covered by that timeout at all), which can exceed a host's session-init
+/// budget. See docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md.
+pub const QDRANT_BOOTSTRAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub struct QdrantWrap {
     pub client: Qdrant,
 }
@@ -21,11 +32,33 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
 }
 
 impl QdrantWrap {
+    /// Build the Qdrant client. `Qdrant::from_url(...).build()` is a plain,
+    /// synchronous call that — despite appearances — performs a blocking
+    /// connection handshake: against a reachable-but-unresponsive Qdrant (TCP
+    /// accepts, no reply), it blocks the calling thread indefinitely with no
+    /// yield point, so an `await`-side `tokio::time::timeout` around it cannot
+    /// preempt it. Routing it through `spawn_blocking` moves that blocking work
+    /// off the async executor and makes it interruptible via `timeout` here.
+    /// See docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md.
     pub async fn connect(url: &str) -> Result<Self> {
-        let client = Qdrant::from_url(url)
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .context("qdrant connect")?;
+        let owned_url = url.to_string();
+        let client = tokio::time::timeout(
+            QDRANT_BOOTSTRAP_TIMEOUT,
+            tokio::task::spawn_blocking(move || {
+                Qdrant::from_url(&owned_url)
+                    .timeout(std::time::Duration::from_secs(120))
+                    .build()
+                    .context("qdrant connect")
+            }),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "timed out connecting to Qdrant at {url} after {QDRANT_BOOTSTRAP_TIMEOUT:?} \
+                 (reachable but unresponsive?)"
+            )
+        })?
+        .context("qdrant connect task panicked")??;
         Ok(Self { client })
     }
 
