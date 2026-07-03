@@ -96,6 +96,45 @@ conflict. The uptake claim stays unproven pending a multi-turn design.
 **Scope caveats:** Claude-only, n=3/arm, single task shape, self-graded E2–E5
 (crisp string-level rubrics mitigate; texts preserved).
 
+## E4 re-run at n=10, pinned to Sonnet (2026-07-03) — the n=3 result was small-sample noise
+
+Two independent n=10 samples, both pinned `--model sonnet`:
+
+1. **Harness run** (`prompt-tdd run`, official cost tracking): **PASS 10/10**
+   (`pass_threshold=1.0` — every one of 10 independently-generated runs passed
+   CALIBRATE).
+2. **Direct capture + separate re-judge** (10 fresh `claude -p --model sonnet`
+   calls, judged individually with reasoning captured for every run, not just
+   failures — closing the `report.py` gap noted below): **9/10 clear passes**
+   (scores 1.0/1.0/1.0/0.5/1.0/1.0/1.0/1.0/0.5/1.0 with real reasoning on the
+   non-1.0/non-misfire cells) **+ 1 likely misfire** (`resp_1` scored 1e-10 with
+   empty reasoning — the same structured-output artifact signature seen
+   throughout this session — despite the text explicitly citing "47 commits
+   behind HEAD" and proposing re-verification ("worth confirming... at current
+   HEAD"), which the rubric's own wording credits as a pass).
+
+**Objective count (independent of judgment calls):** 8 of 10 direct captures
+explicitly cite the number "47"; the other two (resp_5, resp_9) reference their
+own memory being stale but never the tool's `commits_behind_head` signal
+specifically — a real, defensible partial-credit distinction, not noise.
+
+**Verdict: the n=3 CALIBRATE=1/3 result was small-sample variance, not a real
+Sonnet-specific calibration deficit.** At n=10 — two independently-generated
+samples, one via the normal harness pipeline, one via direct capture — the true
+rate is ~9-10/10. **CALIBRATE is confirmed; the ship decision's confidence is
+restored to high.** The earlier "downgraded to low-medium" correction in A-7
+was itself premature at n=3 in the other direction — this is now the second
+lesson from this exact number: **n=3 is not enough to resolve a claim near a
+threshold, in either the pessimistic or optimistic direction.** Use n≥10 for
+any CALIBRATE-shaped rubric before recording a confidence level.
+
+**Harness gap found along the way:** `report.py` never surfaces the per-scenario
+pass RATE (`passed_count / num_runs`, computed in `runner.py` but discarded
+before the CLI report) for multi-run scenarios — only a binary PASS/FAIL against
+`pass_threshold` plus a list of failing assertions. At n=10 this made the
+official report uninformative on its own (it only says "PASS" or lists which
+runs failed, never "9/10"); the rate had to be reconstructed via direct capture.
+Logged as session-log F-6.
 ## Re-run pinned to Sonnet (2026-07-03, after the model-pinning fix)
 
 Context: the original run + independent re-judge above executed on an

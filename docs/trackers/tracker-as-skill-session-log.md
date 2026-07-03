@@ -32,6 +32,7 @@
 | F-3 | 2026-07-02 | med | self-friction | mitigated | prompt-tdd report prints only per-run failing assertions; nearly read as all-runs-0.00 |
 | F-4 | 2026-07-02 | low | eval-harness | mitigated | prompt-tdd test_sdk_pipeline hardcodes global scenario count (== 4); any added scenario reddens it |
 | F-5 | 2026-07-03 | high | eval-harness | fixed-verified | prompt-tdd never pinned --model; A-4–A-7 evals ran on uncontrolled Fable instead of a chosen model |
+| F-6 | 2026-07-03 | low | eval-harness | open | prompt-tdd report never surfaces per-scenario pass rate for multi-run scenarios (binary PASS/FAIL only) |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -287,6 +288,27 @@ Codified so the Index column means the same thing across sessions.
 **Status:** fixed-verified — prompt-engineering `aecb76f` (env-strip) + `8790c80` (model-pin, `DEFAULT_GENERATOR_MODEL = "sonnet"`, per Marius's explicit choice). Verified live (`claude -p ... --model sonnet` resolves) and by re-running all 9 A-7 arms pinned: Test 1 fully confirmed (2 runner FAILs were judge misfires, not model effects); Test 2's KEY-PRIORITY confirmed 6/6 across both model conditions, but CALIBRATE dropped to a real 1/3 under Sonnet — a genuine model-dependent finding the unpinned run could not have surfaced honestly.
 
 **Fix idea / Pointer:** prompt-engineering commits `aecb76f`, `8790c80`; regression tests `test_evaluate_inherits_env_without_config_dir` (rewritten) + new `test_default_session_pins_model_explicitly`. Audit log A-7 correction section.
+
+---
+## F-6 — prompt-tdd report never surfaces per-scenario pass RATE for multi-run scenarios
+
+**Observed:** 2026-07-03, re-running E4 (provenance CALIBRATE) at n=10 pinned to Sonnet, requested after the n=3 result proved unreliable (F-5's correction, then a second correction).
+
+**When:** Reading the harness's own report for a `runs: 10` scenario to get the pass rate.
+
+**Expected:** A multi-run scenario's report shows how many of the N runs passed (e.g. "9/10"), since that rate is the actual signal for a borderline rubric.
+
+**Got:** `runner.py` computes `pass_rate = passed_count / num_runs` internally, but `report.py` never reads or prints it (`grep pass_rate report.py` → 0 matches). The CLI only shows a binary PASS/FAIL against `pass_threshold` (default 1.0 — ANY failing run fails the whole scenario) plus a list of failing-run assertions. A scenario that passes 9/10 runs and one that passes 0/10 both render identically as "FAIL" with the same shape of failing-assertion list; a scenario that passes 10/10 shows bare "PASS" with no rate at all.
+
+**Probable cause:** the report was designed around `pass_threshold=1.0` (binary correctness), and multi-run scenarios with a graded/borderline rubric — where the RATE is the actual finding — were not the original design target.
+
+**Workaround:** reconstruct the rate by direct capture: generate N independent responses via `claude -p --model <pinned>`, judge each individually via `judge_for_model(...).evaluate_rubric(...)`, and count. Done for E4 at n=10 (twice — once via the harness's own PASS/FAIL as a coarse cross-check, once via direct capture for the actual rate).
+
+**Severity:** low — does not block any eval, but costs an extra manual-capture pass every time a multi-run rate matters, exactly the shape of friction F-2/F-3 already logged for this harness.
+
+**Status:** open
+
+**Fix idea / Pointer:** `report.py`'s scenario-line formatter could print `pass_rate` alongside the PASS/FAIL verdict whenever `scenario.runs > 1` (e.g. "FAIL (9/10)"). Same repo/PR as F-2's preflight+persist fix and F-3's per-run distribution idea — this is the third instance of the same underlying gap (the report renders a verdict, not the distribution behind it).
 
 ---
 ## Template for new entries
