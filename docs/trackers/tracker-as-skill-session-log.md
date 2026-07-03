@@ -1,5 +1,20 @@
 # Session Log — Tracker-as-Skill / Prompt-Surface
 
+> **STATUS (2026-07-03) — for the next session.** This work stream ran a
+> prompt/agent/harness research arc: audit-log entries A-3→A-7
+> (`docs/trackers/prompt-hamsa-audit-log.md`) + eval protocols
+> (`docs/evals/2026-07-03-*.md`). **Read the distilled findings first:**
+> [`docs/research/2026-07-03-mcp-guidance-findings.md`](../research/2026-07-03-mcp-guidance-findings.md)
+> (also surfaced as memory `research/loadbearing-mcp-guidance`).
+>
+> **Shipped this stream:** reader-first tracker prompts (A-3),
+> `get_guide("untrusted-content")` data-vs-directive rule (A-5), prompt-tdd
+> model-pin + credential-leak fixes (`../prompt-engineering` `aecb76f`/`8790c80`, F-5).
+> **Green-lit next feature:** server-computed provenance envelope keys (A-7 Test 2) —
+> scout `src/tools/core/types.rs`. **Standing blocker:** a multi-turn eval harness
+> (prompt-tdd `input.history`) — every time-dependent finding is parked on it.
+> **Open frictions:** F-1 (2200-cap), F-3/F-4/F-6 (prompt-tdd report legibility, one PR).
+
 > **Purpose:** Two-sided observation log for a multi-session work stream.
 > Captures frictions (F-N) and wins (W-N) that the session producing it
 > wants to preserve so future sessions inherit the lesson.

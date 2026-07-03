@@ -144,6 +144,16 @@ systems — failure rates of 41–87% in production pipelines. This drove the
 choice of single-session skill-based workflows over agent orchestration chains.
 [Read the analysis →](docs/research/multi-agent-context-loss.md)
 
+## Guidance that agents actually follow
+
+codescout's prompt surfaces — Iron Laws, `get_guide` topics, tracker rendering,
+result envelopes — are shaped by measured findings on how coding agents trust,
+follow, and resist the content a tool surfaces. The short version: authority framing
+(a persona, a "trusted" marker) buys nothing; *placement* and *server-computed
+provenance* buy everything. Trust attaches to what the server computes
+(symbols, git state, freshness keys), never to a marker the content carries about
+itself — because anything in a file body is forgeable by whoever wrote the file.
+[Read the findings →](docs/research/2026-07-03-mcp-guidance-findings.md)
 ## Kotlin & Rust LSP multiplexers
 
 Kotlin and Rust LSPs are expensive to boot and allow only one process per

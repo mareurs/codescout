@@ -46,6 +46,26 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 
 ## What's Next
 
+**Guidance / prompt-surface work stream (2026-07-03, eval-backed).** Findings synthesis:
+[`docs/research/2026-07-03-mcp-guidance-findings.md`](research/2026-07-03-mcp-guidance-findings.md);
+memory `research/loadbearing-mcp-guidance`.
+
+- **Server-computed provenance envelope keys** (`refreshed_at_commit`, `commits_behind_head`)
+  on result envelopes — *green-lit, not yet built*. The one evidence-backed feature from
+  the guidance work that changes Rust, not prompts (KEY-PRIORITY 6/6 across two models;
+  CALIBRATE 9-10/10 at n=10 pinned Sonnet). Scout the envelope seam in
+  `src/tools/core/types.rs`; intersects the G5 bug (augmentation fields omitted from
+  `artifact(get)`).
+- **Multi-turn eval harness** (prompt-tdd `input.history`) — the standing blocker for the
+  whole guidance research line: every time-dependent question (instruction decay,
+  re-derivation of returned facts, guidance persistence, adherence at distance) escapes
+  single-turn measurement. Unblocks 4 parked findings at once.
+- *Shipped this stream:* reader-first tracker prompts (`tracker_design`), the
+  `get_guide("untrusted-content")` data-vs-directive rule, and the prompt-tdd
+  model-pinning + ambient-credential fixes (`../prompt-engineering` `aecb76f`/`8790c80`).
+
+**Standing backlog:**
+
 - Additional tree-sitter grammars (currently: Rust, Python, TypeScript, Go, Java, Kotlin)
 - Additional LSP server configurations
 - Configurable LSP idle TTL via `project.toml`
