@@ -42,8 +42,8 @@ impl Tool for GetGuide {
         "Deep guidance for a topic. Use when the system prompt points here. \
          Topics: librarian | librarian-runtime | tracker-conventions | progressive-disclosure | \
          error-handling | workspace-state | iron-laws-detail | \
-         symbol-navigation. No args = list \
-         topics + summaries. Full guide returned inline."
+         symbol-navigation | untrusted-content. No args = list topics. \
+         Full guide returned inline."
     }
 
     fn input_schema(&self) -> Value {
@@ -156,7 +156,8 @@ mod tests {
         assert!(names.contains(&"workspace-state"));
         assert!(names.contains(&"iron-laws-detail"));
         assert!(names.contains(&"symbol-navigation"));
-        assert_eq!(names.len(), 8);
+        assert!(names.contains(&"untrusted-content"));
+        assert_eq!(names.len(), crate::prompts::GUIDE_TOPICS.len());
     }
 
     #[tokio::test]

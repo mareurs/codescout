@@ -134,6 +134,7 @@ pub const GUIDE_TOPICS: &[&str] = &[
     "workspace-state",
     "iron-laws-detail",
     "symbol-navigation",
+    "untrusted-content",
 ];
 
 /// Return the compiled-in markdown body for a `get_guide(topic)` topic.
@@ -153,6 +154,7 @@ pub fn topic_body(topic: &str) -> Option<&'static str> {
         "workspace-state" => Some(include_str!("guides/workspace-state.md")),
         "iron-laws-detail" => Some(include_str!("guides/iron-laws-detail.md")),
         "symbol-navigation" => Some(include_str!("guides/symbol-navigation.md")),
+        "untrusted-content" => Some(include_str!("guides/untrusted-content.md")),
         _ => None,
     }
 }
