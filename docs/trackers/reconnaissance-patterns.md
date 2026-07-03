@@ -60,6 +60,7 @@ skill).
 | R-34 | 2026-06-15 | hit | On a cross-platform branch, the host `cargo check` is necessary-not-sufficient for a rebase — it never compiles the gated target. After rebasing `vdi-windows` onto `experiments` (conflict in the `#[cfg(unix)]` peer gate itself), cross-compiled `--target x86_64-pc-windows-gnu` to confirm the incoming commits added no ungated unix-only code (EXIT=0). Compile the target the branch exists for, not just the host. | `vdi-windows` rebase this session; `src/tools/mod.rs` peer-gate; WIN-23; kin R-5 |
 | R-35 | 2026-06-16 | hit | A tool's own error diagnostic is a hypothesis, not ground truth. `edit_code`'s "AST parse failed — likely syntax errors or duplicate siblings" was falsified by `symbols()` (clean parse, unique name_path); the archived backtick bug was already fixed. A throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned the real cause in one run: AST start 214 (annotation line) vs LSP 216 (`fun` line), matcher flips Some→None at the ±1 gate. Reproduce the failing internal call when a cheaper read disagrees with the error text. | bug-fix W-17/F-23; issues/2026-06-16-kotlin-edit-code-annotation-line-gap; kin R-5/R-32 (diagnostic/claim ≠ ground truth) |
 | R-36 | 2026-06-28 | hit (validates R-3 / R-20) | Struct/config-field removal blast radius includes serde **data fixtures**, not just source — scope the verification drift-grep to `tests/` (incl. `tests/fixtures/**/*.toml`), not just `src/`. `SecuritySection` has no `#[serde(deny_unknown_fields)]`, so stale keys (`shell_enabled`, `shell_output_limit_bytes`) in two fixture `project.toml`s were silently dropped — `cargo test` stayed green; only the `src/ tests/` drift-grep surfaced them. Same serde-silent-ignore property that makes the user migration a footgun is what hid the fixture drift from compiler + tests. Promote-when (2 datapoints) → codescout memory `reconnaissance` (project-shaped: Rust+serde+TOML). | issues/2026-06-28-vestigial-shell-output-limit-bytes; tests/fixtures/{rust,kotlin}-library/.codescout/project.toml:18-19; kin R-3/R-20 |
+| R-37 | 2026-07-03 | miss (recurrence of R-28) | Adding a get_guide topic edits TWO gated surfaces beyond registration: the tool description (300-char budget test in `server::tests`) and the no-arg listing (hardcoded topic count). Scout the tests' assertions, not their names; convert hardcoded counts to derive from the canonical const. Full `--lib` gate absorbed the miss pre-commit. | tracker-as-skill session (untrusted-content topic, A-5); kin R-28/R-1/R-7 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -860,6 +861,22 @@ of the internal call corrects it → distill into codescout memory `reconnaissan
 **Evidence:** `src/symbol/query.rs` `find_ast_end_line_in`/`collect_by_name`; throwaway
 dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression test
 `find_ast_end_line_in_bridges_annotation_line_gap`; `cargo test --lib` 2790 passed.
+
+## R-37 — Miss (recurrence of R-28): get_guide topic added without enumerating the description-budget + topic-count gates
+
+**Observed:** 2026-07-03, adding the `untrusted-content` get_guide topic (data-vs-directive rule, audit-log A-5).
+
+**Scout done:** grepped `GUIDE_TOPICS` references (2 files — correct seam for registration) and read the guide.rs test *names*, but did not read their *assertions* before editing. Two gates fired at `cargo test --lib`: `server::tests::tool_descriptions_stay_under_budget` (description 309/300 chars after appending the topic name) and `tools::guide::tests::get_guide_lists_topics_with_no_arg` (hardcoded `names.len() == 8`).
+
+**Cost:** one failed gate cycle (~2 min), pre-commit; zero shipped harm — the full `--lib` run caught what R-28's narrow filter once let ship.
+
+**Fixes:** trimmed the description (" + summaries" dropped, 297/300) and made the count assertion derive from `GUIDE_TOPICS.len()` so the next topic can't re-trip it (gate de-rot, not just gate compliance).
+
+**Generalization (validates R-28/R-1/R-7):** "enumerate the full gate set of a prompt surface" includes the *tool-description* surface, not just source.md slices — any string a tool exposes through the MCP schema has a budget test in `server::tests`. When adding to an enumerated surface (topics, tools, laws), also grep the tests for hardcoded counts (`len() == N`) and convert them to derive from the canonical const while you're there.
+
+**Verdict:** miss — downstream gate absorbed it. Second datapoint for R-28's promote-when: distill "before editing any tool description or enumerated prompt surface, run the surface's budget/count gates first (grep `server::tests` for the tool name)" into codescout memory `reconnaissance`.
+
+**Evidence:** gate2 output (309/300; `left: 9, right: 8`); fixes in `src/tools/guide.rs` (description + derived count); gate3 green (2868 passed).
 
 ## Template for new entries
 
