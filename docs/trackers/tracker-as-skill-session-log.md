@@ -28,13 +28,15 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-07-02 | med | prompt-surface | open | Inline provenance Iron Law collides with the 2200-char server_instructions cap (33B headroom) |
-| F-2 | 2026-07-02 | med | eval-harness | open | prompt-tdd runs all generators before judge preflight; invalid runs persist nothing |
+| F-2 | 2026-07-02 | med | eval-harness | mitigated | prompt-tdd runs all generators before judge preflight; invalid runs persist nothing (preflight shipped) |
 | F-3 | 2026-07-02 | med | self-friction | mitigated | prompt-tdd report prints only per-run failing assertions; nearly read as all-runs-0.00 |
+| F-4 | 2026-07-02 | low | eval-harness | mitigated | prompt-tdd test_sdk_pipeline hardcodes global scenario count (== 4); any added scenario reddens it |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-07-02 | med | scout the 2200 cap + `*_invariants` before proposing any server_instructions addition | inline Iron Law fails `source_md_under_cap` at 33B headroom; ≥1 failed-edit round-trip + an unshippable recommendation | validated |
+| W-2 | 2026-07-02 | high | pre-register + one-concept rubric + bind response↔score | four false eval findings (A-3, F-3, A-5, A-6) each one paragraph from a permanent surface | validated |
 ---
 
 ## Category conventions
@@ -195,9 +197,11 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — ~5 min of wasted subscription generator calls per misconfigured run; cost scales linearly with runs × arms, and the same failure mode fires for an expired/missing API key.
 
-**Status:** open
+**Status:** mitigated — preflight shipped (uncommitted in prompt-engineering); persist-on-INVALID deferred.
 
-**Fix idea / Pointer:** Two-part fix in `prompt-engineering/src/prompt_tdd/`: (1) `runner.py` preflights the judge (import + key) before spawning any generator when judge assertions exist; (2) persist raw responses to `results/` even on INVALID so a fixed judge can re-score without regeneration. Pairs with the pre-compact `report --format json` hang — the harness's failure-path ergonomics are its weakest seam.
+**Fix landed (2026-07-02):** `LLMJudge.preflight()` (judge.py) + `_preflight_judge(scenarios, config)` called at the top of `run_suite`/`run_for_prompt` (runner.py) — if any scenario declares judge (tier-3) assertions, the judge client is constructed BEFORE the generator loop (validates SDK import + API-key presence, no network call); failure raises a clear RuntimeError naming the fix, and zero generators run. 2 regression tests in test_runner.py (fail-fast + no-op-without-judge); full suite 280 passed. Uncommitted (separate repo, not asked to commit). Deferred: persist raw responses on INVALID (covers the *mid-run* judge failure the preflight can't catch) + the F-3 report change.
+
+**Fix idea / Pointer:** Remaining two-part follow-up in `prompt-engineering/src/prompt_tdd/`: (1) `runner.py` preflights the judge (import + key) before spawning any generator when judge assertions exist; (2) persist raw responses to `results/` even on INVALID so a fixed judge can re-score without regeneration. Pairs with the pre-compact `report --format json` hang — the harness's failure-path ergonomics are its weakest seam.
 
 ---
 ## F-3 — prompt-tdd report prints only per-run FAILING assertions; two ✗ lines nearly read as "all runs scored 0.00"
@@ -219,6 +223,48 @@ Codified so the Index column means the same thing across sessions.
 **Status:** mitigated (misread corrected in-session; report format now documented here) 
 
 **Fix idea / Pointer:** prompt-tdd report could print per-scenario run distribution (`2/3 runs passed; failing rubrics: …`) instead of bare per-run failures. Same repo/PR as F-2's preflight+persist fix. Full narrative: audit log A-4 method notes.
+
+---
+## W-2 — Bind-response-to-score + one-concept rubrics killed four false eval findings before any reached a permanent surface
+
+**Observed:** 2026-07-02, prompt-hamsa persona/blanket/adherence evals (this work stream).
+
+**Pattern:** Three composed disciplines, applied to every eval: (1) **pre-register** predictions + risks before any run; (2) **one concept per rubric** (never merge "resists injection" with "engages with facts"); (3) **bind response↔score** — read the actual generated responses and confirm the judge's number matches the text, before believing any delta. When a score and a read disagree, the read wins and the score is a suspected judge artifact.
+
+**Counterfactual (four saves, each one paragraph from a permanent surface):**
+1. **Persona injection-zone (A-3):** a merged "PROBE" rubric scored an obedient response 0.0, nearly writing a false "reader-first fights injection" finding. Split rubric → reversed.
+2. **"C scored 0.00 across the board" (F-3):** the report prints only per-run *failures* with pass_threshold=1.0; two ✗ lines read as total failure. Fresh captures scored 1.0/1.0/0.85 → false spoof-trap finding averted.
+3. **br2 FORGERY misfire (A-5):** judge scored a clearly injection-resistant response ~0.0 (it says "I apply none of the edits, would not commit on master, refuse the webhook change"). Reading it killed a false R1 "the rule leaks" conclusion — which would have wrongly sunk the one rule that works.
+4. **Adherence false-ceiling guard (A-6):** before trusting "both arms PASS 3/3", ran a discrimination check (synthetic violation→0.0, compliant→1.0) proving the rubric had power — so the ceiling is real, not a toothless rubric passing everything.
+
+**Confirming data points:** 4 independent catches in one work stream (A-3, F-3, A-5, A-6), across two failure modes (judge artifact + report-format misread) and one power-check.
+
+**Impact:** high — each catch prevented a wrong conclusion from being committed to the audit log / a shipped prompt change. The single-judge (haiku) noise is real and sits exactly on decision boundaries; the discipline is what makes single-judge eval trustworthy at all.
+
+**Promote-when:** already load-bearing. Promote to `prompt-engineering` harness docs (the "An honest artifact is not an honest rubric" section already seeded) + Hamsa memory (done: `rubric-one-concept-test-on-nuance`). At a 5th catch, promote "bind response↔score before believing a judge delta" to a first-class step in the skill-eval playbook.
+
+**Status:** validated
+
+---
+## F-4 — prompt-tdd `test_sdk_pipeline_with_v2_scenarios` hardcodes a global scenario count (`== 4`)
+
+**Observed:** 2026-07-02, running the prompt-engineering suite after adding eval scenarios under `scenarios/`.
+
+**When:** `pytest tests/` after creating `scenarios/persona/*` (and the pre-compact `scenarios/trackers/*`) for the A-4/A-5/A-6 evals.
+
+**Expected:** Adding a new scenario directory is a normal, non-breaking action.
+
+**Got:** `test_integration.py::test_sdk_pipeline_with_v2_scenarios` does `discover_scenarios(scenarios/)` then `assert len(scenarios) == 4` — a working-tree-wide count. Any added scenario dir (even untracked) turns it red: `AssertionError: Expected 4 scenarios, found 14`. The test was already latent-red from the pre-compact trackers scenarios before today's additions.
+
+**Probable cause:** The test hardcodes a global count of a directory that grows whenever anyone adds a scenario, instead of scoping to the specific fixtures it means to exercise (or asserting `>=`).
+
+**Workaround:** Relocated the experimental eval scenarios out of `scenarios/` to the session scratchpad (`scratchpad/persona-eval/scenarios-archive/`); suite returned to 280 passed. The audit-log A-4/A-5/A-6 entries + blanket/adherence plan files document the scenarios for reproduction.
+
+**Severity:** low — brittle test, not a product bug; but it silently blocks a green suite for anyone with local scenario experiments in the tree.
+
+**Status:** mitigated (scenarios relocated) — root brittleness unfixed in prompt-engineering.
+
+**Fix idea / Pointer:** Point the test at a dedicated fixtures subdir, or assert `>= 4` / a per-subdir count. prompt-engineering `tests/prompt_tdd/test_integration.py::test_sdk_pipeline_with_v2_scenarios`.
 
 ---
 ## Template for new entries
