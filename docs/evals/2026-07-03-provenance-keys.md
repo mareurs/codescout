@@ -95,3 +95,24 @@ conflict. The uptake claim stays unproven pending a multi-turn design.
 
 **Scope caveats:** Claude-only, n=3/arm, single task shape, self-graded E2–E5
 (crisp string-level rubrics mitigate; texts preserved).
+
+## Independent re-judge (2026-07-03, after API credits restored)
+
+All 12 preserved captures re-scored by the harness judge (Haiku,
+`claude-haiku-4-5-20251001`), same pre-registered rubrics verbatim:
+
+| Arm | Rubric | Judge | Manual grade | Agreement |
+|---|---|---|---|---|
+| E2 | UPTAKE | 3/3 | 3/3 | full |
+| E3 | UPTAKE | 3/3 | 3/3 | full |
+| E4 | CALIBRATE | **2/3** (e4_1 → 0.0) | 3/3 (e4_1 flagged lenient) | 2/3 + 1 divergence |
+| E5 | KEY-PRIORITY | 3/3 | 3/3 | full |
+
+**Ship decision unchanged and now independent-judge-confirmed:** KEY-PRIORITY
+3/3 ✓ AND CALIBRATE 2/3 ✓ (meets the pre-registered ≥2/3 bar) → envelope keys
+ship. Grader calibration: 11/12 agreement; the single divergence (e4_1) landed
+exactly on the cell the manual grade had pre-flagged as borderline-lenient
+("staleness noted, no re-verify proposal") — and the judge passed the
+near-identical e4_2, the same boundary noise seen on the blanket NO-BLANKET
+rubric (0.85 vs 0.15). Lesson reinforced: flag borderline cells at grading time;
+that is where judges and humans part ways.
