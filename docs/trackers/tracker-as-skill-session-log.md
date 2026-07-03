@@ -31,6 +31,7 @@
 | F-2 | 2026-07-02 | med | eval-harness | mitigated | prompt-tdd runs all generators before judge preflight; invalid runs persist nothing (preflight shipped) |
 | F-3 | 2026-07-02 | med | self-friction | mitigated | prompt-tdd report prints only per-run failing assertions; nearly read as all-runs-0.00 |
 | F-4 | 2026-07-02 | low | eval-harness | mitigated | prompt-tdd test_sdk_pipeline hardcodes global scenario count (== 4); any added scenario reddens it |
+| F-5 | 2026-07-03 | high | eval-harness | fixed-verified | prompt-tdd never pinned --model; A-4–A-7 evals ran on uncontrolled Fable instead of a chosen model |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -265,6 +266,27 @@ Codified so the Index column means the same thing across sessions.
 **Status:** mitigated (scenarios relocated) — root brittleness unfixed in prompt-engineering.
 
 **Fix idea / Pointer:** Point the test at a dedicated fixtures subdir, or assert `>= 4` / a per-subdir count. prompt-engineering `tests/prompt_tdd/test_integration.py::test_sdk_pipeline_with_v2_scenarios`.
+
+---
+## F-5 — prompt-tdd's ClaudeCodeRegistry never pinned --model; two eval decisions ran on an uncontrolled model (Fable, not chosen)
+
+**Observed:** 2026-07-03, while investigating why the judge's Anthropic API key drained credits during the persona/blanket/provenance evals earlier this session.
+
+**When:** Auditing `ClaudeCodeRegistry._evaluate_handler` in prompt-engineering after fixing the ambient-API-key leak (F-2's sibling bug).
+
+**Expected:** Every `claude -p` generator subprocess runs a known, pinned model so eval results are reproducible and attributable.
+
+**Got:** `SessionConfig.model` defaulted to `""`, `prompt_tdd.yaml` had no `session:` block, and `cli.py` read `session_raw.get("model", "")` — so `--model` was never passed. `claude -p` silently used whatever model the operator's interactive CLI profile currently had selected. Confirmed: the earlier persona/blanket/delegation/provenance experiments this session (A-4 through A-7) ran on Fable, not a deliberate choice — and the API judge key got billed for those same Fable generations, draining it (the two bugs compounded: leaked key + unpinned model = silent Fable billing).
+
+**Probable cause:** `model: str = ""` was written as an "empty means don't override" sentinel without a corresponding safe default — the same footgun shape as F-2's `run_env = None` (silent full-inheritance is the resting state instead of an explicit, safe default).
+
+**Workaround:** none needed once fixed — see Fix.
+
+**Severity:** high — two ship decisions (A-7 Test 1 and Test 2) were made from data whose generator model was neither known nor controlled at pre-registration time; re-running under a pinned model was required to know which findings held.
+
+**Status:** fixed-verified — prompt-engineering `aecb76f` (env-strip) + `8790c80` (model-pin, `DEFAULT_GENERATOR_MODEL = "sonnet"`, per Marius's explicit choice). Verified live (`claude -p ... --model sonnet` resolves) and by re-running all 9 A-7 arms pinned: Test 1 fully confirmed (2 runner FAILs were judge misfires, not model effects); Test 2's KEY-PRIORITY confirmed 6/6 across both model conditions, but CALIBRATE dropped to a real 1/3 under Sonnet — a genuine model-dependent finding the unpinned run could not have surfaced honestly.
+
+**Fix idea / Pointer:** prompt-engineering commits `aecb76f`, `8790c80`; regression tests `test_evaluate_inherits_env_without_config_dir` (rewritten) + new `test_default_session_pins_model_explicitly`. Audit log A-7 correction section.
 
 ---
 ## Template for new entries
