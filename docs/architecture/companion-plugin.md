@@ -8,7 +8,7 @@ hook inventory lives here. Source of truth is the plugin's own `hooks/hooks.json
 
 ## What it does (headline hooks)
 
-- `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session
+- `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session; also emits a tracker-hygiene overdue nudge (reads `next-sweep-due` from `docs/trackers/tracker-hygiene-log.md`)
 - `SubagentStart` hook (`hooks/subagent-guidance.sh`) — same for all subagents
 - `PreToolUse` hook on `Grep|Glob|Read|Bash|Edit|Write` (`hooks/pre-tool-guard.sh`) — **hard-denies (`permissionDecision: deny`) native Read/Grep/Glob/Edit/Write on source files and native Bash**, redirecting to codescout MCP tools
 
