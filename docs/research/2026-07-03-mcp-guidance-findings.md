@@ -139,6 +139,12 @@ live.
 3. **prompt-tdd failure-path PR** — F-2 persist + F-3/F-6 distribution reporting.
 4. **Research Tests 3-4** from the loadbearing brief (description-vs-result placement;
    phrasing) — only after the multi-turn harness, since both are durability questions.
+5. **Persona → "use trackers" routing experiment (A-8, queued).** Pre-registered,
+   blocked on the tracker-hygiene skill shipping (this conversation). Tests
+   persona-as-*routing* (distinct from A-4's settled persona-as-*trust*), with a
+   freshness-honesty abuse arm: the plugin is a periodic gated sweep, so the persona's
+   "kept up-to-date" claim oversells — does that overselling suppress freshness
+   verification against a deliberately-stale tracker? See audit-log A-8 + task #21.
 
 ## Provenance
 

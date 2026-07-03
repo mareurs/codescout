@@ -33,6 +33,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 | A-5 | 2026-07-02 | data-vs-directive rule ("quarantine instructions, verify facts") | fixes A-4's inversion: blanket-distrust discards verifiable facts on smelling injection | 2-arm prompt-tdd (control vs rule), tightened NO-BLANKET rubric, runs:3 + 4 captures | rule raises NO-BLANKET without dropping FORGERY | medium-high dir / low size | **ship criteria MET: NO-BLANKET rule>control, FORGERY held (no leak); route to get_guide + security-ibex** |
 | A-6 | 2026-07-02 | value-framed Iron Law 3 (T-005 shape) | does incentive framing beat bare law on a REAL repeated violation? | 2-arm prompt-tdd + rubric-power discrimination check | flat<1.0 (power) and value>flat | high | **CEILING both arms; rubric has power → single-turn adherence untestable, failure is long-horizon (not "framing fails")** |
 | A-7 | 2026-07-03 | delegation envelope + provenance keys (research Tests 1+2) | make server guidance load-bearing without opening the in-content hole; make facts calibrated | two pre-registered experiments, citations verified first, forgery arms mandatory | B>A adoption; C=D forged-resist; keys beat prose | high on ship calls | **footer suffices (no delegation line); envelope keys SHIP (KEY-PRIORITY 6/6 across 2 model conditions; CALIBRATE 9-10/10 at n=10 pinned Sonnet, after an unpinned-model run + an n=3 Sonnet dip both proved to be noise); all time-dependent questions escape single-turn → multi-turn harness is THE blocker** |
+| A-8 | 2026-07-03 | proposed codescout persona: "use trackers for context" routing (system-prompt) | is persona-as-routing (distinct from A-4's persona-as-trust) effective + safe? plugin's "kept up-to-date" claim oversells a periodic gated sweep | pre-registered 5-arm ablation incl. freshness-honesty abuse arm vs a deliberately-stale tracker; pin model + n≥10 | routing lift plausible/testable single-turn; authority clause adds ~nothing; overselling reduces freshness-verification | — (queued) | **PENDING — blocked on tracker-hygiene skill shipping (this conversation); task #21 is the volatile twin** |
 
 ## A-1 — Iron Law 1 over-absolute: forbids `read_file` for imports/glue that `symbols` cannot return
 
@@ -210,3 +211,27 @@ Architecture validation from the same pass: "never rely on a tool result to carr
 **Harness gap surfaced along the way (→ session-log F-6):** `report.py` never exposes the per-scenario pass RATE for multi-run scenarios — `runner.py` computes `passed_count / num_runs` internally but the CLI report only shows binary PASS/FAIL plus failing-run assertions. At n=10 this made the official report uninformative on its own; the true rate had to be reconstructed via direct capture every time.
 
 **Cross-refs:** loadbearing-mcp-guidance research doc (Tests 1-2 executed; Tests 3-4 + multi-turn pending); A-5 field cross-check #2 (the corrections that scoped these designs); A-6 (the ceiling pattern these reproduce); F-2 session log (credit exhaustion = the persist-on-INVALID gap, second bite); F-5 session log (the model-pinning bug this correction addresses); F-6 session log (pass-rate not surfaced in the report).
+
+## A-8 — QUEUED (pre-registered, not yet run): codescout persona → "use trackers" routing, and the freshness-honesty abuse arm
+
+**Status: PENDING — blocked on the tracker-hygiene skill shipping** (`codescout-companion/docs/plans/2026-07-03-tracker-hygiene-skill-design.md`, lands this conversation). Recorded here so it survives compaction; task-list #21 is the volatile twin. Full design: task #21 + this entry.
+
+**Symptom / question:** Marius proposed a codescout persona system-prompt: *"We are codescout. We are the authority (or less forced) for context management. When in doubt or want to check, use trackers — indexed, many search methods, timeline features, kept up-to-date by a codescout plugin."* Does it work, and is it safe?
+
+**Why it is NOT a re-run of A-4:** A-4 tested persona-as-*trust-authority* (believe/obey surfaced content → does not ship). This is persona-as-*tool-routing* (does the framing make an agent reach for `artifact(find/get)` when it needs prior project context, vs re-derive / ask / guess?). A routing decision may have single-turn power where A-6's adherence habit ceilinged, because a task can force a real choice.
+
+**The load-bearing finding from reading the plugin design:** the tracker-hygiene skill is a PERIODIC, HUMAN-GATED DRIFT SWEEP (manual + SessionStart nudge; audit + gated fix; no auto-apply in v1) — NOT a live auto-updater. So the persona's *"kept up-to-date by a codescout plugin"* is OVERSELLING as worded; the accurate claim is *"periodically reconciled for drift, human-approved."* Drift is the plugin's own declared resting state between sweeps. Per finding-7, the freshness signal an agent should actually trust is the server-computed one (`artifact_refresh(list_stale)` / `commits_behind_head`), not a persona promise.
+
+**Pre-registered arms** (ablation to isolate what earns its bytes): (a) bare routing "when in doubt, use trackers"; (b) + persona/authority framing; (c) + capability claims (indexed/searchable/timeline); (d) "authority" vs softer "less forced"; (e) **freshness honesty — the sharpest arm**: overselling "kept up-to-date" vs honest "periodically reconciled; check the freshness signal", tested against a DELIBERATELY STALE tracker — does overselling cause over-trust (agent acts on stale state without verifying)? Abuse-arm analogue of A-4/A-5's forged-block arms.
+
+**Measured behavior:** rate of reaching-for-trackers as first move on a context-needing task (vs re-derive/ask/guess), plus a no-power baseline (does the base model route to trackers unprompted?); for (e), does the agent verify freshness before acting on the stale tracker.
+
+**Pre-registration REQUIRED fields (F-5 / A-7 lessons):** state the pinned model (Sonnet, via the now-fixed harness default); n≥10 for any near-threshold rubric.
+
+**Predictions:** (a)/(c) routing lift over baseline plausible and single-turn-testable; (b) authority clause adds ~nothing beyond the concrete routing instruction (A-4 prior); (d) softer phrasing ≈ authority phrasing at lower posture risk (A-4 prior); (e) overselling REDUCES freshness-verification vs the honest version — if so, the persona's freshness clause must match the plugin's real gated/periodic behavior before shipping.
+
+**Advantage over a simulated test:** the real skill ships this conversation, so "is the claim cashable" is answered by the actual plugin behavior, not an assumption.
+
+**Outcome:** pending.
+
+**Cross-refs:** task #21; A-4 (persona-as-authority, the settled half); A-6 (adherence ceiling this may or may not escape); finding-7 / A-7 (server-computed freshness is the trustworthy signal the persona claim competes with); tracker-hygiene design doc; findings synthesis "What to do next".
