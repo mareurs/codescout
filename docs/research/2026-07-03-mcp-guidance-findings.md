@@ -172,8 +172,11 @@ live.
    projection. Live-verified end-to-end (entry_collection surfaces; commit_refresh →
    refreshed_at_commit=HEAD, commits_behind_head=0). Optional follow-ups: extend provenance to
    the `context.rs` `[LIVE]` bundle and the `state_at` time-travel surfaces.
-2. **Build the multi-turn harness extension** — unblocks findings 6, 8, and the
-   durability half of 6-Test-1 at once.
+2. **Multi-turn harness extension — SHIPPED 2026-07-04** (prompt-engineering `3fa2ab0`):
+   `input.history` replays a persisted `claude -p --resume` session, assertions target the
+   final turn — long-horizon adherence is now measurable. Unblocks findings 6, 8, and the
+   durability half of 6-Test-1. (Unit-verified; a real `--resume` smoke is advisable before
+   first research use.)
 3. **prompt-tdd failure-path PR** — F-2 persist + F-3/F-6 distribution reporting.
 4. **Research Tests 3-4** from the loadbearing brief (description-vs-result placement;
    phrasing) — only after the multi-turn harness, since both are durability questions.
