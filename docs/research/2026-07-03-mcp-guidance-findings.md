@@ -175,8 +175,8 @@ live.
 2. **Multi-turn harness extension — SHIPPED 2026-07-04** (prompt-engineering `3fa2ab0`):
    `input.history` replays a persisted `claude -p --resume` session, assertions target the
    final turn — long-horizon adherence is now measurable. Unblocks findings 6, 8, and the
-   durability half of 6-Test-1. (Unit-verified; a real `--resume` smoke is advisable before
-   first research use.)
+   durability half of 6-Test-1. (Unit-verified + real `--resume` smoke passed 2026-07-04:
+   3-turn live session, no error, and a `CLAUDE.md` one-word rule survived to the final turn.)
 3. **prompt-tdd failure-path PR** — F-2 persist + F-3/F-6 distribution reporting.
 4. **Research Tests 3-4** from the loadbearing brief (description-vs-result placement;
    phrasing) — only after the multi-turn harness, since both are durability questions.

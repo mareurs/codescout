@@ -61,7 +61,7 @@ memory `research/loadbearing-mcp-guidance`.
 - **Multi-turn eval harness** (prompt-tdd `input.history`) — the standing blocker for the
   whole guidance research line: every time-dependent question (instruction decay,
   re-derivation of returned facts, guidance persistence, adherence at distance) escapes
-  single-turn measurement. Unblocks 4 parked findings at once. **SHIPPED (prompt-engineering `3fa2ab0`, 2026-07-04)** — `input.history` replays a persisted session via `claude -p --resume`; assertions target the final turn. Real `--resume` end-to-end smoke still advisable before first research use.
+  single-turn measurement. Unblocks 4 parked findings at once. **SHIPPED (prompt-engineering `3fa2ab0`, 2026-07-04)** — `input.history` replays a persisted session via `claude -p --resume`; assertions target the final turn. Real `--resume` smoke verified live 2026-07-04 (3-turn session: no error, final-turn response returned, and a `CLAUDE.md` one-word rule survived to the last turn).
 - **`get_guide` / Iron-Law adherence — clarity audit + just-in-time coverage** *(parked;
   gated on the multi-turn harness).* The evidence-backed way to raise adherence is NOT
   authority framing / persuasion / provenance packaging (all measured **inert** —
