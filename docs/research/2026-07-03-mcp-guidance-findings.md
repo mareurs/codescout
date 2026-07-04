@@ -23,6 +23,8 @@ asserting authority (a persona, a "sacred" channel, an in-band trust marker) fai
 or was unprovable; every win came from *where* content sits and *what the server
 computes about it*, never from what the content claims about itself.
 
+**A-8 and A-9 extend this from trust to obedience.** Overselling a tracker's freshness did not make an agent over-trust a stale tracker (it verified regardless and flagged the oversell as a hazard); and delivering a directive as a project *file on disk* was obeyed no more than the same directive inline or in `CLAUDE.md`. Capable models judge content **and directives** on their merit — dressing the source (authority, freshness claims, file provenance) is inert; only the model's own verification moves behavior.
+
 ---
 
 ## Validated findings (with confidence + evidence)
@@ -37,13 +39,15 @@ computes about it*, never from what the content claims about itself.
 | 6 | A single guidance instruction in a **plain tool-result footer** is followed reliably single-turn; a delegation line + `<codescout-guide>` envelope adds nothing measurable AND opens no forgery hole. | **Do not build** the delegation line (save the byte budget) | high | A-7 Test 1 (confirmed pinned-Sonnet) |
 | 7 | **Server-computed provenance keys** (`refreshed_at_commit`, `commits_behind_head`) beat forgeable in-content freshness prose (KEY-PRIORITY) and trigger calibrated verification when stale (CALIBRATE). | **Green-lit** — implement in result envelopes (not yet built) | high | A-7 Test 2: KEY-PRIORITY 6/6 across 2 models; CALIBRATE 9-10/10 at n=10 pinned Sonnet |
 | 8 | **Incentive/value framing for rule adherence** is untestable single-turn — compliance ceilings when the rule is fresh in context. The real T-005-style violations are long-horizon. | Untested (not "ineffective") | high | A-6 (ceiling both arms; rubric power confirmed) |
+| 9 | **Persona→tracker routing** lifts consultation (bare "consult docs/trackers/" 2/5→5/5) but a plain instruction suffices — authority/capability framing has no headroom (ceiling). **Overselling freshness** did NOT cause over-trust of a deliberately stale tracker: verify 5/5 == honest 5/5; the oversell agent even flagged its own framing as a hazard. | Route with a plain instruction; keep any freshness claim honest — do not oversell | med (single-turn, sonnet, loud staleness signal) | A-8 (pilot + arm-e, n=5/arm) |
+| 10 | **Channel/provenance is inert for obedience.** A neutral directive was obeyed about the same via a tracker file, `CLAUDE.md`, or inline (8/9/10 of 10, n=5) — the tracker marginally *lower* (adds a consult-dependency). The model judges directives on merit regardless of channel; even a tracker-delivered pointless tag got questioned. | Put must-follow guidance where it is **always visible** (system prompt / `CLAUDE.md`); reserve trackers for on-demand context | med-high (neutral directive ceilings; costly-directive cell untested) | A-9 (v3 clean, after a 3-iteration instrument debug) |
 
 **Trust rides the channel, never the marker.** Corollary running through 1/3/4/7: a
 static `[LIVE]:` header or a `last refreshed:` stamp inside content is copyable by
 anyone who can write the file, so it confers no trust. codescout-*computed* output
 (symbols, references, git state, envelope keys) is authored by the server and is the
 only non-forgeable surface. This is why provenance must be server-computed JSON keys,
-not narrative prose.
+not narrative prose. **A-9 sharpens the corollary for adherence:** even a *non-forgeable-feeling* channel (a real project file on disk) confers no extra *obedience* — provenance is inert for adherence just as authority is. The channel matters only for the *security* of a trust signal (it must be server-computed / unforgeable), never as a lever to make the model obey more.
 
 ---
 
@@ -87,6 +91,23 @@ keeping.
    came from post-cutoff arXiv IDs; spot-checked (recency 2509.11353, CrAM 2406.11497,
    IFEval-FC 2509.18420 confirmed with quoted numbers; MCPTox 2508.14925 exists)
    before any were used as a design basis.
+
+8. **Binding catches false-NEGATIVES too, and grep markers are treacherous for behavior.**
+   A-8's consultation marker undercounted the baseline (a run that consulted but paraphrased
+   the token scored no-consult); A-9's obedience marker over-counted (it caught the directive
+   quoted inside a *refusal*) AND under-counted (agents that *wrote code to a file* left
+   nothing in stdout to match). A `grep -c` count is not a behavior measure — score by
+   structure (annotation adjacent to a `def`), force the behavior on-screen (inline output,
+   no file writes), and read the misses.
+
+9. **The measurement ENVIRONMENT silently invalidates behavior evals — pilot + bind before scaling.**
+   A-9 took three iterations to instrument: v1 (agents wrote to files; grep counted prose),
+   v2 (a "no tools" clause meant to block writes also blocked the tracker arm's *read*, faking
+   0 obedience; the directive was an ethically-refusable "false attestation"), v3 (neutral
+   directive + reads-allowed / writes-forbidden). Each confound was caught by binding before it
+   became a headline. And A-8 showed a ceiling can force a *design pivot*: consultation
+   saturates after bare routing, so the informative axis became *deference* (act-on vs
+   question), not consultation rate.
 
 **Meta-lesson:** pre-registration caught every *rubric* problem this session and
 *no* environment/config problem, because the pre-registration form didn't ask about
