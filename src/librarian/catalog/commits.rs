@@ -55,6 +55,58 @@ pub fn topo_distance(cat: &Catalog, git_root: &str, a: &str, b: &str) -> Result<
     })
 }
 
+/// Current HEAD-as-of-last-reindex for a `git_root`: the highest-`topo_order` commit.
+/// The reindex topological walk assigns oldest = 0 and HEAD = max, so the newest
+/// indexed commit is HEAD. Returns None if the repo has no indexed commits yet.
+pub fn head_commit(cat: &Catalog, git_root: &str) -> Result<Option<String>> {
+    let hash: Option<String> = cat.conn.query_row(
+        "SELECT (SELECT hash FROM commits WHERE git_root=?1 ORDER BY topo_order DESC LIMIT 1)",
+        params![git_root],
+        |r| r.get(0),
+    )?;
+    Ok(hash)
+}
+
+#[cfg(test)]
+mod head_commit_tests {
+    use super::*;
+    use crate::librarian::catalog::Catalog;
+
+    #[test]
+    fn head_commit_returns_highest_topo_order() {
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert_many(
+            &cat,
+            &[
+                CommitRow {
+                    hash: "old".into(),
+                    git_root: "/r".into(),
+                    authored_at: Some(1),
+                    subject: None,
+                    topo_order: Some(0),
+                },
+                CommitRow {
+                    hash: "head".into(),
+                    git_root: "/r".into(),
+                    authored_at: Some(3),
+                    subject: None,
+                    topo_order: Some(2),
+                },
+                CommitRow {
+                    hash: "mid".into(),
+                    git_root: "/r".into(),
+                    authored_at: Some(2),
+                    subject: None,
+                    topo_order: Some(1),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(head_commit(&cat, "/r").unwrap().as_deref(), Some("head"));
+        assert_eq!(head_commit(&cat, "/other").unwrap(), None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

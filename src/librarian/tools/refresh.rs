@@ -310,6 +310,7 @@ mod tests {
             append_mode: false,
             history_cap: None,
             entry_collection: None,
+            refreshed_at_commit: None,
         };
 
         // Two children: a failure_table (all-pass → done) and a task_list (empty → pending).
@@ -404,6 +405,7 @@ mod tests {
                     append_mode: false,
                     history_cap: None,
                     entry_collection: None,
+                    refreshed_at_commit: None,
                 },
             )
             .unwrap();
@@ -461,6 +463,7 @@ mod tests {
             append_mode: false,
             history_cap: None,
             entry_collection: None,
+            refreshed_at_commit: None,
         };
 
         {
@@ -547,6 +550,7 @@ mod tests {
             append_mode: false,
             history_cap: None,
             entry_collection: None,
+            refreshed_at_commit: None,
         };
         {
             let cat = ctx.catalog.lock();

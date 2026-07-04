@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-07-02
-closed:
+closed: 2026-07-04
 severity: low
 owner: marius
 related: []
@@ -53,12 +53,18 @@ See Symptom — Task 8 reviewer's independent catalog queries,
    read path omits. Code-level confirmation pending.
 
 ## Fix
-Not started. Add `entry_collection` (and `append_mode`/`history_cap` if also missing)
-to the `get` response's augmentation projection.
 
+Fixed 2026-07-04 (experiments). The `artifact(get)` augmentation projection in
+`src/librarian/tools/get.rs` now serializes the full augmentation row —
+`entry_collection`, `append_mode`, `history_cap`, `render_template`, `params_schema`
+(plus the new `refreshed_at_commit`) — not just prompt/params. Landed alongside the
+finding-7 provenance keys, which touch the same projection.
 ## Tests added
-N/A — not fixed yet.
 
+`get_includes_entry_collection_in_augmentation` (`src/librarian/tools/get.rs`) —
+augments an artifact with `entry_collection="rows"`, `append_mode=true`,
+`history_cap=10`, then asserts all three appear in the `artifact(get)` `augmentation`
+object.
 ## Workarounds
 Infer via `entry_filter` probe: a correct singleton result proves the collection is wired.
 

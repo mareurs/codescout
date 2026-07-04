@@ -766,6 +766,7 @@ mod tests {
             append_mode: false,
             history_cap: None,
             entry_collection: None,
+            refreshed_at_commit: None,
         }
     }
 

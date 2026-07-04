@@ -24,6 +24,10 @@ pub struct AugmentationRow {
     /// Names the params array whose objects are the tracker's filterable
     /// entry rows (e.g. "failures", "children"). None = not entry-filterable.
     pub entry_collection: Option<String>,
+    /// Server-computed provenance: repo HEAD at the last commit_refresh. None until a
+    /// refresh runs with a resolvable HEAD. Surfaced by artifact(get) as
+    /// provenance.refreshed_at_commit; NOT overwritten by re-augment.
+    pub refreshed_at_commit: Option<String>,
 }
 
 pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
@@ -31,8 +35,8 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
         "INSERT INTO artifact_augmentation
            (artifact_id, prompt, params, last_refreshed_at, refresh_count,
             created_at, updated_at, render_template, params_schema,
-            append_mode, history_cap, entry_collection)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            append_mode, history_cap, entry_collection, refreshed_at_commit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(artifact_id) DO UPDATE SET
            prompt = excluded.prompt,
            params = excluded.params,
@@ -55,6 +59,7 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
             row.append_mode as i64,
             row.history_cap,
             row.entry_collection,
+            row.refreshed_at_commit,
         ],
     )?;
     Ok(())
@@ -64,7 +69,7 @@ pub fn get(cat: &Catalog, artifact_id: &str) -> Result<Option<AugmentationRow>> 
     let mut stmt = cat.conn.prepare(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
                 created_at, updated_at, render_template, params_schema,
-                append_mode, history_cap, entry_collection
+                append_mode, history_cap, entry_collection, refreshed_at_commit
          FROM artifact_augmentation WHERE artifact_id = ?1",
     )?;
     let mut rows = stmt.query_map([artifact_id], row_from_sql)?;
@@ -85,6 +90,7 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
         append_mode: row.get::<_, i64>(9).map(|v| v != 0)?,
         history_cap: row.get(10)?,
         entry_collection: row.get(11)?,
+        refreshed_at_commit: row.get(12)?,
     })
 }
 
@@ -149,14 +155,15 @@ pub fn apply_merge_patch(target: &mut Value, patch: &Value) {
     }
 }
 
-pub fn commit_refresh(cat: &Catalog, artifact_id: &str) -> Result<bool> {
+pub fn commit_refresh(cat: &Catalog, artifact_id: &str, head_commit: Option<&str>) -> Result<bool> {
     let n = cat.conn.execute(
         "UPDATE artifact_augmentation
          SET refresh_count = refresh_count + 1,
              last_refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             refreshed_at_commit = COALESCE(?2, refreshed_at_commit),
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE artifact_id = ?1",
-        rusqlite::params![artifact_id],
+        rusqlite::params![artifact_id, head_commit],
     )?;
     Ok(n > 0)
 }
@@ -187,7 +194,7 @@ pub fn get_batch(
     let sql = format!(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
                 created_at, updated_at, render_template, params_schema,
-                append_mode, history_cap, entry_collection
+                append_mode, history_cap, entry_collection, refreshed_at_commit
          FROM artifact_augmentation WHERE artifact_id IN ({placeholders})"
     );
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -302,6 +309,7 @@ mod tests {
             append_mode: false,
             history_cap: None,
             entry_collection: None,
+            refreshed_at_commit: None,
         }
     }
 
@@ -335,7 +343,7 @@ mod tests {
         art_upsert(&cat, &sample_art("art1")).unwrap();
         upsert(&cat, &aug("art1")).unwrap();
         // Simulate a refresh having happened
-        commit_refresh(&cat, "art1").unwrap();
+        commit_refresh(&cat, "art1", None).unwrap();
         // Re-augment with new prompt
         let mut updated = aug("art1");
         updated.prompt = "Updated prompt".to_string();
@@ -432,7 +440,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         art_upsert(&cat, &sample_art("art1")).unwrap();
         upsert(&cat, &aug("art1")).unwrap();
-        let found = commit_refresh(&cat, "art1").unwrap();
+        let found = commit_refresh(&cat, "art1", None).unwrap();
         assert!(found);
         let row = get(&cat, "art1").unwrap().unwrap();
         assert_eq!(row.refresh_count, 1);
@@ -440,9 +448,39 @@ mod tests {
     }
 
     #[test]
+    fn commit_refresh_records_head_commit() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        upsert(&cat, &aug("art1")).unwrap();
+        assert!(commit_refresh(&cat, "art1", Some("deadbeef")).unwrap());
+        let row = get(&cat, "art1").unwrap().unwrap();
+        assert_eq!(row.refreshed_at_commit.as_deref(), Some("deadbeef"));
+        assert_eq!(row.refresh_count, 1);
+    }
+
+    #[test]
+    fn refreshed_at_commit_preserved_on_reaugment() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        upsert(&cat, &aug("art1")).unwrap();
+        commit_refresh(&cat, "art1", Some("deadbeef")).unwrap();
+        // Re-augment (upsert on conflict) must NOT wipe the recorded refresh commit.
+        let mut re = aug("art1");
+        re.prompt = "new prompt".into();
+        upsert(&cat, &re).unwrap();
+        let row = get(&cat, "art1").unwrap().unwrap();
+        assert_eq!(row.prompt, "new prompt");
+        assert_eq!(
+            row.refreshed_at_commit.as_deref(),
+            Some("deadbeef"),
+            "re-augment must not wipe refreshed_at_commit"
+        );
+    }
+
+    #[test]
     fn commit_refresh_missing_returns_false() {
         let cat = Catalog::open_in_memory().unwrap();
-        let found = commit_refresh(&cat, "nope").unwrap();
+        let found = commit_refresh(&cat, "nope", None).unwrap();
         assert!(!found);
     }
 
@@ -522,6 +560,7 @@ mod tests {
                 append_mode: false,
                 history_cap: None,
                 entry_collection: Some("failures".into()),
+                refreshed_at_commit: None,
             },
         )
         .unwrap();

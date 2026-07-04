@@ -84,6 +84,14 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
             [],
         )?;
     }
+    // v8: refreshed_at_commit column on artifact_augmentation (server-computed provenance;
+    // written by commit_refresh, surfaced by artifact(get) as provenance.refreshed_at_commit).
+    if !column_exists(conn, "artifact_augmentation", "refreshed_at_commit")? {
+        conn.execute(
+            "ALTER TABLE artifact_augmentation ADD COLUMN refreshed_at_commit TEXT",
+            [],
+        )?;
+    }
     // NOTE: the entry_collection block above is ordered before the v6 add/backfill for locality
     // with the other artifact_augmentation column adds. Order is irrelevant — each
     // block is independently guarded (column_exists / catalog_needs_v6_migration),

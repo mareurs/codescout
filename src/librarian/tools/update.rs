@@ -370,8 +370,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     let committed = if a.commit_refresh {
+        // Server-computed provenance: record the repo HEAD at refresh time so
+        // artifact(get) can report commits_behind_head from an unforgeable source.
+        let head = ctx
+            .current_project
+            .as_ref()
+            .map(|p| crate::util::fs::RepoPath::from(&p.git_root).into_string())
+            .and_then(|gr| {
+                crate::librarian::catalog::commits::head_commit(&cat, &gr)
+                    .ok()
+                    .flatten()
+            });
         Some(crate::librarian::catalog::augmentation::commit_refresh(
-            &cat, &a.id,
+            &cat,
+            &a.id,
+            head.as_deref(),
         )?)
     } else {
         None
@@ -761,6 +774,7 @@ mod tests {
                     append_mode: false,
                     history_cap: None,
                     entry_collection: None,
+                    refreshed_at_commit: None,
                 },
             )
             .unwrap();
@@ -872,6 +886,7 @@ mod tests {
                 append_mode,
                 history_cap,
                 entry_collection: None,
+                refreshed_at_commit: None,
             },
         )
         .unwrap();
@@ -1027,6 +1042,7 @@ mod tests {
                     append_mode: false,
                     history_cap: None,
                     entry_collection: None,
+                    refreshed_at_commit: None,
                 },
             )
             .unwrap();

@@ -120,7 +120,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let want_observations = a.include_observations.unwrap_or(false);
     let want_links = a.include_links.unwrap_or(false);
-    let (row, observations_json, links_json, latest_event_row, latest_reviewed_at, aug) = {
+    let (
+        row,
+        observations_json,
+        links_json,
+        latest_event_row,
+        latest_reviewed_at,
+        aug,
+        refreshed_at_commit,
+        commits_behind_head,
+        head_commit,
+    ) = {
         let cat = ctx.catalog.lock();
         let row = match artifact::get(&cat, &a.id)? {
             Some(r) => r,
@@ -192,6 +202,47 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         let aug = augmentation::get(&cat, &a.id)?;
 
+        // Server-computed provenance (finding 7): report staleness from an unforgeable
+        // channel (git state the server computes), not content the artifact carries.
+        let git_root_str = ctx
+            .current_project
+            .as_ref()
+            .map(|p| crate::util::fs::RepoPath::from(&p.git_root).into_string());
+        let head_commit = git_root_str.as_deref().and_then(|gr| {
+            crate::librarian::catalog::commits::head_commit(&cat, gr)
+                .ok()
+                .flatten()
+        });
+        // refreshed_at_commit: the tracker's last-refresh HEAD, else the latest reviewed
+        // event's commit (both server-written); None when neither exists.
+        let refreshed_at_commit = aug
+            .as_ref()
+            .and_then(|a| a.refreshed_at_commit.clone())
+            .or_else(|| {
+                cat.conn
+                    .query_row(
+                        "SELECT head_commit FROM events \
+                         WHERE artifact_id=?1 AND kind='reviewed' AND head_commit IS NOT NULL \
+                         ORDER BY created_at DESC, id DESC LIMIT 1",
+                        rusqlite::params![&a.id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten()
+            });
+        let commits_behind_head = match (
+            git_root_str.as_deref(),
+            refreshed_at_commit.as_deref(),
+            head_commit.as_deref(),
+        ) {
+            (Some(gr), Some(rc), Some(hd)) => {
+                crate::librarian::catalog::commits::topo_distance(&cat, gr, rc, hd)
+                    .ok()
+                    .flatten()
+            }
+            _ => None,
+        };
+
         (
             row,
             observations_json,
@@ -199,6 +250,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             latest_event_row,
             latest_reviewed_at,
             aug,
+            refreshed_at_commit,
+            commits_behind_head,
+            head_commit,
         )
     };
 
@@ -228,7 +282,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             latest_event_kind: latest_event_row.as_ref().map(|e| e.kind.as_str()),
             latest_reviewed_at,
             file_updated_at: row.file_mtime,
-            topo_distance_from_head: None,
+            topo_distance_from_head: commits_behind_head,
             freshness_horizon: crate::librarian::freshness::FRESHNESS_HORIZON_DEFAULT,
         });
     out["freshness"] = serde_json::to_value(freshness)?;
@@ -241,6 +295,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }),
         None => Value::Null,
     };
+    // Finding 7: server-computed provenance keys (unforgeable staleness signal).
+    out["provenance"] = json!({
+        "refreshed_at_commit": refreshed_at_commit,
+        "commits_behind_head": commits_behind_head,
+        "head_commit": head_commit,
+    });
 
     if let Some(ref filter) = a.entry_filter {
         let aug_row = aug.as_ref().ok_or_else(|| {
@@ -308,6 +368,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "refresh_count": a.refresh_count,
             "created_at": a.created_at,
             "updated_at": a.updated_at,
+            "render_template": a.render_template,
+            "params_schema": a.params_schema,
+            "append_mode": a.append_mode,
+            "history_cap": a.history_cap,
+            "entry_collection": a.entry_collection,
+            "refreshed_at_commit": a.refreshed_at_commit,
         }),
         None => Value::Null,
     };
@@ -951,6 +1017,7 @@ mod tests {
                 append_mode: false,
                 history_cap: None,
                 entry_collection: None,
+                refreshed_at_commit: None,
             },
         )
         .unwrap();
@@ -961,6 +1028,163 @@ mod tests {
         assert_eq!(aug["refresh_count"], 5);
         assert_eq!(aug["last_refreshed_at"], "2026-05-01T00:00:00.000Z");
         assert_eq!(aug["params"]["format"], "table");
+    }
+
+    /// Helper: context with a real current_project so provenance HEAD resolution works.
+    fn mk_ctx_with_project(cat: Catalog, git_root: std::path::PathBuf) -> ToolContext {
+        use crate::librarian::current_project::CurrentProject;
+        ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(cat)),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            artifact_store: None,
+            current_project: Some(Arc::new(CurrentProject {
+                abs_path: git_root.clone(),
+                git_root,
+                umbrella: None,
+            })),
+        }
+    }
+
+    #[tokio::test]
+    async fn artifact_get_includes_provenance_keys() {
+        use crate::librarian::catalog::augmentation::{self, AugmentationRow};
+        use crate::librarian::catalog::commits::{self, CommitRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let root = std::path::PathBuf::from("/test/repo");
+        let gr = crate::util::fs::RepoPath::from(&root).into_string();
+        commits::upsert_many(
+            &cat,
+            &[
+                CommitRow {
+                    hash: "c_old".into(),
+                    git_root: gr.clone(),
+                    authored_at: Some(1),
+                    subject: None,
+                    topo_order: Some(0),
+                },
+                CommitRow {
+                    hash: "c_head".into(),
+                    git_root: gr.clone(),
+                    authored_at: Some(2),
+                    subject: None,
+                    topo_order: Some(5),
+                },
+            ],
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "a".into(),
+                prompt: "p".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "0".into(),
+                updated_at: "0".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: Some("c_old".into()),
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx_with_project(cat, root);
+        let res = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(res["provenance"]["refreshed_at_commit"], "c_old");
+        assert_eq!(res["provenance"]["head_commit"], "c_head");
+        assert_eq!(res["provenance"]["commits_behind_head"].as_i64(), Some(5));
+    }
+
+    #[tokio::test]
+    async fn artifact_get_stale_when_commits_behind_horizon() {
+        use crate::librarian::catalog::commits::{self, CommitRow};
+        use crate::librarian::catalog::events;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap(); // file_mtime = 0
+        let root = std::path::PathBuf::from("/test/repo");
+        let gr = crate::util::fs::RepoPath::from(&root).into_string();
+        commits::upsert_many(
+            &cat,
+            &[
+                CommitRow {
+                    hash: "c_old".into(),
+                    git_root: gr.clone(),
+                    authored_at: Some(1),
+                    subject: None,
+                    topo_order: Some(0),
+                },
+                CommitRow {
+                    hash: "c_head".into(),
+                    git_root: gr.clone(),
+                    authored_at: Some(2),
+                    subject: None,
+                    topo_order: Some(100),
+                },
+            ],
+        )
+        .unwrap();
+        // Reviewed event at c_old, created_at 100 > file_mtime 0, so freshness reaches
+        // the commit-distance check (distance 100 > horizon 50 => stale).
+        events::insert(
+            &cat,
+            &events::EventRow {
+                id: "ev1".into(),
+                artifact_id: "a".into(),
+                kind: "reviewed".into(),
+                payload: "{}".into(),
+                anchor_commit: None,
+                head_commit: Some("c_old".into()),
+                author: None,
+                created_at: 100,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx_with_project(cat, root);
+        let res = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(res["provenance"]["commits_behind_head"].as_i64(), Some(100));
+        assert_eq!(res["freshness"], "stale");
+    }
+
+    #[tokio::test]
+    async fn get_includes_entry_collection_in_augmentation() {
+        use crate::librarian::catalog::augmentation::{self, AugmentationRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "a".into(),
+                prompt: "p".into(),
+                params: "{\"rows\":[]}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "0".into(),
+                updated_at: "0".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: true,
+                history_cap: Some(10),
+                entry_collection: Some("rows".into()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let res = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(res["augmentation"]["entry_collection"], "rows");
+        assert_eq!(res["augmentation"]["append_mode"], true);
+        assert_eq!(res["augmentation"]["history_cap"].as_i64(), Some(10));
     }
 
     #[tokio::test]

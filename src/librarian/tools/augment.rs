@@ -193,6 +193,7 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
             append_mode: a.append_mode.unwrap_or(false),
             history_cap: a.history_cap.map(|v| v as i64),
             entry_collection: a.entry_collection,
+            refreshed_at_commit: None,
         },
     )?;
 
@@ -378,6 +379,7 @@ impl Tool for ArtifactAugment {
                                     .entry_collection
                                     .clone()
                                     .or_else(|| existing.entry_collection.clone()),
+                                refreshed_at_commit: existing.refreshed_at_commit.clone(),
                             },
                         )?;
                         patched_siblings = true;
