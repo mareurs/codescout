@@ -51,15 +51,28 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 memory `research/loadbearing-mcp-guidance`.
 
 - **Server-computed provenance envelope keys** (`refreshed_at_commit`, `commits_behind_head`)
-  on result envelopes — *green-lit, not yet built*. The one evidence-backed feature from
-  the guidance work that changes Rust, not prompts (KEY-PRIORITY 6/6 across two models;
-  CALIBRATE 9-10/10 at n=10 pinned Sonnet). Scout the envelope seam in
-  `src/tools/core/types.rs`; intersects the G5 bug (augmentation fields omitted from
-  `artifact(get)`).
+  on `artifact(get)` — **SHIPPED 0de733aa (2026-07-04), live-verified.** Emits a
+  server-computed `provenance` block and activates the freshness engine's stale-by-commit-
+  distance path (`commit_refresh` records HEAD; distance drives `commits_behind_head` +
+  `freshness`); the co-located G5 bug (augmentation fields omitted from `artifact(get)`) is
+  fixed in the same projection. (KEY-PRIORITY 6/6 across two models; CALIBRATE 9-10/10 at
+  n=10 pinned Sonnet.) Optional follow-ups: extend provenance to the `context.rs` `[LIVE]`
+  bundle + `state_at` time-travel surfaces (deferred by design).
 - **Multi-turn eval harness** (prompt-tdd `input.history`) — the standing blocker for the
   whole guidance research line: every time-dependent question (instruction decay,
   re-derivation of returned facts, guidance persistence, adherence at distance) escapes
-  single-turn measurement. Unblocks 4 parked findings at once.
+  single-turn measurement. Unblocks 4 parked findings at once. **Building now.**
+- **`get_guide` / Iron-Law adherence — clarity audit + just-in-time coverage** *(parked;
+  gated on the multi-turn harness).* The evidence-backed way to raise adherence is NOT
+  authority framing / persuasion / provenance packaging (all measured **inert** —
+  A-4/A-9), but: (a) the directive's own **clarity + merit** — rewording Iron Law 1 moved
+  tool-selection **30% → 90% → 100%** (A-1); and (b) **just-in-time delivery** — the rule
+  present in the tool result at the moment of the relevant action (finding 6). Plan: Hamsa-
+  audit each `get_guide` / Iron-Law rule as a stranger would (negation-only, unscoped,
+  vague), then coverage-check that each high-violation rule reaches the model at its point
+  of action. Cheap-but-untestable-today: single-turn adherence already ceilings, so the
+  *long-horizon* payoff can only be measured once the multi-turn harness lands — hence the
+  gate.
 - *Shipped this stream:* reader-first tracker prompts (`tracker_design`), the
   `get_guide("untrusted-content")` data-vs-directive rule, and the prompt-tdd
   model-pinning + ambient-credential fixes (`../prompt-engineering` `aecb76f`/`8790c80`).
