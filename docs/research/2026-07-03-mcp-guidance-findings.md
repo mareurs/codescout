@@ -207,10 +207,12 @@ live.
    heuristic (no decay to resist). **Reframes the get_guide-authority lever from re-injection
    to discoverability** — the fix is getting the model to *call* get_guide at the right moment
    (the auto-inject-on-first-relevant-tool-call trigger), not duplicating guide text into
-   `CLAUDE.md`. **Unreached regime:** high-token-volume distance (20k+ tokens) — heavy-output
-   cells hit the 300s/run cap (superlinear `--resume` replay); next instrument step is a
-   higher per-run timeout or a token-bulk manipulation that fits the budget. Scenarios:
-   `../prompt-engineering/scenarios/guidance-decay/`.
+   `CLAUDE.md`. **Token-volume gap CLOSED 2026-07-05:** buried the rule under ~24k tokens of non-code
+   INPUT (cheap prefill — the fix for the heavy-cell timeout) and it held on both channels
+   AND in MIDDLE-position (primacy-free, the faithful get_guide placement), 2/2 each,
+   transcript-bound. No decay across turn-count, token-volume, and context-position. Residue
+   now: extreme volume (100k+ tokens, near context limits) and weaker models. Scenarios:
+   `../prompt-engineering/scenarios/guidance-decay/` (`*-xfar`, `*-xbulk`, `*-xmid`).
 
 ## Provenance
 
