@@ -57,6 +57,7 @@
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-07-02 | med | scout the 2200 cap + `*_invariants` before proposing any server_instructions addition | inline Iron Law fails `source_md_under_cap` at 33B headroom; ≥1 failed-edit round-trip + an unshippable recommendation | validated |
 | W-2 | 2026-07-02 | high | pre-register + one-concept rubric + bind response↔score | four false eval findings (A-3, F-3, A-5, A-6) each one paragraph from a permanent surface | validated |
+| W-3 | 2026-07-03 | high | tracker-hygiene skill shipped + eval-hardened (precision gate, mutation-proven) + persona/channel authority experiments settled (A-8/A-9) | over-flagging regression would pass green; "tracker authority makes guidance load-bearing" premise stays an untested assumption | validated |
 ---
 
 ## Category conventions
@@ -329,6 +330,35 @@ Codified so the Index column means the same thing across sessions.
 **Fix idea / Pointer:** `report.py`'s scenario-line formatter could print `pass_rate` alongside the PASS/FAIL verdict whenever `scenario.runs > 1` (e.g. "FAIL (9/10)"). Same repo/PR as F-2's preflight+persist fix and F-3's per-run distribution idea — this is the third instance of the same underlying gap (the report renders a verdict, not the distribution behind it).
 
 ---
+## W-3 — Tracker-hygiene skill shipped + eval-hardened; persona/channel authority experiments settled (work-stream close)
+
+**Observed:** 2026-07-03/04, closing the tracker-as-skill work stream. The tracker-hygiene
+skill shipped (codescout-companion v1.12.0, gated 5-phase sweep) and was validated
+end-to-end. Detail lives in canonical homes; pointers here keep the work-stream narrative
+whole for compaction.
+
+**Pattern / outcomes:**
+- **Precision gate** — recall-only (`contains gamma+D1`) passed a skill that over-flags
+  everything; a tier-3 precision rubric now gates it, mutation-proven (precise 1.00 /
+  blatant + subtle-FP 0.00, judge haiku), end-to-end 1/1. → prompt-engineering
+  `scenarios/skills/tracker-hygiene` (`480e8b2`), skill-eval-playbook **L-13** (`d126f8f`),
+  F-2 judge preflight (`ae9bfd4`).
+- **Activation audit** (#23) — the skill fires 5/5 on a literal invoke but only 1/5 on an
+  oblique "what's open?" trigger; foreground-the-trigger fix recommended + deferred. →
+  claude-plugins Hamsa ledger.
+- **Persona/channel experiments** — A-8 (routing works but a bare instruction suffices;
+  freshness-overselling caused no over-trust) + A-9 (channel/provenance inert for obedience;
+  the model judges directives on merit). → codescout Hamsa audit-log A-8/A-9 (`b12f37a2`) +
+  findings synthesis; buddy memory `framing-provenance-inert-model-judges-on-merit`.
+
+**Counterfactual:** without the precision gate a future skill edit / weaker model that
+over-flags passes green; without A-8/A-9 the "make guidance load-bearing via a tracker's
+authority/provenance" premise stays an untested assumption (now measured — NO).
+
+**Impact:** high — the skill is validated and its guidance-delivery premise is answered.
+
+**Status:** validated — work stream closing; open threads (costly-directive cell, A-8
+deference axis, oblique-trigger fix) tracked in their ledgers.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

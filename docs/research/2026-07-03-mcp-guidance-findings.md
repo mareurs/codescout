@@ -160,12 +160,14 @@ live.
 3. **prompt-tdd failure-path PR** — F-2 persist + F-3/F-6 distribution reporting.
 4. **Research Tests 3-4** from the loadbearing brief (description-vs-result placement;
    phrasing) — only after the multi-turn harness, since both are durability questions.
-5. **Persona → "use trackers" routing experiment (A-8, queued).** Pre-registered,
-   blocked on the tracker-hygiene skill shipping (this conversation). Tests
-   persona-as-*routing* (distinct from A-4's settled persona-as-*trust*), with a
-   freshness-honesty abuse arm: the plugin is a periodic gated sweep, so the persona's
-   "kept up-to-date" claim oversells — does that overselling suppress freshness
-   verification against a deliberately-stale tracker? See audit-log A-8 + task #21.
+5. **Persona/channel experiments (A-8, A-9) — DONE 2026-07-03; two cells remain.**
+   A-8: persona→tracker routing works but a plain instruction suffices (consultation
+   ceilings after bare routing); overselling freshness did NOT cause over-trust
+   (verify 5/5 == honest 5/5, sonnet). A-9: channel/provenance is inert for obedience
+   (tracker-file 8 vs CLAUDE.md 9 vs inline 10 of 10) — the model judges directives on
+   merit. Remaining, both low-priority: the **costly-but-neutral directive** cell
+   (headroom without the ethics confound — the one place a channel effect could still
+   hide) and **A-8's deference axis** for arms b/c/d. See audit-log A-8/A-9.
 
 ## Provenance
 

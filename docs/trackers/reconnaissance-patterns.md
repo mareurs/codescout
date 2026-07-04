@@ -61,6 +61,7 @@ skill).
 | R-35 | 2026-06-16 | hit | A tool's own error diagnostic is a hypothesis, not ground truth. `edit_code`'s "AST parse failed — likely syntax errors or duplicate siblings" was falsified by `symbols()` (clean parse, unique name_path); the archived backtick bug was already fixed. A throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned the real cause in one run: AST start 214 (annotation line) vs LSP 216 (`fun` line), matcher flips Some→None at the ±1 gate. Reproduce the failing internal call when a cheaper read disagrees with the error text. | bug-fix W-17/F-23; issues/2026-06-16-kotlin-edit-code-annotation-line-gap; kin R-5/R-32 (diagnostic/claim ≠ ground truth) |
 | R-36 | 2026-06-28 | hit (validates R-3 / R-20) | Struct/config-field removal blast radius includes serde **data fixtures**, not just source — scope the verification drift-grep to `tests/` (incl. `tests/fixtures/**/*.toml`), not just `src/`. `SecuritySection` has no `#[serde(deny_unknown_fields)]`, so stale keys (`shell_enabled`, `shell_output_limit_bytes`) in two fixture `project.toml`s were silently dropped — `cargo test` stayed green; only the `src/ tests/` drift-grep surfaced them. Same serde-silent-ignore property that makes the user migration a footgun is what hid the fixture drift from compiler + tests. Promote-when (2 datapoints) → codescout memory `reconnaissance` (project-shaped: Rust+serde+TOML). | issues/2026-06-28-vestigial-shell-output-limit-bytes; tests/fixtures/{rust,kotlin}-library/.codescout/project.toml:18-19; kin R-3/R-20 |
 | R-37 | 2026-07-03 | miss (recurrence of R-28) | Adding a get_guide topic edits TWO gated surfaces beyond registration: the tool description (300-char budget test in `server::tests`) and the no-arg listing (hardcoded topic count). Scout the tests' assertions, not their names; convert hardcoded counts to derive from the canonical const. Full `--lib` gate absorbed the miss pre-commit. | tracker-as-skill session (untrusted-content topic, A-5); kin R-28/R-1/R-7 |
+| R-38 | 2026-07-03 | miss | Re-derived a finding a concurrent session had already MEASURED because the existing audit-log wasn't scouted first — independently built a precision gate for the tracker-hygiene D1 gap, then found the plugins Hamsa ledger had already measured it (n=5, both tiers). The seam for a derive/record-a-finding task includes the KNOWLEDGE state (ledger entries on the subject), not just the code. | A-8/A-9 session (#22); plugins Hamsa ledger; kin R-19 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -878,6 +879,29 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 
 **Evidence:** gate2 output (309/300; `left: 9, right: 8`); fixes in `src/tools/guide.rs` (description + derived count); gate3 green (2868 passed).
 
+## R-38 — Miss: re-derived a finding a concurrent session had already MEASURED; the existing audit-log wasn't scouted first
+
+**Observed:** 2026-07-03, hardening the tracker-hygiene D1 eval (#22). Independently
+"discovered" the precision gap (could the skill flag `README`/`CONVENTIONS` meta-files as
+D1?) and built a tier-3 precision assertion — then, on finally reading the claude-plugins
+Hamsa audit-log, found a concurrent session had already audited AND measured exactly that
+concern (n=5 across sonnet + haiku; outcome: the false-positive doesn't reproduce).
+
+**Miss:** the "seam" for a *derive-a-finding* or *record-a-finding* task includes the
+existing KNOWLEDGE state — the audit-log / tracker entries on the same subject — not just
+the code + eval. I scouted the code and the scenario but not the ledger, so I re-derived a
+settled measurement. Not wasted (my net-new contribution was a standing regression gate
+over their one-time measurement), but the duplication was avoidable, and I flagged it in
+the plugins follow-up.
+
+**Verdict:** miss (caught downstream by reading the ledger).
+
+**Proposal:** before deriving OR recording a new finding — especially in a
+concurrently-edited shared ledger — scout the existing audit-log / tracker entries on that
+subject first (`artifact(action="find", semantic=...)` / read the ledger section). Treat
+"has this already been measured / recorded?" as a seam to scout, exactly like a struct's
+fields. Promote-when: a second re-derivation-of-prior-work miss → codescout memory
+`reconnaissance`. Kin: R-19 (scout home internals before cross-project claims).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
