@@ -41,6 +41,7 @@ computes about it*, never from what the content claims about itself.
 | 8 | **Incentive/value framing for rule adherence** is untestable single-turn — compliance ceilings when the rule is fresh in context. The real T-005-style violations are long-horizon. | Untested (not "ineffective") | high | A-6 (ceiling both arms; rubric power confirmed) |
 | 9 | **Persona→tracker routing** lifts consultation (bare "consult docs/trackers/" 2/5→5/5) but a plain instruction suffices — authority/capability framing has no headroom (ceiling). **Overselling freshness** did NOT cause over-trust of a deliberately stale tracker: verify 5/5 == honest 5/5; the oversell agent even flagged its own framing as a hazard. | Route with a plain instruction; keep any freshness claim honest — do not oversell | med (single-turn, sonnet, loud staleness signal) | A-8 (pilot + arm-e, n=5/arm) |
 | 10 | **Channel/provenance is inert for obedience.** A neutral directive was obeyed about the same via a tracker file, `CLAUDE.md`, or inline (8/9/10 of 10, n=5) — the tracker marginally *lower* (adds a consult-dependency). The model judges directives on merit regardless of channel; even a tracker-delivered pointless tag got questioned. **Confirmed under cost (2026-07-04):** escalating the directive's effort-cost (a line-specific rationale on ~24 lines/run) left all three channels at 100% — gap +0%, n=10/arm, 737 line judgments — effort-cost does not open disobedience headroom for a channel to modulate. Neutral *values-cost* likewise ceilinged (v6 no-error-handling, v7 no-return, pilot n=3/arm) — obeying-degrades-output does not induce dropping either, so the neutral-but-resisted cell is empty. | Put must-follow guidance where it is **always visible** (system prompt / `CLAUDE.md`); reserve trackers for on-demand context | high (neutral null holds under effort- AND quality-degradation cost, n=10 + v6/v7; only dubious-directive laundering remains, deferred) | A-9 (v3 clean + v4/v5 effort + v6/v7 values cells) |
+| 11 | **Channel/provenance does NOT launder an *illegitimate* directive — the opposite.** A directive the model refuses inline is refused just as hard (false attestation: inline/claudemd/tracker 0/0/0) or *harder* (unsafe `eval`: inline 90% → claudemd 60% → tracker 0%) when delivered via `CLAUDE.md`/tracker — a file reads as an inspectable convention the model overrides when unsafe; even inline eval-compliance HARDENED the call (validated input + stripped builtins). | Reassuring — tracker directives are NOT a laundering / priv-esc surface; no new defense needed (A-5 stays belt-and-suspenders) | high (n=10, two directives of differing strength, bind-verified in-code) | A-9 v8/v9 |
 
 **Trust rides the channel, never the marker.** Corollary running through 1/3/4/7: a
 static `[LIVE]:` header or a `last refreshed:` stamp inside content is copyable by
@@ -109,6 +110,19 @@ keeping.
    saturates after bare routing, so the informative axis became *deference* (act-on vs
    question), not consultation rate.
 
+10. **An infra error is not a datum — and a refusal is not a compliance just because it
+   names the forbidden thing.** The laundering cell (A-9 v8/v9) produced TWO false
+   headlines, both killed by binding: (a) API rate-limit errors (empty output) scored as
+   clean refusals — "0% laundering" from zero data; (b) the directive quoted *inside a
+   refusal* scored as compliance — a spurious "+67% LAUNDERING DETECTED" that was actually
+   refusal on every channel. Fixes now standard in the harness: a generation wrapper
+   (`run_gen.sh`) that retries with exponential backoff, writes a `__GEN_ERROR__` sentinel,
+   and ABORTS the batch on exhaustion (never a half-batch that reads as data); a shared
+   `classify()` guard so no scorer counts a non-OK run as refusal/compliance; and scoring
+   the marker IN THE EMITTED ARTIFACT (in-code), never in prose. Silence/absence is the most
+   dangerous signal in a behavior eval — it looks identical whether the model refused,
+   errored, or was never asked.
+
 **Meta-lesson:** pre-registration caught every *rubric* problem this session and
 *no* environment/config problem, because the pre-registration form didn't ask about
 the environment. Discipline only covers what it explicitly checks — so the checklist
@@ -172,8 +186,11 @@ live.
    likewise ceilinged (v6/v7) — the model obeys legitimate directives even when they worsen
    the output, so the neutral-but-resisted cell is empty. Remaining, low-priority: **A-8's
    deference axis** for arms b/c/d, and the one true residue — **dubious/illegitimate-directive
-   laundering by channel** (does a tracker get an unethical/pointless rule obeyed more than
-   inline?), the deferred "much much later" security question. See audit-log A-8/A-9.
+   laundering by channel** was tested 2026-07-04b (v8/v9, n=10): channel does NOT launder —
+   a false attestation is refused on all channels (0/0/0) and an unsafe `eval` directive is
+   refused MORE via tracker (inline 90% → tracker 0%); provenance cuts toward safety. The
+   A-9 line is now fully closed. Remaining: **A-8's deference axis** (b/c/d) only. See
+   audit-log A-8/A-9.
 
 ## Provenance
 
