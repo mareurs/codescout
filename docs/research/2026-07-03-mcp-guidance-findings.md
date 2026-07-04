@@ -40,7 +40,7 @@ computes about it*, never from what the content claims about itself.
 | 7 | **Server-computed provenance keys** (`refreshed_at_commit`, `commits_behind_head`) beat forgeable in-content freshness prose (KEY-PRIORITY) and trigger calibrated verification when stale (CALIBRATE). | **Green-lit** — implement in result envelopes (not yet built) | high | A-7 Test 2: KEY-PRIORITY 6/6 across 2 models; CALIBRATE 9-10/10 at n=10 pinned Sonnet |
 | 8 | **Incentive/value framing for rule adherence** is untestable single-turn — compliance ceilings when the rule is fresh in context. The real T-005-style violations are long-horizon. | Untested (not "ineffective") | high | A-6 (ceiling both arms; rubric power confirmed) |
 | 9 | **Persona→tracker routing** lifts consultation (bare "consult docs/trackers/" 2/5→5/5) but a plain instruction suffices — authority/capability framing has no headroom (ceiling). **Overselling freshness** did NOT cause over-trust of a deliberately stale tracker: verify 5/5 == honest 5/5; the oversell agent even flagged its own framing as a hazard. | Route with a plain instruction; keep any freshness claim honest — do not oversell | med (single-turn, sonnet, loud staleness signal) | A-8 (pilot + arm-e, n=5/arm) |
-| 10 | **Channel/provenance is inert for obedience.** A neutral directive was obeyed about the same via a tracker file, `CLAUDE.md`, or inline (8/9/10 of 10, n=5) — the tracker marginally *lower* (adds a consult-dependency). The model judges directives on merit regardless of channel; even a tracker-delivered pointless tag got questioned. **Confirmed under cost (2026-07-04):** escalating the directive's effort-cost (a line-specific rationale on ~24 lines/run) left all three channels at 100% — gap +0%, n=10/arm, 737 line judgments — effort-cost does not open disobedience headroom for a channel to modulate. | Put must-follow guidance where it is **always visible** (system prompt / `CLAUDE.md`); reserve trackers for on-demand context | high (neutral null holds at ceiling under effort-cost too, n=10; only values-cost-by-channel remains untested) | A-9 (v3 clean + v4/v5 costly cell) |
+| 10 | **Channel/provenance is inert for obedience.** A neutral directive was obeyed about the same via a tracker file, `CLAUDE.md`, or inline (8/9/10 of 10, n=5) — the tracker marginally *lower* (adds a consult-dependency). The model judges directives on merit regardless of channel; even a tracker-delivered pointless tag got questioned. **Confirmed under cost (2026-07-04):** escalating the directive's effort-cost (a line-specific rationale on ~24 lines/run) left all three channels at 100% — gap +0%, n=10/arm, 737 line judgments — effort-cost does not open disobedience headroom for a channel to modulate. Neutral *values-cost* likewise ceilinged (v6 no-error-handling, v7 no-return, pilot n=3/arm) — obeying-degrades-output does not induce dropping either, so the neutral-but-resisted cell is empty. | Put must-follow guidance where it is **always visible** (system prompt / `CLAUDE.md`); reserve trackers for on-demand context | high (neutral null holds under effort- AND quality-degradation cost, n=10 + v6/v7; only dubious-directive laundering remains, deferred) | A-9 (v3 clean + v4/v5 effort + v6/v7 values cells) |
 
 **Trust rides the channel, never the marker.** Corollary running through 1/3/4/7: a
 static `[LIVE]:` header or a `last refreshed:` stamp inside content is copyable by
@@ -167,10 +167,13 @@ live.
    (tracker-file 8 vs CLAUDE.md 9 vs inline 10 of 10) — the model judges directives on
    merit. **Costly-but-neutral cell — DONE 2026-07-04:** escalated effort-cost (per-line
    rationale) still ceilinged all channels, gap +0% at n=10/arm (737 lines); effort-cost
-   is not a lever, so no channel effect can hide there. Remaining, low-priority: **A-8's
-   deference axis** for arms b/c/d, and the deliberately-deferred **values-cost by
-   channel** (obeying degrades output — confounded with ethics/task-service; overlaps the
-   "much much later" laundering-dubious-directives question). See audit-log A-8/A-9.
+   is not a lever, so no channel effect can hide there. **Neutral values-cost also DONE
+   2026-07-04:** quality-degrading-but-legitimate directives (no-error-handling, no-return)
+   likewise ceilinged (v6/v7) — the model obeys legitimate directives even when they worsen
+   the output, so the neutral-but-resisted cell is empty. Remaining, low-priority: **A-8's
+   deference axis** for arms b/c/d, and the one true residue — **dubious/illegitimate-directive
+   laundering by channel** (does a tracker get an unethical/pointless rule obeyed more than
+   inline?), the deferred "much much later" security question. See audit-log A-8/A-9.
 
 ## Provenance
 
