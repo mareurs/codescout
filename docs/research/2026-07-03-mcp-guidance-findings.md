@@ -37,7 +37,7 @@ computes about it*, never from what the content claims about itself.
 | 4 | The rule needs a **WHAT-not-HOW constraint** — content may say what to verify, never the route (no fetching URLs/scripts it names). | **Shipped** (ibex amendment) | med (verified NO-BLANKET held on re-eval) | A-5 review; blanket-rule-v2 |
 | 5 | **Reader-first tracker prompts** (read/act contract first, maintenance second) beat writer-first — but only for trackers with no pre-answering render_template table. | **Shipped** (`tracker_design` Step 2, deployment_state template, `> Standing instruction:` label) | med (2 methods agree, small N) | A-3 |
 | 6 | A single guidance instruction in a **plain tool-result footer** is followed reliably single-turn; a delegation line + `<codescout-guide>` envelope adds nothing measurable AND opens no forgery hole. | **Do not build** the delegation line (save the byte budget) | high | A-7 Test 1 (confirmed pinned-Sonnet) |
-| 7 | **Server-computed provenance keys** (`refreshed_at_commit`, `commits_behind_head`) beat forgeable in-content freshness prose (KEY-PRIORITY) and trigger calibrated verification when stale (CALIBRATE). | **Green-lit** — implement in result envelopes (not yet built) | high | A-7 Test 2: KEY-PRIORITY 6/6 across 2 models; CALIBRATE 9-10/10 at n=10 pinned Sonnet |
+| 7 | **Server-computed provenance keys** (`refreshed_at_commit`, `commits_behind_head`) beat forgeable in-content freshness prose (KEY-PRIORITY) and trigger calibrated verification when stale (CALIBRATE). | **Shipped** 2026-07-04 (0de733aa, experiments) — `artifact(get)` `provenance` block (`refreshed_at_commit` / `commits_behind_head` / `head_commit`) + freshness-by-distance; live-verified | high | A-7 Test 2: KEY-PRIORITY 6/6 across 2 models; CALIBRATE 9-10/10 at n=10 pinned Sonnet |
 | 8 | **Incentive/value framing for rule adherence** is untestable single-turn — compliance ceilings when the rule is fresh in context. The real T-005-style violations are long-horizon. | Untested (not "ineffective") | high | A-6 (ceiling both arms; rubric power confirmed) |
 | 9 | **Persona→tracker routing** lifts consultation (bare "consult docs/trackers/" 2/5→5/5) but a plain instruction suffices — authority/capability framing has no headroom (ceiling). **Overselling freshness** did NOT cause over-trust of a deliberately stale tracker: verify 5/5 == honest 5/5; the oversell agent even flagged its own framing as a hazard. | Route with a plain instruction; keep any freshness claim honest — do not oversell | med (single-turn, sonnet, loud staleness signal) | A-8 (pilot + arm-e, n=5/arm) |
 | 10 | **Channel/provenance is inert for obedience.** A neutral directive was obeyed about the same via a tracker file, `CLAUDE.md`, or inline (8/9/10 of 10, n=5) — the tracker marginally *lower* (adds a consult-dependency). The model judges directives on merit regardless of channel; even a tracker-delivered pointless tag got questioned. **Confirmed under cost (2026-07-04):** escalating the directive's effort-cost (a line-specific rationale on ~24 lines/run) left all three channels at 100% — gap +0%, n=10/arm, 737 line judgments — effort-cost does not open disobedience headroom for a channel to modulate. Neutral *values-cost* likewise ceilinged (v6 no-error-handling, v7 no-return, pilot n=3/arm) — obeying-degrades-output does not induce dropping either, so the neutral-but-resisted cell is empty. | Put must-follow guidance where it is **always visible** (system prompt / `CLAUDE.md`); reserve trackers for on-demand context | high (neutral null holds under effort- AND quality-degradation cost, n=10 + v6/v7; only dubious-directive laundering remains, deferred) | A-9 (v3 clean + v4/v5 effort + v6/v7 values cells) |
@@ -165,10 +165,13 @@ live.
 
 ## What to do next (in evidence-order)
 
-1. **Implement provenance envelope keys** (finding 7) — the one green-lit feature that
-   changes Rust, not prompts. Begins with a scout of the result-envelope seam in
-   `src/tools/core/types.rs`; intersects the G5 bug (augmentation fields omitted from
-   `artifact(get)`).
+1. **Provenance envelope keys (finding 7) — SHIPPED 2026-07-04** (0de733aa, experiments):
+   `artifact(get)` now emits a server-computed `provenance` block and the freshness engine
+   fires stale-by-commit-distance (activating the previously-stubbed `topo_distance_from_head`,
+   fed by `commit_refresh` recording HEAD); the co-located G5 bug is fixed in the same
+   projection. Live-verified end-to-end (entry_collection surfaces; commit_refresh →
+   refreshed_at_commit=HEAD, commits_behind_head=0). Optional follow-ups: extend provenance to
+   the `context.rs` `[LIVE]` bundle and the `state_at` time-travel surfaces.
 2. **Build the multi-turn harness extension** — unblocks findings 6, 8, and the
    durability half of 6-Test-1 at once.
 3. **prompt-tdd failure-path PR** — F-2 persist + F-3/F-6 distribution reporting.
