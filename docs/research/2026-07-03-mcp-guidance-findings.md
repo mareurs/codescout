@@ -125,6 +125,20 @@ keeping.
    dangerous signal in a behavior eval — it looks identical whether the model refused,
    errored, or was never asked.
 
+11. **Adherence-at-distance has its own traps — and the bind must interrogate the DESIGN,
+   not just the result (A-10).** Measuring whether a directive survives a long conversation is
+   not single-turn scoring with more turns: (a) a SELF-REINFORCING observable ("end every
+   reply with X") cannot detect decay — the model re-anchors it every turn; use a LATENT,
+   non-reinforcing probe (fires once, far from statement, never restated). (b) Transcript
+   turn-INDEX is unreliable — `--resume` logs stray empty/duplicate user turns (an 18-turn
+   design recorded 11+ events); bind by arm + observable, never turn position. (c) "Distance"
+   is at least THREE axes — turn count, token VOLUME, context POSITION — and one is not the
+   others; push volume via INPUT bulk (cheap prefill) not model OUTPUT (slow → hits the
+   per-run timeout), and place the probe MID-context, since a directive at primacy (turn 1) is
+   a weak retention test. Both (a) and (b) were caught by reading the transcripts, and the
+   primacy limitation in (c) surfaced only because the bind exposed that every arm sat at turn
+   1 — binding the *result* forced a redesign of the *experiment*, twice.
+
 **Meta-lesson:** pre-registration caught every *rubric* problem this session and
 *no* environment/config problem, because the pre-registration form didn't ask about
 the environment. Discipline only covers what it explicitly checks — so the checklist
