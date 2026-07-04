@@ -25,6 +25,8 @@ computes about it*, never from what the content claims about itself.
 
 **A-8 and A-9 extend this from trust to obedience.** Overselling a tracker's freshness did not make an agent over-trust a stale tracker (it verified regardless and flagged the oversell as a hazard); and delivering a directive as a project *file on disk* was obeyed no more than the same directive inline or in `CLAUDE.md`. Capable models judge content **and directives** on their merit — dressing the source (authority, freshness claims, file provenance) is inert; only the model's own verification moves behavior.
 
+**A-10 extends this from single-turn to conversational distance.** A directive fetched *once* (a buried turn-1 statement) is obeyed as reliably as one kept always-visible in `CLAUDE.md` — through ~20 turns, for both self-reinforcing and latent non-reinforcing rules (10/10 both channels, transcript-bound). Placement-over-distance is inert too. This **partially refutes our own prior "hoist must-follow guidance to always-visible surfaces" heuristic**: its justification was decay, and no decay occurs at these distances. The real `get_guide`-authority lever is therefore **discoverability** (getting the model to *call* the guide at the right moment), not re-injection — once fetched, on-demand guidance is as authoritative as always-visible guidance.
+
 ---
 
 ## Validated findings (with confidence + evidence)
@@ -144,6 +146,7 @@ or "hide the distribution"):
 | F-4 | `test_sdk_pipeline` hardcodes global scenario count (`== 4`) | mitigated |
 | F-5 | Never pinned `--model`; ambient key + model both leaked into generator subprocess | **fixed** (env-strip + `DEFAULT_GENERATOR_MODEL="sonnet"`) |
 | F-6 | Report never surfaces per-scenario pass *rate* for multi-run scenarios | open |
+| F-7 | `--resume` transcripts record stray **empty** user turns + occasional duplicate user events (an 18-turn design logged 11+) → turn-index analysis of transcripts is unreliable | open (bind by arm + observable, not turn index) |
 
 F-2/F-3/F-6 are the same gap three times: the report renders a verdict, not the
 distribution behind it. Worth one PR. Full detail: `docs/trackers/tracker-as-skill-session-log.md`.
@@ -197,6 +200,17 @@ live.
    refused MORE via tracker (inline 90% → tracker 0%); provenance cuts toward safety. The
    A-9 line is now fully closed. Remaining: **A-8's deference axis** (b/c/d) only. See
    audit-log A-8/A-9.
+6. **get_guide adherence over distance (A-10) — DONE 2026-07-04** (multi-turn): channel is
+   inert over distance too — a once-fetched directive holds as reliably as an always-visible
+   one through ~20 turns (self-reinforcing 10/10; latent non-reinforcing 10/10 incl. the
+   18-filler F arm, 0/10 re-anchor). Partially refutes the "hoist to always-visible"
+   heuristic (no decay to resist). **Reframes the get_guide-authority lever from re-injection
+   to discoverability** — the fix is getting the model to *call* get_guide at the right moment
+   (the auto-inject-on-first-relevant-tool-call trigger), not duplicating guide text into
+   `CLAUDE.md`. **Unreached regime:** high-token-volume distance (20k+ tokens) — heavy-output
+   cells hit the 300s/run cap (superlinear `--resume` replay); next instrument step is a
+   higher per-run timeout or a token-bulk manipulation that fits the budget. Scenarios:
+   `../prompt-engineering/scenarios/guidance-decay/`.
 
 ## Provenance
 
