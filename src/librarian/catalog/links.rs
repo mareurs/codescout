@@ -34,6 +34,32 @@ pub fn incoming(cat: &Catalog, dst_id: &str) -> Result<Vec<LinkRow>> {
     collect(cat, "WHERE dst_id = ?1", params![dst_id])
 }
 
+/// All links with the given rel, across the whole catalog. Used by the
+/// link_scan differ to load the scanner-owned edge set in one query.
+pub fn by_rel(cat: &Catalog, rel: &str) -> Result<Vec<LinkRow>> {
+    collect(cat, "WHERE rel = ?1", params![rel])
+}
+
+/// Delete one edge. Returns the number of rows removed (0 or 1 — the
+/// composite PK makes the (src, dst, rel) triple unique).
+pub fn delete(cat: &Catalog, src_id: &str, dst_id: &str, rel: &str) -> Result<usize> {
+    delete_with(&cat.conn, src_id, dst_id, rel)
+}
+
+/// Transaction-friendly twin of [`delete`], mirroring [`insert_with`].
+pub fn delete_with(
+    conn: &rusqlite::Connection,
+    src_id: &str,
+    dst_id: &str,
+    rel: &str,
+) -> Result<usize> {
+    let n = conn.execute(
+        "DELETE FROM artifact_link WHERE src_id = ?1 AND dst_id = ?2 AND rel = ?3",
+        params![src_id, dst_id, rel],
+    )?;
+    Ok(n)
+}
+
 fn collect(cat: &Catalog, where_clause: &str, p: impl rusqlite::Params) -> Result<Vec<LinkRow>> {
     let sql = format!("SELECT src_id, dst_id, rel, created_at FROM artifact_link {where_clause}");
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -114,5 +140,84 @@ mod tests {
         artifact::delete(&cat, "a").unwrap();
         assert!(outgoing(&cat, "a").unwrap().is_empty());
         assert!(incoming(&cat, "b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn by_rel_filters_across_endpoints() {
+        let cat = Catalog::open_in_memory().unwrap();
+        for id in ["a", "b", "c"] {
+            artifact::upsert(&cat, &art(id)).unwrap();
+        }
+        insert(
+            &cat,
+            &LinkRow {
+                src_id: "a".into(),
+                dst_id: "b".into(),
+                rel: "cites".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        insert(
+            &cat,
+            &LinkRow {
+                src_id: "b".into(),
+                dst_id: "c".into(),
+                rel: "cites".into(),
+                created_at: 2,
+            },
+        )
+        .unwrap();
+        insert(
+            &cat,
+            &LinkRow {
+                src_id: "a".into(),
+                dst_id: "c".into(),
+                rel: "supersedes".into(),
+                created_at: 3,
+            },
+        )
+        .unwrap();
+        let cites = by_rel(&cat, "cites").unwrap();
+        assert_eq!(cites.len(), 2);
+        assert!(cites.iter().all(|l| l.rel == "cites"));
+        let sup = by_rel(&cat, "supersedes").unwrap();
+        assert_eq!(sup.len(), 1);
+        assert!(by_rel(&cat, "implements").unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_removes_exactly_the_named_triple() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a")).unwrap();
+        artifact::upsert(&cat, &art("b")).unwrap();
+        // Same endpoints, two rels — delete must be rel-scoped.
+        insert(
+            &cat,
+            &LinkRow {
+                src_id: "a".into(),
+                dst_id: "b".into(),
+                rel: "cites".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        insert(
+            &cat,
+            &LinkRow {
+                src_id: "a".into(),
+                dst_id: "b".into(),
+                rel: "evidence-for".into(),
+                created_at: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(delete(&cat, "a", "b", "cites").unwrap(), 1);
+        // Second delete of the same triple is a no-op.
+        assert_eq!(delete(&cat, "a", "b", "cites").unwrap(), 0);
+        // The other rel between the same endpoints survives.
+        let out = outgoing(&cat, "a").unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rel, "evidence-for");
     }
 }

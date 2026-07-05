@@ -3066,6 +3066,10 @@ mod guide_hint_tests {
             "librarian",
             &json!({"action": "legibility_scan", "write": false})
         ));
+        // link_scan is READ-default — the polarity inverse of legibility_scan.
+        assert!(!server.is_write_call("librarian", &json!({"action": "link_scan"})));
+        assert!(server.is_write_call("librarian", &json!({"action": "link_scan", "write": true})));
+        assert!(!server.is_write_call("librarian", &json!({"action": "link_scan", "write": false})));
     }
 
     #[tokio::test]

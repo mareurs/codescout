@@ -2201,14 +2201,28 @@ mod tests {
         drop(guard);
 
         // Hold the flock on an independent fd; claim_mux_lock opens its own fd and
-        // must see it as held.
+        // must see it as held. Acquiring right after drop(guard) races the same
+        // flock-release-visibility latency as the reclaim step below — retry
+        // rather than asserting instant acquisition (recurrence 2026-07-05 in
+        // docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
         let holder = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
             .open(&lock)
             .unwrap();
-        holder.try_lock_exclusive().unwrap();
+        let holder_locked = (0..50).any(|_| {
+            if holder.try_lock_exclusive().is_ok() {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                false
+            }
+        });
+        assert!(
+            holder_locked,
+            "holder could not acquire the released flock within budget"
+        );
         assert!(
             super::claim_mux_lock(&lock).unwrap().is_none(),
             "a held flock must read as None — no live-mux assumption"

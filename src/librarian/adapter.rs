@@ -85,7 +85,9 @@ impl crate::tools::Tool for LibrarianAdapter {
             "artifact_refresh" => false,
             // reindex rewrites the catalog; audit_doc_refs emits a tracker unless
             // emit_tracker=false; legibility_scan reconciles the backlog unless
-            // write=false; context/tracker_design/workspace_state_at/doctor read.
+            // write=false; link_scan mutates edges ONLY when write=true (read-
+            // default — polarity is the inverse of legibility_scan's, do not
+            // copy that arm); context/tracker_design/workspace_state_at/doctor read.
             "librarian" => match action {
                 Some("reindex") => true,
                 Some("audit_doc_refs") => {
@@ -94,6 +96,7 @@ impl crate::tools::Tool for LibrarianAdapter {
                 Some("legibility_scan") => {
                     input.get("write").and_then(Value::as_bool) != Some(false)
                 }
+                Some("link_scan") => input.get("write").and_then(Value::as_bool) == Some(true),
                 _ => false,
             },
             _ => false,

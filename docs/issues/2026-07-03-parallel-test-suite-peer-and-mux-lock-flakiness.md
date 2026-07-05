@@ -76,6 +76,21 @@ run 1 → 5 failures (all peer::*); run 2 (unmodified code) → 6 failures (5 pe
 lsp::manager::*, non-identical set to run 1). Every individually-failing test passes when
 re-run alone with `--test-threads=1`.
 
+### Recurrence 2026-07-05 — the HOLDER step flakes too; fix covered only the reclaim step
+
+Full `cargo test` (default parallelism, during link_scan work):
+
+```
+lsp::manager::tests::claim_mux_lock_some_when_free_none_when_held
+panicked at src/lsp/manager.rs:2211:37:
+called `Result::unwrap()` on an `Err` value: Os { code: 11, kind: WouldBlock, … }
+```
+
+Line 2211 is `holder.try_lock_exclusive().unwrap()` — the test's own holder fd acquiring
+the lock right after `drop(guard)` released the first claim. Same mechanism as the fixed
+reclaim flake (flock-release-visibility latency under load), different step: the 2026-07-05
+fix added the retry loop only to the post-release *reclaim*, not to the *holder*
+acquisition. Passes in isolation (verified same session).
 ## Hypotheses tried
 1. **Caused by the concurrent Qdrant fix under test in this session.** Test: the failing
    tests (peer sockets, LSP mux locks) share no code path with `QdrantWrap::connect` or
@@ -97,6 +112,10 @@ real-time readiness budgets losing to CPU starvation under `nproc`-wide parallel
   `claim_mux_lock_some_when_free_none_when_held` now retries the post-release claim
   (up to 50×20ms) instead of asserting instant reclaim, accommodating brief
   flock-release-visibility latency under load.
+- **(2026-07-05 recurrence) Holder step made retry-tolerant too.** The same test's
+  `holder.try_lock_exclusive()` (immediately after `drop(guard)`) got the same 50×20ms
+  retry loop — the original fix had covered only the reclaim step; the holder step
+  flaked under a full parallel run during link_scan work.
 
 `#[serial]` was considered and rejected: the contention is CPU starvation from the
 *other* ~2870 tests, which serializing the socket tests among themselves would not

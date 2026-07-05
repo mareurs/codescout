@@ -176,6 +176,7 @@ pub mod context;
 
 pub mod audit_doc_refs;
 pub mod legibility_scan;
+pub mod link_scan;
 
 pub mod doctor;
 
