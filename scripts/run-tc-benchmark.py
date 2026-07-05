@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -298,41 +299,19 @@ class McpClient:
         content = result.get("content", [])
         if not content:
             return []
-        text = content[0].get("text", "{}")
+        text = content[0].get("text", "")
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            return []
-        # Resolve output buffer reference — read_file paginates; loop until complete
-        if "output_id" in data:
-            ref_id = data["output_id"]
-            raw_parts: list[str] = []
-            start_line = 1
-            for _ in range(50):  # safety cap
-                buf_result = self.call_tool("read_file", {
-                    "path": ref_id,
-                    "start_line": start_line,
-                    "end_line": start_line + 99,
-                })
-                buf_content = buf_result.get("content", [])
-                if not buf_content:
-                    break
-                try:
-                    envelope = json.loads(buf_content[0].get("text", "{}"))
-                except json.JSONDecodeError:
-                    break
-                raw_parts.append(envelope.get("content", ""))
-                shown = envelope.get("shown_lines")
-                if envelope.get("complete", True):
-                    break
-                if isinstance(shown, list) and len(shown) == 2:
-                    start_line = shown[1] + 1
-                else:
-                    break
-            try:
-                data = json.loads("".join(raw_parts))
-            except json.JSONDecodeError:
-                return []
+            # Not JSON — an inline human-readable summary (small or empty result
+            # set, which never crossed the buffering threshold). Parse file paths
+            # straight out of the summary text.
+            return self._parse_summary_file_paths(text)
+        # Buffered result: codescout returned a {output_id, summary, hint} envelope.
+        # The full JSON lives in a server-side buffer that read_file streams back as
+        # HUMAN-READABLE TEXT (not JSON) — reconstruct it explicitly.
+        if isinstance(data, dict) and "output_id" in data:
+            data = self._read_buffered_json(data["output_id"])
         items = data.get("results", data) if isinstance(data, dict) else data
         if isinstance(items, list):
             return [
@@ -340,6 +319,82 @@ class McpClient:
                 for item in items
             ]
         return []
+
+    # read_file renders a buffered value as "{total} lines\n\n{content}", and on an
+    # auto-chunked (incomplete) read appends a footer:
+    #     \n\n  Buffer: {id}\n  [{shown} of {total} lines shown]\n  Next: {hint}
+    # The "[{shown} of {total} lines shown]" line states exactly how many content
+    # lines precede it, so we slice each chunk by that count (no fragile footer
+    # scraping) and re-read the SAME ref at an advancing start_line until complete.
+    _HEADER_RE = re.compile(r"^(\d+) lines?$")
+    _SHOWN_RE = re.compile(r"^\s*\[(\d+) of \d+ lines shown\]\s*$")
+
+    def _read_buffered_json(self, ref_id: str) -> Any:
+        """Reassemble a buffered tool result (JSON) from read_file's text chunks.
+
+        Raises on any unexpected shape rather than returning an empty result — a
+        silent [] here is exactly what made buffered misses indistinguishable
+        from genuine zero-hit queries (the bug this fixes).
+        """
+        parts: list[str] = []
+        start_line = 1
+        chunk = 200
+        for _ in range(500):  # safety cap
+            buf = self.call_tool("read_file", {
+                "path": ref_id,
+                "start_line": start_line,
+                "end_line": start_line + chunk - 1,
+            })
+            buf_content = buf.get("content", [])
+            if not buf_content:
+                raise RuntimeError(f"read_file({ref_id}) returned no content at line {start_line}")
+            chunk_text = buf_content[0].get("text", "")
+            lines = chunk_text.split("\n")
+            if not lines or not self._HEADER_RE.match(lines[0]):
+                raise RuntimeError(
+                    f"read_file({ref_id}) returned unexpected text (no 'N lines' header): "
+                    f"{chunk_text[:120]!r}"
+                )
+            body = lines[2:]  # drop "{total} lines" header + the blank line after it
+            shown = None
+            for bl in body:
+                m = self._SHOWN_RE.match(bl)
+                if m:
+                    shown = int(m.group(1))
+                    break
+            if shown is not None:
+                # Incomplete chunk: the first `shown` body lines are the JSON slice;
+                # everything after is the Buffer/next footer.
+                parts.append("\n".join(body[:shown]))
+                start_line += shown
+            else:
+                # Complete final chunk: body is pure JSON (no footer is emitted when
+                # the read fits without spilling to a @file_ ref).
+                parts.append("\n".join(body))
+                break
+        reassembled = "\n".join(parts)
+        try:
+            return json.loads(reassembled)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"failed to reassemble buffered JSON from {ref_id}: {exc} "
+                f"({len(reassembled)} chars reconstructed)"
+            ) from exc
+
+    @staticmethod
+    def _parse_summary_file_paths(text: str) -> list[str]:
+        """Extract file paths from an inline semantic_search summary.
+
+        Summary lines look like: `  path/to/file.rs:19-24   <snippet>`; an empty
+        result set renders as `0 results` (no such lines) → [].
+        """
+        paths: list[str] = []
+        line_re = re.compile(r"^\s+(.+?):\d+-\d+(?:\s|$)")
+        for line in text.splitlines():
+            m = line_re.match(line)
+            if m:
+                paths.append(m.group(1))
+        return paths
 
     def close(self) -> None:
         try:

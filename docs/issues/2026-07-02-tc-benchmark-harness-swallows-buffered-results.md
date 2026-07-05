@@ -1,12 +1,21 @@
 ---
-status: open
-opened: 2026-07-02
-closed:
-severity: high
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- benchmark
+- mcp-tools
+- progressive-disclosure
+- read_file
+topic: null
+time_scope: null
+closed: '2026-07-05'
+opened: '2026-07-02'
 owner: marius
 related: []
-tags: [benchmark, mcp-tools, progressive-disclosure, read_file]
-kind: bug
+severity: high
 ---
 
 # BUG: `scripts/run-tc-benchmark.py` silently scores buffered semantic_search results as zero
@@ -229,33 +238,44 @@ This is a direct, line-for-line reproduction of the harness's own failure path.
    above; root cause section.
 
 ## Fix
-Not implemented (out of scope for Task 10, which is docs-only). Plan for whoever
-picks this up:
 
-- In `scripts/run-tc-benchmark.py`, either:
-  (a) stop assuming `read_file`'s paginated response is JSON — strip the
-      `"{N} lines\n\n"` header line and treat the remainder as raw text to
-      accumulate, then `json.loads()` only the final concatenated string; or
-  (b) request the structured form directly instead of line-range pagination, e.g.
-      `read_file(path=output_id, json_path="$")` (or the narrowest `json_path` that
-      covers the `results` array), sidestepping `format_read_file`'s human-text
-      renderer entirely.
-- Either fix should be paired with restoring the `except json.JSONDecodeError`
-  blocks at `scripts/run-tc-benchmark.py:304-305,322-323,334-335` to `print(...,
-  file=sys.stderr)` before falling back to `[]`/`break`, so a future regression is
-  visible in the run log instead of silently changing scores.
-- After the fix, re-run all three Task-10 arms — the current hybrid (9/75) and
-  no-sparse (26/75) totals are known undercounts; the lite arm (31/75) is the most
-  trustworthy of the three as-is (only 1/25 TCs affected) but should be re-run too
-  for a clean apples-to-apples comparison.
+Fixed in `scripts/run-tc-benchmark.py`:
 
+1. **Correct reconstruction.** `McpClient.semantic_search` no longer treats
+   the follow-up `read_file` responses as JSON envelopes. New helper
+   `_read_buffered_json(ref_id)` parses `read_file`'s actual text format
+   (`"{total} lines\n\n{content}"` plus, on an auto-chunked read, a
+   `"  [{shown} of {total} lines shown]\n  Next: ..."` footer). It slices each
+   chunk by the exact `{shown}` count the footer states, re-reads the SAME ref
+   at an advancing `start_line` until the read is complete, concatenates the
+   content, and `json.loads` the whole. Verified against `read_file`'s renderer
+   (`src/tools/read_file.rs::format_read_file`) and live ground truth.
+2. **No more silent swallowing.** Parse/shape failures now `raise RuntimeError`
+   instead of `return []`; `main()`'s existing `except` prints
+   `[WARN] {tc} failed: ...`, so a buffered-read problem is visible rather than
+   masquerading as a genuine zero-hit query.
+3. **Inline/empty path handled too.** If the first response isn't JSON (a small
+   or empty result rendered as a human-readable summary), `_parse_summary_file_paths`
+   extracts file paths from the `  {path}:{start}-{end}  ...` summary lines
+   (`0 results` → `[]`).
 ## Tests added
-`N/A` — no fix implemented yet in this session (Task 10 is a docs-only deliverable;
-fixing the benchmark harness is out of scope). Whoever implements the Fix plan above
-should add a Python-side regression test (or a `--self-test` mode in the harness)
-that feeds a >10 KB buffered response through `semantic_search()` and asserts a
-non-empty result, so this doesn't regress silently again.
 
+Two layers of verification:
+
+1. **Unit (format contract).** A standalone harness
+   (`scratchpad/test_bench_reconstruct.py`) simulates `read_file`'s
+   text-rendering + auto-chunk byte budget and asserts `_read_buffered_json`
+   round-trips a 10-result JSON exactly across multi-chunk, single-chunk, and
+   summary/empty cases. All pass.
+2. **End-to-end (live stack).** Ran the real harness against the codescout
+   project (`./target/release/codescout`, qdrant up), 2-TC suite, `--mode full`
+   (both queries buffer >10 KB). Result: `TC-A score=2/3`, `TC-B score=3/3`,
+   each with a full 10-entry `top10_files` — under the old code both would have
+   been `score=0, top10_files=[]`. TC-A's 2/3 is a real retrieval outcome (one
+   of two expected files in top-10), not a measurement artifact.
+
+No cargo test added — this is a standalone Python script under `scripts/`, not
+compiled/tested by the Rust suite.
 ## Workarounds
 - Lower `--limit` and/or use `mode=compact` when invoking the harness, to reduce the
   chance any individual `semantic_search` response crosses the ~10 KB buffering
@@ -266,15 +286,14 @@ non-empty result, so this doesn't regress silently again.
   responses tend to be large (hybrid/rerank arms especially), not an exact score.
 
 ## Resume
-Implement Fix option (b) above in `scripts/run-tc-benchmark.py`'s
-`McpClient.semantic_search()` (around line 306-335): replace the manual
-`read_file` start_line/end_line pagination loop with a single
-`read_file(path=ref_id, json_path="$")` call (or, if the buffered payload can itself
-exceed a single response, page via `json_path` on the `results` array index rather
-than raw line ranges), then re-run all three Task-10 arms and diff against
-`docs/research/2026-07-02-lite-vs-hybrid-benchmark.md`'s recorded numbers to quantify
-how much of the "lite beats hybrid" delta was harness artifact vs. real.
 
+Done. Any prior benchmark numbers produced with `--mode full` (or any run
+where responses crossed the ~10 KB buffer threshold) are invalid and should be
+re-run — the emitted `top10_files: []` / `score: 0` entries were measurement
+artifacts, not retrieval misses, so cross-backend comparisons in
+`docs/research/2026-07-02-lite-vs-hybrid-benchmark.md` that used those numbers
+are confounded (the lite arm buffered less often, inflating its apparent lead).
+Re-run the affected arms before drawing conclusions.
 ## References
 - `scripts/run-tc-benchmark.py:296-336` (`McpClient.semantic_search`)
 - `scripts/run-tc-benchmark.py:423-441` (`main()` — outer exception handling that
