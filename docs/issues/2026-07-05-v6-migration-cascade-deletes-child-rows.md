@@ -116,14 +116,60 @@ Re-augment affected artifacts after the migration
 the .md file).
 
 ## Resume
-Fixed. Note: catalogs already migrated to v6 before this fix have already lost
-their pre-migration augmentations/events irrecoverably — this fix only protects
-catalogs migrating v(<6)→v6 from here on. If a future table-copy migration is
+Fixed. Note: catalogs already migrated to v6 before this fix lost their
+pre-migration augmentations/events from the live DB — but the loss is
+**recoverable from the `catalog.db.pre-v6-bak.<ts>` snapshots** the migration
+writes before running (see ## Recovery for the runbook; 7 trackers restored
+2026-07-05). This fix protects catalogs migrating v(<6)→v6 from here on. If a future table-copy migration is
 added, apply the same foreign_keys-off discipline.
 
+## Recovery (2026-07-05)
+
+The loss is **recoverable when the machine still holds the migration's pre-v6
+backups.** The migration host writes `~/.local/share/librarian/catalog.db.pre-v6-bak.<unixts>`
+before each destructive run; those snapshots retain the augmentation/event/link
+rows the wipe deleted. (`catalog.db.v6-broken.<ts>` with `aug=0` is the post-wipe
+marker.) On this machine the clean recovery sources were the May-8 (`aug=6`) and
+May-15 (`aug=4`) pre-v6 snapshots; two other backups were unusable (stale
+`-wal`/`-shm` written May-12 by a later schema → `malformed database schema`).
+
+**Restored: 7 augmentations, losslessly, across 4 projects** — codescout
+(`artifact-augmentation-followups`, `retrieval-benchmark`), backend-kotlin
+(`eval-baseline`), lang-pal-engine (`plugin-engine-redesign`), MRV-poc
+(`corpus-gaps`, `retrieval-failure-audit`, `retrieval-issues/index`). Live
+catalog augmentation count 41 → 48. (`tool-usage-patterns` + `windows-platform-support`
+were restored earlier from prose; `retrieval-experiments` was already re-augmented.)
+
+### Runbook (reusable)
+1. **Locate + rank backups.** `ls ~/.local/share/librarian/catalog.db.pre-v6-bak.*`;
+   compare `SELECT count(*) FROM artifact_augmentation` across snapshots vs live.
+   Prefer a checkpointed backup (no stray `-wal`/`-shm`).
+2. **Diff by PATH, not id.** v6 recomputes `id = sha256(abs_path)` from the old
+   `sha256(repo,rel_path)`, so the *same file* has a *different id* pre/post.
+   Match backup→live on `artifact.abs_path` (pre-v6: `repo || '/' || rel_path`);
+   an id-based diff falsely flags every recovered row as still-broken. Recover
+   only augmentations whose live artifact **exists and is currently un-augmented**
+   (additive — never overwrite a newer live augmentation).
+3. **Extract byte-exact** with SQLite `writefile()` (no trailing-newline
+   corruption; `length()` counts chars, `stat` bytes — small UTF-8 deltas are
+   expected, not corruption):
+   `sqlite3 -readonly <bak> "SELECT writefile('<id>.prompt',prompt), writefile('<id>.params',params), writefile('<id>.rtmpl',COALESCE(render_template,'')), writefile('<id>.pschema',COALESCE(params_schema,'')) FROM artifact_augmentation WHERE artifact_id='<srcid>';"`
+4. **Restore through the CLI** (same catalog code + locking; the running MCP
+   server sees it on the next read — verified, no cache gap):
+   `codescout artifact-augment <liveid> --prompt @<id>.prompt --params @<id>.params [--render-template @<id>.rtmpl] [--params-schema @<id>.pschema]`
+   (no `--merge` = full replace for a fresh restore). The pre-v6 schema lacks
+   `entry_collection`/`refreshed_at_commit` columns, so those two fields are not
+   recovered — re-add via `artifact_augment(merge=true, entry_collection=...)` if needed.
+5. **Verify** with `librarian(action="context", anchor_id=<liveid>)` — the `[LIVE]`
+   block should render the template with no `<!-- render error -->` comment.
+
+**Caveat — recovery ≠ refresh.** Restored params reflect the *backup* date. Each
+augmentation carries its own refresh prompt; re-sync from its machine source
+(JSON/JSONL/git) or body prose afterward. Trackers augmented *after* the last
+backup and then wiped are NOT in any snapshot — reconstruct their params from
+body prose instead (see `tool-usage-patterns`).
 ## References
 - Symptom: `docs/issues/2026-07-02-tool-usage-patterns-augmentation-lost.md`
 - `src/librarian/catalog/migrate_v6.rs` (drop_legacy_and_stamp)
 - `src/librarian/catalog/mod.rs:199,203` (foreign_keys ON, then migration)
 - `src/librarian/catalog/schema.sql` (ON DELETE CASCADE FKs)
-
