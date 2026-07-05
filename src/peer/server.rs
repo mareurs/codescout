@@ -453,7 +453,10 @@ mod tests {
     use tokio::net::UnixStream;
 
     async fn connect_with_retry(sock: &std::path::Path) -> UnixStream {
-        for _ in 0..50 {
+        // Generous budget (~5s): under nproc-wide parallel test load the spawned
+        // server can be CPU-starved past a tight window even though it will bind
+        // (docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
+        for _ in 0..250 {
             if let Ok(s) = UnixStream::connect(sock).await {
                 return s;
             }
@@ -750,7 +753,7 @@ mod tests {
         // Wait for the socket to accept connections.
         let mut client = {
             let mut c = None;
-            for _ in 0..50 {
+            for _ in 0..100 {
                 if let Ok(client) = crate::peer::client::PeerClient::connect(&sock).await {
                     c = Some(client);
                     break;
@@ -806,7 +809,7 @@ mod tests {
 
         let mut client = {
             let mut c = None;
-            for _ in 0..50 {
+            for _ in 0..100 {
                 if let Ok(client) = crate::peer::client::PeerClient::connect(&sock).await {
                     c = Some(client);
                     break;

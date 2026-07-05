@@ -1,7 +1,7 @@
 ---
 id: '9c034ab9429ff2bf'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: peer::server/peer::client + lsp::manager mux-lock tests intermittently fail under full parallel `cargo test --lib`'
 owners: []
 tags:
@@ -16,6 +16,7 @@ opened: '2026-07-03'
 owner: marius
 related: []
 severity: low
+closed: 2026-07-05
 ---
 
 
@@ -84,24 +85,36 @@ re-run alone with `--test-threads=1`.
    alone. **Verdict: rejected** — all passed in isolation.
 
 ## Fix
-Not started — out of scope for the session that found it. Candidate directions: raise
-per-test "ready" wait budgets for `peer::server`/`peer::client` fixtures; give LSP-mux-lock
-tests a unique lock-file path per test (if not already); or mark the affected tests
-`#[serial]` / run this test group with reduced parallelism in CI.
 
+Fixed as **test-harness robustness** (no product code touched) — the failures were
+real-time readiness budgets losing to CPU starvation under `nproc`-wide parallelism:
+- **Peer socket readiness budgets raised to ~5s.** `src/peer/server.rs`
+  `connect_with_retry` (50×20ms → 250×20ms) and its two inline connect loops
+  (50×50ms → 100×50ms); `src/peer/client.rs` inline connect loop (50×20ms → 250×20ms).
+  The spawned server binds correctly; under load it can just be scheduled past a tight
+  real-time window, so a generous budget absorbs the delay.
+- **Mux-lock reclaim made retry-tolerant.** `src/lsp/manager.rs`
+  `claim_mux_lock_some_when_free_none_when_held` now retries the post-release claim
+  (up to 50×20ms) instead of asserting instant reclaim, accommodating brief
+  flock-release-visibility latency under load.
+
+`#[serial]` was considered and rejected: the contention is CPU starvation from the
+*other* ~2870 tests, which serializing the socket tests among themselves would not
+relieve; raising the real-time budget targets the actual mechanism and keeps parallelism.
 ## Tests added
-N/A — flakiness observation, not a fix.
 
+None — this is test-harness robustness, not a product fix. The regression signal is
+the existing suite staying green under default parallelism.
 ## Workarounds
 Re-run failed tests individually or with `--test-threads=1` to confirm they're not a real
 regression before investigating further.
 
 ## Resume
-Start by checking whether `peer::server`/`peer::client` test fixtures already have a
-documented "ready" polling budget (grep `ready` in `src/peer/server.rs` tests) and whether
-it's generous enough under `nproc`-wide parallel load; check the LSP mux lock test's
-lock-file path for collisions with other concurrently-running tests.
 
+Fixed. Verified: the 18 peer + mux-lock tests pass under `--features server-stack`,
+and the full lib suite is green (2882 passed, 0 failed) under default `nproc`-wide
+parallelism — the exact config that flaked. A single green run can't prove a rare
+flake is gone, but both documented mechanisms (tight readiness budgets, instant-reclaim
+assumption) are structurally removed.
 ## References
 - Surfaced during `docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md` fix verification, 2026-07-03.
-

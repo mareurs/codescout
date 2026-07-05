@@ -2214,10 +2214,20 @@ mod tests {
             "a held flock must read as None — no live-mux assumption"
         );
 
-        // Released → claimable again.
+        // Released → claimable again. Under heavy parallel test load the OS can take
+        // a moment to make the released flock visible to a fresh fd, so retry briefly
+        // rather than asserting instant reclaim (fixes the parallel-suite flake,
+        // docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
         drop(holder);
+        let reclaimed = (0..50).find_map(|_| match super::claim_mux_lock(&lock).unwrap() {
+            Some(guard) => Some(guard),
+            None => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                None
+            }
+        });
         assert!(
-            super::claim_mux_lock(&lock).unwrap().is_some(),
+            reclaimed.is_some(),
             "lock should be reclaimable after the holder releases"
         );
     }

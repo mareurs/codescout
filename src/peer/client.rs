@@ -115,9 +115,11 @@ mod tests {
             accept_one(&listener, &ctx).await.unwrap();
         });
 
-        // connect with retry — socket may not be bound yet
+        // connect with retry — socket may not be bound yet. Generous budget (~5s):
+        // under nproc-wide parallel test load the server can be CPU-starved past a
+        // tight window (docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
         let mut client = None;
-        for _ in 0..50 {
+        for _ in 0..250 {
             if let Ok(c) = PeerClient::connect(&sock).await {
                 client = Some(c);
                 break;
