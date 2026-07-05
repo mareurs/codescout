@@ -525,7 +525,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(aug, 1, "augmentation must survive the v6 table-copy migration");
+        assert_eq!(
+            aug, 1,
+            "augmentation must survive the v6 table-copy migration"
+        );
         let ev: i64 = cat
             .conn
             .query_row(
@@ -534,7 +537,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(ev, 1, "event history must survive the v6 table-copy migration");
+        assert_eq!(
+            ev, 1,
+            "event history must survive the v6 table-copy migration"
+        );
 
         // The surviving augmentation still carries its payload, and the legacy
         // artifact column is gone (migration actually ran, not skipped).
@@ -549,7 +555,9 @@ mod tests {
         assert_eq!(prompt, "maintain the T-N table");
         let has_repo =
             crate::librarian::catalog::column_exists(&cat.conn, "artifact", "repo").unwrap();
-        assert!(!has_repo, "v6 migration should have dropped legacy repo column");
+        assert!(
+            !has_repo,
+            "v6 migration should have dropped legacy repo column"
+        );
     }
-
 }
