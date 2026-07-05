@@ -585,6 +585,38 @@ async fn handle_server_response(msg: &mut Value, state: &Arc<Mutex<MuxState>>) {
     }
 }
 
+/// Extract the LSP registration ids carried by a `client/registerCapability` message.
+fn registration_ids(msg: &Value) -> Vec<String> {
+    msg.get("params")
+        .and_then(|p| p.get("registrations"))
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Insert a `client/registerCapability` message into the replay cache, superseding any
+/// cached entry whose registration ids are all present in `msg`. LSP re-registration
+/// replaces a prior registration of the same id, so the previous append-only cache grew
+/// without bound on every re-registration
+/// (docs/issues/2026-06-23-mux-cached-capabilities-unbounded.md).
+fn cache_registration(cache: &mut Vec<Value>, msg: &Value) {
+    let new_ids: std::collections::HashSet<String> = registration_ids(msg).into_iter().collect();
+    if !new_ids.is_empty() {
+        // Drop a cached message only when every registration it carries is superseded by
+        // `msg`; keep it if it still holds at least one live (non-superseded) id.
+        cache.retain(|cached| {
+            registration_ids(cached)
+                .iter()
+                .any(|id| !new_ids.contains(id))
+        });
+    }
+    cache.push(msg.clone());
+}
+
 /// Handle a server-to-client request (e.g. workspace/applyEdit, client/registerCapability).
 async fn handle_server_request(
     msg: &Value,
@@ -627,7 +659,7 @@ async fn handle_server_request(
             // "received response for unknown request".
             {
                 let mut st = state.lock().await;
-                st.cached_capabilities.push(msg.clone());
+                cache_registration(&mut st.cached_capabilities, msg);
             }
             // Auto-respond with null — `client/registerCapability` spec response is void.
             let response = json!({
@@ -965,5 +997,82 @@ mod process_group_reaping_tests {
             libc::killpg(pgid, libc::SIGKILL);
         }
         // No assertion on errno — the contract is "does not blow up". ESRCH is expected.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reg(id: &str, method: &str) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "client/registerCapability",
+            "params": { "registrations": [ { "id": id, "method": method } ] }
+        })
+    }
+
+    #[test]
+    fn cache_registration_dedups_repeated_identical_registrations() {
+        let msg = reg("reg-1", "textDocument/didChange");
+        let mut cache = Vec::new();
+        for _ in 0..100 {
+            cache_registration(&mut cache, &msg);
+        }
+        assert_eq!(
+            cache.len(),
+            1,
+            "identical re-registration must not grow the replay cache"
+        );
+    }
+
+    #[test]
+    fn cache_registration_keeps_distinct_and_replaces_superseded() {
+        let mut cache = Vec::new();
+        cache_registration(&mut cache, &reg("a", "m-a"));
+        cache_registration(&mut cache, &reg("b", "m-b"));
+        assert_eq!(
+            cache.len(),
+            2,
+            "distinct registration ids must both be retained"
+        );
+
+        // Re-register `a` — supersedes the prior `a` entry; cache stays bounded at 2.
+        cache_registration(&mut cache, &reg("a", "m-a-v2"));
+        assert_eq!(
+            cache.len(),
+            2,
+            "re-registering an existing id must replace, not append"
+        );
+
+        let a_entry = cache
+            .iter()
+            .find(|m| registration_ids(m) == vec!["a".to_string()])
+            .expect("registration a must still be cached");
+        assert_eq!(
+            a_entry["params"]["registrations"][0]["method"], "m-a-v2",
+            "the retained entry for id `a` must be the newest registration"
+        );
+    }
+
+    #[test]
+    fn cache_registration_supersedes_prior_entry_when_batch_covers_its_ids() {
+        let mut cache = Vec::new();
+        cache_registration(&mut cache, &reg("x", "m-x"));
+        // A batch covering `x` plus a new id `y` supersedes the standalone `x` entry.
+        cache_registration(
+            &mut cache,
+            &json!({
+                "params": { "registrations": [
+                    { "id": "x", "method": "m-x-v2" },
+                    { "id": "y", "method": "m-y" }
+                ] }
+            }),
+        );
+        assert_eq!(
+            cache.len(),
+            1,
+            "a batch covering all ids of a prior entry supersedes it"
+        );
     }
 }

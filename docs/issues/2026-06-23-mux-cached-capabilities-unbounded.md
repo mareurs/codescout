@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-23
-closed:
+closed: 2026-07-05
 severity: low
 owner: marius
 related: []
@@ -69,31 +69,36 @@ cached_capabilities: Vec<Value>,
    + the append site above.
 
 ## Fix
-Not yet implemented. Options, safest first:
-1. **Dedup by registration id** — `registerCapability` params carry
-   `registrations[].id`; replace an existing entry with the same id instead of appending.
-   Correct per LSP semantics (re-registration supersedes) and bounds the duplicate case.
-2. **High cap + `warn!`** — keep the most recent N (e.g. 4096) and warn past it. Bounds
-   memory unconditionally; effectively never drops a real capability (no LSP registers
-   thousands of distinct capabilities). Risk: theoretically drops an old distinct
-   capability for a late-joining client.
-Deferred out of the OOM-instrumentation change to keep that commit focused; this is a
-separate, non-urgent hygiene fix.
 
+Implemented **option 1 (dedup by registration id)** in `src/lsp/mux/process.rs`.
+Two pure free functions added before `handle_server_request`:
+- `registration_ids(msg)` — extracts `params.registrations[].id`.
+- `cache_registration(cache, msg)` — before pushing, drops any cached message whose
+  registration ids are **all** superseded by the incoming one (keeps entries still
+  carrying a live id), then pushes. Repeated identical re-registration now replaces
+  instead of accumulating, bounding the growth; distinct live capabilities are preserved.
+
+The `client/registerCapability` arm now calls
+`cache_registration(&mut st.cached_capabilities, msg)` instead of the append-only
+`st.cached_capabilities.push(msg.clone())`. New-client init replay therefore carries
+each live capability once (fewer duplicate registrations to late-joining clients).
 ## Tests added
-N/A — not yet fixed. A fix should add a mux test asserting `cached_capabilities` does not
-grow on repeated identical registrations (dedup) or stays ≤ cap.
 
+Three pure unit tests in the new `src/lsp/mux/process.rs` `mod tests` (no async /
+`SharedWriter` mock needed — the dedup logic is a free function):
+- `cache_registration_dedups_repeated_identical_registrations` — 100× identical registration → len 1.
+- `cache_registration_keeps_distinct_and_replaces_superseded` — distinct ids retained; re-registering an id replaces (len stays 2) with the newest registerOptions.
+- `cache_registration_supersedes_prior_entry_when_batch_covers_its_ids` — a batch covering a prior entry's ids supersedes it.
+
+All green; clippy `-D warnings` clean; full lib suite green (2882 passed).
 ## Workarounds
 None needed — no functional impact observed. A mux restart (idle-timeout or new session)
 resets the vec.
 
 ## Resume
-Decide between dedup-by-id (option 1, preferred) and cap+warn (option 2) for
-`src/lsp/mux/process.rs:628-631`; add the mux regression test; verify new-client init
-still receives each live capability. Low priority — schedule behind the OOM-forensics
-instrumentation and the actual leak hunt.
 
+Fixed via dedup-by-registration-id (option 1). Verified: 3 new tests pass, full
+`--features server-stack` lib suite green. Latent hygiene bug closed.
 ## References
 - `src/lsp/mux/process.rs:36,365,628-631`
 - Sibling: `docs/issues/2026-06-19-mcp-server-oom-68gb.md` (the audit that surfaced this; this is explicitly *not* its cause)
