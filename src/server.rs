@@ -2944,6 +2944,22 @@ mod guide_hint_tests {
     async fn make_server() -> (tempfile::TempDir, EnvGuard, CodeScoutServer) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        // Seed an empty librarian workspace and pin LIBRARIAN_WORKSPACE so
+        // build_tool_context() resolves the workspace from here rather than
+        // falling back to dirs::config_dir()/librarian/workspace.toml. That
+        // fallback is $HOME/.config-derived, which is (a) absent under
+        // wine/windows-gnu — the DETERMINISTIC cause of the 8-test guide_hint
+        // wine cluster (docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md),
+        // where the missing file makes build_tool_context fail, try_build_runtime
+        // silently returns None, and the `artifact` tool never registers — and
+        // (b) a process-global HOME dependency other (non-#[serial]) tests race
+        // (docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md).
+        // An empty file is valid: WorkspaceConfig is #[derive(Default)] with all
+        // fields #[serde(default)]. The guard is local — build_tool_context only
+        // reads LIBRARIAN_WORKSPACE during CodeScoutServer::new, below.
+        let ws_path = dir.path().join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+        let _ws_env = EnvGuard::set("LIBRARIAN_WORKSPACE", &ws_path);
         // Per-test LIBRARIAN_DB isolation. Combined with `#[serial]` on every
         // test that calls this helper, this prevents the Windows
         // mandatory-locking deadlock on the shared default catalog path

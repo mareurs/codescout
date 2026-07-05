@@ -1,12 +1,23 @@
 ---
-status: open
-opened: 2026-07-02
-closed:
-severity: medium
-owner: marius
-related: [docs/trackers/windows-platform-support.md]
-tags: [windows-gnu, wine, ci, test-portability]
+id: null
 kind: bug
+status: open
+title: null
+owners: []
+tags:
+- windows-gnu
+- wine
+- ci
+- test-portability
+topic: null
+time_scope: null
+closed: null
+guide_hint_cluster: fixed-2026-07-05
+opened: '2026-07-02'
+owner: marius
+related:
+- docs/trackers/windows-platform-support.md
+severity: medium
 ---
 
 # BUG: 20 lib tests fail under wine on the windows-gnu target (pre-existing; exposed by the new CI gate)
@@ -18,6 +29,40 @@ perf-vdi-closure work: the symbols cluster fails identically at `8431a1d5`
 (pre-Task-6). The windows-gnu wine suite was never green — only targeted win32
 tests had ever been run under wine (tracker 2026-06-12 entries).
 
+
+## Resolution (partial, 2026-07-05)
+
+**8-test `guide_hint` cluster: FIXED and un-skipped.** Root cause confirmed
+under wine: all 8 panicked at `src/server.rs` `tool_by_name` with
+`tool 'artifact' not registered`. `guide_hint_tests::make_server` set
+`LIBRARIAN_DB` but not `LIBRARIAN_WORKSPACE`, so `build_tool_context` fell back
+to `dirs::config_dir()/librarian/workspace.toml` — which does not exist under
+wine → `workspace::load` fails → `try_build_runtime` silently returns `None`
+→ the librarian `artifact` tool never registers → panic. (Same root cause as
+the Linux flake `docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md`,
+but deterministic under wine because the fallback path is *always* unseeded there.)
+
+**Fix:** `make_server` now seeds an empty `librarian-workspace.toml` in its
+tempdir and pins `LIBRARIAN_WORKSPACE` to it (empty is valid — `WorkspaceConfig`
+is `#[derive(Default)]` with all-`serde(default)` fields). This removes the
+`build_tool_context` dependency on the ambient `$HOME/.config` workspace
+entirely, so the artifact tool always registers.
+
+**Verified under wine** (`scripts/build-windows.sh test guide_hint_tests`):
+before = `2 passed; 8 failed`; after = `10 passed; 0 failed; 1 ignored` (the 1
+ignored is `run_command_with_overflow_emits_progressive_hint_once`, Unix-only,
+ignored for an unrelated reason). Linux full server suite still green (81/81),
+clippy clean. `--skip guide_hint_tests` removed from `.github/workflows/ci.yml`.
+
+**Remaining: 12 skips (down from 20).** These are NOT fixed here and stay
+skip-listed — they are a different, wine-emulation-specific class (the symbols
+glob-walk cluster returns empty result sets under wine; preflight/gitignore;
+markdown compact rendering; run_command quoting; head_sha), plus the one
+genuinely real-Windows failure `validate_prune_request_gates` (red on MSVC
+windows-latest too). Root-causing those is unbounded wine-quirk work with low
+payoff (they are not real Windows bugs, per the MSVC baseline); the doctor test
+is the only one worth chasing as a real defect. This bug stays **open** for
+those 12.
 ## Symptom (Effect)
 CI `windows-gnu` job, wine test step:
 
