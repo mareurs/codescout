@@ -574,6 +574,7 @@ mod tests {
     use super::*;
 
     use crate::config::global::lock_env_for_tests;
+    use serial_test::serial;
 
     #[test]
     fn default_embed_model_is_allminilm() {
@@ -1077,6 +1078,7 @@ model = "local:AllMiniLML6V2Q"
     }
 
     #[test]
+    #[serial]
     fn env_vars_override_model_and_url() {
         let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");

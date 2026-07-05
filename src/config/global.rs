@@ -108,11 +108,14 @@ pub(crate) fn lock_env_for_tests() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+#[cfg(test)]
 mod tests {
     use super::lock_env_for_tests;
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn global_config_path_uses_xdg_config_home() {
         let _guard = lock_env_for_tests();
         let saved = std::env::var_os("XDG_CONFIG_HOME");
@@ -129,6 +132,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn global_config_path_falls_back_to_home_dot_config() {
         let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
@@ -151,6 +155,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn global_config_load_returns_none_when_absent() {
         let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
@@ -171,6 +176,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn global_config_load_parses_valid_toml() {
         let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");

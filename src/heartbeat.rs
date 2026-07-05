@@ -46,11 +46,26 @@ const RETAIN: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// runaway tool still names it). `Mutex::new` is const, so no lazy init needed.
 static CURRENT_OP: Mutex<Option<(String, u64)>> = Mutex::new(None);
 
+/// Build a `CURRENT_OP` entry for a foreground tool: `(name, now)`, no prefix.
+/// Extracted so the (necessarily atomic) test helper writes the exact same
+/// shape production does — see `set_current_op_and_read`.
+fn tool_op_entry(name: &str) -> (String, u64) {
+    (name.to_string(), now_unix())
+}
+
+/// Build a `CURRENT_OP` entry for a background op: `("bg:<label>", now)`.
+/// The `bg:` prefix is the load-bearing distinction from a tool name; keeping
+/// it in one place lets the race-free test assert on it without duplicating
+/// the format string.
+fn bg_op_entry(label: &str) -> (String, u64) {
+    (format!("bg:{label}"), now_unix())
+}
+
 /// Record the tool about to run. Called at the single dispatch chokepoint
 /// (`CodeScoutServer::call_tool_inner`). Cheap: one short lock per tool call.
 pub fn note_tool(name: &str) {
     if let Ok(mut g) = CURRENT_OP.lock() {
-        *g = Some((name.to_string(), now_unix()));
+        *g = Some(tool_op_entry(name));
     }
 }
 
@@ -67,7 +82,7 @@ pub fn note_tool(name: &str) {
 /// but not a precise concurrent view.
 pub fn note_background_op(label: &str) {
     if let Ok(mut g) = CURRENT_OP.lock() {
-        *g = Some((format!("bg:{label}"), now_unix()));
+        *g = Some(bg_op_entry(label));
     }
 }
 
@@ -283,22 +298,45 @@ pub fn spawn_durable(instance: String, project: String) {
 mod tests {
     use super::*;
 
+    /// Atomically replace `CURRENT_OP` with `entry` and read the stored op name
+    /// back under a single lock hold. Every tool dispatch calls `note_tool` at
+    /// the server chokepoint, so any concurrently-running, non-`#[serial]` test
+    /// is a live writer of this process-global slot; a plain `note_*` followed
+    /// by a separate `current_op()` read can have another test's write land in
+    /// the gap (that was the flake). Holding the lock across write+read closes
+    /// the window. See docs/issues/2026-07-02-heartbeat-current-op-test-race.md.
+    fn set_current_op_and_read(entry: (String, u64)) -> String {
+        let mut g = CURRENT_OP.lock().expect("CURRENT_OP poisoned");
+        *g = Some(entry);
+        g.as_ref()
+            .map(|(op, _)| op.clone())
+            .expect("just wrote Some")
+    }
+
     #[test]
     fn note_tool_then_current_op_returns_name() {
-        note_tool("semantic_search");
-        let (op, _age) = current_op();
-        assert_eq!(op, "semantic_search");
-        // Last-writer-wins.
-        note_tool("run_command");
-        assert_eq!(current_op().0, "run_command");
+        // A foreground tool entry is stored verbatim (no prefix). Race-free
+        // equivalent of note_tool + current_op via set_current_op_and_read.
+        assert_eq!(
+            set_current_op_and_read(tool_op_entry("semantic_search")),
+            "semantic_search"
+        );
+        assert_eq!(
+            set_current_op_and_read(tool_op_entry("run_command")),
+            "run_command"
+        );
     }
 
     #[test]
     fn note_background_op_prefixes_and_is_observable() {
         // A background op must be nameable in the heartbeat — the 68 GB OOM op was
         // a background auto-index that the tool-only `note_tool` never recorded.
-        note_background_op("auto_index:foo");
-        assert_eq!(current_op().0, "bg:auto_index:foo");
+        // The `bg:` prefix is the load-bearing bit; assert it without racing a
+        // concurrent `note_tool` by writing+reading under one lock hold.
+        assert_eq!(
+            set_current_op_and_read(bg_op_entry("auto_index:foo")),
+            "bg:auto_index:foo"
+        );
     }
 
     #[test]

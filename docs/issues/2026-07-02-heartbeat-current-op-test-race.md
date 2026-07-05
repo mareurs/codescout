@@ -1,13 +1,22 @@
 ---
-status: open
-opened: 2026-07-02
-closed:
-severity: medium
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- flaky-test
+- heartbeat
+- test-env-isolation
+topic: null
+time_scope: null
+closed: '2026-07-05'
+opened: '2026-07-02'
 opened-by: claude
 owner: marius
-related: [docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md]
-tags: [flaky-test, heartbeat, test-env-isolation]
-kind: bug
+related:
+- docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md
+severity: medium
 ---
 
 # BUG: heartbeat CURRENT_OP test races every concurrent tool dispatch
@@ -57,22 +66,32 @@ related bug file).
    neighborhoods and incidence, not the defect.
 
 ## Fix
-Not started. Candidates: (a) make the assertion tolerant — set-then-read under
-one lock acquisition (add a test-only `note_and_get` that holds the lock across
-both), (b) retry-loop the assertion, (c) redesign CURRENT_OP as a keyed/stacked
-record rather than last-writer-wins. (a) is smallest and honest to the API.
 
+Implemented option (a) — the smallest, API-honest fix. Extracted the two
+`CURRENT_OP` entry constructors (`tool_op_entry`, `bg_op_entry`) so production
+and tests build the slot's contents identically, then added a test-only
+`set_current_op_and_read(entry) -> String` helper that writes the entry and
+reads the op name back **under a single `CURRENT_OP` lock acquisition**. Both
+global-state tests (`note_background_op_prefixes_and_is_observable` and its
+sibling `note_tool_then_current_op_returns_name`, which had the identical
+latent race) now call it, so a concurrent `note_tool` from another test's
+dispatch can no longer land between the write and the read. The public API
+(`note_tool`, `note_background_op`, `current_op`) is unchanged.
 ## Tests added
-N/A — this IS a test bug.
 
+No new test — the two existing global-state tests were rewritten to use the
+race-free `set_current_op_and_read` helper (which itself is the test seam). The
+meaningful assertions are preserved: a foreground tool is stored verbatim, a
+background op is stored with the `bg:` prefix. `cargo test --lib heartbeat::`
+→ 9/9 pass; the whole class of two tests is now deterministic.
 ## Workarounds
 Re-run the job; or run the heartbeat tests single-threaded.
 
 ## Resume
-Implement (a): add `#[cfg(test)] fn note_background_op_and_get(label) -> String`
-in src/heartbeat.rs holding the `CURRENT_OP` lock across write+read; switch the
-test to it; keep the public API untouched. One-line clippy/fmt/test gate.
 
+Done — fixed in `src/heartbeat.rs` (this file's fix commit). No follow-up
+needed; the process-global `CURRENT_OP` remains last-writer-wins by design for
+production, and the tests no longer assume no concurrent writer exists.
 ## References
 - src/heartbeat.rs:66-71, :295-302; src/server.rs:626-628
 - docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md (sibling
