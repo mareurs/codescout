@@ -1,12 +1,23 @@
 ---
-status: open
-opened: 2026-07-01
-closed:
-severity: low
+id: null
+kind: bug
+status: zombie
+title: null
+owners: []
+tags:
+- build.rs
+- prompt-surfaces
+- snapshot
+- incremental-build
+- false-pass
+topic: null
+time_scope: null
+closed: '2026-07-05'
+last_observed: '2026-07-01'
+opened: '2026-07-01'
 owner: marius
 related: []
-tags: ["build.rs", "prompt-surfaces", "snapshot", "incremental-build", "false-pass"]
-kind: bug
+severity: low
 ---
 
 # BUG: `build.rs` OUT_DIR copy of `source.md` not reliably regenerated on incremental builds → prompt snapshot test false-passes
@@ -49,13 +60,25 @@ the edit. Confirm `build.rs`'s `cargo:rerun-if-changed` covers `source.md`
 
 ## Root cause
 
-Unknown — under investigation. Hypothesis: `build.rs` either does not emit
-`cargo:rerun-if-changed=src/prompts/source.md` (so cargo doesn't re-run the
-script when only that file changes), or it copies `source.md` into `OUT_DIR`
-in a way that a warm incremental build skips. The "Compiling codescout" line
-is misleading — it reflects the crate recompiling for the test edit, not
-`build.rs` re-running.
+**Leading hypothesis DISPROVEN (2026-07-05).** `build.rs` **does** emit
+`cargo:rerun-if-changed=src/prompts/source.md` (and `=build.rs`) at the end of
+`emit_prompt_surfaces()` — confirmed by reading `build.rs`. So "missing
+`rerun-if-changed`" is not the cause. The dependency chain is sound end to end:
+`source.md` change → cargo reruns `build.rs` (rerun-if-changed) → regenerates
+`OUT_DIR/server_instructions.md` → `SERVER_INSTRUCTIONS`
+(`include_str!(concat!(env!("OUT_DIR"), "/server_instructions.md"))`,
+src/prompts/mod.rs:11) recompiles because rustc tracks `include_str!` targets
+in its dep-info → the snapshot test sees the new bytes.
 
+Incidental reinforcement: `bake_git_sha()` also emits
+`rerun-if-changed=.git/HEAD` / `.git/index` / `.git/refs/heads/`, so *any* git
+operation (commit, stage) re-runs `build.rs` and regenerates the OUT_DIR copy —
+keeping it aggressively fresh and making a staleness window very hard to hit.
+
+Root cause of the original Task-6 observation remains **unconfirmed** — most
+likely a one-off cargo fingerprint anomaly (the kind `cargo clean` resolves) or
+a misattribution (e.g. the edited span fell outside the `<!-- @surface -->`
+markers, so the slice legitimately didn't change).
 ## Evidence
 
 Task 6 report (`.superpowers/sdd/task-6-report.md`, "Concerns"): snapshot test
@@ -70,18 +93,23 @@ the fixture and the test passed legitimately.
 
 ## Fix
 
-Plan (not implemented): audit `build.rs` for `cargo:rerun-if-changed`
-directives covering `src/prompts/source.md` (and every file copied to `OUT_DIR`
-or `include_str!`'d for a snapshot). If missing, add them. Consider making the
-snapshot test read `source.md` directly rather than an `OUT_DIR` copy, if the
-copy is the staleness source.
+**No code change — cannot reproduce on current HEAD (28ccbb17).**
 
+Controlled repro: injected a distinctive ` ZZZPROBE` token into the
+`server_instructions` surface of `src/prompts/source.md`, then ran
+`cargo test --lib prompt_surfaces_server_instructions_snapshot` on an
+**incremental (no-clean)** build. The test **failed** correctly
+(`expected 2167 bytes, actual 2176` — the +9 probe bytes), i.e. the OUT_DIR
+copy tracked the edit. Ran a **second** incremental build — failed again
+(no false-pass). Reverted the probe → test passes, tree clean. The mechanism
+the bug claimed was broken works reliably here.
 ## Tests added
 
-N/A — under investigation. A regression test would edit source.md in a temp
-harness and assert the rendered slice tracks it without a clean build (may be
-impractical; manual verify may be the pragmatic gate).
-
+None needed — the existing `prompts::tests::prompt_surfaces_server_instructions_snapshot`
+IS the guard, and it was verified (above) to catch a `source.md` edit on
+incremental builds across two consecutive runs. The complementary invariant
+`source_md_under_cap` and the build.rs parser-duplication byte-equality test
+(build.rs doc-comment) round out the coverage.
 ## Workarounds
 
 `cargo clean -p codescout` before running prompt snapshot tests after editing
@@ -90,10 +118,15 @@ impractical; manual verify may be the pragmatic gate).
 
 ## Resume
 
-Inspect `build.rs` for `rerun-if-changed` coverage of `src/prompts/source.md`
-and any OUT_DIR copy step. Confirm whether the snapshot test reads from OUT_DIR
-or the repo path. Reproduce with a double-run (no clean) after a source.md edit.
-
+Closed as **zombie** (no longer observed; root cause unconfirmed). **Re-open
+trigger:** a snapshot test false-passes after a real `source.md` slice edit on
+an incremental build AND survives a second `cargo test` without `cargo clean` —
+capture the exact `source.md` diff, the cargo command sequence, and
+`ls -la $OUT_DIR/server_instructions.md` mtime vs the source.md mtime at that
+moment. If it recurs, the durable fix is to have the snapshot test read+slice
+`src/prompts/source.md` directly (via the crate-side `extract_surface`) instead
+of the OUT_DIR `include_str!` copy — removing the build.rs/OUT_DIR hop from the
+test's trust chain entirely.
 ## References
 
 - Surfaced during grep-improvements Task 6 (`docs/superpowers/plans/2026-07-01-grep-improvements.md`).
