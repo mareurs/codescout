@@ -105,7 +105,7 @@ jobs:
       # ambient ~/.config/librarian/workspace.toml, which is absent under wine).
       # Inventory + un-skip protocol: docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md (WIN-27)
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip validate_prune_request_gates --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip symbols_overview_glob_marks_grammarless
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip symbols_overview_glob_marks_grammarless
 
   tool-docs-sync:
     name: Tool Docs Sync

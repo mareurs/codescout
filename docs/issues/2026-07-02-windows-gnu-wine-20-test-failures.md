@@ -1,7 +1,7 @@
 ---
 id: null
 kind: bug
-status: open
+status: mitigated
 title: null
 owners: []
 tags:
@@ -63,6 +63,31 @@ windows-latest too). Root-causing those is unbounded wine-quirk work with low
 payoff (they are not real Windows bugs, per the MSVC baseline); the doctor test
 is the only one worth chasing as a real defect. This bug stays **open** for
 those 12.
+## Resolution — `validate_prune_request_gates` (2026-07-05)
+
+**The one real cross-platform defect: FIXED and un-skipped.** Unlike the other 11
+residual failures, this test also failed on real Windows MSVC — a genuine bug, but in
+the **test**, not `validate_prune_request` (whose `is_absolute()`→`exists()` logic is
+correct). The test hard-coded Unix absolute paths (`/tmp`,
+`/definitely/not/a/real/root/xyz`); on Windows a leading-slash path is **not** absolute
+(`Path::is_absolute()` needs a drive/UNC), so the "dead absolute root → accepted" case
+returned `Err` instead of `Ok`.
+
+**Fix:** the test now derives absolute paths from `std::env::temp_dir()` —
+absolute-and-present on every platform for the live-root case, and a temp-dir-rooted
+non-existent path for the dead-root case (`src/librarian/tools/doctor.rs`
+`tests/validate_prune_request_gates`).
+
+**Verified:** passes on Linux (`cargo test`) AND under wine
+(`scripts/build-windows.sh test validate_prune_request_gates` → `1 passed`).
+`--skip validate_prune_request_gates` removed from `.github/workflows/ci.yml` so it is
+a regression gate again.
+
+**Status → mitigated.** All real cross-platform defects are now fixed (the 8-test
+guide_hint cluster + this doctor test). The remaining wine skips are confirmed
+wine-emulation-only artifacts (green on real Windows MSVC per the pre-session baseline)
+— not real Windows bugs, low-payoff to chase; they stay skip-listed with documented
+rationale.
 ## Symptom (Effect)
 CI `windows-gnu` job, wine test step:
 
@@ -160,12 +185,16 @@ None needed for users — wine is a CI proxy; the VDI runs real Windows where on
 the doctor test is affected.
 
 ## Resume
-Pick one cluster (`server::guide_hint_tests` — 8 tests, one shared unwrap at
-src/server.rs:2966): run under wine with RUST_BACKTRACE=1
-(`scripts/build-windows.sh test guide_hint_tests`), identify the unwrap's env
-dependency (config dir? APPDATA?), fix or gate; then remove its --skip from
-.github/workflows/ci.yml and confirm the job stays green.
 
+All real cross-platform defects fixed: the guide_hint cluster (8 tests, 2026-07-05)
+and `validate_prune_request_gates` (2026-07-05, un-skipped). Residual wine skips are
+wine-emulation-only artifacts (symbols glob-walk empty under wine, preflight/gitignore,
+markdown compact rendering, run_command quoting, head_sha, reindex commits-table) —
+green on real Windows MSVC, so not real bugs; they remain skip-listed. No further
+action unless a residual test starts failing on real Windows too (promote it to a real
+defect then). Minor follow-up still open: `cfg_attr(dead_code)` gating for the three
+unix-only fns in `src/lsp/manager.rs` that warn on the gnu test compile (harmless — the
+wine job has no `-D warnings`).
 ## References
 - CI runs: 28582988236 (first gnu run), 28039317667 (pre-session baseline)
 - docs/trackers/windows-platform-support.md — WIN-27

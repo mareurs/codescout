@@ -469,19 +469,27 @@ mod tests {
 
     #[test]
     fn validate_prune_request_gates() {
-        // unknown fix → refused
+        // unknown fix → refused (rejected before any path check)
         assert!(validate_prune_request("zap", Some("/gone")).is_err());
         // missing root → refused
         assert!(validate_prune_request("prune_missing", None).is_err());
-        // relative root → refused
+        // relative root → refused (relative on every platform)
         assert!(validate_prune_request("prune_missing", Some("relative/path")).is_err());
-        // live root refused (/tmp exists on the test host) — not an orphan
-        assert!(validate_prune_request("prune_missing", Some("/tmp")).is_err());
-        // dead absolute root → accepted
-        assert!(
-            validate_prune_request("prune_missing", Some("/definitely/not/a/real/root/xyz"))
-                .is_ok()
-        );
+
+        // live root refused — an existing absolute dir is not an orphan. Derive it from
+        // the OS temp dir so the path is absolute AND present on every platform (Unix
+        // /tmp, Windows C:\…\Temp); a hard-coded "/tmp" is not absolute on Windows and
+        // broke this test under wine / windows (BUG 36d475f3).
+        let live = std::env::temp_dir();
+        let live = live.to_str().expect("temp_dir path is valid UTF-8");
+        assert!(validate_prune_request("prune_missing", Some(live)).is_err());
+
+        // dead absolute root → accepted. Build a temp-dir-rooted path that does not
+        // exist, so it is absolute on every platform.
+        let dead = std::env::temp_dir().join("codescout-nonexistent-root-6f3a1c9e");
+        assert!(!dead.exists(), "test fixture path must not exist");
+        let dead = dead.to_str().expect("temp path is valid UTF-8");
+        assert!(validate_prune_request("prune_missing", Some(dead)).is_ok());
     }
 
     #[test]
