@@ -23,6 +23,10 @@ The log is how an *unverified, N=0* inspection becomes a measured hold-rate.
 Audit IDs are `A-N`, monotonic, never reused.
 
 ## Index
+> Rendered from `params.audits` (`entry_collection`) — append/edit rows via
+> `artifact_augment(merge=true, params={audits: […full array…]})` (params_path for >9 KB),
+> never by editing this table. Query: `artifact(get, entry_filter={…})`. Full maintenance
+> contract: the augmentation prompt.
 
 | ID | Date | Artifact | Gap (1-line) | Recommended move | Prediction | Confidence | Outcome |
 |----|------|----------|--------------|------------------|------------|------------|---------|

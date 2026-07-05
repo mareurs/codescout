@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-07-05
-closed:
+closed: 2026-07-05
 severity: low
 owner: marius
 related: []
@@ -41,8 +41,8 @@ Scout report (plan-mode, 2026-07-05): "`artifact_id()` … = `sha256(...)` trunc
 N/A — mechanism read directly from source.
 
 ## Fix
-One-word doc fix in `src/prompts/guides/librarian.md`: "8-hex" → "16-hex". Scheduled with
-the W2 conventions edits of the tracker cross-linking plan.
+One-word doc fix in `src/prompts/guides/librarian.md`: "8-hex" → "16-hex".
+Shipped with the W2 conventions commit `(experiments:439a9c7a, not-yet-on-master)`.
 
 ## Tests added
 N/A — doc-only; the id width is already pinned by `sixteen_hex_chars`.

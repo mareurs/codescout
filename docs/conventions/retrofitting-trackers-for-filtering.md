@@ -50,6 +50,11 @@ the `entry_collection` pointer.
    `merge=false` overwrites ALL caller-controlled fields, so pass `prompt` /
    `render_template` / `params_schema` back in the same call — omitting one
    resets it to `None`.
+   **Size note:** a params array ≳9 KB cannot be passed inline (the MCP result
+   buffer caps round-trips) — write the JSON to a file and pass
+   `params_path="/abs/path.json"` instead of `params` (read server-side;
+   mutually exclusive). An 11-row table with prose-heavy cells already grazes
+   the cap (measured 8.8 KB on the prompt-hamsa audit-log retrofit, 2026-07-05).
 6. **Verify.** `artifact(action="get", id="<id>", full=true)` — the rendered body
    must match the original section-for-section. Then test a filter:
    ```
