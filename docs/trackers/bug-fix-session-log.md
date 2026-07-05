@@ -96,6 +96,8 @@ time_scope: open-ended
 | W-16 | 2026-06-14 | med | Scout each bug's actual body before standing behind a title-derived severity/priority triage of a bug set | Would have carried two wrong facts into a fix-priority recommendation: labeled `7ca71bf7` (catalog staleness) "data-loss" and missed that `3fc22ad2` is already partially fixed (lock-probe shipped 2026-06-11); 2nd same-day recurrence of F-21 | validated |
 | W-17 | 2026-06-16 | med | When a tool's error text names a cause but a higher-level read contradicts it, reproduce the failing internal call on the real file and print its inputs before fixing | Two visible-but-wrong leads (hint said "syntax errors"; archived bug said "backtick mismatch", already shipped) would each have produced a no-op or wrong fix; a throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned AST 214 vs LSP 216 in one run, saving ≥1 wrong fix cycle (~4 round-trips) and a tolerance-widening band-aid | validated |
 | W-18 | 2026-07-01 | med | Pre-impl recon confirms a parser-grammar fix plan is safe + names the regression tests it must keep green | Naive quoted-key fix flips `$.a[abc]`→Key (breaks `tests.rs:731`); blunt tokenizer rewrite breaks `$.a[0][-1]` (`tests.rs:683`); ≥2 red tests found only at cargo test; also pre-empted an over-engineered `Segment::QuotedKey` variant (Key already applies via `obj.get`) | validated |
+| W-19 | 2026-07-05 | med | Pre-fix recon on `context(anchor_id)` starvation bug found `max_tokens_caps_inclusion` encodes "always include first" as deliberate design for topic-search mode, not a bug | A fix removing the `!markdown.is_empty()` packing guard globally would have broken that test's `assert_eq!(ids.len(), 1, ...)`; correct fix scopes the anchor's size cap to anchor-mode only | validated |
+| W-20 | 2026-07-05 | high | Didn't accept a "triage the findings" task at face value — empirically bisected a surprising self-cite failure down to root cause instead of writing it off as expected noise | Would have reported 366 dangling / 232 ambiguous findings as "mostly expected per-tracker-ID-reuse noise" without noticing ~34 dangling + ~19 ambiguous were a real `link_scan` parsing defect (`ENABLE_YAML_STYLE_METADATA_BLOCKS` pairing any two bare `---` lines as YAML metadata, swallowing every other session-log entry's heading); found + fixed + live-verified (dangling 366→332, ambiguous 232→213, +16 edges, 8 pruned) instead of shipping an inflated triage report | validated |
 
 ## Category conventions
 
@@ -1674,6 +1676,49 @@ live-LSP class I initially misattributed to).
 **Status:** validated
 
 ---
+## W-19 — Pre-fix recon on context() starvation bug found a locked-in "always include first" test — scoped the fix to anchor mode only
+
+**Observed:** 2026-07-05, resuming `docs/issues/2026-07-05-context-anchor-starves-neighbors.md` (residual #2 from the tracker cross-linking arc). Seam: the packing loop in `src/librarian/tools/context.rs::call` (the section after `candidate_ids`/`sorted_ids` construction).
+
+**Pattern:** Before fixing a "budget exhausted by the first item" bug in a shared packing/inclusion loop, grep the loop's own test module for existing tests whose *assertion* depends on the current behavior — not just tests that exercise the same function. A loop shared by multiple call modes (anchor / topic / goal-tracker) may have a test encoding the "buggy-looking" behavior as intentional for a *different* mode.
+
+**Counterfactual:** The bug file's own hypothesis was "packer includes the anchor first, un-trimmed, exhausting max_tokens" — confirmed, but the obvious naive fix (remove the `!markdown.is_empty()` short-circuit so oversized first-items get rejected/trimmed unconditionally) would have flipped `max_tokens_caps_inclusion`'s `assert_eq!(ids.len(), 1, "max_tokens should cap inclusion to 1 artifact")` red, because that test's own comment says the guard's behavior is deliberate: "first artifact is always included (budget check only triggers on subsequent artifacts)." Reading the test before writing the fix showed the guarantee-≥1-result contract must survive for topic-search/goal-tracker modes; only anchor-mode needed a reserved-budget carve-out.
+
+**Confirming data points:**
+1. `tests/max_tokens_caps_inclusion` (`context.rs:507-543`) — comment + assertion pin "first artifact always included" for the `topic` search path at `max_tokens=15`.
+2. The packing loop's guard `if !markdown.is_empty() && (markdown.len() + section.len()) > char_cap { break; }` — the `!markdown.is_empty()` clause is what exempts item #1 from the size check, and is shared by all three candidate-gathering branches (anchor / topic / goal-tracker), not anchor-specific.
+3. Bug file's own root-cause section: "Hypothesis (unverified in detail)... Needs a read of the packing loop below `candidate_ids`" — confirmed the exact line, but the test-coupling wasn't discoverable from the bug file alone.
+
+**Impact:** med — a naive fix would have shipped green on its own new anchor-mode test while failing an existing, orthogonal test in the same file; caught pre-implementation instead of at `cargo test`.
+
+**Promote-when:** 7th datapoint in the "pre-action recon validates a plan/bug claim against reality/tests" cluster (W-2, W-4, W-9, W-15, W-16, W-18, now W-19). Per W-18's own note, this cluster is large enough to consolidate into one CLAUDE.md rule now rather than accumulate further — flagging for the user rather than unilaterally editing CLAUDE.md.
+
+**Status:** validated
+
+---
+
+## W-20 — Didn't write off a surprising self-cite failure as noise — bisected it to a real link_scan parsing bug
+
+**Observed:** 2026-07-05, triaging `link_scan`'s 366 dangling + 232 ambiguous findings (residual #2 from the tracker cross-linking arc). First hypothesis (from the F-N/W-N-is-locally-scoped convention) was that the whole bucket was expected noise. One finding broke that story: `bug-fix-session-log.md` (`2dd9d90bc83f9f49`) cited its own freshly-added `W-19` token as dangling — from the SAME file that defines `## W-19 — …` as a heading. Self-cite should have suppressed this.
+
+**Pattern:** When a triage/report task produces a result that contradicts a fact you can directly verify ("this token IS defined right here, in this file"), don't fold it into the "expected noise" bucket by pattern-matching on the majority shape. Isolate the anomaly with a minimal, controlled repro using the actual extraction function directly (`extract(text)`), not just synthetic guesses — and when a first synthetic repro passes but the real file fails, bisect the REAL file's content (slice from a known-good anchor point, shrink toward the failure) rather than trust that "the code looks right on read."
+
+**Counterfactual:** Reading `extract()`'s and `resolve()`'s source suggested the self-cite logic was correct — twice, code-reading alone said "this should work." Only empirical bisection (dumping raw pulldown_cmark events, then `Tag::MetadataBlock` Start/End spans) revealed `ENABLE_YAML_STYLE_METADATA_BLOCKS` pairs ANY two bare `---` lines as YAML metadata, not just leading frontmatter — and session-log trackers separate every entry with a bare `---`. Without the bisection, this would have shipped as "232 ambiguous / 366 dangling, mostly expected" in the ROADMAP/triage writeup, permanently under-counting the real link graph by the ~34 dangling + ~19 ambiguous findings this bug caused, and leaving 16 real edges undiscovered.
+
+**Confirming data points:**
+1. Isolated synthetic repro (heading immediately after a lone `---`, short body) extracted correctly — ruled out "any bare `---` before a heading breaks recognition."
+2. Real-file tail slice from `## F-26` onward reproduced the failure; bisecting further down to just the 4 lines `**Status:** validated / (blank) / --- / ## W-19 …` still reproduced it.
+3. Direct `Tag::MetadataBlock` event dump on the real file showed `METADATA START YamlStyle` at the `---` before `## W-19` and `METADATA END YamlStyle` at the NEXT entry's `---` — exact byte-range match to the swallowed span.
+4. Fix (byte-offset frontmatter guard via `frontmatter::parse`, dropping the pulldown_cmark option) verified live: dangling 366→332, ambiguous 232→213, +16 edges added, 8 stale pruned, re-confirmed idempotent (438/438).
+
+**Impact:** high — a plausible-sounding wrong story ("F-N/W-N reuse noise") would have shipped as the triage conclusion, permanently hiding a real extraction defect and 16+ real graph edges; caught only because one data point was checked against ground truth instead of pattern-matched into the majority bucket.
+
+**Promote-when:** First datapoint of this specific pattern ("triage output contradicts a directly-verifiable fact — bisect, don't pattern-match"); track for a second occurrence before promoting to CLAUDE.md.
+
+**Status:** validated
+
+---
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

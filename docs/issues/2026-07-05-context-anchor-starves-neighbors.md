@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-07-05
-closed:
+closed: 2026-07-05
 severity: medium
 owner: marius
 related: []
@@ -53,13 +53,11 @@ result, `included_ids` = anchor only.
    effect at all, so the anchor isn't being trimmed to budget either.
 
 ## Fix
-Plan: reserve a fraction of the budget for neighbors (e.g. anchor capped at
-50%, or anchor included as preview/heading-map when oversized), and honor
-`max_tokens` for the anchor itself. Not implemented.
 
+Confirmed: the packing loop's `if !markdown.is_empty() && (markdown.len() + section.len()) > char_cap { break; }` guard is *inert* for the very first item — `markdown` starts empty, so the size check never fires and the first candidate (always the anchor, per candidate-gathering order) is admitted unconditionally, then the post-push `if markdown.len() >= char_cap { break; }` fires immediately, starving every neighbor. This "always include the first result" behavior is *deliberate* for the topic-search/goal-tracker paths (pinned by `tests/max_tokens_caps_inclusion`), so the fix is scoped to anchor mode only: when `anchor_id` is set and there is at least one neighbor candidate, reserve half of `char_cap` for the anchor (`anchor_reserve_cap`) and truncate the anchor's own section (byte-safe, with a `[anchor truncated …]` note) if it exceeds that reserve, before the shared packing loop runs. Non-anchor paths are untouched. Implemented in `src/librarian/tools/context.rs::call`, right after `included_ids` is declared and inside the packing loop before the existing size check.
 ## Tests added
-N/A — not yet fixed.
 
+`tests/anchor_neighbors_are_not_starved_by_oversized_anchor` (`context.rs`) — 1 anchor (2000-byte single-line body, so the 30-line preview cap can't shrink it) + 3 neighbors (2 outgoing `cites`, 1 incoming), `max_tokens=300`. Asserts `included_ids` contains the anchor and has length 4 (anchor + all 3 neighbors). Fails pre-fix with `included_ids == ["r/anchor.md"]` (len 1); passes post-fix. `tests/max_tokens_caps_inclusion` (pre-existing, topic-search path) re-verified green — confirms the fix didn't touch the deliberate "always include first" guarantee for non-anchor modes.
 ## Workarounds
 Use `artifact(action="graph", id=…)` + targeted `artifact(get, heading=…)` per
 neighbor instead of anchor-mode context for large hubs.

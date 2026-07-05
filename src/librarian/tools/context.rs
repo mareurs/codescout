@@ -271,6 +271,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         String::new()
     };
     let mut included_ids: Vec<String> = Vec::new();
+    // A large anchor otherwise consumes the whole budget before any neighbor is
+    // even considered (docs/issues/2026-07-05-context-anchor-starves-neighbors.md):
+    // reserve half of char_cap for neighbors whenever the anchor actually has any.
+    let anchor_reserve_cap =
+        (a.anchor_id.is_some() && candidate_ids.len() > 1).then_some(char_cap / 2);
 
     for id in &sorted_ids {
         let row = match rows_map.get(id) {
@@ -288,7 +293,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         };
         let first_30: String = body.lines().take(30).collect::<Vec<_>>().join("\n");
         let title = row.title.as_deref().unwrap_or("(untitled)");
-        let section = if let Some(aug) = aug_map.get(id.as_str()) {
+        let mut section = if let Some(aug) = aug_map.get(id.as_str()) {
             let refreshed = aug.last_refreshed_at.as_deref().unwrap_or("never");
             let rendered = aug.render_template.as_deref().map(|tmpl| {
                 let params: Value =
@@ -323,6 +328,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 first_30
             )
         };
+        if Some(id.as_str()) == a.anchor_id.as_deref() {
+            if let Some(cap) = anchor_reserve_cap {
+                if section.len() > cap {
+                    let mut cut = cap;
+                    while !section.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    section.truncate(cut);
+                    section.push_str(
+                        "\n\n… [anchor truncated — reserved half the budget for its \
+                         link neighbors; use `artifact(get, id=…)` for the full body]\n\n",
+                    );
+                }
+            }
+        }
         if !markdown.is_empty() && (markdown.len() + section.len()) > char_cap {
             break;
         }
@@ -539,6 +559,95 @@ mod tests {
             ids.len(),
             1,
             "max_tokens should cap inclusion to 1 artifact"
+        );
+    }
+
+    #[tokio::test]
+    async fn anchor_neighbors_are_not_starved_by_oversized_anchor() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Anchor body is one giant line so the 30-line preview cap can't shrink
+        // it — it must consume the whole reserved-anchor share and nothing more.
+        std::fs::write(root.join("anchor.md"), "x".repeat(2000)).unwrap();
+        std::fs::write(root.join("neighbor_a.md"), "Neighbor A\n").unwrap();
+        std::fs::write(root.join("neighbor_b.md"), "Neighbor B\n").unwrap();
+        std::fs::write(root.join("neighbor_c.md"), "Neighbor C\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/anchor.md", "r", "anchor.md", "Anchor", None),
+        )
+        .unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/neighbor_a.md", "r", "neighbor_a.md", "Neighbor A", None),
+        )
+        .unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/neighbor_b.md", "r", "neighbor_b.md", "Neighbor B", None),
+        )
+        .unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/neighbor_c.md", "r", "neighbor_c.md", "Neighbor C", None),
+        )
+        .unwrap();
+
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: "r/anchor.md".into(),
+                dst_id: "r/neighbor_a.md".into(),
+                rel: "cites".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: "r/anchor.md".into(),
+                dst_id: "r/neighbor_b.md".into(),
+                rel: "cites".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: "r/neighbor_c.md".into(),
+                dst_id: "r/anchor.md".into(),
+                rel: "cites".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+
+        let v = call(&ctx, json!({"anchor_id": "r/anchor.md", "max_tokens": 300}))
+            .await
+            .unwrap();
+
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            ids.contains(&"r/anchor.md".to_string()),
+            "anchor must always be included, got {ids:?}"
+        );
+        assert_eq!(
+            ids.len(),
+            4,
+            "expected anchor + all 3 neighbors, got {ids:?}"
         );
     }
 

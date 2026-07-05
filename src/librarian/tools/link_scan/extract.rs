@@ -75,23 +75,35 @@ fn def_re() -> &'static Regex {
 }
 
 pub fn extract(text: &str) -> DocExtract {
-    let opts = Options::ENABLE_TABLES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    // `ENABLE_TABLES` only — NOT `ENABLE_YAML_STYLE_METADATA_BLOCKS`. That option
+    // pairs ANY two bare `---` lines anywhere in the document as a YAML metadata
+    // block, not just a leading frontmatter block. Session-log trackers use a
+    // bare `---` as an inter-entry separator, so it silently swallowed every
+    // other entry's heading + body as "metadata" (never extracted as a
+    // Definition or scanned for citations). Frontmatter is skipped instead via
+    // an explicit byte-offset guard computed from the same delimiter-finding
+    // logic `frontmatter::parse` already uses.
+    let opts = Options::ENABLE_TABLES;
     let line_starts = line_starts(text);
+    let frontmatter_end = match crate::librarian::frontmatter::parse(text) {
+        Ok((_, body)) => text.len() - body.len(),
+        Err(_) => 0,
+    };
 
     let mut out = DocExtract::default();
     let mut seen_defs = std::collections::BTreeSet::new();
     let mut seen_cites = std::collections::BTreeSet::new();
 
     let mut in_code_block = false;
-    let mut in_metadata = false;
     let mut in_heading = false;
     let mut heading_first_inline = false;
 
     for (event, span) in Parser::new_ext(text, opts).into_offset_iter() {
+        if span.start < frontmatter_end {
+            continue;
+        }
         let line = line_of(&line_starts, span.start);
         match event {
-            Event::Start(Tag::MetadataBlock(_)) => in_metadata = true,
-            Event::End(TagEnd::MetadataBlock(_)) => in_metadata = false,
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
             Event::Start(Tag::Heading { .. }) => {
@@ -99,7 +111,7 @@ pub fn extract(text: &str) -> DocExtract {
                 heading_first_inline = true;
             }
             Event::End(TagEnd::Heading(_)) => in_heading = false,
-            Event::Start(Tag::Link { dest_url, .. }) if !in_metadata && !in_code_block => {
+            Event::Start(Tag::Link { dest_url, .. }) if !in_code_block => {
                 if let Some(target) = link_target(dest_url.as_ref()) {
                     push_citation(
                         &mut out,
@@ -110,7 +122,7 @@ pub fn extract(text: &str) -> DocExtract {
                     );
                 }
             }
-            Event::Code(content) if !in_metadata && !in_code_block => {
+            Event::Code(content) if !in_code_block => {
                 // Inline code: real citations live here, but a code-first
                 // heading (`### `A-9` …`) must not define.
                 if in_heading && heading_first_inline {
@@ -118,7 +130,7 @@ pub fn extract(text: &str) -> DocExtract {
                 }
                 scan_tokens(&mut out, &mut seen_cites, content.as_ref(), line);
             }
-            Event::Text(content) if !in_metadata && !in_code_block => {
+            Event::Text(content) if !in_code_block => {
                 let mut rest = content.as_ref();
                 if in_heading && heading_first_inline {
                     heading_first_inline = false;
@@ -262,6 +274,19 @@ mod tests {
             "frontmatter must not cite: {:?}",
             ex.citations
         );
+    }
+
+    #[test]
+    fn bare_dash_separator_between_entries_is_not_mistaken_for_yaml_metadata() {
+        // Session-log trackers separate every entry with a lone `---` line (not
+        // frontmatter). `ENABLE_YAML_STYLE_METADATA_BLOCKS` used to pair ANY two
+        // bare `---` lines anywhere in the doc as a metadata block, silently
+        // swallowing the entry in between — including its heading — as
+        // unextracted "metadata".
+        let text = "---\nid: abc123\nkind: tracker\n---\n\n## W-1 — First entry\n\n**Status:** validated\n\n---\n\n## W-2 — Second entry\n\n**Status:** validated\n\n---\n\n## W-3 — Third entry\n";
+        let ex = extract(text);
+        let tokens: Vec<&str> = ex.definitions.iter().map(|d| d.token.as_str()).collect();
+        assert_eq!(tokens, vec!["W-1", "W-2", "W-3"]);
     }
 
     #[test]

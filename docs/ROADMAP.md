@@ -83,15 +83,42 @@ Plan: `~/.claude-sdd/plans/eager-pondering-brook.md`. `link_scan` derives scanne
 `rel="cites"` edges from prose citations (dc35c70e); cross-linking convention +
 TAXONOMY/guide fixes (439a9c7a); audit-log retrofitted as filterable augmented artifact
 (1d10c072). Live: 755 artifacts → 430 edges from zero, idempotent fixpoint verified.
-**Residuals:** (1) cherry-pick the experiments run to master (ship sequence — gate is
-green: 3032 tests, clippy clean, MCP live-verified); (2) `context(anchor_id)` large-anchor
-neighbor starvation — bug filed with Resume
-(`docs/issues/2026-07-05-context-anchor-starves-neighbors.md`), fix makes anchor-context
-useful now that graphs exist; (3) dangling/ambiguous triage pass (364 + 232 findings —
-re-run `link_scan` report-mode any time, the report is derived not stored); (4) W4
-`review_by:` TTL frontmatter — cut from v1, revisit only if freshness-by-review-event
-proves insufficient; (5) three audit_doc_refs bug files from scouting (lsp stub / scope
-ignored / fail_on mismatch).
+**Residual (2) FIXED (2026-07-05, experiments-only):** `context(anchor_id)` large-anchor
+neighbor starvation — root cause was the packing loop's "always include the first item"
+guard (deliberate for topic-search, pinned by `tests/max_tokens_caps_inclusion`) admitting
+an oversized anchor unconditionally and exhausting the budget before any neighbor was
+considered. Fix reserves half of `char_cap` for neighbors and truncates the anchor's own
+section when it exceeds that reserve, scoped to anchor-mode only (topic-search behavior
+untouched). New test `anchor_neighbors_are_not_starved_by_oversized_anchor`; full gate
+green (3033 tests, clippy clean). Bug file closed:
+`docs/issues/2026-07-05-context-anchor-starves-neighbors.md`.
+**Residual (2) DONE (2026-07-05, experiments-only):** dangling/ambiguous triage pass —
+while triaging, found and fixed a second real bug:
+`src/librarian/tools/link_scan/extract.rs` enabled pulldown_cmark's
+`ENABLE_YAML_STYLE_METADATA_BLOCKS`, which pairs up ANY two bare `---` lines anywhere in a
+doc as a YAML metadata block, not just leading frontmatter — session-log trackers separate
+every entry with a bare `---`, so roughly every other entry's heading was silently swallowed
+and never registered as a link-scan `Definition`. Fixed by skipping frontmatter via an
+explicit byte-offset guard (reusing `frontmatter::parse`'s delimiter logic) instead of
+pulldown_cmark's own heuristic. New test
+`bare_dash_separator_between_entries_is_not_mistaken_for_yaml_metadata`; bug file
+`docs/issues/2026-07-05-link-scan-yaml-metadata-block-swallows-headings.md` (fixed). Live
+re-scan post-fix: dangling 366→332, ambiguous 232→213, +16 previously-invisible edges added,
+8 stale edges pruned, idempotent fixpoint reconfirmed (438 edges). Triage of what remains:
+**ambiguous** (213) is overwhelmingly the expected, pre-validated consequence of F-N/W-N
+being locally-scoped per-tracker (no fix — system correctly declines to guess); **dangling**
+(332) breaks into (a) `T-N` tokens that exist only as augmented-artifact `params` rows,
+invisible to link_scan's heading-based detector by design (both now documented in
+`.codescout/memories/gotchas.md`), (b) a real but already-tracked stale-id drift
+(`42dfdfc8b1522192` in `windows-platform-support.md`, F-2 in
+`perf-windows-session-log.md`, fix owned by `docs/superpowers/plans/2026-07-02-perf-vdi-closure.md`
+Track 3 — not duplicated here), (c) legacy `BUG-NNN`/forward R-N references, low-value
+cleanup. Full gate green (3034 tests, clippy clean, MCP live-verified with both fixes).
+**Remaining residuals:** (1) cherry-pick the experiments run to master (ship sequence —
+gate is green: 3034 tests, clippy clean, MCP live-verified — now carries both the
+anchor-starvation and YAML-metadata-block fixes); (2) W4 `review_by:` TTL frontmatter — cut
+from v1, revisit only if freshness-by-review-event proves insufficient; (3) three
+`audit_doc_refs` bug files from scouting (lsp stub / scope ignored / fail_on mismatch).
 
 - Additional tree-sitter grammars (currently: Rust, Python, TypeScript, Go, Java, Kotlin)
 - Additional LSP server configurations

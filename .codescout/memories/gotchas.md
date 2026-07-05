@@ -62,9 +62,33 @@ distance. Discovered on the W3 audit-log retrofit (2026-07-05).
 (catalog/artifact.rs upsert) CASCADE-drops a moved artifact's links when its id churns.
 Never hand-curate `cites` edges — cite in prose and run
 `librarian(action="link_scan", write=true)` (idempotent fixpoint; scanner owns rel="cites"
-only, never touches manual rels/supersedes). For large hub artifacts prefer
-`artifact(graph)` + targeted `get(heading=…)` over `context(anchor_id=…)` until the
-anchor-starvation bug is fixed (docs/issues/2026-07-05-context-anchor-starves-neighbors.md).
+only, never touches manual rels/supersedes). `context(anchor_id=…)`'s large-hub neighbor
+starvation is FIXED (2026-07-05, `src/librarian/tools/context.rs::call`) — the packing loop
+now reserves half the budget for neighbors and truncates an oversized anchor rather than
+letting it consume the whole budget; `artifact(graph)` + targeted `get(heading=…)` remains
+a fine alternative but is no longer a required workaround.
+## link_scan Can't See Augmented-Artifact Param Rows (Only Markdown Headings)
+
+`link_scan`'s definition detector (`extract.rs::def_re`) only recognizes `## TOKEN — title`
+markdown headings. Entry-tokens that exist ONLY as structured rows inside an augmented
+artifact's `params` (e.g. `tool-usage-patterns.md`'s `T-N` rows, most of which have no
+matching `### T-NNN` prose write-up) will always report as `dangling`, even though they
+are genuinely "defined" from the tracker's own maintenance-contract perspective. This is an
+architectural boundary, not a bug — `link_scan` scans prose/headings, not augmentation
+params. Confirmed 2026-07-05: ~21 of a sampled dangling batch were `T-1`..`T-21` cited from
+`docs/trackers/artifact-augmentation-followups.md`, all traced to this cause. No fix planned;
+note it here so a future dangling-triage pass doesn't re-investigate from scratch.
+
+## Short Tracker IDs (F-N/W-N) Are Locally-Scoped — Multi-Definer Is Expected
+
+Nearly every `docs/trackers/*session-log.md` file runs its own independent `F-1`, `F-2`,
+`W-1`... counter. `link_scan` correctly reports a generic short token (e.g. `F-8`, `W-2`)
+cited without a qualifying tracker name as `ambiguous` whenever ≥2 trackers define it — this
+was predicted by the pre-implementation design-validation memo ("multi-definer is the common
+case, not rare") and confirmed live 2026-07-05: the large majority of a 213-entry ambiguous
+sample was exactly this pattern, concentrated in `prompt-hamsa-audit-log.md`'s narrative
+citing other trackers' F-N/W-N entries generically. Not a bug — the system correctly declines
+to guess which tracker's `F-8` is meant rather than link to a possibly-wrong one.
 ## Onboarding Subagent Project-Scope Collision
 
 During parallel force-onboarding, subagents may overwrite each other's memories in the
