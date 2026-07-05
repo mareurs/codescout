@@ -1,7 +1,7 @@
 ---
 id: null
 kind: bug
-status: open
+status: fixed
 title: null
 owners: []
 tags:
@@ -11,7 +11,7 @@ tags:
 - claude-md-drift
 topic: null
 time_scope: null
-closed: null
+closed: '2026-07-05'
 opened: '2026-07-02'
 owner: marius
 related:
@@ -119,20 +119,31 @@ the null in (1) is a real absence, not a get-projection omission.
    **Evidence link:** Evidence #2.
 
 ## Fix
-Plan (needs decision — not yet implemented):
-- **Restore:** re-augment via `artifact_augment(id="f2ecdd76a6189efb", ...)` with
-  the original `prompt`, `render_template`, `entry_collection="observations"`, and
-  a `params.observations` array reconstructed from the body's T-001…T-010 prose.
-  Reconstruction is lossy without the pre-loss params snapshot; check
-  `artifact_event(action="list", artifact_id=...)` for a prior `field_patch`/params
-  history that could seed it.
-- **Or accept + document:** if hand-maintaining the body table is now preferred,
-  update CLAUDE.md's "Tool Usage Patterns" section to drop the
-  `artifact_augment(merge=true)` append instructions (they currently instruct a
-  call that errors).
-- **Prevent:** investigate whether a reindex/move path can drop augmentation rows
-  silently; if so, that is a separate root-cause bug to file.
 
+**Restored (2026-07-05).** Re-augmented `f2ecdd76a6189efb` via `artifact_augment`
+(merge=false, fresh) reconstructing from the intact body prose:
+- `prompt` — maintenance instructions + the reconstruction note.
+- `params.observations` — all 10 rows (T-001..T-010) rebuilt from the body's
+  `### T-NNN` sections: {id, tool, verdict, session, summary, prompt_gap}.
+- `render_template` — MiniJinja table over `params.observations`.
+- `entry_collection = "observations"`.
+
+Verified: `artifact(get)` returns a non-null augmentation; `find(augmented=true)`
+now lists it (4 augmented trackers); `entry_filter={"verdict":{"eq":"wrong-tool"}}`
+returns the 6 matching rows (`entry_total: 10`) — proving `entry_collection` is
+wired; `librarian(context)` renders the live table with no template error. The
+CLAUDE.md `artifact_augment(merge=true)` T-N append workflow works again.
+
+**Scope caveat:** augmentation lives only in the machine-local `catalog.db`, not
+in the git-tracked `.md`, so this restore fixes THIS machine only. Other machines
+(and any catalog restored from the .md alone) still show no augmentation and must
+re-run the same `artifact_augment`. The event history remains unrecoverable (it
+was cascade-deleted, never persisted to the file).
+
+Root-cause prevention is the separate fix
+(docs/issues/2026-07-05-v6-migration-cascade-deletes-child-rows.md, committed):
+the v6 migration no longer cascade-deletes augmentations/events, so this class of
+loss won't recur.
 ## Tests added
 N/A — not yet fixed. A regression test would assert augmentation survives the
 reindex/move path once the root cause is confirmed.
