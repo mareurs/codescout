@@ -1,12 +1,23 @@
 ---
-status: open
-opened: 2026-07-02
-closed:
-severity: high
-owner: marius
-related: [f2ecdd76a6189efb]
-tags: [librarian, augmentation, tracker, claude-md-drift]
+id: null
 kind: bug
+status: open
+title: null
+owners: []
+tags:
+- librarian
+- augmentation
+- tracker
+- claude-md-drift
+topic: null
+time_scope: null
+closed: null
+opened: '2026-07-02'
+owner: marius
+related:
+- f2ecdd76a6189efb
+root_cause: v6-migration-drop-table-cascade
+severity: high
 ---
 
 # BUG: tool-usage-patterns tracker has lost its augmentation; CLAUDE.md's documented T-N append workflow is broken
@@ -49,15 +60,43 @@ codescout MCP (live release), Linux, project `codescout`, branch `experiments`,
 HEAD `78d9ef21`. Catalog DB is machine-local (not in repo).
 
 ## Root cause
-Unknown — under investigation. Leading hypothesis: the augmentation row was
-dropped by a `delete`+`create` cycle or a reindex path that did not preserve it.
-`id = sha256(abs_path)` and augmentation lives only in the machine-local catalog
-(not git), so any flow that deletes+recreates the catalog row orphans the
-augmentation (documented in CLAUDE.md § tracker archiving warning). The body
-prose (per-observation T-001…T-010 analysis) survives in the file; only the
-catalog-side augmentation (prompt + params + render_template + entry_collection)
-is gone.
 
+**CONFIRMED (2026-07-05) — the v6 catalog schema migration cascade-deleted it.**
+The earlier "delete+recreate" hypothesis is DISPROVEN: `created_at` is still the
+original 2026-06-02 (a recreate would reset it), and the event log is *empty*
+(a recreate wouldn't wipe pre-existing events — a cascade would).
+
+Chain (all verified against code + an empirical SQLite repro):
+1. `artifact_augmentation.artifact_id` and `events.artifact_id` are
+   `REFERENCES artifact(id) ON DELETE CASCADE` (`src/librarian/catalog/schema.sql:117`, `:58`;
+   same for `artifact_link`, `artifact_observation`, `event_edges`).
+2. `Catalog::open_with_workspace` runs `PRAGMA foreign_keys = ON`
+   (`src/librarian/catalog/mod.rs:199`) then calls
+   `migrate_v6::drop_legacy_and_stamp` (`:203`).
+3. `drop_legacy_and_stamp` rebuilds `artifact` via a table-copy that does
+   `DROP TABLE artifact` + rename (to drop legacy `repo`/`rel_path`)
+   (`src/librarian/catalog/migrate_v6.rs:141-216`). Under `foreign_keys=ON`,
+   SQLite's `DROP TABLE` performs an implicit row-DELETE that **invokes FK
+   actions** — firing `ON DELETE CASCADE` on augmentation/events/links/
+   observations. The migration copies only `artifact` + `commits` forward, not
+   the child tables, so those rows are gone; the artifact row is re-inserted
+   with its original `created_at` (hence the row survives, augmentation/events
+   do not).
+4. Empirical proof (Python stdlib sqlite3, exact table-copy pattern):
+   `before: aug=1 events=1` -> `after: artifact=1 aug=0 events=0`.
+
+Why only this tracker (of the trackers): it was augmented ~2026-06-02, BEFORE
+the v6 migration ran on this box. The 3 trackers that still have augmentation
+(windows-platform-support, headroom-llm-proxy-integration, legibility-backlog)
+were all augmented AFTER the migration; nobody re-augmented this one.
+
+**This is a general data-loss defect, not tracker-specific** — the migration
+wiped augmentation + events + links + observations for EVERY artifact present
+when it ran, and it is still LATENT: any catalog that has not yet reached v6
+will lose its augmentations/events the first time this codescout opens it. That
+migration bug warrants its own issue + fix (wrap the table-copy in
+`PRAGMA foreign_keys=OFF`/`ON` toggled OUTSIDE the transaction, since SQLite
+ignores the pragma inside a transaction).
 ## Evidence
 ### 1. get returns null augmentation
 Buffer `@tool_24879a21` from `artifact(get, id=f2ecdd76a6189efb, full=true)`:

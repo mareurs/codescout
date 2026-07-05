@@ -152,7 +152,21 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
         return Ok(());
     }
 
-    conn.execute_batch(
+    // Foreign keys MUST be disabled for the table-copy. `DROP TABLE artifact`
+    // under `PRAGMA foreign_keys = ON` performs an implicit row-DELETE that
+    // INVOKES foreign-key actions — firing the `ON DELETE CASCADE` on every
+    // child table (artifact_augmentation, events, artifact_link,
+    // artifact_observation, event_edges) and deleting their rows, even though
+    // the copied artifact rows keep their ids. This copy carries only
+    // `artifact` + `commits` forward, so those children would be lost.
+    // (Before this guard, the migration silently wiped all augmentations +
+    // event history for every artifact present when it ran — see
+    // docs/issues/2026-07-05-v6-migration-cascade-deletes-child-rows.md.)
+    // `PRAGMA foreign_keys` is a no-op INSIDE a transaction, so it must be
+    // toggled OUTSIDE the BEGIN/COMMIT below. On error we ROLLBACK first so
+    // the re-enable below is not swallowed by a still-open transaction.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let copy = conn.execute_batch(
         r#"
         BEGIN;
 
@@ -210,7 +224,14 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
         INSERT OR IGNORE INTO schema_version (version) VALUES (6);
         COMMIT;
         "#,
-    )?;
+    );
+    if copy.is_err() {
+        // A failed batch leaves the transaction open; close it so the pragma
+        // re-enable below is honored (it is ignored inside a transaction).
+        let _ = conn.execute_batch("ROLLBACK;");
+    }
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    copy?;
 
     Ok(())
 }
@@ -436,4 +457,99 @@ mod tests {
             .unwrap();
         assert_eq!(v, 6);
     }
+
+    #[test]
+    fn migration_v6_preserves_augmentation_and_events() {
+        // Regression for docs/issues/2026-07-05-v6-migration-cascade-deletes-child-rows.md:
+        // drop_legacy_and_stamp's table-copy ran under foreign_keys=ON, so
+        // `DROP TABLE artifact` cascade-deleted every artifact_augmentation /
+        // events row (the copy carries only artifact + commits forward). Seed a
+        // pre-v6 DB with an augmented artifact + an event, run the full v6
+        // migration, and assert both survive. FAILS on the pre-fix code.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE artifact (
+                    id TEXT PRIMARY KEY, repo TEXT NOT NULL, rel_path TEXT NOT NULL,
+                    kind TEXT NOT NULL, status TEXT NOT NULL, title TEXT,
+                    owners TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]',
+                    topic TEXT, time_scope TEXT, source TEXT,
+                    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                    file_mtime INTEGER NOT NULL, file_sha256 TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 1.0
+                );
+                CREATE TABLE commits (
+                    hash TEXT PRIMARY KEY, repo TEXT NOT NULL,
+                    authored_at INTEGER, subject TEXT, topo_order INTEGER
+                );
+                CREATE TABLE artifact_augmentation (
+                    artifact_id TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+                    prompt TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
+                    last_refreshed_at TEXT, refresh_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    PRIMARY KEY (artifact_id)
+                );
+                CREATE TABLE events (
+                    id TEXT PRIMARY KEY,
+                    artifact_id TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL, payload TEXT NOT NULL,
+                    anchor_commit TEXT, head_commit TEXT, author TEXT,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+                INSERT OR IGNORE INTO schema_version (version) VALUES (3);
+                INSERT INTO artifact(id, repo, rel_path, kind, status, title,
+                                     created_at, updated_at, file_mtime, file_sha256)
+                  VALUES ('a1', 'r', 'docs/x.md', 'tracker', 'active', 't', 0, 0, 0, 'sha');
+                INSERT INTO artifact_augmentation(artifact_id, prompt, params)
+                  VALUES ('a1', 'maintain the T-N table', '{"rows":[1,2,3]}');
+                INSERT INTO events(id, artifact_id, kind, payload, created_at)
+                  VALUES ('e1', 'a1', 'field_patch', '{}', 0);
+                "#,
+            )
+            .unwrap();
+        }
+
+        let ws = ws_with("r", tmp.path().to_str().unwrap());
+        let cat = crate::librarian::catalog::Catalog::open_with_workspace(&db_path, &ws).unwrap();
+
+        let aug: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_augmentation WHERE artifact_id='a1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(aug, 1, "augmentation must survive the v6 table-copy migration");
+        let ev: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE artifact_id='a1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ev, 1, "event history must survive the v6 table-copy migration");
+
+        // The surviving augmentation still carries its payload, and the legacy
+        // artifact column is gone (migration actually ran, not skipped).
+        let prompt: String = cat
+            .conn
+            .query_row(
+                "SELECT prompt FROM artifact_augmentation WHERE artifact_id='a1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(prompt, "maintain the T-N table");
+        let has_repo =
+            crate::librarian::catalog::column_exists(&cat.conn, "artifact", "repo").unwrap();
+        assert!(!has_repo, "v6 migration should have dropped legacy repo column");
+    }
+
 }
