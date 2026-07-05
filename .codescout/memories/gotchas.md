@@ -46,6 +46,25 @@ returns empty. Use `git log master --oneline --grep="<subject>"` to recover mast
 When a tracker cites a commit from a sibling repo, prefix: `<repo>:<sha>` (e.g. `codescout-companion:0b75991`).
 A bare SHA implies the current repo. Unenforced by tooling — readers must notice the prefix.
 
+## Artifact Freshness Requires a `reviewed` EVENT — Not a Refresh
+
+`artifact(get).freshness` stays `"unknown"` no matter how many `commit_refresh=true`
+updates land: `freshness::compute` (src/librarian/freshness.rs) returns Unknown whenever
+`latest_reviewed_at` is absent. `commit_refresh` feeds the `provenance` keys
+(`refreshed_at_commit`, `commits_behind_head`); freshness anchors on
+`artifact_event(kind="reviewed")`. To flip a tracker fresh: emit a reviewed event (earn it —
+an actual content review), THEN freshness computes fresh/stale from file mtime + commit
+distance. Discovered on the W3 audit-log retrofit (2026-07-05).
+
+## Link Graph Is Derived — Re-Run link_scan After Moves/Reindex
+
+`artifact_link` rows do NOT durably survive: the reindex abs_path pre-clean
+(catalog/artifact.rs upsert) CASCADE-drops a moved artifact's links when its id churns.
+Never hand-curate `cites` edges — cite in prose and run
+`librarian(action="link_scan", write=true)` (idempotent fixpoint; scanner owns rel="cites"
+only, never touches manual rels/supersedes). For large hub artifacts prefer
+`artifact(graph)` + targeted `get(heading=…)` over `context(anchor_id=…)` until the
+anchor-starvation bug is fixed (docs/issues/2026-07-05-context-anchor-starves-neighbors.md).
 ## Onboarding Subagent Project-Scope Collision
 
 During parallel force-onboarding, subagents may overwrite each other's memories in the

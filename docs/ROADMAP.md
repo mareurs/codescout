@@ -62,22 +62,36 @@ memory `research/loadbearing-mcp-guidance`.
   whole guidance research line: every time-dependent question (instruction decay,
   re-derivation of returned facts, guidance persistence, adherence at distance) escapes
   single-turn measurement. Unblocks 4 parked findings at once. **SHIPPED (prompt-engineering `3fa2ab0`, 2026-07-04)** — `input.history` replays a persisted session via `claude -p --resume`; assertions target the final turn. Real `--resume` smoke verified live 2026-07-04 (3-turn session: no error, final-turn response returned, and a `CLAUDE.md` one-word rule survived to the last turn).
-- **`get_guide` / Iron-Law adherence — clarity audit + just-in-time coverage** *(parked;
-  gated on the multi-turn harness).* The evidence-backed way to raise adherence is NOT
-  authority framing / persuasion / provenance packaging (all measured **inert** —
-  A-4/A-9), but: (a) the directive's own **clarity + merit** — rewording Iron Law 1 moved
-  tool-selection **30% → 90% → 100%** (A-1); and (b) **just-in-time delivery** — the rule
-  present in the tool result at the moment of the relevant action (finding 6). Plan: Hamsa-
-  audit each `get_guide` / Iron-Law rule as a stranger would (negation-only, unscoped,
-  vague), then coverage-check that each high-violation rule reaches the model at its point
-  of action. Cheap-but-untestable-today: single-turn adherence already ceilings, so the
-  *long-horizon* payoff can only be measured once the multi-turn harness lands — hence the
-  gate.
+- **`get_guide` / Iron-Law adherence — clarity audit + just-in-time coverage** *(unblocked;
+  reframed by A-10/A-11, 2026-07-05).* The multi-turn harness landed AND answered the decay
+  half: **no decay through ~20 turns / ~24k tokens / mid-context position** — once fetched,
+  on-demand guidance is as authoritative as `CLAUDE.md`, so the lever is DISCOVERABILITY
+  (the auto-inject trigger firing at the right moment) plus per-rule **clarity + merit**
+  (A-1 precedent: 30%→90%→100%; A-11 precedent: an "unverifiable" verdict section moved
+  report calibration 1–2/5→5/5). Remaining work: Hamsa-audit each Iron-Law/guide rule as a
+  stranger would + coverage-check the auto-inject triggers. Audit ledger:
+  `docs/trackers/prompt-hamsa-audit-log.md` (now entry-filterable; open items:
+  `entry_filter={"outcome":{"contains":"pending"}}`).
 - *Shipped this stream:* reader-first tracker prompts (`tracker_design`), the
   `get_guide("untrusted-content")` data-vs-directive rule, and the prompt-tdd
   model-pinning + ambient-credential fixes (`../prompt-engineering` `aecb76f`/`8790c80`).
 
 **Standing backlog:**
+
+**Tracker cross-linking stream (2026-07-05, research-validated, SHIPPED W1–W3 + seed).**
+Plan: `~/.claude-sdd/plans/eager-pondering-brook.md`. `link_scan` derives scanner-owned
+`rel="cites"` edges from prose citations (dc35c70e); cross-linking convention +
+TAXONOMY/guide fixes (439a9c7a); audit-log retrofitted as filterable augmented artifact
+(1d10c072). Live: 755 artifacts → 430 edges from zero, idempotent fixpoint verified.
+**Residuals:** (1) cherry-pick the experiments run to master (ship sequence — gate is
+green: 3032 tests, clippy clean, MCP live-verified); (2) `context(anchor_id)` large-anchor
+neighbor starvation — bug filed with Resume
+(`docs/issues/2026-07-05-context-anchor-starves-neighbors.md`), fix makes anchor-context
+useful now that graphs exist; (3) dangling/ambiguous triage pass (364 + 232 findings —
+re-run `link_scan` report-mode any time, the report is derived not stored); (4) W4
+`review_by:` TTL frontmatter — cut from v1, revisit only if freshness-by-review-event
+proves insufficient; (5) three audit_doc_refs bug files from scouting (lsp stub / scope
+ignored / fail_on mismatch).
 
 - Additional tree-sitter grammars (currently: Rust, Python, TypeScript, Go, Java, Kotlin)
 - Additional LSP server configurations
