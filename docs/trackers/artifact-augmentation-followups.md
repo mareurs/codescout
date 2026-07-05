@@ -59,6 +59,7 @@ Skipped for now (in brainstorm but deferred):
 | T-16 | Inline existing-trackers list (cap 30, overflow hint) | done | 1.5 | `EXISTING_TRACKERS_CAP=30`, hint references `artifact_find`. |
 | T-17 | Tests: response structure + each archetype's example params validates against its example schema | done | 1.5 | 5 tests including self-consistency (schema↔example) and template-renders-against-example. |
 | T-18 | Register `tracker_design` in `tools/mod.rs::all_tools` + prompt-surface mention | done | 1.5 | Tool selection table row + augmentation-and-refresh section paragraph. |
+| T-21 | Guard merge-patch against unknown top-level params keys when no `params_schema` is set | open | 6 | `artifact_augment(merge=true)` silently stores unknown/new keys as dead no-ops (RFC 7396) → stranded data. See Phase 6. |
 
 Status legend: `open` / `in-progress` / `done` / `blocked` / `dropped`
 
@@ -248,6 +249,22 @@ Keep the **N most recent** sections (top of file = newest). Trim by scanning for
 - [ ] All 6 test cases above pass
 
 ---
+
+## Phase 6 — merge-patch unknown-key guard (proposed)
+
+### Why
+`artifact_augment(merge=true, params={...})` is RFC 7396 merge-patch. When the augmentation has a `params_schema`, `merge_params()` validates and rejects violations (T-3). But when **no `params_schema` is set** — the common case for hand-authored trackers — merge accepts **any** top-level key silently: an unknown or mistyped key is stored verbatim as a dead no-op the augmentation never applies. Arrays also replace wholesale (RFC 7396), so an agent intending an entry-grain array edit who passes a helper key gets neither an error nor an effect.
+
+**Observed 2026-07-05** in a downstream project (MRV-poc `retrieval-experiments` tracker; augmentation had no `params_schema`): prior sessions tried to prepend to the `recent_experiments[]` array by passing sibling keys `recent_experiments_prepend` / `recent_experiments_pending_prepend`, and to patch other collections via `open_blockers_add` / `ship_gate_3_supersedes`. **None applied** — the target arrays never changed; four dead keys accumulated holding 3 stranded experiment entries + a ship-gate note + a blocker. The failure is fully silent: no warning, no error, and the call returns `"ok"`. Recovery required manually spotting the stray keys, rescuing their contents into the real arrays, and nulling the dead keys.
+
+### Shape (proposal)
+On `artifact_augment(merge=true)` / `artifact_update_params`, when a top-level params key in the patch is **new** (absent from current params) AND not declared in `params_schema` (or no schema exists), emit a non-blocking `param_warnings: ["new top-level key 'X' — merge-patch stores it verbatim and never applies it; to change an array replace it wholesale under its exact key, use null to delete"]`. Opt-in strict mode (a `params_schema` with `additionalProperties:false`, or a `reject_unknown_params=true` flag) upgrades the warning to a hard `RecoverableError` naming the key. Merge semantics stay RFC-7396-correct; this only restores discoverability of the foot-gun.
+
+### Acceptance
+- [ ] `artifact_augment(merge=true)` with a new top-level key not in current params (no schema) returns a `param_warnings` entry naming the key.
+- [ ] With a `params_schema` present, behaviour unchanged (schema validation already covers this via T-3).
+- [ ] Opt-in strict flag (or `additionalProperties:false`) rejects the unknown key with a `RecoverableError` that names it + gives the array-replace guidance.
+- [ ] Doc note in `augmentation-render-template.md`: “to change an array, replace it wholesale under its exact key; use `null` to delete; a new sibling key is a silent no-op.”
 
 ## History
 
