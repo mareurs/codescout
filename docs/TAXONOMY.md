@@ -23,8 +23,9 @@ follow the links for the controlling convention.
 | **R-N** | `docs/trackers/reconnaissance-patterns.md` | Meta — observations about the **recon skill itself**: hits, misses, vocabulary expansions | `edit_markdown(action="insert_before", heading="## Template for new entries")` | PR against `codescout-companion/skills/reconnaissance/SKILL.md` |
 | **U-N** | `docs/trackers/codescout-usage-frictions.md` | Friction using codescout tools / MCP server: tool slips, prompt drift, hook false-positives | `edit_markdown(action="insert_after", heading="### U-<previous>")` | H-N hookify rule, CLAUDE.md note, or prompt-surface edit |
 | **H-N** | `docs/trackers/codescout-usage-hookify.md` | Hook design proposal: warn → deny criteria, new gate ideas, false-positive carve-outs | `edit_markdown(action="insert_after", heading="### H-<previous>")` | Shipped hook in `claude-plugins/codescout-companion/hooks/` |
-| **T-N** | `docs/trackers/tool-usage-patterns.md` (augmented artifact `b3fa993849ac83ab`) | Tool-selection quality observation: legitimate / debatable / wrong-tool call with prompt gap | `artifact_augment(merge=true, params={observations: [..., {id:"T-N", ...}]})` + body prose via `edit_markdown` | `src/prompts/source.md` edits (server-instructions surface) |
+| **T-N** | `docs/trackers/tool-usage-patterns.md` (augmented artifact `f2ecdd76a6189efb`) | Tool-selection quality observation: legitimate / debatable / wrong-tool call with prompt gap | `artifact_augment(merge=true, params={observations: [..., {id:"T-N", ...}]})` + body prose via `edit_markdown` | `src/prompts/source.md` edits (server-instructions surface) |
 | **WIN-N** | `docs/trackers/windows-platform-support.md` (augmented artifact `42dfdfc8b1522192`) | Windows-platform issue: process-spawn / lsp / platform-gated / path-handling / build-install / test-portability / companion defect, fix, or cfg-gate decision | `artifact_augment(merge=true, params={issues: [..., {id:"WIN-N", ...}]})` + sync body `## Issue index` table | Bug file (`docs/issues/`) for new incidents; `status` flips in place as fixes land |
+| **A-N** | `docs/trackers/prompt-hamsa-audit-log.md` (craft-level twin in `claude-plugins/docs/trackers/`) | Prompt-audit record from a Hamsa audit: named gap, recommended move, prediction, confidence, outcome (filled when evidence lands) | Per the tracker's maintenance convention (`## A-N — <title>` section + Index row) | Hamsa SKILL.md heuristic / buddy memory when the finding generalizes |
 | **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` after the fix ships to master (verify with `git branch --contains <fix-sha>`) |
 
 ## Work-stream-specific prefixes (not durable taxonomy slots)
@@ -61,7 +62,7 @@ You observed something. Where does it go?
 │   → H-N in codescout-usage-hookify.md
 │
 ├─ Is it a tool-selection observation worth reviewing later?
-│   → T-N in tool-usage-patterns.md (artifact b3fa993849ac83ab)
+│   → T-N in tool-usage-patterns.md (artifact f2ecdd76a6189efb)
 │
 ├─ Is it about the recon skill itself (hit / miss / proposal)?
 │   → R-N in reconnaissance-patterns.md

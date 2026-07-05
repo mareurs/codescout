@@ -15,7 +15,7 @@ Every artifact is a markdown file with YAML frontmatter stored under the project
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string (8-hex) | Immutable, auto-assigned on create |
+| `id` | string (16-hex) | Immutable, auto-assigned on create |
 | `kind` | string | `spec`, `plan`, `adr`, `tracker`, or any custom kind |
 | `status` | string | `draft`, `active`, `done`, `archived` — or any custom value |
 | `title` | string | Human-readable title |

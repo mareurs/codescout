@@ -141,3 +141,30 @@ For deeper artifact / augmentation / event mechanics see
 `get_guide("librarian")`. For how augmented trackers carry cross-session
 behavior — including the session-passover pattern — see
 `get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
+
+## Cross-linking (edges are derived — cite in prose)
+
+How artifacts reference each other, and who maintains the link graph:
+
+- **Cite by stable ID in prose.** Entry IDs in their ledger's namespace
+  (`A-11`, `F-3`, `BUG-40`), artifact ids (16-hex) or rel_paths across
+  files, `<repo>:<ID>` across repos. Prose is the ONLY write surface for
+  citations — never hand-create `cites` edges.
+- **`link_scan` derives the edges.** `librarian(action="link_scan")` parses
+  artifact bodies, resolves citations (entry tokens by their defining
+  heading; archived definers lose ties to active ones; ambiguous tokens are
+  reported, never guessed), and materializes/prunes scanner-owned
+  `rel="cites"` edges. `write=false` (default) reports; `write=true`
+  applies. Idempotent — safe to re-run any time, and the repair path after
+  moves/reindex (the catalog's abs_path pre-clean cascade-drops a moved
+  artifact's links; the scan heals them).
+- **Manual rels are few and deliberate:** `evidence-for`, `promoted-to`,
+  `refutes` via `artifact(action="link")` — use sparingly; a wrong edge
+  pollutes context packing. `supersedes` is side-effectful (flips dst
+  status, emits an event): archiving a tracker that has a successor
+  REQUIRES a supersedes edge — created through `artifact(action="link")`,
+  never a bare status edit.
+- **Where links pay off:** `artifact(action="get", include_links=true)`,
+  `artifact(action="graph", depth=1-3)`, and
+  `librarian(action="context", anchor_id=…)` all read the graph — a
+  well-cited tracker gets neighborhood packing for free.
