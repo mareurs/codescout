@@ -161,6 +161,7 @@ or "hide the distribution"):
 | F-5 | Never pinned `--model`; ambient key + model both leaked into generator subprocess | **fixed** (env-strip + `DEFAULT_GENERATOR_MODEL="sonnet"`) |
 | F-6 | Report never surfaces per-scenario pass *rate* for multi-run scenarios | open |
 | F-7 | `--resume` transcripts record stray **empty** user turns + occasional duplicate user events (an 18-turn design logged 11+) → turn-index analysis of transcripts is unreliable | open (bind by arm + observable, not turn index) |
+| F-8 | `setup.hooks` double defect (A-11 v1): payload never arrived as hook feedback (adapter writes a flat `settings["hooks"][event]` list at `claude_code.py:355-356` — real CC schema nests matcher groups; flat-schema cause plausible, unverified) AND the hook fixture script is copied into the subject's workdir, where agents read it — stimulus contamination | open (workaround: diegetic payloads in `setup.files`; adapter schema fix pending) |
 
 F-2/F-3/F-6 are the same gap three times: the report renders a verdict, not the
 distribution behind it. Worth one PR. Full detail: `docs/trackers/tracker-as-skill-session-log.md`.
