@@ -183,7 +183,7 @@ git commit -m "feat(librarian): add constitution tracker archetype"
 - Test: same new file, `#[cfg(test)] mod tests`
 
 **Interfaces:**
-- Produces: `pub fn find_matching_rules(cat: &Catalog, path: &str) -> anyhow::Result<Vec<MatchedRule>>` and `pub struct MatchedRule { pub id: String, pub tracker_id: String, pub title: String, pub rule: String }` (all fields `pub`, `#[derive(Debug, Clone, serde::Serialize)]` on the struct so Task 3 can print it as JSON directly).
+- Produces: `pub fn find_matching_rules(cat: &Catalog, path: &str) -> anyhow::Result<Vec<MatchedRule>>`, `pub fn find_global_rules(cat: &Catalog) -> anyhow::Result<Vec<MatchedRule>>`, and `pub struct MatchedRule { pub id: String, pub tracker_id: String, pub title: String, pub rule: String }` (all fields `pub`, `#[derive(Debug, Clone, serde::Serialize)]` on the struct so Task 3 can print either function's output as JSON directly). `find_global_rules` is the companion-hooks plan's dependency for its `UserPromptSubmit` channel — path-scoped and global rules are mutually exclusive by construction (a rule either has `paths` or it doesn't), so the two functions never return overlapping entries.
 - Consumes: `crate::librarian::catalog::find::{find, FindOpts}`, `crate::librarian::catalog::augmentation::get`, `crate::librarian::catalog::Catalog` (all existing).
 
 - [ ] **Step 1: Write the failing tests**
@@ -264,6 +264,60 @@ pub fn find_matching_rules(cat: &Catalog, path: &str) -> Result<Vec<MatchedRule>
                     rule: r.get("rule").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 });
             }
+        }
+    }
+    Ok(matches)
+}
+
+/// Finds active, path-less (global) constitution rules — the companion of
+/// `find_matching_rules`. A rule with no `paths` field is always relevant
+/// regardless of what's being touched (e.g. "never commit secrets"); it is
+/// surfaced through a session-level channel (UserPromptSubmit), not a
+/// tool-call-targeted one, so this function ignores `paths` entirely and
+/// returns every active rule that *lacks* it.
+pub fn find_global_rules(cat: &Catalog) -> Result<Vec<MatchedRule>> {
+    let opts = find::FindOpts {
+        filter: Some(serde_json::from_value(serde_json::json!({
+            "and": [
+                {"kind": {"eq": "tracker"}},
+                {"status": {"eq": "active"}},
+                {"tags": {"contains": "constitution"}}
+            ]
+        }))?),
+        limit: 500,
+        offset: 0,
+    };
+    let trackers = find::find(cat, &opts)?;
+
+    let mut matches = Vec::new();
+    for t in trackers {
+        let Some(aug) = augmentation::get(cat, &t.id)? else {
+            continue;
+        };
+        if aug.entry_collection.as_deref() != Some("rules") {
+            continue;
+        }
+        let params: Value = serde_json::from_str(&aug.params).unwrap_or(Value::Null);
+        let Some(rules) = params.get("rules").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for r in rules {
+            if r.get("status").and_then(|v| v.as_str()) != Some("active") {
+                continue;
+            }
+            if r.get("paths").and_then(|v| v.as_array()).is_some() {
+                continue; // path-scoped — not this channel's concern
+            }
+            matches.push(MatchedRule {
+                id: r.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                tracker_id: t.id.clone(),
+                title: r
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                rule: r.get("rule").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            });
         }
     }
     Ok(matches)
@@ -400,6 +454,53 @@ mod tests {
         let hits = find_matching_rules(&cat, "src/solver/x.kt").unwrap();
         assert!(hits.is_empty(), "trackers not tagged `constitution` must never match");
     }
+
+    #[test]
+    fn find_global_rules_returns_only_path_less_rules() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("c1", vec!["constitution".to_string()])).unwrap();
+        aug_upsert(
+            &cat,
+            &aug(
+                "c1",
+                r#"{"rules":[
+                    {"id":"C-1","paths":["**/solver/**"],"title":"T1","rule":"R1","status":"active"},
+                    {"id":"C-2","title":"Never commit secrets","rule":"R2","status":"active"}
+                ]}"#,
+            ),
+        )
+        .unwrap();
+
+        let hits = find_global_rules(&cat).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "C-2");
+    }
+
+    #[test]
+    fn find_global_rules_skips_superseded_and_untagged() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("c1", vec!["constitution".to_string()])).unwrap();
+        aug_upsert(
+            &cat,
+            &aug(
+                "c1",
+                r#"{"rules":[{"id":"C-2","title":"T","rule":"R","status":"superseded"}]}"#,
+            ),
+        )
+        .unwrap();
+        art_upsert(&cat, &sample_art("c2", vec!["some-other-tag".to_string()])).unwrap();
+        aug_upsert(
+            &cat,
+            &aug(
+                "c2",
+                r#"{"rules":[{"id":"C-3","title":"T","rule":"R","status":"active"}]}"#,
+            ),
+        )
+        .unwrap();
+
+        let hits = find_global_rules(&cat).unwrap();
+        assert!(hits.is_empty());
+    }
 }
 ```
 
@@ -438,18 +539,20 @@ git commit -m "feat(librarian): add constitution-rule path matching"
 - Modify: `src/main.rs` — add a `ConstitutionCheck` variant to `Commands` and its dispatch arm
 
 **Interfaces:**
-- Consumes: `constitution_check::find_matching_rules` (Task 2), `crate::cli::{open_ctx, CommonOpts}` (existing, see `src/cli/doctor.rs::run` for the identical pattern).
-- Produces: a CLI subcommand printing a compact JSON array of `MatchedRule` objects to stdout, one line, always exit 0 (a companion-plugin hook shelling into this must never see a nonzero exit crash a hook pipeline — errors degrade to an empty array, matching the spec's "hook failures never block the tool" requirement).
+- Consumes: `constitution_check::{find_matching_rules, find_global_rules}` (Task 2), `crate::cli::{open_ctx, CommonOpts}` (existing, see `src/cli/doctor.rs::run` for the identical pattern).
+- Produces: a CLI subcommand printing a compact JSON array of `MatchedRule` objects to stdout, one line, always exit 0 (a companion-plugin hook shelling into this must never see a nonzero exit crash a hook pipeline — errors degrade to an empty array, matching the spec's "hook failures never block the tool" requirement). `--path <path>` selects path-scoped mode (`find_matching_rules`); omitting `--path` selects global mode (`find_global_rules`) — this is the single query surface both companion-plugin hooks (`PreToolUse` and `UserPromptSubmit`) depend on.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `src/cli/constitution_check.rs`:
 
 ```rust
-//! `codescout constitution-check --path <path>` — read-only, fast query for
-//! codescout-companion's PreToolUse hook. Always exits 0; on any internal
-//! error, prints `[]` rather than failing, so a broken query degrades to
-//! "no injection" instead of blocking the caller's tool call.
+//! `codescout constitution-check [--path <path>]` — read-only, fast query for
+//! codescout-companion's hooks. With `--path`, returns path-scoped rules
+//! matching that path (for the PreToolUse hook); without it, returns global
+//! (path-less) rules (for the UserPromptSubmit hook). Always exits 0; on any
+//! internal error, prints `[]` rather than failing, so a broken query
+//! degrades to "no injection" instead of blocking the caller.
 
 use crate::cli::{open_ctx, CommonOpts};
 use clap::Args;
@@ -460,9 +563,10 @@ pub struct ConstitutionCheckArgs {
     #[arg(long)]
     pub project: Option<std::path::PathBuf>,
 
-    /// The file path a tool is about to touch.
+    /// The file path a tool is about to touch. Omit to query global
+    /// (path-less) rules instead of path-scoped ones.
     #[arg(long)]
-    pub path: String,
+    pub path: Option<String>,
 }
 
 pub async fn run(args: ConstitutionCheckArgs) {
@@ -473,8 +577,14 @@ pub async fn run(args: ConstitutionCheckArgs) {
     let hits = match open_ctx(&common).await {
         Ok(ctx) => {
             let cat = ctx.catalog.lock();
-            crate::librarian::tools::constitution_check::find_matching_rules(&cat, &args.path)
-                .unwrap_or_default()
+            match &args.path {
+                Some(p) => {
+                    crate::librarian::tools::constitution_check::find_matching_rules(&cat, p)
+                        .unwrap_or_default()
+                }
+                None => crate::librarian::tools::constitution_check::find_global_rules(&cat)
+                    .unwrap_or_default(),
+            }
         }
         Err(_) => Vec::new(),
     };
@@ -490,12 +600,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         run(ConstitutionCheckArgs {
             project: Some(dir.path().to_path_buf()),
-            path: "src/solver/x.kt".to_string(),
+            path: Some("src/solver/x.kt".to_string()),
         })
         .await;
         // No assertion beyond "did not panic" — this is a smoke test for the
         // always-degrade-gracefully contract `find_matching_rules` already
         // covers in detail (see src/librarian/tools/constitution_check.rs).
+    }
+
+    #[tokio::test]
+    async fn run_never_panics_in_global_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        run(ConstitutionCheckArgs {
+            project: Some(dir.path().to_path_buf()),
+            path: None,
+        })
+        .await;
     }
 }
 ```
@@ -542,6 +662,9 @@ Expected: PASS (all tests from Task 2 and this task)
 Run: `cargo run --quiet -- constitution-check --path src/solver/x.kt --project .`
 Expected: prints `[]` (no constitution trackers exist in codescout's own catalog yet) and exits 0.
 
+Run: `cargo run --quiet -- constitution-check --project .`
+Expected: prints `[]` (global mode, same reason) and exits 0.
+
 - [ ] **Step 6: Run the full verification gate**
 
 Run: `cargo fmt && cargo clippy -- -D warnings && cargo test`
@@ -558,7 +681,8 @@ git commit -m "feat(cli): add constitution-check subcommand for hook consumption
 
 ## Self-Review Notes
 
-- **Spec coverage:** the spec's `constitution` archetype (`params.rules`, `entry_collection: "rules"`, single-tier enforcement) is Task 1. The "paths absent = global, never matched by the path-scoped matcher" requirement is directly tested (`skips_global_path_less_rules`, Task 2). The CLI subcommand's "hook failures never block the tool" error-handling requirement is Task 3's `Err(_) => Vec::new()` fallback plus its smoke test.
+- **Spec coverage:** the spec's `constitution` archetype (`params.rules`, `entry_collection: "rules"`, single-tier enforcement) is Task 1. The "paths absent = global, never matched by the path-scoped matcher" requirement is directly tested (`skips_global_path_less_rules`, Task 2) — and its inverse (`find_global_rules` never returns path-scoped rules) is tested by `find_global_rules_returns_only_path_less_rules`. The CLI subcommand's "hook failures never block the tool" error-handling requirement is Task 3's `Err(_) => Vec::new()` fallback plus its smoke tests (both modes).
+- **Amendment (added after drafting the companion-hooks plan):** the spec's `UserPromptSubmit` channel needs a way to fetch global (path-less) rules, which the original draft of this plan didn't provide — `find_matching_rules` explicitly filters them out and there was no counterpart. Added `find_global_rules` (Task 2) and made `ConstitutionCheckArgs.path` optional so one CLI subcommand serves both companion-plugin hooks (Task 3), rather than needing a second subcommand.
 - **Design decision not fully specified in the spec, resolved here:** the spec doesn't say how a companion-plugin hook (which can't easily know "is this tracker's archetype constitution?" — archetype is a design-time template, not a persisted field) finds constitution trackers. This plan resolves it via a `"constitution"` tag convention, documented in the archetype's own `when_to_use` and `prompt_template` text so a human or LLM authoring one is told to tag it. Flagging this explicitly since it's a plan-level decision, not one the user approved during brainstorming.
-- **Type consistency:** `MatchedRule`'s fields (`id`, `tracker_id`, `title`, `rule`) are identical across Task 2 (definition) and Task 3 (consumption via `serde_json::to_string(&hits)`) — no renaming drift.
-- **Dependency on this plan:** `docs/superpowers/plans/2026-07-06-constitution-tracker-companion-hooks.md` (codescout-companion repo) shells into the `constitution-check` binary this plan produces — that plan cannot be executed before this one lands.
+- **Type consistency:** `MatchedRule`'s fields (`id`, `tracker_id`, `title`, `rule`) are identical across Task 2 (definition, both functions) and Task 3 (consumption via `serde_json::to_string(&hits)`) — no renaming drift.
+- **Dependency on this plan:** `docs/plans/2026-07-06-constitution-tracker-hooks.md` (codescout-companion repo) shells into the `constitution-check` binary this plan produces — that plan cannot be executed before this one lands.
