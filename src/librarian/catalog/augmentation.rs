@@ -1,6 +1,7 @@
 use crate::librarian::catalog::Catalog;
 use crate::librarian::tools::{schema_validate, RecoverableError};
 use anyhow::Result;
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 
 pub struct AugmentationRow {
@@ -136,6 +137,97 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
         rusqlite::params![new_params, artifact_id],
     )?;
     Ok(true)
+}
+
+/// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
+/// `params.<entry_collection>`. Runs inside a single `IMMEDIATE` transaction
+/// so the read-max-write is safe under both intra-process and cross-process
+/// concurrency (paired with `busy_timeout` set on the connection).
+pub fn append_entry(
+    cat: &mut Catalog,
+    artifact_id: &str,
+    entry_collection: &str,
+    id_prefix: &str,
+    mut entry: Value,
+) -> Result<String> {
+    let tx = cat
+        .conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+    let row: Option<(String, Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT params, params_schema, entry_collection
+             FROM artifact_augmentation WHERE artifact_id = ?1",
+            [artifact_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+
+    let Some((params_text, params_schema, declared_collection)) = row else {
+        return Err(RecoverableError::new(format!(
+            "append_entry: artifact `{artifact_id}` has no augmentation — augment it with an entry_collection first"
+        )));
+    };
+
+    if declared_collection.as_deref() != Some(entry_collection) {
+        return Err(RecoverableError::with_hint(
+            format!("append_entry: `{entry_collection}` is not this artifact's entry_collection"),
+            match declared_collection {
+                Some(c) => format!("This artifact's entry_collection is `{c}` — pass that instead."),
+                None => "This artifact has no entry_collection declared — set one via artifact_augment first.".to_string(),
+            },
+        ));
+    }
+
+    let mut params: Value = serde_json::from_str(&params_text).unwrap_or_else(|_| json!({}));
+    let existing_ids: Vec<String> = params
+        .get(entry_collection)
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let new_id = format!("{id_prefix}-{}", next_index(&existing_ids, id_prefix));
+
+    if let Some(obj) = entry.as_object_mut() {
+        obj.insert("id".to_string(), json!(new_id));
+    }
+
+    match params.get_mut(entry_collection) {
+        Some(Value::Array(arr)) => arr.push(entry),
+        _ => {
+            params[entry_collection] = json!([entry]);
+        }
+    }
+
+    if let Some(schema_text) = params_schema.as_deref() {
+        schema_validate::validate_against_stored(schema_text, &params).map_err(|e| {
+            RecoverableError::new(format!(
+                "append_entry: new entry violates params_schema: {e}"
+            ))
+        })?;
+    }
+
+    let new_params_text = serde_json::to_string(&params)?;
+    tx.execute(
+        "UPDATE artifact_augmentation SET params = ?1,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE artifact_id = ?2",
+        rusqlite::params![new_params_text, artifact_id],
+    )?;
+    tx.commit()?;
+    Ok(new_id)
+}
+
+fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
+    let re = regex::Regex::new(&format!(r"^{}-(\d+)$", regex::escape(id_prefix))).unwrap();
+    existing_ids
+        .iter()
+        .filter_map(|id| re.captures(id))
+        .filter_map(|c| c[1].parse::<u64>().ok())
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(1)
 }
 
 /// Shallow RFC 7396 merge-patch applied in place to `target`. `null` keys in the
@@ -566,5 +658,102 @@ mod tests {
         .unwrap();
         let got = get(&cat, "ec-art").unwrap().unwrap();
         assert_eq!(got.entry_collection.as_deref(), Some("failures"));
+    }
+
+    #[test]
+    fn append_entry_assigns_first_id_to_empty_collection() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let id =
+            append_entry(&mut cat, "art1", "failures", "F", json!({"status": "fail"})).unwrap();
+
+        assert_eq!(id, "F-1");
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["failures"][0]["id"], "F-1");
+        assert_eq!(params["failures"][0]["status"], "fail");
+    }
+
+    #[test]
+    fn append_entry_computes_max_plus_one_across_non_contiguous_ids() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-3"},{"id":"F-9"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({})).unwrap();
+        assert_eq!(id, "F-10");
+    }
+
+    #[test]
+    fn append_entry_rejects_unknown_entry_collection() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let err = append_entry(&mut cat, "art1", "bugs", "B", json!({})).unwrap_err();
+        assert!(err.to_string().contains("failures"));
+    }
+
+    #[test]
+    fn append_entry_rejects_missing_augmentation() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+
+        let err = append_entry(&mut cat, "art1", "failures", "F", json!({})).unwrap_err();
+        assert!(err.to_string().contains("no augmentation"));
+    }
+
+    #[test]
+    fn append_entry_rejects_schema_violation_without_writing() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-1","status":"fail"}]}"#.to_string();
+        a.params_schema = Some(
+            json!({
+                "type": "object",
+                "properties": {
+                    "failures": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["id", "status"],
+                            "properties": {
+                                "status": {"type": "string", "enum": ["fail", "pass"]}
+                            }
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        );
+        upsert(&cat, &a).unwrap();
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({"status": "bogus"}),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("params_schema"));
+
+        // Rolled back: still exactly the one original entry.
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["failures"].as_array().unwrap().len(), 1);
     }
 }
