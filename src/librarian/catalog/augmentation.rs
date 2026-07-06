@@ -756,4 +756,46 @@ mod tests {
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert_eq!(params["failures"].as_array().unwrap().len(), 1);
     }
+
+    #[test]
+    fn append_entry_serializes_across_independent_connections_to_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+
+        {
+            let cat = Catalog::open(&path).unwrap();
+            art_upsert(&cat, &sample_art("art1")).unwrap();
+            let mut a = aug("art1");
+            a.entry_collection = Some("failures".to_string());
+            a.params = r#"{"failures":[]}"#.to_string();
+            upsert(&cat, &a).unwrap();
+        }
+
+        let path1 = path.clone();
+        let path2 = path.clone();
+        let h1 = std::thread::spawn(move || {
+            let mut cat = Catalog::open(&path1).unwrap();
+            append_entry(&mut cat, "art1", "failures", "F", json!({"who": "one"})).unwrap()
+        });
+        let h2 = std::thread::spawn(move || {
+            let mut cat = Catalog::open(&path2).unwrap();
+            append_entry(&mut cat, "art1", "failures", "F", json!({"who": "two"})).unwrap()
+        });
+
+        let id1 = h1.join().unwrap();
+        let id2 = h2.join().unwrap();
+
+        assert_ne!(
+            id1, id2,
+            "concurrent appends from independent connections must not collide"
+        );
+        let mut ids = vec![id1, id2];
+        ids.sort();
+        assert_eq!(ids, vec!["F-1".to_string(), "F-2".to_string()]);
+
+        let cat = Catalog::open(&path).unwrap();
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["failures"].as_array().unwrap().len(), 2);
+    }
 }
