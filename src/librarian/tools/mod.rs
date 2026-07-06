@@ -161,6 +161,7 @@ pub mod update;
 
 pub mod link;
 
+pub mod append_entry;
 pub mod delete;
 pub mod mv;
 

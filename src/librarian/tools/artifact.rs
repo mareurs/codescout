@@ -13,12 +13,14 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Artifact CRUD and query. action: find | get | create | update | move | delete | link | graph | state_at. \
+        "Artifact CRUD and query. action: find | get | create | update | move | delete | link | graph | state_at | append_entry. \
          Defaults: scope=project (active project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
          and combine with filter via AND. \
          Trackers are artifacts with kind=tracker — augmented documents that auto-refresh their \
-         body via a persistent prompt; call librarian(tracker_design) before creating one."
+         body via a persistent prompt; call librarian(tracker_design) before creating one. \
+         append_entry atomically assigns the next id and appends to a tracker's entry_collection — \
+         use it instead of a manual read-then-write for any monotonic-ID tracker (F-N, W-N, T-N, ...)."
     }
 
     fn input_schema(&self) -> Value {
@@ -28,7 +30,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "link", "graph", "state_at"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "link", "graph", "state_at", "append_entry"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -70,7 +72,7 @@ impl Tool for Artifact {
                 "offset": { "type": "integer", "default": 0, "maximum": 100000 },
                 "id": {
                     "type": "string",
-                    "description": "get/update/graph: artifact id"
+                    "description": "get/update/graph/append_entry: artifact id"
                 },
                 "include_links": { "type": "boolean", "default": false, "description": "get: include link edges" },
                 "links_direction": {
@@ -167,6 +169,18 @@ impl Tool for Artifact {
                     "type": "integer",
                     "format": "int64",
                     "description": "state_at: unix epoch ms as time-travel cutoff"
+                },
+                "entry_collection": {
+                    "type": "string",
+                    "description": "append_entry: the augmentation's entry_collection array to append into (must match the artifact's declared entry_collection)"
+                },
+                "id_prefix": {
+                    "type": "string",
+                    "description": "append_entry: id prefix — the assigned id is `<id_prefix>-<next integer>`, computed from the live max across existing entries"
+                },
+                "entry": {
+                    "type": "object",
+                    "description": "append_entry: the new entry's fields, excluding `id` — the server assigns and overwrites `id`"
                 }
             }
         })
@@ -175,7 +189,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: find, get, create, update, move, link, graph, state_at",
+                "action required — one of: find, get, create, update, move, link, graph, state_at, append_entry",
             )
         })?;
         match action {
@@ -188,8 +202,9 @@ impl Tool for Artifact {
             "link"     => super::link::call(ctx, args).await,
             "graph"    => super::graph::call(ctx, args).await,
             "state_at" => super::state_at::call(ctx, args).await,
+            "append_entry" => super::append_entry::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, link, graph, state_at"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, link, graph, state_at, append_entry"
             ))),
         }
     }
