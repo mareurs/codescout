@@ -248,6 +248,27 @@ mod tests {
     }
 
     #[test]
+    fn matches_only_path_scoped_rule_when_tracker_has_mixed_rules() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("c1", vec!["constitution".to_string()])).unwrap();
+        aug_upsert(
+            &cat,
+            &aug(
+                "c1",
+                r#"{"rules":[
+                    {"id":"C-1","paths":["**/solver/**"],"title":"T1","rule":"R1","status":"active"},
+                    {"id":"C-2","title":"Never commit secrets","rule":"R2","status":"active"}
+                ]}"#,
+            ),
+        )
+        .unwrap();
+
+        let hits = find_matching_rules(&cat, "src/solver/PinningEngine.kt").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "C-1");
+    }
+
+    #[test]
     fn skips_superseded_rules() {
         let cat = Catalog::open_in_memory().unwrap();
         art_upsert(&cat, &sample_art("c1", vec!["constitution".to_string()])).unwrap();
