@@ -181,6 +181,8 @@ pub mod link_scan;
 
 pub mod doctor;
 
+pub mod constitution_check;
+
 pub mod augment;
 pub mod goal_aggregation;
 pub mod refresh;
