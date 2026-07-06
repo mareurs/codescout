@@ -16,6 +16,7 @@ pub mod artifact_event;
 pub mod artifact_refresh;
 #[cfg(feature = "librarian")]
 pub mod audit_doc_refs;
+#[cfg(feature = "librarian")]
 pub mod constitution_check;
 
 pub mod doctor;
