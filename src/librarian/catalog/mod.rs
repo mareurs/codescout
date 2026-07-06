@@ -163,7 +163,11 @@ impl Catalog {
         init_sqlite_vec();
         let conn =
             Connection::open(db_path).with_context(|| format!("opening {}", db_path.display()))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        // Cross-process writers (separate codescout server instances sharing one
+        // catalog file) block and retry instead of failing immediately.
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+        )?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, None).context("running migrations")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
@@ -196,7 +200,11 @@ impl Catalog {
         init_sqlite_vec();
         let conn =
             Connection::open(db_path).with_context(|| format!("opening {}", db_path.display()))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        // Cross-process writers (separate codescout server instances sharing one
+        // catalog file) block and retry instead of failing immediately.
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+        )?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, Some(ws)).context("running migrations")?;
         if needs_v6 {
@@ -304,5 +312,17 @@ mod tests {
             tables.iter().any(|t| t == "artifact_augmentation"),
             "expected artifact_augmentation table, got: {tables:?}"
         );
+    }
+
+    #[test]
+    fn open_sets_busy_timeout_for_cross_process_writers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+        let cat = Catalog::open(&path).unwrap();
+        let ms: i64 = cat
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ms, 5000);
     }
 }
