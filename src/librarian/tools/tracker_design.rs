@@ -35,6 +35,7 @@ pub fn archetypes() -> Value {
         archetype_task_list(),
         archetype_reflective(),
         archetype_goal(),
+        archetype_constitution(),
     ])
 }
 
@@ -376,16 +377,65 @@ fn archetype_goal() -> Value {
     })
 }
 
+fn archetype_constitution() -> Value {
+    json!({
+        "name": "constitution",
+        "when_to_use": "Rules the agent MUST follow no matter what, enforced mechanically rather than by prose trust — not a place for advisory/'should' guidance (use a regular tracker or memory for that). Tag the tracker artifact's `tags` with `\"constitution\"` so codescout-companion's enforcement hooks can find it — the archetype shape alone does not enable enforcement. Examples: 'solver invariants (path-scoped)', 'never commit secrets (global, no paths)'.",
+        "params_shape_example": {
+            "rules": [
+                {
+                    "id": "C-1",
+                    "paths": ["**/solver/**", "**/*Constraint*.kt"],
+                    "title": "Never disable a constraint via weight 0",
+                    "rule": "A constraint_profiles weight of 0 or 1 is a sentinel, not disabled — read the lambda before touching it.",
+                    "status": "active"
+                },
+                {
+                    "id": "C-2",
+                    "title": "Never commit secrets",
+                    "rule": "Never stage .env, credentials.json, or any file matching *_key*/*_secret* without explicit user confirmation.",
+                    "status": "active"
+                }
+            ]
+        },
+        "params_schema_example": {
+            "type": "object",
+            "required": ["rules"],
+            "properties": {
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "title", "rule", "status"],
+                        "properties": {
+                            "id":     { "type": "string", "pattern": "^C-\\d+$" },
+                            "paths":  { "type": "array", "items": { "type": "string" } },
+                            "title":  { "type": "string" },
+                            "rule":   { "type": "string" },
+                            "status": { "type": "string", "enum": ["active", "superseded"] }
+                        }
+                    }
+                }
+            }
+        },
+        "render_template_example": "**Active rules:** {{ rules|selectattr(\"status\",\"equalto\",\"active\")|list|length }} / {{ rules|length }}\n\n| id | scope | title |\n|----|-------|-------|\n{% for r in rules %}| {{ r.id }} | {{ \"path-scoped\" if r.paths else \"global\" }} | {{ r.title }} |\n{% endfor %}",
+        "body_skeleton": "## Why this constitution exists\n\n_What domain these rules guard, and why prose alone wasn't enough._\n\n## Per-rule detail\n\n_`## C-N` sections: why / how to apply / evidence._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
+        "prompt_template": "This tracker holds rules the agent must follow no matter what — single-tier, mechanically enforced (path-scoped rules via a PreToolUse deny, global rules via a UserPromptSubmit injection), never prose-trust alone. To act: if a tool call was denied citing a C-N rule, read that rule's body section before retrying. To maintain: add new C-N entries via the `append_entry` primitive (never hand-pick the next integer — see docs/superpowers/specs/2026-07-06-librarian-atomic-index-allocation-design.md); never delete an entry — supersede a wrong one with status=superseded plus a pointer to its replacement. This artifact's `tags` must include `\"constitution\"` for the enforcement hooks to find it.",
+        "entry_collection": "rules"
+    })
+}
+
 const SYSTEM_PROMPT: &str = r#"# How to design a tracker
 
 A tracker is an artifact that mixes **live state** (params, refreshed often by gather sources) with **prose** (body, edited rarely by humans). The art of designing a good tracker is putting the right thing in the right place.
 
 ## Step 1 — Pick an archetype
 
-Match the user's intent to one of the 7 archetypes. Use this decision sketch:
+Match the user's intent to one of the 8 archetypes. Use this decision sketch:
 
 - **Will state change mechanically per commit/run/deploy?** → `deployment_state`, `failure_table`, `metric_baseline`, `audit_issues`, or `task_list`.
 - **Is the content options/decisions/research that requires human judgment?** → `reflective`.
+- **Does it hold rules the agent must follow no matter what, mechanically enforced rather than just documented?** → `constitution`. Remember to tag the artifact `"constitution"` — the archetype shape alone doesn't enable enforcement.
 - **Is the structure a numbered table?** → `failure_table` (F-N), `audit_issues` (numbered), or `task_list` (T-N).
 - **Is it metrics over time with sessions?** → `metric_baseline`.
 - **Is it a feature flag or env state?** → `deployment_state`.
@@ -563,7 +613,7 @@ mod tests {
         let v = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v["design_version"], "1");
         assert!(v["system_prompt"].as_str().unwrap().len() > 1000);
-        assert_eq!(v["archetypes"].as_array().unwrap().len(), 7);
+        assert_eq!(v["archetypes"].as_array().unwrap().len(), 8);
         assert!(v["next_step"].as_str().unwrap().contains("artifact_create"));
     }
 
@@ -735,11 +785,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn constitution_archetype_has_entry_collection_field() {
+        let v = archetype_constitution();
+        assert_eq!(
+            v["entry_collection"].as_str(),
+            Some("rules"),
+            "constitution archetype must advertise entry_collection = \"rules\""
+        );
+    }
+
+    #[tokio::test]
+    async fn constitution_archetype_present_and_registered() {
+        let v = archetypes();
+        let arr = v.as_array().unwrap();
+        let names: Vec<&str> = arr.iter().map(|a| a["name"].as_str().unwrap()).collect();
+        assert!(
+            names.contains(&"constitution"),
+            "constitution archetype missing from archetypes() — got {names:?}"
+        );
+    }
+
     #[tokio::test]
     async fn goal_archetype_present_and_registered() {
         let v = archetypes();
         let arr = v.as_array().unwrap();
-        assert_eq!(arr.len(), 7, "expected 7 archetypes including goal");
+        assert_eq!(
+            arr.len(),
+            8,
+            "expected 8 archetypes including goal and constitution"
+        );
         let names: Vec<&str> = arr.iter().map(|a| a["name"].as_str().unwrap()).collect();
         assert!(
             names.contains(&"goal"),
