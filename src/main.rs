@@ -193,6 +193,12 @@ enum Commands {
     /// when downstream LIKE queries return unexpected empty sets.
     #[cfg(feature = "librarian")]
     Doctor(codescout::cli::doctor::DoctorArgs),
+
+    /// Read-only query: which active constitution rules apply to a given
+    /// path. Used by codescout-companion's PreToolUse hook — not meant for
+    /// interactive use. Always exits 0; prints `[]` on any internal error.
+    #[cfg(feature = "librarian")]
+    ConstitutionCheck(codescout::cli::constitution_check::ConstitutionCheckArgs),
 }
 
 // `--env` is only parsed by the cfg(unix) `Mux` subcommand; dead on Windows.
@@ -369,6 +375,10 @@ async fn main() -> Result<()> {
         #[cfg(feature = "librarian")]
         Commands::Doctor(args) => {
             codescout::cli::doctor::run(args).await?;
+        }
+        #[cfg(feature = "librarian")]
+        Commands::ConstitutionCheck(args) => {
+            codescout::cli::constitution_check::run(args).await;
         }
         #[cfg(unix)]
         Commands::Mux {
