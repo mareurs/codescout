@@ -92,6 +92,12 @@ pub struct ToolContext {
     /// lies outside every configured workspace root; tools then fall back to
     /// workspace-wide scope and surface a hint in their response.
     pub current_project: Option<Arc<crate::librarian::current_project::CurrentProject>>,
+    /// The same shared LSP manager instance the core MCP `ToolContext` uses —
+    /// threaded in at construction (`build_tool_context`), never a second
+    /// independent instance. See
+    /// docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md for why this
+    /// field exists and why reuse (not duplication) is load-bearing.
+    pub lsp: Arc<dyn crate::lsp::LspProvider>,
 }
 
 /// Candidate "managed roots" an artifact may legitimately live under: the

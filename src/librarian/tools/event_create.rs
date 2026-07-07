@@ -407,6 +407,7 @@ pub(crate) mod tests {
     pub(crate) fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
         use crate::librarian::workspace::Root;
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(
                 crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
             )),

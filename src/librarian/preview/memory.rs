@@ -81,6 +81,7 @@ mod tests {
 
     fn mk_ctx(cat: Catalog) -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![],

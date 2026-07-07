@@ -26,7 +26,9 @@ pub mod tools;
 
 use anyhow::Result;
 
-pub async fn build_tool_context() -> Result<tools::ToolContext> {
+pub async fn build_tool_context(
+    lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
+) -> Result<tools::ToolContext> {
     use anyhow::Context as _;
     use std::path::PathBuf;
 
@@ -156,12 +158,14 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
         embedding,
         artifact_store,
         current_project,
+        lsp,
     })
 }
 
 #[allow(dead_code)]
 pub(crate) async fn run_stdio_server() -> Result<()> {
-    let ctx = build_tool_context().await?;
+    let lsp = crate::lsp::LspManager::new_arc();
+    let ctx = build_tool_context(lsp).await?;
     server::LibrarianServer::new(ctx).serve_stdio().await
 }
 

@@ -406,6 +406,7 @@ mod tests {
             )
             .unwrap();
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
@@ -727,6 +728,7 @@ mod tests {
         artifact::upsert(&cat, &out_proj).unwrap();
 
         let ctx = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {

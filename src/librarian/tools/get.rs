@@ -513,6 +513,7 @@ mod tests {
 
     fn mk_ctx(cat: Catalog) -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![],
@@ -655,6 +656,7 @@ mod tests {
             )
             .unwrap();
         let ctx = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
@@ -1034,6 +1036,7 @@ mod tests {
     fn mk_ctx_with_project(cat: Catalog, git_root: std::path::PathBuf) -> ToolContext {
         use crate::librarian::current_project::CurrentProject;
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![],

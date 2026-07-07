@@ -17,8 +17,10 @@ use serde_json::Value;
 
 use crate::librarian::tools::{all_tools as lib_all_tools, ToolContext as LibToolContext};
 
-pub async fn try_build_runtime() -> Option<Arc<LibToolContext>> {
-    match crate::librarian::build_tool_context().await {
+pub async fn try_build_runtime(
+    lsp: Arc<dyn crate::lsp::LspProvider>,
+) -> Option<Arc<LibToolContext>> {
+    match crate::librarian::build_tool_context(lsp).await {
         Ok(ctx) => Some(Arc::new(ctx)),
         Err(err) => {
             tracing::info!("librarian disabled: {err:#}");
@@ -142,6 +144,7 @@ impl LibrarianAdapter {
             embedding: self.ctx.embedding.clone(),
             artifact_store: self.ctx.artifact_store.clone(),
             current_project,
+            lsp: Arc::clone(&self.ctx.lsp),
         })
     }
 }

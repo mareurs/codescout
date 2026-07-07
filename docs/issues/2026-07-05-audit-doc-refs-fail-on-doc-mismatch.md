@@ -1,12 +1,20 @@
 ---
-status: open
-opened: 2026-07-05
-closed:
-severity: low
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- audit_doc_refs
+- doc-drift
+topic: null
+time_scope: null
+closed: '2026-07-06'
+opened: '2026-07-05'
 owner: marius
 related: []
-tags: [librarian, audit_doc_refs, doc-drift]
-kind: bug
+severity: low
 ---
 
 # BUG: audit_doc_refs `fail_on` documented as high|med|low|never but code handles only "high" and "any"
@@ -38,13 +46,22 @@ only handles `"high"` and `"any"` (`mod.rs:600-611`)."
 N/A — mechanism read directly from source.
 
 ## Fix
-Implement `med`/`low` thresholds (gate on findings at-or-above the level) and either accept
-`any` as documented alias or fix the docs; reject unknown values with `RecoverableError`
-instead of silently not gating.
 
+Implemented. `build_response` (`src/librarian/tools/audit_doc_refs/mod.rs`) now returns
+`Result<Value>` and gates `exit_code` on an explicit severity threshold per level:
+`never` (0), `high` (any High-severity non-resolved finding), `med` (High or Med),
+`low` (any non-resolved/non-external finding, any severity). The undocumented `"any"`
+value is kept as a backward-compatible alias for `low`'s predicate. Any other value
+now returns a `RecoverableError` naming the bad value instead of silently gating
+nothing.
 ## Tests added
-N/A — not yet fixed.
 
+`src/librarian/tools/audit_doc_refs/mod.rs` tests module: `fail_on_never_is_always_zero`,
+`fail_on_high_ignores_med_severity`, `fail_on_high_trips_on_high_severity`,
+`fail_on_med_trips_on_med_and_high_but_not_low`, `fail_on_low_trips_on_any_unresolved_severity`,
+`fail_on_low_is_silent_when_all_resolved`, `fail_on_any_alias_matches_low_semantics`,
+`fail_on_unknown_value_is_rejected` — one case per threshold level plus the alias and
+the rejected-unknown-value path.
 ## Workarounds
 Use `fail_on="high"` or `"any"` only.
 

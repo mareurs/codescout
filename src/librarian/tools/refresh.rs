@@ -219,6 +219,7 @@ mod tests {
 
     fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {

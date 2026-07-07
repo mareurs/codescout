@@ -1,12 +1,20 @@
 ---
-status: open
-opened: 2026-07-05
-closed:
-severity: low
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- audit_doc_refs
+- schema-drift
+topic: null
+time_scope: null
+closed: '2026-07-06'
+opened: '2026-07-05'
 owner: marius
 related: []
-tags: [librarian, audit_doc_refs, schema-drift]
-kind: bug
+severity: low
 ---
 
 # BUG: audit_doc_refs declares `scope` in its schema but ignores it
@@ -40,12 +48,22 @@ Scout report (plan-mode, 2026-07-05): "`scope` from the schema is declared but n
 N/A — mechanism read directly from source.
 
 ## Fix
-Either implement scope widening (reuse `tools::scope::apply_scope`) or error recoverably on
-non-default scope ("audit_doc_refs is project-scoped in v1") — silence is the bug.
 
+Shipped the reject path, not the implement path. `AuditArgs` gained a
+`#[serde(default)] pub scope: Option<String>` field; `call()` now returns a
+`RecoverableError` ("audit_doc_refs is project-scoped in v1") when `scope` is present
+and not `"project"`. The `scope` schema description in `src/librarian/tools/librarian.rs`
+was updated to say audit_doc_refs is project-scoped-only in v1.
+
+Real `repo`/`umbrella` widening is deferred — logged as a Low-priority roadmap item
+in `docs/ROADMAP.md` § Future Improvements, since (unlike the SQL-filtered tools that
+share this `scope` param) audit_doc_refs walks the filesystem directly, so widening
+means scanning multiple project roots and aggregating findings/trackers across
+repos — real feature work, not a bugfix-sized change.
 ## Tests added
-N/A — not yet fixed.
 
+`src/librarian/tools/audit_doc_refs/mod.rs` tests module: `scope_repo_is_rejected`,
+`scope_umbrella_is_rejected`, `scope_project_is_accepted`, `scope_absent_is_accepted`.
 ## Workarounds
 Activate the project you want scanned before calling.
 

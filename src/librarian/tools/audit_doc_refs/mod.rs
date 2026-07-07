@@ -135,6 +135,8 @@ pub struct AuditArgs {
     pub tracker_id: Option<String>,
     #[serde(default = "default_fail_on")]
     pub fail_on: String,
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -166,6 +168,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "see librarian(action=\"audit_doc_refs\") input schema",
         )
     })?;
+
+    if let Some(scope) = args.scope.as_deref() {
+        if scope != "project" {
+            return Err(RecoverableError::with_hint(
+                "audit_doc_refs is project-scoped in v1",
+                "call from within the target project, or omit `scope`",
+            ));
+        }
+    }
 
     let repo_root = ctx
         .current_project
@@ -214,7 +225,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let resolve_ctx = resolver::ResolveCtx {
         repo_root: &repo_root,
         memory_globs: &memory_globs,
-        lsp: None, // v1: LSP not plumbed through ToolContext yet
+        lsp: Some(ctx.lsp.clone()),
         degraded_languages: Default::default(),
         basename_index,
     };
@@ -279,7 +290,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         tracker_id.as_deref(),
         tracker_path.as_deref(),
         &args.fail_on,
-    );
+    )?;
     Ok(response)
 }
 fn git_head_commit(repo_root: &std::path::Path) -> Option<String> {
@@ -547,7 +558,7 @@ fn build_response(
     tracker_id: Option<&str>,
     tracker_path: Option<&str>,
     fail_on: &str,
-) -> Value {
+) -> Result<Value> {
     let cap = 50;
     let total = findings.len();
     let shown_findings: Vec<_> = findings.iter().take(cap).map(finding_to_json).collect();
@@ -593,20 +604,35 @@ fn build_response(
         .filter(|f| f.resolution.verdict == Verdict::Resolved)
         .count();
 
-    let exit_code: i32 = match fail_on {
-        "high"
-            if findings.iter().any(|f| {
-                f.resolution.severity == Severity::High
-                    && !matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External)
-            }) =>
-        {
-            1
+    // A finding "counts" toward a fail_on threshold unless its verdict is
+    // Resolved or External — those two are the only verdicts that mean
+    // "this reference is fine," regardless of the severity value they carry.
+    let counts = |f: &Finding| -> Option<Severity> {
+        if matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External) {
+            None
+        } else {
+            Some(f.resolution.severity)
         }
-        "any" if n_broken + n_unknown > 0 => 1,
-        _ => 0,
+    };
+    let exit_code: i32 = match fail_on {
+        "never" => 0,
+        "high" => findings.iter().any(|f| counts(f) == Some(Severity::High)) as i32,
+        "med" => findings
+            .iter()
+            .any(|f| matches!(counts(f), Some(Severity::High) | Some(Severity::Med)))
+            as i32,
+        // "any" is an undocumented pre-existing alias for "low" — kept so no
+        // existing caller's behavior silently changes.
+        "low" | "any" => findings.iter().any(|f| counts(f).is_some()) as i32,
+        other => {
+            return Err(RecoverableError::with_hint(
+                format!("audit_doc_refs: unknown fail_on value `{other}`"),
+                "valid values: high | med | low | never",
+            ))
+        }
     };
 
-    json!({
+    Ok(json!({
         "n_files_scanned": n_files,
         "n_refs_found": findings.len(),
         "n_refs_resolved": n_resolved,
@@ -622,7 +648,7 @@ fn build_response(
             "lsp_languages_offline": offline,
         },
         "exit_code": exit_code,
-    })
+    }))
 }
 
 fn finding_to_json(f: &Finding) -> Value {
@@ -651,6 +677,7 @@ mod tests {
 
     fn mk_smoke_ctx(root: std::path::PathBuf) -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
@@ -672,6 +699,208 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lsp_wiring_resolves_real_symbol_end_to_end() {
+        use crate::lsp::{MockLspClient, MockLspProvider, SymbolInfo, SymbolKind};
+
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("foo.py"), "def bar():\n    pass\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See `foo.py:bar`.\n").unwrap();
+
+        let mock_client = MockLspClient::new().with_symbols(
+            tmp.path().join("foo.py"),
+            vec![SymbolInfo {
+                name: "bar".to_string(),
+                name_path: "bar".to_string(),
+                kind: SymbolKind::Function,
+                file: tmp.path().join("foo.py"),
+                start_line: 0,
+                end_line: 1,
+                range_start_line: None,
+                start_col: 0,
+                children: vec![],
+                detail: None,
+            }],
+        );
+
+        let mut ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        ctx.lsp = MockLspProvider::with_client(mock_client);
+
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "emit_tracker": false,
+                "paths": ["docs/**/*.md"],
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result["n_refs_broken"], 0,
+            "a real symbol served by the LSP should resolve, not be flagged broken: {result}"
+        );
+        assert_eq!(
+            result["n_refs_unknown"], 0,
+            "the real LSP should have been consulted, not skipped as absent: {result}"
+        );
+        assert_eq!(
+            result["scan_meta"]["degraded"], false,
+            "a responsive LSP must not be reported as degraded: {result}"
+        );
+    }
+
+    fn mk_finding(verdict: Verdict, severity: Severity) -> Finding {
+        Finding {
+            candidate: RefCandidate {
+                md_file: "docs/spec.md".to_string(),
+                md_line: 1,
+                raw_ref: "src/gone.py".to_string(),
+                ref_kind: RefKind::FilePath,
+                position: RefPosition::InlineSpan,
+            },
+            resolution: Resolution {
+                verdict,
+                severity,
+                severity_reason: "test",
+                notes: None,
+            },
+        }
+    }
+
+    #[test]
+    fn fail_on_never_is_always_zero() {
+        let findings = vec![mk_finding(Verdict::Missing, Severity::High)];
+        let result = build_response(&findings, &[], &[], 1, None, None, "never").unwrap();
+        assert_eq!(result["exit_code"], 0);
+    }
+
+    #[test]
+    fn fail_on_high_ignores_med_severity() {
+        let findings = vec![mk_finding(Verdict::Missing, Severity::Med)];
+        let result = build_response(&findings, &[], &[], 1, None, None, "high").unwrap();
+        assert_eq!(
+            result["exit_code"], 0,
+            "a Med finding should not trip fail_on=high"
+        );
+    }
+
+    #[test]
+    fn fail_on_high_trips_on_high_severity() {
+        let findings = vec![mk_finding(Verdict::Missing, Severity::High)];
+        let result = build_response(&findings, &[], &[], 1, None, None, "high").unwrap();
+        assert_eq!(result["exit_code"], 1);
+    }
+
+    #[test]
+    fn fail_on_med_trips_on_med_and_high_but_not_low() {
+        let med = build_response(
+            &[mk_finding(Verdict::Missing, Severity::Med)],
+            &[],
+            &[],
+            1,
+            None,
+            None,
+            "med",
+        )
+        .unwrap();
+        assert_eq!(med["exit_code"], 1, "med finding should trip fail_on=med");
+
+        let high = build_response(
+            &[mk_finding(Verdict::Missing, Severity::High)],
+            &[],
+            &[],
+            1,
+            None,
+            None,
+            "med",
+        )
+        .unwrap();
+        assert_eq!(
+            high["exit_code"], 1,
+            "high finding should also trip fail_on=med"
+        );
+
+        let low = build_response(
+            &[mk_finding(Verdict::Missing, Severity::Low)],
+            &[],
+            &[],
+            1,
+            None,
+            None,
+            "med",
+        )
+        .unwrap();
+        assert_eq!(
+            low["exit_code"], 0,
+            "low finding should not trip fail_on=med"
+        );
+    }
+
+    #[test]
+    fn fail_on_low_trips_on_any_unresolved_severity() {
+        let result = build_response(
+            &[mk_finding(Verdict::Unknown, Severity::Low)],
+            &[],
+            &[],
+            1,
+            None,
+            None,
+            "low",
+        )
+        .unwrap();
+        assert_eq!(
+            result["exit_code"], 1,
+            "even a Low-severity finding should trip fail_on=low"
+        );
+    }
+
+    #[test]
+    fn fail_on_low_is_silent_when_all_resolved() {
+        let result = build_response(
+            &[mk_finding(Verdict::Resolved, Severity::Low)],
+            &[],
+            &[],
+            1,
+            None,
+            None,
+            "low",
+        )
+        .unwrap();
+        assert_eq!(
+            result["exit_code"], 0,
+            "a Resolved verdict should never trip any fail_on level"
+        );
+    }
+
+    #[test]
+    fn fail_on_any_alias_matches_low_semantics() {
+        let result = build_response(
+            &[mk_finding(Verdict::Unknown, Severity::Low)],
+            &[],
+            &[],
+            1,
+            None,
+            None,
+            "any",
+        )
+        .unwrap();
+        assert_eq!(
+            result["exit_code"], 1,
+            "undocumented `any` alias should keep working like `low`"
+        );
+    }
+
+    #[test]
+    fn fail_on_unknown_value_is_rejected() {
+        let err = build_response(&[], &[], &[], 1, None, None, "critical").unwrap_err();
+        assert!(
+            format!("{err}").contains("critical"),
+            "error should name the bad value; got: {err}"
+        );
+    }
+
     #[tokio::test]
     async fn smoke_scan_yields_zero_on_clean_repo() {
         let tmp = TempDir::new().unwrap();
@@ -691,6 +920,69 @@ mod tests {
         .unwrap();
 
         assert_eq!(result["n_refs_broken"], 0);
+        assert_eq!(result["exit_code"], 0);
+    }
+
+    #[tokio::test]
+    async fn scope_repo_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "hello\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let err = call(
+            &ctx,
+            serde_json::json!({"emit_tracker": false, "scope": "repo"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            format!("{err}").contains("project-scoped"),
+            "error should explain audit_doc_refs is project-scoped; got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_umbrella_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "hello\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let err = call(
+            &ctx,
+            serde_json::json!({"emit_tracker": false, "scope": "umbrella"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            format!("{err}").contains("project-scoped"),
+            "error should explain audit_doc_refs is project-scoped; got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_project_is_accepted() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "hello\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(
+            &ctx,
+            serde_json::json!({"emit_tracker": false, "scope": "project"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["exit_code"], 0);
+    }
+
+    #[tokio::test]
+    async fn scope_absent_is_accepted() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "hello\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(&ctx, serde_json::json!({"emit_tracker": false}))
+            .await
+            .unwrap();
         assert_eq!(result["exit_code"], 0);
     }
 

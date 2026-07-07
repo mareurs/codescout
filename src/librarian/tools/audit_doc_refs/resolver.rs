@@ -5,7 +5,7 @@ use std::path::Path;
 pub struct ResolveCtx<'a> {
     pub repo_root: &'a Path,
     pub memory_globs: &'a [globset::Glob],
-    pub lsp: Option<&'a dyn crate::lsp::ops::LspProvider>,
+    pub lsp: Option<std::sync::Arc<dyn crate::lsp::ops::LspProvider>>,
     pub degraded_languages: std::cell::RefCell<Vec<String>>,
     /// Basename → list of relative paths in the workspace. Used by
     /// `resolve_file_path` as a fallback when a bare basename (no `/`) doesn't
@@ -229,7 +229,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         );
     }
     let lang = detect_language(path_str);
-    let Some(lsp) = ctx.lsp else {
+    let Some(lsp) = ctx.lsp.clone() else {
         ctx.degraded_languages.borrow_mut().push(lang.to_string());
         return Resolution {
             verdict: Verdict::Unknown,
@@ -238,22 +238,41 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             notes: None,
         };
     };
-    // Call the async LSP on a fresh runtime — the resolver is single-threaded per scan.
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let lang_id = lang.to_string();
-    let result = rt.block_on(async {
-        let client = lsp
-            .get_or_start(&lang_id, ctx.repo_root, None)
-            .await
-            .map_err(|e| e.to_string())?;
-        let syms = client
-            .document_symbols(&path, &lang_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok::<_, String>(syms)
-    });
+    let repo_root = ctx.repo_root.to_path_buf();
+    // `client_within_budget` bounds cold-start latency instead of an unbounded
+    // wait a hung/slow LSP could otherwise stall on (see
+    // docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md).
+    let fut = async move {
+        let client = crate::lsp::client_within_budget(
+            lsp,
+            &lang_id,
+            &repo_root,
+            None,
+            crate::lsp::LSP_FIRST_CALL_BUDGET,
+        )
+        .await?;
+        client.document_symbols(&path, &lang_id).await.ok()
+    };
+    // `resolve_file_symbol` is called both from plain sync unit tests (no
+    // ambient runtime — safe to spin a throwaway one) and from `call()`,
+    // which already runs inside the server's own tokio runtime. Blocking
+    // that runtime's worker thread on a second, nested `Runtime::block_on`
+    // panics ("Cannot start a runtime from within a runtime") — this branch
+    // was previously unreachable dead code because `ctx.lsp` was always
+    // `None` in production. `block_in_place` hands the wait to a
+    // Tokio-managed blocking thread instead, which requires a
+    // multi-threaded runtime — true for the server's `#[tokio::main]`
+    // (default flavor); the one test exercising this branch is marked
+    // `#[tokio::test(flavor = "multi_thread")]` for the same reason.
+    let result = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+        Err(_) => tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(fut),
+    };
     match result {
-        Ok(syms) => {
+        Some(syms) => {
             if syms.iter().any(|s| s.name == name) {
                 Resolution {
                     verdict: Verdict::Resolved,
@@ -269,7 +288,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 )
             }
         }
-        Err(_) => {
+        None => {
             ctx.degraded_languages.borrow_mut().push(lang.to_string());
             Resolution {
                 verdict: Verdict::Unknown,
@@ -459,7 +478,7 @@ mod tests {
             &ResolveCtx {
                 repo_root: tmp.path(),
                 memory_globs: &[],
-                lsp: Some(lsp.as_ref()),
+                lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
             },
@@ -497,7 +516,7 @@ mod tests {
             &ResolveCtx {
                 repo_root: tmp.path(),
                 memory_globs: &[],
-                lsp: Some(lsp.as_ref()),
+                lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
             },
@@ -506,6 +525,42 @@ mod tests {
         // This encodes the "prefer disk truth" rule: the LSP responded (not offline),
         // so an empty symbol list means the symbol genuinely isn't there.
         assert_eq!(r.verdict, Verdict::SymbolMissing);
+    }
+
+    #[test]
+    fn resolver_resolved_when_lsp_returns_matching_symbol() {
+        use crate::lsp::mock::{MockLspClient, MockLspProvider};
+        use crate::lsp::{SymbolInfo, SymbolKind};
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("foo.rs"), "pub fn bar() {}\n").unwrap();
+        let client = MockLspClient::new().with_symbols(
+            tmp.path().join("foo.rs"),
+            vec![SymbolInfo {
+                name: "bar".to_string(),
+                name_path: "bar".to_string(),
+                kind: SymbolKind::Function,
+                file: tmp.path().join("foo.rs"),
+                start_line: 0,
+                end_line: 0,
+                range_start_line: None,
+                start_col: 0,
+                children: vec![],
+                detail: None,
+            }],
+        );
+        let lsp = MockLspProvider::with_client(client);
+        let c = cand("foo.rs:bar", "docs/spec.md", RefKind::FileSymbol);
+        let r = resolve_ref(
+            &c,
+            &ResolveCtx {
+                repo_root: tmp.path(),
+                memory_globs: &[],
+                lsp: Some(lsp),
+                degraded_languages: Default::default(),
+                basename_index: std::collections::HashMap::new(),
+            },
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
     }
 
     // ── Task 8b: path-outside-project + anchor link resolution ───────────────

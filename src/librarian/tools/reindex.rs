@@ -270,6 +270,7 @@ mod tests {
     fn mk_ctx(tmp_root: std::path::PathBuf, rules_toml: &str) -> ToolContext {
         let rules = load_rules(rules_toml).unwrap();
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
@@ -360,6 +361,7 @@ mod tests {
 
     fn mk_ctx_with_project(tmp_root: std::path::PathBuf, project_subdir: &str) -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
@@ -437,6 +439,7 @@ mod tests {
 
         // Reuse same catalog for project-scoped force reindex from p1
         let ctx_p1 = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: ctx_all.catalog.clone(),
             workspace: ctx_all.workspace.clone(),
             rules: ctx_all.rules.clone(),
@@ -530,6 +533,7 @@ mod tests {
         // Build a ToolContext pointing at this repo as "r1"
         let rules = crate::librarian::classify::load_rules("").unwrap();
         let ctx = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {

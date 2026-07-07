@@ -19,6 +19,7 @@ pub mod audit_doc_refs;
 #[cfg(feature = "librarian")]
 pub mod constitution_check;
 
+#[cfg(feature = "librarian")]
 pub mod doctor;
 
 use anyhow::{anyhow, Context, Result};
@@ -45,6 +46,11 @@ impl CommonOpts {
 /// Build the librarian-mcp `ToolContext`. Honors `--project` by setting
 /// `LIBRARIAN_CWD` before delegating to the shared bootstrap.
 ///
+/// The CLI is a one-shot process (unlike the long-running MCP server, which
+/// threads its single shared `LspManager` into `try_build_runtime`) — there
+/// is no pre-existing shared instance to reuse here, so this constructs its
+/// own, mirroring `CodeScoutServer::new`'s own default-path construction.
+///
 /// Thread-safety: `std::env::set_var` is not safe in the presence of other
 /// threads. The codescout binary runs one command per process, so the racy
 /// window does not exist in practice. If a future refactor moves CLI dispatch
@@ -54,7 +60,8 @@ pub async fn open_ctx(opts: &CommonOpts) -> Result<crate::librarian::tools::Tool
     if let Some(p) = opts.project.as_ref() {
         std::env::set_var("LIBRARIAN_CWD", p);
     }
-    crate::librarian::build_tool_context()
+    let lsp = crate::lsp::LspManager::new_arc();
+    crate::librarian::build_tool_context(lsp)
         .await
         .context("opening librarian tool context")
 }

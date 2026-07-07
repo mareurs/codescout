@@ -547,6 +547,7 @@ mod tests {
 
     fn mk_ctx(cat: Catalog) -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
@@ -571,6 +572,7 @@ mod tests {
     fn mk_ctx_with_embedder(cat: Catalog, svc: Arc<EmbeddingService>) -> ToolContext {
         let catalog = Arc::new(parking_lot::Mutex::new(cat));
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::clone(&catalog),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![],
@@ -678,6 +680,7 @@ mod tests {
 
         // With umbrella: more_in_workspace hint must appear.
         let ctx_umbrella = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(make_cat())),
             workspace: Arc::new(crate::librarian::workspace::WorkspaceConfig {
                 roots: vec![crate::librarian::workspace::Root {
@@ -1066,6 +1069,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &sample_row("a", "A")).unwrap();
         let ctx = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(crate::librarian::workspace::WorkspaceConfig {
                 roots: vec![crate::librarian::workspace::Root {

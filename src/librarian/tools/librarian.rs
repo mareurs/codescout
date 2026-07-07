@@ -60,7 +60,7 @@ impl Tool for Librarian {
                     "type": "string",
                     "enum": ["project", "repo", "umbrella", "all"],
                     "default": "project",
-                    "description": "context/reindex/workspace_state_at/audit_doc_refs/link_scan: scope. Defaults to active project."
+                    "description": "context/reindex/workspace_state_at/link_scan: scope. audit_doc_refs: project-scoped only in v1 — any other value is rejected. Defaults to active project."
                 },
                 "repo": { "type": "string", "description": "reindex: restrict to a specific workspace root" },
                 "force": { "type": "boolean", "description": "reindex: wipe rows for targeted scope before re-walking" },
@@ -125,6 +125,7 @@ mod tests {
 
     fn mk_ctx() -> ToolContext {
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![],
@@ -168,6 +169,7 @@ mod tests {
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::write(root.join("docs/readme.md"), "# hello\n").unwrap();
         let ctx = ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {

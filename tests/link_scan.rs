@@ -22,6 +22,7 @@ use tempfile::TempDir;
 
 fn mk_ctx(root: std::path::PathBuf) -> ToolContext {
     ToolContext {
+        lsp: codescout::lsp::MockLspProvider::with_client(codescout::lsp::MockLspClient::default()),
         catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
         workspace: Arc::new(WorkspaceConfig {
             roots: vec![Root {

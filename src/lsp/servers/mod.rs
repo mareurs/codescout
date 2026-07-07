@@ -235,10 +235,22 @@ pub fn has_lsp_config(lang: &str) -> bool {
 /// index (a) leaves the user's real `~/.config`, and (b) can be reclaimed
 /// wholesale on mux shutdown. See
 /// `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
+#[cfg(feature = "librarian")]
 pub(crate) fn kotlin_lsp_home_root() -> std::path::PathBuf {
     dirs::cache_dir()
         .or_else(dirs::data_local_dir)
         .unwrap_or_else(std::env::temp_dir)
+        .join("codescout")
+        .join("kotlin-lsp-home")
+}
+
+/// `dirs`-free fallback for builds without the `librarian` feature, which is
+/// the only feature pulling in the `dirs` crate — same final path shape,
+/// just skipping straight to `temp_dir` instead of trying `dirs::cache_dir()`
+/// first.
+#[cfg(not(feature = "librarian"))]
+pub(crate) fn kotlin_lsp_home_root() -> std::path::PathBuf {
+    std::env::temp_dir()
         .join("codescout")
         .join("kotlin-lsp-home")
 }

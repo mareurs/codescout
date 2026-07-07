@@ -144,12 +144,22 @@ pub fn read_self_memory_kb() -> SelfMemoryKb {
 /// Mirrors `lsp::servers::kotlin_lsp_home_root`'s cache-root resolution so a
 /// post-mortem always knows where to look, regardless of the dead instance's
 /// cwd (the discoverability gap that lost the 68 GB instance's diagnostic log).
+#[cfg(feature = "librarian")]
 pub fn heartbeat_dir() -> PathBuf {
     dirs::cache_dir()
         .or_else(dirs::data_local_dir)
         .unwrap_or_else(std::env::temp_dir)
         .join("codescout")
         .join("heartbeats")
+}
+
+/// `dirs`-free fallback for builds without the `librarian` feature, which is
+/// the only feature pulling in the `dirs` crate — same final path shape,
+/// just skipping straight to `temp_dir` instead of trying `dirs::cache_dir()`
+/// first.
+#[cfg(not(feature = "librarian"))]
+pub fn heartbeat_dir() -> PathBuf {
+    std::env::temp_dir().join("codescout").join("heartbeats")
 }
 
 fn heartbeat_path(dir: &Path) -> PathBuf {
