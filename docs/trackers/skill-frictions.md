@@ -24,6 +24,8 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix idea:** Make the search path explicit in skill docs; add a diagnostic mode (`lf.py check-env`) that prints where it looked  
 **Status: FIXED 2026-05-03** — `get_client` error message now prints key location (`~/agents/llm-proxy/.env`) and explicit env-var invocation example
 
+**Root cause found + FIXED 2026-07-07** — the 05-03 fix only improved the error message; the real bug was `load_env()` returning after the *first existing* `.env`. Any project with its own `.env` (e.g. codescout's, holding only `CARGO_REGISTRY_TOKEN`/`CODESCOUT_*`) shadowed `~/agents/llm-proxy/.env` so the `LANGFUSE_*` keys never loaded. Fix (in `~/agents/llm-proxy/.claude/skills/claude-traces/scripts/lf.py`, symlinked into codescout): load **all** candidate `.env` files with `os.environ.setdefault` merge semantics — earlier candidates still win per-key, real env vars win over files. Verified: `lf.py recent` now works from codescout cwd. Surfaced during Fable-tuning T-8.
+
 ### F-002 — cc.py stats fails silently on cross-project sessions
 **When:** `cc.py stats 64618681-de62-4bf7-abad-0e0d93de005a`  
 **Expected:** Find session JSONL and return token/cost summary  
