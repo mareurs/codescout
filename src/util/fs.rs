@@ -107,6 +107,20 @@ pub fn to_forward_slash(p: &std::path::Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// Render `path` relative to `root` in forward-slash form, falling back to
+/// the absolute forward-slash form when `path` is not under `root`.
+///
+/// The `path.strip_prefix(root).unwrap_or(path)` + stringify idiom repeats
+/// across every tool that reports a file path relative to a project or
+/// library root (`list_overview`, `classify_reference_path`, `symbol_at`,
+/// `agent` status, ...) — this is the one place it lives. Backslash-safety
+/// on Windows is inherited from [`to_forward_slash`]; `strip_prefix` itself
+/// is a `std::path::Path` component operation and already parses `\` vs `/`
+/// correctly per host platform.
+pub fn relative_forward_slash(path: &std::path::Path, root: &std::path::Path) -> String {
+    to_forward_slash(path.strip_prefix(root).unwrap_or(path))
+}
+
 /// A path string in forward-slash separator form, suitable for catalog
 /// storage, hashing into IDs, and LIKE-pattern construction.
 ///
@@ -270,6 +284,20 @@ mod tests {
         let twice = to_forward_slash(std::path::Path::new(&once));
         assert_eq!(once, twice);
         assert_eq!(once, "C:/mixed/separators/foo.md");
+    }
+
+    #[test]
+    fn relative_forward_slash_strips_root() {
+        let root = std::path::PathBuf::from("/proj");
+        let path = std::path::PathBuf::from("/proj/src/lib.rs");
+        assert_eq!(relative_forward_slash(&path, &root), "src/lib.rs");
+    }
+
+    #[test]
+    fn relative_forward_slash_falls_back_to_absolute_outside_root() {
+        let root = std::path::PathBuf::from("/proj");
+        let path = std::path::PathBuf::from("/other/lib.rs");
+        assert_eq!(relative_forward_slash(&path, &root), "/other/lib.rs");
     }
 
     #[test]
