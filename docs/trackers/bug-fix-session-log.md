@@ -72,6 +72,8 @@ time_scope: open-ended
 | F-24 | 2026-06-20 | med | plan-prose | fixed-verified | Kotlin `-Xmx2g` fix documented "implemented on experiments" but was an uncommitted working-tree change at recon; concurrent session committed it as `3adb66e7` (incl. test) on `experiments` 2026-06-21 — not yet on master. llm-proxy `2906647`-on-master assertion checked out clean by contrast |
 | F-25 | 2026-06-21 | med | plan-prose | open | Kotlin heap bug's root cause ("no `-Xmx` anywhere") missed kotlin-lsp's `intellij-server.vmoptions -Xmx2048m` — BUT that cap isn't reliably applied to codescout-spawned instances (06-20 GC-sawtooth reached 31 GiB heap despite it), so explicit `JAVA_TOOL_OPTIONS -Xmx2g` (`3adb66e7`) IS load-bearing, not redundant (self-corrected mid-session) |
 | F-26 | 2026-06-21 | med | self-friction | fixed-verified | `replace_symbol_surfaces_stale_error_after_max_retries` failed on `experiments` — ROOT-CAUSED (2026-06-23): hermetic MockLsp test, NOT environmental; `758801d5` (F-23 fix) removed the AST-collection line-gate so `validate_symbol_range` pre-empted the staleness path. Master verified GREEN (still line-gated); orthogonal to the Kotlin cherry-pick. **Fixed `d079c054`** (reorder validators, option a); full suite green |
+| F-27 | 2026-07-07 | med | self-friction | mitigated | Prior-session summary claimed two bug files were logged; neither exists on disk or in git history |
+| F-28 | 2026-07-07 | low | plan-prose | wontfix-false-alarm | Inherited "stray lsp: field" claim in mv.rs was stale — ToolContext.lsp is now a legitimate field |
 
 ## Wins Index
 
@@ -98,6 +100,7 @@ time_scope: open-ended
 | W-18 | 2026-07-01 | med | Pre-impl recon confirms a parser-grammar fix plan is safe + names the regression tests it must keep green | Naive quoted-key fix flips `$.a[abc]`→Key (breaks `tests.rs:731`); blunt tokenizer rewrite breaks `$.a[0][-1]` (`tests.rs:683`); ≥2 red tests found only at cargo test; also pre-empted an over-engineered `Segment::QuotedKey` variant (Key already applies via `obj.get`) | validated |
 | W-19 | 2026-07-05 | med | Pre-fix recon on `context(anchor_id)` starvation bug found `max_tokens_caps_inclusion` encodes "always include first" as deliberate design for topic-search mode, not a bug | A fix removing the `!markdown.is_empty()` packing guard globally would have broken that test's `assert_eq!(ids.len(), 1, ...)`; correct fix scopes the anchor's size cap to anchor-mode only | validated |
 | W-20 | 2026-07-05 | high | Didn't accept a "triage the findings" task at face value — empirically bisected a surprising self-cite failure down to root cause instead of writing it off as expected noise | Would have reported 366 dangling / 232 ambiguous findings as "mostly expected per-tracker-ID-reuse noise" without noticing ~34 dangling + ~19 ambiguous were a real `link_scan` parsing defect (`ENABLE_YAML_STYLE_METADATA_BLOCKS` pairing any two bare `---` lines as YAML metadata, swallowing every other session-log entry's heading); found + fixed + live-verified (dangling 366→332, ambiguous 232→213, +16 edges, 8 pruned) instead of shipping an inflated triage report | validated |
+| W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 
 ## Category conventions
 
@@ -1714,6 +1717,67 @@ live-LSP class I initially misattributed to).
 **Impact:** high — a plausible-sounding wrong story ("F-N/W-N reuse noise") would have shipped as the triage conclusion, permanently hiding a real extraction defect and 16+ real graph edges; caught only because one data point was checked against ground truth instead of pattern-matched into the majority bucket.
 
 **Promote-when:** First datapoint of this specific pattern ("triage output contradicts a directly-verifiable fact — bisect, don't pattern-match"); track for a second occurrence before promoting to CLAUDE.md.
+
+**Status:** validated
+
+---
+
+## F-27 — Prior-session summary claimed two bug files were logged; neither exists on disk or in git history
+
+**Observed:** 2026-07-07, resuming the `symbols_overview_glob_marks_grammarless_language_warming_instead_of_dropping_file` Windows path-separator fix. User pasted a prior session's summary as the task brief.
+
+**When:** Before starting the fix, searching for the bug file the prior summary said it had created, to read its root-cause section instead of re-deriving it from scratch.
+
+**Expected:** Prior summary text: "I logged this as 2026-07-07-windows-glob-overview-path-separator-test-mismatch.md, along with the earlier memory-tool discrepancy I found: 2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md."
+
+**Got:** `artifact(find, kind="bug")` returned 0 matches for either slug; `tree(glob="*2026-07-07*", path="docs/issues")` found 0 files; `git log --all --diff-filter=A -- 'docs/issues/2026-07-07*'` returned nothing across all branches/commits. Neither file was ever created or committed anywhere in this repo.
+
+**Probable cause:** Unknown — the pasted summary is a self-report from a prior session/context that either ran against a different checkout, was interrupted before the file-creation call landed, or narrated the action without actually executing it.
+
+**Workaround:** Independently re-derived root cause from the actual failing test (`src/tools/symbol/tests.rs:5008`) and the real source (`src/tools/symbol/list_overview.rs:268,295,310`) — matched the prior summary's diagnosis — then created `docs/issues/2026-07-07-windows-glob-overview-path-separator-test-mismatch.md` for real, status `fixed`. Did NOT fabricate the second (memory-tool) bug file — flagged it back to the user since there is no first-hand evidence to write from.
+
+**Severity:** med — no wasted implementation effort (the claimed root cause was independently re-verified against source before being trusted), but taking "already logged" at face value would have left both bugs permanently untracked while everyone believed they were tracked.
+
+**Status:** mitigated
+
+**Fix idea / Pointer:** Treat "I already logged X" in any inherited session summary as a claim to verify (`artifact(find)` / `git log`), not a fact — same class as F-16/F-24 (inherited-claim misdiagnosis).
+
+---
+## F-28 — Inherited "stray lsp: field" claim in mv.rs was stale; ToolContext.lsp is now a legitimate field
+
+**Observed:** 2026-07-07, applying an externally-supplied debugging finding for the doctor.rs `check_ads_colon` verbatim-prefix bug (see `docs/issues/2026-07-07-doctor-ads-colon-verbatim-prefix-false-positive.md`).
+
+**When:** Before touching `src/librarian/tools/mv.rs`, scouting the finding's "bonus find" claim that a stray `lsp:` field in `mv.rs`'s test `mk_ctx` referenced a field "that never existed on ToolContext" and had been removed.
+
+**Expected:** Per the inherited report, `ToolContext` (`src/librarian/tools/mod.rs`) has no `lsp` field; the `lsp: crate::lsp::MockLspProvider::with_client(...)` line in `mv.rs`'s `mk_ctx` test helper is a leftover from an abandoned "thread lsp into librarian" attempt and a compile error.
+
+**Got:** `ToolContext` at `src/librarian/tools/mod.rs:97-100` now has a legitimate `pub lsp: Arc<dyn crate::lsp::LspProvider>` field, deliberately threaded in at construction and documented with a comment citing `docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md`. `mv.rs:136`'s `lsp: ...` assignment is a correct, compiling use of that field, not a stray leftover — confirmed via `symbols(include_body=true)` and a full `cargo test --lib` (2954 passed, 0 failed).
+
+**Probable cause:** The report describes an earlier state of the codebase, before `lsp` was legitimately added to librarian's `ToolContext` as part of the audit_doc_refs LSP-stubbed-off fix — same shape of drift as F-2/F-15/F-24 (inherited reports going stale as sibling work lands on the same branch).
+
+**Workaround:** Skipped the `mv.rs` edit entirely.
+
+**Severity:** low — no code was touched based on the stale claim; caught before any edit via routine reconnaissance rather than after a failed compile.
+
+**Status:** wontfix-false-alarm
+
+**Fix idea / Pointer:** N/A — no fix needed, the field is load-bearing.
+
+---
+
+## W-21 — Grep the raw tracker file for the true max F-N/W-N; `artifact(get)` silently truncates large trackers
+
+**Observed:** 2026-07-07, allocating the next F-N/W-N IDs to file this session's findings into this tracker.
+
+**Pattern:** Before allocating a new tracker ID, `grep(pattern="^## (F|W)-\\d+ —", path="docs/trackers/<file>.md")` against the raw file rather than trusting `artifact(get)`'s `preview.headings` or `get(full=true)`'s `body` field.
+
+**Counterfactual:** `artifact(get, id="2dd9d90bc83f9f49", full=false)`'s `preview.headings` listed F-1..F-7 as the last entries (despite `preview.line_count: 1739` being correct), and `artifact(get, full=true)`'s `body` field silently truncated at 499 lines / ~46794 bytes — with no truncation flag in either response — landing mid-way through F-6/F-7, well short of the tracker's real F-27/W-20. Trusting either would have allocated new entries as "F-8"/"W-5", directly colliding with the 20 entries (F-8..F-27, W-5..W-20) already in the file. `librarian(action="reindex", scope="project")` (reported `updated: 10`) did not move the truncation point on a re-fetch, ruling out catalog staleness — filed as `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md`.
+
+**Confirming data points:** 1) This session — the reconnaissance-skill invocation prompted a raw-file grep before append, which caught the true F-27/W-20 ceiling before any write landed. 2) No second datapoint yet — first observation of this failure mode.
+
+**Impact:** high — an ID collision in a session-log tracker corrupts the Index/body correspondence that makes every prior F-N/W-N citation resolvable; the failure is silent (no error, just a plausible-looking duplicate ID) and would surface only when a future reader noticed two different bodies claiming the same ID.
+
+**Promote-when:** A second large tracker (>500 lines / >~47KB body) exhibits the same `get`/preview truncation without a flag — at that point, escalate `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md`'s priority and promote this grep-first practice into `get_guide("tracker-conventions")`.
 
 **Status:** validated
 
