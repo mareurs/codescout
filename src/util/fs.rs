@@ -121,6 +121,22 @@ pub fn relative_forward_slash(path: &std::path::Path, root: &std::path::Path) ->
     to_forward_slash(path.strip_prefix(root).unwrap_or(path))
 }
 
+/// Length in bytes of a Windows drive-letter prefix (`C:`) at the start of
+/// `s`, including the `//?/` extended-length "verbatim" marker that
+/// `fs::canonicalize` prepends on Windows (stored here in forward-slash
+/// form by [`to_forward_slash`] — e.g. `//?/C:/Users/...`). Returns `None`
+/// if `s` has no drive-letter prefix in either form.
+///
+/// Detects the string *shape*, not the host platform: catalog `abs_path`
+/// values may have been captured on a different OS than the one running
+/// the check, so this must not be `cfg(windows)`-gated.
+pub fn drive_letter_prefix_len(s: &str) -> Option<usize> {
+    let verbatim_len = if s.starts_with("//?/") { 4 } else { 0 };
+    let rest = s.as_bytes().get(verbatim_len..)?;
+    (rest.len() >= 2 && rest[0].is_ascii_alphabetic() && rest[1] == b':')
+        .then_some(verbatim_len + 2)
+}
+
 /// A path string in forward-slash separator form, suitable for catalog
 /// storage, hashing into IDs, and LIKE-pattern construction.
 ///
@@ -298,6 +314,31 @@ mod tests {
         let root = std::path::PathBuf::from("/proj");
         let path = std::path::PathBuf::from("/other/lib.rs");
         assert_eq!(relative_forward_slash(&path, &root), "/other/lib.rs");
+    }
+
+    #[test]
+    fn drive_letter_prefix_len_bare_drive() {
+        assert_eq!(drive_letter_prefix_len("C:/Users/x/foo.md"), Some(2));
+        assert_eq!(drive_letter_prefix_len("z:/"), Some(2));
+        assert_eq!(drive_letter_prefix_len("C:foo.txt"), Some(2));
+    }
+
+    #[test]
+    fn drive_letter_prefix_len_verbatim_form() {
+        assert_eq!(
+            drive_letter_prefix_len("//?/C:/Users/marius/foo.md"),
+            Some(6)
+        );
+        assert_eq!(drive_letter_prefix_len("//?/C:/foo.txt:stream"), Some(6));
+    }
+
+    #[test]
+    fn drive_letter_prefix_len_none_for_posix_and_malformed() {
+        assert_eq!(drive_letter_prefix_len("/home/marius/foo.md"), None);
+        assert_eq!(drive_letter_prefix_len("docs/foo.md"), None);
+        assert_eq!(drive_letter_prefix_len("Cusers/foo.md"), None);
+        assert_eq!(drive_letter_prefix_len(""), None);
+        assert_eq!(drive_letter_prefix_len("//?/"), None);
     }
 
     #[test]

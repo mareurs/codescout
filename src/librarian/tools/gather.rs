@@ -376,23 +376,20 @@ fn gather_observations(
 }
 
 fn guard_relative_path(path: &str) -> Result<()> {
-    // Reject absolute paths in BOTH POSIX (leading /) and Windows (leading \ or
-    // drive letter) forms — Path::is_absolute() only checks the current
-    // platform's notion of absolute, but the gather tool must reject any
-    // shape that could escape the project root on any platform.
+    // Reject absolute paths in BOTH POSIX (leading /) and Windows (leading \)
+    // forms — Path::is_absolute() only checks the current platform's notion
+    // of absolute, but the gather tool must reject any shape that could
+    // escape the project root on any platform.
     //
     // Also reject any embedded colon: on Windows the colon is reserved for
     // drive prefixes (`C:foo`) AND for NTFS alternate data streams
-    // (`legit.txt:hidden`). In legitimate relative paths on either platform
-    // there is no reason to allow colons, so a blanket reject closes the
-    // ADS-read path the drive-letter check alone misses (Ibex S-2).
-    let starts_with_drive =
-        path.len() >= 2 && path.as_bytes()[0].is_ascii_alphabetic() && path.as_bytes()[1] == b':';
+    // (`legit.txt:hidden`). A blanket colon reject covers both cases without
+    // a separate drive-letter check — any drive-prefixed path already
+    // contains a colon (Ibex S-2).
     if path.contains("..")
         || std::path::Path::new(path).is_absolute()
         || path.starts_with('/')
         || path.starts_with('\\')
-        || starts_with_drive
         || path.contains(':')
     {
         anyhow::bail!("path must be relative and must not contain '..' or ':'");

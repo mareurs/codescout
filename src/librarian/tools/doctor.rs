@@ -248,20 +248,14 @@ fn check_backslash(id: &str, abs_path: &str, check_name: &str) -> Option<Violati
 
 fn check_ads_colon(id: &str, abs_path: &str) -> Option<Violation> {
     // Exempt the Windows drive-letter slot (`C:`) from being flagged as an
-    // NTFS alternate-data-stream selector. `fs::canonicalize` on Windows
-    // yields the extended-length verbatim form (`\\?\C:\...`), stored here
-    // in forward-slash form as `//?/C:/...` — the drive-letter colon then
-    // sits past the 4-byte `//?/` marker, not at byte 0..2. Strip the marker
-    // before locating the drive slot so it isn't mistaken for a real ADS
-    // colon (false positive on every Windows-indexed row otherwise).
-    let verbatim_prefix_len = if abs_path.starts_with("//?/") { 4 } else { 0 };
-    let rest = &abs_path[verbatim_prefix_len..];
-    let bytes = rest.as_bytes();
-    let starts_with_drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
-    let tail = if starts_with_drive { &rest[2..] } else { rest };
+    // NTFS alternate-data-stream selector. `drive_letter_prefix_len` already
+    // accounts for the `//?/` verbatim marker `fs::canonicalize` prepends on
+    // Windows, so the drive-letter colon isn't mistaken for a real ADS colon
+    // (false positive on every Windows-indexed row otherwise).
+    let prefix_len = crate::util::fs::drive_letter_prefix_len(abs_path).unwrap_or(0);
+    let tail = &abs_path[prefix_len..];
     tail.find(':').map(|pos_in_tail| {
-        let absolute_pos =
-            pos_in_tail + verbatim_prefix_len + if starts_with_drive { 2 } else { 0 };
+        let absolute_pos = pos_in_tail + prefix_len;
         Violation::new(
             "ads_colon_in_abs_path",
             Some(id.to_string()),
@@ -305,15 +299,15 @@ fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation
     // false positives (Path::exists resolves them against the caller's cwd).
     //
     // Absolute on the platforms we care about:
-    //   - POSIX: leading `/`
-    //   - Windows: leading `<drive>:` (`C:`, `D:`, …), with `[a-zA-Z]:` byte
-    //     pattern at positions 0..2.
+    //   - POSIX: leading `/` (also covers the Windows verbatim-prefix form
+    //     `//?/C:/...`, which starts with `/`).
+    //   - Windows: leading `<drive>:` (`C:`, `D:`, …), bare or verbatim-prefixed
+    //     — see `drive_letter_prefix_len`.
     //   - Windows UNC `\\server\share` is allowed in theory but extremely
     //     unusual in our content corpus; if it ever appears the
     //     `backslash_in_abs_path` check catches it first.
-    let bytes = abs_path.as_bytes();
-    let starts_with_posix_root = bytes.first() == Some(&b'/');
-    let starts_with_drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    let starts_with_posix_root = abs_path.as_bytes().first() == Some(&b'/');
+    let starts_with_drive = crate::util::fs::drive_letter_prefix_len(abs_path).is_some();
     if starts_with_posix_root || starts_with_drive {
         return None;
     }
