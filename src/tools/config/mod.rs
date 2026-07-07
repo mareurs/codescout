@@ -2,6 +2,7 @@
 
 use super::{optional_bool_param, parse_bool_param, Tool, ToolContext};
 use crate::tools::onboarding::{onboarding_version_stale, ONBOARDING_VERSION};
+use crate::util::fs::to_forward_slash;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -279,7 +280,7 @@ impl Tool for ProjectStatus {
             .await?;
 
         let mut result = json!({
-            "project_root": root.display().to_string(),
+            "project_root": to_forward_slash(&root),
             "languages": languages,
             "embeddings_model": embeddings_model,
             "libraries": { "count": lib_count, "indexed": lib_indexed },
@@ -546,7 +547,7 @@ async fn build_activation_response(
             };
             Ok((
                 p.config.project.name.clone(),
-                p.root.display().to_string(),
+                to_forward_slash(&p.root),
                 p.root.clone(),
                 p.config.project.languages.clone(),
                 p.read_only,
@@ -651,7 +652,7 @@ async fn build_activation_response(
 
     if legacy_db_present {
         result["legacy_semantic_index"] = json!({
-            "path": legacy_db_path.display().to_string(),
+            "path": to_forward_slash(&legacy_db_path),
             "hint": "Run `codescout migrate-memories` to port memories to Qdrant, then delete this file.",
         });
     }

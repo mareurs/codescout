@@ -1,4 +1,5 @@
 use super::{ResourceBytes, ResourceDescriptor, ResourceError, ResourceProvider};
+use crate::util::fs::to_forward_slash;
 use async_trait::async_trait;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -127,7 +128,7 @@ impl SummarySource for AgentSummarySource {
     async fn snapshot(&self) -> SummarySnapshot {
         let root = self.agent.project_root().await;
 
-        let active_project = root.as_ref().map(|p| p.display().to_string());
+        let active_project = root.as_ref().map(|p| to_forward_slash(p));
 
         let configured: Vec<String> = self
             .agent
