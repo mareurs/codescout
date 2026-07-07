@@ -44,9 +44,8 @@ Query examples:
 **Work-stream reframe:** with the fallback mechanism dead locally and the CLAUDE.md diet shipped+measured, the remaining lever is FND-8/FND-9 (Fable defaults + over-prescriptive prompts).
 
 **Resume here — next open (`high`):**
-- **T-7** — audit prompt surfaces for reasoning-extraction foot-gun + token-countdown surfacing (no eval gate).
-- **T-2** — A/B anti-tidying / anti-over-engineering snippet (eval-gated via `59ebeebb6ed05c89`).
-- **T-11** — codify the subtract-and-measure protocol.
+- **T-11** — codify the subtract-and-measure protocol (now has a worked example: A-14's base-arm-first + pre-registered ceiling branch; the `fable-tidying` suite is the template).
+- (T-7 done: foot-gun audit CLEAN → A-13/FND-15. T-2 done: closed NOT-INDICATED → A-14/FND-16 — base arm 10/10 surgical on fable, snippet not shipped; T-3..T-6 priors weakened, base-arm-first noted on each.)
 
 **Open threads:** T-10 (cc.py `--config-dir`) still open; fable tracker updates uncommitted on codescout `experiments` (llm-proxy work is committed as `678778c`).
 ## History

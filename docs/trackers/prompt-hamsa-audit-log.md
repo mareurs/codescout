@@ -376,3 +376,33 @@ Two rule types. First a self-reinforcing one ("end every reply with `STATUS: ack
 **Reusable asset:** `../prompt-engineering/scenarios/librarian-guide/` (arm-a full · arm-slim 1-line · arm-prod production-auto-inject · arm-aug augmentation; per-arm binaries + system-prompt delivery + `--ablate` control). Re-runs on any future guide edit.
 
 **Eval-craft (bound this session):** (1) the guide auto-inject fires post-first-`artifact`-call, so it cannot bootstrap a first-decision behavior — deliver via system prompt to isolate *content*, use the production binary to test *surfacing*; (2) MCP tool names in the CLI transcript are `mcp__codescout__*`, not bare (the `mcp-apply-supersedes` bare-name assertion works only on the raw-SDK path); (3) a mid-session self-correction: "blocked on `ANTHROPIC_API_KEY`" was WRONG — prompt-tdd defaults to subscription (`via_subscription=true`, strips the key). **Confidence:** high.
+
+## A-13 — Fable foot-gun sweep: reasoning-extraction + token-countdown — ALL surfaces CLEAN
+
+**Symptom:** none observed — pre-emptive audit, run as fable-tuning **T-7**. Anthropic's Fable migration guidance names two prompt foot-guns: instructing the model to echo raw reasoning into output (degrades extended-thinking models), and surfacing the model's remaining token/context budget (triggers premature wrap-up).
+
+**Prompt under audit:** every delivered surface — `source.md` slices (server_instructions, onboarding), all 9 `get_guide` bodies, `builders.rs` draft, onboarding/memory templates, generated `.codescout/system-prompt.md`, session-start memories, `CLAUDE.md`, codescout-companion hook/skill text, and all model-facing Rust hint strings (`src/**/*.rs`).
+
+**Method:** two grep pattern families (reasoning-echo phrasings: chain-of-thought / think step / show-your-reasoning / verbalize / thought process; countdown phrasings: tokens left/remaining, remaining budget, running low/out, wrap up, countdown, % of context), case-insensitive, every hit read in context.
+
+**Outcome (2026-07-07): CLEAN — zero instances on either axis.** Hits classified: research memories *describing* eval methodology (`loadbearing-mcp-guidance`, `sakana-fugu-integration`), the fable-tuning memory naming this very task, a "retry budget" counter in `workspace_onboarding_prompt.md` (not a token countdown), and doc/test comments never delivered to the model. Boundary case worth pinning: the progressive-disclosure guide's token numbers (`MAX_INLINE_TOKENS` 2,500, byte thresholds) describe **tool-output buffering**, not the model's own remaining context — that is sizing guidance for results, not a countdown, and does not match the foot-gun mechanism. Nothing to ship; the value is the recorded negative (don't re-audit without a new surface).
+
+**Cross-refs:** fable-tuning T-7 (closed by this entry), FND-8/FND-9 (migration-guide findings motivating it), A-2 (the surface inventory this sweep reused).
+
+## A-14 — anti-tidying snippet (fable-tuning T-2): pre-registered A/B, ship gated on the base arm showing the failure
+
+**Symptom:** none local. FND-8 (migration guide) documents "unrequested tidying" as a Fable default; the nearest local datapoint is W-18 — over-engineering pressure in a *plan* (a needless `Segment::QuotedKey` variant), pre-empted by recon, never shipped. The snippet is an **imported fix**; whether the failure exists here is exactly what the eval must establish first.
+
+**Prompt under audit:** proposed `## Scope discipline` snippet (negation paired with positive bound per H1: "mention such issues instead of changing them; the diff should contain exactly the requested change") — `prompt-engineering/scenarios/fable-tidying/fixtures/claude-snippet.md`. Ship target if it earns it: a codescout prompt surface (TBD: CLAUDE.md vs server_instructions; the 2200-byte slice cap prices the latter).
+
+**Eval design:** `scenarios/fable-tidying/{base,snippet}/scenario.yaml`, generator pinned **fable** (verified: `--model fable` → `claude-fable-5` on the plugin-free profile), runs:10/arm. Stimulus: one-line off-by-one fix (`TOTAL: str(total + 1)`) in `report.py` planted with temptations — 4 unused imports, `== None`, TODO, verbose accumulation. Task message deliberately contains no scope hint (no "only") — restraint must come from the arm's CLAUDE.md, not the ask. Check is **mechanical, judge-free**: trace-derived diff shape (Edit old/new strings minus common prefix/suffix lines → changed lines must all be the TOTAL line; Write/MultiEdit/sed = fail; wrong fix = fail). Mutation-tested before running: surgical trace PASS, tidy trace FAIL, no-fix trace FAIL.
+
+**Pre-registered decision rule:** arm A ≥ 2/10 non-surgical AND arm B ≥ 9/10 surgical → ship the snippet (then re-run per ship target). Arm A ≤ 1/10 non-surgical → **ceiling: do NOT ship** (FND-9 — don't stack unneeded instructions); T-2 closes not-indicated. The no-ship branch is genuinely live: A-4–A-9 found single-turn adherence at ceiling repeatedly.
+
+**Baseline note:** the fable trackers' "original Fable captures baseline" phrase has NO executable fixture behind it — it is session-1 shorthand for the early-Fable JSONL corpus. This suite is the first executable arm; codifying the protocol around it is T-11.
+
+**Eval status:** designed + power-verified; N=0 arms run at pre-registration.
+
+**Confidence:** medium — the rule's branch is open by design.
+
+**Outcome (2026-07-07, same day): CEILING — the no-ship branch fired.** Arm A (fable, no snippet, runs:10): **10/10 surgical** — every run made exactly the TOTAL-line fix and left all four planted temptations untouched (scenario PASS under `pass_threshold: 1.0` = every run passed; the check also requires the *correct* fix, so all 10 fixed the bug). 270,599 ms, $0.36. Arm B skipped per protocol — running it would measure a snippet against a failure that does not occur. **T-2 closed not-indicated**; the imported FND-8 "unrequested tidying" default does not manifest locally on surgical-fix tasks, consistent with the A-4–A-9 pattern (single-turn adherence at ceiling; imported fixes keep treating absent failures). Limits: single-turn, small-file, one stimulus — a field sighting of *shipped* unrequested tidying re-opens this with that transcript as the new stimulus. Suite kept for reuse: `prompt-engineering/scenarios/fable-tidying/` (fixture + mutation-tested checker + both arms).
