@@ -243,18 +243,33 @@ pub fn index_repo_sync(
         }
     }
 
-    // Delete rows under abs_root that were not seen in this walk.
+    // Delete rows under abs_root that were not seen in this walk AND whose
+    // underlying file is genuinely gone from disk.
+    //
+    // "Not seen in this walk" alone is NOT equivalent to "file no longer
+    // exists": the walker (`ignore::WalkBuilder::standard_filters(true)`)
+    // also skips paths matched by `.gitignore`, `.git/info/exclude`, or a
+    // global excludesfile — none of which mean the file was deleted. Before
+    // this existence check, any reindex over a repo with such an ignore rule
+    // (e.g. a `.git/info/exclude` entry for a locally-tracked-but-never-
+    // published `docs/trackers/` directory) silently deleted the catalog rows
+    // for every file under it on every single reindex, even though the files
+    // were sitting right there on disk the whole time (found live, 2026-07-07,
+    // debugging Mercury BOM's "reindex succeeds but find/get come back empty"
+    // — the docs/trackers/*.md rows were being deleted by this exact path).
     let root_prefix = format!(
         "{}/",
         crate::util::fs::RepoPath::from(abs_root)
             .as_str()
             .replace('\'', "''")
     );
-    let removed = if seen_ids.is_empty() {
-        cat.conn.execute(
-            "DELETE FROM artifact WHERE abs_path LIKE ?1",
-            rusqlite::params![format!("{root_prefix}%")],
-        )?
+    let candidates: Vec<(String, String)> = if seen_ids.is_empty() {
+        cat.conn
+            .prepare("SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1")?
+            .query_map(rusqlite::params![format!("{root_prefix}%")], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?
     } else {
         let placeholders = seen_ids
             .iter()
@@ -263,18 +278,32 @@ pub fn index_repo_sync(
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "DELETE FROM artifact WHERE abs_path LIKE ?1 AND id NOT IN ({})",
+            "SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 AND id NOT IN ({})",
             placeholders
         );
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("{root_prefix}%"))];
         for id in &seen_ids {
             params.push(Box::new(id.clone()));
         }
-        cat.conn.execute(
-            &sql,
-            rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
-        )?
+        cat.conn
+            .prepare(&sql)?
+            .query_map(
+                rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?
+            .collect::<rusqlite::Result<_>>()?
     };
+
+    let mut removed = 0usize;
+    for (cand_id, cand_abs_path) in &candidates {
+        if !std::path::Path::new(cand_abs_path).exists() {
+            cat.conn.execute(
+                "DELETE FROM artifact WHERE id = ?1",
+                rusqlite::params![cand_id],
+            )?;
+            removed += 1;
+        }
+    }
     report.removed = removed;
 
     Ok((report, embed_queue))
@@ -585,6 +614,58 @@ kind = "memory"
         std::fs::remove_file(root.join("docs/specs/b.md")).unwrap();
         let (r2, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         assert_eq!(r2.removed, 1);
+    }
+
+    #[test]
+    fn index_does_not_delete_still_existing_file_newly_matched_by_ignore() {
+        // Found live (2026-07-07) debugging Mercury BOM's "reindex succeeds
+        // but find/get come back empty": a `.git/info/exclude` entry for
+        // docs/trackers/ made the walker (standard_filters) silently skip
+        // that whole directory, and the orphan-cleanup then deleted every
+        // row under it on every reindex, purely because it was "not seen in
+        // this walk" — even though the files were sitting right there on
+        // disk. A file must survive reindex as long as it still exists,
+        // regardless of WHY the walker didn't visit it this pass.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+        std::fs::write(root.join("docs/trackers/a.md"), "# a\nbody\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/trackers/*.md\"\nkind = \"tracker\"\n",
+        )
+        .unwrap();
+
+        // Pass 1: no ignore rule yet — the file gets indexed normally.
+        let no_ignore = globset::GlobSet::empty();
+        let (r1, _) = index_repo_sync(&cat, &rules, root, &no_ignore, false, false, false).unwrap();
+        assert_eq!(r1.added, 1);
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/trackers/a.md"));
+        assert!(crate::librarian::catalog::artifact::get(&cat, &id)
+            .unwrap()
+            .is_some());
+
+        // Pass 2: an ignore rule now matches the SAME file (simulating a
+        // .git/info/exclude entry the standard_filters walker would also
+        // respect) — the file is not walked this pass, but it still exists
+        // on disk. Its row must survive.
+        let now_ignored =
+            crate::librarian::workspace::compile_ignore(&["**/docs/trackers/**".to_string()])
+                .unwrap();
+        let (r2, _) =
+            index_repo_sync(&cat, &rules, root, &now_ignored, false, false, false).unwrap();
+        assert_eq!(
+            r2.removed, 0,
+            "a file that still exists must not be deleted just because this \
+             walk didn't visit it"
+        );
+        assert!(
+            crate::librarian::catalog::artifact::get(&cat, &id)
+                .unwrap()
+                .is_some(),
+            "row for the still-existing, now-ignored file must survive"
+        );
     }
 
     #[test]
