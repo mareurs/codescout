@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use crate::ast;
 use crate::tools::output::{OutputGuard, OverflowInfo};
 use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, ToolContext};
+use crate::util::fs::{relative_forward_slash, to_forward_slash};
 
 use crate::fs::{
     format_library_path, get_path_param, is_glob, resolve_glob_for, resolve_library_roots,
@@ -134,11 +135,7 @@ pub(super) fn count_files_by_subdir(
     let mut subdirs: Vec<(String, usize)> = subdir_counts
         .into_iter()
         .map(|(abs_path, count)| {
-            let display = abs_path
-                .strip_prefix(project_root)
-                .unwrap_or(&abs_path)
-                .display()
-                .to_string();
+            let display = relative_forward_slash(&abs_path, project_root);
             (display, count)
         })
         .collect();
@@ -265,7 +262,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                         json_symbols
                     };
                     let mut entry = json!({
-                        "file": rel.display().to_string(),
+                        "file": to_forward_slash(rel),
                         "symbols": json_symbols,
                     });
                     if include_docs {
@@ -292,7 +289,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                     json_symbols
                 };
                 let mut entry = json!({
-                    "file": rel.display().to_string(),
+                    "file": to_forward_slash(rel),
                     "symbols": json_symbols,
                     "lsp": "warming",
                     "hint": "Language server is starting; symbols served from tree-sitter. \
@@ -307,7 +304,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 // warming-marked entry instead of silently dropping it.
                 let rel = file_path.strip_prefix(&root).unwrap_or(file_path);
                 result.push(json!({
-                    "file": rel.display().to_string(),
+                    "file": to_forward_slash(rel),
                     "symbols": [],
                     "lsp": "warming",
                     "hint": format!(
@@ -523,11 +520,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                         continue;
                     }
                     let abs = entry.path().to_path_buf();
-                    let display = abs
-                        .strip_prefix(&root)
-                        .unwrap_or(&abs)
-                        .display()
-                        .to_string();
+                    let display = relative_forward_slash(&abs, &root);
                     dir_files.push((display, abs));
                 }
             }
