@@ -455,6 +455,37 @@ feature work, not a bug-fix-sized change.
   design decision, not just plumbing.
 - `scope="all"` presumably means "every registered workspace root" —
   same aggregation question as umbrella, at a larger scale.
+### Distill Fable's Tracker Fluency into a Cross-Model Pattern
+
+Mine session traces to understand *why* `claude-fable-5` reaches for trackers (librarian
+artifacts, `append_entry`, session logs) far more fluently than other models — sometimes to
+excess — and turn that mechanism into transferable knowledge/skill for any agent.
+
+**Motivation:** Observation from real traces (2026-07): Fable uses codescout's tracker
+surfaces both *more often* and *more appropriately* than Opus/Sonnet, though occasionally
+to a fault (redundant or over-eager appends). If we can name the underlying mechanism —
+prompt-surface sensitivity, a disposition to externalize working state, reward coupling with
+structured note-taking — we can (a) codify the good behavior as model-agnostic guidance other
+agents can follow, and (b) trim Fable's over-use without losing the instinct. This is the
+mirror image of the `fable-tuning` work stream: there Fable is the *patient* (recover lost
+quality); here Fable is the *positive exemplar* to learn from.
+
+**Approach sketch:**
+
+1. **Corpus** — pull comparable tracker-eligible tasks across models (Fable, Opus, Sonnet)
+   from Langfuse + local JSONL — the same sources the `fable-tuning` stream already mines.
+2. **Compare** — quantify tracker-tool usage per model: call frequency, *appropriateness*
+   (right entry on the right surface), and over-use rate (redundant/excessive appends).
+3. **Mechanism** — form and test hypotheses for the delta; use the fable-tuning
+   subtract-and-measure method (T-11) to isolate which prompt/tool signal drives the behavior.
+4. **Distill** — write the validated pattern as a memory or a skill, phrased model-agnostically
+   so Opus/Sonnet can adopt it; feed the excess-suppression findings back into Fable tuning.
+
+**Related:** `fable-tuning` work stream — trackers `ca8c26fecbbc4f37` (index),
+`35de33286cd34f87` (findings), `ab2170158c7d264e` (research / trace evidence). Distilled
+patterns feed Tool Usage Patterns (`f2ecdd76a6189efb`).
+
+---
 ## Contributor Skills
 
 Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. See [`plans/2026-02-26-contributor-skills-design.md`](plans/2026-02-26-contributor-skills-design.md) for the full design.
