@@ -540,33 +540,25 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::artifact::{self, ArtifactRow};
     use crate::librarian::catalog::Catalog;
-    use crate::librarian::current_project::CurrentProject;
     use crate::librarian::embedding::EmbeddingService;
-    use crate::librarian::workspace::{Root, WorkspaceConfig};
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::WorkspaceConfig;
     use std::sync::Arc;
 
     fn mk_ctx(cat: Catalog) -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "code-explorer".into(),
-                    path: "/tmp/code-explorer".into(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(CurrentProject {
-                abs_path: std::path::PathBuf::from("/test/code-explorer"),
-                git_root: std::path::PathBuf::from("/test/code-explorer"),
-                umbrella: None,
-            })),
-        }
+        TestToolContextBuilder::new(cat)
+            .with_root(crate::librarian::workspace::Root {
+                name: "code-explorer".into(),
+                path: "/tmp/code-explorer".into(),
+            })
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: std::path::PathBuf::from("/test/code-explorer"),
+                    git_root: std::path::PathBuf::from("/test/code-explorer"),
+                    umbrella: None,
+                },
+            ))
+            .build()
     }
 
     fn mk_ctx_with_embedder(cat: Catalog, svc: Arc<EmbeddingService>) -> ToolContext {
@@ -679,35 +671,26 @@ mod tests {
         );
 
         // With umbrella: more_in_workspace hint must appear.
-        let ctx_umbrella = ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(make_cat())),
-            workspace: Arc::new(crate::librarian::workspace::WorkspaceConfig {
-                roots: vec![crate::librarian::workspace::Root {
-                    name: "code-explorer".into(),
-                    path: "/tmp/code-explorer".into(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![crate::librarian::workspace::Umbrella {
-                    name: "main".into(),
-                    members: vec![
-                        std::path::PathBuf::from("/test/code-explorer"),
-                        std::path::PathBuf::from("/test/agents"),
-                    ],
-                }],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(
+        let ctx_umbrella = TestToolContextBuilder::new(make_cat())
+            .with_root(crate::librarian::workspace::Root {
+                name: "code-explorer".into(),
+                path: "/tmp/code-explorer".into(),
+            })
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "main".into(),
+                members: vec![
+                    std::path::PathBuf::from("/test/code-explorer"),
+                    std::path::PathBuf::from("/test/agents"),
+                ],
+            }])
+            .with_current_project(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),
                     git_root: std::path::PathBuf::from("/test/code-explorer"),
                     umbrella: Some("main".into()),
                 },
-            )),
-        };
+            ))
+            .build();
         let v_umbrella = call(&ctx_umbrella, json!({"filter": {"kind": {"eq": "spec"}}}))
             .await
             .unwrap();
@@ -1068,32 +1051,23 @@ mod tests {
     async fn scope_all_allowed_with_umbrella() {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &sample_row("a", "A")).unwrap();
-        let ctx = ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(crate::librarian::workspace::WorkspaceConfig {
-                roots: vec![crate::librarian::workspace::Root {
-                    name: "code-explorer".into(),
-                    path: "/tmp/code-explorer".into(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![crate::librarian::workspace::Umbrella {
-                    name: "main".into(),
-                    members: vec![std::path::PathBuf::from("/test/code-explorer")],
-                }],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(crate::librarian::workspace::Root {
+                name: "code-explorer".into(),
+                path: "/tmp/code-explorer".into(),
+            })
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "main".into(),
+                members: vec![std::path::PathBuf::from("/test/code-explorer")],
+            }])
+            .with_current_project(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),
                     git_root: std::path::PathBuf::from("/test/code-explorer"),
                     umbrella: Some("main".into()),
                 },
-            )),
-        };
+            ))
+            .build();
         let result = call(&ctx, json!({"scope": "all"})).await.unwrap();
         assert_eq!(result["count"].as_u64(), Some(1));
     }

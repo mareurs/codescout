@@ -105,6 +105,7 @@ pub struct ToolContext {
 pub(crate) struct TestToolContextBuilder {
     catalog: Catalog,
     roots: Vec<Root>,
+    umbrellas: Vec<crate::librarian::workspace::Umbrella>,
     embedding: Option<Arc<crate::librarian::embedding::EmbeddingService>>,
     artifact_store: Option<Arc<dyn crate::librarian::artifact_store::ArtifactVectorStore>>,
     current_project: Option<Arc<crate::librarian::current_project::CurrentProject>>,
@@ -116,6 +117,7 @@ impl TestToolContextBuilder {
         Self {
             catalog,
             roots: vec![],
+            umbrellas: vec![],
             embedding: None,
             artifact_store: None,
             current_project: None,
@@ -124,6 +126,14 @@ impl TestToolContextBuilder {
 
     pub(crate) fn with_root(mut self, root: Root) -> Self {
         self.roots.push(root);
+        self
+    }
+
+    pub(crate) fn with_umbrellas(
+        mut self,
+        umbrellas: Vec<crate::librarian::workspace::Umbrella>,
+    ) -> Self {
+        self.umbrellas = umbrellas;
         self
     }
 
@@ -143,7 +153,7 @@ impl TestToolContextBuilder {
                 roots: self.roots,
                 ignore: vec![],
                 rules: vec![],
-                umbrellas: vec![],
+                umbrellas: self.umbrellas,
             }),
             rules: Arc::new(vec![]),
             embedding: self.embedding,

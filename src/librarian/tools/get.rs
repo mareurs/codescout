@@ -508,24 +508,11 @@ mod tests {
     use crate::librarian::catalog::links::{self, LinkRow};
     use crate::librarian::catalog::observations::{self, ObservationRow};
     use crate::librarian::catalog::Catalog;
-    use crate::librarian::workspace::WorkspaceConfig;
+    use crate::librarian::tools::TestToolContextBuilder;
     use std::sync::Arc;
 
     fn mk_ctx(cat: Catalog) -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(cat).build()
     }
 
     fn mk_row(id: &str) -> ArtifactRow {
@@ -655,23 +642,12 @@ mod tests {
                 rusqlite::params![new_prefix],
             )
             .unwrap();
-        let ctx = ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: dir.path().to_path_buf(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        };
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: dir.path().to_path_buf(),
+            })
+            .build();
         (ctx, dir)
     }
 
@@ -1035,24 +1011,13 @@ mod tests {
     /// Helper: context with a real current_project so provenance HEAD resolution works.
     fn mk_ctx_with_project(cat: Catalog, git_root: std::path::PathBuf) -> ToolContext {
         use crate::librarian::current_project::CurrentProject;
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(CurrentProject {
+        TestToolContextBuilder::new(cat)
+            .with_current_project(Arc::new(CurrentProject {
                 abs_path: git_root.clone(),
                 git_root,
                 umbrella: None,
-            })),
-        }
+            }))
+            .build()
     }
 
     #[tokio::test]

@@ -178,28 +178,18 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::current_project::CurrentProject;
-    use crate::librarian::workspace::{Root, WorkspaceConfig};
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::Root;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: tmp_root,
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp_root,
+            })
+            .build()
     }
 
     #[tokio::test]
