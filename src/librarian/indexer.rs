@@ -222,7 +222,14 @@ pub fn index_repo_sync(
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| body.to_string());
-            embed_queue.push((id.clone(), title, first_chunk));
+            // Skip empty/whitespace-only bodies (frontmatter-only or blank
+            // files) — the embedder's own guard bails the WHOLE batch on a
+            // single empty input (see 2026-05-17-reindex-embedding-dim-mismatch.md),
+            // which would otherwise abort an entire bulk reindex/backfill run
+            // over one near-empty file.
+            if !first_chunk.trim().is_empty() {
+                embed_queue.push((id.clone(), title, first_chunk));
+            }
         }
 
         seen_ids.push(id.clone());
@@ -946,6 +953,50 @@ kind = "memory"
             q3.len(),
             1,
             "force_embed must queue unchanged content for re-embedding"
+        );
+    }
+
+    #[test]
+    fn index_repo_sync_skips_empty_body_from_embed_queue() {
+        // BUG (found live during an Azure-embedder bulk backfill): a single
+        // empty/frontmatter-only body aborted the ENTIRE reindex, because
+        // the embedder's own guard bails the whole batch on any empty input.
+        // Empty bodies must never reach the embed queue in the first place.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        // Frontmatter-only, no body content at all.
+        std::fs::write(root.join("docs/specs/empty.md"), "---\ntitle: Empty\n---\n").unwrap();
+        // Body is present but whitespace-only.
+        std::fs::write(
+            root.join("docs/specs/whitespace.md"),
+            "---\ntitle: Whitespace\n---\n   \n\n\t\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("docs/specs/real.md"),
+            "# Real\n\nSome body text.\n",
+        )
+        .unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+
+        let (report, queue) =
+            index_repo_sync(&cat, &rules, root, &ignore, true, false, false).unwrap();
+        assert_eq!(report.added, 3);
+        assert_eq!(
+            queue.len(),
+            1,
+            "only the file with real body content may reach the embed queue, got: {queue:?}"
+        );
+        assert_eq!(
+            queue[0].0,
+            crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/real.md"))
         );
     }
 
