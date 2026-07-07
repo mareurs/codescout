@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -271,6 +271,10 @@ pub fn index_repo_sync(
 /// and that length must match any existing row in `artifact_vec`. A 1-element
 /// vector (the empirical F-6b case — embedder returning an error sentinel)
 /// fails here with a clear message instead of at the SQL layer post-DELETE.
+///
+/// A dimension mismatch against existing rows (e.g. after switching embedding
+/// models) is a loud, safe stop **by default** — see [`rebuild_artifact_vec_at_dim`]
+/// for the explicit, backed-up, opt-in migration path.
 pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
     use rusqlite::OptionalExtension;
 
@@ -314,16 +318,30 @@ pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Res
         // Each f32 takes 4 bytes in the little-endian blob serialization.
         let existing_dim = (blob_len / 4) as usize;
         if batch_dim != existing_dim {
-            anyhow::bail!(
-                "embedding dim mismatch vs catalog: batch={}, existing={}. \
-                 Likely causes: (1) embedder is misconfigured and returns error \
-                 sentinels with wrong dim (the F-6b case — vec.len()=1), (2) the \
-                 configured embedder model changed without a full re-embed pipeline. \
-                 To rebuild with a new model, drop `artifact_vec` rows explicitly \
-                 first; do NOT use `reindex(force=true)` (bug-tracker #6/#7).",
-                batch_dim,
-                existing_dim
+            if std::env::var(ARTIFACT_VEC_MIGRATE_ENV).as_deref() != Ok("1") {
+                anyhow::bail!(
+                    "embedding dim mismatch vs catalog: batch={}, existing={}. \
+                     Likely causes: (1) embedder is misconfigured and returns error \
+                     sentinels with wrong dim (the F-6b case — vec.len()=1), (2) the \
+                     configured embedder model changed without a full re-embed pipeline. \
+                     To rebuild `artifact_vec` for the new model, set \
+                     {ARTIFACT_VEC_MIGRATE_ENV}=1 and retry: this backs up catalog.db, \
+                     then drops + recreates artifact_vec at the new dimension. \
+                     artifact_vec is a SHARED table (one catalog.db per user, not per \
+                     repo) — this destroys existing vectors for EVERY project sharing \
+                     this catalog (artifact metadata/files are untouched; a full \
+                     reindex regenerates them). Do NOT use `reindex(force=true)` alone \
+                     to route around this (bug-tracker #6/#7).",
+                    batch_dim,
+                    existing_dim
+                );
+            }
+            tracing::warn!(
+                "{ARTIFACT_VEC_MIGRATE_ENV}=1: rebuilding artifact_vec {existing_dim}->{batch_dim} \
+                 — this deletes vectors for every project sharing this catalog; each will \
+                 need a full reindex to regenerate them"
             );
+            rebuild_artifact_vec_at_dim(&cat.conn, batch_dim)?;
         }
     }
 
@@ -338,6 +356,65 @@ pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Res
             rusqlite::params![id, blob],
         )?;
     }
+    Ok(())
+}
+
+/// Opt-in gate for [`rebuild_artifact_vec_at_dim`]. Default OFF — a dimension
+/// mismatch is a loud, safe stop by default (see F-6b/F-9 history in
+/// `docs/archive/old-trackers/bug-tracker.md` and
+/// `docs/trackers/archive/artifact-code-linkage-session-log.md`); this env var
+/// is the explicit, backed-up escape hatch for a deliberate embedder-model
+/// change, never a silent auto-heal.
+const ARTIFACT_VEC_MIGRATE_ENV: &str = "LIBRARIAN_ARTIFACT_VEC_MIGRATE";
+
+/// Back up `catalog.db` (if file-backed), then drop + recreate `artifact_vec`
+/// at `new_dim`.
+///
+/// Only called from [`write_embeddings`] when `LIBRARIAN_ARTIFACT_VEC_MIGRATE=1`
+/// is set AND a dimension mismatch was detected — a deliberate, opt-in
+/// migration for "I changed my embedding model", not an automatic silent-heal
+/// path. `artifact_vec` is a shared, cross-project table (one catalog.db per
+/// user, not per-repo), so this affects every project using this catalog —
+/// the caller logs a loud warning either way.
+///
+/// Reuses the exact `DROP`+`CREATE VIRTUAL TABLE ... USING vec0(...)` shape
+/// from `schema.sql`, just with `new_dim` substituted for the column width —
+/// safe to interpolate directly since it is a `usize` computed from an
+/// embedder's own vector length, never user input. `CREATE VIRTUAL TABLE IF
+/// NOT EXISTS` in `schema.sql` no-ops once the table exists, regardless of its
+/// actual column width, so the new dimension survives future `Catalog::open`
+/// calls (no permanent change to `schema.sql`'s public default of `FLOAT[768]`
+/// is needed for this to persist).
+///
+/// Backup mirrors the existing v6-migration `backup_db` pattern: a timestamped
+/// sibling file, `catalog.db.pre-vec-dim-bak.<unix_ts>`. In-memory catalogs
+/// (`conn.path()` empty, i.e. [`Catalog::open_in_memory`]) skip the backup —
+/// there is no file to copy.
+fn rebuild_artifact_vec_at_dim(conn: &rusqlite::Connection, new_dim: usize) -> Result<()> {
+    if let Some(path) = conn.path().filter(|p| !p.is_empty()) {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let db_path = std::path::Path::new(path);
+        let bak = db_path.with_extension(format!("db.pre-vec-dim-bak.{ts}"));
+        std::fs::copy(db_path, &bak).with_context(|| {
+            format!(
+                "backing up catalog before artifact_vec dimension migration: {} -> {}",
+                db_path.display(),
+                bak.display()
+            )
+        })?;
+        tracing::warn!(
+            "artifact_vec dimension migration: backup created at {} before rebuilding at dim={new_dim}",
+            bak.display()
+        );
+    }
+    conn.execute_batch(&format!(
+        "DROP TABLE IF EXISTS artifact_vec; \
+         CREATE VIRTUAL TABLE artifact_vec USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[{new_dim}]);"
+    ))
+    .context("rebuilding artifact_vec at new dimension")?;
     Ok(())
 }
 
@@ -674,6 +751,141 @@ kind = "memory"
             .query_row("SELECT count(*) FROM artifact_vec", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1, "second write must replace, not duplicate");
+    }
+
+    /// RAII guard: save current value of an env var, set new value, restore on
+    /// drop. Mirrors the `EnvGuard` in `src/librarian/mod.rs`/`src/agent/mod.rs`
+    /// — without it, a test mutating `LIBRARIAN_ARTIFACT_VEC_MIGRATE` leaks the
+    /// value into the rest of the process.
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn seed_artifact_row(cat: &Catalog, id: &str) {
+        let now = chrono::Utc::now().timestamp_millis();
+        let row = crate::librarian::catalog::artifact::ArtifactRow {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
+            kind: "spec".into(),
+            status: "draft".into(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: now,
+            updated_at: now,
+            file_mtime: now,
+            file_sha256: "deadbeef".into(),
+            confidence: 1.0,
+        };
+        crate::librarian::catalog::artifact::upsert(cat, &row).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn write_embeddings_dim_mismatch_bails_by_default() {
+        std::env::remove_var(ARTIFACT_VEC_MIGRATE_ENV);
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact_row(&cat, "a");
+        seed_artifact_row(&cat, "b");
+        write_embeddings(&cat, &[("a".into(), vec![0.1f32; 768])]).unwrap();
+
+        let err = write_embeddings(&cat, &[("b".into(), vec![0.2f32; 3072])]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("embedding dim mismatch vs catalog"),
+            "got: {err}"
+        );
+        assert!(
+            err.to_string().contains(ARTIFACT_VEC_MIGRATE_ENV),
+            "error must name the opt-in escape hatch: {err}"
+        );
+
+        // The mismatched write must not have landed.
+        let count: i64 = cat
+            .conn
+            .query_row("SELECT count(*) FROM artifact_vec", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "rejected batch must not be inserted");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn write_embeddings_dim_mismatch_migrates_when_opted_in() {
+        let _guard = EnvGuard::set(ARTIFACT_VEC_MIGRATE_ENV, "1");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact_row(&cat, "a");
+        seed_artifact_row(&cat, "b");
+        write_embeddings(&cat, &[("a".into(), vec![0.1f32; 768])]).unwrap();
+
+        // Opted in: the 3072-dim batch must migrate the table instead of erroring.
+        write_embeddings(&cat, &[("b".into(), vec![0.2f32; 3072])]).unwrap();
+
+        // The old 768-dim row is gone (table was dropped + recreated), only
+        // the new 3072-dim row survives.
+        let count: i64 = cat
+            .conn
+            .query_row("SELECT count(*) FROM artifact_vec", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "table rebuild must drop the old-dim row");
+        let blob_len: i64 = cat
+            .conn
+            .query_row(
+                "SELECT length(embedding) FROM artifact_vec WHERE id = 'b'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(blob_len / 4, 3072, "surviving row must be at the new dim");
+
+        // The new dim is now the catalog's baseline — a second 3072-dim batch
+        // must succeed without further migration.
+        write_embeddings(&cat, &[("a".into(), vec![0.3f32; 3072])]).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn write_embeddings_migration_backs_up_file_backed_catalog() {
+        let _guard = EnvGuard::set(ARTIFACT_VEC_MIGRATE_ENV, "1");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        let cat = Catalog::open(&db_path).unwrap();
+        seed_artifact_row(&cat, "a");
+        seed_artifact_row(&cat, "b");
+        write_embeddings(&cat, &[("a".into(), vec![0.1f32; 768])]).unwrap();
+
+        write_embeddings(&cat, &[("b".into(), vec![0.2f32; 3072])]).unwrap();
+
+        let backups: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("pre-vec-dim-bak"))
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "exactly one backup file must be created before the migration"
+        );
     }
 
     #[test]
