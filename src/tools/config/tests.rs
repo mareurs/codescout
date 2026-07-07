@@ -347,7 +347,9 @@ async fn activate_includes_cwd_hint() {
         hint.starts_with("CWD: "),
         "hint should start with CWD: but was: {hint}"
     );
-    assert!(hint.contains(root.to_str().unwrap()));
+    // Response paths are forward-slash normalized (RepoPath convention); the
+    // raw canonicalized PathBuf renders with native separators on Windows.
+    assert!(hint.contains(&crate::util::fs::to_forward_slash(&root)));
 }
 
 #[tokio::test]
@@ -381,12 +383,14 @@ async fn activate_hint_shows_switched_when_away_from_home() {
         hint.contains("remember to workspace"),
         "hint should warn to switch back: {hint}"
     );
+    // Response paths are forward-slash normalized (RepoPath convention); the
+    // raw canonicalized PathBufs render with native separators on Windows.
     assert!(
-        hint.contains(root2.to_str().unwrap()),
+        hint.contains(&crate::util::fs::to_forward_slash(&root2)),
         "should contain new path: {hint}"
     );
     assert!(
-        hint.contains(root1.to_str().unwrap()),
+        hint.contains(&crate::util::fs::to_forward_slash(&root1)),
         "should contain home path: {hint}"
     );
 }
@@ -426,7 +430,9 @@ async fn activate_hint_shows_returned_when_back_home() {
         .unwrap();
     let hint = result["hint"].as_str().unwrap();
     assert!(hint.contains("Returned to home project"), "hint: {hint}");
-    assert!(hint.contains(root1.to_str().unwrap()));
+    // Response paths are forward-slash normalized (RepoPath convention); the
+    // raw canonicalized PathBuf renders with native separators on Windows.
+    assert!(hint.contains(&crate::util::fs::to_forward_slash(&root1)));
 }
 
 #[tokio::test]
@@ -1348,7 +1354,7 @@ async fn activation_response_emits_legacy_index_when_db_present() {
     );
     assert_eq!(
         legacy["path"].as_str().unwrap(),
-        legacy_db.display().to_string()
+        crate::util::fs::to_forward_slash(&legacy_db)
     );
     assert!(legacy["hint"]
         .as_str()

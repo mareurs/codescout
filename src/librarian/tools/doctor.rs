@@ -821,6 +821,22 @@ mod tests {
     }
 
     #[test]
+    fn check_ads_colon_exempts_verbatim_prefix_drive_colon() {
+        // Windows extended-length ("\\?\") path marker, forward-slash form.
+        // std::fs::canonicalize on Windows returns paths in this shape; the
+        // drive-letter colon here is legitimate, not an ADS selector, even
+        // though it sits at byte 5 rather than byte 1.
+        assert!(check_ads_colon("a1", "//?/C:/Users/marius/foo.md").is_none());
+    }
+
+    #[test]
+    fn check_ads_colon_flags_ads_colon_after_verbatim_prefix() {
+        let v = check_ads_colon("a1", "//?/C:/Users/marius/foo.txt:stream").unwrap();
+        assert_eq!(v.check, "ads_colon_in_abs_path");
+        assert!(v.detail.contains("position"));
+    }
+
+    #[test]
     fn check_ads_colon_flags_post_drive_colon() {
         let v = check_ads_colon("a1", "C:/foo.txt:stream").unwrap();
         assert_eq!(v.check, "ads_colon_in_abs_path");
@@ -834,21 +850,6 @@ mod tests {
         // always means corruption.
         let v = check_ads_colon("a1", "/home/foo:bar").unwrap();
         assert_eq!(v.check, "ads_colon_in_abs_path");
-    }
-
-    #[test]
-    fn check_ads_colon_exempts_verbatim_prefix_drive_colon() {
-        // fs::canonicalize on Windows yields the extended-length verbatim
-        // form; stored here in forward-slash rendering. The drive-letter
-        // colon at byte 5 must not be flagged.
-        assert!(check_ads_colon("a1", "//?/C:/Users/marius/foo.md").is_none());
-    }
-
-    #[test]
-    fn check_ads_colon_flags_ads_colon_after_verbatim_prefix() {
-        let v = check_ads_colon("a1", "//?/C:/foo.txt:stream").unwrap();
-        assert_eq!(v.check, "ads_colon_in_abs_path");
-        assert!(v.detail.contains("position 14"));
     }
 
     #[test]

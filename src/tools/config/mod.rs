@@ -628,7 +628,7 @@ async fn build_activation_response(
         HintScenario::SwitchAway if read_only => {
             let home_str = home_root
                 .as_ref()
-                .map(|p| p.display().to_string())
+                .map(|p| to_forward_slash(p))
                 .unwrap_or_default();
             format!(
                 "Browsing {} (read-only). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
@@ -638,7 +638,7 @@ async fn build_activation_response(
         HintScenario::SwitchAway => {
             let home_str = home_root
                 .as_ref()
-                .map(|p| p.display().to_string())
+                .map(|p| to_forward_slash(p))
                 .unwrap_or_default();
             format!(
                 "Switched project (read-write). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
