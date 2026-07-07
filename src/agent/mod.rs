@@ -14,6 +14,7 @@ use crate::config::project::ProjectConfig;
 use crate::library::registry::LibraryRegistry;
 use crate::memory::semantic_store::SemanticMemoryStore;
 use crate::memory::MemoryStore;
+use crate::util::fs::to_forward_slash;
 use crate::workspace::{discover_projects, DiscoveredProject, Project, ProjectState, Workspace};
 
 /// State of the background index-build task spawned by `index_project`.
@@ -1106,7 +1107,7 @@ impl Agent {
             let db_path = project.root.join(".codescout/embeddings/project.db");
             Some((
                 project.config.project.name.clone(),
-                project.root.display().to_string(),
+                to_forward_slash(&project.root),
                 project.root.clone(),
                 project.config.project.languages.clone(),
                 project.memory.clone(),
@@ -1182,7 +1183,7 @@ impl Agent {
                     .unwrap_or_default();
                 crate::prompts::WorkspaceProjectSummary {
                     id: p.discovered.id.clone(),
-                    root: p.discovered.relative_root.display().to_string(),
+                    root: to_forward_slash(&p.discovered.relative_root),
                     languages: p.discovered.languages.clone(),
                     depends_on,
                 }
