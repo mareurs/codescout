@@ -119,3 +119,18 @@ returned "AST parse failed" is the proof. Datapoint: the 2026-06-04 extractor-co
 (nested types, namespaces/abstract classes, Rust assoc items/macros, TS arrow consts, Go generic
 receivers) — `symbols` showed LSP output for all; `edit_code` on `my_macro` / impl `Output` was
 the real proof.
+
+## `artifact(create, augment={...})` Silently Drops `entry_collection`
+
+The `augment` shortcut on `artifact(action="create")` only accepts `prompt` and `params`
+(per its own input schema) — passing `entry_collection` (or `render_template`, `params_schema`,
+etc.) alongside them inside `augment` is silently ignored, leaving the new artifact's
+augmentation with `entry_collection: null`. Any code that filters on `entry_collection`
+(e.g. `find_matching_rules`/`find_global_rules` in the constitution-tracker feature, which
+skip any tracker whose `entry_collection != "rules"`) will then see the artifact as invisible,
+with no error anywhere in the chain — it looks exactly like "no matching trackers exist."
+Hit twice in one session (2026-07-06) creating throwaway test trackers for the constitution
+archetype's `rules` entry_collection.
+**Fix:** follow `artifact(create, augment={prompt, params})` with a separate
+`artifact_augment(id=..., entry_collection="...", merge=true)` call — `create`'s `augment`
+shortcut only ever gets you `prompt`+`params`; everything else needs the dedicated tool.

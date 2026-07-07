@@ -95,6 +95,37 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
     })
 }
 
+/// Validates glob syntax for every rule's `paths` entries when the write
+/// targets a `rules` entry_collection (the constitution-tracker convention
+/// `find_matching_rules` reads, in `src/librarian/tools/constitution_check.rs`).
+/// JSON Schema can't itself validate glob syntax, so this runs as a sibling
+/// check next to `schema_validate` at every params write site — a malformed
+/// glob must fail loud at authoring time, not silently disable the rule at
+/// query time.
+fn validate_rule_globs(entry_collection: &str, params: &Value) -> Result<()> {
+    if entry_collection != "rules" {
+        return Ok(());
+    }
+    let Some(rules) = params.get("rules").and_then(|v| v.as_array()) else {
+        return Ok(());
+    };
+    for rule in rules {
+        let Some(paths) = rule.get("paths").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for p in paths {
+            let Some(s) = p.as_str() else { continue };
+            if let Err(e) = globset::Glob::new(s) {
+                let rule_id = rule.get("id").and_then(|v| v.as_str()).unwrap_or("<no id>");
+                return Err(RecoverableError::new(format!(
+                    "invalid glob `{s}` in rule `{rule_id}`'s paths: {e}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Merge `patch` into the artifact's stored params and validate the result
 /// against `params_schema` (if any) WITHOUT writing. Returns the serialized
 /// merged params on success, or `None` when the artifact has no augmentation.
@@ -115,6 +146,7 @@ fn merge_params_dry(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<O
             RecoverableError::new(format!("merge_params: patch violates params_schema: {e}"))
         })?;
     }
+    validate_rule_globs(existing.entry_collection.as_deref().unwrap_or(""), &current)?;
     Ok(Some(serde_json::to_string(&current)?))
 }
 
@@ -207,6 +239,7 @@ pub fn append_entry(
             ))
         })?;
     }
+    validate_rule_globs(entry_collection, &params)?;
 
     let new_params_text = serde_json::to_string(&params)?;
     tx.execute(
@@ -755,6 +788,97 @@ mod tests {
         let row = get(&cat, "art1").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert_eq!(params["failures"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn append_entry_rejects_malformed_glob_without_writing() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("rules".to_string());
+        a.params = r#"{"rules":[]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "rules",
+            "C",
+            json!({"paths": ["[invalid"], "rule": "R", "status": "active"}),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("[invalid"),
+            "error should name the offending glob; got: {err}"
+        );
+
+        // Rolled back: still no rules persisted.
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["rules"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn append_entry_accepts_valid_glob() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("rules".to_string());
+        a.params = r#"{"rules":[]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let id = append_entry(
+            &mut cat,
+            "art1",
+            "rules",
+            "C",
+            json!({"paths": ["src/**/*.rs"], "rule": "R", "status": "active"}),
+        )
+        .unwrap();
+        assert_eq!(id, "C-1");
+    }
+
+    #[test]
+    fn append_entry_ignores_glob_check_for_other_collections() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        // "paths" isn't a rules-glob field here — an unrelated collection
+        // must never be glob-validated, valid-looking or not.
+        let id = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({"paths": ["[invalid"], "status": "fail"}),
+        )
+        .unwrap();
+        assert_eq!(id, "F-1");
+    }
+
+    #[test]
+    fn merge_params_rejects_malformed_glob_without_writing() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("rules".to_string());
+        a.params = r#"{"rules":[]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let patch = json!({"rules": [{"id": "C-1", "paths": ["[invalid"], "status": "active"}]});
+        let err = merge_params(&cat, "art1", &patch).unwrap_err();
+        assert!(
+            err.to_string().contains("[invalid"),
+            "error should name the offending glob; got: {err}"
+        );
+
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["rules"].as_array().unwrap().len(), 0);
     }
 
     #[test]

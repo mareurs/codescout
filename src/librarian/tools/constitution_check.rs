@@ -269,6 +269,30 @@ mod tests {
     }
 
     #[test]
+    fn malformed_glob_in_one_rule_does_not_panic_or_match() {
+        // Defense-in-depth: data written before the write-time glob guard
+        // (or any path bypassing it) must still degrade to "no match" here,
+        // not panic — and must not suppress sibling rules with valid globs.
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("c1", vec!["constitution".to_string()])).unwrap();
+        aug_upsert(
+            &cat,
+            &aug(
+                "c1",
+                r#"{"rules":[
+                    {"id":"C-1","paths":["[invalid"],"title":"T1","rule":"R1","status":"active"},
+                    {"id":"C-2","paths":["src/**/*.kt"],"title":"T2","rule":"R2","status":"active"}
+                ]}"#,
+            ),
+        )
+        .unwrap();
+
+        let hits = find_matching_rules(&cat, "src/solver/PinningEngine.kt").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "C-2");
+    }
+
+    #[test]
     fn skips_superseded_rules() {
         let cat = Catalog::open_in_memory().unwrap();
         art_upsert(&cat, &sample_art("c1", vec!["constitution".to_string()])).unwrap();

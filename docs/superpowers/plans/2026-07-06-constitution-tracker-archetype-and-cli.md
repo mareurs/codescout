@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the `constitution` tracker archetype to codescout's archetype library, and a fast, read-only `codescout constitution-check --path <path>` CLI subcommand that a companion-plugin hook (a separate plan, `docs/superpowers/plans/2026-07-06-constitution-tracker-companion-hooks.md`) will shell into for mechanical, path-conditional rule injection.
+**Goal:** Add the `constitution` tracker archetype to codescout's archetype library, and a fast, read-only `codescout constitution-check --path <path>` CLI subcommand that a companion-plugin hook (a separate plan, `docs/plans/2026-07-06-constitution-tracker-hooks.md` in the `codescout-companion` repo) will shell into for mechanical, path-conditional rule injection.
 
 **Architecture:** `constitution` is data-shape-only, like the other 7 archetypes — it doesn't self-enable enforcement. A tracker becomes enforceable by (1) using this archetype's shape (`params.rules` + `entry_collection: "rules"`) and (2) carrying the tag `"constitution"` in its frontmatter `tags` — that tag is how the CLI query finds it, since "archetype" is a design-time template, not a persisted, queryable artifact field. The CLI subcommand queries the catalog directly (bypassing the MCP tool layer's buffering, since it must be fast and synchronous for a hook) and glob-matches each active rule's `paths` against the given path.
 
