@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use crate::lsp::SymbolInfo;
 use crate::tools::RecoverableError;
+use crate::util::fs::to_forward_slash;
 
 use crate::tools::ToolContext;
 
@@ -119,7 +120,7 @@ pub fn symbol_to_json(
     map.insert("kind".into(), json!(format!("{:?}", sym.kind)));
 
     if show_file {
-        map.insert("file".into(), json!(sym.file.display().to_string()));
+        map.insert("file".into(), json!(to_forward_slash(&sym.file)));
     }
 
     if let Some(sig) = &sym.detail {
