@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use super::format::format_overflow;
 use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
+use crate::util::fs::to_forward_slash;
 
 // ── grep ───────────────────────────────────────────────────────
 
@@ -131,9 +132,7 @@ impl Tool for Grep {
                 let n = text.lines().filter(|l| re.is_match(l)).count();
                 if n > 0 {
                     total += n;
-                    *counts
-                        .entry(entry.path().display().to_string())
-                        .or_default() += n;
+                    *counts.entry(to_forward_slash(entry.path())).or_default() += n;
                 }
             }
             let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
@@ -167,7 +166,7 @@ impl Tool for Grep {
                     if re.is_match(line) {
                         total_match_count += 1;
                         matches.push(json!({
-                            "file": entry.path().display().to_string(),
+                            "file": to_forward_slash(entry.path()),
                             "line": i + 1,
                             "content": line
                         }));
@@ -207,7 +206,7 @@ impl Tool for Grep {
                                 let match_lines: Vec<u64> =
                                     blk_matches.iter().map(|&m| (m + 1) as u64).collect();
                                 matches.push(json!({
-                                    "file": entry.path().display().to_string(),
+                                    "file": to_forward_slash(entry.path()),
                                     "match_lines": match_lines,
                                     "start_line": blk_start + 1,
                                     "content": content,
@@ -229,7 +228,7 @@ impl Tool for Grep {
                     let match_lines: Vec<u64> =
                         blk_matches.iter().map(|&m| (m + 1) as u64).collect();
                     matches.push(json!({
-                        "file": entry.path().display().to_string(),
+                        "file": to_forward_slash(entry.path()),
                         "match_lines": match_lines,
                         "start_line": blk_start + 1,
                         "content": content,
