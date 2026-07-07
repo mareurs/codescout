@@ -12,6 +12,7 @@ use crate::fs::{
     get_lsp_client, require_path_param, resolve_read_path_for, retry_on_mux_disconnect,
     tag_external_path, uri_to_path, LspTimer,
 };
+use crate::util::fs::relative_forward_slash;
 
 const HOVER_SKIP_TOKENS: &[&str] = &[
     "pub", "async", "unsafe", "extern", "default", "override", "fn", "struct", "enum", "trait",
@@ -161,10 +162,7 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
         let def_path = uri_to_path(loc.uri.as_str());
         let (file_display, source_tag) = if let Some(ref p) = def_path {
             let tag = tag_external_path(p, &root, &ctx.agent).await;
-            let display = p
-                .strip_prefix(&root)
-                .map(|r| r.display().to_string())
-                .unwrap_or_else(|_| p.display().to_string());
+            let display = relative_forward_slash(p, &root);
             (display, tag)
         } else {
             (loc.uri.as_str().to_string(), "external".to_string())
