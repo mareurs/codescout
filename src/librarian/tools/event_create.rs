@@ -399,32 +399,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::librarian::catalog::artifact::{upsert as art_insert, ArtifactRow};
-    use crate::librarian::tools::ToolContext;
-    use crate::librarian::workspace::WorkspaceConfig;
-    use std::sync::Arc;
+    use crate::librarian::tools::{TestToolContextBuilder, ToolContext};
     use tempfile::TempDir;
 
     pub(crate) fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
         use crate::librarian::workspace::Root;
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(
-                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
-            )),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: tmp_root,
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(crate::librarian::catalog::Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp_root,
+            })
+            .build()
     }
 
     thread_local! {

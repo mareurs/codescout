@@ -364,7 +364,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 mod tests {
     use super::*;
     use crate::librarian::catalog::{artifact::ArtifactRow, Catalog};
-    use crate::librarian::workspace::{Root, WorkspaceConfig};
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::Root;
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -405,23 +406,12 @@ mod tests {
                 rusqlite::params![new_prefix],
             )
             .unwrap();
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: tmp_root,
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp_root,
+            })
+            .build()
     }
 
     #[tokio::test]
@@ -727,29 +717,19 @@ mod tests {
         artifact::upsert(&cat, &in_proj).unwrap();
         artifact::upsert(&cat, &out_proj).unwrap();
 
-        let ctx = ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "claude".into(),
-                    path: root.clone(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "claude".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: proj_dir.clone(),
                     git_root: root.clone(),
                     umbrella: None,
                 },
-            )),
-        };
+            ))
+            .build();
 
         let v = call(&ctx, json!({"topic": "auth"})).await.unwrap();
         let included = v["included_ids"].as_array().unwrap();

@@ -582,30 +582,19 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::{augmentation, Catalog};
     use crate::librarian::current_project::CurrentProject;
-    use crate::librarian::workspace::WorkspaceConfig;
+    use crate::librarian::tools::TestToolContextBuilder;
     use jsonschema::validator_for;
     use std::sync::Arc;
 
     fn mk_ctx() -> ToolContext {
         let cat = Catalog::open_in_memory().unwrap();
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(CurrentProject {
+        TestToolContextBuilder::new(cat)
+            .with_current_project(Arc::new(CurrentProject {
                 abs_path: std::path::PathBuf::from("/test/x/y"),
                 git_root: std::path::PathBuf::from("/test/x"),
                 umbrella: None,
-            })),
-        }
+            }))
+            .build()
     }
 
     #[tokio::test]

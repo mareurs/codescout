@@ -523,30 +523,18 @@ fn gather_config_value(
 mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
-    use crate::librarian::workspace::{Root, WorkspaceConfig};
-    use parking_lot::Mutex;
-    use std::sync::Arc;
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::Root;
     use tempfile::TempDir;
 
     fn mk_ctx(tmp: &TempDir) -> ToolContext {
         let cat = Catalog::open_in_memory().unwrap();
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "repo".into(),
-                    path: tmp.path().to_path_buf(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "repo".into(),
+                path: tmp.path().to_path_buf(),
+            })
+            .build()
     }
 
     #[test]

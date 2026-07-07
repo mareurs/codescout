@@ -98,7 +98,7 @@ mod tests {
 
     use crate::librarian::{
         catalog::{artifact, artifact::ArtifactRow, Catalog},
-        tools::{mv, ToolContext},
+        tools::{mv, TestToolContextBuilder, ToolContext},
         workspace::{Root, WorkspaceConfig},
     };
 
@@ -132,23 +132,12 @@ mod tests {
         )
         .unwrap();
 
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "test-repo".into(),
-                    path: tmp.to_path_buf(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "test-repo".into(),
+                path: tmp.to_path_buf(),
+            })
+            .build()
     }
 
     #[tokio::test]
