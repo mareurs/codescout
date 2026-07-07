@@ -9,9 +9,9 @@ Tool output is capped to keep the model's context window healthy.
 Results exceeding the inline budget are stored in a server-side
 `@tool_*` buffer and a compact summary is returned in their place.
 
-| Constant | Value | Source |
+| Constant | Value | Notes |
 |---|---|---|
-| `MAX_INLINE_TOKENS` | 2,500 tokens (~10 KB) | `src/tools/core/types.rs` |
+| `MAX_INLINE_TOKENS` | 2,500 tokens (~10 KB) | base budget (~4 bytes/token) |
 | `TOOL_OUTPUT_BUFFER_THRESHOLD` | 10,000 bytes | derived: `MAX_INLINE_TOKENS * 4` |
 | `INLINE_BYTE_BUDGET` | 9,000 bytes | derived: 90% of threshold |
 | `COMPACT_SUMMARY_MAX_BYTES` | 2,000 bytes | summary soft cap |
@@ -84,5 +84,4 @@ output against catalog state, prefer reading the buffer directly
 
 ## Related
 
-- Tool authoring patterns: `docs/PROGRESSIVE_DISCOVERABILITY.md`
 - Error routing for inputs that overflow: `get_guide("error-handling")`

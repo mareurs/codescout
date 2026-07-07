@@ -7,10 +7,9 @@ call — including across subagents that share the parent's MCP server.
 ## What `activate_project` does
 
 A single call to `activate_project(path=...)` flips the server's active
-project to the given root. Implementation: `src/tools/config/mod.rs`
-(`ActivateProject` tool). The call has these side effects, in order:
+project to the given root. The call has these side effects, in order:
 
-1. **Clears `ctx.guide_hints_emitted`** — the per-session set tracking
+1. **Clears `guide_hints_emitted`** — the per-session set tracking
    which `get_guide(topic)` topics the model has been hinted about. A
    fresh activation re-triggers first-call hints for the new project.
 2. **Resolves the path.** Bare project IDs (no `/`) inside a workspace
@@ -19,12 +18,10 @@ project to the given root. Implementation: `src/tools/config/mod.rs`
    (`isError: false`, sibling calls survive).
 3. **Prewarms LSP** for the project's languages (background — does not
    block the response).
-4. **Auto-registers dependencies** for cross-project navigation
-   (`crate::library::auto_register::auto_register_deps`).
-5. **Resets `path_note_emitted_since_activation`** on
-   `CodeScoutServer` — so the next non-`run_command` tool response
-   that contains the new root re-emits `[codescout] paths are
-   relative to <root>`.
+4. **Auto-registers dependencies** for cross-project navigation.
+5. **Re-arms the path-relative banner** — so the next
+   non-`run_command` tool response that contains the new root re-emits
+   `[codescout] paths are relative to <root>`.
 
 The response includes `project_hints` (primary language, manifest,
 entry points, build commands) so the model has orientation context
@@ -48,12 +45,12 @@ explicitly restore home or end the session.
 
 Activation clears these per-session sets:
 
-| State | Owner | Behavior |
-|---|---|---|
-| `guide_hints_emitted` | `CodeScoutServer` | Cleared on every activation **and on `workspace(post_compact=true)`** (compaction re-arm); **persisted** per `CLAUDE_CODE_SESSION_ID` (`.codescout/guide_hints/<id>.json`), so it survives `/mcp` restarts within one conversation instead of re-injecting guide bodies the conversation already holds. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a tool with `relevant_guide_topic()` — one shared keyspace, so either path suppresses the other's re-emit. After a clear, the next of either re-emits. |
-| `path_note_emitted_since_activation` | `CodeScoutServer` | Cleared on every activation. Next stripped response re-emits the path-relative banner. |
-| `section_coverage` | `CodeScoutServer` | NOT cleared. Section-read tracking persists across activations. |
-| Output buffers (`@tool_*`, `@cmd_*`) | `OutputBuffer` | NOT cleared. Buffers from before the switch remain readable. |
+| State | Behavior |
+|---|---|
+| `guide_hints_emitted` | Cleared on every activation **and on `workspace(post_compact=true)`** (compaction re-arm); **persisted per session**, so it survives `/mcp` restarts within one conversation instead of re-injecting guide bodies the conversation already holds. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a hint-carrying tool — one shared keyspace, so either path suppresses the other's re-emit. After a clear, the next of either re-emits. |
+| path-relative banner | Cleared on every activation. Next stripped response re-emits it. |
+| section-read tracking | NOT cleared. Persists across activations. |
+| Output buffers (`@tool_*`, `@cmd_*`) | NOT cleared. Buffers from before the switch remain readable. |
 
 ## Path-relative annotation
 
@@ -67,8 +64,7 @@ stripped response since activation carries a trailing note:
 
 Subsequent stripped responses in the same activation window do NOT
 re-emit the note (novelty-gated). `run_command` output is exempt —
-raw shell bytes, stripping would corrupt path literals. See
-`docs/issues/2026-05-28-path-annotation-spam.md` for the rationale.
+raw shell bytes, stripping would corrupt path literals.
 
 ## Cross-project workflow pattern
 
@@ -133,7 +129,7 @@ instead of activating: pass `workspace=<absolute path>` on each tool call.
 - **Switching workspaces inside a subagent without restoration.**
   Parent's next tool call lands in the subagent's workspace. Caller
   has no way to detect this without an extra `workspace(status)` call.
-- **Relying on `guide_hints_emitted` to survive activation or compaction.** (It now *does* survive `/mcp` restarts — persisted per `CLAUDE_CODE_SESSION_ID`.) Every
+- **Relying on `guide_hints_emitted` to survive activation or compaction.** (It now *does* survive `/mcp` restarts — persisted per session.) Every
   `activate_project` resets it. If a hint was useful, capture the
   guide content in the parent's prompt or call `get_guide(topic)`
   again after activation.
@@ -147,8 +143,6 @@ instead of activating: pass `workspace=<absolute path>` on each tool call.
   invalid paths and read-only violations
 - `get_guide("progressive-disclosure")` — `[codescout] paths are
   relative to <root>` mechanics, path stripping, buffer behavior
-- `docs/issues/2026-05-28-path-annotation-spam.md` — full rationale
-  for the novelty-gated path annotation
 - Iron Law 6 in `server_instructions` — subagent dispatch discipline
   (parent must brief subagents about workspace state, among other
   context)

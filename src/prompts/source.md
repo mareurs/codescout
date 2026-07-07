@@ -25,6 +25,7 @@ Subagents inherit these rules. Pass them along.
 - Exact string/regex → grep(pattern, ignore_case, glob, mode="files")
 - Who calls X → references(symbol, path) — NOT grep
 - Structural code edit → edit_code | Text/import edit → edit_file
+- docs/trackers → artifact(find/get), never read_markdown/read_file
 
 ## Workspace gate
 
@@ -36,14 +37,14 @@ workspace=<abs path>, don't activate. Full rules: get_guide("workspace-state").
 
 ## Deeper guidance
 
-Call get_guide(topic) where topic in:
-- "librarian"               — artifact model, filters, trackers, body editing
-- "tracker-conventions"     — frontmatter, archive flow, status
-- "progressive-disclosure"  — output budgets, @ref buffer details
+Before deeper work in an area below, call get_guide(topic) FIRST:
+- "librarian"               — artifacts, filters, trackers
+- "tracker-conventions"     — frontmatter, archive, status
+- "progressive-disclosure"  — output budgets, @ref buffers
 - "error-handling"          — RecoverableError vs anyhow::bail
-- "workspace-state"         — activate_project, home/foreign, ledger reset
-- "iron-laws-detail"        — per-law gate text, exceptions, edge cases
-- "symbol-navigation"       — per-language symbol/ref nav tips
+- "workspace-state"         — activate, home/foreign, reset
+- "iron-laws-detail"        — gate text + exceptions
+- "symbol-navigation"       — per-language nav tips
 <!-- @end -->
 
 <!-- @surface onboarding_prompt -->

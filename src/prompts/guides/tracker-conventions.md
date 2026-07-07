@@ -12,7 +12,7 @@ tracker file by raw path lookup — go through the catalog.
 
 ## Bug files (docs/issues/)
 
-One file per bug, copied from `docs/issues/_TEMPLATE.md`.
+One file per bug.
 
 - **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` while open;
   `docs/issues/archive/` only **after** the fix has shipped to `master`
@@ -134,8 +134,7 @@ artifact(action="get", id="<id>", heading="## Foo")
 **Filterable trackers** — augmented trackers that store structured rows in a params array
 can be queried at entry grain via `entry_filter`. Call `artifact_augment` with
 `entry_collection="<array-key>"` to enable it, then pass `entry_filter={…}` (same AST as
-`filter`) to `artifact(action="get")`. Prose trackers need retrofit first — see
-`docs/conventions/retrofitting-trackers-for-filtering.md`.
+`filter`) to `artifact(action="get")`. Prose trackers need retrofit first.
 
 For deeper artifact / augmentation / event mechanics see
 `get_guide("librarian")`. For how augmented trackers carry cross-session

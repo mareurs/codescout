@@ -79,11 +79,9 @@ The catalog is a single SQLite DB. Its path is resolved at server start:
 
 - **Default:** `dirs::data_local_dir()/librarian/catalog.db` — on Linux
   `~/.local/share/librarian/catalog.db` (falls back to
-  `/tmp/librarian/catalog.db` if no data dir). Source:
-  `src/librarian/mod.rs` (`db_path` resolution).
+  `/tmp/librarian/catalog.db` if no data dir).
 - **Override:** set the `LIBRARIAN_DB` env var to point elsewhere
-  (the test suite does this per-test for isolation; see
-  `docs/conventions/test-env-isolation.md`).
+  (the test suite does this per-test for isolation).
 
 **The DB is machine-local and git-ignored — it is *not* in the repo and
 *not* shared with teammates.** A teammate who clones the project gets the

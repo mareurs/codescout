@@ -12,8 +12,7 @@ file overview, `symbols(name=..., include_body=true)` for one body,
 `symbols(query="...")` to search across the project. But `symbols` is a
 *definition projection*: it does NOT return imports / `use` / `package`,
 module re-exports (`mod.rs`, barrel `index.ts`), macro-generated code,
-annotations, or constructs the AST-extractor drops (see the `2026-06-04`
-extractor-gap bugs). For those, a **line-range `read_file` is the correct
+annotations, or constructs the AST-extractor drops. For those, a **line-range `read_file` is the correct
 tool, not a fallback** — and they are common, not rare.
 
 **Gate is overlap-based, not absolute.** The gate fires when a `read_file`
@@ -37,10 +36,7 @@ source file — it just returns the `symbols` outline anyway. Call
 lines, doc comments, kind metadata) via LSP + tree-sitter, and caches;
 `read_file` returns text. For *definitions*, prefer `symbols`. For *what the
 AST does not model* — imports, glue, macro output, exact bytes — a line-range
-`read_file` is the only tool that returns the answer. Empirical basis: across
-4 projects, 82–94% of source reads are line-slices (Pika `U-27`); a slice-only
-A/B measured routing accuracy on import/glue/macro/exact-byte intents at 90%
-under this rule vs 30% under "never read_file source" (audit-log `A-1`).
+`read_file` is the only tool that returns the answer.
 ## Iron Law 2: structural code edits → `edit_code`
 
 **Rule:** never `edit_file` for changes that touch a symbol
@@ -162,13 +158,11 @@ whose first tool call is `get_guide(topic)` for a topic obviously
 needed by its task indicates the parent underbriefed.
 
 **Substrate fact this compensates for:** the `guide_hints_emitted`
-ledger is process-wide — now persisted per `CLAUDE_CODE_SESSION_ID` so it
-survives `/mcp` restarts (`CodeScoutServer.guide_hints_emitted`,
-shared via `Arc` clone in every per-request `ToolContext`). Once
-the parent triggers a topic hint, NO subagent receives that hint
-independently — the ledger says "already delivered." Iron Law 6
-is the only channel that delivers parent-known context to
-subagents.
+ledger is process-wide and shared across the parent and its subagents,
+persisted per session so it survives `/mcp` restarts. Once the parent
+triggers a topic hint, NO subagent receives that hint independently — the
+ledger says "already delivered." Iron Law 6 is the only channel that
+delivers parent-known context to subagents.
 
 **Recursion:** applies at every spawn boundary. Grandparent →
 parent → child each pass context downward; intermediate agents do
@@ -185,8 +179,7 @@ not relay automatically.
 - Avoid context dumps. "Everything I know" wastes the subagent's
   budget; "what the subagent needs to act on this task" is the bar.
 - **State which get_guide topics you've already triggered this
-  session** (F-6 in `docs/trackers/prompt-guide-refactor-session-log.md`).
-  The `guide_hints_emitted` ledger is shared parent↔subagent — so once
+  session.** The `guide_hints_emitted` ledger is shared parent↔subagent — so once
   you trigger a topic, the subagent will NOT receive its V2 auto-inject
   independently. Telling the subagent "I've triggered: [librarian,
   progressive-disclosure]" lets it predict its own injection behavior
@@ -200,5 +193,3 @@ not relay automatically.
   buffer queries (referenced from Iron Law 3)
 - `get_guide("error-handling")` — `RecoverableError` vs
   `anyhow::bail` (the routing rule behind gate errors)
-- `docs/PROGRESSIVE_DISCOVERABILITY.md` — tool authoring patterns
-  that produce gates and overflow envelopes

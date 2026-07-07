@@ -141,6 +141,7 @@ This measurement must precede the V2 decision.
 | F-8 | 2026-05-31 | high | 2kb-cap | fixed-verified | Concurrent Phase-5 commit (b13c8c66) pushed slice to 2272 B (over cap) + left snapshot stale; re-scout caught before bless/commit |
 | F-9 | 2026-06-03 | low | get-guide-topic | open | Tool-name drift guard scans 3 surfaces only — `get_guide` body files (`prompts/guides/*.md`) are ungated |
 | F-10 | 2026-06-21 | med | tool-name-gate | mitigated | Module-level `const` used only in `#[cfg(test)]` breaks `clippy -D warnings` (dead_code) |
+| F-11 | 2026-07-07 | high | surfacing | fixed-verified | librarian.md's load-bearing tracker-access rule rode the auto-inject (fires post-first-artifact-call) — too late. FIXED: direct 1-line rule + meta-rule added to server_instructions; production A/B 2/10→9/10 |
 
 ## Wins Index
 
@@ -154,6 +155,8 @@ This measurement must precede the V2 decision.
 | W-6 | 2026-06-03 | med | Pre-draft scout of which gates apply to a specific prompt-surface | Avoided a fabricated guide byte-cap rationale + skipped manual tool-name verification (stale name would ship unguarded) | validated |
 | W-7 | 2026-06-03 | med-high | Tier guide content by point-of-use frequency (split librarian core vs on-demand runtime) | Every artifact-session carried ~6 KB rarely-needed reference on the auto-inject; split → −31% per-session, runtime now inline-fetch | validated |
 | W-8 | 2026-06-21 | med | Pre-edit scout: confirm a markdown file is/ isn't `include_str!`'d before cutting it | CLAUDE.md cuts could have tripped a byte-cap/snapshot invariant if compiled in; module-level shared const would have broken `clippy -D warnings` | validated |
+| W-9 | 2026-07-07 | high | Eval guide rules by delivery×content (upfront/slim/absent × system-prompt/auto-inject), --ablate control | Inspection would have kept the augmentation prose (decoration; ablate NO POWER) and missed that the load-bearing tracker-access rule is mis-surfaced (production auto-inject FAIL vs upfront 10/10) | validated |
+| W-10 | 2026-07-07 | high | Belt-and-suspenders surfacing fix (server_instructions meta-rule + direct rule + auto-inject fallback), validated via production-channel A/B | Old server_instructions delivered tracker-access ~2/10; new (rebuilt binary, MCP-init delivery) = 9/10. Without the production A/B the fix would have shipped on a system-prompt proxy, unverified in its real channel | validated |
 
 ---
 
@@ -677,6 +680,50 @@ Symptoms:
 **Status:** validated — single datapoint; both risks resolved against source before any edit.
 
 ---
+## F-11 — librarian.md's load-bearing tracker-access rule is delivered too late (auto-inject fires post-first-artifact-call)
+
+**Observed:** 2026-07-07, behavioral eval of the get_guide bodies (prompt-tdd `anthropic-mcp`, sonnet, subscription, N=10, trace-bound).
+
+**Expected:** the librarian guide's "never raw-read `docs/trackers/`; use `artifact(find)`" rule steers the model to the catalog.
+
+**Got:** the rule IS load-bearing (upfront delivery 10/10 use `artifact`; absent RED, raw-reads). But in PRODUCTION it rides the V2 auto-inject, which appends the guide body only on the FIRST `artifact` call. Without an upfront rule the model raw-reads via native `Read` FIRST — traces: 8/10 never call `artifact` (auto-inject never fires), 2/10 fire it uselessly late. Production arm (codescout-A, guide via auto-inject only): **FAIL** vs upfront **10/10**. The load-bearing rule never reaches the decision it governs.
+
+**Severity:** high — the highest-leverage guide (`librarian.md` is hard-injected on first `artifact` call) has its most important rule delivered by a mechanism that fires too late to work.
+
+**Status:** fixed-verified. **Fix idea:** promote the one-line tracker-access rule (arm-slim: 10/10 upfront) to `server_instructions` (delivered upfront every session) — discoverability fix, not content. Converges with audit-log A-10 ("invest in the trigger that fetches guidance, not re-injection") and pairs with F-3 (soft-hint ~1.3% compliance — same "guidance doesn't reach the model in time" family). Eval: `../prompt-engineering/scenarios/librarian-guide/` (arm-prod).
+
+## W-9 — Delivery×content eval drew the keep/cut line inspection could not
+
+**Observed:** 2026-07-07, refactoring the 9 get_guide bodies.
+
+**Pattern:** For each load-bearing candidate rule, run a behavioral A/B across two axes — CONTENT (full / slim / absent) × DELIVERY (upfront system-prompt / production auto-inject) — with `--ablate` as the power control; N=10, `pass_threshold=1.0`, traces bound.
+
+**Counterfactual:** Inspection alone would have (a) KEPT the augmentation prose (it reads useful) — but ablate NO POWER proved it decoration (tool descriptions + `librarian_guard` carry the behavior; cut/merged it); and (b) treated the tracker-access rule as a plain "keep" — missing it is load-bearing YET mis-surfaced (→ F-11). The eval turned "compact the guides" into a discoverability finding + a proven-safe merge + a validated 1-line compaction floor.
+
+**Impact:** high — prevented both over-cutting (a load-bearing rule) and under-cutting (proven decoration), and surfaced a production delivery bug the audit could not see.
+
+**Confirming data points:** tracker-access: upfront-full 10/10 · upfront-slim 10/10 · production-auto-inject FAIL · absent RED. augmentation-edit: guide-present 10/10 · ablate NO POWER.
+
+**Promote-when:** a second guide/rule where delivery-vs-content changes the verdict → promote "eval guide rules by delivery×content" to the prompt-craft/reconnaissance playbook.
+
+**Status:** validated.
+
+## W-10 — Production-channel A/B validated the surfacing fix (2/10 → 9/10)
+
+**Observed:** 2026-07-07, shipping the F-11 fix into `server_instructions`.
+
+**Pattern:** Don't validate a prompt-surface fix on a system-prompt proxy — grade it in its REAL delivery channel. Rebuilt the codescout binary with the new `server_instructions`, delivered it via MCP-init (production), and A/B'd against the old binary in the same channel. Fix = direct 1-line tracker rule (quickref) + meta-rule ("call get_guide(topic) FIRST before deeper work", folded into Deeper guidance) + auto-inject retained as ledger-deduped fallback ("belt-and-suspenders": three independent layers).
+
+**Counterfactual:** arm-slim/arm-meta proved the rule works delivered as a *system prompt* (10/10, 9/10). Shipping on that alone would have been `cap-forces-untested-wording-retest`'s trap — the wording that ships (embedded in the full server_instructions, delivered by MCP-init) is a different artifact. The production A/B caught the real number: old server_instructions ~2/10, new 9/10. Same channel, content-only delta.
+
+**Confirming data points:** arm-prod (old, MCP-init) ~2/10 · arm-final (new, MCP-init) 9/10 · arm-slim (direct, system-prompt) 10/10 · arm-meta (meta-rule, system-prompt) 9/10 · generality (progressive-disclosure) 8/10 fetched right guide. All N=10, sonnet, subscription, trace-bound. Note: eval env is plugin-free (no companion deny) = worst case; production adds the companion hard-deny as a 3rd layer.
+
+**Eval-craft:** `behavior-eval-bind` fired 3× — meta/final/generality each reported aggregate "FAIL" at pass_threshold=1.0 that binding revealed as 9/10, 9/10, 8/10. Never trust the aggregate over the bound traces.
+
+**Promote-when:** a 2nd prompt-surface fix where system-prompt-proxy and real-channel results diverge → promote "grade in the real delivery channel" to the eval playbook.
+
+**Status:** validated.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

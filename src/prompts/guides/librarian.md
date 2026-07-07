@@ -87,8 +87,7 @@ named by the augmentation's `entry_collection` field instead of querying the SQL
 every entry yields a `filter_warnings.unknown_fields` list in the response — the in-memory
 engine has no field allowlist (unlike the SQL side, which errors on unknown columns), so an
 empty result there may be a field-name typo, not a true zero-match. Only augmented trackers that
-declare an `entry_collection` support this; prose trackers need retrofit first — see
-`docs/conventions/retrofitting-trackers-for-filtering.md`.
+declare an `entry_collection` support this; prose trackers need retrofit first.
 
 ---
 
@@ -121,25 +120,12 @@ get_guide("tracker-conventions"). This guide covers only the artifact-level
 mechanics that apply to all kinds.
 ### Reach for augmentation — don't hand-maintain the table
 
-A tracker with repeating structured rows — defect tables, experiment logs,
-audit signals, `F-N`/`W-N` session logs — is an **augmented artifact**, not a
-markdown table to edit by hand. It has two faces:
-
-- **On-demand skill.** Augment once with a `params` array + an
-  `entry_collection` pointer + a `render_template`:
-  `artifact_augment(id, params={rows:[…]}, render_template="…", entry_collection="rows")`.
-  Add a later row with `artifact_augment(merge=true, params={…})` — **not**
-  `edit_markdown` on the rendered table. The attached `prompt` travels with the
-  artifact and tells the next agent how to maintain it.
-- **Time-aware log.** Filter rows with
-  `artifact(action="get", entry_filter={…})`; replay history with
-  `artifact(action="state_at")` / `librarian(action="workspace_state_at")` and
-  `artifact_event(action="list")`.
-
-Retrofit a prose tracker via
-`docs/conventions/retrofitting-trackers-for-filtering.md`. The full model and
-the when-NOT-to-augment cases live in
-`docs/architecture/augmented-artifacts.md`.
+A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
+**augmented artifact**: attach a `params` array + `render_template` (+ optional
+`entry_collection`) once via `artifact_augment`, then add rows with
+`artifact_augment(merge=true)` and filter them with
+`artifact(action="get", entry_filter={…})`. Merge semantics + the full-array rule
+are in *Augmentation Lifecycle* below.
 ## Augmentation Lifecycle
 
 Augmentation attaches a persistent prompt to any artifact.

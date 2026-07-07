@@ -40,10 +40,9 @@ The MCP response has an `isError` field.
 - `isError: false` → recoverable; read the message + guidance field
   (`hint` / `warning` / `must_follow`) and adapt the next call.
 
-For tool authors: return `RecoverableError::new(message)` (chainable
-with `.with_hint(...)`, `.with_warning(...)`, `.with_must_follow(...)`,
-`.with_extra(key, value)`) when the failure is the model's fault — bad
-input it can self-correct. Return `anyhow::bail!` when it's not.
-
-See `src/tools/core/types.rs` for the type definition and
-`src/tools/mod.rs::route_tool_error` for the serialisation path.
+For tool authors: return `RecoverableError::new(message)` — or the
+`RecoverableError::with_hint(message, hint)` / `with_warning` /
+`with_must_follow` constructors to attach severity-tagged guidance, then
+chain `.with_extra(key, value)` for structured fields — when the failure
+is the model's fault, bad input it can self-correct. Return
+`anyhow::bail!` when it isn't.
