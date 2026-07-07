@@ -263,29 +263,20 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::classify::load_rules;
-    use crate::librarian::workspace::{Root, WorkspaceConfig};
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::Root;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     fn mk_ctx(tmp_root: std::path::PathBuf, rules_toml: &str) -> ToolContext {
         let rules = load_rules(rules_toml).unwrap();
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: tmp_root,
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(rules),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp_root,
+            })
+            .with_rules(rules)
+            .build()
     }
 
     #[tokio::test]
@@ -360,34 +351,25 @@ mod tests {
     }
 
     fn mk_ctx_with_project(tmp_root: std::path::PathBuf, project_subdir: &str) -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: tmp_root.clone(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: tmp_root.clone(),
+            })
+            .with_rules(
                 crate::librarian::classify::load_rules(
                     "[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
                 )
                 .unwrap(),
-            ),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(
+            )
+            .with_current_project(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: tmp_root.join(project_subdir),
                     git_root: tmp_root.clone(),
                     umbrella: None,
                 },
-            )),
-        }
+            ))
+            .build()
     }
 
     #[tokio::test]
@@ -532,23 +514,13 @@ mod tests {
 
         // Build a ToolContext pointing at this repo as "r1"
         let rules = crate::librarian::classify::load_rules("").unwrap();
-        let ctx = ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r1".into(),
-                    path: repo_path.clone(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(rules),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        };
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r1".into(),
+                path: repo_path.clone(),
+            })
+            .with_rules(rules)
+            .build();
 
         // Run reindex — this should backfill the commits table
         call(&ctx, json!({})).await.unwrap();

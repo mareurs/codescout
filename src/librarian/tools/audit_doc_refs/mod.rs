@@ -671,32 +671,23 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::current_project::CurrentProject;
-    use crate::librarian::workspace::{Root, WorkspaceConfig};
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::Root;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     fn mk_smoke_ctx(root: std::path::PathBuf) -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: root.clone(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(CurrentProject {
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
                 abs_path: root.clone(),
                 git_root: root,
                 umbrella: None,
-            })),
-        }
+            }))
+            .build()
     }
 
     #[tokio::test(flavor = "multi_thread")]
