@@ -65,6 +65,16 @@ is the only one worth chasing as a real defect. This bug stays **open** for
 those 12.
 ## Resolution — `validate_prune_request_gates` (2026-07-05)
 
+## Resolution — `cfg_attr(dead_code)` follow-up (2026-07-07)
+
+**The last open item: closed.** `strip_deleted_suffix`, `stable_codescout_binary`, `resolve_mux_binary` in `src/lsp/manager.rs` are gated `#[cfg(unix)]` (matching every sibling mux-only helper already in that file), and `strip_deleted_suffix_recovers_rebuilt_path` gated to match. Their only caller (`get_or_start_via_mux`) was already `#[cfg(unix)]`; on windows-gnu they had zero callers and warned as dead code.
+
+**Verified against the real supported configs** (an initial ad hoc `--no-default-features` check with zero features re-added surfaced two unrelated warnings in `server.rs` — `os_random_auth_token`/`ct_eq` — that turned out to be a feature-flag artifact of that wrong invocation disabling the `http` feature entirely, not a real bug; re-verified clean against the actual configs below):
+- `cargo build --target x86_64-pc-windows-gnu` (default features): 0 warnings.
+- `cargo check --target x86_64-pc-windows-gnu --no-default-features --features "remote-embed,http,librarian,local-embed-dynamic"` (the `--edr` config `scripts/build-windows.sh` uses, matching the VDI's deployed shape): 0 warnings.
+- `scripts/build-windows.sh test lsp::manager` under wine: 28 passed / 0 failed / 1 ignored.
+- Native `cargo test --lib`: 2952 passed / 0 failed / 6 ignored, clippy clean.
+
 **The one real cross-platform defect: FIXED and un-skipped.** Unlike the other 11
 residual failures, this test also failed on real Windows MSVC — a genuine bug, but in
 the **test**, not `validate_prune_request` (whose `is_absolute()`→`exists()` logic is

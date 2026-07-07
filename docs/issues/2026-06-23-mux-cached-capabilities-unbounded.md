@@ -1,16 +1,21 @@
 ---
+id: null
+kind: bug
 status: fixed
-opened: 2026-06-23
-closed: 2026-07-05
-severity: low
+title: null
+owners: []
+tags:
+- mux
+- lsp
+- memory
+- unbounded-growth
+topic: null
+time_scope: null
+closed: '2026-07-05'
+opened: '2026-06-23'
 owner: marius
 related: []
-tags:
-  - mux
-  - lsp
-  - memory
-  - unbounded-growth
-kind: bug
+severity: low
 ---
 
 # BUG: mux `MuxState.cached_capabilities` grows unbounded (pushed per `client/registerCapability`, never cleared or capped)
