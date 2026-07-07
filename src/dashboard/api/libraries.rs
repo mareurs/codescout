@@ -1,5 +1,6 @@
 use super::super::routes::DashboardState;
 use crate::library::registry::LibraryRegistry;
+use crate::util::fs::to_forward_slash;
 use axum::extract::State;
 use axum::Json;
 use serde_json::{json, Value};
@@ -14,7 +15,7 @@ pub async fn get_libraries(State(state): State<DashboardState>) -> Json<Value> {
         .map(|e| {
             json!({
                 "name": e.name,
-                "path": e.path.display().to_string(),
+                "path": to_forward_slash(&e.path),
                 "language": e.language,
                 "indexed": e.indexed,
                 "version": e.version,

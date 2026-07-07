@@ -1,5 +1,6 @@
 use super::super::routes::DashboardState;
 use crate::config::project::ProjectConfig;
+use crate::util::fs::to_forward_slash;
 use axum::extract::State;
 use axum::Json;
 use serde_json::{json, Value};
@@ -18,7 +19,7 @@ pub async fn get_project_info(State(state): State<DashboardState>) -> Json<Value
 
     Json(json!({
         "name": name,
-        "root": root.display().to_string(),
+        "root": to_forward_slash(root),
         "languages": languages,
         "git_branch": git_branch,
         "git_dirty": git_dirty,
