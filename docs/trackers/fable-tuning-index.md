@@ -43,9 +43,7 @@ Query examples:
 
 **Work-stream reframe:** with the fallback mechanism dead locally and the CLAUDE.md diet shipped+measured, the remaining lever is FND-8/FND-9 (Fable defaults + over-prescriptive prompts).
 
-**Resume here — next open (`high`):**
-- **T-11** — codify the subtract-and-measure protocol (now has a worked example: A-14's base-arm-first + pre-registered ceiling branch; the `fable-tidying` suite is the template).
-- (T-7 done: foot-gun audit CLEAN → A-13/FND-15. T-2 done: closed NOT-INDICATED → A-14/FND-16 — base arm 10/10 surgical on fable, snippet not shipped; T-3..T-6 priors weakened, base-arm-first noted on each.)
+**Resume here:** the high-priority backlog is EMPTY — 9/12 tasks resolved (T-1/2/7/8/9/11 done, T-12 dropped). T-11 closed the saga's methodology goal: protocol P-1..P-8 lives in prompt-hamsa-audit-log § Protocol (+ pointer in `src/prompts/README.md` § Measure before shipping). Remaining open are opportunistic: T-3..T-6 (medium, priors weakened by FND-16 — base-arm-first per P-3, T-6 the most likely to escape ceiling via multi-turn) and T-10 (low, cc.py --config-dir). New prompt-change work should enter via the protocol, not this tracker.
 
 **Open threads:** T-10 (cc.py `--config-dir`) still open; fable tracker updates uncommitted on codescout `experiments` (llm-proxy work is committed as `678778c`).
 ## History

@@ -4,3 +4,7 @@
 [[anchors]]
 path = "CLAUDE.md"
 hash = "a20bcd127a18fca84c503ef364dde53be7a152a01df1800cfd5c968ae877dfd7"
+
+[[anchors]]
+path = "src/prompts/README.md"
+hash = "8b81125e68a865a61c6762a2cd744952adf7c87a9f8ce41800ebcaa1f8f2208c"
