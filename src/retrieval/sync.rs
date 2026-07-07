@@ -2,6 +2,8 @@ use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+use crate::util::fs::to_forward_slash;
+
 #[derive(Debug, Clone, Default)]
 pub struct SyncOpts {
     pub languages: Option<Vec<String>>,
@@ -136,7 +138,7 @@ async fn stream_index(
             }
             pending.push(CodePayload {
                 project_id: project_id.into(),
-                file_path: rel_path.display().to_string(),
+                file_path: to_forward_slash(rel_path),
                 language: lang.into(),
                 start_line: c.start_line as i64,
                 end_line: c.end_line as i64,
