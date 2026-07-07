@@ -11,6 +11,7 @@ use super::format::format_overflow;
 use super::{
     optional_u64_param, parse_bool_param, OutputForm, RecoverableError, Tool, ToolContext,
 };
+use crate::util::fs::to_forward_slash;
 
 // ── tree ────────────────────────────────────────────────────────────────────
 
@@ -224,7 +225,7 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
             .strip_prefix(&search_path)
             .unwrap_or(entry.path());
         if glob.is_match(rel) {
-            matches.push(entry.path().display().to_string());
+            matches.push(to_forward_slash(entry.path()));
             if matches.len() >= max {
                 hit_cap = true;
                 break;

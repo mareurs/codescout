@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::{OutputForm, Tool, ToolContext};
+use crate::util::fs::to_forward_slash;
 
 pub struct ListLibraries;
 
@@ -43,7 +44,7 @@ impl Tool for ListLibraries {
                             "version": entry.version,
                             "version_indexed": entry.version_indexed,
                             "stale": stale,
-                            "path": entry.path.display().to_string(),
+                            "path": to_forward_slash(&entry.path),
                             "language": entry.language,
                             "discovered_via": entry.discovered_via,
                             "indexed": entry.indexed,
