@@ -148,4 +148,3 @@ aren't covered by a failing test; consider migrating them to
 - `docs/trackers/bug-fix-session-log.md` (`2dd9d90bc83f9f49`) F-27 — records
   that a prior session's claim to have already logged this bug (and a
   second, memory-tool bug) did not actually land anywhere in the repo.
-
