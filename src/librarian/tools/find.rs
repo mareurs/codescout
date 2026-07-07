@@ -538,7 +538,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{self, ArtifactRow};
+    use crate::librarian::catalog::artifact::{self, ArtifactRow, TestArtifactRowBuilder};
     use crate::librarian::catalog::Catalog;
     use crate::librarian::embedding::EmbeddingService;
     use crate::librarian::tools::TestToolContextBuilder;
@@ -584,23 +584,11 @@ mod tests {
     }
 
     fn sample_row(id: &str, title: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
-            kind: "spec".into(),
-            status: "active".into(),
-            title: Some(title.into()),
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 1,
-            file_mtime: 0,
-            file_sha256: String::new(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_abs_path(format!("/test/code-explorer/{id}.md"))
+            .with_title(title)
+            .with_updated_at(1)
+            .build()
     }
 
     #[tokio::test]
@@ -855,23 +843,11 @@ mod tests {
         use crate::librarian::catalog::artifact::{upsert, ArtifactRow};
         let cat = Catalog::open_in_memory().unwrap();
         fn row(id: &str, kind: &str) -> ArtifactRow {
-            ArtifactRow {
-                id: id.into(),
-                abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
-                kind: kind.into(),
-                status: "active".into(),
-                title: Some(id.into()),
-                owners: vec![],
-                tags: vec![],
-                topic: None,
-                time_scope: None,
-                source: None,
-                created_at: 0,
-                updated_at: 0,
-                file_mtime: 0,
-                file_sha256: "".into(),
-                confidence: 1.0,
-            }
+            TestArtifactRowBuilder::new(id)
+                .with_abs_path(format!("/test/code-explorer/{id}.md"))
+                .with_kind(kind)
+                .with_title(id)
+                .build()
         }
         upsert(&cat, &row("spec-1", "spec")).unwrap();
         upsert(&cat, &row("plan-1", "plan")).unwrap();
@@ -887,23 +863,12 @@ mod tests {
         use crate::librarian::catalog::artifact::{upsert, ArtifactRow};
         let cat = Catalog::open_in_memory().unwrap();
         fn row(id: &str, kind: &str, status: &str) -> ArtifactRow {
-            ArtifactRow {
-                id: id.into(),
-                abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
-                kind: kind.into(),
-                status: status.into(),
-                title: Some(id.into()),
-                owners: vec![],
-                tags: vec![],
-                topic: None,
-                time_scope: None,
-                source: None,
-                created_at: 0,
-                updated_at: 0,
-                file_mtime: 0,
-                file_sha256: "".into(),
-                confidence: 1.0,
-            }
+            TestArtifactRowBuilder::new(id)
+                .with_abs_path(format!("/test/code-explorer/{id}.md"))
+                .with_kind(kind)
+                .with_status(status)
+                .with_title(id)
+                .build()
         }
         upsert(&cat, &row("spec-active", "spec", "active")).unwrap();
         upsert(&cat, &row("spec-draft", "spec", "draft")).unwrap();
@@ -929,23 +894,11 @@ mod tests {
         use crate::librarian::catalog::artifact::{upsert, ArtifactRow};
         let cat = Catalog::open_in_memory().unwrap();
         fn row(id: &str, status: &str) -> ArtifactRow {
-            ArtifactRow {
-                id: id.into(),
-                abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
-                kind: "spec".into(),
-                status: status.into(),
-                title: Some(id.into()),
-                owners: vec![],
-                tags: vec![],
-                topic: None,
-                time_scope: None,
-                source: None,
-                created_at: 0,
-                updated_at: 0,
-                file_mtime: 0,
-                file_sha256: "".into(),
-                confidence: 1.0,
-            }
+            TestArtifactRowBuilder::new(id)
+                .with_abs_path(format!("/test/code-explorer/{id}.md"))
+                .with_status(status)
+                .with_title(id)
+                .build()
         }
         upsert(&cat, &row("a", "active")).unwrap();
         upsert(&cat, &row("d", "draft")).unwrap();

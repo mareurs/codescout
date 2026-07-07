@@ -504,7 +504,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{self, ArtifactRow};
+    use crate::librarian::catalog::artifact::{self, ArtifactRow, TestArtifactRowBuilder};
     use crate::librarian::catalog::links::{self, LinkRow};
     use crate::librarian::catalog::observations::{self, ObservationRow};
     use crate::librarian::catalog::Catalog;
@@ -516,23 +516,10 @@ mod tests {
     }
 
     fn mk_row(id: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
-            kind: "spec".into(),
-            status: "active".into(),
-            title: Some(id.to_uppercase()),
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 1,
-            file_mtime: 0,
-            file_sha256: "".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_title(id.to_uppercase())
+            .with_updated_at(1)
+            .build()
     }
 
     #[tokio::test]

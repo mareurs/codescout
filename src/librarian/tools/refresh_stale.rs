@@ -98,27 +98,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use crate::librarian::catalog::artifact::ArtifactRow;
+    use crate::librarian::catalog::artifact::{ArtifactRow, TestArtifactRowBuilder};
     use crate::librarian::catalog::{artifact, augmentation, Catalog};
 
     fn sample_art(id: &str, repo: &str, rel_path: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/{repo}/{rel_path}")),
-            kind: "tracker".into(),
-            status: "active".into(),
-            title: Some(format!("Tracker {id}")),
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: "abc".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_abs_path(format!("/{repo}/{rel_path}"))
+            .with_kind("tracker")
+            .with_title(format!("Tracker {id}"))
+            .with_file_sha256("abc")
+            .build()
     }
 
     fn aug_row(

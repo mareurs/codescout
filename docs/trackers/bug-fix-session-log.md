@@ -102,6 +102,7 @@ time_scope: open-ended
 | W-19 | 2026-07-05 | med | Pre-fix recon on `context(anchor_id)` starvation bug found `max_tokens_caps_inclusion` encodes "always include first" as deliberate design for topic-search mode, not a bug | A fix removing the `!markdown.is_empty()` packing guard globally would have broken that test's `assert_eq!(ids.len(), 1, ...)`; correct fix scopes the anchor's size cap to anchor-mode only | validated |
 | W-20 | 2026-07-05 | high | Didn't accept a "triage the findings" task at face value — empirically bisected a surprising self-cite failure down to root cause instead of writing it off as expected noise | Would have reported 366 dangling / 232 ambiguous findings as "mostly expected per-tracker-ID-reuse noise" without noticing ~34 dangling + ~19 ambiguous were a real `link_scan` parsing defect (`ENABLE_YAML_STYLE_METADATA_BLOCKS` pairing any two bare `---` lines as YAML metadata, swallowing every other session-log entry's heading); found + fixed + live-verified (dangling 366→332, ambiguous 232→213, +16 edges, 8 pruned) instead of shipping an inflated triage report | validated |
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
+| W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 
 ## Category conventions
 
@@ -1801,6 +1802,24 @@ live-LSP class I initially misattributed to).
 **Status:** fixed-verified — recon ran before any code change; corrected scope adopted before starting the `TestArtifactRowBuilder` extraction.
 
 **Fix idea / Pointer:** `docs/trackers/bug-fix-session-log.md` W-22 (this session) — the actual extraction, once landed.
+
+---
+
+## W-22 — Diff-before-test discipline caught 2 field-omission bugs in the ArtifactRow builder migration before any test ran
+
+**Observed:** 2026-07-08, Phase 3 of the `TestArtifactRowBuilder` migration (F-29), converting `refresh_stale.rs::sample_art` and `constitution_check.rs::sample_art` to builder calls.
+
+**Pattern:** Adopted after the `find.rs::mk_ctx` miss in the `ToolContext` refactor (same session, prior phase): after every `edit_code` conversion in a batch, run `git diff` on the touched files and read every hunk field-by-field against the pre-edit body *before* running `cargo test`, not after.
+
+**Counterfactual:** `git diff` on `refresh_stale.rs` showed the converted call omitted `.with_file_sha256("abc")` (original had a non-default sha; builder default is `String::new()`). Same pass on `constitution_check.rs` showed a worse miss: BOTH `.with_abs_path(format!("/test/{id}.md"))` (original path has no `/r/` segment; builder default does) AND `.with_file_sha256("x")` were dropped. Neither field appears to be asserted by any test in those files (`cargo test --lib` was not yet run against the buggy version, but both bugs are silent-until-asserted class defects — the kind that would pass green and only surface if a *future* test started asserting on `abs_path` or `file_sha256`). Without the diff-first step, both bugs would have shipped as silent fixture drift indistinguishable from a passing refactor.
+
+**Confirming data points:** 1) `find.rs::mk_ctx` (ToolContext refactor, same session) — caught only after tests failed, requiring a `git stash` isolation investigation to rule out flakiness. 2) This entry — caught by diff review alone, zero failed test runs, zero investigation overhead. The same root cause (converting a fixture fn from memory/pattern-matching instead of re-reading its literal body) recurred, but the fix cost dropped from "diagnose a red test suite" to "catch it in a diff before running anything."
+
+**Impact:** high — the second occurrence involved 2 silently-wrong fields in one function (abs_path AND file_sha256), which a green test suite would not have caught; this is exactly the failure class that erodes trust in "tests pass" as a completeness signal for fixture refactors.
+
+**Promote-when:** Already promoted in practice this session (used across all of Phase 2 and Phase 3 of this refactor without further misses after adoption). Formalize: `docs/PROGRESSIVE_DISCOVERABILITY.md` or a CLAUDE.md note — "when converting N>1 hand-rolled struct-literal test fixtures to a shared builder, diff every converted file against its pre-edit body before running the test suite; do not rely on `cargo test` green as proof the literal fields transcribed correctly."
+
+**Status:** validated — 2 real bugs caught pre-test, pre-commit, in a single phase.
 
 ---
 

@@ -149,28 +149,23 @@ pub fn find_global_rules(cat: &Catalog) -> Result<Vec<MatchedRule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+    use crate::librarian::catalog::artifact::{
+        upsert as art_upsert, ArtifactRow, TestArtifactRowBuilder,
+    };
     use crate::librarian::catalog::augmentation::{upsert as aug_upsert, AugmentationRow};
 
     fn sample_art(id: &str, tags: Vec<String>) -> ArtifactRow {
         let now = chrono::Utc::now().timestamp_millis();
-        ArtifactRow {
-            id: id.to_string(),
-            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
-            kind: "tracker".to_string(),
-            status: "active".to_string(),
-            title: Some("T".to_string()),
-            owners: vec![],
-            tags,
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: now,
-            updated_at: now,
-            file_mtime: now,
-            file_sha256: "x".to_string(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_abs_path(format!("/test/{id}.md"))
+            .with_kind("tracker")
+            .with_title("T")
+            .with_tags(tags)
+            .with_created_at(now)
+            .with_updated_at(now)
+            .with_file_mtime(now)
+            .with_file_sha256("x")
+            .build()
     }
 
     fn aug(id: &str, params: &str) -> AugmentationRow {
