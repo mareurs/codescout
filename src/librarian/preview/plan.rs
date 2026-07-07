@@ -78,25 +78,13 @@ fn truncate_task_text(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
 
     fn mk_row() -> ArtifactRow {
-        ArtifactRow {
-            id: "p".into(),
-            abs_path: std::path::PathBuf::from("/test/r/p.md"),
-            kind: "plan".into(),
-            status: "draft".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: String::new(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new("p")
+            .with_kind("plan")
+            .with_status("draft")
+            .build()
     }
 
     #[test]

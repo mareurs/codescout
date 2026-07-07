@@ -218,30 +218,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{upsert as art_insert, ArtifactRow};
+    use crate::librarian::catalog::artifact::{
+        upsert as art_insert, ArtifactRow, TestArtifactRowBuilder,
+    };
     use crate::librarian::catalog::commits::{upsert_many, CommitRow};
     use crate::librarian::catalog::events::{insert as ev_insert, EventRow};
     use crate::librarian::tools::event_create::tests::mk_ctx;
     use tempfile::TempDir;
 
     fn art(id: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
-            kind: "spec".into(),
-            status: "active".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: "".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id).build()
     }
 
     fn seed(ctx: &ToolContext, id: &str) {

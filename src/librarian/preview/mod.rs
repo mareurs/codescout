@@ -31,28 +31,15 @@ pub fn extract(kind: &str, row: &ArtifactRow, body: &str, ctx: &ToolContext) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::ArtifactRow;
+    use crate::librarian::catalog::artifact::{ArtifactRow, TestArtifactRowBuilder};
     use crate::librarian::catalog::Catalog;
     use crate::librarian::tools::TestToolContextBuilder;
 
     fn mk_row(kind: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: "x".into(),
-            abs_path: std::path::PathBuf::from("/test/r/x.md"),
-            kind: kind.into(),
-            status: "draft".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: String::new(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new("x")
+            .with_kind(kind)
+            .with_status("draft")
+            .build()
     }
 
     fn mk_ctx() -> ToolContext {

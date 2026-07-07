@@ -54,28 +54,13 @@ fn truncate_text(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::librarian::catalog::artifact;
+    use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
     use crate::librarian::catalog::observations::ObservationRow;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::tools::TestToolContextBuilder;
 
     fn mk_row(id: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
-            kind: "memory".into(),
-            status: "active".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: String::new(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id).with_kind("memory").build()
     }
 
     fn mk_ctx(cat: Catalog) -> ToolContext {

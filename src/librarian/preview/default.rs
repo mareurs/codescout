@@ -25,25 +25,12 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
 
     fn mk_row() -> ArtifactRow {
-        ArtifactRow {
-            id: "x".into(),
-            abs_path: std::path::PathBuf::from("/test/r/x.md"),
-            kind: "unknown".into(),
-            status: "active".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: String::new(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new("x")
+            .with_kind("unknown")
+            .build()
     }
 
     #[test]
