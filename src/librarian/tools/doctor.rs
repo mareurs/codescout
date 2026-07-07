@@ -247,17 +247,21 @@ fn check_backslash(id: &str, abs_path: &str, check_name: &str) -> Option<Violati
 }
 
 fn check_ads_colon(id: &str, abs_path: &str) -> Option<Violation> {
-    // Exempt the Windows drive-letter slot at positions 0..2 (`C:`).
-    // After that any colon is an NTFS alternate-data-stream selector.
-    let bytes = abs_path.as_bytes();
+    // Exempt the Windows drive-letter slot (`C:`) from being flagged as an
+    // NTFS alternate-data-stream selector. `fs::canonicalize` on Windows
+    // yields the extended-length verbatim form (`\\?\C:\...`), stored here
+    // in forward-slash form as `//?/C:/...` — the drive-letter colon then
+    // sits past the 4-byte `//?/` marker, not at byte 0..2. Strip the marker
+    // before locating the drive slot so it isn't mistaken for a real ADS
+    // colon (false positive on every Windows-indexed row otherwise).
+    let verbatim_prefix_len = if abs_path.starts_with("//?/") { 4 } else { 0 };
+    let rest = &abs_path[verbatim_prefix_len..];
+    let bytes = rest.as_bytes();
     let starts_with_drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
-    let tail = if starts_with_drive {
-        &abs_path[2..]
-    } else {
-        abs_path
-    };
+    let tail = if starts_with_drive { &rest[2..] } else { rest };
     tail.find(':').map(|pos_in_tail| {
-        let absolute_pos = pos_in_tail + if starts_with_drive { 2 } else { 0 };
+        let absolute_pos =
+            pos_in_tail + verbatim_prefix_len + if starts_with_drive { 2 } else { 0 };
         Violation::new(
             "ads_colon_in_abs_path",
             Some(id.to_string()),
@@ -382,6 +386,21 @@ mod tests {
         // always means corruption.
         let v = check_ads_colon("a1", "/home/foo:bar").unwrap();
         assert_eq!(v.check, "ads_colon_in_abs_path");
+    }
+
+    #[test]
+    fn check_ads_colon_exempts_verbatim_prefix_drive_colon() {
+        // fs::canonicalize on Windows yields the extended-length verbatim
+        // form; stored here in forward-slash rendering. The drive-letter
+        // colon at byte 5 must not be flagged.
+        assert!(check_ads_colon("a1", "//?/C:/Users/marius/foo.md").is_none());
+    }
+
+    #[test]
+    fn check_ads_colon_flags_ads_colon_after_verbatim_prefix() {
+        let v = check_ads_colon("a1", "//?/C:/foo.txt:stream").unwrap();
+        assert_eq!(v.check, "ads_colon_in_abs_path");
+        assert!(v.detail.contains("position 14"));
     }
 
     #[test]
