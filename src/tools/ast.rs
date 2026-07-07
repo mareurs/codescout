@@ -3,6 +3,7 @@
 use super::{Tool, ToolContext};
 use crate::ast;
 use crate::lsp::symbols::SymbolKind;
+use crate::util::fs::to_forward_slash;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -68,7 +69,7 @@ impl Tool for ListFunctions {
         collect_functions(&symbols, &mut functions);
 
         Ok(json!({
-            "file": path.display().to_string(),
+            "file": to_forward_slash(&path),
             "functions": functions,
             "total": functions.len(),
         }))
@@ -149,7 +150,7 @@ impl Tool for ListDocs {
             .collect();
 
         Ok(json!({
-            "file": path.display().to_string(),
+            "file": to_forward_slash(&path),
             "docstrings": results,
             "total": results.len(),
         }))
