@@ -384,6 +384,7 @@ pub(super) fn build_mux_args(
 
 /// Strip the Linux `/proc/self/exe` `"<path> (deleted)"` marker. Returns the
 /// underlying path when the suffix is present, else `None`.
+#[cfg(unix)]
 fn strip_deleted_suffix(exe: &Path) -> Option<PathBuf> {
     exe.to_string_lossy()
         .strip_suffix(" (deleted)")
@@ -393,6 +394,7 @@ fn strip_deleted_suffix(exe: &Path) -> Option<PathBuf> {
 /// A stable, on-disk codescout binary to spawn the mux from when `current_exe()`
 /// is no longer usable. Checks `$CARGO_HOME/bin/codescout` then
 /// `$HOME/.cargo/bin/codescout` (the documented install symlink).
+#[cfg(unix)]
 fn stable_codescout_binary() -> Option<PathBuf> {
     let candidates = [
         std::env::var_os("CARGO_HOME").map(|c| PathBuf::from(c).join("bin").join("codescout")),
@@ -410,6 +412,7 @@ fn stable_codescout_binary() -> Option<PathBuf> {
 /// we (1) strip the `" (deleted)"` marker — the same path now holds the rebuilt
 /// binary — then (2) fall back to a stable install path, and only then (3) error
 /// with an actionable message.
+#[cfg(unix)]
 fn resolve_mux_binary() -> Result<PathBuf> {
     let exe = std::env::current_exe()
         .map_err(|e| anyhow::anyhow!("failed to determine codescout binary path: {e}"))?;
@@ -2501,6 +2504,7 @@ mod tests {
         assert_eq!(args[idle_idx + 1], "300");
     }
 
+    #[cfg(unix)]
     #[test]
     fn strip_deleted_suffix_recovers_rebuilt_path() {
         // /proc/self/exe after a mid-session `cargo build` rename-replace.
