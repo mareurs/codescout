@@ -424,6 +424,37 @@ and is straightforward to inspect.
 `src/tools/run_command.rs`; companion plugin's `pre-tool-guard.sh` already
 funnels every Bash call through `run_command`, so the audit hook covers all
 agent shell activity.
+
+### `audit_doc_refs`: `scope=repo`/`umbrella` widening
+
+**Priority:** Low | **Effort:** Medium
+
+`librarian(action="audit_doc_refs")` declares the generic `scope` param in
+its schema, but as of `docs/issues/2026-07-05-audit-doc-refs-scope-param-ignored.md`
+it only ever scans the active project — any other `scope` value is now
+rejected with a `RecoverableError` ("audit_doc_refs is project-scoped in
+v1") rather than silently ignored.
+
+The reason it isn't simply implemented like `context`/`reindex`/`link_scan`'s
+`scope` handling: those tools query the SQL catalog, so widening scope is a
+`WHERE` clause change (`apply_scope` in `src/librarian/tools/scope.rs`).
+`audit_doc_refs` walks the filesystem directly
+(`collect_markdown_files(&repo_root, ...)` in `audit_doc_refs/mod.rs`) —
+widening to `repo` or `umbrella` means scanning multiple project roots and
+aggregating findings/parse-warnings/tracker state across repos with
+potentially different `docs/trackers/doc-ref-audit.md` targets. That's real
+feature work, not a bug-fix-sized change.
+
+**Sketch (not yet implemented):**
+- For `scope="repo"`: walk from `ctx.current_project.git_root` instead of
+  `.abs_path` — likely the easy half, single root, just a wider glob base.
+- For `scope="umbrella"`: iterate `ws.umbrellas[].members`, run the existing
+  scan per member root, and decide how findings/exit_code/tracker emission
+  aggregate — one tracker per member (current per-project behavior,
+  unchanged) vs. one umbrella-level rollup tracker (new concept). Needs a
+  design decision, not just plumbing.
+- `scope="all"` presumably means "every registered workspace root" —
+  same aggregation question as umbrella, at a larger scale.
 ## Contributor Skills
 
 Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. See [`plans/2026-02-26-contributor-skills-design.md`](plans/2026-02-26-contributor-skills-design.md) for the full design.
