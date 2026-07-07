@@ -87,27 +87,18 @@ fn row_to_edge(r: &rusqlite::Row) -> rusqlite::Result<EdgeRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+    use crate::librarian::catalog::artifact::{
+        upsert as art_upsert, ArtifactRow, TestArtifactRowBuilder,
+    };
     use crate::librarian::catalog::events::{insert as ev_insert, EventRow};
 
     fn art(id: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
-            kind: "spec".into(),
-            status: "active".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 1,
-            updated_at: 1,
-            file_mtime: 1,
-            file_sha256: "s".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_created_at(1)
+            .with_updated_at(1)
+            .with_file_mtime(1)
+            .with_file_sha256("s")
+            .build()
     }
 
     fn ev(id: &str, art: &str, kind: &str) -> EventRow {

@@ -235,27 +235,18 @@ pub async fn semantic_find(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{self, ArtifactRow};
+    use crate::librarian::catalog::artifact::{self, ArtifactRow, TestArtifactRowBuilder};
     use serde_json::json;
 
     fn art(id: &str, kind: &str, status: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
-            kind: kind.into(),
-            status: status.into(),
-            title: None,
-            owners: vec![],
-            tags: vec!["t".into()],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: id.chars().last().map(|c| c as i64).unwrap_or(0),
-            file_mtime: 0,
-            file_sha256: "x".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_abs_path(format!("/test/{id}.md"))
+            .with_kind(kind)
+            .with_status(status)
+            .with_tags(vec!["t".into()])
+            .with_updated_at(id.chars().last().map(|c| c as i64).unwrap_or(0))
+            .with_file_sha256("x")
+            .build()
     }
 
     #[test]

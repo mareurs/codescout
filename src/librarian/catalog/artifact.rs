@@ -23,6 +23,117 @@ pub struct ArtifactRow {
     pub confidence: f64,
 }
 
+#[cfg(test)]
+pub(crate) struct TestArtifactRowBuilder {
+    id: String,
+    abs_path: std::path::PathBuf,
+    kind: String,
+    status: String,
+    title: Option<String>,
+    owners: Vec<String>,
+    tags: Vec<String>,
+    source: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+    file_mtime: i64,
+    file_sha256: String,
+}
+
+#[cfg(test)]
+impl TestArtifactRowBuilder {
+    pub(crate) fn new(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
+            kind: "spec".to_string(),
+            status: "active".to_string(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+        }
+    }
+
+    pub(crate) fn with_abs_path(mut self, abs_path: impl Into<std::path::PathBuf>) -> Self {
+        self.abs_path = abs_path.into();
+        self
+    }
+
+    pub(crate) fn with_kind(mut self, kind: &str) -> Self {
+        self.kind = kind.to_string();
+        self
+    }
+
+    pub(crate) fn with_status(mut self, status: &str) -> Self {
+        self.status = status.to_string();
+        self
+    }
+
+    pub(crate) fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub(crate) fn with_owners(mut self, owners: Vec<String>) -> Self {
+        self.owners = owners;
+        self
+    }
+
+    pub(crate) fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    pub(crate) fn with_source(mut self, source: &str) -> Self {
+        self.source = Some(source.to_string());
+        self
+    }
+
+    pub(crate) fn with_created_at(mut self, created_at: i64) -> Self {
+        self.created_at = created_at;
+        self
+    }
+
+    pub(crate) fn with_updated_at(mut self, updated_at: i64) -> Self {
+        self.updated_at = updated_at;
+        self
+    }
+
+    pub(crate) fn with_file_mtime(mut self, file_mtime: i64) -> Self {
+        self.file_mtime = file_mtime;
+        self
+    }
+
+    pub(crate) fn with_file_sha256(mut self, file_sha256: &str) -> Self {
+        self.file_sha256 = file_sha256.to_string();
+        self
+    }
+
+    pub(crate) fn build(self) -> ArtifactRow {
+        ArtifactRow {
+            id: self.id,
+            abs_path: self.abs_path,
+            kind: self.kind,
+            status: self.status,
+            title: self.title,
+            owners: self.owners,
+            tags: self.tags,
+            topic: None,
+            time_scope: None,
+            source: self.source,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            file_mtime: self.file_mtime,
+            file_sha256: self.file_sha256,
+            confidence: 1.0,
+        }
+    }
+}
+
 pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     // F-6a fix (bug-tracker #5): the artifact schema declares
     // `abs_path TEXT NOT NULL UNIQUE`, but the INSERT below only handles
@@ -214,23 +325,16 @@ mod tests {
     use super::*;
 
     fn sample(id: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
-            kind: "spec".into(),
-            status: "active".into(),
-            title: Some("T".into()),
-            owners: vec!["marius".into()],
-            tags: vec!["a".into(), "b".into()],
-            topic: None,
-            time_scope: None,
-            source: Some("repo".into()),
-            created_at: 1,
-            updated_at: 2,
-            file_mtime: 3,
-            file_sha256: "abc".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_title("T")
+            .with_owners(vec!["marius".into()])
+            .with_tags(vec!["a".into(), "b".into()])
+            .with_source("repo")
+            .with_created_at(1)
+            .with_updated_at(2)
+            .with_file_mtime(3)
+            .with_file_sha256("abc")
+            .build()
     }
 
     #[test]

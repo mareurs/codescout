@@ -396,28 +396,21 @@ pub fn list_stale(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+    use crate::librarian::catalog::artifact::{
+        upsert as art_upsert, ArtifactRow, TestArtifactRowBuilder,
+    };
     use chrono::Utc;
 
     fn sample_art(id: &str) -> ArtifactRow {
         let now = Utc::now().timestamp_millis();
-        ArtifactRow {
-            id: id.to_string(),
-            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
-            kind: "tracker".to_string(),
-            status: "active".to_string(),
-            title: Some("T".to_string()),
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: now,
-            updated_at: now,
-            file_mtime: now,
-            file_sha256: "abc".to_string(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id)
+            .with_kind("tracker")
+            .with_title("T")
+            .with_created_at(now)
+            .with_updated_at(now)
+            .with_file_mtime(now)
+            .with_file_sha256("abc")
+            .build()
     }
 
     fn aug(artifact_id: &str) -> AugmentationRow {

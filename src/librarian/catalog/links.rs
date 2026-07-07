@@ -77,27 +77,11 @@ fn collect(cat: &Catalog, where_clause: &str, p: impl rusqlite::Params) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact;
     use crate::librarian::catalog::artifact::ArtifactRow;
+    use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
 
     fn art(id: &str) -> ArtifactRow {
-        ArtifactRow {
-            id: id.into(),
-            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
-            kind: "spec".into(),
-            status: "active".into(),
-            title: None,
-            owners: vec![],
-            tags: vec![],
-            topic: None,
-            time_scope: None,
-            source: None,
-            created_at: 0,
-            updated_at: 0,
-            file_mtime: 0,
-            file_sha256: "".into(),
-            confidence: 1.0,
-        }
+        TestArtifactRowBuilder::new(id).build()
     }
 
     #[test]
