@@ -89,9 +89,33 @@ pub fn index_repo_sync(
     let mut seen_ids: Vec<String> = Vec::new();
     let mut embed_queue: Vec<EmbedQueueItem> = Vec::new();
 
+    // Candidate .md files: the normal ignore-respecting walk, PLUS a
+    // supplemental scan for any `[ignored_paths] force_include` patterns
+    // declared in <abs_root>/.codescout/project.toml — directories that are
+    // gitignore/git-exclude'd from the repo's publish branch but should still
+    // be walked into the librarian catalog (e.g. a locally-tracked-only
+    // `docs/trackers/`). Deduplicated by path; force_include entries win no
+    // priority over the main walk, they just fill in what it skipped.
+    let mut seen_paths: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+    let mut candidate_paths: Vec<std::path::PathBuf> = Vec::new();
+
     let walker = WalkBuilder::new(abs_root).standard_filters(true).build();
     for entry in walker.flatten() {
-        let path = entry.path();
+        let path = entry.path().to_path_buf();
+        if seen_paths.insert(path.clone()) {
+            candidate_paths.push(path);
+        }
+    }
+
+    for path in force_include_candidates(abs_root)? {
+        if seen_paths.insert(path.clone()) {
+            candidate_paths.push(path);
+        }
+    }
+
+    for path in &candidate_paths {
+        let path = path.as_path();
         if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("md") {
             continue;
         }
@@ -307,6 +331,100 @@ pub fn index_repo_sync(
     report.removed = removed;
 
     Ok((report, embed_queue))
+}
+
+/// Read `[ignored_paths] force_include` from `<abs_root>/.codescout/project.toml`,
+/// if present. Absent file / unparseable TOML / missing key all resolve to
+/// "no force-includes" — this is a best-effort opt-in, never a hard error.
+///
+/// Mirrors `ArtifactBackend::resolve`'s raw-TOML-read pattern (no project.toml
+/// struct threading needed here — librarian's `ToolContext` doesn't carry the
+/// main server's parsed `IgnoredPathsSection`, and reading it fresh keeps this
+/// self-contained and independent of the config-loading path).
+fn read_force_include(abs_root: &Path) -> Vec<String> {
+    let cfg_path = abs_root.join(".codescout").join("project.toml");
+    let Ok(text) = std::fs::read_to_string(&cfg_path) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
+        return Vec::new();
+    };
+    parsed
+        .get("ignored_paths")
+        .and_then(|t| t.get("force_include"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The literal (non-glob) prefix of a glob pattern — the portion before the
+/// first metacharacter. `"docs/trackers/**"` → `"docs/trackers"`;
+/// `"docs/trackers"` (no metacharacters at all) → `"docs/trackers"` itself.
+/// Used to scope the force_include supplemental walk to a specific
+/// subdirectory instead of re-walking the whole repo with ignore files
+/// disabled (which would be needlessly slow over large ignored trees like
+/// `node_modules`/`.venv` that force_include was never meant to reach).
+fn literal_glob_prefix(pattern: &str) -> &str {
+    let end = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
+    pattern[..end].trim_end_matches('/')
+}
+
+/// Resolve `[ignored_paths] force_include` patterns (if any) into concrete
+/// `.md` file paths that the main ignore-respecting walk would have skipped.
+///
+/// For each pattern, scopes a supplemental walk to its literal directory
+/// prefix (see [`literal_glob_prefix`]) with `.gitignore`/`.git/info/exclude`/
+/// global-excludesfile checks all disabled — bypassing exactly the mechanism
+/// that made these paths invisible to the main walk in the first place — then
+/// confirms each candidate file actually matches the full force_include
+/// globset before including it (defensive: the anchor directory may contain
+/// files the glob itself doesn't cover, e.g. a non-recursive pattern).
+fn force_include_candidates(abs_root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let patterns = read_force_include(abs_root);
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let force_include_globset = crate::librarian::workspace::compile_ignore(&patterns)?;
+
+    let mut anchors: Vec<String> = patterns
+        .iter()
+        .map(|p| literal_glob_prefix(p).to_string())
+        .filter(|a| !a.is_empty())
+        .collect();
+    anchors.sort();
+    anchors.dedup();
+
+    let mut results = Vec::new();
+    for anchor in anchors {
+        let anchor_dir = abs_root.join(&anchor);
+        if !anchor_dir.is_dir() {
+            continue;
+        }
+        let supplemental = WalkBuilder::new(&anchor_dir)
+            .git_ignore(false)
+            .git_exclude(false)
+            .git_global(false)
+            .ignore(false)
+            .build();
+        for entry in supplemental.flatten() {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(rel_raw) = path.strip_prefix(abs_root) else {
+                continue;
+            };
+            let rel = crate::librarian::util::normalize_rel_path(&rel_raw.to_string_lossy());
+            if force_include_globset.is_match(&rel) {
+                results.push(path.to_path_buf());
+            }
+        }
+    }
+    Ok(results)
 }
 
 /// Write pre-computed embedding vectors into `artifact_vec`.
@@ -666,6 +784,66 @@ kind = "memory"
                 .is_some(),
             "row for the still-existing, now-ignored file must survive"
         );
+    }
+
+    #[test]
+    fn force_include_recovers_files_hidden_by_gitignore() {
+        // Companion to the orphan-cleanup fix above: that fix stops
+        // deletion, but the walker still never VISITS an ignored
+        // directory, so a never-before-indexed file under it stays
+        // invisible forever without an explicit opt-in. `[ignored_paths]
+        // force_include` in `.codescout/project.toml` is that opt-in —
+        // this proves it actually works end to end (config → walk →
+        // catalog row), not just that it's a no-op key some other
+        // session assumed existed (Mercury BOM's project.toml already had
+        // it, silently doing nothing, before this feature existed).
+        //
+        // Uses a plain `.ignore` file (the `ignore` crate's own,
+        // git-independent ignore mechanism) rather than `.gitignore` /
+        // `.git/info/exclude` — those require an actual `.git` directory
+        // to be detected before `WalkBuilder` will honor them, which
+        // `.ignore` does not. The real Mercury BOM bug used
+        // `.git/info/exclude`; the earlier
+        // `index_does_not_delete_still_existing_file_newly_matched_by_ignore`
+        // test already covers that specific mechanism via a custom deny
+        // globset. This test only needs SOME walker-level exclusion that
+        // is independent of the `ignore: &GlobSet` deny-list parameter
+        // (force_include candidates are still filtered by that param —
+        // see `index_repo_sync` — so it can't double as the "hidden"
+        // mechanism here).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+        std::fs::write(root.join("docs/trackers/a.md"), "# a\nbody\n").unwrap();
+        std::fs::write(root.join(".ignore"), "docs/trackers/\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules("").unwrap();
+        let no_ignore = globset::GlobSet::empty();
+
+        // Baseline: no project.toml at all — the .ignore'd file is
+        // never walked, so it's never indexed in the first place.
+        let (r1, _) = index_repo_sync(&cat, &rules, root, &no_ignore, false, false, false).unwrap();
+        assert_eq!(
+            r1.added, 0,
+            "ignore'd file must be invisible without force_include"
+        );
+
+        // Opt in via project.toml — same shape as Mercury BOM's existing
+        // (previously inert) config.
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(
+            root.join(".codescout").join("project.toml"),
+            "[ignored_paths]\nforce_include = [\"docs/trackers\", \"docs/trackers/**\"]\n",
+        )
+        .unwrap();
+
+        let (r2, _) = index_repo_sync(&cat, &rules, root, &no_ignore, false, false, false).unwrap();
+        assert_eq!(r2.added, 1, "force_include must recover the ignore'd file");
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/trackers/a.md"));
+        assert!(crate::librarian::catalog::artifact::get(&cat, &id)
+            .unwrap()
+            .is_some());
     }
 
     #[test]
