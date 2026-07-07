@@ -64,7 +64,8 @@ impl Tool for Librarian {
                     "description": "context/reindex/workspace_state_at/link_scan: scope. audit_doc_refs: project-scoped only in v1 — any other value is rejected. Defaults to active project."
                 },
                 "repo": { "type": "string", "description": "reindex: restrict to a specific workspace root" },
-                "force": { "type": "boolean", "description": "reindex: wipe rows for targeted scope before re-walking" },
+                "force": { "type": "boolean", "description": "reindex: ignore cached file hashes and re-walk every file (re-classification; does NOT by itself force re-embedding — see reembed)" },
+                "reembed": { "type": "boolean", "description": "reindex: also queue every file for re-embedding even when its content hash is unchanged. Use after enabling embeddings for the first time, or after switching embedding models/backends, on an already-indexed project — otherwise unchanged content is silently never (re-)embedded." },
                 "intent": { "type": "string", "description": "tracker_design: free-form intent (optional)" },
                 "commit": { "type": "string", "description": "workspace_state_at: git commit hash as time-travel cutoff. Exactly one of commit or timestamp required." },
                 "timestamp": { "type": "integer", "format": "int64", "description": "workspace_state_at: unix epoch ms as cutoff. Exactly one of commit or timestamp required." },

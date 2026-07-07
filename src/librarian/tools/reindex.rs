@@ -19,6 +19,15 @@ struct Args {
     /// That DELETE was removed in commit `d482ca8a`; force is now a safe
     /// hash-cache-bypass with no destructive side-effect.
     force: Option<bool>,
+    /// When true, queues every walked file for re-embedding even when its
+    /// content hash is unchanged (`force_embed` in `index_repo_sync`). Default
+    /// false. Use this after enabling embeddings for the first time, or after
+    /// switching embedding models/backends, on a project that was already
+    /// indexed — otherwise unchanged content is silently never (re-)embedded,
+    /// since `content_unchanged` alone gates the embed queue. Independent of
+    /// `force`: `force` alone bypasses the unchanged-ROW skip (metadata is
+    /// still re-derived) but does not by itself force re-embedding.
+    reembed: Option<bool>,
     /// Scope of the reindex. Defaults to `project` when a current project is
     /// resolved, else `all`. Mirrors the read-tool scope semantics.
     scope: Option<super::scope::Scope>,
@@ -200,6 +209,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 &ignore,
                 want_embeddings,
                 a.force.unwrap_or(false),
+                a.reembed.unwrap_or(false),
             )?
         };
 

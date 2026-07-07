@@ -53,6 +53,15 @@ pub fn first_h1(body: &str) -> Option<String> {
 
 /// Synchronous part of indexing: walk files, upsert artifact rows, collect embedding queue.
 /// Returns `(report, embed_queue)` where `embed_queue` is a list of [`EmbedQueueItem`].
+///
+/// `force_rewalk` bypasses the unchanged-row early-return (metadata is
+/// re-derived/re-written even when nothing changed) but does NOT by itself
+/// force re-embedding — re-classification alone doesn't need a new vector.
+/// `force_embed` is the separate, explicit lever for "queue this file for
+/// embedding even though its content hash is unchanged": the backfill case
+/// when embeddings are enabled/reconfigured (new model, new backend) for a
+/// project that was already indexed without them. Without it, already-indexed
+/// unchanged content never gets embedded, silently, forever.
 pub fn index_repo_sync(
     cat: &Catalog,
     rules: &[CompiledRule],
@@ -60,6 +69,7 @@ pub fn index_repo_sync(
     ignore: &globset::GlobSet,
     want_embeddings: bool,
     force_rewalk: bool,
+    force_embed: bool,
 ) -> Result<(IndexReport, Vec<EmbedQueueItem>)> {
     let mut report = IndexReport::default();
 
@@ -201,9 +211,12 @@ pub fn index_repo_sync(
         };
         artifact::upsert(cat, &row)?;
 
-        // Only (re-)embed when content actually changed. Re-classification
-        // alone does not require recomputing the embedding.
-        if want_embeddings && !content_unchanged {
+        // (Re-)embed when content actually changed, OR when the caller
+        // explicitly opted into a re-embed backfill via `force_embed` (e.g.
+        // embeddings were just enabled/reconfigured for an already-indexed
+        // project). Re-classification alone, without either signal, does not
+        // require recomputing the embedding.
+        if want_embeddings && (!content_unchanged || force_embed) {
             let chunks = codescout_embed::chunk_markdown(body, 512);
             let first_chunk = chunks
                 .into_iter()
@@ -437,7 +450,8 @@ pub async fn index_repo(
     project_id: &str,
 ) -> Result<IndexReport> {
     let want = embedding.is_some();
-    let (mut report, embed_queue) = index_repo_sync(cat, rules, abs_root, ignore, want, false)?;
+    let (mut report, embed_queue) =
+        index_repo_sync(cat, rules, abs_root, ignore, want, false, false)?;
 
     if let Some(svc) = embedding {
         let futures_iter = embed_queue
@@ -502,11 +516,13 @@ kind = "memory"
         let ignore = globset::GlobSet::empty();
         let fixture =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/librarian/fixtures/repo_a");
-        let (report, _) = index_repo_sync(&cat, &rules, &fixture, &ignore, false, false).unwrap();
+        let (report, _) =
+            index_repo_sync(&cat, &rules, &fixture, &ignore, false, false, false).unwrap();
         assert_eq!(report.added, 3, "should index 3 .md files");
         assert_eq!(report.unknown_ids.len(), 1, "README.md is unknown");
 
-        let (r2, _) = index_repo_sync(&cat, &rules, &fixture, &ignore, false, false).unwrap();
+        let (r2, _) =
+            index_repo_sync(&cat, &rules, &fixture, &ignore, false, false, false).unwrap();
         assert_eq!(r2.unchanged, 3);
         assert_eq!(r2.added, 0);
     }
@@ -530,7 +546,8 @@ kind = "memory"
         let cat = Catalog::open_in_memory().unwrap();
         let rules: Vec<CompiledRule> = Vec::new();
         let ignore = globset::GlobSet::empty();
-        let (report, queue) = index_repo_sync(&cat, &rules, &wt, &ignore, false, false).unwrap();
+        let (report, queue) =
+            index_repo_sync(&cat, &rules, &wt, &ignore, false, false, false).unwrap();
         assert_eq!(report.added, 0, "a linked worktree must not be indexed");
         assert!(queue.is_empty());
         let n: i64 = cat
@@ -555,11 +572,11 @@ kind = "memory"
         .unwrap();
         let ignore = globset::GlobSet::empty();
 
-        let (r1, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        let (r1, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         assert_eq!(r1.added, 2);
 
         std::fs::remove_file(root.join("docs/specs/b.md")).unwrap();
-        let (r2, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        let (r2, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         assert_eq!(r2.removed, 1);
     }
 
@@ -576,7 +593,7 @@ kind = "memory"
         )
         .unwrap();
         let ignore = globset::GlobSet::empty();
-        index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
 
         // 1. Baseline
@@ -599,7 +616,7 @@ kind = "memory"
         );
 
         // 4. Reindex.
-        index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
 
         // 5. Fresh.
         let fresh = crate::librarian::catalog::artifact::get(&cat, &id)
@@ -647,7 +664,7 @@ kind = "memory"
 
         // Phase 1: sync walk
         let (report, embed_queue) =
-            index_repo_sync(&cat, &rules, root, &ignore, true, false).unwrap();
+            index_repo_sync(&cat, &rules, root, &ignore, true, false, false).unwrap();
         assert_eq!(report.added, 1);
 
         // Phase 2: embed
@@ -685,7 +702,7 @@ kind = "memory"
 
         // 1. Index with no matching rules → kind=unknown.
         let no_rules = crate::librarian::classify::load_rules("").unwrap();
-        index_repo_sync(&cat, &no_rules, root, &ignore, false, false).unwrap();
+        index_repo_sync(&cat, &no_rules, root, &ignore, false, false, false).unwrap();
         let before = crate::librarian::catalog::artifact::get(&cat, &id)
             .unwrap()
             .unwrap();
@@ -703,7 +720,7 @@ kind = "memory"
             "[[rule]]\nglob = \"**/docs/trackers/*.md\"\nkind = \"tracker\"\nstatus = \"active\"\n",
         )
         .unwrap();
-        index_repo_sync(&cat, &with_rules, root, &ignore, false, false).unwrap();
+        index_repo_sync(&cat, &with_rules, root, &ignore, false, false, false).unwrap();
 
         // 4. Row must be reclassified.
         let after = crate::librarian::catalog::artifact::get(&cat, &id)
@@ -889,6 +906,50 @@ kind = "memory"
     }
 
     #[test]
+    fn index_repo_sync_force_embed_requeues_unchanged_content() {
+        // Without force_embed, content_unchanged short-circuits the embed
+        // queue even when want_embeddings=true — the "embeddings were just
+        // enabled/reconfigured for an already-indexed project" gap this
+        // parameter exists to close.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\nbody\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+
+        // First pass: index without embeddings (simulates "already indexed
+        // before embeddings were configured").
+        let (r1, q1) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
+        assert_eq!(r1.added, 1);
+        assert!(q1.is_empty());
+
+        // Second pass: embeddings now wanted, force_rewalk=true (bypasses the
+        // unchanged-row skip), but force_embed=false — content is unchanged
+        // on disk, so the file must NOT be queued for embedding.
+        let (r2, q2) = index_repo_sync(&cat, &rules, root, &ignore, true, true, false).unwrap();
+        assert_eq!(r2.updated, 1, "force_rewalk must still process the row");
+        assert!(
+            q2.is_empty(),
+            "unchanged content must not be queued without force_embed"
+        );
+
+        // Third pass: force_embed=true must queue it despite unchanged content.
+        let (r3, q3) = index_repo_sync(&cat, &rules, root, &ignore, true, true, true).unwrap();
+        assert_eq!(r3.updated, 1);
+        assert_eq!(
+            q3.len(),
+            1,
+            "force_embed must queue unchanged content for re-embedding"
+        );
+    }
+
+    #[test]
     fn ignore_globs_skip_matching_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -906,7 +967,7 @@ kind = "memory"
             crate::librarian::workspace::compile_ignore(&["**/tests/fixtures/**".to_string()])
                 .unwrap();
 
-        let (r, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        let (r, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         assert_eq!(r.added, 1, "fixture file must be skipped by ignore glob");
     }
 
@@ -954,7 +1015,8 @@ kind = "memory"
         .unwrap();
         let ignore = globset::GlobSet::empty();
 
-        let (report, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        let (report, _) =
+            index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         assert_eq!(report.added, 1);
 
         let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/page.md"));
@@ -990,7 +1052,8 @@ kind = "memory"
         )
         .unwrap();
         let ignore = globset::GlobSet::empty();
-        let (report, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        let (report, _) =
+            index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
         assert_eq!(report.added, 2);
 
         let id_no_fm =
@@ -1028,7 +1091,7 @@ kind = "memory"
         let ignore = globset::GlobSet::empty();
 
         // Index both files so artifact rows exist.
-        index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
 
         let id_a = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
         let id_b = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/b.md"));
@@ -1052,7 +1115,7 @@ kind = "memory"
 
         // Delete file b and reindex — trigger must cascade delete into artifact_vec.
         std::fs::remove_file(root.join("docs/specs/b.md")).unwrap();
-        index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
 
         let count_b: i64 = cat
             .conn
