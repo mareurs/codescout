@@ -36,6 +36,7 @@ use crate::tools::{
     Onboarding, RunCommand, Tool, ToolContext,
 };
 use crate::usage::UsageRecorder;
+use crate::util::fs::to_forward_slash;
 
 // Note: `library` (action='register') writes libraries.json but is intentionally excluded —
 // it is idempotent and write-lock overhead on registration is not warranted.
@@ -149,7 +150,7 @@ impl CodeScoutServer {
         }
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
-            if let Some(lib_ctx) = crate::librarian::try_build_runtime().await {
+            if let Some(lib_ctx) = crate::librarian::try_build_runtime(lsp.clone()).await {
                 tools.extend(crate::librarian::adapters_for(lib_ctx));
             }
         }
@@ -454,7 +455,7 @@ impl CodeScoutServer {
             .agent
             .project_root()
             .await
-            .map(|p| format!("{}/", p.display()))
+            .map(|p| format!("{}/", to_forward_slash(&p)))
             .unwrap_or_default();
 
         // `run_command` returns raw, byte-faithful shell stdout. Stripping the
