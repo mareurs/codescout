@@ -74,6 +74,7 @@ time_scope: open-ended
 | F-26 | 2026-06-21 | med | self-friction | fixed-verified | `replace_symbol_surfaces_stale_error_after_max_retries` failed on `experiments` — ROOT-CAUSED (2026-06-23): hermetic MockLsp test, NOT environmental; `758801d5` (F-23 fix) removed the AST-collection line-gate so `validate_symbol_range` pre-empted the staleness path. Master verified GREEN (still line-gated); orthogonal to the Kotlin cherry-pick. **Fixed `d079c054`** (reorder validators, option a); full suite green |
 | F-27 | 2026-07-07 | med | self-friction | mitigated | Prior-session summary claimed two bug files were logged; neither exists on disk or in git history |
 | F-28 | 2026-07-07 | low | plan-prose | wontfix-false-alarm | Inherited "stray lsp: field" claim in mv.rs was stale — ToolContext.lsp is now a legitimate field |
+| F-29 | 2026-07-07 | med | self-friction | fixed-verified | Pre-compaction estimate of `ArtifactRow` fixture duplication ("3-4 sites") undercounted reality by 5x — actual: 21 constructors, 20 files |
 
 ## Wins Index
 
@@ -1780,6 +1781,26 @@ live-LSP class I initially misattributed to).
 **Promote-when:** A second large tracker (>500 lines / >~47KB body) exhibits the same `get`/preview truncation without a flag — at that point, escalate `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md`'s priority and promote this grep-first practice into `get_guide("tracker-conventions")`.
 
 **Status:** validated
+
+---
+
+## F-29 — Pre-compaction estimate of `ArtifactRow` fixture duplication ("3-4 sites") undercounted reality by 5x
+
+**Observed:** 2026-07-07, resuming the code-duplication hunt after `/compact`, following up on the `TestToolContextBuilder` refactor's closing note that flagged `mk_row`/`seed_artifact`-style `ArtifactRow` fixtures as a smaller, secondary duplication candidate "at the rule-of-three threshold with only 3-4 sites."
+
+**Expected (pre-compaction note):** ~3-4 call sites, borderline rule-of-three case, possibly not worth a dedicated builder.
+
+**Got (scouted reality):** `grep(pattern="ArtifactRow\\s*\\{")` at workspace root found 81 struct-literal matches across 34 files; filtering to local test-fixture helper functions (`fn \w+(...) -> ArtifactRow`) found **21 independent constructors across 20 files** (`art`, `sample`, `sample_art`, `mk_row`, `row`, `sample_row` — inconsistent naming, one per file), each hand-rolling the same 15-field struct literal (`id, abs_path, kind, status, title, owners, tags, topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence`) with only 1-3 fields actually parameterized per call site. This is the same defect shape as the `ToolContext` duplication just fixed this session (also undercounted pre-execution: 27 estimated vs 65+ actual), not a smaller cousin of it.
+
+**Probable cause:** The pre-compaction note was written from memory of a quick earlier grep, not a fresh recon pass — the same failure mode the reconnaissance skill exists to prevent (assuming stale shape instead of re-scouting before acting).
+
+**Workaround:** None needed — recon ran before any edit, so no wrong-scoped work landed. Treating this as its own full `TestArtifactRowBuilder` extraction (peer to `TestToolContextBuilder`), not a "maybe not worth it" 3-4-site tweak.
+
+**Severity:** med — no failed tool call resulted (recon caught it pre-edit), but acting on the stale "3-4 sites" estimate would have produced a scope-widening surprise mid-refactor identical to the `ToolContext` Phase-1 experience, this time avoidable in advance.
+
+**Status:** fixed-verified — recon ran before any code change; corrected scope adopted before starting the `TestArtifactRowBuilder` extraction.
+
+**Fix idea / Pointer:** `docs/trackers/bug-fix-session-log.md` W-22 (this session) — the actual extraction, once landed.
 
 ---
 
