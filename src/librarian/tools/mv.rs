@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 use super::ToolContext;
 use crate::librarian::catalog::artifact;
+use crate::util::fs::to_forward_slash;
 
 #[derive(Deserialize)]
 struct Args {
@@ -85,8 +86,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     Ok(json!({
         "id": a.id,
-        "old_abs_path": old_full.display().to_string(),
-        "new_abs_path": new_full.display().to_string(),
+        "old_abs_path": to_forward_slash(&old_full),
+        "new_abs_path": to_forward_slash(&new_full),
         "moved": true
     }))
 }
@@ -132,6 +133,7 @@ mod tests {
         .unwrap();
 
         ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
