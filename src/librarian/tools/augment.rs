@@ -422,26 +422,11 @@ impl Tool for ArtifactAugment {
 mod tests {
     use super::*;
     use crate::librarian::catalog::{artifact, augmentation, Catalog};
-    use crate::librarian::workspace::WorkspaceConfig;
-    use parking_lot::Mutex;
-    use std::sync::Arc;
+    use crate::librarian::tools::TestToolContextBuilder;
 
     fn mk_ctx() -> ToolContext {
         let cat = Catalog::open_in_memory().unwrap();
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(cat).build()
     }
 
     fn seed_artifact(ctx: &ToolContext, id: &str) {

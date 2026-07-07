@@ -33,8 +33,7 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::artifact::ArtifactRow;
     use crate::librarian::catalog::Catalog;
-    use crate::librarian::workspace::WorkspaceConfig;
-    use std::sync::Arc;
+    use crate::librarian::tools::TestToolContextBuilder;
 
     fn mk_row(kind: &str) -> ArtifactRow {
         ArtifactRow {
@@ -58,20 +57,7 @@ mod tests {
 
     fn mk_ctx() -> ToolContext {
         let cat = Catalog::open_in_memory().unwrap();
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(cat).build()
     }
 
     #[test]

@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use crate::librarian::catalog::Catalog;
 use crate::librarian::classify::CompiledRule;
+#[cfg(test)]
+use crate::librarian::workspace::Root;
 use crate::librarian::workspace::WorkspaceConfig;
 
 pub mod find;
@@ -98,6 +100,57 @@ pub struct ToolContext {
     /// docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md for why this
     /// field exists and why reuse (not duplication) is load-bearing.
     pub lsp: Arc<dyn crate::lsp::LspProvider>,
+}
+#[cfg(test)]
+pub(crate) struct TestToolContextBuilder {
+    catalog: Catalog,
+    roots: Vec<Root>,
+    embedding: Option<Arc<crate::librarian::embedding::EmbeddingService>>,
+    artifact_store: Option<Arc<dyn crate::librarian::artifact_store::ArtifactVectorStore>>,
+    current_project: Option<Arc<crate::librarian::current_project::CurrentProject>>,
+}
+
+#[cfg(test)]
+impl TestToolContextBuilder {
+    pub(crate) fn new(catalog: Catalog) -> Self {
+        Self {
+            catalog,
+            roots: vec![],
+            embedding: None,
+            artifact_store: None,
+            current_project: None,
+        }
+    }
+
+    pub(crate) fn with_root(mut self, root: Root) -> Self {
+        self.roots.push(root);
+        self
+    }
+
+    pub(crate) fn with_current_project(
+        mut self,
+        current_project: Arc<crate::librarian::current_project::CurrentProject>,
+    ) -> Self {
+        self.current_project = Some(current_project);
+        self
+    }
+
+    pub(crate) fn build(self) -> ToolContext {
+        ToolContext {
+            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
+            catalog: Arc::new(parking_lot::Mutex::new(self.catalog)),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: self.roots,
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: self.embedding,
+            artifact_store: self.artifact_store,
+            current_project: self.current_project,
+        }
+    }
 }
 
 /// Candidate "managed roots" an artifact may legitimately live under: the

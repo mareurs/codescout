@@ -120,24 +120,11 @@ impl Tool for Librarian {
 mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
-    use crate::librarian::workspace::WorkspaceConfig;
+    use crate::librarian::tools::TestToolContextBuilder;
     use std::sync::Arc;
 
     fn mk_ctx() -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
     #[tokio::test]
@@ -168,27 +155,17 @@ mod tests {
         // Write a minimal markdown file so the scanner has something to scan.
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::write(root.join("docs/readme.md"), "# hello\n").unwrap();
-        let ctx = ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![Root {
-                    name: "r".into(),
-                    path: root.clone(),
-                }],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: Some(Arc::new(CurrentProject {
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
                 abs_path: root.clone(),
                 git_root: root,
                 umbrella: None,
-            })),
-        };
+            }))
+            .build();
         let result = crate::librarian::tools::audit_doc_refs::call(&ctx, serde_json::json!({}))
             .await
             .unwrap();

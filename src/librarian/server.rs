@@ -109,23 +109,10 @@ pub(crate) fn map_tool_result(r: Result<serde_json::Value>) -> CallToolResult {
 mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
-    use crate::librarian::workspace::WorkspaceConfig;
+    use crate::librarian::tools::TestToolContextBuilder;
 
     fn mk_ctx() -> ToolContext {
-        ToolContext {
-            lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),
-            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
-            workspace: Arc::new(WorkspaceConfig {
-                roots: vec![],
-                ignore: vec![],
-                rules: vec![],
-                umbrellas: vec![],
-            }),
-            rules: Arc::new(vec![]),
-            embedding: None,
-            artifact_store: None,
-            current_project: None,
-        }
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
     #[tokio::test]
