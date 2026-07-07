@@ -103,6 +103,54 @@ fn find_normalized_windows(content: &str, old_string: &str) -> Vec<NormWindow> {
     out
 }
 
+/// Byte-exact except for a lone trailing `\r` per line — unlike
+/// [`find_normalized_windows`], this never `.trim()`s leading whitespace, so it cannot
+/// erase or shift indentation. Safe to run even for [`indentation_significant`]
+/// languages (Python/YAML/Haskell), where the trim-based fallback is deliberately
+/// disabled.
+///
+/// Exists for the common real-world case: a Windows-checked-out file has `\r\n` line
+/// endings (`core.autocrlf=true` materializes CRLF in the working tree while git's
+/// index stores LF — `git ls-files --eol` shows `i/lf w/crlf`), but a multi-line
+/// `old_string` arrives with bare `\n` newlines (the normal shape for an MCP payload).
+/// The initial exact byte match then fails on every line boundary in the file,
+/// regardless of language — confirmed 2026-07-08 against Mercury BOM's `.py` files,
+/// where `indentation_significant` additionally blocked the trim-based fallback,
+/// leaving no recovery path at all.
+fn find_crlf_tolerant_windows(content: &str, old_string: &str) -> Vec<NormWindow> {
+    let old_lines: Vec<&str> = old_string
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
+    let k = old_lines.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let mut spans: Vec<(&str, usize, usize)> = Vec::new();
+    let mut offset = 0usize;
+    for raw in content.split_inclusive('\n') {
+        let no_lf = raw.strip_suffix('\n').unwrap_or(raw);
+        let text = no_lf.strip_suffix('\r').unwrap_or(no_lf);
+        spans.push((text, offset, offset + text.len()));
+        offset += raw.len();
+    }
+    let mut out = Vec::new();
+    if spans.len() < k {
+        return out;
+    }
+    for i in 0..=(spans.len() - k) {
+        if (0..k).all(|j| spans[i + j].0 == old_lines[j]) {
+            out.push(NormWindow {
+                start_line: i + 1,
+                end_line: i + k,
+                start_byte: spans[i].1,
+                end_byte: spans[i + k - 1].2,
+            });
+        }
+    }
+    out
+}
+
 /// Best-effort nearest window for an error hint when no unique normalized match
 /// exists. Returns (start_line, end_line, actual_text) of the content window with
 /// the highest count of normalized-matching lines against `old_string`.
@@ -617,6 +665,55 @@ async fn perform_edit(
                     "note": "old_string matched after decoding escaped quotes; verify the result"
                 }));
             }
+        }
+        // CRLF-tolerant match: exact except for a lone trailing `\r` per line. Runs for
+        // every language (unlike the trim-based fallback below, it never touches
+        // indentation, so it's safe even where that one is disabled) — see
+        // `find_crlf_tolerant_windows` for why this exists.
+        let crlf_windows = find_crlf_tolerant_windows(&content, old_string);
+        if crlf_windows.len() == 1 {
+            let w = &crlf_windows[0];
+            let matched = &content[w.start_byte..w.end_byte];
+            let replacement_src = new_string.strip_suffix('\n').unwrap_or(new_string);
+            // Adapt the replacement's line endings to match this region's convention so
+            // the edit doesn't leave a mixed CRLF/LF block behind.
+            let adapted = if matched.contains("\r\n") {
+                replacement_src.replace("\r\n", "\n").replace('\n', "\r\n")
+            } else {
+                replacement_src.replace("\r\n", "\n")
+            };
+            let mut new_content = String::with_capacity(content.len());
+            new_content.push_str(&content[..w.start_byte]);
+            new_content.push_str(&adapted);
+            new_content.push_str(&content[w.end_byte..]);
+
+            if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
+                let before = crate::ast::has_syntax_errors(&content, lang);
+                let after = crate::ast::has_syntax_errors(&new_content, lang);
+                if after && !before {
+                    return Err(super::RecoverableError::with_hint(
+                        format!(
+                            "CRLF-tolerant match at lines {}-{} would introduce syntax errors — not written",
+                            w.start_line, w.end_line
+                        ),
+                        "Verify the target with read_file and retry edit_file with the exact text.",
+                    )
+                    .into());
+                }
+            }
+
+            commit_edit(ctx, &resolved, &new_content).await?;
+            if path.ends_with(".md") || path.ends_with(".markdown") {
+                if let Ok(mut cov) = ctx.section_coverage.lock() {
+                    cov.update_mtime(&resolved);
+                }
+            }
+            return Ok(json!({
+                "status": "ok",
+                "applied_via": "crlf-tolerant match",
+                "lines": format!("{}-{}", w.start_line, w.end_line),
+                "note": "old_string matched after tolerating \\r\\n vs \\n line-ending differences; verify the result"
+            }));
         }
         // Indentation-significant languages: a whitespace-normalized match could be
         // re-indented into a different block while still parsing, so the AST gate would

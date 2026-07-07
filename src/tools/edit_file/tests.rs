@@ -3185,6 +3185,61 @@ async fn normalized_fallback_disabled_for_python() {
     );
 }
 
+#[test]
+fn find_crlf_tolerant_windows_matches_across_crlf_line_endings() {
+    // The exact bug: a Windows-checked-out file has \r\n endings, but a multi-line
+    // old_string arrives with bare \n (the normal MCP payload shape). A byte-exact
+    // substring search never matches; this fallback must.
+    let content = "def f():\r\n    x = 1\r\n    return x\r\n";
+    let old = "    x = 1\n    return x";
+    let w = find_crlf_tolerant_windows(content, old);
+    assert_eq!(w.len(), 1);
+    assert_eq!((w[0].start_line, w[0].end_line), (2, 3));
+}
+
+#[test]
+fn find_crlf_tolerant_windows_does_not_tolerate_indentation_diff() {
+    // Unlike find_normalized_windows, this must NOT erase leading-whitespace
+    // differences -- only the trailing \r. A dedented old_string must not match.
+    let content = "def f():\r\n        x = 1\r\n";
+    let old = "    x = 1";
+    let w = find_crlf_tolerant_windows(content, old);
+    assert!(
+        w.is_empty(),
+        "indentation differences must not be tolerated by the CRLF-only fallback"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_crlf_tolerant_match_succeeds_on_python_file() {
+    // Companion to normalized_fallback_disabled_for_python: THAT test proves the
+    // indentation-erasing fallback correctly stays off for Python. THIS test proves
+    // Python isn't left with zero recovery -- a multi-line old_string that differs
+    // from a CRLF file ONLY in its line-ending byte must still succeed, since no
+    // indentation is at stake. Real-world trigger: core.autocrlf=true checks .py
+    // files out with \r\n; an edit_file call built from LF-only text otherwise fails
+    // on every multi-line anchor in the repo (confirmed 2026-07-08, Mercury BOM).
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("g.py");
+    let original = "def f():\r\n    x = 1\r\n    return x\r\n";
+    std::fs::write(&f, original).unwrap();
+    let result = EditFile
+        .call(
+            json!({
+                "path": f.to_str().unwrap(),
+                "old_string": "    x = 1\n    return x",
+                "new_string": "    x = 42\n    return x"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "ok");
+    assert_eq!(result["applied_via"], "crlf-tolerant match");
+    let after = std::fs::read_to_string(&f).unwrap();
+    assert_eq!(after, "def f():\r\n    x = 42\r\n    return x\r\n");
+}
+
 #[tokio::test]
 async fn normalized_fallback_disabled_for_yaml() {
     let (dir, ctx) = project_ctx().await;
