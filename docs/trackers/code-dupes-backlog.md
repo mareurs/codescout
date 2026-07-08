@@ -94,6 +94,10 @@ helper (`request_call_hierarchy<T: DeserializeOwned>(method, params) -> Result<V
 which is a bit more invasive than issues 1-3. Worth doing but not in the first pass.
 **Predicted impact:** ~25 duplicated lines removed.
 
+**Fixed:** 859a1f5c — extracted `send_call_hierarchy_request<T>()`; each caller still builds its
+own typed params (the two params structs aren't interchangeable) and delegates. Verified
+against a live rust-analyzer via `call_hierarchy_outgoing_returns_calls`.
+
 ### Issue 5 — `open_intents` / `orphan_verdicts` duplication
 **Symptom:** `src/librarian/catalog/events.rs:135-168` — same
 `prepare` / `query_map(row_to_event)` / `collect` skeleton, differing only in the SQL
@@ -105,6 +109,11 @@ dst_event_id ...)` vs `NOT IN (SELECT src_event_id ...)`) that a shared helper w
 predicate parameter; worth it but marginal given only 2 call sites.
 **Predicted impact:** ~15 duplicated lines removed.
 
+**Fixed:** 010872f9 — extracted `events_where_no_resolves_edge()`, passing the edge subquery
+text whole rather than parameterizing a column name: `dst_event_id` needs an explicit
+`IS NOT NULL` guard that `src_event_id` doesn't, so the two subqueries were never truly
+identical, just the surrounding Rust skeleton was.
+
 ### Issue 6 — Dashboard route handler duplication (`get_lsp` / `get_usage`)
 **Symptom:** `src/dashboard/api/lsp.rs:15-56` and `src/dashboard/api/usage.rs:12-53` share
 an identical "check usage.db exists → open it → run a query → shape `{available, ...}`
@@ -115,6 +124,14 @@ custom "not available" messages).
 **Predicted impact:** ~35 duplicated lines removed; likely to recur as more dashboard
 panels are added (`dashboard/routes.rs` already has 4 near-identical
 `*_returns_not_available_without_db` stubs at the test layer).
+
+**Fixed:** a1c1b236 — extracted `usage_stats_response()` into a new `dashboard/api/common.rs`.
+Caught mid-fix: `dashboard` is a non-default Cargo feature not enabled by the standard
+`cargo test`/`cargo clippy` commands (nor by `cargo rb`'s `server-stack`), so my first
+compile/test pass silently checked *nothing* in this module — re-ran everything with
+`--features dashboard` explicitly. Also found zero existing tests for either handler;
+added 3 characterization tests (db-missing, query-success, query-failure) on
+`usage_stats_response` before trusting the refactor.
 
 ### Issue 7 — Duplicated frontmatter-patch closure in `librarian/tools/update.rs::call`
 **Symptom:** Inside the single `call` function (`src/librarian/tools/update.rs:164-398`),
@@ -147,6 +164,11 @@ Regex` helper (the latter needs `cell` passed by the caller since each needs its
 easy-to-get-wrong pattern (a typo'd `.expect()` message is the only thing that currently
 distinguishes the 5 call sites).
 
+**Fixed:** 169dd7d3 — `cached_regex_fn!` macro; each accessor is now a one-line invocation
+with its own `static` storage. Note: `edit_code`'s structural-replace guard correctly
+refused to turn a `fn` into a macro invocation (not a recognizable function shape) —
+worked around via `edit_code remove` + `edit_code insert` instead of fighting the guard.
+
 ### Issue 9 — `OutputBuffer::store_dangerous` / `store_pending_write` near-duplication
 **Symptom:** `src/tools/output_buffer.rs` — both methods share the identical
 lock-inner / mint-pending-handle / insert-into-`pending_acks` / push-to-`pending_order` /
@@ -155,6 +177,8 @@ return-id skeleton, differing only in which `PendingAck` variant they construct.
 **Fix:** Extract a private `fn store_pending(&self, ack: PendingAck) -> String` and have
 both public methods build their variant and call it.
 **Predicted impact:** ~10 duplicated lines removed; low priority, near-duplicate not exact.
+
+**Fixed:** 5e290c4e — extracted `store_pending(ack: PendingAck)`.
 
 ### Issue 10 — Systemic per-language extractor duplication in `ast/parser.rs`
 **Symptom:** `extract_enum_variants` (Rust, `enum_variant_list`/`enum_variant`) and
@@ -197,3 +221,17 @@ Fixed the 4 cleanest/lowest-risk mechanical extractions (commits 2507e4eb, 991c0
 `cargo test --lib` 2957 passed / 0 failed / 6 ignored (unrelated). Net diff: -45 lines
 across 6 files. Issues 4, 5, 6, 8, 9 remain open; issue 10 needs its own scoped pass;
 issue 11 is wontfix (false positive).
+
+
+### 2026-07-08 — Second fix pass: issues 4, 5, 6, 8, 9
+Fixed the remaining open issues except 10 (commits 859a1f5c, 010872f9, a1c1b236,
+169dd7d3, 5e290c4e). Verification: `cargo fmt` + `cargo clippy -- -D warnings` clean on
+both default features and `--features dashboard`; `cargo test --lib` 2957/0/6 (default),
+2973/0/6 (`--features dashboard`, includes 3 new characterization tests for issue 6).
+Only issue 10 remains open (needs its own scoped pass); issue 11 stays wontfix.
+
+Worth flagging for next time: issue 6 lives entirely behind a non-default Cargo feature
+(`dashboard`) that neither the standard `cargo test`/`cargo clippy` invocations nor
+`cargo rb` enable — easy to "verify" a change against that module without actually
+compiling it. Always grep for `#[cfg(feature = ...)]` above a module's `pub mod` line
+before trusting a green check on code under it.
