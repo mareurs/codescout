@@ -116,22 +116,22 @@ impl OutputGuard {
         self.mode == OutputMode::Focused
     }
 
-    /// Cap a list of items according to the current mode.
-    ///
-    /// - **Exploring**: keeps the first `max_results` items.
-    /// - **Focused**: applies `offset`/`limit` pagination.
-    ///
-    /// Returns the (possibly truncated) vec and optional overflow metadata.
-    pub fn cap_items<T>(&self, items: Vec<T>, hint: &str) -> (Vec<T>, Option<OverflowInfo>) {
+    /// Shared truncate-or-paginate logic behind `cap_items`/`cap_files`.
+    fn cap<T>(
+        &self,
+        items: Vec<T>,
+        hint: &str,
+        threshold: usize,
+    ) -> (Vec<T>, Option<OverflowInfo>) {
         let total = items.len();
         match self.mode {
             OutputMode::Exploring => {
-                if total <= self.max_results {
+                if total <= threshold {
                     (items, None)
                 } else {
-                    let kept: Vec<T> = items.into_iter().take(self.max_results).collect();
+                    let kept: Vec<T> = items.into_iter().take(threshold).collect();
                     let overflow = OverflowInfo {
-                        shown: self.max_results,
+                        shown: threshold,
                         total,
                         hint: hint.to_string(),
                         next_offset: None,
@@ -145,31 +145,22 @@ impl OutputGuard {
         }
     }
 
+    /// Cap a list of items according to the current mode.
+    ///
+    /// - **Exploring**: keeps the first `max_results` items.
+    /// - **Focused**: applies `offset`/`limit` pagination.
+    ///
+    /// Returns the (possibly truncated) vec and optional overflow metadata.
+    pub fn cap_items<T>(&self, items: Vec<T>, hint: &str) -> (Vec<T>, Option<OverflowInfo>) {
+        self.cap(items, hint, self.max_results)
+    }
+
     /// Cap a list of files according to the current mode.
     ///
     /// - **Exploring**: keeps the first `max_files` entries.
     /// - **Focused**: applies `offset`/`limit` pagination.
     pub fn cap_files<T>(&self, files: Vec<T>, hint: &str) -> (Vec<T>, Option<OverflowInfo>) {
-        let total = files.len();
-        match self.mode {
-            OutputMode::Exploring => {
-                if total <= self.max_files {
-                    (files, None)
-                } else {
-                    let kept: Vec<T> = files.into_iter().take(self.max_files).collect();
-                    let overflow = OverflowInfo {
-                        shown: self.max_files,
-                        total,
-                        hint: hint.to_string(),
-                        next_offset: None,
-                        by_file: None,
-                        by_file_overflow: 0,
-                    };
-                    (kept, Some(overflow))
-                }
-            }
-            OutputMode::Focused => paginate(files, self.offset, self.limit, hint),
-        }
+        self.cap(files, hint, self.max_files)
     }
 
     /// Serialize overflow metadata to JSON for inclusion in tool responses.
