@@ -1389,6 +1389,31 @@ impl LspClient {
         Ok(items.into_iter().next())
     }
 
+    /// Shared capability-check / request / deserialize tail for the two
+    /// call-hierarchy directions (`incoming_calls`/`outgoing_calls`), which
+    /// differ only in the LSP method name, the params struct, and the
+    /// response element type.
+    async fn send_call_hierarchy_request<T: serde::de::DeserializeOwned>(
+        &self,
+        method: &str,
+        params: impl serde::Serialize,
+    ) -> Result<Vec<T>> {
+        {
+            let caps = self.capabilities.lock().unwrap_or_else(|e| e.into_inner());
+            if !supports_call_hierarchy(&caps) {
+                return Ok(vec![]);
+            }
+        }
+        let result = self.request(method, serde_json::to_value(params)?).await?;
+
+        if result.is_null() {
+            return Ok(vec![]);
+        }
+
+        let calls: Vec<T> = serde_json::from_value(result)?;
+        Ok(calls)
+    }
+
     /// Fetch incoming calls for a call hierarchy item.
     ///
     /// Returns an empty vec if the server does not support call hierarchy.
@@ -1397,28 +1422,13 @@ impl LspClient {
         item: &lsp_types::CallHierarchyItem,
         _language_id: &str,
     ) -> Result<Vec<lsp_types::CallHierarchyIncomingCall>> {
-        {
-            let caps = self.capabilities.lock().unwrap_or_else(|e| e.into_inner());
-            if !supports_call_hierarchy(&caps) {
-                return Ok(vec![]);
-            }
-        }
         let params = lsp_types::CallHierarchyIncomingCallsParams {
             item: item.clone(),
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-
-        let result = self
-            .request("callHierarchy/incomingCalls", serde_json::to_value(params)?)
-            .await?;
-
-        if result.is_null() {
-            return Ok(vec![]);
-        }
-
-        let calls: Vec<lsp_types::CallHierarchyIncomingCall> = serde_json::from_value(result)?;
-        Ok(calls)
+        self.send_call_hierarchy_request("callHierarchy/incomingCalls", params)
+            .await
     }
 
     /// Fetch outgoing calls for a call hierarchy item.
@@ -1429,28 +1439,13 @@ impl LspClient {
         item: &lsp_types::CallHierarchyItem,
         _language_id: &str,
     ) -> Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
-        {
-            let caps = self.capabilities.lock().unwrap_or_else(|e| e.into_inner());
-            if !supports_call_hierarchy(&caps) {
-                return Ok(vec![]);
-            }
-        }
         let params = lsp_types::CallHierarchyOutgoingCallsParams {
             item: item.clone(),
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
-
-        let result = self
-            .request("callHierarchy/outgoingCalls", serde_json::to_value(params)?)
-            .await?;
-
-        if result.is_null() {
-            return Ok(vec![]);
-        }
-
-        let calls: Vec<lsp_types::CallHierarchyOutgoingCall> = serde_json::from_value(result)?;
-        Ok(calls)
+        self.send_call_hierarchy_request("callHierarchy/outgoingCalls", params)
+            .await
     }
 }
 
