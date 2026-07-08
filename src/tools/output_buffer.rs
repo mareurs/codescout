@@ -356,6 +356,17 @@ impl OutputBuffer {
         id
     }
 
+    /// Shared lock/mint-handle/insert/push/return skeleton behind
+    /// `store_dangerous`/`store_pending_write` — they differ only in which
+    /// `PendingAck` variant they construct.
+    fn store_pending(&self, ack: PendingAck) -> String {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let id = Self::mint_pending_handle(&mut inner);
+        inner.pending_acks.insert(id.clone(), ack);
+        inner.pending_order.push(id.clone());
+        id
+    }
+
     /// Store a dangerous command pending acknowledgment.
     ///
     /// Returns an opaque `@ack_<8hex>` handle. The handle carries the full
@@ -366,18 +377,11 @@ impl OutputBuffer {
         cwd: Option<String>,
         timeout_secs: u64,
     ) -> String {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let id = Self::mint_pending_handle(&mut inner);
-        inner.pending_acks.insert(
-            id.clone(),
-            PendingAck::Command(PendingAckCommand {
-                command,
-                cwd,
-                timeout_secs,
-            }),
-        );
-        inner.pending_order.push(id.clone());
-        id
+        self.store_pending(PendingAck::Command(PendingAckCommand {
+            command,
+            cwd,
+            timeout_secs,
+        }))
     }
 
     /// Retrieve a stored pending ack by handle.
@@ -402,18 +406,11 @@ impl OutputBuffer {
         input: serde_json::Value,
         approve_dir: PathBuf,
     ) -> String {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let id = Self::mint_pending_handle(&mut inner);
-        inner.pending_acks.insert(
-            id.clone(),
-            PendingAck::Write(PendingAckWrite {
-                tool_name,
-                input,
-                approve_dir,
-            }),
-        );
-        inner.pending_order.push(id.clone());
-        id
+        self.store_pending(PendingAck::Write(PendingAckWrite {
+            tool_name,
+            input,
+            approve_dir,
+        }))
     }
 
     /// Retrieve a stored pending write by handle. Returns `None` if the handle
