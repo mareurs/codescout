@@ -222,7 +222,7 @@ mod tests {
         upsert as art_insert, ArtifactRow, TestArtifactRowBuilder,
     };
     use crate::librarian::catalog::commits::{upsert_many, CommitRow};
-    use crate::librarian::catalog::events::{insert as ev_insert, EventRow};
+    use crate::librarian::catalog::events::{insert as ev_insert, EventRow, TestEventRowBuilder};
     use crate::librarian::tools::event_create::tests::mk_ctx;
     use tempfile::TempDir;
 
@@ -236,16 +236,10 @@ mod tests {
     }
 
     fn ev(artifact_id: &str, kind: &str, payload: Value, ts: i64) -> EventRow {
-        EventRow {
-            id: ulid::Ulid::new().to_string(),
-            artifact_id: artifact_id.into(),
-            kind: kind.into(),
-            payload: payload.to_string(),
-            anchor_commit: None,
-            head_commit: None,
-            author: None,
-            created_at: ts,
-        }
+        TestEventRowBuilder::new(artifact_id, kind)
+            .with_payload(payload.to_string())
+            .with_created_at(ts)
+            .build()
     }
 
     #[tokio::test]

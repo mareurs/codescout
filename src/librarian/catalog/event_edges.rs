@@ -90,7 +90,7 @@ mod tests {
     use crate::librarian::catalog::artifact::{
         upsert as art_upsert, ArtifactRow, TestArtifactRowBuilder,
     };
-    use crate::librarian::catalog::events::{insert as ev_insert, EventRow};
+    use crate::librarian::catalog::events::{insert as ev_insert, EventRow, TestEventRowBuilder};
 
     fn art(id: &str) -> ArtifactRow {
         TestArtifactRowBuilder::new(id)
@@ -102,16 +102,10 @@ mod tests {
     }
 
     fn ev(id: &str, art: &str, kind: &str) -> EventRow {
-        EventRow {
-            id: id.into(),
-            artifact_id: art.into(),
-            kind: kind.into(),
-            payload: "{}".into(),
-            anchor_commit: None,
-            head_commit: None,
-            author: None,
-            created_at: 1,
-        }
+        TestEventRowBuilder::new(art, kind)
+            .with_id(id)
+            .with_created_at(1)
+            .build()
     }
 
     #[test]

@@ -15,6 +15,56 @@ pub struct EventRow {
     pub created_at: i64,
 }
 
+#[cfg(test)]
+pub(crate) struct TestEventRowBuilder {
+    id: String,
+    artifact_id: String,
+    kind: String,
+    payload: String,
+    created_at: i64,
+}
+
+#[cfg(test)]
+impl TestEventRowBuilder {
+    pub(crate) fn new(artifact_id: &str, kind: &str) -> Self {
+        Self {
+            id: ulid::Ulid::new().to_string(),
+            artifact_id: artifact_id.to_string(),
+            kind: kind.to_string(),
+            payload: "{}".to_string(),
+            created_at: 0,
+        }
+    }
+
+    pub(crate) fn with_id(mut self, id: &str) -> Self {
+        self.id = id.to_string();
+        self
+    }
+
+    pub(crate) fn with_payload(mut self, payload: impl Into<String>) -> Self {
+        self.payload = payload.into();
+        self
+    }
+
+    pub(crate) fn with_created_at(mut self, created_at: i64) -> Self {
+        self.created_at = created_at;
+        self
+    }
+
+    pub(crate) fn build(self) -> EventRow {
+        EventRow {
+            id: self.id,
+            artifact_id: self.artifact_id,
+            kind: self.kind,
+            payload: self.payload,
+            anchor_commit: None,
+            head_commit: None,
+            author: None,
+            created_at: self.created_at,
+        }
+    }
+}
+
 pub fn insert(cat: &Catalog, ev: &EventRow) -> Result<()> {
     insert_with(&cat.conn, ev)
 }
@@ -168,16 +218,10 @@ mod tests {
     }
 
     fn ev(id: &str, art: &str, kind: &str, ts: i64) -> EventRow {
-        EventRow {
-            id: id.into(),
-            artifact_id: art.into(),
-            kind: kind.into(),
-            payload: "{}".into(),
-            anchor_commit: None,
-            head_commit: None,
-            author: None,
-            created_at: ts,
-        }
+        TestEventRowBuilder::new(art, kind)
+            .with_id(id)
+            .with_created_at(ts)
+            .build()
     }
 
     #[test]

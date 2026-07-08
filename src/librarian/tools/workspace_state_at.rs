@@ -231,10 +231,9 @@ mod tests {
     use crate::librarian::catalog::artifact::{
         upsert as art_insert, ArtifactRow, TestArtifactRowBuilder,
     };
-    use crate::librarian::catalog::events::{insert as ev_insert, EventRow};
+    use crate::librarian::catalog::events::{insert as ev_insert, EventRow, TestEventRowBuilder};
     use crate::librarian::tools::event_create::tests::mk_ctx;
     use tempfile::TempDir;
-    use ulid::Ulid;
 
     fn art(id: &str, file_mtime: i64) -> ArtifactRow {
         TestArtifactRowBuilder::new(id)
@@ -243,16 +242,9 @@ mod tests {
     }
 
     fn ev(artifact_id: &str, kind: &str, ts: i64) -> EventRow {
-        EventRow {
-            id: Ulid::new().to_string(),
-            artifact_id: artifact_id.into(),
-            kind: kind.into(),
-            payload: "{}".into(),
-            anchor_commit: None,
-            head_commit: None,
-            author: None,
-            created_at: ts,
-        }
+        TestEventRowBuilder::new(artifact_id, kind)
+            .with_created_at(ts)
+            .build()
     }
 
     /// freshness_at_as_of vs freshness_now differ when the cutoff is before a review
