@@ -23,14 +23,21 @@ pub mod constitution_check;
 pub mod doctor;
 
 use anyhow::{anyhow, Context, Result};
+use clap::Args;
 use std::io::Read;
 use std::path::PathBuf;
 
 /// Flags shared by every CLI subcommand.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Args)]
 pub struct CommonOpts {
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
     pub project: Option<PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
     pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
     pub no_color: bool,
 }
 

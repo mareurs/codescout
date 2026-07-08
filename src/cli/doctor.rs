@@ -12,17 +12,8 @@ use crate::cli::{open_ctx, CommonOpts};
 
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
-    /// Project root override. Defaults to current working directory.
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-
-    /// Emit JSON to stdout (default: pretty-printed JSON via `cli::format`).
-    #[arg(long)]
-    pub json: bool,
-
-    /// Disable colored output (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 
     /// Exit with code 1 when the scanner reports any violation. Default is
     /// to exit 0 regardless — useful for monitoring without breaking CI.
@@ -32,11 +23,7 @@ pub struct DoctorArgs {
 }
 
 pub async fn run(args: DoctorArgs) -> Result<()> {
-    let common = CommonOpts {
-        project: args.project.clone(),
-        json: args.json,
-        no_color: args.no_color,
-    };
+    let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
 

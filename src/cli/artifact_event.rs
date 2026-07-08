@@ -31,15 +31,8 @@ pub struct ListArgs {
     /// Max results to return.
     #[arg(long, default_value_t = 50)]
     pub limit: usize,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 pub async fn dispatch(verb: Verb) -> Result<()> {
@@ -50,11 +43,7 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
 }
 
 async fn run_list(args: ListArgs) -> Result<()> {
-    let common = CommonOpts {
-        project: args.project.clone(),
-        json: args.json,
-        no_color: args.no_color,
-    };
+    let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
     let mut tool_args = serde_json::Map::new();
@@ -117,24 +106,13 @@ pub struct CreateArgs {
     /// External signal source kind (must be paired with --source-uri).
     #[arg(long = "source-kind")]
     pub source_kind: Option<String>,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 async fn run_create(args: CreateArgs) -> Result<()> {
     use anyhow::Context;
-    let common = CommonOpts {
-        project: args.project.clone(),
-        json: args.json,
-        no_color: args.no_color,
-    };
+    let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
     let mut tool_args = serde_json::Map::new();

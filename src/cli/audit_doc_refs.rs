@@ -36,25 +36,12 @@ pub struct AuditArgs {
     #[arg(long = "tracker-id")]
     pub tracker_id: Option<String>,
 
-    /// Project root override. Defaults to current working directory.
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-
-    /// Emit JSON to stdout (default: pretty-printed JSON via cli::format).
-    #[arg(long)]
-    pub json: bool,
-
-    /// Disable colored output (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 pub async fn run(args: AuditArgs) -> Result<()> {
-    let common = CommonOpts {
-        project: args.project.clone(),
-        json: args.json,
-        no_color: args.no_color,
-    };
+    let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
 

@@ -35,23 +35,12 @@ pub struct AugmentArgs {
     /// Max number of dated ## YYYY-MM-DD sections to retain.
     #[arg(long = "history-cap")]
     pub history_cap: Option<usize>,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 pub async fn run(args: AugmentArgs) -> Result<()> {
-    let common = CommonOpts {
-        project: args.project.clone(),
-        json: args.json,
-        no_color: args.no_color,
-    };
+    let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
 

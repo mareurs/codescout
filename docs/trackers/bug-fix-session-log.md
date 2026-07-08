@@ -75,6 +75,7 @@ time_scope: open-ended
 | F-27 | 2026-07-07 | med | self-friction | mitigated | Prior-session summary claimed two bug files were logged; neither exists on disk or in git history |
 | F-28 | 2026-07-07 | low | plan-prose | wontfix-false-alarm | Inherited "stray lsp: field" claim in mv.rs was stale — ToolContext.lsp is now a legitimate field |
 | F-29 | 2026-07-07 | med | self-friction | fixed-verified | Pre-compaction estimate of `ArtifactRow` fixture duplication ("3-4 sites") undercounted reality by 5x — actual: 21 constructors, 20 files |
+| F-30 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 
 ## Wins Index
 
@@ -1820,6 +1821,26 @@ live-LSP class I initially misattributed to).
 **Promote-when:** Already promoted in practice this session (used across all of Phase 2 and Phase 3 of this refactor without further misses after adoption). Formalize: `docs/PROGRESSIVE_DISCOVERABILITY.md` or a CLAUDE.md note — "when converting N>1 hand-rolled struct-literal test fixtures to a shared builder, diff every converted file against its pre-edit body before running the test suite; do not rely on `cargo test` green as proof the literal fields transcribed correctly."
 
 **Status:** validated — 2 real bugs caught pre-test, pre-commit, in a single phase.
+
+---
+
+## F-30 — `edit_code` rewrite of a test fn dropped a trailing assertion line outside the read window
+
+**Observed:** 2026-07-08, flattening `CommonOpts` into 15 CLI arg structs (`src/cli/*.rs`). Rewrote `tests/run_state_at_rejects_missing_cutoff` in `artifact.rs` via `edit_code(action="replace")`.
+
+**Expected:** the rewritten body would be complete — I'd read the function before editing.
+
+**Got (scouted reality, via post-edit diff review):** the earlier `read_file(start_line=605, end_line=735)` call used to gather all 4 test bodies needing this edit ended its window at line 735, one line short of the function's actual closing content. The last line visible was `assert!(msg.contains("--commit"), "got: {msg}");` — I took that as the function's end and wrote a "corrected" body that stopped there, silently dropping the next line, `assert!(msg.contains("--timestamp"), "got: {msg}");`, which existed in the original but sat just outside my read window. `git diff` after the edit showed it as a deleted line with no corresponding addition — caught before compiling, before tests ran, before commit.
+
+**Probable cause:** distinct from F-15/the `mk_ctx` miss (those were "didn't read the body at all") — here the body WAS read, but the read window's end coincided almost exactly with the function's true end, and I didn't verify the window actually reached a closing `}` before treating the visible content as complete.
+
+**Workaround:** re-ran `edit_code(action="replace")` with the missing assertion restored, then re-diffed to confirm a clean state.
+
+**Severity:** med — would have silently weakened a regression test (removing one of two assertions on a "missing cutoff" error message) with a green build; the diff-before-test discipline (W-22, same session) caught it before any test ran.
+
+**Status:** fixed-verified — caught and corrected before compiling; diff re-verified clean.
+
+**Fix idea / Pointer:** When a multi-symbol batch read's line-range window ends close to a target symbol's expected end, confirm the read actually captured a closing `}` (or re-read with a generous overshoot) before using it as the basis for an `edit_code` rewrite — don't trust "the last line I saw" as "the last line that exists."
 
 ---
 

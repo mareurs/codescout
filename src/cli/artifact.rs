@@ -65,24 +65,13 @@ pub struct FindArgs {
     /// Pagination offset.
     #[arg(long, default_value_t = 0)]
     pub offset: usize,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl FindArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -201,24 +190,13 @@ pub struct GetArgs {
     /// Include events in the response.
     #[arg(long = "include-events")]
     pub include_events: bool,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl GetArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -273,24 +251,13 @@ pub struct GraphArgs {
     /// Include event/source nodes via event edges.
     #[arg(long = "include-events")]
     pub include_events: bool,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl GraphArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -330,24 +297,13 @@ pub struct StateAtArgs {
     /// Unix epoch ms to time-travel to. Mutually exclusive with --commit.
     #[arg(long, conflicts_with = "commit")]
     pub timestamp: Option<i64>,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl StateAtArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -408,24 +364,13 @@ pub struct CreateArgs {
     /// Augmentation params JSON (`@<file>` / `-` / literal JSON string).
     #[arg(long = "augment-params")]
     pub augment_params: Option<String>,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl CreateArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -522,24 +467,13 @@ pub struct UpdateArgs {
     /// Record a completed refresh cycle atomically.
     #[arg(long = "commit-refresh")]
     pub commit_refresh: bool,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl UpdateArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -606,24 +540,13 @@ pub struct MoveArgs {
     /// Destination path relative to repo root.
     #[arg(long = "new-rel-path")]
     pub new_rel_path: String,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl MoveArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -651,24 +574,13 @@ pub struct LinkArgs {
     /// Relation type (e.g. supersedes, implements, child).
     #[arg(long)]
     pub rel: String,
-    /// Optional project root override (defaults to cwd).
-    #[arg(long)]
-    pub project: Option<std::path::PathBuf>,
-    /// Emit JSON to stdout.
-    #[arg(long)]
-    pub json: bool,
-    /// Force no color (also implicit when stdout is not a TTY).
-    #[arg(long = "no-color")]
-    pub no_color: bool,
+    #[command(flatten)]
+    pub common: CommonOpts,
 }
 
 impl LinkArgs {
     pub fn common(&self) -> CommonOpts {
-        CommonOpts {
-            project: self.project.clone(),
-            json: self.json,
-            no_color: self.no_color,
-        }
+        self.common.clone()
     }
 }
 
@@ -704,9 +616,7 @@ mod tests {
             augmented: None,
             limit: 50,
             offset: 0,
-            project: None,
-            json: false,
-            no_color: false,
+            common: CommonOpts::default(),
         }
     }
 
@@ -782,9 +692,11 @@ mod tests {
             links_rel: None,
             include_observations: false,
             include_events: false,
-            project: Some(std::path::PathBuf::from("/tmp/proj")),
-            json: true,
-            no_color: true,
+            common: CommonOpts {
+                project: Some(std::path::PathBuf::from("/tmp/proj")),
+                json: true,
+                no_color: true,
+            },
         };
         let c = a.common();
         assert_eq!(c.project, Some(std::path::PathBuf::from("/tmp/proj")));
@@ -799,9 +711,7 @@ mod tests {
             depth: 0,
             rels: None,
             include_events: false,
-            project: None,
-            json: false,
-            no_color: false,
+            common: CommonOpts::default(),
         };
         let err = run_graph(args).await.unwrap_err();
         let msg = format!("{err:#}");
@@ -814,9 +724,7 @@ mod tests {
             id: "abc".into(),
             commit: None,
             timestamp: None,
-            project: None,
-            json: false,
-            no_color: false,
+            common: CommonOpts::default(),
         };
         let err = run_state_at(args).await.unwrap_err();
         let msg = format!("{err:#}");
