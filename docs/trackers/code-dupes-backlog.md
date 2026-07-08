@@ -133,6 +133,24 @@ compile/test pass silently checked *nothing* in this module — re-ran everythin
 added 3 characterization tests (db-missing, query-success, query-failure) on
 `usage_stats_response` before trusting the refactor.
 
+**Architecture review (architecture-snow-lion, 2026-07-08):** checked whether `common.rs`
+is a premature 2-user abstraction against this project's own rule-of-three convention.
+The "4 near-identical stubs" cited above are test functions in `routes.rs::tests`, not
+production handlers. The one real candidate third user, `get_errors`
+(`dashboard/api/errors.rs`), genuinely diverges in shape: no `"reason"` field on
+missing-db (`{"available": false, "errors": []}` instead), and it collapses
+open-failure/query-failure into one case rather than two distinct messages. `get_index`
+queries Qdrant, not `usage.db`, and isn't a candidate at all.
+**Decision:** keep `usage_stats_response` as-is, a 2-user private helper — do not widen it
+to absorb `get_errors`. Alternatives considered: (a) generalize with a configurable
+error-shape param — rejected, adds parameters for one confirmed need and risks silently
+changing `get_errors`'s response shape inside a "refactor"; (b) revert `get_lsp`/`get_usage`
+back to inline duplication — rejected, those two were byte-identical already (not a
+speculative guess at shared shape), unlike the registry-abstraction case the rule-of-three
+memory warns against. Revisit-when: a handler is asked to match this exact skeleton —
+until then `get_errors` staying divergent is evidence *for* the project's rule-of-three
+caution, not against the extraction that already exists. Confidence: high.
+
 ### Issue 7 — Duplicated frontmatter-patch closure in `librarian/tools/update.rs::call`
 **Symptom:** Inside the single `call` function (`src/librarian/tools/update.rs:164-398`),
 the exact same closure body — apply `status`/`title`/`owners`/`tags`/`topic`/`time_scope`
