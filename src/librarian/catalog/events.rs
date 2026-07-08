@@ -129,42 +129,52 @@ pub fn timeline_for_artifact(
     Ok(rows)
 }
 
-/// Return all `intent` events that have not yet been resolved by a
-/// `verdict` event (i.e. no `event_edges` row with `rel='resolves'`
-/// pointing at the intent's id).
-pub fn open_intents(cat: &Catalog) -> Result<Vec<EventRow>> {
-    let mut stmt = cat.conn.prepare(
+/// Shared prepare/query_map/collect skeleton behind `open_intents` and
+/// `orphan_verdicts` — they differ only in the event `kind` and the
+/// `event_edges` subquery that defines "has a resolving edge" (the two
+/// subqueries are not literally interchangeable: `dst_event_id` needs an
+/// explicit `IS NOT NULL` guard since a `resolves` edge may target an
+/// artifact instead, while `src_event_id` never is), so `edge_subquery` is
+/// passed whole rather than parameterized to a single column name.
+fn events_where_no_resolves_edge(
+    cat: &Catalog,
+    kind: &str,
+    edge_subquery: &str,
+) -> Result<Vec<EventRow>> {
+    let sql = format!(
         "SELECT id, artifact_id, kind, payload, anchor_commit, head_commit, author, created_at
          FROM events
-         WHERE kind='intent'
-           AND id NOT IN (
-             SELECT dst_event_id FROM event_edges
-             WHERE rel='resolves' AND dst_event_id IS NOT NULL
-           )
+         WHERE kind='{kind}'
+           AND id NOT IN ({edge_subquery})
          ORDER BY created_at DESC, id DESC",
-    )?;
+    );
+    let mut stmt = cat.conn.prepare(&sql)?;
     let rows = stmt
         .query_map([], row_to_event)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
+/// Return all `intent` events that have not yet been resolved by a
+/// `verdict` event (i.e. no `event_edges` row with `rel='resolves'`
+/// pointing at the intent's id).
+pub fn open_intents(cat: &Catalog) -> Result<Vec<EventRow>> {
+    events_where_no_resolves_edge(
+        cat,
+        "intent",
+        "SELECT dst_event_id FROM event_edges \
+         WHERE rel='resolves' AND dst_event_id IS NOT NULL",
+    )
+}
+
 /// Return all `verdict` events that have no outgoing `resolves` edge.
 /// Such rows are a data bug — every verdict must resolve an intent.
 pub fn orphan_verdicts(cat: &Catalog) -> Result<Vec<EventRow>> {
-    let mut stmt = cat.conn.prepare(
-        "SELECT id, artifact_id, kind, payload, anchor_commit, head_commit, author, created_at
-         FROM events
-         WHERE kind='verdict'
-           AND id NOT IN (
-             SELECT src_event_id FROM event_edges WHERE rel='resolves'
-           )
-         ORDER BY created_at DESC, id DESC",
-    )?;
-    let rows = stmt
-        .query_map([], row_to_event)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+    events_where_no_resolves_edge(
+        cat,
+        "verdict",
+        "SELECT src_event_id FROM event_edges WHERE rel='resolves'",
+    )
 }
 
 fn row_to_event(r: &rusqlite::Row) -> rusqlite::Result<EventRow> {
