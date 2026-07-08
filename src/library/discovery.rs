@@ -41,58 +41,39 @@ pub fn discover_library_root(file_path: &Path) -> Option<DiscoveredLibrary> {
     })
 }
 
-fn try_cargo_toml(dir: &Path) -> Option<DiscoveredLibrary> {
-    let manifest = dir.join("Cargo.toml");
+fn try_manifest(
+    dir: &Path,
+    filename: &str,
+    extract: fn(&str, &str) -> Option<String>,
+    language: &str,
+) -> Option<DiscoveredLibrary> {
+    let manifest = dir.join(filename);
     if !manifest.exists() {
         return None;
     }
     let text = std::fs::read_to_string(&manifest).ok()?;
 
-    let name = extract_toml_value(&text, "name")?;
-    let version = extract_toml_value(&text, "version");
+    let name = extract(&text, "name")?;
+    let version = extract(&text, "version");
 
     Some(DiscoveredLibrary {
         name,
         version,
         path: dir.to_path_buf(),
-        language: "rust".into(),
+        language: language.into(),
     })
+}
+
+fn try_cargo_toml(dir: &Path) -> Option<DiscoveredLibrary> {
+    try_manifest(dir, "Cargo.toml", extract_toml_value, "rust")
 }
 
 fn try_package_json(dir: &Path) -> Option<DiscoveredLibrary> {
-    let manifest = dir.join("package.json");
-    if !manifest.exists() {
-        return None;
-    }
-    let text = std::fs::read_to_string(&manifest).ok()?;
-
-    let name = extract_json_value(&text, "name")?;
-    let version = extract_json_value(&text, "version");
-
-    Some(DiscoveredLibrary {
-        name,
-        version,
-        path: dir.to_path_buf(),
-        language: "javascript".into(),
-    })
+    try_manifest(dir, "package.json", extract_json_value, "javascript")
 }
 
 fn try_pyproject_toml(dir: &Path) -> Option<DiscoveredLibrary> {
-    let manifest = dir.join("pyproject.toml");
-    if !manifest.exists() {
-        return None;
-    }
-    let text = std::fs::read_to_string(&manifest).ok()?;
-
-    let name = extract_toml_value(&text, "name")?;
-    let version = extract_toml_value(&text, "version");
-
-    Some(DiscoveredLibrary {
-        name,
-        version,
-        path: dir.to_path_buf(),
-        language: "python".into(),
-    })
+    try_manifest(dir, "pyproject.toml", extract_toml_value, "python")
 }
 
 fn try_go_mod(dir: &Path) -> Option<DiscoveredLibrary> {
