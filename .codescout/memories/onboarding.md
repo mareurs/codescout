@@ -1,3 +1,3 @@
-Languages: rust
+Languages: 
 Root: .
-Manifest: Cargo.toml
+Manifest: none
