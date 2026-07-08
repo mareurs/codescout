@@ -38,67 +38,63 @@ pub enum CommandType {
 // Regex patterns (compiled once via OnceLock)
 // ---------------------------------------------------------------------------
 
-fn test_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r"(?x)
-            (?:^|\s|/)
-            (?:
-                cargo\s+test
-              | pytest
-              | npm\s+test
-              | npx\s+jest
-              | jest
-              | go\s+test
-              | mvn\s+test
-              | gradle\s+test
-            )
-            (?:\s|$)",
-        )
-        .expect("test regex")
-    })
+/// Defines a `fn $name() -> &'static Regex` backed by its own lazily-initialized
+/// `OnceLock`. All five regex accessors below repeated this exact
+/// static-cell/get_or_init/expect skeleton around a different pattern —
+/// this macro is the single place that skeleton lives now.
+macro_rules! cached_regex_fn {
+    ($name:ident, $pattern:expr, $what:literal) => {
+        fn $name() -> &'static Regex {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            RE.get_or_init(|| Regex::new($pattern).expect($what))
+        }
+    };
 }
+cached_regex_fn!(
+    test_re,
+    r"(?x)
+    (?:^|\s|/)
+    (?:
+        cargo\s+test
+      | pytest
+      | npm\s+test
+      | npx\s+jest
+      | jest
+      | go\s+test
+      | mvn\s+test
+      | gradle\s+test
+    )
+    (?:\s|$)",
+    "test regex"
+);
 
-fn build_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r"(?x)
-            (?:^|\s|/)
-            (?:
-                cargo\s+(?:build|clippy|check)
-              | npm\s+run\s+build
-              | make(?:\s|$)
-              | tsc(?:\s|$)
-              | gcc(?:\s|$)
-              | g\+\+(?:\s|$)
-              | clang(?:\s|$)
-              | javac(?:\s|$)
-              | go\s+build
-            )",
-        )
-        .expect("build regex")
-    })
-}
+cached_regex_fn!(
+    build_re,
+    r"(?x)
+    (?:^|\s|/)
+    (?:
+        cargo\s+(?:build|clippy|check)
+      | npm\s+run\s+build
+      | make(?:\s|$)
+      | tsc(?:\s|$)
+      | gcc(?:\s|$)
+      | g\+\+(?:\s|$)
+      | clang(?:\s|$)
+      | javac(?:\s|$)
+      | go\s+build
+    )",
+    "build regex"
+);
 
-fn cargo_test_result_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(\d+)\s+passed;\s+(\d+)\s+failed;\s+(\d+)\s+ignored")
-            .expect("cargo test regex")
-    })
-}
+cached_regex_fn!(
+    cargo_test_result_re,
+    r"(\d+)\s+passed;\s+(\d+)\s+failed;\s+(\d+)\s+ignored",
+    "cargo test regex"
+);
 
-fn rust_error_code_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^error\[E\d+\]").expect("rust error regex"))
-}
+cached_regex_fn!(rust_error_code_re, r"^error\[E\d+\]", "rust error regex");
 
-fn warning_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^warning(\[.+\])?:").expect("warning regex"))
-}
+cached_regex_fn!(warning_re, r"^warning(\[.+\])?:", "warning regex");
 
 // ---------------------------------------------------------------------------
 // Public API
