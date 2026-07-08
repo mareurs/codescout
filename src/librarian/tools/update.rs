@@ -81,6 +81,35 @@ fn merge_extra(
     }
 }
 
+/// Copy the patchable scalar frontmatter fields (`status`/`title`/`owners`/
+/// `tags`/`topic`/`time_scope`) plus `extra` from `patch` onto `fm`, in place.
+/// Shared by all three of `call`'s frontmatter-touching branches (full-body
+/// overwrite, `body_edits` with frontmatter change, and plain in-place patch).
+fn apply_frontmatter_patch(
+    fm: &mut crate::librarian::frontmatter::Frontmatter,
+    patch: &UpdatePatch,
+) {
+    if let Some(v) = &patch.status {
+        fm.status = Some(v.clone());
+    }
+    if let Some(v) = &patch.title {
+        fm.title = Some(v.clone());
+    }
+    if let Some(v) = &patch.owners {
+        fm.owners = v.clone();
+    }
+    if let Some(v) = &patch.tags {
+        fm.tags = v.clone();
+    }
+    if let Some(v) = &patch.topic {
+        fm.topic = Some(v.clone());
+    }
+    if let Some(v) = &patch.time_scope {
+        fm.time_scope = Some(v.clone());
+    }
+    merge_extra(fm, &patch.extra);
+}
+
 /// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
 /// Mirrors the batch semantics of `edit_markdown`'s `edits=[...]`. Used by
 /// `artifact(update, patch={body_edits: [...]})` to provide surgical body
@@ -190,25 +219,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let new_content = if let Some(new_body) = &patch.body {
         let (fm_opt, old_body) = crate::librarian::frontmatter::parse(&original)?;
         let mut fm = fm_opt.unwrap_or_default();
-        if let Some(v) = &patch.status {
-            fm.status = Some(v.clone());
-        }
-        if let Some(v) = &patch.title {
-            fm.title = Some(v.clone());
-        }
-        if let Some(v) = &patch.owners {
-            fm.owners = v.clone();
-        }
-        if let Some(v) = &patch.tags {
-            fm.tags = v.clone();
-        }
-        if let Some(v) = &patch.topic {
-            fm.topic = Some(v.clone());
-        }
-        if let Some(v) = &patch.time_scope {
-            fm.time_scope = Some(v.clone());
-        }
-        merge_extra(&mut fm, &patch.extra);
+        apply_frontmatter_patch(&mut fm, patch);
         let actual_body = match crate::librarian::catalog::augmentation::get(&cat, &a.id)? {
             Some(aug) if aug.append_mode => {
                 let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -232,49 +243,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             || patch.extra.is_some();
         if fm_changing {
             working = crate::librarian::frontmatter::update_in_place(&working, |fm| {
-                if let Some(v) = &patch.status {
-                    fm.status = Some(v.clone());
-                }
-                if let Some(v) = &patch.title {
-                    fm.title = Some(v.clone());
-                }
-                if let Some(v) = &patch.owners {
-                    fm.owners = v.clone();
-                }
-                if let Some(v) = &patch.tags {
-                    fm.tags = v.clone();
-                }
-                if let Some(v) = &patch.topic {
-                    fm.topic = Some(v.clone());
-                }
-                if let Some(v) = &patch.time_scope {
-                    fm.time_scope = Some(v.clone());
-                }
-                merge_extra(fm, &patch.extra);
+                apply_frontmatter_patch(fm, patch);
             })?;
         }
         apply_body_edits(&working, edits)?
     } else {
         crate::librarian::frontmatter::update_in_place(&original, |fm| {
-            if let Some(v) = &patch.status {
-                fm.status = Some(v.clone());
-            }
-            if let Some(v) = &patch.title {
-                fm.title = Some(v.clone());
-            }
-            if let Some(v) = &patch.owners {
-                fm.owners = v.clone();
-            }
-            if let Some(v) = &patch.tags {
-                fm.tags = v.clone();
-            }
-            if let Some(v) = &patch.topic {
-                fm.topic = Some(v.clone());
-            }
-            if let Some(v) = &patch.time_scope {
-                fm.time_scope = Some(v.clone());
-            }
-            merge_extra(fm, &patch.extra);
+            apply_frontmatter_patch(fm, patch);
         })?
     };
 
