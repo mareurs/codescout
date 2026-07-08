@@ -14,6 +14,12 @@
 //! sqlite-vec first — registering the same auto-extension twice would run the
 //! `vec0` init on every connection twice.
 
+use anyhow::{Context, Result};
+use parking_lot::Mutex;
+use rusqlite::Connection;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 use std::sync::Once;
 
 // Compile-time pin on the upstream signature: if sqlite-vec ever changes the
@@ -59,6 +65,32 @@ pub fn sanitize_db_name(project_id: &str) -> String {
     } else {
         s
     }
+}
+
+/// Open (once) and cache a project's sqlite-vec connection, creating its base
+/// table from `ddl`. Shared by the code + memory sqlite-vec stores, which
+/// differ only in db filename suffix and schema.
+pub fn open_conn(
+    dir: &Path,
+    conns: &Mutex<HashMap<String, Arc<Mutex<Connection>>>>,
+    project_id: &str,
+    db_suffix: &str,
+    ddl: &str,
+) -> Result<Arc<Mutex<Connection>>> {
+    let mut cache = conns.lock();
+    if let Some(c) = cache.get(project_id) {
+        return Ok(Arc::clone(c));
+    }
+    register();
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("create sqlite-vec dir {}", dir.display()))?;
+    let path = dir.join(format!("{}{}", sanitize_db_name(project_id), db_suffix));
+    let conn = Connection::open(&path)
+        .with_context(|| format!("open sqlite-vec db {}", path.display()))?;
+    conn.execute_batch(ddl).context("create sqlite-vec table")?;
+    let arc = Arc::new(Mutex::new(conn));
+    cache.insert(project_id.to_string(), Arc::clone(&arc));
+    Ok(arc)
 }
 
 /// Little-endian f32 blob for a `vec0` embedding column / `vec_f32()` argument.

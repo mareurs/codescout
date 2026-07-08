@@ -10,7 +10,7 @@
 use crate::memory::semantic_store::{MemoryFilter, MemoryOrder, SemanticMemoryStore};
 use crate::retrieval::memory::MemoryHit;
 use crate::retrieval::memory_payload::SemanticMemory;
-use crate::sqlite_vec_ext::{dense_blob, sanitize_db_name};
+use crate::sqlite_vec_ext::dense_blob;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -51,19 +51,11 @@ impl SqliteVecSemanticMemoryStore {
     }
 
     fn conn_for(&self, project_id: &str) -> Result<Arc<Mutex<Connection>>> {
-        let mut cache = self.conns.lock();
-        if let Some(c) = cache.get(project_id) {
-            return Ok(Arc::clone(c));
-        }
-        crate::sqlite_vec_ext::register();
-        std::fs::create_dir_all(&self.dir)
-            .with_context(|| format!("create sqlite-vec dir {}", self.dir.display()))?;
-        let path = self
-            .dir
-            .join(format!("{}.memories.db", sanitize_db_name(project_id)));
-        let conn = Connection::open(&path)
-            .with_context(|| format!("open sqlite-vec memory db {}", path.display()))?;
-        conn.execute_batch(
+        crate::sqlite_vec_ext::open_conn(
+            &self.dir,
+            &self.conns,
+            project_id,
+            ".memories.db",
             "CREATE TABLE IF NOT EXISTS memory_item (
                  point_id   TEXT PRIMARY KEY,
                  project_id TEXT NOT NULL,
@@ -73,10 +65,6 @@ impl SqliteVecSemanticMemoryStore {
              );
              CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_item(project_id);",
         )
-        .context("create memory_item table")?;
-        let arc = Arc::new(Mutex::new(conn));
-        cache.insert(project_id.to_string(), Arc::clone(&arc));
-        Ok(arc)
     }
 
     fn ensure_vec_table(conn: &Connection, dim: usize) -> Result<()> {

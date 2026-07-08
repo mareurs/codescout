@@ -23,7 +23,7 @@ use crate::retrieval::drift::ChunkRef;
 use crate::retrieval::embedder::{EmbedOutput, SparseVector};
 use crate::retrieval::payload::CodePayload;
 use crate::retrieval::search::Hit;
-use crate::sqlite_vec_ext::{dense_blob, sanitize_db_name};
+use crate::sqlite_vec_ext::dense_blob;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -68,19 +68,11 @@ impl SqliteVecCodeStore {
     /// `code_chunk` table. The `vec0` table is created lazily on first upsert,
     /// when the embedding dimension is known.
     fn conn_for(&self, project_id: &str) -> Result<Arc<Mutex<Connection>>> {
-        let mut cache = self.conns.lock();
-        if let Some(c) = cache.get(project_id) {
-            return Ok(Arc::clone(c));
-        }
-        crate::sqlite_vec_ext::register();
-        std::fs::create_dir_all(&self.dir)
-            .with_context(|| format!("create sqlite-vec dir {}", self.dir.display()))?;
-        let path = self
-            .dir
-            .join(format!("{}.db", sanitize_db_name(project_id)));
-        let conn = Connection::open(&path)
-            .with_context(|| format!("open sqlite-vec db {}", path.display()))?;
-        conn.execute_batch(
+        crate::sqlite_vec_ext::open_conn(
+            &self.dir,
+            &self.conns,
+            project_id,
+            ".db",
             "CREATE TABLE IF NOT EXISTS code_chunk (
                  chunk_id     TEXT PRIMARY KEY,
                  project_id   TEXT NOT NULL,
@@ -93,10 +85,6 @@ impl SqliteVecCodeStore {
              );
              CREATE INDEX IF NOT EXISTS idx_code_chunk_project ON code_chunk(project_id);",
         )
-        .context("create code_chunk table")?;
-        let arc = Arc::new(Mutex::new(conn));
-        cache.insert(project_id.to_string(), Arc::clone(&arc));
-        Ok(arc)
     }
 
     /// Ensure the `code_vec` virtual table exists with the given dim. Validates
