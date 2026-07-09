@@ -12,6 +12,7 @@
 | F-1 | 2026-07-09 | med | codescout-tool | fixed-verified | Task 2's plan text omits `read_only=false` on the claude-plugins activation, which would have left the workspace read-only for the implementer's writes |
 | F-2 | 2026-07-09 | high | architectural | mitigated | Controller's foreign-workspace activation raced a live background implementer subagent's MCP calls |
 | F-3 | 2026-07-09 | med | architectural | open | `subagent-driven-development`'s `task-N-brief.md`/`task-N-report.md` scratch paths collide across unrelated plans |
+| F-4 | 2026-07-09 | med | plan-prose | fixed-verified | Task 3's Measurement 2 referenced a nonexistent "same 30-error sample" |
 
 ## Wins Index
 
@@ -202,6 +203,48 @@ development` skill's scripts), not something to patch mid-plan in this repo.
 files by plan slug (e.g. `task-<plan-slug>-<N>-brief.md`) instead of bare task index.
 No action taken this session — flagging for whoever next touches the
 `subagent-driven-development` skill's `scripts/task-brief` / `scripts/review-package`.
+
+---
+
+## F-4 — Task 3's Measurement 2 referenced a nonexistent "same 30-error sample"
+
+**Observed:** 2026-07-09, pre-dispatch reconnaissance for Task 3, after confirming real
+`il1_read_overlaps_symbol` counts across the three repos (codescout 205/37 sessions,
+backend-kotlin 705/49, claude-plugins 22/9 — 932 total errors, not 30).
+
+**When:** Reading Task 3 Step 3 (Measurement 2 — ambiguity rate) before dispatching its
+implementer.
+
+**Expected (plan):** Step 3 said "For the same 30-error sample" — implying Measurement 1
+(Step 2) selects a specific 30-row sample that Measurement 2 reuses.
+
+**Got (scouted reality):** Step 2's query is an unsampled aggregate over the FULL
+population (`AVG`/`MAX`/`COUNT` with no `LIMIT`) — there is no "30-error sample" to
+reuse. "30" doesn't correspond to anything in Step 2 at all. Also, unlike Measurements
+1/3/4 (pure SQL over historical rows), Measurement 2 requires a NEW live `symbols()`
+call per error — running it over the real population (932 errors) would mean ~932 live
+tool calls, impractical for an evidence-gathering pass.
+
+**Probable cause:** "30-error sample" is a leftover reference from an earlier, smaller
+ad-hoc manual investigation (pre-compaction session) that predated Step 2's full-
+population SQL query design; the plan text wasn't reconciled when Step 2 was written
+against the full corpus instead of a fixed sample.
+
+**Workaround:** None needed — caught pre-dispatch. Revised Step 3 in place to draw its
+own explicit, executable sample: the 10 most-recent errors per repo (30 total, matching
+the original "30" figure but now grounded in a concrete, reproducible query instead of a
+dangling cross-reference), with the exact `LIMIT 10 ... ORDER BY id DESC` query spelled
+out.
+
+**Severity:** med — without this catch, Task 3's implementer would have had no operable
+definition of "the same 30-error sample" (nothing in Step 2 produces one) and would have
+had to guess a sampling method mid-task, producing a result whose sample selection isn't
+reproducible or citable by a later session.
+
+**Status:** fixed-verified — plan edit landed before any subagent ran.
+
+**Fix idea / Pointer:** Plan Task 3, Step 3, this session (`experiments`, pre-Task-3-
+dispatch).
 
 ---
 

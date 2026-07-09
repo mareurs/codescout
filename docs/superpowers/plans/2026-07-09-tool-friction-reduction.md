@@ -524,11 +524,21 @@ F-1's **Got:** field.
 
 - [ ] **Step 3: Measurement 2 — ambiguity rate**
 
-For the same 30-error sample, for each `read_file(path, start_line, end_line)` input,
-run `symbols(path=<file>)` (overview mode) and count how many named symbols the
-requested `[start_line, end_line]` range overlaps. Record `unambiguous (exactly 1) /
-total` as a percentage in F-2's **Got:** field — this is the number that gates any
-future auto-redirect design.
+Unlike Measurements 1/3/4 (pure SQL aggregates over the full historical population —
+205 errors in codescout, 705 in backend-kotlin, 22 in claude-plugins as of 2026-07-09),
+this measurement requires a live `symbols()` call per error, so it runs on a bounded
+sample: the 10 most-recent `il1_read_overlaps_symbol` errors per repo (30 total —
+`SELECT id, json_extract(input_json, '$.path') AS path, json_extract(input_json,
+'$.start_line') AS start_line, json_extract(input_json, '$.end_line') AS end_line FROM
+tool_calls WHERE err_family = 'il1_read_overlaps_symbol' ORDER BY id DESC LIMIT 10`
+per repo — most-recent errors are more likely to point at files that still exist).
+For each sampled error, run `symbols(path=<file>)` (overview mode) and count how many
+named symbols the requested `[start_line, end_line]` range overlaps (treat a missing
+`start_line`/`end_line` as the whole file — trivially overlaps every symbol in it, and
+is itself worth noting as a distinct sub-case in the write-up). Record `unambiguous
+(exactly 1) / total` as a percentage in F-2's **Got:** field, and separately note how
+many of the 30 were whole-file reads vs. explicit ranges — this is the number that
+gates any future auto-redirect design.
 
 - [ ] **Step 4: Measurement 3 — repeat-offender pattern**
 
