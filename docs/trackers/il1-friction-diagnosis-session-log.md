@@ -27,10 +27,10 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-07-09 | high | codescout-tool | pinned-as-eval-baseline | IL1 recovery-cost distribution: mean gap 21-174 calls, 32-42% never recover same-file within session |
-| F-2 | 2026-07-09 | high | codescout-tool | pinned-as-eval-baseline | IL1 ambiguity rate: only 33% of sampled errors map to exactly one overlapping symbol |
+| F-1 | 2026-07-09 | high | codescout-tool | pinned-as-eval-baseline | IL1 recovery-cost distribution: mean gap 21-174 calls, 32-41% never recover same-file within session |
+| F-2 | 2026-07-09 | high | codescout-tool | pinned-as-eval-baseline | IL1 ambiguity rate: 33% of sampled errors map to exactly one overlapping symbol |
 | F-3 | 2026-07-09 | high | codescout-tool | pinned-as-eval-baseline | IL1 repeat-offender pattern: 74% of affected sessions hit it on >1 distinct file |
-| F-4 | 2026-07-09 | low | codescout-tool | pinned-as-eval-baseline | IL1 dispatch correlation: only 5-11% of sessions hit first IL1 within their first 5-10 calls |
+| F-4 | 2026-07-09 | low | codescout-tool | pinned-as-eval-baseline | IL1 dispatch correlation: 5-11% of sessions hit first IL1 within their first 5-10 calls |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -159,7 +159,7 @@ Codified so the Index column means the same thing across sessions.
 
 `total_errors` matches the controller's pre-verified sanity-check counts exactly (205/705/22) in all three repos, confirming the query and DB state are aligned.
 
-32-42% of `il1_read_overlaps_symbol` errors in each repo never get a same-file `symbols()` success later in the same session (`recovered_count/total_errors` is 58-68%, not 100%) — a sizeable minority of these errors are followed by the session moving on without a same-file `symbols()` success (different tool, different file, or the line of work was dropped). Among the errors that *do* recover, the mean gap is 21-174 tool calls later — up to nearly 5,000 calls later in the worst backend-kotlin case — so recovery is typically not "the very next call."
+32-41% of `il1_read_overlaps_symbol` errors in each repo never get a same-file `symbols()` success later in the same session (`recovered_count/total_errors` is 58-68%, not 100%) — a sizeable minority of these errors are followed by the session moving on without a same-file `symbols()` success (different tool, different file, or the line of work was dropped). Among the errors that *do* recover, the mean gap is 21-174 tool calls later — up to nearly 5,000 calls later in the worst backend-kotlin case — so recovery is typically not "the very next call."
 
 **Probable cause:** Not investigated in this task (analysis-only; the brief doesn't ask for causal attribution here) — the gap size itself is the deliverable.
 
