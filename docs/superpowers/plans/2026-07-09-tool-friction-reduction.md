@@ -389,8 +389,12 @@ only, since artifact(get) never raises this as an error."
 - [ ] **Step 1: Switch workspace context to claude-plugins**
 
 ```
-workspace(action="activate", path="/home/marius/work/claude/claude-plugins")
+workspace(action="activate", path="/home/marius/work/claude/claude-plugins", read_only=false)
 ```
+
+(`read_only=false` is required here — claude-plugins is a foreign project this
+session, and codescout's foreign-activation default is `read_only=true`; see
+F-1 in `docs/trackers/tool-friction-reduction-session-log.md`.)
 
 - [ ] **Step 2: Add the new SQL anchor**
 
