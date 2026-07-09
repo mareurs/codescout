@@ -35,40 +35,37 @@ pub async fn auto_register_deps(project_root: &Path, ctx: &ToolContext) -> Vec<R
         return vec![];
     }
 
-    let result: anyhow::Result<Vec<RegisteredDep>> = async {
-        let mut inner = ctx.agent.inner.write().await;
-        let project = inner
-            .active_project_mut()
-            .ok_or_else(|| anyhow::anyhow!("no active project"))?;
+    let result: anyhow::Result<Vec<RegisteredDep>> = ctx
+        .agent
+        .with_project_at_mut(ctx.workspace_override.as_deref(), |project| {
+            let mut newly_registered = vec![];
+            for (dep, language, source_path) in &all_deps {
+                let already = project.library_registry.lookup(&dep.name).is_some();
+                let source_available = source_path.is_some();
+                let path = source_path.clone().unwrap_or_default();
 
-        let mut newly_registered = vec![];
-        for (dep, language, source_path) in &all_deps {
-            let already = project.library_registry.lookup(&dep.name).is_some();
-            let source_available = source_path.is_some();
-            let path = source_path.clone().unwrap_or_default();
-
-            // Let register() handle all precedence (ManifestScan vs Manual).
-            project.library_registry.register(
-                dep.name.clone(),
-                path,
-                language.clone(),
-                DiscoveryMethod::ManifestScan,
-                source_available,
-            );
-            if !already {
-                newly_registered.push(RegisteredDep {
-                    name: dep.name.clone(),
-                    language: language.clone(),
+                // Let register() handle all precedence (ManifestScan vs Manual).
+                project.library_registry.register(
+                    dep.name.clone(),
+                    path,
+                    language.clone(),
+                    DiscoveryMethod::ManifestScan,
                     source_available,
-                });
+                );
+                if !already {
+                    newly_registered.push(RegisteredDep {
+                        name: dep.name.clone(),
+                        language: language.clone(),
+                        source_available,
+                    });
+                }
             }
-        }
 
-        let registry_path = project.root.join(".codescout").join("libraries.json");
-        project.library_registry.save(&registry_path)?;
-        Ok(newly_registered)
-    }
-    .await;
+            let registry_path = project.root.join(".codescout").join("libraries.json");
+            project.library_registry.save(&registry_path)?;
+            Ok(newly_registered)
+        })
+        .await;
 
     result.unwrap_or_default()
 }
@@ -1051,5 +1048,66 @@ dependencies {
             .await
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn auto_register_deps_honors_workspace_override_pin() {
+        // BUG (docs/issues/...-edit-code-write-path-ignores-workspace-pin.md,
+        // sibling finding): auto_register_deps mutated the project registry
+        // via raw `ctx.agent.inner.write().await.active_project_mut()`,
+        // bypassing `with_project_at_mut` entirely — so a pinned call would
+        // silently register into (and save `libraries.json` for) the
+        // session-default project instead of the pinned workspace.
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let root_a = dir_a.path();
+        let root_b = dir_b.path();
+        std::fs::create_dir_all(root_a.join(".codescout")).unwrap();
+        std::fs::create_dir_all(root_b.join(".codescout")).unwrap();
+        std::fs::write(
+            root_a.join("package.json"),
+            r#"{"dependencies":{"express":"^4.0"}}"#,
+        )
+        .unwrap();
+        let nm = root_a.join("node_modules/express");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(nm.join("package.json"), "{}").unwrap();
+        let canon_a = std::fs::canonicalize(root_a).unwrap();
+
+        // Default (unpinned) project is B; pin THIS call to A.
+        let agent = crate::agent::Agent::new(Some(root_b.to_path_buf()))
+            .await
+            .unwrap();
+        let ctx = crate::tools::ToolContext {
+            agent,
+            lsp: crate::lsp::mock::MockLspProvider::with_client(
+                crate::lsp::mock::MockLspClient::default(),
+            ),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: Some(canon_a.clone()),
+        };
+
+        let registered = auto_register_deps(root_a, &ctx).await;
+        assert!(
+            !registered.is_empty(),
+            "expected express to be auto-registered from package.json"
+        );
+
+        let registry_a = canon_a.join(".codescout").join("libraries.json");
+        let registry_b = root_b.join(".codescout").join("libraries.json");
+        assert!(
+            registry_a.exists(),
+            "libraries.json must be written to the PINNED workspace A"
+        );
+        assert!(
+            !registry_b.exists(),
+            "libraries.json must NOT be written to the session-default workspace B"
+        );
     }
 }

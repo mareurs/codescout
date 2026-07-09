@@ -19,7 +19,7 @@ use crate::tools::{
 use super::display::{format_overview_symbols, format_search_symbols};
 use super::list_overview::list_overview;
 use crate::fs::{
-    format_library_path, get_path_param, is_glob, resolve_glob, resolve_library_roots, LspTimer,
+    format_library_path, get_path_param, is_glob, resolve_glob_for, resolve_library_roots, LspTimer,
 };
 use crate::symbol::query::{
     collect_matching, matches_kind_filter, resolve_range_via_document_symbols, symbol_name_matches,
@@ -358,7 +358,7 @@ async fn search_files_restricted(
 ) -> anyhow::Result<()> {
     // Restricted search: per-file textDocument/documentSymbol
     let files: Vec<PathBuf> = if is_glob(rel) {
-        resolve_glob(&ctx.agent, rel).await?
+        resolve_glob_for(&ctx.agent, ctx.workspace_override.as_deref(), rel).await?
     } else {
         let full = root.join(rel);
         if full.is_dir() {

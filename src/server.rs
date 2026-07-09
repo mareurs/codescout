@@ -281,8 +281,12 @@ impl CodeScoutServer {
             .unwrap_or(Value::Object(Default::default()))
     }
 
-    async fn check_tool_access(&self, name: &str) -> std::result::Result<(), CallToolResult> {
-        let security = self.agent.security_config().await;
+    async fn check_tool_access(
+        &self,
+        name: &str,
+        workspace_override: Option<&std::path::Path>,
+    ) -> std::result::Result<(), CallToolResult> {
+        let security = self.agent.security_config_for(workspace_override).await;
         crate::util::path_security::check_tool_access(name, &security)
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
     }
@@ -631,20 +635,26 @@ impl CodeScoutServer {
 
         let tool = self.resolve_tool(&req.name)?;
 
-        if let Err(err) = self.check_tool_access(&req.name).await {
+        let input: Value = Self::parse_input(req.arguments);
+        let workspace_override = Self::extract_workspace_override(&input);
+
+        if let Err(err) = self
+            .check_tool_access(&req.name, workspace_override.as_deref())
+            .await
+        {
             return Ok(err);
         }
 
-        let input: Value = Self::parse_input(req.arguments);
-
         let mut ctx = self.build_context(progress, peer);
-        ctx.workspace_override = Self::extract_workspace_override(&input);
+        ctx.workspace_override = workspace_override;
 
         let timeout_secs = if tool_skips_server_timeout(&req.name) {
             None
         } else {
             self.agent
-                .with_project(|p| Ok(p.config.project.tool_timeout_secs))
+                .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                    Ok(p.config.project.tool_timeout_secs)
+                })
                 .await
                 .ok()
         };
@@ -2398,6 +2408,56 @@ mod tests {
         assert!(
             !text.contains(&root),
             "Expected absolute root to be stripped, but found it in output:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_tool_inner_honors_workspace_override_for_security_config() {
+        // BUG (sibling of the edit_code write-path pin bug): check_tool_access
+        // ran BEFORE ctx.workspace_override was even extracted from the input,
+        // so it always gated against the session-default project's security
+        // config. Workspace A disables writes (file_write_enabled = false);
+        // the session-default project B (from make_server) allows them.
+        // Pinning a write-tool call to A must be rejected using A's config —
+        // proving the pin is honored before the access check runs, not after.
+        let dir_a = tempdir().unwrap();
+        let (_dir_b, server) = make_server().await;
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir_a.path().join(".codescout").join("project.toml"),
+            "[project]\nname = \"pin-test-a\"\n\n[security]\nfile_write_enabled = false\n",
+        )
+        .unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        let req = CallToolRequestParams::new("create_file").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "path": "new_file.txt",
+                "content": "hello",
+                "workspace": root_a.to_string_lossy(),
+            }))
+            .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("")
+            .to_string();
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "write call pinned to workspace A (file_write_enabled=false) must be \
+             rejected using A's config, not B's (session-default, writes enabled); got: {text}"
+        );
+        assert!(
+            !dir_a.path().join("new_file.txt").exists(),
+            "file must not have been created in pinned workspace A"
         );
     }
 

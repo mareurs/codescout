@@ -170,19 +170,6 @@ pub(crate) fn classify_reference_path(
     }
 }
 
-/// Resolve a path that may be a glob pattern, returning all matching files.
-/// If the path is a literal file/directory, returns it as a single-element vec.
-/// If it contains glob metacharacters (* ? [), expands against the project root.
-///
-/// Resolves against the session-default project. For `workspace=` pinning use
-/// [`resolve_glob_for`] — this is that with `None`.
-pub(crate) async fn resolve_glob(
-    agent: &Agent,
-    path_or_glob: &str,
-) -> anyhow::Result<Vec<PathBuf>> {
-    resolve_glob_for(agent, None, path_or_glob).await
-}
-
 /// Override-aware twin of [`resolve_glob`]: expands against the workspace named
 /// by `workspace_override` (resident-on-demand) rather than the session default.
 pub(crate) async fn resolve_glob_for(

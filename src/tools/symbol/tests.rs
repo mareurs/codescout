@@ -6293,6 +6293,40 @@ async fn call_graph_honors_workspace_override_for_relative_path() {
     );
 }
 
+#[tokio::test]
+async fn symbols_search_honors_workspace_override_for_glob_path() {
+    // BUG: `search_files_restricted`'s glob branch resolved via the unpinned
+    // `resolve_glob` (== `resolve_glob_for(agent, None, ...)`), while the
+    // non-glob branch right next to it (and the `Symbols::call` caller) both
+    // correctly pin via `require_project_root_for`/`resolve_glob_for`. Pin
+    // workspace A (which has the marker) while the default project is B
+    // (which does not), and assert the glob resolves against A rather than
+    // erroring "no files matched" against B.
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+    // Marker exists ONLY in pinned workspace A, NOT in default workspace B.
+    std::fs::write(dir_a.path().join("pin_marker.txt"), "x").unwrap();
+    let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+    // Default (unpinned) project is B; pin THIS request to A.
+    let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+    let mut ctx = test_ctx_with_agent(agent);
+    ctx.workspace_override = Some(root_a);
+
+    let result = Symbols
+        .call(json!({ "query": "Whatever", "path": "*.txt" }), &ctx)
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "glob path pinned to workspace A must resolve against A (which has \
+         pin_marker.txt), not the session-default B (which has none); got: {:?}",
+        result.err()
+    );
+}
+
 fn test_ctx_with_agent(agent: Agent) -> ToolContext {
     ToolContext {
         agent,
