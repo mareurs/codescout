@@ -67,7 +67,9 @@ impl UsageRecorder {
         } else {
             None
         };
-        let err_family = error_msg.as_deref().and_then(db::normalize_err_family);
+        let err_family = error_msg
+            .as_deref()
+            .and_then(|m| db::normalize_err_family(tool_name, m));
         let project_root_str = project_root.to_string_lossy().to_string();
 
         let input_json = if self.debug {

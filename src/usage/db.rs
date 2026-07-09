@@ -156,7 +156,7 @@ pub fn write_record(
 /// Lives here (not in the parent module) so the one-time backfill in `open_db`
 /// can re-classify historical `error_msg` values with the same logic
 /// `write_content` applies to new rows.
-pub(crate) fn normalize_err_family(msg: &str) -> Option<&'static str> {
+pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'static str> {
     // infra / tool-class (excluded from the probe's code-class score)
     if msg.contains("index is locked") {
         return Some("lsp_index_locked");
@@ -169,6 +169,41 @@ pub(crate) fn normalize_err_family(msg: &str) -> Option<&'static str> {
     }
     if msg.contains("LSP server disconnected") {
         return Some("lsp_disconnect");
+    }
+    // read_markdown's OWN errors — tool-scoped so an unrelated tool emitting
+    // similar-looking text never mis-attributes. Distinct from
+    // `il4_read_markdown_routing` below, which is read_file's redirect-TO-
+    // read_markdown message, not read_markdown's own failure.
+    if tool_name == "read_markdown" {
+        if msg.contains("only supports .md files") {
+            return Some("read_markdown_wrong_ext");
+        }
+        if msg.starts_with("file not found:") {
+            return Some("read_markdown_file_not_found");
+        }
+        if msg.contains("is a directory, not a file") {
+            return Some("read_markdown_path_is_directory");
+        }
+        if msg.contains("exceeds inline threshold") {
+            return Some("read_markdown_overflow_threshold");
+        }
+        if msg.contains("mutually exclusive")
+            || msg.contains("both start_line and end_line are required")
+        {
+            return Some("read_markdown_param_conflict");
+        }
+        if msg.contains("invalid line range") || msg.contains("exceeds file length") {
+            return Some("read_markdown_invalid_line_range");
+        }
+    }
+    // Shared heading-resolution error (file_summary::resolve_section_range) —
+    // raised by read_markdown and edit_markdown; NOT by artifact(get), which
+    // swallows the same miss into body_meta.heading_missing and stays success.
+    if (tool_name == "read_markdown" || tool_name == "edit_markdown")
+        && msg.starts_with("heading '")
+        && msg.ends_with("' not found")
+    {
+        return Some("heading_not_found");
     }
     // iron-law routing / wrong-tool class — the agent reached for the wrong tool
     // and the server gate rejected + re-routed it. These dominate the real error
@@ -194,7 +229,9 @@ pub(crate) fn normalize_err_family(msg: &str) -> Option<&'static str> {
     if msg.contains("IL3 violation") {
         return Some("il3_pipe_to_trimmer");
     }
-    // security / scope class
+    // security / scope class — deliberately tool-agnostic: `write denied` comes
+    // from `path_security.rs`'s shared write-gate, reused by every write tool.
+    // Same underlying mechanism regardless of caller, so one family is correct.
     if msg.contains("write denied") {
         return Some("write_scope_denied");
     }
@@ -202,6 +239,10 @@ pub(crate) fn normalize_err_family(msg: &str) -> Option<&'static str> {
     if msg.contains("unsupported json_path") {
         return Some("json_path_unsupported");
     }
+    // deliberately tool-agnostic: `edit_file` and `edit_markdown` both raise
+    // "old_string not found" for the identical root cause (stale re-read before
+    // editing) — confirmed by grep across src/tools/edit_file/mod.rs and
+    // src/tools/markdown/edit_markdown.rs; one family is correct here too.
     if msg.contains("old_string not found") {
         return Some("edit_stale_match");
     }
@@ -253,16 +294,16 @@ fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
         params![project_root],
     )?;
 
-    let unclassified: Vec<(i64, String)> = {
+    let unclassified: Vec<(i64, String, String)> = {
         let mut stmt = conn.prepare(
-            "SELECT id, error_msg FROM tool_calls \
+            "SELECT id, tool_name, error_msg FROM tool_calls \
              WHERE err_family IS NULL AND error_msg IS NOT NULL",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<std::result::Result<_, _>>()?
     };
-    for (id, msg) in unclassified {
-        if let Some(family) = normalize_err_family(&msg) {
+    for (id, tool_name, msg) in unclassified {
+        if let Some(family) = normalize_err_family(&tool_name, &msg) {
             conn.execute(
                 "UPDATE tool_calls SET err_family = ?1 WHERE id = ?2",
                 params![family, id],
@@ -1341,49 +1382,139 @@ mod tests {
         // The families that dominate the real error population — previously all NULL.
         let cases = [
             (
+                "read_file",
                 "source range overlaps named symbol(s): 'open_db'",
                 Some("il1_read_overlaps_symbol"),
             ),
             (
+                "read_file",
                 "Use read_markdown for markdown files",
                 Some("il4_read_markdown_routing"),
             ),
             (
+                "edit_file",
                 "Use edit_markdown for markdown files",
                 Some("il5_edit_markdown_routing"),
             ),
             (
+                "edit_file",
                 "edit contains a symbol definition (\"def \") — use symbol tools",
                 Some("il2_structural_edit"),
             ),
             (
+                "edit_file",
                 "edit_file is blocked for structural edits on source code files",
                 Some("il2_structural_edit"),
             ),
             (
+                "run_command",
                 "shell access to source files is blocked",
                 Some("il3_shell_on_source"),
             ),
             (
+                "run_command",
                 "IL3 violation — piped `cargo test` to a log-trimmer. BLOCKED.",
                 Some("il3_pipe_to_trimmer"),
             ),
             (
+                "create_file",
                 "write denied: '/x/INDEX.md' is outside the project root",
                 Some("write_scope_denied"),
             ),
             (
+                "read_file",
                 "unsupported json_path segment '[*]'",
                 Some("json_path_unsupported"),
             ),
-            ("old_string not found in src/x.rs", Some("edit_stale_match")),
+            (
+                "edit_file",
+                "old_string not found in src/x.rs",
+                Some("edit_stale_match"),
+            ),
+            (
+                "edit_markdown",
+                "old_string not found in section 'Foo'. The text must match exactly (whitespace-sensitive).",
+                Some("edit_stale_match"),
+            ),
             // Pre-existing families still resolve.
-            ("LSP server disconnected", Some("lsp_disconnect")),
-            ("symbol not found: Foo/bar", Some("symbol_not_found")),
-            ("some unrecognized failure", None),
+            ("symbols", "LSP server disconnected", Some("lsp_disconnect")),
+            (
+                "symbols",
+                "symbol not found: Foo/bar",
+                Some("symbol_not_found"),
+            ),
+            ("read_file", "some unrecognized failure", None),
+            // New: read_markdown's own errors, previously untagged (the biggest
+            // untagged bucket in usage.db — see the design spec's Problem section).
+            (
+                "read_markdown",
+                "read_markdown only supports .md files",
+                Some("read_markdown_wrong_ext"),
+            ),
+            (
+                "read_markdown",
+                "file not found: 'docs/MISSING.md'",
+                Some("read_markdown_file_not_found"),
+            ),
+            (
+                "read_markdown",
+                "'docs/trackers' is a directory, not a file",
+                Some("read_markdown_path_is_directory"),
+            ),
+            (
+                "read_markdown",
+                "combined headings span 812 lines — exceeds inline threshold",
+                Some("read_markdown_overflow_threshold"),
+            ),
+            (
+                "read_markdown",
+                "section \"## Foo\" spans 900 lines — exceeds inline threshold",
+                Some("read_markdown_overflow_threshold"),
+            ),
+            (
+                "read_markdown",
+                "heading and headings are mutually exclusive",
+                Some("read_markdown_param_conflict"),
+            ),
+            (
+                "read_markdown",
+                "both start_line and end_line are required",
+                Some("read_markdown_param_conflict"),
+            ),
+            (
+                "read_markdown",
+                "invalid line range: start_line=5 end_line=2",
+                Some("read_markdown_invalid_line_range"),
+            ),
+            (
+                "read_markdown",
+                "start_line 900 exceeds file length 500",
+                Some("read_markdown_invalid_line_range"),
+            ),
+            (
+                "read_markdown",
+                "heading 'SI-99' not found",
+                Some("heading_not_found"),
+            ),
+            (
+                "edit_markdown",
+                "heading 'SI-99' not found",
+                Some("heading_not_found"),
+            ),
+            // Scoping proof: the same message text from an unrelated tool must NOT
+            // pick up a read_markdown-specific family.
+            (
+                "some_other_tool",
+                "read_markdown only supports .md files",
+                None,
+            ),
         ];
-        for (msg, want) in cases {
-            assert_eq!(normalize_err_family(msg), want, "msg: {msg}");
+        for (tool_name, msg, want) in cases {
+            assert_eq!(
+                normalize_err_family(tool_name, msg),
+                want,
+                "tool={tool_name} msg={msg}"
+            );
         }
     }
 
