@@ -1,7 +1,7 @@
 ---
 id: b0e3905454edcba7
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(get, full=true) silently truncates body on large trackers with no truncation indicator'
 owners:
 - marius
@@ -11,7 +11,7 @@ tags:
 - windows-audit-tangent
 topic: null
 time_scope: null
-closed: null
+closed: '2026-07-10'
 opened: '2026-07-07'
 related:
 - docs/issues/2026-07-07-doctor-ads-colon-verbatim-prefix-false-positive.md
@@ -49,10 +49,19 @@ codescout MCP server, librarian `artifact` tool, project `codescout`, branch `ex
 
 ## Root cause
 
-Unknown — not yet traced to a specific `path:line` in the librarian tool's Rust source. Likely candidates (untested):
-- A response-size cap applied when serializing `body` for the `get` MCP response, independent of the `output_buffer` progressive-disclosure layer (this response was itself buffered as `@tool_*`, i.e. the truncation happens *before* or *during* buffering, not as a consequence of it).
-- The cap sits at a suspiciously round-ish byte count (~46.8KB) that didn't move across two identical calls and a reindex in between, suggesting a fixed limit rather than a race or cache issue.
-
+Not a missing signal — a **buried** one. `artifact(get, full=true)` *does* cap the
+body at `SOFT_CAP_LINES` (500) in `apply_soft_cap` (`src/librarian/tools/get.rs:40`)
+and emits a loud sibling `overflow` object (`shown_lines`/`total_lines`/`hint`) plus
+`body_meta.source_line_count` (`get.rs:456,480-489`). **But** any body over the
+500-line cap also exceeds the 10 KB inline budget, so the whole `get` response is
+buffered and `Tool::call_content` (`src/tools/core/types.rs:618-621`) substitutes a
+generic `"Result stored in @tool_X (N bytes)"` summary — because `LibrarianAdapter`
+(`src/librarian/adapter.rs`) never overrode `format_compact`. The truncation warning
+was generated, then discarded at the progressive-disclosure boundary, in exactly the
+case (large body) it exists to cover. `read_file(json_path="$.body")` then faithfully
+returns the already-capped ~500 lines (`read_from_buffer`, `src/tools/read_file.rs`)
+with no back-reference to `$.overflow`, so the guided flow never surfaces the cut.
+The two reporters each extracted `$.body` and missed the sibling `$.overflow`.
 ## Evidence
 
 Call 1 (`@tool_3cde2717`, before reindex): `"buffered_bytes": 46794`, extracted `$.body` → 499 lines.
@@ -68,22 +77,36 @@ Raw-file grep (`grep -oE "^## (F|W)-[0-9]+" docs/trackers/bug-fix-session-log.md
 
 ## Fix
 
-Not investigated — out of scope for the session that found it (was auditing a Windows-path bug in `src/librarian/tools/doctor.rs` and hit this while trying to append a session-log entry to this same tracker). Filing per this repo's "capture on notice" bug-tracking convention (CLAUDE.md) rather than fixing now.
-
+Fixed at the summary layer (`src/librarian/adapter.rs`): added
+`LibrarianAdapter::format_compact` delegating to a new free fn
+`librarian_compact_summary(inner_name, result)`. When an `artifact` response carries
+an `overflow` object, the compact summary that survives buffering now reads
+`"artifact body TRUNCATED — only N of M lines are in $.body …"` with narrower-selector
+guidance. `output_id`/`hint`/`buffered_bytes` are set independently of the summary, so
+buffer navigation is unaffected. The 500-line cap itself is unchanged (it keeps the
+buffered body navigable); only the *silence* is fixed. Shipped on `experiments`.
 ## Tests added
 
-N/A — root cause not yet located in source, so no regression test written. A regression test should assert that `artifact(get, full=true)`'s returned body's line count matches (or the response explicitly flags a mismatch against) `preview.line_count`/the on-disk file's line count for a tracker exceeding whatever the real cap turns out to be.
+`src/librarian/adapter.rs` (new `#[cfg(test)] mod tests`):
+- `compact_summary_surfaces_artifact_get_body_truncation` — overflow object → summary
+  names shown/total lines and contains "TRUNCAT".
+- `compact_summary_none_without_overflow` — in-cap body → `None` (generic fallback preserved).
+- `compact_summary_none_for_non_artifact_tools` — defensive gate on tool name.
 
+Live-verified through the reconnected server: `artifact(get, id=2dd9d90bc83f9f49,
+full=true)` summary flipped from `"Result stored in @tool_… (47588 bytes)"` to the
+TRUNCATED warning, same `buffered_bytes: 47588`.
 ## Workarounds
 
 For large trackers, read in slices via `read_file` on the buffered `@tool_*`/`@file_*` reference (as this session did) rather than trusting a single `full=true` call to return the complete document. Cross-check suspiciously round-looking `body` lengths against `preview.line_count` when the two are available from the same or a sibling call.
 
 ## Resume
 
-Grep the librarian `artifact` tool's `get` handler (likely `src/librarian/tools/get.rs`, per the tool-name-to-file convention used elsewhere in `src/librarian/tools/`) for any byte/line cap applied to `full=true` body serialization, and check whether it emits a truncation signal anywhere. Compare against how `preview` mode computes `line_count` (which correctly saw all 1739 lines) to find where the two code paths diverge.
-
+Fixed 2026-07-10. No further action. Sibling report
+`docs/issues/2026-07-09-artifact-get-full-true-body-silent-truncation.md` (id
+`98dc447e9c72eacc`) is the same defect from the `read_file(json_path="$.body")` angle —
+closed by the same fix.
 ## References
 
 - `docs/trackers/bug-fix-session-log.md` (id `2dd9d90bc83f9f49`) — the tracker on which this was found; see its `## W-21` entry for the reconnaissance-skill scout that caught this before it caused an F-N/W-N ID collision.
 - `docs/issues/2026-07-07-doctor-ads-colon-verbatim-prefix-false-positive.md` — the unrelated Windows-path bug being fixed in the same session when this was found.
-
