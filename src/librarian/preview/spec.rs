@@ -7,19 +7,20 @@ use serde_json::{json, Value};
 const MAX_HEADINGS: usize = 20;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
-    let mut hs = headings::parse(body);
-    hs.truncate(MAX_HEADINGS);
+    let (hs, dropped) = headings::cap(headings::parse(body), MAX_HEADINGS);
     let line_count = if body.is_empty() {
         0
     } else {
         body.lines().count()
     };
-    json!({
+    let mut v = json!({
         "shape": "spec",
         "headings": hs,
         "summary": summary::extract(body),
         "line_count": line_count,
-    })
+    });
+    headings::stamp_truncation(&mut v, dropped);
+    v
 }
 
 #[cfg(test)]
@@ -68,5 +69,16 @@ Details here.
         }
         let v = extract(&mk_row(), &body);
         assert_eq!(v["headings"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn heading_truncation_is_signaled() {
+        let mut body = String::new();
+        for i in 0..25 {
+            body.push_str(&format!("## H{i}\n"));
+        }
+        let v = extract(&mk_row(), &body);
+        assert_eq!(v["headings_truncated"], true);
+        assert_eq!(v["total_headings"], 25);
     }
 }

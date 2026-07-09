@@ -1,7 +1,7 @@
 ---
 id: '3a8ae5f8cf96e5ea'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(get) preview.headings silently capped at 20 (MAX_HEADINGS) with no signal, while line_count reflects the full file'
 owners:
 - marius
@@ -13,6 +13,7 @@ tags:
 - trackers
 topic: null
 time_scope: null
+closed: '2026-07-10'
 opened: '2026-07-10'
 related:
 - docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md
@@ -77,29 +78,35 @@ which asserts 25 headings → 20 with no truncation flag.)
    `.truncate(20)`'d. F-7 being ~line 509 is a coincidence (it's simply the 20th heading).
 
 ## Fix
-Not yet implemented. Options: (a) when `headings.len() > MAX_HEADINGS`, add a companion
-signal to the preview (`total_headings: N` and/or `headings_truncated: true`) so the cut is
-loud and `line_count`/`headings` no longer silently disagree; and/or (b) raise/remove the
-cap for tracker-kind previews specifically (navigation is the whole point of a tracker's
-heading list). (a) is the minimal correctness fix; (b) is a UX improvement. Prefer (a) at
-minimum — mirror the "make truncation loud" principle applied to the body path in `97a36905`.
 
+Fixed by making the cap loud (option a) and applying it consistently across all three
+heading-emitting extractors. Added a shared helper pair in `src/librarian/preview/headings.rs`:
+`cap(headings, max) -> (Vec<Heading>, Option<usize>)` (returns `Some(total)` when it dropped
+entries) and `stamp_truncation(preview, dropped)` (adds `total_headings` + `headings_truncated:
+true` only when entries were dropped). Rewired `default::extract`, `spec::extract`, and
+`plan::extract` to use them. The cap value (20) is unchanged — only the silence is fixed;
+small previews stay lean (no signal fields when under the cap). Shipped on `experiments`.
 ## Tests added
-N/A — not yet fixed. A regression test should assert that a >20-heading body yields either
-all headings or a `total_headings`/`headings_truncated` signal, and that the signal is
-present exactly when `headings.len()` was reduced.
 
+`src/librarian/preview/headings.rs`: `cap_reports_total_when_truncated`,
+`cap_no_report_when_within_limit`, `stamp_truncation_adds_fields_only_when_dropped`.
+`src/librarian/preview/default.rs`: `heading_truncation_is_signaled`,
+`no_truncation_signal_under_cap`. `spec.rs` + `plan.rs`: `heading_truncation_is_signaled`.
+`cargo test --lib` → 2976 passed / 0 failed. Live-verified post-reconnect:
+`artifact(get, id=2dd9d90bc83f9f49)` preview now reports `total_headings: 62`,
+`headings_truncated: true` alongside `line_count: 1843` (was: headings silently ended at
+F-7, the 20th, with no signal).
 ## Workarounds
 Grep the raw tracker file for headings/IDs rather than trusting `preview.headings` on large
 trackers (the W-21 practice). For a complete heading map, use `read_markdown` on non-managed
 files, or a heading-scoped `artifact(get, heading=...)` when you already know the section.
 
 ## Resume
-Fix in `src/librarian/preview/default.rs::extract` — add a truncation signal when
-`headings.truncate(MAX_HEADINGS)` drops entries (option a), optionally raising the cap for
-trackers (option b). Add the regression test described above. Same "make the silent cap
-loud" shape as the `full=true` summary fix (`97a36905`, `src/librarian/adapter.rs`).
 
+Fixed 2026-07-10. Closes the surviving (`preview.headings`) half of
+`docs/trackers/bug-fix-session-log.md` W-21's two-part counterfactual; the `full=true`
+body-truncation half was closed earlier by `97a36905`. Both members of the silent-cap
+family are now loud.
 ## References
 - `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md` (fixed) — sibling,
   the `full=true` body-truncation half of the same W-21 counterfactual.
@@ -107,4 +114,3 @@ loud" shape as the `full=true` summary fix (`97a36905`, `src/librarian/adapter.r
   same defect from the `read_file(json_path="$.body")` angle.
 - `docs/trackers/bug-fix-session-log.md` W-21 — the ID-collision incident this enables;
   failure #2 of its two-part counterfactual.
-

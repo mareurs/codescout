@@ -7,19 +7,20 @@ use serde_json::{json, Value};
 const MAX_HEADINGS: usize = 20;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
-    let mut headings = headings::parse(body);
-    headings.truncate(MAX_HEADINGS);
+    let (headings, dropped) = headings::cap(headings::parse(body), MAX_HEADINGS);
     let line_count = if body.is_empty() {
         0
     } else {
         body.lines().count()
     };
-    json!({
+    let mut v = json!({
         "shape": "default",
         "headings": headings,
         "summary": summary::extract(body),
         "line_count": line_count,
-    })
+    });
+    headings::stamp_truncation(&mut v, dropped);
+    v
 }
 
 #[cfg(test)]
@@ -49,6 +50,30 @@ mod tests {
         }
         let v = extract(&mk_row(), &body);
         assert_eq!(v["headings"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn heading_truncation_is_signaled() {
+        // Regression: the cap must be loud so preview.headings and line_count
+        // don't silently disagree — docs/issues/2026-07-10-preview-headings-silent-cap-20.md.
+        let mut body = String::new();
+        for i in 0..25 {
+            body.push_str(&format!("## H{i}\n"));
+        }
+        let v = extract(&mk_row(), &body);
+        assert_eq!(v["headings"].as_array().unwrap().len(), 20);
+        assert_eq!(v["headings_truncated"], true, "cut must be signaled");
+        assert_eq!(v["total_headings"], 25, "total reflects pre-cut count");
+    }
+
+    #[test]
+    fn no_truncation_signal_under_cap() {
+        let v = extract(&mk_row(), "## A\n## B\n");
+        assert!(
+            v.get("headings_truncated").is_none(),
+            "no signal when under cap"
+        );
+        assert!(v.get("total_headings").is_none());
     }
 
     #[test]

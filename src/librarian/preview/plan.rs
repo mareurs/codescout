@@ -9,8 +9,7 @@ const OPEN_NEXT_LIMIT: usize = 3;
 const TASK_TEXT_MAX: usize = 100;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
-    let mut hs = headings::parse(body);
-    hs.truncate(MAX_HEADINGS);
+    let (hs, dropped) = headings::cap(headings::parse(body), MAX_HEADINGS);
 
     let mut total = 0u64;
     let mut done = 0u64;
@@ -55,7 +54,7 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
         body.lines().count()
     };
 
-    json!({
+    let mut v = json!({
         "shape": "plan",
         "headings": hs,
         "tasks": {
@@ -64,7 +63,9 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
             "open_next": open_next,
         },
         "line_count": line_count,
-    })
+    });
+    headings::stamp_truncation(&mut v, dropped);
+    v
 }
 
 fn truncate_task_text(s: &str) -> String {
@@ -159,6 +160,17 @@ mod tests {
         }
         let v = extract(&mk_row(), &body);
         assert_eq!(v["headings"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn heading_truncation_is_signaled() {
+        let mut body = String::new();
+        for i in 0..25 {
+            body.push_str(&format!("## H{i}\n"));
+        }
+        let v = extract(&mk_row(), &body);
+        assert_eq!(v["headings_truncated"], true);
+        assert_eq!(v["total_headings"], 25);
     }
 
     #[test]
