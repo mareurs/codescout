@@ -269,7 +269,7 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
 /// Bump to force a one-time re-run of [`backfill_legacy_rows`] on the next open
 /// (e.g. after the [`normalize_err_family`] taxonomy is extended). Tracked via
 /// SQLite's `PRAGMA user_version`.
-const BACKFILL_VERSION: i64 = 1;
+const BACKFILL_VERSION: i64 = 2;
 
 /// One-time, idempotent repair of rows written before the friction columns were
 /// populated. Gated on `PRAGMA user_version` so it runs once per DB and is a
