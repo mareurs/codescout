@@ -205,6 +205,70 @@ Gates: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` cl
 
 Not added: sibling live tool-level tests for `replace`/`remove`/`rename`. Justification — all four `do_*` methods call the exact same `resolve_write_path_for` with the identical argument pattern (verified by direct code reading, not inference), so the fast resolver-level test plus the one live `insert` tool-level test already exercise the shared defective line under both the unfixed and fixed code paths; three more live-LSP round trips would be redundant coverage of the same single line, not new coverage of new logic.
 
+
+## Live-verification finding (post-fix, important caveat)
+
+While doing a live `/mcp`-reconnected verification through the actual running
+server (not `cargo test`), attempting a pinned **write** (`edit_code`,
+also independently reproduced with `create_file`) to a workspace that had
+**never been explicitly `activate`d** consistently failed with:
+
+```
+File writes are disabled for this project. If this project was activated
+in read-only mode, call workspace(action='activate', read_only: false) to
+enable writes.
+```
+
+**Root cause of this behavior (not a new bug — pre-existing, by design):**
+every internal caller of `Agent::ensure_resident` (`with_project_at`,
+`with_project_at_mut`, `call_edges_project_id_for`, `tools/memory/mod.rs`)
+passes `read_only: None` unconditionally (`src/agent/mod.rs:591,723,1226`;
+`src/tools/memory/mod.rs:479`). `ensure_resident`'s own doc comment states
+"Pinned, non-home workspaces default to read-only" — confirmed intentional.
+`project_security_config` (`agent/mod.rs:361-373`) then forces
+`file_write_enabled = false` whenever `p.read_only` is true, regardless of
+that workspace's own `project.toml` setting. Separately, `Agent::activate`
+unconditionally does `inner.workspaces.clear()` (`agent/mod.rs:518`) on
+**every** call — home or foreign — so there is no way to have two
+simultaneously-resident, simultaneously-writable workspaces via the tools
+exposed today. A workspace is writable if and only if it is the **current**
+session default (most recently `activate`d, nothing else activated since).
+
+**Practical consequence of combining this session's two fixes
+(write-path + `check_tool_access`):** before this session, a pinned write to
+a workspace that was never explicitly activated would **silently succeed but
+land in the wrong (session-default) file** — the exact bug this file
+documents. After this session's fixes, the identical calling pattern (pin
+only, no `activate`) now **fails loudly and safely** with "file writes
+disabled" instead — an improvement (fail-closed beats silent misdirection),
+but it means the write no longer *works* for that pattern at all, only fails
+safely. For the original bug's fix to actually deliver a **successful,
+correctly-routed write** in the field (not just a safe rejection), the caller
+must ensure the pin target is already resident+writable — today that means
+explicitly calling `workspace(action='activate', path=<target>,
+read_only=false)` on it at some point with nothing else activated since,
+which the workspace-state guide otherwise discourages from subagents
+precisely because it clobbers every other resident workspace
+(`docs/plans/2026-05-30-per-request-workspace-pinning.md` design docs confirm
+this read-only default and single-slot-clear were deliberate Phase 1
+choices, not oversights — but the *interaction* with a now-correctly-pinned
+`check_tool_access` doesn't appear to have been previously exercised or
+documented).
+
+This is almost certainly why the original report's four dispatches saw
+writes *succeed* (misrouted) rather than rejected: `check_tool_access` was
+still using the session-default's (permissive, presumably explicitly
+activated) config at that time, masking this read-only-default entirely.
+Fixing `check_tool_access` to honor the pin (this session) makes the access
+gate correctly consult the pin target's config — which, for a never-activated
+target, is always read-only.
+
+**Not filed as a separate bug** — recorded here since it's a direct,
+material consequence of this fix's interaction with pre-existing,
+deliberate design. Worth a design discussion: should `ensure_resident`
+(or a new pin-time parameter) support opting a per-request pin into write
+access without requiring a full `activate` that clobbers sibling residents?
+That would need its own plan/spec, not a bug fix.
 ## Workarounds
 None were needed once the fix landed. Prior to this fix: callers editing a
 specific worktree/foreign workspace with `edit_code` should verify with
@@ -217,16 +281,20 @@ instead of using a `workspace=` pin for `edit_code` calls, since the
 session-default path was unaffected by this bug.
 
 ## Resume
-Fix implemented and verified locally this session (fmt/clippy/test/release
-build all green; `edit_code_insert_honors_workspace_override_pin` now
-passes). Not yet committed. Remaining: commit the change, then follow the
-standard ship sequence (`docs/RELEASE.md`) before cherry-picking to
-`master` — including a live `/mcp` reconnect + two-worktree pin verification
-matching the regression test's setup, since this session's verification was
-library-level (`cargo test`) plus a release build, not a live MCP round
-trip. Once cherry-picked, cite the master-side SHA here per CLAUDE.md's
-"after cherry-pick" rule, then archive to `docs/issues/archive/`.
 
+Live `/mcp`-reconnected verification done. Read-side pin behavior confirmed
+correct through the actual running server (`symbols(path, workspace=...)`
+resolves against the pinned workspace). Write-side verification surfaced the
+read-only-by-default finding documented above rather than a clean
+file-identity demo — that finding is more important than the demo would have
+been. Next: decide whether to open a design discussion/plan for a supported
+way to grant a per-request pin write access without a full `activate`
+(see the finding above); until then, document in onboarding/CLAUDE.md-level
+guidance that pinned writes to a never-activated workspace will be safely
+rejected, not silently misrouted. Commit `3fca32db` on `experiments` also
+fixed 3 sibling bugs found in a follow-up audit
+(`docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`).
+Not yet cherry-picked to `master`.
 ## References
 - Sibling bug (read-path + LSP-root pin, same pattern, already fixed):
   catalog id `3fb29bc678a32562`,
@@ -239,4 +307,3 @@ trip. Once cherry-picked, cite the master-side SHA here per CLAUDE.md's
   pin mis-routed structural inserts to the main repo instead of the worktree
   on all four implementer dispatches... each self-caught via git status and
   reverted cleanly."
-
