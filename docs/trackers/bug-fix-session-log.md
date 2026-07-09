@@ -1782,6 +1782,8 @@ live-LSP class I initially misattributed to).
 
 **Promote-when:** A second large tracker (>500 lines / >~47KB body) exhibits the same `get`/preview truncation without a flag — at that point, escalate `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md`'s priority and promote this grep-first practice into `get_guide("tracker-conventions")`.
 
+**Update 2026-07-10 (half fixed — practice still holds):** The counterfactual had two independent failures; one is now fixed. (1) `artifact(get, full=true)`'s *silent body truncation* is closed — the buffered response now surfaces a loud `"artifact body TRUNCATED — N of M lines are in $.body …"` summary (commit `97a36905`, `LibrarianAdapter::format_compact`); bug files `2026-07-07-artifact-get-full-body-silent-truncation.md` and `2026-07-09-artifact-get-full-true-body-silent-truncation.md` are both marked `fixed`. (2) `preview.headings` stopping early (F-7 here) while `preview.line_count` stays correct is **NOT** fixed and still reproduces (verified 2026-07-10 — every `get` on this tracker returned headings ending at F-7 with `line_count: 1841`). So grep-first remains the safe ID-allocation practice, now motivated by (2) alone. The Promote-when's body-path half can no longer recur; the `preview.headings` half stands as a separate, still-open defect.
+
 **Status:** validated
 
 ---
