@@ -199,9 +199,13 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     // Shared heading-resolution error (file_summary::resolve_section_range) —
     // raised by read_markdown and edit_markdown; NOT by artifact(get), which
     // swallows the same miss into body_meta.heading_missing and stays success.
+    // Quote-style agnostic: read_markdown's runtime message quotes the heading
+    // via `{:?}` (Rust Debug — double quotes), while edit_markdown's propagated
+    // message uses `{}` (Display — single quotes). Match on the shape shared
+    // by both rather than a specific quote character.
     if (tool_name == "read_markdown" || tool_name == "edit_markdown")
-        && msg.starts_with("heading '")
-        && msg.ends_with("' not found")
+        && msg.starts_with("heading ")
+        && msg.ends_with(" not found")
     {
         return Some("heading_not_found");
     }
@@ -1499,6 +1503,15 @@ mod tests {
             (
                 "edit_markdown",
                 "heading 'SI-99' not found",
+                Some("heading_not_found"),
+            ),
+            // Double-quoted form: read_markdown's actual runtime message uses
+            // `{:?}` (Rust Debug) on the heading query, which renders with double
+            // quotes — distinct from edit_markdown's single-quoted Display text
+            // above. The classifier must recognize both quote styles.
+            (
+                "read_markdown",
+                "heading \"SI-99\" not found",
                 Some("heading_not_found"),
             ),
             // Scoping proof: the same message text from an unrelated tool must NOT
