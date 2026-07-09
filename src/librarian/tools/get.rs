@@ -22,25 +22,10 @@ fn resolve_file_path(
     Some(row.abs_path.clone())
 }
 
-fn normalize_heading(s: &str) -> String {
-    s.trim().trim_start_matches('#').trim().to_lowercase()
-}
-
-fn find_heading_section(hs: &[headings::Heading], body: &str, query: &str) -> Option<String> {
-    let normalized_query = normalize_heading(query);
-    let idx = hs
-        .iter()
-        .position(|h| normalize_heading(&h.text) == normalized_query)?;
-    let start_line = hs[idx].line;
-    let start_level = hs[idx].level;
-    let end_line = hs[idx + 1..]
-        .iter()
-        .find(|h| h.level <= start_level)
-        .map(|h| h.line)
-        .unwrap_or(usize::MAX);
-    let lines: Vec<&str> = body.lines().collect();
-    let slice_end = std::cmp::min(end_line.saturating_sub(1), lines.len());
-    Some(lines[start_line - 1..slice_end].join("\n"))
+fn find_heading_section(body: &str, query: &str) -> Option<String> {
+    crate::tools::file_summary::extract_markdown_section(body, query)
+        .ok()
+        .map(|r| r.content)
 }
 
 fn slice_lines(body: &str, start: usize, end: usize) -> String {
@@ -408,7 +393,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         file_content
             .as_ref()
             .map(|content| match frontmatter::parse(content) {
-                Ok((_, b)) => b.to_string(),
+                // Files conventionally carry a single blank separator line between the
+                // frontmatter's closing `---` and the body content. Strip exactly one so
+                // `start_line`/`end_line`/`source_line_count` are 1-indexed against the
+                // first VISIBLE content line, not the invisible separator.
+                Ok((_, b)) => b
+                    .strip_prefix("\r\n")
+                    .or_else(|| b.strip_prefix('\n'))
+                    .unwrap_or(b)
+                    .to_string(),
                 Err(_) => content.clone(),
             });
 
@@ -427,9 +420,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         out["preview"] = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
 
         if body_selected {
-            let parsed_headings = headings::parse(body);
             let (final_body, overflow_meta, body_meta_extra) = if let Some(ref name) = a.heading {
-                match find_heading_section(&parsed_headings, body, name) {
+                match find_heading_section(body, name) {
                     Some(section) => (section, None, json!({ "heading": name })),
                     None => (
                         String::new(),
@@ -441,7 +433,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 let mut parts = Vec::new();
                 let mut missing = Vec::new();
                 for name in list {
-                    match find_heading_section(&parsed_headings, body, name) {
+                    match find_heading_section(body, name) {
                         Some(s) => parts.push(s),
                         None => missing.push(name.clone()),
                     }
@@ -922,6 +914,52 @@ mod tests {
         let missing = v["body_meta"]["headings_missing"].as_array().unwrap();
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].as_str().unwrap(), "Missing");
+    }
+
+    #[tokio::test]
+    async fn line_slice_start_line_1_returns_first_visible_content_line() {
+        // Regression for the real-world bug: a normally-created file has a blank
+        // separator line between the frontmatter's closing `---` and the body
+        // content, so start_line=1 must mean the first VISIBLE line ("L1"), not
+        // that invisible separator.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\nL1\nL2\nL3\nL4\nL5\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "start_line": 1, "end_line": 1}))
+            .await
+            .unwrap();
+        assert_eq!(v["body"], "L1");
+        assert_eq!(v["body_meta"]["line_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn heading_matches_by_short_id_prefix() {
+        // Regression: SI-N style trackers write headings as
+        // "## SI-23 — <long descriptive title>". Callers naturally address a
+        // section by its short id; that must fuzzy-match like read_markdown/
+        // edit_markdown, not require the full heading text verbatim.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n## SI-23 — Even the per-cell count is isolation\n\nbody23\n\n## SI-2 — Weight semantics\n\nbody2\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "SI-23"}))
+            .await
+            .unwrap();
+        assert_eq!(v["body_meta"]["heading_missing"], Value::Null);
+        let body = v["body"].as_str().unwrap();
+        assert!(body.contains("body23"));
+        assert!(!body.contains("body2\n"));
     }
 
     #[tokio::test]

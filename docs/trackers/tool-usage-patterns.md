@@ -149,6 +149,16 @@ Started with `edit_code` correctly for service file structural changes (calls 39
 **Fix:** Remapped `rel_path` → `abs_path` in `compile_leaf` before SQL generation; removed phantom `repo` from `ALLOWED_FIELDS`. Regression tests added: `rel_path_filter_compiles_to_abs_path_sql` + `repo_filter_rejected` (`filter.rs`).  
 **Prompt gap:** None needed — the tool description example was correct and now works. Root cause was a schema-migration orphan in the filter allowlist, not a prompt issue.
 
+
+## artifact observations
+
+### T-011 — `artifact(get, start_line, end_line)` off-by-one via an invisible blank separator
+
+A per-repo `usage.db` mining pass (backend-kotlin + codescout, 2026-07-01 → 2026-07-09) surfaced 7 occurrences of the same downstream signature: `read_file(json_path="$.body")` on an `artifact(get)` result buffer returning `"0 lines"`. Root cause: `artifact(get, start_line=1, end_line=1)` addressed the blank separator line between the frontmatter's closing `---` and the body content — not the first visible content line — because `frontmatter::parse()`'s remainder was assigned to `parsed_body` verbatim, unshifted. Not a caller mistake — the tool's own 1-indexing silently pointed one line too early for every line-oriented consumer (full, slice, heading). See `docs/issues/2026-07-09-artifact-get-line-slice-blank-separator-offset.md` for the full root-cause trace (including two rejected hypotheses) and fix.
+
+### T-012 — `artifact(get, heading=)` required the full heading text, not a short id
+
+Same mining pass found 6 occurrences in backend-kotlin (`heading="SI-20"`, `headings=["SI-19","SI-20"]`, `headings=["## SI-22","## SI-1"]`, `heading="SI-29"`, `heading="## SI-33"`) plus 1 in codescout, spanning a week — every heading query style against a numbered-section tracker (`## SI-N — <long title>`) missed, `body_meta.heading_missing: true`, no error. `get.rs` used a bespoke exact-match-only matcher instead of the shared, already-tested `file_summary::resolve_section_range` 4-tier fuzzy cascade that backs `read_markdown`/`edit_markdown`'s documented "fuzzy matched" `heading=` param — a prompt-surface consistency gap, not a caller error. See `docs/issues/2026-07-09-artifact-get-heading-exact-match-only.md`.
 ## Prompt improvement candidates
 
 ### Iron Law #7 — Scope distinction for grep vs semantic_search
@@ -185,5 +195,3 @@ for scoped-directory multi-symbol discovery. Framing: internal Langfuse for tool
 ### 2026-05-03 — Initial population (as grep-usage-patterns)
 First 3 observations from session 64618681 (Kotlin backend). G-001 verdict corrected
 from debatable to legitimate after live proof.
-
-
