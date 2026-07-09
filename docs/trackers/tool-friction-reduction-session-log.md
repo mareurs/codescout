@@ -11,6 +11,7 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-07-09 | med | codescout-tool | fixed-verified | Task 2's plan text omits `read_only=false` on the claude-plugins activation, which would have left the workspace read-only for the implementer's writes |
 | F-2 | 2026-07-09 | high | architectural | mitigated | Controller's foreign-workspace activation raced a live background implementer subagent's MCP calls |
+| F-3 | 2026-07-09 | med | architectural | open | `subagent-driven-development`'s `task-N-brief.md`/`task-N-report.md` scratch paths collide across unrelated plans |
 
 ## Wins Index
 
@@ -155,6 +156,52 @@ not something to fix in this session.
 **Fix idea / Pointer:** Process discipline only, this session. Candidate `H-N` hookify /
 `R-N` reconnaissance-pattern promotion if this recurs: "controller must not `activate` a
 foreign workspace while a background subagent is in flight — pin per call instead."
+
+---
+
+## F-3 — `subagent-driven-development`'s `task-N-brief.md`/`task-N-report.md` scratch paths collide across unrelated plans
+
+**Observed:** 2026-07-09, Task 2 implementer's completion report (background subagent),
+flagged as an aside while reporting Task 2 done.
+
+**When:** Implementer wrote its report to `.superpowers/sdd/task-2-report.md` per the
+controller's dispatch instructions, and independently noticed the file already contained
+stale content before it overwrote it.
+
+**Expected:** `.superpowers/sdd/task-2-report.md` should either not exist yet (fresh plan)
+or contain this work stream's own prior content.
+
+**Got (scouted reality, via the implementer's own observation):** The pre-existing content
+was from a *different, unrelated, already-merged* plan — the constitution-tracker work's
+"Plan 2A Task 2: `find_matching_rules`" (visible in `.superpowers/sdd/progress.md`'s earlier
+section, confirmed by the controller from having read that ledger section pre-dispatch).
+`scripts/task-brief` and the implementer-dispatch convention both key report/brief filenames
+purely off task index (`task-<N>-brief.md`, `task-<N>-report.md`) with no plan-name
+component, so any two plans executed against the same repo checkout — even sequentially,
+weeks apart — silently share and overwrite the same scratch files.
+
+**Probable cause:** `.superpowers/sdd/` is a flat, plan-agnostic scratch directory; the
+skill's scripts (`task-brief`, `review-package`) don't namespace by plan slug or session.
+
+**Workaround:** None needed this time — the implementer overwrote cleanly and the stale
+content was fully irrelevant, so no confusion resulted. The controller also always
+regenerates `task-N-brief.md` immediately before each dispatch (never reads a pre-existing
+one blindly), which happens to sidestep the read-side risk for this session specifically.
+
+**Severity:** med — this time it was harmless (overwrite, no read-before-write of stale
+data), but the failure mode is real: a controller resuming a session after compaction, or
+running two plans interleaved, could read a stale `task-N-report.md` believing it reflects
+the current plan's task, or a concurrent second SDD session in the same checkout could
+race a write. Either produces silently wrong context fed to a reviewer or the controller
+itself.
+
+**Status:** open — not fixed; this is upstream tooling (the `superpowers:subagent-driven-
+development` skill's scripts), not something to patch mid-plan in this repo.
+
+**Fix idea / Pointer:** Candidate upstream fix: namespace `.superpowers/sdd/` scratch
+files by plan slug (e.g. `task-<plan-slug>-<N>-brief.md`) instead of bare task index.
+No action taken this session — flagging for whoever next touches the
+`subagent-driven-development` skill's `scripts/task-brief` / `scripts/review-package`.
 
 ---
 
