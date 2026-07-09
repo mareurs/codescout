@@ -557,12 +557,22 @@ impl Agent {
     /// Ensure `root` is resident in the registry (load + cache on miss) WITHOUT
     /// clearing the registry or changing `default_workspace_root`. Lets a
     /// per-request pinned workspace be resolved alongside the default. Pinned,
-    /// non-home workspaces default to read-only. Idempotent.
+    /// non-home workspaces default to read-only. Idempotent — EXCEPT that
+    /// passing `Some(false)` on an already-resident, currently-read-only entry
+    /// upgrades it to writable (never downgrades an already-writable entry).
+    /// This lets a write-tool call pin a workspace it was never separately
+    /// `activate`d into without requiring a full `activate` (which would clear
+    /// every other resident workspace — see `Agent::activate`).
     pub async fn ensure_resident(&self, root: PathBuf, read_only: Option<bool>) -> Result<()> {
         let root = std::fs::canonicalize(&root).unwrap_or(root);
         {
-            let inner = self.inner.read().await;
-            if inner.workspaces.contains_key(&root) {
+            let mut inner = self.inner.write().await;
+            if let Some(ws) = inner.workspaces.get_mut(&root) {
+                if read_only == Some(false) {
+                    if let Some(p) = ws.focused_active_mut().and_then(|p| p.as_active_mut()) {
+                        p.read_only = false;
+                    }
+                }
                 return Ok(());
             }
         }
@@ -570,7 +580,12 @@ impl Agent {
         let mut inner = self.inner.write().await;
         // Re-check under the write lock — another caller may have inserted it
         // while we did the lock-free I/O.
-        if inner.workspaces.contains_key(&root) {
+        if let Some(ws) = inner.workspaces.get_mut(&root) {
+            if read_only == Some(false) {
+                if let Some(p) = ws.focused_active_mut().and_then(|p| p.as_active_mut()) {
+                    p.read_only = false;
+                }
+            }
             return Ok(());
         }
         let ws = inner.build_workspace(&root, read_only, res);
@@ -1929,6 +1944,47 @@ mod tests {
         assert_eq!(
             inner.default_workspace_root.as_deref(),
             Some(root_b.as_path())
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_resident_upgrades_read_only_pin_to_writable() {
+        // FINDING (docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
+        // "Live-verification finding"): ensure_resident's non-home default is
+        // read-only, and every internal caller passed None — so a workspace
+        // pin could never become writable without a full `activate` (which
+        // clears every other resident workspace). ensure_resident(root,
+        // Some(false)) must upgrade an already-resident, read-only entry in
+        // place instead of no-op'ing on the idempotence check.
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        let root_a = canonical(dir_a.path());
+
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+
+        // First touch (read-oriented default): A becomes resident, read-only.
+        agent.ensure_resident(root_a.clone(), None).await.unwrap();
+        let read_only_before = agent
+            .with_project_at(Some(&root_a), |p| Ok(p.read_only))
+            .await
+            .unwrap();
+        assert!(read_only_before, "fresh pin must default to read-only");
+
+        // Upgrade: the SAME already-resident entry must flip to writable.
+        agent
+            .ensure_resident(root_a.clone(), Some(false))
+            .await
+            .unwrap();
+        let read_only_after = agent
+            .with_project_at(Some(&root_a), |p| Ok(p.read_only))
+            .await
+            .unwrap();
+        assert!(
+            !read_only_after,
+            "ensure_resident(Some(false)) must upgrade an already-resident \
+             read-only entry to writable"
         );
     }
 

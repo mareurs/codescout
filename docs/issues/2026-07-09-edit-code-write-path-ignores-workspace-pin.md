@@ -206,7 +206,7 @@ Gates: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` cl
 Not added: sibling live tool-level tests for `replace`/`remove`/`rename`. Justification — all four `do_*` methods call the exact same `resolve_write_path_for` with the identical argument pattern (verified by direct code reading, not inference), so the fast resolver-level test plus the one live `insert` tool-level test already exercise the shared defective line under both the unfixed and fixed code paths; three more live-LSP round trips would be redundant coverage of the same single line, not new coverage of new logic.
 
 
-## Live-verification finding (post-fix, important caveat)
+## Live-verification finding (post-fix) — FIXED
 
 While doing a live `/mcp`-reconnected verification through the actual running
 server (not `cargo test`), attempting a pinned **write** (`edit_code`,
@@ -269,6 +269,10 @@ deliberate design. Worth a design discussion: should `ensure_resident`
 (or a new pin-time parameter) support opting a per-request pin into write
 access without requiring a full `activate` that clobbers sibling residents?
 That would need its own plan/spec, not a bug fix.
+
+**Fixed this session, on top of the original fix above.** `Agent::ensure_resident` (`src/agent/mod.rs`) now upgrades an already-resident, read-only entry to writable when called with `Some(false)`, instead of no-op'ing on the idempotence check. `CodeScoutServer::call_tool_inner` (`src/server.rs`) now calls `ensure_resident(root, Some(false))` for any write-tool call (`tool.is_write(&input)`) that carries a `workspace=` pin, *before* `check_tool_access` runs — so a pin to a workspace that was never separately `activate`d now succeeds at writing (the pin itself is treated as the caller's explicit consent), instead of failing "file writes disabled". Read-only pinned calls are unaffected — they never reach this branch, so a pinned read still gets the safer read-only default. Path-security scoping (`validate_write_path`, the outside-root ack flow, deny-lists) is untouched; this only affects the `read_only`/`file_write_enabled` gate.
+
+Tests added: `Agent::ensure_resident_upgrades_read_only_pin_to_writable` (`src/agent/mod.rs`) at the accessor level; `CodeScoutServer::call_tool_inner_grants_write_access_to_a_fresh_pinned_workspace` (`src/server.rs`) end-to-end through the real dispatch path, pinning `create_file` to a workspace that is never `activate`d and asserting the write succeeds.
 ## Workarounds
 None were needed once the fix landed. Prior to this fix: callers editing a
 specific worktree/foreign workspace with `edit_code` should verify with

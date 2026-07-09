@@ -638,6 +638,26 @@ impl CodeScoutServer {
         let input: Value = Self::parse_input(req.arguments);
         let workspace_override = Self::extract_workspace_override(&input);
 
+        // A per-request workspace= pin is the caller's explicit, deliberate
+        // choice of target — they named the exact path. For a write-tool
+        // call, grant that pinned workspace write access on first residency
+        // (or upgrade it if already resident read-only) instead of leaving
+        // it at ensure_resident's read-only default. Without this, a pin to
+        // a workspace that was never separately `activate`d always fails
+        // "file writes disabled" below, even though the pin itself already
+        // is the caller's consent — and `activate`ing it instead would clear
+        // every other resident workspace (see `Agent::activate`), defeating
+        // the point of pinning. Read-only calls never reach this branch, so
+        // a pinned read still gets the safer read-only default.
+        if let Some(root) = workspace_override.as_deref() {
+            if tool.is_write(&input) {
+                let _ = self
+                    .agent
+                    .ensure_resident(root.to_path_buf(), Some(false))
+                    .await;
+            }
+        }
+
         if let Err(err) = self
             .check_tool_access(&req.name, workspace_override.as_deref())
             .await
@@ -2458,6 +2478,54 @@ mod tests {
         assert!(
             !dir_a.path().join("new_file.txt").exists(),
             "file must not have been created in pinned workspace A"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_tool_inner_grants_write_access_to_a_fresh_pinned_workspace() {
+        // FINDING (docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
+        // "Live-verification finding"): a workspace pin defaulted to read-only
+        // on first residency (Agent::ensure_resident's documented default),
+        // and Agent::activate clears every other resident workspace on every
+        // call — so a per-request `workspace=` pin could never succeed at
+        // writing to a workspace that was never separately `activate`d, even
+        // though naming it in `workspace=` is already the caller's explicit
+        // consent. A write-tool call with a pin must now upgrade that
+        // workspace to writable on first touch.
+        let dir_a = tempdir().unwrap();
+        let (_dir_b, server) = make_server().await;
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // dir_a is NEVER explicitly activated — only referenced via the pin.
+        let req = CallToolRequestParams::new("create_file").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "path": "new_file.txt",
+                "content": "hello",
+                "workspace": root_a.to_string_lossy(),
+            }))
+            .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("")
+            .to_string();
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "write pinned to a never-activated workspace must succeed \
+             (the pin is the caller's explicit consent); got: {text}"
+        );
+        assert!(
+            dir_a.path().join("new_file.txt").exists(),
+            "file must be created in the pinned workspace A"
         );
     }
 
