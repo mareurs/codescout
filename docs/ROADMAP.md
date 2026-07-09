@@ -283,6 +283,60 @@ CREATE TABLE doc_sources (
 
 ---
 
+### Bidirectional Code ↔ Tracker Linking
+
+Surface relevant trackers/bugs/plans when an agent explores code, and surface referenced
+code locations when an agent reads a tracker — in both directions, automatically, without
+a separate manual query.
+
+**Motivation:** `link_scan` (shipped, see "Tracker cross-linking stream" above) already
+derives `rel="cites"` edges between *artifacts* from prose citations of IDs. `audit_doc_refs`
+(`src/librarian/tools/audit_doc_refs/`) already *extracts* code references from tracker/doc
+prose — file paths, symbol names, line numbers, module paths — and checks them against the
+current filesystem + LSP symbol index, but only to report staleness in a one-off audit run;
+the extracted refs aren't persisted as queryable graph edges. Right now an agent exploring
+`src/foo.rs` has no way to discover "there's an open bug about this file" short of grepping
+`docs/issues/` by hand, and reading a bug file gives no structured pointer back to the code
+it's about beyond whatever's typed in prose.
+
+**Core mechanism:**
+1. **Persist code refs as edges.** Reuse `audit_doc_refs`'s parser/resolver
+   (`src/librarian/tools/audit_doc_refs/parser.rs`, `resolver.rs`) to extract
+   `(artifact_id, file_path, symbol?, line?)` tuples from artifact prose, but instead of
+   only using them for one-off staleness reporting, persist them in a new
+   `catalog/code_refs.rs` table (parallel to `catalog/links.rs`'s `LinkRow`, except the
+   "destination" is a code location, not another artifact) — same idempotent-rebuild
+   pattern `link_scan` already established (`link_scan(write=true)` materializes/prunes).
+2. **Code → tracker surfacing.** Extend `symbols`, `references`, and/or `read_file`'s
+   response envelope with a cheap, indexed lookup: "N tracker(s) reference this file/symbol"
+   — a hint line, not a forced fetch, matching the existing `_guide_hint`/progressive-disclosure
+   convention. Backed by an index on `code_refs.file_path` (+ optional symbol column).
+3. **Tracker → code surfacing.** Extend `artifact(get)` to render a "Referenced code"
+   block from the same table, and reuse `audit_doc_refs`'s existing filesystem/LSP-symbol
+   staleness check to flag drift inline (e.g. "`src/foo.rs:42` — symbol `Bar::baz` not
+   found, likely moved/renamed") instead of requiring a separate `audit_doc_refs` run.
+4. **Keep it manual-cadence like its siblings.** `link_scan` and `audit_doc_refs` are both
+   deliberately manual-trigger, not automatic-on-every-write (cost/staleness tradeoff); this
+   should follow the same convention — run periodically (a `link_scan`-adjacent action), not
+   re-derived on every edit.
+
+**Implementation sketch:**
+- New `src/librarian/catalog/code_refs.rs` + schema addition to `schema.sql`
+- Extend `src/librarian/tools/link_scan/` (or add a sibling module) to call
+  `audit_doc_refs`'s extraction layer and write `code_refs` rows alongside/instead of
+  `cites` edges
+- Hook code→tracker surfacing into the existing hint-injection path (`src/tools/output.rs` /
+  progressive-disclosure envelope), gated so it doesn't fire when zero refs exist — no hint
+  spam on files nobody's ever filed a bug against
+- Tracker→code surfacing: new rendered section in `artifact(get)`'s body, or a queryable
+  field, reusing `audit_doc_refs`'s resolver for live staleness
+
+**Related:** `link_scan` (`src/librarian/tools/link_scan/`) — the shipped artifact↔artifact
+sibling this generalizes from. `audit_doc_refs` (`src/librarian/tools/audit_doc_refs/`) —
+already does the hard part (extraction + staleness classification) for a one-off report;
+this makes that extraction durable and queryable instead of ephemeral.
+
+---
 ### Interactive Sessions
 
 Allow the agent to interact with long-running processes — REPLs, debuggers, and confirmation prompts — instead of waiting for them to exit.
