@@ -10,6 +10,7 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-07-09 | med | codescout-tool | fixed-verified | Task 2's plan text omits `read_only=false` on the claude-plugins activation, which would have left the workspace read-only for the implementer's writes |
+| F-2 | 2026-07-09 | high | architectural | mitigated | Controller's foreign-workspace activation raced a live background implementer subagent's MCP calls |
 
 ## Wins Index
 
@@ -98,6 +99,62 @@ implementer BLOCKED/NEEDS_CONTEXT report.
 `read_only=false` confirmed writable via the `"Switched project (read-write)"` hint.
 
 **Fix idea / Pointer:** Plan Task 2, Step 1, this session (`experiments`, pre-Task-2-dispatch).
+
+---
+
+## F-2 — Controller's foreign-workspace activation raced a live background implementer subagent's MCP calls
+
+**Observed:** 2026-07-09, immediately after dispatching Task 1's implementer (background
+agent) and while it was still running, the controller (this session) ran
+`workspace(activate, path="/home/marius/work/claude/claude-plugins")` to pre-scout Task 2's
+seam.
+
+**When:** Task 1's implementer was mid-task, using the same shared codescout MCP server
+session as the controller (per `get_guide("workspace-state")` § "Subagent semantics":
+background/async subagents dispatched via the `Agent` tool share the parent's MCP server,
+including the one shared active-project slot).
+
+**Expected:** The controller assumed a foreign-workspace excursion during a background
+subagent's run was harmless housekeeping, since the subagent had "already been briefed" and
+should be self-contained.
+
+**Got (scouted reality, from the implementer's own report):** The implementer's Task 1
+report independently flagged: "the active workspace project was also independently observed
+to flip to an unrelated project (`claude-plugins`) mid-task from what must have been a
+concurrent session, requiring re-activation of `codescout` before continuing." This is a
+first-hand account of exactly the hazard `get_guide("workspace-state")` names: "parallel
+subagents that activate different workspaces race — last writer wins." Here it wasn't two
+subagents racing — it was the controller's own recon excursion racing a background
+implementer that shares the same server session.
+
+**Probable cause:** `workspace(activate)` flips one global, session-wide active-project
+slot. A background-dispatched subagent (async `Agent` call) is not isolated from this slot
+just because it's "a different subagent" — it shares the literal same MCP server connection
+as the controller. The controller's mental model ("subagents are isolated context, so my
+tool calls can't affect them") is true for conversational/token context but false for MCP
+server-side state.
+
+**Workaround:** None applied retroactively — the implementer happened to notice the drift
+(via a stale/wrong-project response) and self-corrected by re-activating `codescout` before
+its next write. This was luck, not design: had the implementer been mid-`edit_file`/
+`edit_code` write when the slot flipped, the write could have silently targeted the wrong
+repo with no error (same shared session, different active root).
+
+**Severity:** high — silent wrong-repo write is a realistic outcome of this race, not just
+a failed call; this instance was caught only because the implementer's own defensive
+re-check happened to fire before any write landed.
+
+**Status:** mitigated — going-forward practice for the rest of this work stream: do not call
+`workspace(action="activate", path=<foreign>)` on the controller side while any background
+subagent is in flight. Use per-call `workspace=<path>` pinning (see
+`get_guide("workspace-state")` § "Per-call workspace pinning") for controller-side
+cross-repo reads instead of a shared activate, or wait for the subagent to report before
+activating. Root cause (one shared active-project slot per MCP session) is architectural,
+not something to fix in this session.
+
+**Fix idea / Pointer:** Process discipline only, this session. Candidate `H-N` hookify /
+`R-N` reconnaissance-pattern promotion if this recurs: "controller must not `activate` a
+foreign workspace while a background subagent is in flight — pin per call instead."
 
 ---
 
