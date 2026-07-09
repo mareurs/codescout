@@ -92,8 +92,8 @@ counted as a real line throughout.
 Strip exactly one leading blank-line separator (`\r\n` or `\n`) from the frontmatter-
 parsed remainder before assigning it to `parsed_body`, so `start_line=1` means the first
 visible content line for every consumer (full, slice, heading) in one place.
-`src/librarian/tools/get.rs:407-417` (uncommitted on `experiments` as of this filing —
-pending user decision to commit). Deliberately scoped to `get.rs` only; `frontmatter::parse`
+`src/librarian/tools/get.rs:407-417`. Committed on `experiments` as `21662112`
+(not yet on `master`). Deliberately scoped to `get.rs` only; `frontmatter::parse`
 itself is untouched to avoid blast radius on `update.rs`/`create.rs`/`indexer.rs`/
 `context.rs`/`link_scan/extract.rs`, which also consume it.
 

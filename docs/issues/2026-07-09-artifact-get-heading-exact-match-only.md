@@ -105,7 +105,7 @@ tier) now collapses to `heading_missing: true` via `.ok()?` rather than the old 
 undetected silent "first match wins" — a strict improvement, not a behavior this fix
 set out to specifically test (no known tracker has duplicate SI-N-style headings).
 Reused code, zero blast radius on `read_markdown`/`edit_markdown` (unchanged).
-Uncommitted on `experiments` as of this filing — pending user decision to commit.
+Committed on `experiments` as `21662112` (not yet on `master`).
 
 ## Tests added
 - `librarian::tools::get::tests::heading_matches_by_short_id_prefix`
