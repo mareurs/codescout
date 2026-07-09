@@ -72,14 +72,19 @@ pub(crate) async fn resolve_read_path_for(
     Ok(full)
 }
 
-/// Resolve a path for writing, with security validation.
-pub(crate) async fn resolve_write_path(
+/// Resolve a path for writing, with security validation, against the
+/// workspace named by `workspace_override` (resident-on-demand) rather than
+/// the session default. Pass `None` for the default.
+pub(crate) async fn resolve_write_path_for(
     agent: &Agent,
+    workspace_override: Option<&Path>,
     relative_path: &str,
 ) -> anyhow::Result<PathBuf> {
-    let root = agent.require_project_root().await?;
-    let security = agent.security_config().await;
-    let session_roots = agent.session_write_roots_snapshot().await;
+    let root = agent.require_project_root_for(workspace_override).await?;
+    let security = agent.security_config_for(workspace_override).await;
+    let session_roots = agent
+        .session_write_roots_snapshot_for(workspace_override)
+        .await;
     crate::util::path_security::validate_write_path(relative_path, &root, &security, &session_roots)
 }
 
@@ -485,6 +490,45 @@ mod tests {
             resolved.display()
         );
     }
+
+    #[tokio::test]
+    async fn resolve_write_path_for_honors_workspace_override() {
+        // BUG (docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin):
+        // edit_code's do_* methods resolved full_path via the unpinned
+        // resolve_write_path, so a `workspace=` pin was silently ignored and
+        // structural edits landed in the session-default project instead of
+        // the pinned workspace. The _for parameter closes that, mirroring
+        // resolve_read_path_for.
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+        let root_b = std::fs::canonicalize(dir_b.path()).unwrap();
+
+        // Default (unpinned) project is B; pin THIS request to A.
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+
+        let unpinned = resolve_write_path_for(&agent, None, "target.rs")
+            .await
+            .expect("unpinned resolution should succeed against default workspace B");
+        assert!(
+            unpinned.starts_with(&root_b),
+            "unpinned write path must resolve against default workspace B; got {}",
+            unpinned.display()
+        );
+
+        let pinned = resolve_write_path_for(&agent, Some(root_a.as_path()), "target.rs")
+            .await
+            .expect("pinned resolution should succeed against workspace A");
+        assert!(
+            pinned.starts_with(&root_a),
+            "workspace=A pin must resolve the write path against A, not the \
+             session-default B; got {}",
+            pinned.display()
+        );
+    }
+
     #[tokio::test]
     async fn get_lsp_client_honors_workspace_override_for_lsp_root() {
         // Per-request pin regression, defect #2

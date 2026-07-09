@@ -6956,6 +6956,99 @@ async fn edit_code_replace_appends_caller_hint() {
     );
 }
 
+/// `do_insert`'s `full_path` is resolved via the unpinned `resolve_write_path`
+/// (`src/fs/mod.rs`), which always joins `rel_path` onto the session-DEFAULT
+/// project root — never `ctx.workspace_override`. Workspace A stands in for a
+/// pinned worktree, workspace B for the session-default main repo; both hold
+/// an IDENTICAL `src/lib.rs` so LSP symbol resolution succeeds no matter which
+/// physical file the bug actually touches. A correctly pin-aware `edit_code`
+/// must write the inserted marker into A and leave B untouched. Currently it
+/// does the opposite — this test is expected to FAIL until the bug is fixed
+/// (see docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md).
+#[tokio::test]
+async fn edit_code_insert_honors_workspace_override_pin() {
+    if !std::process::Command::new("rust-analyzer")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    for dir in [&dir_a, &dir_b] {
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test-pin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n",
+        )
+        .unwrap();
+    }
+    let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+    // Default (unpinned) project is B ("main repo"); pin THIS request to A
+    // ("worktree") — the exact shape of a subagent dispatch that passes
+    // workspace=<worktree abs path> while the server's active project is
+    // still the main repo.
+    let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+    let mut ctx = test_ctx_with_agent(agent);
+    ctx.workspace_override = Some(root_a);
+
+    let marker = "pub fn pinned_insert_marker() {}";
+    let mut outcome: Option<Value> = None;
+    for attempt in 0..5 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(600 * attempt)).await;
+        }
+        let result = EditCode
+            .call(
+                json!({
+                    "symbol": "greet",
+                    "path": "src/lib.rs",
+                    "action": "insert",
+                    "body": marker,
+                    "position": "after",
+                }),
+                &ctx,
+            )
+            .await;
+        match result {
+            Ok(v) => {
+                outcome = Some(v);
+                break;
+            }
+            Err(e) => eprintln!("Attempt {}: {}", attempt + 1, e),
+        }
+    }
+    if outcome.is_none() {
+        eprintln!("Skipping: LSP did not respond in time");
+        return;
+    }
+
+    let content_a = std::fs::read_to_string(dir_a.path().join("src/lib.rs")).unwrap();
+    let content_b = std::fs::read_to_string(dir_b.path().join("src/lib.rs")).unwrap();
+
+    assert!(
+        content_a.contains(marker),
+        "insert pinned to workspace A must land in A's file, not B's; \
+         A content:\n{content_a}\n---\nB content:\n{content_b}"
+    );
+    assert!(
+        !content_b.contains(marker),
+        "insert pinned to workspace A must NOT modify the session-default \
+         workspace B's file (main-repo mis-routing bug); B content:\n{content_b}"
+    );
+}
+
 #[test]
 fn collect_matching_skips_function_children_when_pushed() {
     // Regression: a function whose Variable children's name_path starts with
