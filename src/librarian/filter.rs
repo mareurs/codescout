@@ -242,6 +242,74 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         }),
     }
 }
+
+/// Repair the inverted-leaf mistake — `{op: {field, value}}` written instead of
+/// the canonical `{field: {op: value}}` — in place, returning a description of
+/// each correction applied. usage.db shows this is the most common filter error;
+/// the generic "unknown field" error used to force a retry (a second LLM call).
+/// Repairing lets the query run on the first try while the returned note teaches
+/// the canonical shape. A leaf is treated as inverted only when its single key
+/// parses as an op AND its value is an object carrying a `field` key — an
+/// unambiguous, deterministic signature, so the transform never guesses.
+pub fn repair_inverted_leaves(node: &mut FilterNode) -> Vec<String> {
+    let mut corrections = Vec::new();
+    repair_node(node, &mut corrections);
+    corrections
+}
+
+fn repair_node(node: &mut FilterNode, corrections: &mut Vec<String>) {
+    match node {
+        FilterNode::And { and } => {
+            for child in and.iter_mut() {
+                repair_node(child, corrections);
+            }
+        }
+        FilterNode::Or { or } => {
+            for child in or.iter_mut() {
+                repair_node(child, corrections);
+            }
+        }
+        FilterNode::Not { not } => repair_node(not, corrections),
+        FilterNode::Leaf(map) => {
+            if map.len() != 1 {
+                return;
+            }
+            // Clone the single (key, value) so the map borrow ends before we mutate.
+            let (key, val) = {
+                let (k, v) = map.iter().next().unwrap();
+                (k.clone(), v.clone())
+            };
+            // Canonical leaves key on a field name; only an op-keyed leaf whose
+            // value carries `field` is the inverted shape.
+            if key.parse::<LeafOp>().is_err() {
+                return;
+            }
+            let Some(inner) = val.as_object() else {
+                return;
+            };
+            let Some(field) = inner.get("field").and_then(|v| v.as_str()) else {
+                return;
+            };
+            let inner_value = inner
+                .get("value")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let mut op_map = serde_json::Map::new();
+            op_map.insert(key.clone(), inner_value);
+            let mut corrected = serde_json::Map::new();
+            corrected.insert(field.to_string(), serde_json::Value::Object(op_map));
+            let before = serde_json::Value::Object({
+                let mut m = serde_json::Map::new();
+                m.insert(key.clone(), val.clone());
+                m
+            });
+            let after = serde_json::Value::Object(corrected.clone());
+            corrections.push(format!("inverted filter leaf repaired: {before} → {after}"));
+            *map = corrected;
+        }
+    }
+}
+
 /// Evaluate a filter AST against one entry object, in memory.
 ///
 /// Sibling to `compile` (which emits SQL). No `ALLOWED_FIELDS` gate —
@@ -546,6 +614,49 @@ mod tests {
     fn rejects_non_allowlisted_column() {
         let node = parse(json!({"sqlite_master": {"eq": "x"}}));
         assert!(compile(&node).is_err());
+    }
+
+    #[test]
+    fn repair_fixes_inverted_op_keyed_leaf() {
+        // {op: {field, value}} → {field: {op: value}}; repaired node compiles.
+        let mut node = parse(json!({"contains": {"field": "title", "value": "or-tools"}}));
+        let corrections = repair_inverted_leaves(&mut node);
+        assert_eq!(
+            corrections.len(),
+            1,
+            "one correction expected: {corrections:?}"
+        );
+        let f = compile(&node).unwrap();
+        assert_eq!(f.sql, "title LIKE ?");
+    }
+
+    #[test]
+    fn repair_leaves_canonical_leaf_untouched() {
+        let mut node = parse(json!({"title": {"contains": "x"}}));
+        assert!(repair_inverted_leaves(&mut node).is_empty());
+        // Still the canonical shape.
+        assert!(compile(&node).is_ok());
+    }
+
+    #[test]
+    fn repair_recurses_into_composition() {
+        let mut node = parse(json!({"or": [
+            {"eq": {"field": "status", "value": "active"}},
+            {"kind": {"eq": "tracker"}}
+        ]}));
+        let corrections = repair_inverted_leaves(&mut node);
+        assert_eq!(corrections.len(), 1, "only the inverted child repaired");
+        assert!(
+            compile(&node).is_ok(),
+            "whole composition compiles after repair"
+        );
+    }
+
+    #[test]
+    fn repair_ignores_op_keyed_leaf_without_field() {
+        // {"contains": "x"} is ambiguous (no `field` key) — do not guess.
+        let mut node = parse(json!({"contains": "x"}));
+        assert!(repair_inverted_leaves(&mut node).is_empty());
     }
 
     #[test]

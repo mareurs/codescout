@@ -32,6 +32,7 @@ impl Tool for Grep {
             "properties": {
                 "pattern": { "type": "string", "description": "Regex pattern" },
                 "path": { "type": "string", "description": "File or directory (default: project root)" },
+                "file_path": { "type": "string", "description": "Alias for path" },
                 "limit": { "type": "integer", "default": 50, "description": "Max matching lines" },
                 "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." },
                 "ignore_case": { "type": "boolean", "default": false, "description": "Case-insensitive match" },
@@ -45,7 +46,16 @@ impl Tool for Grep {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
-        let raw_path = strip_buffer_ref_quotes(input["path"].as_str().unwrap_or("."));
+        let raw_path = strip_buffer_ref_quotes(
+            input["path"]
+                .as_str()
+                .or_else(|| {
+                    crate::fs::PATH_PARAM_ALIASES
+                        .iter()
+                        .find_map(|a| input.get(*a).and_then(|v| v.as_str()))
+                })
+                .unwrap_or("."),
+        );
 
         // Buffer ref (@tool_*, @cmd_*, @file_*): search the cached content
         // instead of treating the ref as a filesystem path.
@@ -1110,6 +1120,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r["total"].as_u64().unwrap(), 1, "only the .rs file matches");
+    }
+
+    #[tokio::test]
+    async fn grep_accepts_file_path_alias_for_scope() {
+        // file_path must actually scope the search — not silently fall back to
+        // "." (project root). Decoy at root + hit in sub/ discriminates the two.
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("hit.rs"), "NEEDLE\n").unwrap();
+        std::fs::write(dir.path().join("decoy.rs"), "NEEDLE\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+
+        let r = Grep
+            .call(
+                json!({ "pattern": "NEEDLE", "file_path": sub.to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let s = r.to_string();
+        assert!(s.contains("hit.rs"), "should find the in-scope match: {s}");
+        assert!(
+            !s.contains("decoy.rs"),
+            "file_path must scope to sub/, not fall back to project root: {s}"
+        );
     }
 
     #[tokio::test]

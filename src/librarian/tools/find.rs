@@ -311,7 +311,16 @@ fn scan_unindexed_md(
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args)?;
+    let mut a: Args = serde_json::from_value(args)?;
+    // Repair-and-continue: fix the deterministic inverted-leaf filter mistake
+    // ({op:{field,value}} -> {field:{op:value}}) in place rather than erroring,
+    // so a malformed filter costs zero retry round-trips. The corrections ride
+    // back in the response so the agent still learns the canonical shape.
+    let filter_corrections = a
+        .filter
+        .as_mut()
+        .map(crate::librarian::filter::repair_inverted_leaves)
+        .unwrap_or_default();
     let is_cold_call = a.filter.is_none()
         && a.semantic.is_none()
         && a.kind.is_none()
@@ -553,6 +562,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(cat_val) = catalog_value {
         response["catalog"] = cat_val;
     }
+    if !filter_corrections.is_empty() {
+        response["corrections"] = serde_json::json!({
+            "filter": filter_corrections,
+            "hint": "Filter leaf shape is {field: {op: value}}, not {op: {field, value}}. \
+                     Your filter was auto-corrected and the query ran; use the canonical shape next time.",
+        });
+    }
     Ok(response)
 }
 
@@ -623,6 +639,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(v["count"].as_u64(), Some(2));
+    }
+
+    #[tokio::test]
+    async fn repairs_inverted_filter_and_notes_correction() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("a", "or-tools guide")).unwrap();
+        artifact::upsert(&cat, &sample_row("b", "unrelated")).unwrap();
+
+        let ctx = mk_ctx(cat);
+        // Inverted leaf {op:{field,value}} instead of {field:{op:value}} — the
+        // handler repairs it and runs the query rather than erroring (no retry
+        // round-trip), and rides a correction note back so the agent learns.
+        let v = call(
+            &ctx,
+            json!({"filter": {"contains": {"field": "title", "value": "or-tools"}}}),
+        )
+        .await
+        .expect("inverted filter should be repaired, not error");
+        assert_eq!(v["count"].as_u64(), Some(1), "repaired query matches: {v}");
+        assert!(
+            v["corrections"]["filter"].is_array(),
+            "correction note present: {v}"
+        );
     }
 
     #[tokio::test]
