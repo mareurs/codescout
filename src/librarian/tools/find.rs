@@ -117,6 +117,8 @@ fn build_hints(
     scope_fallback: bool,
     user_constrains_status: bool,
     include_archived: bool,
+    returned_count: usize,
+    offset: usize,
 ) -> Result<Value> {
     let mut hints = serde_json::Map::new();
 
@@ -128,6 +130,23 @@ fn build_hints(
     }
 
     let here = count_for_scope(cat, base, ws, current, applied.scope)?;
+
+    // More matched in THIS scope than were returned on this page? The result
+    // set is capped by `limit`/`offset`; without this signal an agent reads the
+    // returned page as the complete set (silent-cap bug — see
+    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    let shown_through = offset.saturating_add(returned_count);
+    let more_in_scope = here.saturating_sub(shown_through);
+    if more_in_scope > 0 {
+        hints.insert("more_in_scope".into(), json!(more_in_scope));
+        hints.insert(
+            "more_in_scope_hint".into(),
+            json!(
+                "more artifacts match in this scope than were returned; \
+                 raise `limit`, page with `offset`, or narrow the filter"
+            ),
+        );
+    }
 
     if !matches!(applied.scope, Scope::Repo | Scope::All) && current.is_some() {
         let in_repo = count_for_scope(cat, base, ws, current, Scope::Repo)?;
@@ -492,6 +511,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 scope_fallback,
                 user_constrains_status,
                 a.include_archived,
+                items.len(),
+                offset,
             )?
         };
 
@@ -705,6 +726,36 @@ mod tests {
         let ctx = mk_ctx(cat);
         let v = call(&ctx, json!({"limit": 10_000_000})).await.unwrap();
         assert!(v["count"].as_u64().unwrap() <= 500);
+    }
+
+    #[tokio::test]
+    async fn more_in_scope_signals_capped_page() {
+        // Regression for the silent-cap family: a limit-capped page must signal
+        // that more match in scope. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        let cat = Catalog::open_in_memory().unwrap();
+        for i in 0..3 {
+            artifact::upsert(&cat, &sample_row(&format!("id{i}"), &format!("t{i}"))).unwrap();
+        }
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"limit": 2})).await.unwrap();
+        assert_eq!(v["count"].as_u64(), Some(2), "page size stays items.len()");
+        assert_eq!(
+            v["hints"]["more_in_scope"].as_u64(),
+            Some(1),
+            "3 match, 2 returned → 1 more in scope"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_more_in_scope_when_page_holds_everything() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("a", "alpha")).unwrap();
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            v["hints"]["more_in_scope"].is_null(),
+            "nothing capped → no more_in_scope signal"
+        );
     }
 
     struct MockEmbedder;
