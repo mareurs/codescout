@@ -262,14 +262,7 @@ pub async fn run(
     // the reap-before-spawn net on the next mux start.
     // killpg on an already-dead group returns ESRCH — harmless.
     if let Some(pgid) = child_pgid {
-        // SAFETY: pgid was created with process_group(0); signalling our own group is safe.
-        unsafe {
-            libc::killpg(pgid, libc::SIGTERM);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        unsafe {
-            libc::killpg(pgid, libc::SIGKILL);
-        }
+        kill_process_group(pgid).await;
     }
     std::fs::remove_file(socket_path).ok();
     // flock released when lock_file drops
@@ -776,13 +769,17 @@ fn extract_text_document_uri(msg: &Value) -> Option<String> {
         .map(String::from)
 }
 
-/// Periodically logs RSS+swap for the LSP server process.
-/// Emits warn at 4 GiB and error at 8 GiB — both well above the 2 GiB JVM heap cap,
-/// so any trigger indicates native memory growth (RocksDB JNI, direct buffers, etc.).
-/// Exits silently when the process dies.
+/// Periodically samples RSS+swap for the LSP server process and **kills the LSP
+/// process group** when it balloons, to bound native (off-heap) memory growth the
+/// JVM `-Xmx` heap cap does not constrain
+/// (docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md, Fix 2). Logs warn at
+/// 4 GiB and error at 8 GiB. Kills when rss+swap crosses an absolute ceiling
+/// (`CODESCOUT_LSP_KILL_RSS_CEIL_MB`, default 24 GiB) or when host `MemAvailable`
+/// falls below a floor (`CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB`, default 15 GiB) while
+/// this process is itself large (>= 8 GiB). Set `CODESCOUT_LSP_MEM_KILL_DISABLE=1`
+/// to log only. Exits when the process dies.
 async fn watch_memory(pid: u32) {
-    const WARN_KB: u64 = 4 * 1024 * 1024; // 4 GiB
-    const ERROR_KB: u64 = 8 * 1024 * 1024; // 8 GiB
+    let thresholds = MemThresholds::from_env();
 
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -791,29 +788,175 @@ async fn watch_memory(pid: u32) {
         let Some((rss_kb, swap_kb)) = read_proc_memory(pid) else {
             break;
         };
+        let avail_kb = read_mem_available_kb();
         let total_kb = rss_kb + swap_kb;
         let rss_gib = rss_kb as f64 / (1024.0 * 1024.0);
         let swap_gib = swap_kb as f64 / (1024.0 * 1024.0);
         let total_gib = total_kb as f64 / (1024.0 * 1024.0);
-        if total_kb >= ERROR_KB {
-            error!(
-                target: "mux::memory",
-                "LSP server memory CRITICAL (pid={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB)",
-                pid, total_gib, rss_gib, swap_gib
-            );
-        } else if total_kb >= WARN_KB {
-            warn!(
-                target: "mux::memory",
-                "LSP server memory high (pid={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB)",
-                pid, total_gib, rss_gib, swap_gib
-            );
-        } else {
-            debug!(
-                target: "mux::memory",
-                "LSP server memory (pid={}): rss={:.1} GiB swap={:.1} GiB",
-                pid, rss_gib, swap_gib
-            );
+        match classify_memory(rss_kb, swap_kb, avail_kb, &thresholds) {
+            MemAction::Kill(reason) => {
+                let avail_gib = avail_kb
+                    .map(|a| a as f64 / (1024.0 * 1024.0))
+                    .unwrap_or(f64::NAN);
+                error!(
+                    target: "mux::memory",
+                    "LSP server memory watchdog KILLING process group (pid={} reason={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB avail={:.1} GiB)",
+                    pid, reason, total_gib, rss_gib, swap_gib, avail_gib
+                );
+                // PGID == PID (child spawned with process_group(0)).
+                kill_process_group(pid as libc::pid_t).await;
+                break;
+            }
+            MemAction::Error => {
+                error!(
+                    target: "mux::memory",
+                    "LSP server memory CRITICAL (pid={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB)",
+                    pid, total_gib, rss_gib, swap_gib
+                );
+            }
+            MemAction::Warn => {
+                warn!(
+                    target: "mux::memory",
+                    "LSP server memory high (pid={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB)",
+                    pid, total_gib, rss_gib, swap_gib
+                );
+            }
+            MemAction::Ok => {
+                debug!(
+                    target: "mux::memory",
+                    "LSP server memory (pid={}): rss={:.1} GiB swap={:.1} GiB",
+                    pid, rss_gib, swap_gib
+                );
+            }
         }
+    }
+}
+
+/// SIGTERM the process group, wait 500ms, then SIGKILL. `killpg` on an
+/// already-dead group returns ESRCH — harmless. The pgid was created with
+/// `process_group(0)` (PGID == child PID), so signalling the group reaps the JVM
+/// *and* its kotlin-lsp forks. Shared by `run`'s shutdown path and the memory
+/// watchdog.
+async fn kill_process_group(pgid: libc::pid_t) {
+    // SAFETY: pgid was created with process_group(0); signalling our own group is safe.
+    unsafe {
+        libc::killpg(pgid, libc::SIGTERM);
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    unsafe {
+        libc::killpg(pgid, libc::SIGKILL);
+    }
+}
+
+/// Reads `MemAvailable` (KiB) from `/proc/meminfo`. Returns `None` if it cannot be
+/// read/parsed. Mirrors `hardware::probe_ram`'s line-scan idiom.
+#[cfg(target_os = "linux")]
+fn read_mem_available_kb() -> Option<u64> {
+    let content = std::fs::read_to_string("/proc/meminfo").ok()?;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("MemAvailable:") {
+            return rest.split_whitespace().next().and_then(|v| v.parse().ok());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_mem_available_kb() -> Option<u64> {
+    None
+}
+
+/// Watchdog thresholds, resolved once at watcher start. Log thresholds are fixed;
+/// kill thresholds are env-tunable (in MB), mirroring the `CODESCOUT_INDEX_FLUSH_BATCH`
+/// override precedent — no CLI plumbing through main.rs/manager.rs.
+#[derive(Clone, Copy, Debug)]
+struct MemThresholds {
+    warn_kb: u64,
+    error_kb: u64,
+    /// Absolute per-process (rss+swap) ceiling — kill regardless of host state.
+    kill_rss_ceil_kb: u64,
+    /// Host `MemAvailable` floor — kill a large process when the host drops below this.
+    kill_avail_floor_kb: u64,
+    /// When false, the watchdog only logs and never kills.
+    kill_enabled: bool,
+}
+
+impl MemThresholds {
+    fn from_env() -> Self {
+        const WARN_KB: u64 = 4 * 1024 * 1024; // 4 GiB
+        const ERROR_KB: u64 = 8 * 1024 * 1024; // 8 GiB
+        const DEFAULT_KILL_RSS_CEIL_MB: u64 = 24 * 1024; // 24 GiB
+        const DEFAULT_KILL_AVAIL_FLOOR_MB: u64 = 15 * 1024; // 15 GiB
+
+        let mb_to_kb = |key: &str, default_mb: u64| -> u64 {
+            std::env::var(key)
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(default_mb)
+                .saturating_mul(1024)
+        };
+        let kill_enabled = !matches!(
+            std::env::var("CODESCOUT_LSP_MEM_KILL_DISABLE")
+                .ok()
+                .as_deref(),
+            Some("1") | Some("true")
+        );
+        Self {
+            warn_kb: WARN_KB,
+            error_kb: ERROR_KB,
+            kill_rss_ceil_kb: mb_to_kb("CODESCOUT_LSP_KILL_RSS_CEIL_MB", DEFAULT_KILL_RSS_CEIL_MB),
+            kill_avail_floor_kb: mb_to_kb(
+                "CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB",
+                DEFAULT_KILL_AVAIL_FLOOR_MB,
+            ),
+            kill_enabled,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemAction {
+    Ok,
+    Warn,
+    Error,
+    /// Kill the LSP process group; the reason is for logs/metrics.
+    Kill(&'static str),
+}
+
+/// Pure decision: given a process's rss+swap and (optionally) host `MemAvailable`,
+/// decide whether to log or kill. No I/O — unit-testable in isolation.
+///
+/// Two kill arms:
+/// - **rss_ceiling**: rss+swap crosses an absolute ceiling — a single LSP this large
+///   is pathological regardless of host RAM (the "35 GB for a fixture" case, which on
+///   a big box never depresses host `MemAvailable`).
+/// - **host_pressure**: host `MemAvailable` is below the floor *and* this process is
+///   itself large (>= error threshold) — protects the host from a global OOM while
+///   sparing an innocent small LSP when the pressure came from elsewhere.
+fn classify_memory(
+    rss_kb: u64,
+    swap_kb: u64,
+    avail_kb: Option<u64>,
+    th: &MemThresholds,
+) -> MemAction {
+    let total_kb = rss_kb.saturating_add(swap_kb);
+    if th.kill_enabled {
+        if total_kb >= th.kill_rss_ceil_kb {
+            return MemAction::Kill("rss_ceiling");
+        }
+        if let Some(avail) = avail_kb {
+            if avail < th.kill_avail_floor_kb && total_kb >= th.error_kb {
+                return MemAction::Kill("host_pressure");
+            }
+        }
+    }
+    if total_kb >= th.error_kb {
+        MemAction::Error
+    } else if total_kb >= th.warn_kb {
+        MemAction::Warn
+    } else {
+        MemAction::Ok
     }
 }
 
@@ -1024,6 +1167,103 @@ mod tests {
             1,
             "identical re-registration must not grow the replay cache"
         );
+    }
+
+    // ---- memory watchdog (classify_memory / read_mem_available_kb) ----
+
+    const GIB_KB: u64 = 1024 * 1024; // 1 GiB expressed in KiB
+
+    fn th(rss_ceil_mb: u64, avail_floor_mb: u64, kill_enabled: bool) -> MemThresholds {
+        MemThresholds {
+            warn_kb: 4 * 1024 * 1024,
+            error_kb: 8 * 1024 * 1024,
+            kill_rss_ceil_kb: rss_ceil_mb * 1024,
+            kill_avail_floor_kb: avail_floor_mb * 1024,
+            kill_enabled,
+        }
+    }
+
+    #[test]
+    fn classify_memory_logs_below_thresholds() {
+        let t = th(24 * 1024, 15 * 1024, true);
+        assert_eq!(
+            classify_memory(GIB_KB, 0, Some(60 * GIB_KB), &t),
+            MemAction::Ok
+        );
+        assert_eq!(
+            classify_memory(5 * GIB_KB, 0, Some(60 * GIB_KB), &t),
+            MemAction::Warn
+        );
+        assert_eq!(
+            classify_memory(9 * GIB_KB, 0, Some(60 * GIB_KB), &t),
+            MemAction::Error
+        );
+    }
+
+    #[test]
+    fn classify_memory_kills_on_absolute_rss_ceiling() {
+        let t = th(24 * 1024, 15 * 1024, true);
+        // 25 GiB rss with plenty of host RAM free — absolute ceiling still fires.
+        assert_eq!(
+            classify_memory(25 * GIB_KB, 0, Some(90 * GIB_KB), &t),
+            MemAction::Kill("rss_ceiling")
+        );
+        // swap counts toward the total.
+        assert_eq!(
+            classify_memory(23 * GIB_KB, 2 * GIB_KB, Some(90 * GIB_KB), &t),
+            MemAction::Kill("rss_ceiling")
+        );
+    }
+
+    #[test]
+    fn classify_memory_kills_on_host_pressure_only_when_culpable() {
+        let t = th(24 * 1024, 15 * 1024, true);
+        // Host low (10 GiB avail) AND this LSP is large (10 GiB >= 8 GiB error) → kill.
+        assert_eq!(
+            classify_memory(10 * GIB_KB, 0, Some(10 * GIB_KB), &t),
+            MemAction::Kill("host_pressure")
+        );
+        // Host low but this LSP is small (5 GiB < 8 GiB) → spare it, just warn.
+        assert_eq!(
+            classify_memory(5 * GIB_KB, 0, Some(10 * GIB_KB), &t),
+            MemAction::Warn
+        );
+    }
+
+    #[test]
+    fn classify_memory_avail_unknown_disables_pressure_arm() {
+        let t = th(24 * 1024, 15 * 1024, true);
+        // No MemAvailable reading → host-pressure arm cannot fire; a large-but-under-ceiling
+        // process only reaches Error.
+        assert_eq!(classify_memory(10 * GIB_KB, 0, None, &t), MemAction::Error);
+        // Absolute ceiling still fires without an avail reading.
+        assert_eq!(
+            classify_memory(30 * GIB_KB, 0, None, &t),
+            MemAction::Kill("rss_ceiling")
+        );
+    }
+
+    #[test]
+    fn classify_memory_disabled_never_kills() {
+        let t = th(24 * 1024, 15 * 1024, false);
+        // Both arms would fire if enabled; disabled → log only (never Kill).
+        assert_eq!(
+            classify_memory(30 * GIB_KB, 0, Some(2 * GIB_KB), &t),
+            MemAction::Error
+        );
+        assert_eq!(
+            classify_memory(10 * GIB_KB, 0, Some(5 * GIB_KB), &t),
+            MemAction::Error
+        );
+    }
+
+    #[test]
+    fn read_mem_available_kb_smoke() {
+        // On Linux this reads /proc/meminfo; elsewhere it returns None. Must not panic,
+        // and when Some, must be a plausible positive value.
+        if let Some(kb) = read_mem_available_kb() {
+            assert!(kb > 0, "MemAvailable should be positive KiB when readable");
+        }
     }
 
     #[test]

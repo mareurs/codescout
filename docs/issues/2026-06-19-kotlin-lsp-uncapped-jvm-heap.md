@@ -153,6 +153,83 @@ allocation); it OOMs only when the host is already pressured (as at the first
 kill, `free`=2 GB / swap 100%) — then GC cannot outrun allocation and the JVM
 rides to the ceiling, dragging the host down (the sibling Rust-OOM scenario, but
 JVM-driven).
+
+### Live capture 2026-07-08 — heap cap holds, but the "small native residual" assumption is wrong
+
+Three organic mux spawns against the same codescout-repo Kotlin fixture, captured
+by a 5s-interval passive RSS monitor, during an unrelated live investigation
+triggered by a user report of kotlin-lsp "going rogue" on the real `backend-kotlin`
+project (which itself showed no anomaly — RSS stayed under 500 MB throughout, all
+session).
+
+**`jcmd` verification on two of the three** (independent of the 2026-06-21 check):
+`VM.flags` confirmed `-XX:MaxHeapSize=2147483648` (exactly 2 GiB, matching `-Xmx2g`)
+in effect on both. Fix 1 is not silently bypassed.
+
+```
+Capture A — pid 464910, spawned 03:36:09
+  t+0s    rss=840MB
+  t+5s    rss=4549MB
+  t+10s   rss=9149MB
+  t+15s   rss=11161MB
+  ...     oscillates 13-17GB for ~40s
+  t+~106s rss=29462MB avail=13926MB   <- GC.heap_info: heap used=566MB/2GiB (heap NOT the driver)
+  ...     oscillates 24-27GB for ~2 min
+  03:38:37 rss=31797MB avail=12998MB
+  03:39:03 rss=35019MB avail=7900MB   <- avail minimum this capture
+  03:39:24 rss=35582MB                <- peak, matches pre-fix 35.7GB ceiling to within 0.1GB
+  ...     oscillates 24-35GB for ~2 min
+  03:41:48 rss=3830MB  avail=40640MB  <- sudden full release (24GB->3.8GB in 11s)
+  (stable ~3.8-4.4GB for 50 min, then idle-timeout exit at 04:37:07)
+
+Capture B — pid 838177, spawned 04:37:12 (5s after Capture A exited)
+  t+0s    rss=835MB
+  ...     climbs to 23313MB by t+~56s  <- GC.heap_info: heap used=1593MB/2GiB (heap NEAR its cap this time)
+  ...     oscillates 20-30GB for ~70s
+  04:39:30 rss=36419MB avail=10765MB  <- new peak, exceeds Capture A's 35.6GB
+  -> killed manually (SIGTERM to mux+JVM process group) at rss=37.3GB, avail=10.8GB;
+     avail recovered to 45GB within 3s of the kill
+
+Capture C — pid 955632, spawned 04:52:45 (13 min after Capture B was killed)
+  t+0s    rss=3286MB
+  ...     oscillates 8-30GB for ~2 min
+  04:55:24 rss=36561MB avail=9816MB
+  -> killed manually (same method) at rss=37.4GB, avail recovering to 31GB after
+```
+
+**Corrections to the 2026-06-20 evidence's conclusion:**
+
+1. **The "small native residual" framing is wrong.** That entry assumed an `-Xmx2g`
+   cap would collapse the ~20GB heap-driven sawtooth to "≤2GB, leaving only the
+   small native residual." Live-verified counter-evidence: with the cap
+   *confirmed in effect* on both jcmd-checked captures, native memory alone
+   reached 35.6GB (capture A) and 37.4GB (capture B) — matching or *exceeding*
+   the entire pre-fix ceiling. Fix 1 changed which component balloons (heap ->
+   native); it did not lower the worst-case host-memory exposure for this
+   workload.
+2. **Heap pressure is not a precondition.** Capture A's heap sat at 566MB/2GiB
+   (28% full) while RSS hit 35.6GB; capture B's heap was genuinely near its cap
+   (1.59GB/2GiB, 80% full) while RSS hit 37.4GB. The native growth happens
+   independent of whether the heap itself is under pressure — ruling out
+   "heap cap forces overflow into native" as the mechanism.
+3. **Not monotonic — volatile climb/partial-release, not always self-resolving.**
+   Capture A self-released dramatically (24GB->3.8GB in 11s, consistent with a
+   completed indexing burst freeing mmap'd/off-heap buffers) without
+   intervention. Captures B and C did NOT self-release before crossing the
+   avail<15GiB danger band and were killed manually — the same intervention
+   Fix 2 (below) proposes to automate.
+4. **`NativeMemoryTracking` was not enabled** (`jcmd VM.native_memory summary`
+   → "Native memory tracking is not enabled"), so the exact native category
+   (RocksDB block cache / JNI direct buffers / JIT code cache / mmap'd analyzer
+   index) could not be isolated this session. Recommend adding
+   `-XX:NativeMemoryTracking=summary` to the mux's `JAVA_TOOL_OPTIONS` so the
+   next occurrence can be diagnosed precisely without a restart.
+5. **Reproducibility held**: 3/3 organic spawns against the same codescout-repo
+   fixture project within ~90 minutes; 2/3 required manual intervention. The
+   real `backend-kotlin` project's own concurrent kotlin-lsp instances (checked
+   throughout) stayed under 500MB the entire session — consistent with the
+   2026-06-20 entry's "50x the real project's LSP" observation, now confirmed
+   to persist with Fix 1 applied.
 ## Hypotheses tried
 1. **Hypothesis:** The 27 GB is workload-driven (large project to index).
    **Test:** compare against the kotlin-lsp serving the real Kotlin backend
@@ -177,14 +254,20 @@ JVM-driven).
    documents (heap ≤ 2 GiB → total RSS > 4 GiB means a genuine *native* leak).
    Implemented on `experiments`; **not yet cherry-picked to master**, **not yet
    live-verified** via `/mcp` restart.
-2. **TODO (defense-in-depth) — make `watch_memory` actuate, not just log**: on the
-   ERROR threshold, kill the LSP process group (the mux already holds `child_pgid`
-   + `killpg` plumbing in `run`) so a future *native* leak self-bounds instead of
-   riding to a host OOM. Deferred to a follow-up commit.
-3. **TODO — the `watch_memory` doc comment** at `src/lsp/mux/process.rs:752` is now
-   *true* (the 2 GiB cap exists), so no edit is strictly required; revisit only if
-   the cap value changes.
-4. Cross-ref the cgroup blast-radius cap from the sibling OOM bug (Fix 4 there).
+2. **DONE (2026-07-10) — `watch_memory` now actuates.** On a kill verdict it
+   `killpg`s the LSP process group (SIGTERM → 500ms → SIGKILL, via the shared
+   `kill_process_group` helper; PGID == PID from `process_group(0)`). The verdict
+   comes from a pure, unit-tested `classify_memory` (`src/lsp/mux/process.rs`)
+   with two kill arms: an absolute rss+swap ceiling
+   (`CODESCOUT_LSP_KILL_RSS_CEIL_MB`, default 24 GiB) that fires regardless of
+   host RAM, and a host-`MemAvailable` floor (`CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB`,
+   default 15 GiB) gated on the process being large (≥ 8 GiB) so an innocent small
+   LSP is spared under unrelated host pressure. `CODESCOUT_LSP_MEM_KILL_DISABLE=1`
+   reverts to log-only. Added a `read_mem_available_kb` (`/proc/meminfo`) reader.
+   On `experiments`; **not yet on master**.
+3. **DONE — the `watch_memory` doc comment** was rewritten to describe the new
+   kill actuation and its env knobs (it is no longer "log-only").
+4. **Blast-radius cap (moved out).** The cgroup `MemoryMax`/`MemorySwapMax=0` blast-radius cap is now tracked in `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md`. The sibling 68 GiB OOM bug was fixed and archived to `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`.
 **Update (2026-06-21).** Fix 1 is **committed** as `3adb66e7` `fix(lsp): cap kotlin-lsp JVM heap with -Xmx2g` on `experiments` (code + the `kotlin_caps_jvm_heap` regression test), and **live-verified**: after `cargo rb` + `/mcp`, the codescout-repo kotlin-lsp JVM (PID 4100626, carrying our `-Xmx2g`) reports `jcmd … VM.flags` → `-XX:MaxHeapSize=2147483648` (exactly 2 GiB). Per the §Root cause correction, this is the *reliable* cap (the distribution's vmoptions `-Xmx2048m` is not dependably applied to our instances). **Still TODO:** Fix 2 (`watch_memory` actuation) remains the real defense for *native* (off-heap) growth, which `-Xmx` does not bound — the capped JVM's RSS is 4.16 GiB = 2 GiB heap + ~2 GiB native.
 ## Tests added
 
@@ -202,13 +285,74 @@ existing `kotlin_redirects_user_home_off_real_config` style. Full lib suite gree
   `systemd-run --user --scope -p MemoryMax=20G -p MemorySwapMax=0 codescout start --debug`.
 - Acute relief: `kill -9 <kotlin-lsp pid>`; the mux respawns it on next demand.
 
+
+## Upstream status (researched 2026-07-08)
+
+Confirmed via GitHub API + release notes: **`Kotlin/kotlin-lsp`** is JetBrains' official
+LSP (binary name `intellij-server`), versioned by IntelliJ platform build number, not
+semver. Installed: `LS-262.7569.0` (2026-06-09). Latest: `262.8190.0` (2026-06-19) — one
+release behind.
+
+**Version history relevant to memory:**
+- `v262.2310.0` — "various memory leaks were fixed" (changelog, no issue # given)
+- `v262.4739.0` — migrated index storage to **RocksDB** ("more robust state management
+  and better performance") — the same RocksDB this doc and the sibling disk-escape bug
+  already implicate as the likely native-memory source
+- `v262.7569.0` (our version) — fixed "the regression introduced by the RocksDB migration"
+  affecting completion/auto-import speed (a partial RocksDB-regression fix, not memory-focused)
+- `v262.8190.0` (latest, NOT yet installed) — fixes upstream **#213**: nested projects
+  imported too eagerly, causing "huge workspace caches"
+
+**Three upstream issues, none solved by the maintainers:**
+
+| # | Title | Status | Relevance |
+|---|---|---|---|
+| [#441](https://github.com/Kotlin/kotlin-lsp/issues/441) | Persistent heap exhaustion on medium/large repos | open | Reporters say raising `-Xmx` and tuning GC does **not** help — matches our heap-capped-but-RSS-unbounded finding |
+| [#205](https://github.com/Kotlin/kotlin-lsp/issues/205) | Failed init spawns new JVMs, old ones never die | open, no fix | 34+ orphaned JVMs @ 2.5-3.2GB RSS each observed by reporter. Different mechanism (many small zombies vs. one ballooning process) but same "unbounded JVM footprint" family. Only workaround: disable the extension entirely |
+| [#203](https://github.com/Kotlin/kotlin-lsp/issues/203) | LSP always queries all files in workspace root, ignoring `contentRoots` scoping | **open, zero maintainer response** | Reporter's OOM originates in indexing/VFS internals (`RefreshSession`, `IndexingImplKt`) while scanning files explicitly excluded by their `contentRoots` config (including unrelated `.git/objects/pack` files). **Likely our exact mechanism**: codescout's own launch path (`src/lsp/servers/mod.rs::default_config`) passes `--system-path` (controls index *storage* location) but no content-root scoping — kotlin-lsp's workspace root for the codescout-repo instance is the full monorepo (93,873 files across 8 languages), not just `tests/fixtures/kotlin-library`. If #203 holds, even adding scoping config may not be honored upstream. |
+
+**Why this project (vs. `backend-kotlin`) is the worst offender:** file counts are
+actually comparable (codescout: 93,873 files; backend-kotlin: 90,356) — codescout's
+kotlin-lsp instance isn't ballooning because its *fixture* is unusually large, it's
+because its *workspace root* (the whole monorepo, passed as `--cwd`) is a
+multi-language repo where Kotlin is a small minority, and (per #203) kotlin-lsp
+indexes the whole root regardless of what's actually being queried. `backend-kotlin`
+avoids this because its workspace root genuinely *is* the Kotlin project.
+
+**No upstream fix or workaround exists for the core mechanism (#203).** The only
+actionable upstream item is the version bump to `262.8190.0` for the #213 cache fix,
+which is unrelated to #203 but cheap and low-risk to pick up regardless.
+
+**Update 2026-07-08 (same session):** upgraded via `yay -S kotlin-lsp-bin --noconfirm`
+(AUR package `kotlin-lsp-bin`, host `ripper`). `kotlin-lsp --version` now reports
+`LS-262.8190.0`, confirmed via `pacman -Qi`. This is a system-wide binary shared by
+every codescout instance on the host — existing running kotlin-lsp processes keep
+their old on-disk binary (already-open inode), new spawns pick up 262.8190.0
+going forward. Does not address #203; still watching whether the codescout-repo
+fixture's ballooning recurs post-upgrade (the mux respawns kotlin-lsp on demand,
+so the next organic spawn will be the first live test of this version).
+
+**First live test, post-upgrade (2026-07-08 05:29-07:37):** an organic mux respawn
+(triggered by a codescout server rebuild + `/mcp` reconnect) spawned pid 1260818
+against the codescout-repo workspace, confirmed via `/proc/1260818/exe` to be running
+the new `262.8190.0` binary. It ran for **2h07m** and exited at 505 MB RSS —
+essentially unchanged from its 504 MB startup baseline, never ballooned. Contrast
+with all three pre-upgrade captures (this doc's "Live capture 2026-07-08" evidence),
+which started climbing within 5-20s of spawn and reached 20-37 GB. One clean sample
+is not proof #213's fix resolves this doc's symptom (or that #203 doesn't still
+apply under different indexing triggers), but it's the first non-ballooning
+codescout-repo kotlin-lsp lifecycle observed all session. Continue monitoring
+further organic spawns before downgrading this bug's severity or status.
 ## Resume
 
-Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified** (`jcmd` MaxHeapSize = 2 GiB on the codescout-repo JVM). Remaining:
+Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified twice more** (2026-07-08: `jcmd` MaxHeapSize = 2 GiB confirmed in effect on two independent codescout-repo JVMs) — the heap cap itself is not bypassed. However, the 2026-07-08 live captures (see Evidence) prove Fix 1 alone does **not** bound worst-case host-memory exposure: native memory independently reached 35.6-37.4 GB on 2 of 3 captures, matching or exceeding the pre-fix ceiling. Remaining:
 
-1. **Ship to master** — cherry-pick `3adb66e7` (+ this doc's 2026-06-21 corrections) to `master`, rebase `experiments`, then flip status to `fixed` / set `closed:`. **Gated:** the full `cargo test` on `experiments` currently has one *orthogonal* failure (`replace_symbol_surfaces_stale_error_after_max_retries`, an F-18/F-23-class kotlin-lsp range issue unrelated to this fix — see session-log F-26); resolve or explicitly accept that before the protected-branch cherry-pick.
-2. **Fix 2** — make `watch_memory` actuate (kill the LSP process group at the ERROR threshold) to bound *native* growth, the residual host-OOM path `-Xmx` does not cover.
-3. Cross-ref the cgroup blast-radius cap from the sibling 68 GiB OOM bug (Fix 4 there).
+1. **Ship to master** — cherry-pick `3adb66e7` (+ this doc's corrections) to `master`, rebase `experiments`, then flip status to `fixed` / set `closed:`. Given the 2026-07-08 findings, holding `status: fixed` until Fix 2 lands is correct — Fix 1 alone does not resolve the host-OOM risk this bug is titled for. **Gated:** the full `cargo test` on `experiments` currently has one *orthogonal* failure (`replace_symbol_surfaces_stale_error_after_max_retries`, an F-18/F-23-class kotlin-lsp range issue unrelated to this fix — see session-log F-26); resolve or explicitly accept that before the protected-branch cherry-pick.
+2. **Fix 2 — DONE on `experiments` (2026-07-10).** `watch_memory` now kills the LSP process group on a threshold cross (absolute rss+swap ceiling 24 GiB, or host `MemAvailable` < 15 GiB while the process is ≥ 8 GiB), via the shared `kill_process_group` helper. Env-tunable (`CODESCOUT_LSP_KILL_RSS_CEIL_MB`, `CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB`, `CODESCOUT_LSP_MEM_KILL_DISABLE`). Tests: `classify_memory_*` threshold table + `read_mem_available_kb_smoke`; killpg mechanics stay covered by `process_group_reaping_tests`. **Known limitation:** a mem-kill is a *mid-life* kill and does **not** count toward the LSP circuit breaker (`src/lsp/manager.rs` counts only startup failures), so a kill→respawn→grow→kill *slow* loop is possible (period ≈ cold-start + minutes of native growth) — bounded (host survives) but unthrottled. Follow-up: a per-workspace last-mem-kill timestamp in `LspManager` applying backoff before respawn. **Still needs:** cherry-pick to master (gated on the orthogonal F-26 failure per item 1) + live `/mcp` verification.
+3. **Add `-XX:NativeMemoryTracking=summary`** to the mux's `JAVA_TOOL_OPTIONS` so the next occurrence can be diagnosed with an exact native-memory category breakdown (RocksDB vs JNI direct buffers vs JIT code cache) instead of inferring from the heap/RSS gap.
+4. Cross-ref the cgroup blast-radius cap — now tracked in `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md` (the sibling 68 GiB OOM bug is fixed + archived).
+5. **Bump kotlin-lsp to `262.8190.0`** (see Upstream status) — picks up upstream #213's workspace-cache fix. Cheap, low-risk, independent of Fix 2/3.
+6. **Investigate content-root scoping** for the codescout-repo kotlin-lsp launch (restrict indexing to `tests/fixtures/kotlin-library` instead of the full monorepo `--cwd`) — per upstream #203 (open, unfixed, no maintainer response), scoping config may not be honored; verify empirically before relying on it as a fix.
 ## References
 - Launch env builder: `src/lsp/servers/mod.rs:85-106`
 - Memory watcher (log-only) + fictional-cap comment: `src/lsp/mux/process.rs:751-786`, comment at `:752`
