@@ -14,6 +14,16 @@ All three must pass. No exceptions.
 - Write tools return `json!("ok")` — never echo content back. Reserve richer responses only for genuinely new info (e.g. LSP diagnostics after a write).
 - See `get_guide("error-handling")` for the full decision tree
 
+## Repair-and-Continue Input Handling
+
+When a tool can **deterministically** infer intent from a malformed input, repair it, execute, return the result, and attach an advisory `corrections` note — do NOT return `RecoverableError`. Every `RecoverableError` forces a retry = a second LLM call; repairing saves it. Reserve `RecoverableError` for input that is genuinely missing or ambiguous.
+
+- **Repair + note** (exactly one correct reading): synonym (`file_path`/`relative_path`/`file`→`path`, `regex`/`query`→`pattern`), mechanical shape inversion (`{op:{field,value}}`→`{field:{op:value}}`), coercible scalar.
+- **Error + teaching hint** (never guess): absent input ("no implicit current file"), unknown-not-op field, uncoercible/ambiguous value.
+- **Writes get a higher bar than reads:** accept an *explicit* write target; never auto-*guess* one (a wrong guess on a write is unrecoverable).
+- Repair at the tool's input boundary; keep core validators strict (defense-in-depth). Notes ride only on object-shaped responses; `json!("ok")` tools repair silently.
+- Helpers: `crate::fs::PATH_PARAM_ALIASES`, `require_str_param_or_hint`, `filter::repair_inverted_leaves`. Full rationale: ADR `docs/adrs/2026-07-10-repair-and-continue-input-handling.md`. No prompt-surface change needed — the correction note is self-describing at the moment of the mistake.
+
 ## MCP Entry Point
 
 `call_content()` is the MCP entry point — it handles buffer routing via `OutputGuard`.

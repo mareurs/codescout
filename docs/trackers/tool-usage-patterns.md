@@ -161,6 +161,20 @@ A per-repo `usage.db` mining pass (backend-kotlin + codescout, 2026-07-01 → 20
 Same mining pass found 6 occurrences in backend-kotlin (`heading="SI-20"`, `headings=["SI-19","SI-20"]`, `headings=["## SI-22","## SI-1"]`, `heading="SI-29"`, `heading="## SI-33"`) plus 1 in codescout, spanning a week — every heading query style against a numbered-section tracker (`## SI-N — <long title>`) missed, `body_meta.heading_missing: true`, no error. `get.rs` used a bespoke exact-match-only matcher instead of the shared, already-tested `file_summary::resolve_section_range` 4-tier fuzzy cascade that backs `read_markdown`/`edit_markdown`'s documented "fuzzy matched" `heading=` param — a prompt-surface consistency gap, not a caller error. See `docs/issues/2026-07-09-artifact-get-heading-exact-match-only.md`.
 ## Prompt improvement candidates
 
+### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
+
+A usage.db sweep (72 DBs) surfaced param-*shape* frictions — `file_path` for
+`path`, inverted filter leaves `{op:{field,value}}`, buffer handles under
+`output_id`. These are malformed-input mistakes (the agent picked the right
+tool), **not** tool-selection mistakes — so they are deliberately NOT T-N
+observations. They were resolved by **repair-and-continue** (auto-correct the
+deterministic mistake + attach an advisory note) rather than a
+`server_instructions` edit, because the correction note is self-describing at
+the moment of the mistake. See ADR
+`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`. Rule of thumb: a
+*deterministic* input mistake is a repair candidate; only a genuine
+tool-*selection* gap is a prompt candidate.
+
 ### Iron Law #7 — Scope distinction for grep vs semantic_search
 
 Add to decision tree:

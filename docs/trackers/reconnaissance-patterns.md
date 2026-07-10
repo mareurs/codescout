@@ -63,6 +63,7 @@ skill).
 | R-37 | 2026-07-03 | miss (recurrence of R-28) | Adding a get_guide topic edits TWO gated surfaces beyond registration: the tool description (300-char budget test in `server::tests`) and the no-arg listing (hardcoded topic count). Scout the tests' assertions, not their names; convert hardcoded counts to derive from the canonical const. Full `--lib` gate absorbed the miss pre-commit. | tracker-as-skill session (untrusted-content topic, A-5); kin R-28/R-1/R-7 |
 | R-38 | 2026-07-03 | miss | Re-derived a finding a concurrent session had already MEASURED because the existing audit-log wasn't scouted first — independently built a precision gate for the tracker-hygiene D1 gap, then found the plugins Hamsa ledger had already measured it (n=5, both tiers). The seam for a derive/record-a-finding task includes the KNOWLEDGE state (ledger entries on the subject), not just the code. | A-8/A-9 session (#22); plugins Hamsa ledger; kin R-19 |
 | R-39 | 2026-07-10 | hit | Adding a tool param/alias is additive-safe in codescout: every `*_schema_*` test is positive-presence (`props["x"].is_object()` / `contains_key`), none enumerate the exact prop set, and no `input_schema()` sets `additionalProperties:false` — so a new prop can't break a snapshot, and an unknown key flows through to `call()` (the very mechanism the alias fix relies on). | param-alias-ergonomics session (this session); 3038 lib passed / 0 failed; kin R-28/R-36 |
+| R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -916,6 +917,18 @@ fields. Promote-when: a second re-derivation-of-prior-work miss → codescout me
 **Generalization:** before worrying that adding a tool param/alias will break a schema snapshot or be rejected by strict validation — in codescout neither risk exists. Schema tests guard *presence*, not exact shape; schemas are *open* (`additionalProperties` unset). A param/alias addition is additive-safe. The one real gate a *description* edit must still clear is `server::tests::tool_descriptions_stay_under_budget` (R-28/R-37) — but adding a schema *property* (not touching `description()`) doesn't approach it. Kin: R-36 (serde has no `deny_unknown_fields` → the sibling open-schema property at the config-data layer).
 
 **Evidence:** positive-presence tests in `src/tools/{memory,semantic,symbol,ast,run_command}/tests.rs` + `src/tools/peer.rs`; schema assembly in `src/server.rs` (no `additionalProperties`); gate: 3038 passed / 0 failed. Promote-when (2nd datapoint): distill "adding a tool param/alias is additive-safe — schema tests are presence-only, schemas are open" into codescout memory `reconnaissance`. param-alias-ergonomics session (this session); commit pending.
+
+## R-40 — usage.db error counts are commit-mixed AND time-spanning; verify a candidate against current code before fixing
+
+**Observed:** 2026-07-10, mining usage.db (72 DBs) for fixable input-shape frictions after shipping the param-alias unification.
+
+**Scout done:** ranked candidate frictions by error count, then — before writing any fix — read the current code for each. The `read_file` `json_path` quoted-key friction (`$["1.5"]`, `$["2.1.3"]`) had ~200 events, the LARGEST non-alias cluster. But `file_summary.rs::split_on_unbracketed_dot` (comment cites `Bug 2026-07-01-...dotted-object-keys-unreachable`) plus `parse_bracket`'s `strip_matching_quotes` branch already handle it — the friction was closed 2026-07-01. The telemetry spanned months and mixed pre- and post-fix commits.
+
+**Verdict:** hit — a count-only ranking would have sent me to "fix" an already-fixed bug. This is R-29's phantom one axis over: R-29 is cross-*project* mixing, R-40 is cross-*time* staleness — same commit-SHA-keyed DB, same root cause. The real target (`artifact` filter inversion, 22 events) was confirmed by a *live* re-repro; json_path was a ghost.
+
+**Generalization (extends R-29 / R-23):** usage.db is keyed by commit-SHA and accumulates across every project AND every commit the process ever served. A high error count is a *hypothesis about the current binary*, not a fact about it — reproduce a telemetry-surfaced friction against today's code (read the impl, or run the tool once) before fixing. Promote-when (2nd datapoint) → codescout memory `reconnaissance`.
+
+**Evidence:** `src/tools/file_summary/file_summary.rs` `split_on_unbracketed_dot` / `strip_matching_quotes`; live re-repro of the filter inversion (`unknown field \`contains\``). param-alias-ergonomics session.
 
 ## Template for new entries
 
