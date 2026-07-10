@@ -30,6 +30,9 @@
 //! 6. `backslash_in_git_root` — `commits.git_root` carries paths too;
 //!    the same forward-slash invariant applies (commits.rs writes via
 //!    `RepoPath::from_path(...).into_string()` post-#66).
+//! 7. `worktree_scoped_row` — flags catalog rows whose abs_path is under a
+//!    linked git worktree; classifies no_collision vs collision; feeds
+//!    `fix=reseat_worktree`.
 //!
 //! Deferred to a follow-up: NFC unicode normalization, orphan
 //! `artifact_augmentation` rows (the FK already cascades on artifact
@@ -62,9 +65,10 @@ use super::{RecoverableError, ToolContext};
 /// One violation of a doctor invariant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Violation {
-    /// Which check fired. One of: `backslash_in_abs_path`,
-    /// `ads_colon_in_abs_path`, `dotdot_segment_in_abs_path`,
-    /// `missing_file`, `backslash_in_git_root`.
+    /// Which check fired. One of: `abs_path_must_be_absolute`,
+    /// `backslash_in_abs_path`, `ads_colon_in_abs_path`,
+    /// `dotdot_segment_in_abs_path`, `missing_file`,
+    /// `backslash_in_git_root`, `worktree_scoped_row`.
     pub check: String,
     /// The artifact id that owns the violating row, when applicable.
     /// `None` for table-wide checks (e.g. `commits.git_root` has no

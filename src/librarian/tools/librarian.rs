@@ -20,10 +20,9 @@ impl Tool for Librarian {
          tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \
          workspace_state_at: time-travel snapshot of all artifacts at a commit/timestamp. \
          audit_doc_refs: scan markdown for stale code refs (file paths, symbols, \
-         line refs, link targets, module paths). Surfaces broken references \
-         against current filesystem + LSP symbol index. Manual cadence — run \
-         when a doc-heavy PR is about to merge or when drift is suspected. \
-         Output is an `audit_issues` tracker. \
+         line refs, link targets, module paths) against the current filesystem \
+         + LSP symbol index. Manual cadence — run before a doc-heavy PR merges \
+         or when drift is suspected. Output is an `audit_issues` tracker. \
          legibility_scan: rank code-legibility refactor candidates from usage.db \
          friction + the AST symbol index. Writes/updates the legibility-backlog \
          tracker — open targets ranked by observed cost (tier 1 biting-now, tier 2 \
@@ -32,14 +31,15 @@ impl Tool for Librarian {
          link_scan: derive rel=\"cites\" edges from prose citations (entry \
          tokens, ids, md links); default reports, write=true \
          materializes/prunes cites edges. \
-         doctor: catalog drift scanner (read-only by default). Checks abs_path columns for \
-         absolute-form, forward-slash form, NTFS ADS colons, '..' segments, \
-         and missing files on disk; checks commits.git_root for forward-slash \
-         form. Returns a JSON report with per-check violation counts. Manual \
-         cadence — run after large refactors or when downstream LIKE queries \
-         return empty. Opt-in repair: fix=prune_missing + root=<absolute path of \
-         a dead/renamed repo root> prunes (cascade-safe) every artifact + commits \
-         row anchored under a root that no longer exists on disk."
+         doctor: catalog drift scanner (read-only by default). Checks abs_path \
+         columns for absolute-form, forward-slash form, NTFS ADS colons, '..' \
+         segments, and missing files on disk; checks commits.git_root for \
+         forward-slash form; flags worktree-scoped rows (worktree_scoped_row). \
+         Returns a JSON report with per-check violation counts. Run after large \
+         refactors or when LIKE queries return empty. Opt-in repairs: \
+         fix=prune_missing + root=<dead/renamed repo root> prunes rows under it; \
+         fix=reseat_worktree re-points no-collision rows to the main-repo path \
+         (collisions need manual graft)."
     }
 
     fn input_schema(&self) -> Value {
@@ -88,7 +88,7 @@ impl Tool for Librarian {
                 "write": { "type": "boolean", "description": "legibility_scan (default true): reconcile the backlog tracker (false = dry-run JSON only). link_scan (default false): materialize/prune cites edges (false = report only)." },
                 "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
                 "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap artifacts scanned (default 10000)." },
-                "fix": { "type": "string", "enum": ["prune_missing"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). Omit for a read-only scan." },
+                "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual artifact(action=\"graft\"). Omit for a read-only scan." },
                 "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune. Refused if the path still exists on disk." }
             }
         })
