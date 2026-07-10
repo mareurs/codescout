@@ -42,6 +42,11 @@
 //! (vec0-linked) connection, which a bare `sqlite3` CLI cannot do (7ca71bf7).
 //! Output is a JSON report with `violations` + `summary` (per-check counts); a
 //! fix run returns `pruned` counts instead.
+//!
+//! A second opt-in fix, `fix=reseat_worktree`, consumes `scan_worktree_scoped`
+//! violations: `no_collision` rows get their `abs_path` re-pointed at the
+//! main-repo path (a catalog `UPDATE` — no filesystem rename, `id` unchanged);
+//! `collision` rows are left untouched and reported for a manual `graft`.
 
 use std::path::{Path, PathBuf};
 
@@ -150,17 +155,68 @@ fn validate_prune_request<'a>(fix: &str, root: Option<&'a str>) -> Result<&'a st
     Ok(root_path)
 }
 
-/// Opt-in catalog repair. Currently one fix: `prune_missing` — remove every row
-/// anchored under a dead/renamed repo `root`.
+/// Opt-in catalog repair. Two fixes: `prune_missing` — remove every row
+/// anchored under a dead/renamed repo `root`; `reseat_worktree` — re-point
+/// `no_collision` worktree-scoped rows (from `scan_worktree_scoped`) onto
+/// their main-repo path, leaving `collision` rows untouched for a manual
+/// `graft`.
 async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>) -> Result<Value> {
-    let root_path = validate_prune_request(fix, root)?;
+    match fix {
+        "prune_missing" => {
+            let root_path = validate_prune_request(fix, root)?;
+            let cat = ctx.catalog.lock();
+            let (artifact_rows, commit_rows) = prune_dead_root(&cat.conn, root_path)?;
+            drop(cat);
+            Ok(json!({
+                "fix": "prune_missing",
+                "root": root_path.to_string_lossy(),
+                "pruned": { "artifact_rows": artifact_rows, "commit_rows": commit_rows },
+            }))
+        }
+        "reseat_worktree" => reseat_worktree(ctx),
+        other => Err(RecoverableError::new(format!(
+            "unknown fix '{other}' — expected 'prune_missing' or 'reseat_worktree'"
+        ))),
+    }
+}
+
+/// `fix=reseat_worktree`: consume `scan_worktree_scoped` violations. For each
+/// `no_collision` row, re-point its `abs_path` to the main-repo path — a
+/// catalog `UPDATE` only, never a filesystem rename (git already placed the
+/// merged file there) and never a recompute of `id` (same contract as
+/// `artifact(move)`: the id stays stable, only `abs_path` moves). `collision`
+/// rows are left untouched and reported for a manual `graft`.
+fn reseat_worktree(ctx: &ToolContext) -> Result<Value> {
     let cat = ctx.catalog.lock();
-    let (artifact_rows, commit_rows) = prune_dead_root(&cat.conn, root_path)?;
+    let violations = scan_worktree_scoped(&cat.conn)?;
+    let mut reseated = Vec::new();
+    let mut collisions = Vec::new();
+    for v in &violations {
+        let Some(id) = v.artifact_id.as_deref() else {
+            continue;
+        };
+        let detail: Value = serde_json::from_str(&v.detail).unwrap_or_default();
+        let main_path = detail["main_path"].as_str().unwrap_or_default();
+        match detail["classification"].as_str() {
+            Some("no_collision") => {
+                cat.conn.execute(
+                    "UPDATE artifact SET abs_path = ?1 WHERE id = ?2",
+                    rusqlite::params![main_path, id],
+                )?;
+                reseated.push(json!({ "id": id, "new_path": main_path }));
+            }
+            _ => collisions.push(json!({
+                "id": id,
+                "main_path": main_path,
+                "into_id": detail["collision_with"].clone(),
+            })),
+        }
+    }
     drop(cat);
     Ok(json!({
-        "fix": "prune_missing",
-        "root": root_path.to_string_lossy(),
-        "pruned": { "artifact_rows": artifact_rows, "commit_rows": commit_rows },
+        "fix": "reseat_worktree",
+        "reseated": reseated,
+        "collisions": collisions,
     }))
 }
 
@@ -479,6 +535,7 @@ mod tests {
     use crate::librarian::catalog::artifact::{upsert as art_upsert, TestArtifactRowBuilder};
     use crate::librarian::catalog::augmentation;
     use crate::librarian::catalog::Catalog;
+    use crate::librarian::tools::TestToolContextBuilder;
     use rusqlite::params;
 
     fn seed_artifact(cat: &Catalog, id: &str, abs_path: &str) {
@@ -818,6 +875,81 @@ mod tests {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
         assert_eq!(overlap, vec!["b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn reseat_worktree_repoints_no_collision_row_without_rename() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+        let main_doc = main_root.join("docs/x.md");
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        assert_eq!(out["fix"], "reseat_worktree");
+        assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
+        assert!(out["collisions"].as_array().unwrap().is_empty());
+
+        // The row was re-pointed to the main path: id unchanged, no rename on
+        // disk (the merged file already lives there; only the catalog moved).
+        let expected_main = crate::util::fs::RepoPath::from_path(&main_doc).to_string();
+        let cat = ctx.catalog.lock();
+        let abs_path: String = cat
+            .conn
+            .query_row(
+                "SELECT abs_path FROM artifact WHERE id = ?1",
+                params!["wt-row"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(abs_path, expected_main);
+    }
+
+    #[tokio::test]
+    async fn reseat_worktree_leaves_collisions_for_graft() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+        let main_doc = main_root.join("docs/x.md");
+        let main_id = crate::librarian::ids::artifact_id_from_abs(&main_doc);
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+        let main_row = TestArtifactRowBuilder::new(&main_id)
+            .with_abs_path(main_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &main_row).unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        assert!(out["reseated"].as_array().unwrap().is_empty());
+        assert_eq!(out["collisions"].as_array().unwrap().len(), 1);
+
+        // Collision rows are reported, never mutated: the worktree row's
+        // abs_path must still point at the worktree, not the main path.
+        let expected_wt = crate::util::fs::RepoPath::from_path(&wt_doc).to_string();
+        let cat = ctx.catalog.lock();
+        let abs_path: String = cat
+            .conn
+            .query_row(
+                "SELECT abs_path FROM artifact WHERE id = ?1",
+                params!["wt-row"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(abs_path, expected_wt);
     }
 
     fn aug_row(
