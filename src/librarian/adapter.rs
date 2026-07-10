@@ -67,7 +67,10 @@ impl crate::tools::Tool for LibrarianAdapter {
             inner.active_project().map(|p| p.root.clone())
         };
         let lib_ctx = self.derive_ctx(active_root.as_deref());
-        self.inner.call(&lib_ctx, input).await
+        self.inner
+            .call(&lib_ctx, input)
+            .await
+            .map_err(bridge_recoverable_error)
     }
 
     fn is_write(&self, input: &Value) -> bool {
@@ -184,6 +187,26 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
     ))
 }
 
+/// Bridge a librarian-side `RecoverableError` into the host `RecoverableError`
+/// so `route_tool_error`'s exact-type `downcast_ref` matches it (→ `isError:
+/// false`, sibling parallel calls not aborted). The two types are distinct
+/// (`crate::librarian::tools::RecoverableError` has `{message, hint}`;
+/// `crate::tools::RecoverableError` has `{message, guidance, extra}`), and the
+/// librarian tools construct the former. Without this bridge every librarian
+/// recoverable condition falls through to the fatal branch in `route_tool_error`
+/// and hard-fails, aborting sibling parallel calls — exactly what the type
+/// exists to prevent. See
+/// docs/issues/2026-07-10-librarian-recoverable-error-downcast-never-matches.md.
+fn bridge_recoverable_error(e: anyhow::Error) -> anyhow::Error {
+    match e.downcast::<crate::librarian::tools::RecoverableError>() {
+        Ok(lib) => match lib.hint {
+            Some(h) => crate::tools::RecoverableError::with_hint(lib.message, h).into(),
+            None => crate::tools::RecoverableError::new(lib.message).into(),
+        },
+        Err(orig) => orig,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +244,35 @@ mod tests {
         // must not be hijacked into an artifact-body message.
         let result = json!({ "overflow": { "shown_lines": 1, "total_lines": 2 } });
         assert!(librarian_compact_summary("librarian", &result).is_none());
+    }
+
+    #[test]
+    fn bridge_maps_librarian_recoverable_to_host_type() {
+        // route_tool_error downcasts to crate::tools::RecoverableError; the
+        // librarian type must be bridged to it, or every librarian recoverable
+        // error hard-fails (isError: true) and aborts sibling parallel calls.
+        let e = crate::librarian::tools::RecoverableError::with_hint(
+            "artifact not found",
+            "check the id",
+        );
+        let bridged = bridge_recoverable_error(e);
+        let host = bridged
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("must downcast to the host RecoverableError route_tool_error looks for");
+        assert_eq!(host.message, "artifact not found");
+        assert!(host.guidance.is_some(), "hint must map to guidance");
+    }
+
+    #[test]
+    fn bridge_passes_through_non_recoverable_errors() {
+        let e = anyhow::anyhow!("fatal: database exploded");
+        let bridged = bridge_recoverable_error(e);
+        assert!(
+            bridged
+                .downcast_ref::<crate::tools::RecoverableError>()
+                .is_none(),
+            "genuine failures must stay fatal (isError: true)"
+        );
+        assert!(bridged.to_string().contains("database exploded"));
     }
 }
