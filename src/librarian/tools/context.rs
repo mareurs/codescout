@@ -59,6 +59,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         (s, _) => (s, false),
     };
     let current = ctx.current_project.as_deref();
+    // Set when candidate DISCOVERY (not the token budget) hit its cap — more
+    // artifacts may match than were even considered.
+    let mut candidates_capped = false;
 
     let topic_vec: Option<Vec<f32>> =
         if let (Some(ref topic), Some(ref svc)) = (&a.topic, &ctx.embedding) {
@@ -99,16 +102,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             } else {
                 None
             };
-            let rows = crate::librarian::catalog::find::semantic_find(
+            let mut rows = crate::librarian::catalog::find::semantic_find(
                 store.as_ref(),
                 &ctx.catalog,
                 project_id.as_deref(),
                 &vec,
                 scoped_filter.as_ref(),
-                50,
+                51,
                 0,
             )
             .await?;
+            candidates_capped = rows.len() > 50;
+            rows.truncate(50);
             Some(rows.into_iter().map(|r| r.id).collect())
         } else {
             None
@@ -172,14 +177,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 },
                 None => topic_clause,
             };
-            let rows = find(
+            let mut rows = find(
                 &cat,
                 &FindOpts {
                     filter: Some(combined),
-                    limit: 50,
+                    limit: 51,
                     offset: 0,
                 },
             )?;
+            candidates_capped = rows.len() > 50;
+            rows.truncate(50);
             rows.into_iter().map(|r| r.id).collect()
         } else {
             // No anchor, no topic: surface active goal-trackers.
@@ -210,14 +217,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let goal_filter = FilterNode::And { and: clauses };
             let (scoped_filter, _) =
                 apply_scope(Some(goal_filter), effective_scope, &ctx.workspace, current)?;
-            let rows = find(
+            let mut rows = find(
                 &cat,
                 &FindOpts {
                     filter: scoped_filter,
-                    limit: 10,
+                    limit: 11,
                     offset: 0,
                 },
             )?;
+            candidates_capped = rows.len() > 10;
+            rows.truncate(10);
             rows.into_iter().map(|r| r.id).collect()
         }
     };
@@ -291,7 +300,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             Ok((_, body)) => body.to_string(),
             Err(_) => content.clone(),
         };
-        let first_30: String = body.lines().take(30).collect::<Vec<_>>().join("\n");
+        let total_lines = body.lines().count();
+        let mut first_30: String = body.lines().take(30).collect::<Vec<_>>().join("\n");
+        if total_lines > 30 {
+            first_30.push_str(&format!(
+                "\n… [30 of {total_lines} lines — artifact(get, id=…) for the full body]"
+            ));
+        }
         let title = row.title.as_deref().unwrap_or("(untitled)");
         let mut section = if let Some(aug) = aug_map.get(id.as_str()) {
             let refreshed = aug.last_refreshed_at.as_deref().unwrap_or("never");
@@ -353,9 +368,33 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    let total_candidates = sorted_ids.len();
+    let included = included_ids.len();
+    let omitted = total_candidates.saturating_sub(included);
+    let mut overflow = json!({
+        "candidates": total_candidates,
+        "included": included,
+        "omitted": omitted,
+        "candidates_capped": candidates_capped,
+    });
+    if omitted > 0 || candidates_capped {
+        let mut hint = String::new();
+        if omitted > 0 {
+            hint.push_str(&format!(
+                "{omitted} candidate(s) omitted (token budget) — raise `max_tokens` or narrow `topic`. "
+            ));
+        }
+        if candidates_capped {
+            hint.push_str(
+                "candidate discovery hit its cap; more artifacts may match than were considered. ",
+            );
+        }
+        overflow["hint"] = json!(hint.trim_end());
+    }
     Ok(json!({
         "markdown": markdown,
         "included_ids": included_ids,
+        "overflow": overflow,
         "scope": scope_summary(effective_scope, current, scope_fallback),
     }))
 }
@@ -550,6 +589,64 @@ mod tests {
             ids.len(),
             1,
             "max_tokens should cap inclusion to 1 artifact"
+        );
+    }
+
+    #[tokio::test]
+    async fn omitted_signal_when_budget_truncates() {
+        // Silent-cap regression: candidates dropped by the char budget must be
+        // reported, so the bundle is not read as the complete set.
+        // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("auth_a.md"), "# Auth A\n".repeat(5)).unwrap();
+        std::fs::write(root.join("auth_b.md"), "# Auth B\n".repeat(5)).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/auth_a.md", "r", "auth_a.md", "Auth A", None),
+        )
+        .unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/auth_b.md", "r", "auth_b.md", "Auth B", None),
+        )
+        .unwrap();
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"topic": "auth", "max_tokens": 15}))
+            .await
+            .unwrap();
+        assert_eq!(v["included_ids"].as_array().unwrap().len(), 1);
+        assert_eq!(v["overflow"]["candidates"], json!(2));
+        assert_eq!(v["overflow"]["included"], json!(1));
+        assert_eq!(v["overflow"]["omitted"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn body_preview_marks_line_truncation() {
+        // A 30-line preview of a 50-line body must say so — a cut body must not
+        // read as a short-but-complete one.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let body = (0..50)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(root.join("big.md"), body).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/big.md", "r", "big.md", "Big", Some("bigtopic")),
+        )
+        .unwrap();
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"topic": "bigtopic", "max_tokens": 5000}))
+            .await
+            .unwrap();
+        let md = v["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("30 of 50 lines"),
+            "expected line-truncation marker, got: {md}"
         );
     }
 
