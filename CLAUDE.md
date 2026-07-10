@@ -33,6 +33,26 @@ archiving a tracker/bug. The one-page index of every ID prefix
 
 Two living trackers capture observations from real sessions. Keep them current — they feed
 prompt improvements and skill refactors.
+### Cross-project scope — the `codescout-ecosystem` umbrella
+
+`codescout`, `prompt-engineering`, `claude-plugins`, and `llm-proxy` share a
+librarian **umbrella** named `codescout-ecosystem`, declared globally in
+`~/.config/librarian/workspace.toml`. Pass `scope="umbrella"` to
+`artifact(find/context/…)` to query trackers and artifacts across all four —
+e.g. surface codescout bug files from a `prompt-engineering` session, or the
+reverse.
+
+**`prompt-engineering`** (a.k.a. prompt-tdd) is the prompt-eval harness that
+puts codescout's own skills/prompts under TDD against headless `claude -p`
+sessions. Trackers of note there: `skill-eval-log`, `skill-eval-playbook`, and
+`prompt-tdd-harness-backlog` (harness gaps the evals surfaced — several are
+codescout-adjacent, e.g. the `AnthropicMcpRegistry` setup-file parity fix).
+
+Umbrella membership resolves by path-prefix (`abs_path.starts_with(member)`).
+A project may also declare its own `[[umbrella]]` in its
+`.codescout/workspace.toml`; a **project-local umbrella takes precedence** over
+the global registry (for the hub-and-spoke case where a main project owns its
+dependency set). The global file is for cross-linked peers with no single owner.
 ### Skill Frictions — `docs/trackers/skill-frictions.md`
 
 Rough edges found while using project skills (`/claude-traces`, `/analyze-usage`, etc.).

@@ -13,7 +13,7 @@ pub struct WorkspaceConfig {
     pub ignore: Vec<String>,
     #[serde(default, rename = "rule")]
     pub rules: Vec<Rule>,
-    #[serde(default)]
+    #[serde(default, rename = "umbrella")]
     pub umbrellas: Vec<Umbrella>,
 }
 
@@ -124,5 +124,24 @@ path = "/abs/x"
         .unwrap();
         let cfg = load(f.path()).unwrap();
         assert_eq!(cfg.roots.len(), 1, "still parsed");
+    }
+
+    #[test]
+    fn parses_umbrella_block() {
+        // Docs, error messages, and the companion hint all instruct users to
+        // write `[[umbrella]]` (singular) — the same convention as `[[rule]]`.
+        // Without a matching serde rename, deny_unknown_fields rejects it and
+        // the whole workspace config fails to load, disabling the librarian.
+        let cfg: WorkspaceConfig = toml::from_str(
+            r#"
+    [[umbrella]]
+    name = "eco"
+    members = ["/a/b", "/c/d"]
+    "#,
+        )
+        .expect("[[umbrella]] must parse");
+        assert_eq!(cfg.umbrellas.len(), 1);
+        assert_eq!(cfg.umbrellas[0].name, "eco");
+        assert_eq!(cfg.umbrellas[0].members.len(), 2);
     }
 }

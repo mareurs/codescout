@@ -126,9 +126,12 @@ impl LibrarianAdapter {
             Ok(abs_path) => {
                 let git_root = crate::librarian::current_project::lookup_git_root(&abs_path)
                     .unwrap_or_else(|| abs_path.clone());
-                let umbrella = crate::librarian::current_project::lookup_umbrella(
+                let project_local =
+                    crate::librarian::current_project::load_project_umbrellas(&abs_path);
+                let umbrella = crate::librarian::current_project::resolve_umbrella(
                     &abs_path,
-                    &self.ctx.workspace,
+                    &project_local,
+                    &self.ctx.workspace.umbrellas,
                 );
                 Some(Arc::new(
                     crate::librarian::current_project::CurrentProject {

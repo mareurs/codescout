@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::librarian::workspace::WorkspaceConfig;
+use crate::librarian::workspace::{Umbrella, WorkspaceConfig};
 
 #[derive(Debug, Clone)]
 pub struct CurrentProject {
@@ -98,12 +98,54 @@ pub(crate) fn worktree_main_root(root: &Path) -> Option<PathBuf> {
 }
 
 pub fn lookup_umbrella(abs_path: &Path, ws: &WorkspaceConfig) -> Option<String> {
-    ws.umbrellas.iter().find_map(|u| {
+    lookup_umbrella_in(abs_path, &ws.umbrellas)
+}
+
+/// Return the name of the first umbrella in `umbrellas` whose member set
+/// contains `abs_path` (by path-prefix). The slice-based twin of
+/// [`lookup_umbrella`], so callers can resolve against a merged list.
+pub fn lookup_umbrella_in(abs_path: &Path, umbrellas: &[Umbrella]) -> Option<String> {
+    umbrellas.iter().find_map(|u| {
         u.members
             .iter()
             .any(|m| abs_path.starts_with(m))
             .then(|| u.name.clone())
     })
+}
+
+/// Resolve the umbrella for `abs_path`, preferring project-local declarations
+/// over the machine-global registry. A project's own `.codescout/workspace.toml`
+/// expresses the owning project's explicit, colocated intent, so it wins; the
+/// global registry (`~/.config/librarian/workspace.toml`) is the fallback for
+/// peer/cross-linked projects that have no single owner.
+pub fn resolve_umbrella(
+    abs_path: &Path,
+    project_local: &[Umbrella],
+    global: &[Umbrella],
+) -> Option<String> {
+    lookup_umbrella_in(abs_path, project_local).or_else(|| lookup_umbrella_in(abs_path, global))
+}
+
+/// Load project-local umbrellas from a project's own `.codescout/workspace.toml`.
+/// Only the `[[umbrella]]` array is read; codescout's own sections (`[workspace]`,
+/// `[[project]]`, ...) are ignored. A missing or unparseable file yields an empty
+/// list, so a project without local umbrellas simply falls through to the global
+/// registry.
+pub fn load_project_umbrellas(project_root: &Path) -> Vec<Umbrella> {
+    // A minimal view over the project's .codescout/workspace.toml: no
+    // deny_unknown_fields, so codescout's own [workspace]/[[project]]/... are
+    // ignored and only [[umbrella]] is extracted.
+    #[derive(serde::Deserialize, Default)]
+    struct ProjectUmbrellas {
+        #[serde(default, rename = "umbrella")]
+        umbrellas: Vec<Umbrella>,
+    }
+    let path = project_root.join(".codescout").join("workspace.toml");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| toml::from_str::<ProjectUmbrellas>(&s).ok())
+        .map(|p| p.umbrellas)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -239,5 +281,90 @@ mod tests {
         };
         let cp = resolve(&nested, &ws).unwrap();
         assert_eq!(cp.umbrella, Some("team".to_string()));
+    }
+
+    #[test]
+    fn resolve_umbrella_prefers_project_local_over_global() {
+        let p = Path::new("/home/x/proj");
+        let local = vec![Umbrella {
+            name: "local".into(),
+            members: vec!["/home/x/proj".into()],
+        }];
+        let global = vec![Umbrella {
+            name: "global".into(),
+            members: vec!["/home/x".into()],
+        }];
+        assert_eq!(
+            resolve_umbrella(p, &local, &global).as_deref(),
+            Some("local"),
+            "project-local umbrella must win when both match"
+        );
+    }
+
+    #[test]
+    fn resolve_umbrella_falls_back_to_global() {
+        let p = Path::new("/home/x/proj");
+        let local = vec![Umbrella {
+            name: "unrelated".into(),
+            members: vec!["/elsewhere".into()],
+        }];
+        let global = vec![Umbrella {
+            name: "global".into(),
+            members: vec!["/home/x".into()],
+        }];
+        assert_eq!(
+            resolve_umbrella(p, &local, &global).as_deref(),
+            Some("global"),
+            "global registry is the fallback when no project-local umbrella matches"
+        );
+    }
+
+    #[test]
+    fn resolve_umbrella_none_when_neither_matches() {
+        let p = Path::new("/home/x/proj");
+        let local = vec![Umbrella {
+            name: "a".into(),
+            members: vec!["/no/a".into()],
+        }];
+        let global = vec![Umbrella {
+            name: "b".into(),
+            members: vec!["/no/b".into()],
+        }];
+        assert_eq!(resolve_umbrella(p, &local, &global), None);
+    }
+
+    #[test]
+    fn load_project_umbrellas_reads_umbrella_ignoring_other_sections() {
+        let tmp = TempDir::new().unwrap();
+        let cs = tmp.path().join(".codescout");
+        std::fs::create_dir_all(&cs).unwrap();
+        // A real project workspace.toml also carries codescout's own sections;
+        // the loader must read [[umbrella]] and ignore the rest (no deny_unknown).
+        std::fs::write(
+            cs.join("workspace.toml"),
+            r#"
+    [workspace]
+    name = "hub"
+
+    [[project]]
+    id = "hub"
+    root = "."
+
+    [[umbrella]]
+    name = "hub-and-spokes"
+    members = ["/a", "/b"]
+    "#,
+        )
+        .unwrap();
+        let u = load_project_umbrellas(tmp.path());
+        assert_eq!(u.len(), 1);
+        assert_eq!(u[0].name, "hub-and-spokes");
+        assert_eq!(u[0].members.len(), 2);
+    }
+
+    #[test]
+    fn load_project_umbrellas_empty_when_file_absent() {
+        let tmp = TempDir::new().unwrap();
+        assert!(load_project_umbrellas(tmp.path()).is_empty());
     }
 }
