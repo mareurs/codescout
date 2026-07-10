@@ -269,7 +269,40 @@ sync flow.
   fall back to cookbook judgment rather than silently mis-ordering.
 - **Content settled before catalog.** `graft`/`reseat` run *after* the file
   content is merged (git + R-3). They never substitute for content disposition.
+- **Reconcile BEFORE `git worktree remove`.** `scan_worktree_scoped` detects rows
+  via `is_linked_worktree`, which reads the worktree's `.git` pointer file. Once
+  the worktree is removed, that pointer is gone, the row is no longer recognized
+  as worktree-scoped, and `reseat_worktree` can't find it — it degrades to a
+  missing-file orphan that `doctor(fix=prune_missing)` will DELETE (losing its
+  events/augmentation). So the reconcile step (`doctor` → `reseat`/`graft`) must
+  run while the worktree still exists. (Surfaced by the RED-baseline investigation.)
 
+## Companion skill status — REFUTED BY BASELINE (do not build)
+
+The original design proposed a `worktree-tracker-merge` orchestration skill
+(codescout-companion). A RED-phase investigation (writing-skills TDD, 2026-07-10)
+**refuted it** — three baseline scenarios, no orchestration skill present:
+
+1. **In-repo, full docs available** — a Sonnet agent found the shipped spec/plan +
+   tool schemas and produced a near-perfect reconciliation walkthrough (correct
+   sequence, rebase gate, R-3, citation breadcrumb, stale-binary caveat). GREEN.
+2. **Spec-free, handed only the terse tool-schema descriptions** — derived the
+   whole flow from first principles + schema text, zero tool calls; caught the
+   duplicate-F-N graft risk and the reseat-before-remove ordering unprompted. GREEN.
+3. **Latent (not primed about trackers, schema text withheld)** — still
+   **spontaneously recognized** the `id=hash(abs_path)` git-blind-catalog risk, so
+   a trigger to *notice* the risk is unnecessary. BUT, unable to **discover**
+   `graft`/`reseat`, it improvised a **lossy** path (`reindex` + manual re-augment
+   + `prune_missing`) that silently drops the event log.
+
+**Conclusion:** the orchestration content is redundant for a capable agent — the
+tool names are self-describing and the core insight is derivable. The real lever
+is **tool discoverability**, already delivered by the schema descriptions (the
+cleanup commit) — which take effect once the MCP binary is deployed (`cargo rb`).
+Building a 300-line SKILL.md would be adding a dead rule against a passing
+baseline (writing-skills Iron Law; prompt-hamsa Heuristic 12: base arm at ceiling
+→ no-ship). The durable cross-session nudge lives in a codescout memory instead
+(`worktree-merge-catalog-reconciliation`), not a skill.
 ## Error handling & edge cases
 
 - **`graft` transactionality:** the four steps run in one `IMMEDIATE`
