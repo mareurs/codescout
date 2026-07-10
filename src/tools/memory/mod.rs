@@ -911,9 +911,14 @@ impl Tool for Memory {
                 })?.embed(query).await?;
 
                 let store = ctx.agent.semantic_memory_store().await?;
-                let hits = store
-                    .search(&project_id, &query_vec, limit, bucket_filter)
+                // Overfetch limit+1 to detect that more memories match than the
+                // page shows (silent-cap family — see
+                // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+                let mut hits = store
+                    .search(&project_id, &query_vec, limit + 1, bucket_filter)
                     .await?;
+                let has_more = hits.len() > limit;
+                hits.truncate(limit);
 
                 let guard = super::output::OutputGuard::from_input(&input);
                 let items: Vec<serde_json::Value> = hits
@@ -944,7 +949,17 @@ impl Tool for Memory {
                     })
                     .collect();
 
-                Ok(json!({ "results": items }))
+                let count = items.len();
+                let mut out = json!({
+                    "results": items,
+                    "count": count,
+                    "has_more": has_more,
+                });
+                if has_more {
+                    out["more_hint"] =
+                        json!("more memories match; raise `limit` or refine `query`");
+                }
+                Ok(out)
             }
             "forget" => {
                 let id_str = input["id"].as_str().ok_or_else(|| {

@@ -316,6 +316,67 @@ async fn memory_remember_then_recall_e2e_via_test_seams() {
 }
 
 #[tokio::test]
+async fn memory_recall_signals_has_more_when_capped() {
+    // Silent-cap regression: a limit-capped recall must flag that more memories
+    // match. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    let (_dir, ctx) = test_ctx_with_project().await;
+    struct FixedEmbedder;
+    #[async_trait::async_trait]
+    impl DenseEmbedder for FixedEmbedder {
+        async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        }
+    }
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    let stub: Arc<InMemorySemanticMemoryStore> = Arc::new(InMemorySemanticMemoryStore::new());
+    ctx.agent
+        .set_semantic_memory_store_for_test(stub.clone() as Arc<dyn SemanticMemoryStore>)
+        .map_err(|_| ())
+        .expect("set store");
+
+    for i in 0..4 {
+        Memory
+            .call(
+                json!({
+                    "action": "remember",
+                    "content": format!("memory number {i}"),
+                    "title": format!("t{i}"),
+                    "bucket": "unstructured",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+    }
+
+    let result = Memory
+        .call(
+            json!({"action": "recall", "query": "memory", "limit": 2}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result["results"].as_array().unwrap().len(),
+        2,
+        "capped to limit"
+    );
+    assert_eq!(
+        result["has_more"],
+        json!(true),
+        "4 memories, limit 2 -> has_more"
+    );
+}
+
+#[tokio::test]
 async fn tools_error_without_active_project() {
     let ctx = test_ctx_no_project().await;
     assert!(WriteMemory
