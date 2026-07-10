@@ -40,11 +40,51 @@ pub struct GlobalIgnoredPathsSection {
     pub patterns: Option<Vec<String>>,
 }
 
-pub fn global_config_path() -> Option<PathBuf> {
+/// `$XDG_CONFIG_HOME/codescout` or `$HOME/.config/codescout`. `None` when neither
+/// `XDG_CONFIG_HOME` nor `HOME` is set (e.g. some Windows/CI environments).
+fn global_config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("codescout").join("config.toml"))
+    Some(base.join("codescout"))
+}
+
+pub fn global_config_path() -> Option<PathBuf> {
+    Some(global_config_dir()?.join("config.toml"))
+}
+
+/// Default startup-dotenv path: `<global_config_dir>/.env`.
+pub fn global_env_path() -> Option<PathBuf> {
+    Some(global_config_dir()?.join(".env"))
+}
+
+/// Load a startup dotenv into the process environment before config resolution.
+///
+/// Path: `$CODESCOUT_ENV_FILE` if set, else [`global_env_path`]. Uses
+/// `dotenvy::from_path`, which does NOT override already-set vars — so an
+/// explicit process env var always wins over the file. A missing default path is
+/// a silent no-op (opt-in); a missing *explicit* `$CODESCOUT_ENV_FILE` is a
+/// surfaced warning. Never reads the current working directory — a user-scoped
+/// server must not absorb an arbitrary repo's `.env`.
+pub fn load_startup_env() {
+    let explicit = std::env::var_os("CODESCOUT_ENV_FILE").map(PathBuf::from);
+    let path = match explicit.clone().or_else(global_env_path) {
+        Some(p) => p,
+        None => return,
+    };
+    if !path.exists() {
+        if explicit.is_some() {
+            tracing::warn!(
+                "CODESCOUT_ENV_FILE set to {} but the file was not found",
+                path.display()
+            );
+        }
+        return;
+    }
+    match dotenvy::from_path(&path) {
+        Ok(()) => tracing::debug!("loaded startup env from {}", path.display()),
+        Err(e) => tracing::warn!("failed to load startup env from {}: {e}", path.display()),
+    }
 }
 
 impl GlobalConfig {
@@ -270,5 +310,103 @@ mod tests {
             .get("security")
             .and_then(|s| s.get("shell_command_mode"))
             .is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn global_env_path_derives_from_config_dir() {
+        let _guard = lock_env_for_tests();
+        let saved = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-test-codescout");
+        let path = global_env_path().unwrap();
+        match saved {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/tmp/xdg-test-codescout/codescout/.env")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn load_startup_env_reads_explicit_file() {
+        let _guard = lock_env_for_tests();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("custom.env");
+        std::fs::write(&file, "CODESCOUT_TEST_LOADER_VAR=from_file\n").unwrap();
+
+        let saved_file = std::env::var_os("CODESCOUT_ENV_FILE");
+        let saved_var = std::env::var_os("CODESCOUT_TEST_LOADER_VAR");
+        std::env::remove_var("CODESCOUT_TEST_LOADER_VAR");
+        std::env::set_var("CODESCOUT_ENV_FILE", &file);
+
+        load_startup_env();
+        let got = std::env::var("CODESCOUT_TEST_LOADER_VAR").ok();
+
+        match saved_file {
+            Some(v) => std::env::set_var("CODESCOUT_ENV_FILE", v),
+            None => std::env::remove_var("CODESCOUT_ENV_FILE"),
+        }
+        match saved_var {
+            Some(v) => std::env::set_var("CODESCOUT_TEST_LOADER_VAR", v),
+            None => std::env::remove_var("CODESCOUT_TEST_LOADER_VAR"),
+        }
+        assert_eq!(got.as_deref(), Some("from_file"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_startup_env_does_not_override_existing() {
+        let _guard = lock_env_for_tests();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("custom.env");
+        std::fs::write(&file, "CODESCOUT_TEST_LOADER_VAR=from_file\n").unwrap();
+
+        let saved_file = std::env::var_os("CODESCOUT_ENV_FILE");
+        let saved_var = std::env::var_os("CODESCOUT_TEST_LOADER_VAR");
+        std::env::set_var("CODESCOUT_TEST_LOADER_VAR", "from_env");
+        std::env::set_var("CODESCOUT_ENV_FILE", &file);
+
+        load_startup_env();
+        let got = std::env::var("CODESCOUT_TEST_LOADER_VAR").ok();
+
+        match saved_file {
+            Some(v) => std::env::set_var("CODESCOUT_ENV_FILE", v),
+            None => std::env::remove_var("CODESCOUT_ENV_FILE"),
+        }
+        match saved_var {
+            Some(v) => std::env::set_var("CODESCOUT_TEST_LOADER_VAR", v),
+            None => std::env::remove_var("CODESCOUT_TEST_LOADER_VAR"),
+        }
+        assert_eq!(
+            got.as_deref(),
+            Some("from_env"),
+            "real env must win over the file"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn load_startup_env_noop_when_explicit_file_missing() {
+        let _guard = lock_env_for_tests();
+        let saved_file = std::env::var_os("CODESCOUT_ENV_FILE");
+        let saved_var = std::env::var_os("CODESCOUT_TEST_LOADER_VAR");
+        std::env::remove_var("CODESCOUT_TEST_LOADER_VAR");
+        std::env::set_var("CODESCOUT_ENV_FILE", "/nonexistent/codescout-test-xyz/.env");
+
+        load_startup_env(); // must not panic; must not set anything
+
+        let got = std::env::var_os("CODESCOUT_TEST_LOADER_VAR");
+        match saved_file {
+            Some(v) => std::env::set_var("CODESCOUT_ENV_FILE", v),
+            None => std::env::remove_var("CODESCOUT_ENV_FILE"),
+        }
+        match saved_var {
+            Some(v) => std::env::set_var("CODESCOUT_TEST_LOADER_VAR", v),
+            None => std::env::remove_var("CODESCOUT_TEST_LOADER_VAR"),
+        }
+        assert!(got.is_none());
     }
 }

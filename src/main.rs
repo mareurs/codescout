@@ -225,6 +225,9 @@ async fn main() -> Result<()> {
     // than aws-lc-rs). Must happen before any rustls config is built — idempotent.
     codescout::install_default_crypto_provider();
 
+    // Load a startup dotenv (opt-in) so the MCP launcher needs no env injection.
+    codescout::config::load_startup_env();
+
     let cli = Cli::parse();
 
     match cli.command {

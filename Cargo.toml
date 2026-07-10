@@ -43,6 +43,8 @@ path = "src/main.rs"
 
 [dependencies]
 fs4 = "0.12"
+# Startup dotenv self-load (non-overriding)
+dotenvy = "0.15"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
