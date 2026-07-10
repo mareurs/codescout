@@ -409,4 +409,41 @@ mod tests {
         }
         assert!(got.is_none());
     }
+
+    #[test]
+    #[serial]
+    fn load_startup_env_noop_when_default_path_absent() {
+        let _guard = lock_env_for_tests();
+        let dir = tempfile::tempdir().unwrap();
+
+        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let saved_home = std::env::var_os("HOME");
+        let saved_file = std::env::var_os("CODESCOUT_ENV_FILE");
+        let saved_var = std::env::var_os("CODESCOUT_TEST_NOOP_SENTINEL");
+
+        std::env::set_var("XDG_CONFIG_HOME", dir.path());
+        std::env::remove_var("CODESCOUT_ENV_FILE");
+        std::env::remove_var("CODESCOUT_TEST_NOOP_SENTINEL");
+
+        load_startup_env(); // must not panic; default path does not exist
+
+        let got = std::env::var_os("CODESCOUT_TEST_NOOP_SENTINEL");
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match saved_file {
+            Some(v) => std::env::set_var("CODESCOUT_ENV_FILE", v),
+            None => std::env::remove_var("CODESCOUT_ENV_FILE"),
+        }
+        match saved_var {
+            Some(v) => std::env::set_var("CODESCOUT_TEST_NOOP_SENTINEL", v),
+            None => std::env::remove_var("CODESCOUT_TEST_NOOP_SENTINEL"),
+        }
+        assert!(got.is_none());
+    }
 }
