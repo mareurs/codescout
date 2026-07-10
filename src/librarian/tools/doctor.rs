@@ -47,9 +47,18 @@
 //! fix run returns `pruned` counts instead.
 //!
 //! A second opt-in fix, `fix=reseat_worktree`, consumes `scan_worktree_scoped`
-//! violations: `no_collision` rows get their `abs_path` re-pointed at the
-//! main-repo path (a catalog `UPDATE` — no filesystem rename, `id` unchanged);
-//! `collision` rows are left untouched and reported for a manual `graft`.
+//! violations: `no_collision` rows are durably re-seeded at the main-repo
+//! path — a fresh row is written at `id_m = artifact_id_from_abs(main_path)`
+//! and [`crate::librarian::catalog::graft::graft_rows`] folds the worktree
+//! row's entire history (events, links, event_edges, and the git-invisible
+//! `append_entry` augmentation) onto it before deleting the worktree row. The
+//! id CHANGES (`id_w` -> `id_m`): catalog identity is
+//! `id == artifact_id_from_abs(abs_path)`, so a bare `abs_path` UPDATE that
+//! kept `id_w` would leave the row mismatched, and the next MAIN-repo
+//! reindex's `artifact::upsert` pre-clean (`DELETE FROM artifact WHERE
+//! abs_path=? AND id != ?`) would delete it — cascading away exactly the
+//! history this exists to preserve. `collision` rows are left untouched and
+//! reported for a manual `graft`.
 
 use std::path::{Path, PathBuf};
 
@@ -58,6 +67,8 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::librarian::catalog::artifact::{self, ArtifactRow};
+use crate::librarian::catalog::graft;
 use crate::librarian::{current_project, ids};
 
 use super::{RecoverableError, ToolContext};
@@ -185,32 +196,62 @@ async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>) -> Result<Val
 }
 
 /// `fix=reseat_worktree`: consume `scan_worktree_scoped` violations. For each
-/// `no_collision` row, re-point its `abs_path` to the main-repo path — a
-/// catalog `UPDATE` only, never a filesystem rename (git already placed the
-/// merged file there) and never a recompute of `id` (same contract as
-/// `artifact(move)`: the id stays stable, only `abs_path` moves). `collision`
-/// rows are left untouched and reported for a manual `graft`.
+/// `no_collision` row (`id_w`, at the worktree path), durably re-seed a row
+/// at the main-repo path instead of a bare `abs_path` UPDATE. Catalog
+/// identity is `id == artifact_id_from_abs(abs_path)`; keeping `id_w` while
+/// pointing `abs_path` at the main path would leave that invariant broken,
+/// and the next MAIN-repo reindex's [`artifact::upsert`] pre-clean (`DELETE
+/// FROM artifact WHERE abs_path=? AND id != ?`) would delete the row —
+/// cascading away its events / links / event_edges / augmentation (the
+/// git-invisible `append_entry` history this feature exists to preserve).
+///
+/// Instead: seed a fresh row at `id_m = artifact_id_from_abs(main_path)`
+/// (`no_collision` means nothing lives there yet, so the pre-clean deletes
+/// nothing), then [`graft::graft_rows`] folds `id_w`'s entire history —
+/// including the augmentation — onto `id_m` and deletes `id_w`. A subsequent
+/// reindex now hits `ON CONFLICT(id)` (id already matches path) instead of
+/// the pre-clean `DELETE`, so nothing is lost. `collision` rows are left
+/// untouched and reported for a manual `graft`.
 fn reseat_worktree(ctx: &ToolContext) -> Result<Value> {
-    let cat = ctx.catalog.lock();
+    let mut cat = ctx.catalog.lock();
+    // Owned Vec: the immutable borrow of `cat.conn` ends here, before the
+    // mutable `graft_rows` calls below.
     let violations = scan_worktree_scoped(&cat.conn)?;
     let mut reseated = Vec::new();
     let mut collisions = Vec::new();
     for v in &violations {
-        let Some(id) = v.artifact_id.as_deref() else {
+        let Some(id_w) = v.artifact_id.as_deref() else {
             continue;
         };
         let detail: Value = serde_json::from_str(&v.detail).unwrap_or_default();
         let main_path = detail["main_path"].as_str().unwrap_or_default();
         match detail["classification"].as_str() {
             Some("no_collision") => {
-                cat.conn.execute(
-                    "UPDATE artifact SET abs_path = ?1 WHERE id = ?2",
-                    rusqlite::params![main_path, id],
-                )?;
-                reseated.push(json!({ "id": id, "new_path": main_path }));
+                let Some(row_w) = artifact::get(&cat, id_w)? else {
+                    continue; // race: row vanished since the scan; nothing to reseat
+                };
+                let id_m = ids::artifact_id_from_abs(Path::new(main_path));
+                let row_m = ArtifactRow {
+                    id: id_m.clone(),
+                    abs_path: PathBuf::from(main_path),
+                    ..row_w
+                };
+                // Two separate transactions (`upsert` autocommits; `graft_rows`
+                // runs its own IMMEDIATE tx) — acceptable for a manual
+                // diagnostic. A crash between them is recoverable, not data
+                // loss: either an orphan `id_m` row with no history yet, or an
+                // un-grafted `id_w` that the next run's scan reports as a
+                // `collision` against `id_m` for a manual `graft`.
+                artifact::upsert(&cat, &row_m)?;
+                graft::graft_rows(&mut cat, id_w, &id_m)?;
+                reseated.push(json!({
+                    "old_id": id_w,
+                    "new_id": id_m,
+                    "new_path": main_path,
+                }));
             }
             _ => collisions.push(json!({
-                "id": id,
+                "id": id_w,
                 "main_path": main_path,
                 "into_id": detail["collision_with"].clone(),
             })),
@@ -536,8 +577,9 @@ fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::catalog::artifact::{upsert as art_upsert, TestArtifactRowBuilder};
+    use crate::librarian::catalog::artifact::{self, upsert as art_upsert, TestArtifactRowBuilder};
     use crate::librarian::catalog::augmentation;
+    use crate::librarian::catalog::events::{self, TestEventRowBuilder};
     use crate::librarian::catalog::Catalog;
     use crate::librarian::tools::TestToolContextBuilder;
     use rusqlite::params;
@@ -886,6 +928,7 @@ mod tests {
         let (_tmp, main_root, worktree_root) = make_worktree_fixture();
         let wt_doc = worktree_root.join("docs/x.md");
         let main_doc = main_root.join("docs/x.md");
+        let id_m = crate::librarian::ids::artifact_id_from_abs(&main_doc);
 
         let cat = Catalog::open_in_memory().unwrap();
         let wt_row = TestArtifactRowBuilder::new("wt-row")
@@ -900,20 +943,26 @@ mod tests {
         assert_eq!(out["fix"], "reseat_worktree");
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
+        assert_eq!(out["reseated"][0]["old_id"], "wt-row");
+        assert_eq!(out["reseated"][0]["new_id"], id_m);
 
-        // The row was re-pointed to the main path: id unchanged, no rename on
-        // disk (the merged file already lives there; only the catalog moved).
+        // The row is durably re-seeded at id_m (== hash(main_path)) rather than
+        // merely re-pointed under the stale worktree-derived id: no filesystem
+        // rename (the merged file already lives there; only the catalog
+        // moved), but the catalog id DOES change so identity
+        // (id == hash(abs_path)) holds and the worktree-id row is gone.
         let expected_main = crate::util::fs::RepoPath::from_path(&main_doc).to_string();
         let cat = ctx.catalog.lock();
         let abs_path: String = cat
             .conn
             .query_row(
                 "SELECT abs_path FROM artifact WHERE id = ?1",
-                params!["wt-row"],
+                params![id_m],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(abs_path, expected_main);
+        assert!(artifact::get(&cat, "wt-row").unwrap().is_none());
     }
 
     #[tokio::test]
@@ -954,6 +1003,104 @@ mod tests {
             )
             .unwrap();
         assert_eq!(abs_path, expected_wt);
+    }
+
+    /// The durability proof: a `no_collision` reseat must survive the NEXT
+    /// main-repo reindex without losing history. Seeds a worktree-scoped row
+    /// WITH an augmentation (`entry_collection` + params) and an event, runs
+    /// `reseat_worktree`, then simulates the next reindex's `artifact::upsert`
+    /// at the main path — before this fix, that upsert's abs_path-collision
+    /// pre-clean (`DELETE FROM artifact WHERE abs_path=? AND id != ?`) would
+    /// fire against the stale worktree-derived id and cascade-drop the
+    /// augmentation; this test would have failed on `main` prior to the fix.
+    #[tokio::test]
+    async fn reseat_worktree_durably_reseeds_and_survives_reindex() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+        let main_doc = main_root.join("docs/x.md");
+        let id_m = crate::librarian::ids::artifact_id_from_abs(&main_doc);
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+        augmentation::upsert(&cat, &aug_row("wt-row", "items", &["a", "b"])).unwrap();
+        events::insert(
+            &cat,
+            &TestEventRowBuilder::new("wt-row", "note")
+                .with_id("ev-1")
+                .build(),
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
+        assert!(out["collisions"].as_array().unwrap().is_empty());
+        assert_eq!(out["reseated"][0]["old_id"], "wt-row");
+        assert_eq!(out["reseated"][0]["new_id"], id_m);
+        assert_eq!(
+            out["reseated"][0]["new_path"],
+            crate::util::fs::RepoPath::from_path(&main_doc).to_string()
+        );
+
+        {
+            let cat = ctx.catalog.lock();
+
+            // Catalog identity restored: a row lives at id_m, the stale
+            // worktree-id row is gone.
+            assert!(artifact::get(&cat, &id_m).unwrap().is_some());
+            assert!(artifact::get(&cat, "wt-row").unwrap().is_none());
+
+            // The augmentation (git-invisible append_entry history) migrated.
+            let aug = augmentation::get(&cat, &id_m).unwrap().unwrap();
+            let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+            let ids: Vec<&str> = params["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| e["id"].as_str().unwrap())
+                .collect();
+            assert_eq!(ids, vec!["a", "b"]);
+
+            // The event followed too.
+            let ev_artifact_id: String = cat
+                .conn
+                .query_row(
+                    "SELECT artifact_id FROM events WHERE id = ?1",
+                    params!["ev-1"],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(ev_artifact_id, id_m);
+        }
+
+        // Simulate the NEXT main-repo reindex walk: a fresh ArtifactRow at the
+        // same id a real walk would compute (hash(main_path)) upserts onto the
+        // row this fix just reseeded.
+        {
+            let cat = ctx.catalog.lock();
+            let reindexed_row = TestArtifactRowBuilder::new(&id_m)
+                .with_abs_path(main_doc.clone())
+                .with_kind("tracker")
+                .build();
+            art_upsert(&cat, &reindexed_row).unwrap();
+
+            // The durability guarantee: the augmentation is STILL there. Before
+            // the fix, id_m would have still been id_w at this point, so the
+            // upsert's abs_path pre-clean would have deleted the row (and its
+            // cascaded augmentation) out from under this reindex.
+            let aug = augmentation::get(&cat, &id_m).unwrap().unwrap();
+            let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+            assert_eq!(
+                params["items"].as_array().unwrap().len(),
+                2,
+                "augmentation survives the next reindex"
+            );
+        }
     }
 
     fn aug_row(
