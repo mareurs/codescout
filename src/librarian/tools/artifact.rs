@@ -30,7 +30,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "link", "graph", "state_at", "append_entry"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -189,7 +189,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: find, get, create, update, move, link, graph, state_at, append_entry",
+                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry",
             )
         })?;
         match action {
@@ -199,12 +199,13 @@ impl Tool for Artifact {
             "update"   => super::update::call(ctx, args).await,
             "move"     => super::mv::call(ctx, args).await,
             "delete"   => super::delete::call(ctx, args).await,
+            "graft"    => super::graft::call(ctx, args).await,
             "link"     => super::link::call(ctx, args).await,
             "graph"    => super::graph::call(ctx, args).await,
             "state_at" => super::state_at::call(ctx, args).await,
             "append_entry" => super::append_entry::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, link, graph, state_at, append_entry"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry"
             ))),
         }
     }

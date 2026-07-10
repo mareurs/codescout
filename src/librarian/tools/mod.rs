@@ -239,6 +239,7 @@ pub mod link;
 
 pub mod append_entry;
 pub mod delete;
+pub mod graft;
 pub mod mv;
 
 pub mod event_create;
