@@ -43,9 +43,14 @@
 //! Output is a JSON report with `violations` + `summary` (per-check counts); a
 //! fix run returns `pruned` counts instead.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+use crate::librarian::{current_project, ids};
 
 use super::{RecoverableError, ToolContext};
 
@@ -97,6 +102,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     all_violations.extend(scan_artifact_paths(&cat.conn)?);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
+    all_violations.extend(scan_worktree_scoped(&cat.conn)?);
 
     // Drop the lock before computing the summary — keeps lock scope minimal.
     drop(cat);
@@ -235,6 +241,154 @@ fn scan_commits_git_root(conn: &rusqlite::Connection) -> Result<Vec<Violation>> 
     Ok(violations)
 }
 
+/// Computes the would-be path of a worktree-scoped row in the MAIN repo:
+/// `abs_path` re-rooted from `worktree_root` onto `main_root`. `None` if
+/// `abs_path` is not actually under `worktree_root` — defensive; the only
+/// caller invokes this after confirming ancestry via `is_linked_worktree`.
+fn main_path_for(abs_path: &Path, worktree_root: &Path, main_root: &Path) -> Option<PathBuf> {
+    let rel = abs_path.strip_prefix(worktree_root).ok()?;
+    Some(main_root.join(rel))
+}
+
+/// Reads `artifact_augmentation.entry_collection` + `params` for `artifact_id`.
+/// `None` if the row is unaugmented.
+fn augmentation_entry_collection(
+    conn: &rusqlite::Connection,
+    artifact_id: &str,
+) -> Result<Option<(Option<String>, String)>> {
+    let row = conn
+        .query_row(
+            "SELECT entry_collection, params FROM artifact_augmentation WHERE artifact_id = ?1",
+            rusqlite::params![artifact_id],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    Ok(row)
+}
+
+/// Extracts the `id` field of every object in `params_json[collection]`
+/// (skipping entries with no string `id`). Best-effort: malformed JSON or a
+/// missing/non-array collection yields an empty list rather than an error —
+/// this feeds diagnostic detail, not the collision classification itself.
+fn entry_ids(params_json: &str, collection: &str) -> Vec<String> {
+    let Ok(parsed) = serde_json::from_str::<Value>(params_json) else {
+        return Vec::new();
+    };
+    parsed
+        .get(collection)
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Given both sides of a `worktree_scoped_row` collision, returns the
+/// overlapping entry ids IF both rows are augmented with the SAME non-null
+/// `entry_collection` name. `None` means that precondition isn't met (either
+/// row unaugmented, or the collection names differ/are absent) — distinct
+/// from `Some(vec![])`, which means the precondition held but nothing
+/// actually overlapped.
+fn shared_entry_overlap(
+    conn: &rusqlite::Connection,
+    row_id: &str,
+    other_id: &str,
+) -> Result<Option<Vec<String>>> {
+    let Some((row_collection, row_params)) = augmentation_entry_collection(conn, row_id)? else {
+        return Ok(None);
+    };
+    let Some((other_collection, other_params)) = augmentation_entry_collection(conn, other_id)?
+    else {
+        return Ok(None);
+    };
+    let (Some(rc), Some(oc)) = (row_collection, other_collection) else {
+        return Ok(None);
+    };
+    if rc != oc {
+        return Ok(None);
+    }
+    let row_ids = entry_ids(&row_params, &rc);
+    let other_ids = entry_ids(&other_params, &oc);
+    Ok(Some(
+        row_ids
+            .into_iter()
+            .filter(|i| other_ids.contains(i))
+            .collect(),
+    ))
+}
+
+/// Flags artifact rows whose `abs_path` lives inside a linked git worktree.
+/// For each such row, computes the row's would-be path in the MAIN repo and
+/// classifies whether a catalog row already exists there:
+///
+/// - `no_collision` — no row at the main-repo path; the worktree-scoped row
+///   is merely absent from the main catalog view, not conflicting with it.
+/// - `collision` — a row already exists at the main-repo path (same
+///   [`ids::artifact_id_from_abs`]). If both rows are augmented with the
+///   SAME `entry_collection`, the overlapping entry ids are surfaced too —
+///   `fix=reseat_worktree` (a follow-up change) will need this to merge
+///   safely instead of clobbering.
+///
+/// Filesystem-only: walks each `abs_path`'s ancestor directories looking for
+/// one [`current_project::is_linked_worktree`] recognizes (a `.git` *file*
+/// containing a `gitdir: .../worktrees/<name>` pointer) — no `git` subprocess.
+fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut violations = Vec::new();
+    for (id, abs_path) in &rows {
+        let path = Path::new(abs_path);
+        let Some(worktree_root) = path
+            .ancestors()
+            .find(|a| current_project::is_linked_worktree(a))
+        else {
+            continue;
+        };
+        let Some(main_root) = current_project::worktree_main_root(worktree_root) else {
+            continue;
+        };
+        let Some(main_path) = main_path_for(path, worktree_root, &main_root) else {
+            continue;
+        };
+        let main_id = ids::artifact_id_from_abs(&main_path);
+        let main_path_str = crate::util::fs::RepoPath::from_path(&main_path).to_string();
+
+        let exists_at_main: bool = conn
+            .query_row(
+                "SELECT 1 FROM artifact WHERE id = ?1",
+                rusqlite::params![main_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+
+        let mut detail = json!({
+            "main_path": main_path_str,
+            "classification": if exists_at_main { "collision" } else { "no_collision" },
+        });
+
+        if exists_at_main {
+            detail["collision_with"] = json!(main_id);
+            if let Some(overlap) = shared_entry_overlap(conn, id, &main_id)? {
+                detail["id_overlap"] = json!(overlap);
+            }
+        }
+
+        violations.push(Violation::new(
+            "worktree_scoped_row",
+            Some(id.clone()),
+            abs_path.clone(),
+            detail.to_string(),
+        ));
+    }
+    Ok(violations)
+}
+
 fn check_backslash(id: &str, abs_path: &str, check_name: &str) -> Option<Violation> {
     abs_path.find('\\').map(|pos| {
         Violation::new(
@@ -322,6 +476,8 @@ fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::artifact::{upsert as art_upsert, TestArtifactRowBuilder};
+    use crate::librarian::catalog::augmentation;
     use crate::librarian::catalog::Catalog;
     use rusqlite::params;
 
@@ -544,5 +700,147 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM commits", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n_com, 1, "only the /tmp commit remains");
+    }
+
+    #[test]
+    fn scan_worktree_scoped_empty_when_no_worktree_rows() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // Plain rows with no linked-worktree ancestor anywhere on disk —
+        // the scan must not flag anything (safe default).
+        seed_artifact(&cat, "plain", "/tmp/plain/doc.md");
+        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        assert!(violations.is_empty());
+    }
+
+    /// Builds a real `<tmp>/main` + linked-worktree-under-main layout on disk
+    /// (a `.git` FILE at the worktree root pointing `gitdir:` back at the
+    /// main repo's `.git/worktrees/<name>`), matching exactly what
+    /// `is_linked_worktree` / `worktree_main_root` read. Returns
+    /// `(tmp, main_root, worktree_root)`; `tmp` must stay alive for the
+    /// duration of the test (dropping it deletes the directory).
+    fn make_worktree_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let main_root = tmp.path().join("main");
+        std::fs::create_dir_all(main_root.join(".git")).unwrap();
+        let worktree_root = main_root.join(".worktrees/feat");
+        std::fs::create_dir_all(&worktree_root).unwrap();
+        std::fs::write(
+            worktree_root.join(".git"),
+            format!(
+                "gitdir: {}/main/.git/worktrees/feat\n",
+                tmp.path().display()
+            ),
+        )
+        .unwrap();
+        (tmp, main_root, worktree_root)
+    }
+
+    #[test]
+    fn scan_worktree_scoped_classifies_no_collision() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+
+        // Proves is_linked_worktree/worktree_main_root actually fired: with
+        // no real .git-file layout on disk this would be empty (see the
+        // no-worktree-rows test above). Here it must find exactly the one
+        // seeded row.
+        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        assert_eq!(violations.len(), 1, "the worktree-scoped row is flagged");
+        let v = &violations[0];
+        assert_eq!(v.check, "worktree_scoped_row");
+        assert_eq!(v.artifact_id.as_deref(), Some("wt-row"));
+
+        let detail: serde_json::Value = serde_json::from_str(&v.detail).unwrap();
+        assert_eq!(detail["classification"], "no_collision");
+        assert!(detail.get("collision_with").is_none());
+        let main_doc = main_root.join("docs/x.md");
+        assert_eq!(
+            detail["main_path"],
+            crate::util::fs::RepoPath::from_path(&main_doc).to_string()
+        );
+    }
+
+    #[test]
+    fn scan_worktree_scoped_classifies_collision_and_overlap() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+        let main_doc = main_root.join("docs/x.md");
+        // The collision classifier computes the main-path id via
+        // artifact_id_from_abs and checks whether a row with that id
+        // exists — so the seeded main-side row's id MUST be exactly that.
+        let main_id = crate::librarian::ids::artifact_id_from_abs(&main_doc);
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+        let main_row = TestArtifactRowBuilder::new(&main_id)
+            .with_abs_path(main_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &main_row).unwrap();
+
+        // Augment both sides with the SAME entry_collection name but
+        // partially-overlapping id sets — "b" is the only shared id.
+        augmentation::upsert(&cat, &aug_row("wt-row", "items", &["a", "b"])).unwrap();
+        augmentation::upsert(&cat, &aug_row(&main_id, "items", &["b", "c"])).unwrap();
+
+        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        assert_eq!(
+            violations.len(),
+            1,
+            "only the worktree-side row is scanned; the main-side row has no \
+             linked-worktree ancestor and is skipped"
+        );
+        let v = &violations[0];
+        assert_eq!(v.artifact_id.as_deref(), Some("wt-row"));
+
+        let detail: serde_json::Value = serde_json::from_str(&v.detail).unwrap();
+        assert_eq!(detail["classification"], "collision");
+        assert_eq!(detail["collision_with"], main_id);
+        assert_eq!(
+            detail["main_path"],
+            crate::util::fs::RepoPath::from_path(&main_doc).to_string()
+        );
+        let overlap: Vec<String> = detail["id_overlap"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(overlap, vec!["b".to_string()]);
+    }
+
+    fn aug_row(
+        artifact_id: &str,
+        entry_collection: &str,
+        ids: &[&str],
+    ) -> crate::librarian::catalog::augmentation::AugmentationRow {
+        let items: Vec<serde_json::Value> =
+            ids.iter().map(|i| serde_json::json!({ "id": i })).collect();
+        crate::librarian::catalog::augmentation::AugmentationRow {
+            artifact_id: artifact_id.to_string(),
+            prompt: "test prompt".to_string(),
+            params: serde_json::json!({ entry_collection: items }).to_string(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+            entry_collection: Some(entry_collection.to_string()),
+            refreshed_at_commit: None,
+        }
     }
 }

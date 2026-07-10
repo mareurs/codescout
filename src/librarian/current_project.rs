@@ -75,6 +75,28 @@ pub(crate) fn is_linked_worktree(root: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Given a linked-worktree root, derives its MAIN repo root from the
+/// `.git`-file `gitdir: <main>/.git/worktrees/<name>` pointer — the same file
+/// [`is_linked_worktree`] reads. Filesystem-only (no `git` subprocess).
+///
+/// Returns `None` if `root` has no readable `.git` file, or if the pointer's
+/// `gitdir:` path has no `.git` path component to split the main root on
+/// (i.e. `root` is not actually a linked worktree).
+pub(crate) fn worktree_main_root(root: &Path) -> Option<PathBuf> {
+    let pointer = std::fs::read_to_string(root.join(".git")).ok()?;
+    let gitdir = pointer
+        .lines()
+        .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))?;
+    let mut main = PathBuf::new();
+    for component in Path::new(gitdir).components() {
+        if component.as_os_str() == ".git" {
+            return Some(main);
+        }
+        main.push(component);
+    }
+    None
+}
+
 pub fn lookup_umbrella(abs_path: &Path, ws: &WorkspaceConfig) -> Option<String> {
     ws.umbrellas.iter().find_map(|u| {
         u.members
@@ -167,6 +189,37 @@ mod tests {
         let plain = tmp.path().join("plain");
         std::fs::create_dir_all(&plain).unwrap();
         assert!(!is_linked_worktree(&plain), "non-git dir is not a worktree");
+    }
+
+    #[test]
+    fn worktree_main_root_from_gitdir_pointer() {
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().join("main/.worktrees/feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!(
+                "gitdir: {}/main/.git/worktrees/feat\n",
+                tmp.path().display()
+            ),
+        )
+        .unwrap();
+        let main = worktree_main_root(&wt).unwrap();
+        assert_eq!(main, tmp.path().join("main"));
+    }
+
+    #[test]
+    fn worktree_main_root_returns_none_for_non_worktree() {
+        let tmp = TempDir::new().unwrap();
+        // Main checkout: no .git file (it's a directory) -> read_to_string fails.
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        assert!(worktree_main_root(&main).is_none());
+
+        // No .git at all.
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(worktree_main_root(&plain).is_none());
     }
 
     #[test]
