@@ -786,3 +786,29 @@ Two execution options:
 2. **Inline Execution** — batch execution with checkpoints in this session.
 
 Per the project's model floor (CLAUDE.md): Sonnet is the implementer floor; budget at least one **Opus** review pass on the `graft` catalog core (Tasks 1–2) — it is shared infrastructure the skill builds on, exactly the "load-bearing, review harder" class.
+
+## Post-Execution Corrections
+
+Executed 2026-07-10 via subagent-driven-development (Sonnet implementers, Opus reviews on the
+load-bearing graft core Tasks 1–2 + Task 4 per the CLAUDE.md model-floor rule). Two real defects
+in THIS plan's own sample code were caught by the Opus review passes and fixed:
+
+1. **`event_edges` cascade child missed (Task 1).** The plan enumerated only `events`,
+   `artifact_observation`, `artifact_link` for re-pointing. `event_edges.dst_artifact_id`
+   (schema.sql:97) is a fifth `ON DELETE CASCADE` FK to `artifact(id)`; without re-pointing it, a
+   narrative-graph edge targeting `from_id` was silently cascade-deleted on graft. Fixed in commit
+   `2b6d9473` (re-point + `event_edges_repointed`/`event_edges_dropped` report fields + test).
+
+2. **Renumber allocator emitted duplicate ids (Task 2).** The plan's `merge_augmentation` sample
+   seeded the renumber search from survivor ids + incoming-appended-so-far, missing non-colliding
+   incoming ids appended later — so on the modal divergent merge (`into=[F-1,F-2,F-3]`,
+   `from=[F-1,F-2,F-4]`) a renumbered id collided with a preserved free incoming id. Fixed in commit
+   `b0c21d66`: seed the allocation universe with `into ids ∪ all non-colliding incoming ids` before
+   allocating. The plan's Task 2 test expectations (which encoded the bug) were corrected.
+
+Plus a discoverability cleanup (commit `f7803732`): the new `graft` action and `worktree_scoped_row`
+check / `reseat_worktree` fix are now surfaced in the `artifact`/`librarian` tool schemas and
+docstrings (they were missing, so a schema-respecting agent couldn't reach `fix=reseat_worktree`).
+
+Shipped commit range: `49214372..f7803732` (8 commits) on `experiments`. Full suite 3124 green.
+The spec (`…-worktree-merge-tracker-safety-design.md`) was updated to reflect both corrections.

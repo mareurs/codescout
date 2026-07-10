@@ -60,7 +60,7 @@ project documents in three places (CLAUDE.md verify-open cadence,
 | The indexer **skips linked worktrees** (`.git`-file → `gitdir: …/worktrees/<name>`). So worktree tracker rows only ever appear via `artifact(create)` at the worktree path, never via a walk. | `src/librarian/indexer.rs:56` (guard), `current_project.rs:56` (`is_linked_worktree`) |
 | `append_entry` writes **only** `artifact_augmentation.params` (DB), never the `.md` file. So augmented-tracker structured entries are git-invisible. | `src/librarian/catalog/augmentation.rs:178` |
 | `artifact(move)` renames the file on disk **and** updates the row, keeping the same `id`; it errors if the destination already exists. Not usable as-is post-merge (the file is already at the destination, put there by git). | `src/librarian/tools/mv.rs:15` |
-| Events, links, augmentation, observations all `REFERENCES artifact(id) ON DELETE CASCADE`. Deleting a row cascade-deletes its history. | `src/librarian/catalog/migrate_v6.rs:489`, `:498` |
+| **Five** child tables `REFERENCES artifact(id) ON DELETE CASCADE` — `events`, `artifact_observation`, `artifact_link` (both `src_id` **and** `dst_id`), `artifact_augmentation`, and `event_edges.dst_artifact_id`. Deleting a row cascade-deletes ALL of them, so `graft` must re-point every one **before** the delete. (`event_edges` was missed in the first draft of this spec and caught in review — see corrections note.) | `src/librarian/catalog/schema.sql:21,22,30,58,97` |
 | `artifact_link` is directional: `(src_id, dst_id, rel, created_at)`, `INSERT OR IGNORE` (unique triple). | `src/librarian/catalog/links.rs:9`, `:23` |
 | `doctor` is a detect-then-opt-in-fix tool: read-only `scan_*` checks emitting `Violation`s, plus `run_fix(ctx, fix, root)` (currently `fix=prune_missing`). | `src/librarian/tools/doctor.rs:88`, `:149` |
 
@@ -148,32 +148,28 @@ This is the fully-automatic common case.
 
 ### Tool 2 — `artifact(action="graft", from_id, into_id)`
 
-Added to the action enum (`artifact.rs:33`) and dispatch (`artifact.rs:200`).
-Folds `from_id` into `into_id` in **one transaction**, in this **mandatory
-order** (delete-last, because of `ON DELETE CASCADE`):
+Added to the action enum (`artifact.rs`), dispatch, both action-list error
+strings, and the tool `description()`. Folds `from_id` into `into_id` in **one
+`IMMEDIATE` transaction**, in this **mandatory order** (delete-last, because
+every child FK is `ON DELETE CASCADE` — a delete before the re-points would
+destroy the history graft exists to preserve):
 
-1. **Re-point events:** `UPDATE artifact_event SET artifact_id = into_id WHERE artifact_id = from_id`.
-2. **Re-point links, both directions**, with dedup against the unique
-   `(src_id, dst_id, rel)` triple: re-point `src_id` and `dst_id` where the
-   result does not collide with an existing edge; drop (or `UPDATE OR IGNORE`)
-   where it would. Self-edges (`from_id → from_id`) collapse to
-   `into_id → into_id`.
-3. **Merge params:** if both rows are augmented with the same
-   `entry_collection`, append `from_id`'s entries into `into_id`'s collection,
-   **auto-renumbering** the incoming (worktree) side's colliding ids to continue
-   after `into_id`'s max (reusing `next_index`,
-   `augmentation.rs:255`). Migrate the augmentation only if `into_id` has none.
-4. **Delete `from_id`** — now safe; its history has been re-pointed off it.
+1. **Re-point events:** `UPDATE events SET artifact_id = into_id WHERE artifact_id = from_id` (table is `events`; event row ids are unchanged, so `event_edges`' event references stay valid).
+2. **Re-point observations:** `UPDATE artifact_observation SET artifact_id = into_id WHERE artifact_id = from_id`.
+3. **Re-point links, both directions**, with `UPDATE OR IGNORE` against the unique `(src_id, dst_id, rel)` triple: a re-point that would duplicate an existing edge is skipped and cascade-deleted with the source. Self-edges collapse to `into_id → into_id`.
+4. **Re-point `event_edges.dst_artifact_id`:** `UPDATE OR IGNORE event_edges SET dst_artifact_id = into_id WHERE dst_artifact_id = from_id` (unique index `idx_event_edges_unique` covers `dst_artifact_id`, so the same drop-on-conflict dedup applies). *Only* `dst_artifact_id` moves — the edge's event-id endpoints are unaffected.
+5. **Merge params:** if both rows are augmented with the same `entry_collection`, merge `from_id`'s entries into `into_id`'s collection. **Renumber semantics (corrected after review):** seed the allocation universe with `into`'s ids **∪ ALL non-colliding incoming ids`, append the non-colliding incoming entries first, then renumber each *colliding* incoming id to `<prefix>-<next>` where `next` is monotonic max+1 over that full universe (accumulating each assignment). This guarantees a renumbered id can never collide with a preserved free incoming id or another renumbered id — the naive "continue after `into`'s max" (this spec's first draft) produced duplicate ids on the modal divergent merge and was caught in review. If `into_id` has no augmentation, migrate `from`'s wholesale (re-point the augmentation row). Non-object survivor params → `RecoverableError`, not a panic.
+6. **Delete `from_id`** — now safe; all history has been re-pointed off it.
 
-**Returns:** the ID remap (`{"F-8":"F-13", …}`), a `suspicious` list (incoming
-entries whose content/timestamp closely match a surviving entry — candidate
+**Returns:** the ID remap (`{"F-2":"F-10", …}`), a `suspicious` list (incoming
+entries whose object *minus its `id`* deep-equals a surviving entry — candidate
 "same finding discovered twice," which should be *merged*, not renumbered — see
-cookbook archetype 3), and counts (events re-pointed, links re-pointed/dropped,
-entries merged/renumbered).
+cookbook archetype 3), and counts (`events_repointed`, `observations_repointed`,
+`links_repointed`/`links_dropped`, `event_edges_repointed`/`event_edges_dropped`,
+`entries_merged`/`entries_renumbered`).
 
 **Does not** touch `into_id`'s body, title, status, tags, or non-colliding
 params. Content disposition is settled upstream (R-3) before `graft` runs.
-
 ### Citation rewrite — lives in the skill, not a tool
 
 Using the remap `graft` returns, the skill greps the merged tree and rewrites
