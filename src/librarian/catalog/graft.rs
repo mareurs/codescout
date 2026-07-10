@@ -167,11 +167,15 @@ fn strip_id(entry: &Value) -> Value {
 /// - Both sides augmented but their `entry_collection`s differ (or either is
 ///   unset): leave `into_id`'s params untouched; `from_id`'s row is
 ///   cascade-deleted with the source.
-/// - Both sides augmented with the same `entry_collection`: append incoming
-///   entries onto the survivor's array, renumbering any incoming id that
-///   collides with an existing id (`<prefix>-<into_max+k>`, tracked in
-///   `report.remap`), and flagging incoming entries whose content (minus
-///   `id`) already matches a surviving entry (`report.suspicious`).
+/// - Both sides augmented with the same `entry_collection`: fold incoming
+///   entries onto the survivor's array. Free (non-colliding) incoming ids
+///   are preserved; any incoming id that collides with a surviving id is
+///   renumbered to the next free `<prefix>-N`, allocated over the whole
+///   reserved universe (survivor ids + all free incoming ids + ids already
+///   allocated this graft) so the result never contains a duplicate id
+///   (`report.remap` records old->new). Incoming entries whose content
+///   (minus `id`) already matches a surviving entry are flagged in
+///   `report.suspicious`.
 fn merge_augmentation(
     tx: &rusqlite::Transaction<'_>,
     from_id: &str,
@@ -233,42 +237,81 @@ fn merge_augmentation(
         .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
         .collect();
 
-    let mut merged = into_arr.clone();
-    for entry in &from_arr {
-        let old = entry
-            .get("id")
+    let id_of = |e: &Value| {
+        e.get("id")
             .and_then(Value::as_str)
             .unwrap_or_default()
-            .to_string();
-        // Near-dup detection: same object (minus id) already present on the survivor.
+            .to_string()
+    };
+    let mut merged = into_arr.clone();
+
+    // Near-dup detection: incoming object (minus id) deep-equals a surviving original.
+    for entry in &from_arr {
         if into_arr.iter().any(|e| strip_id(e) == strip_id(entry)) {
             report.suspicious.push(entry.clone());
         }
-        let mut e = entry.clone();
-        if into_ids.contains(&old) {
-            // Collision: renumber to <prefix>-<max+k>, computed over the
-            // survivor's original ids PLUS any ids already merged in this
-            // loop, so two incoming collisions on the same prefix don't
-            // collide with each other.
-            if let Some((prefix, _)) = split_id(&old) {
-                let same_prefix: Vec<String> = merged
-                    .iter()
-                    .filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from))
-                    .collect();
-                let next = next_index(&same_prefix, prefix);
-                let new_id = format!("{prefix}-{next}");
-                if let Some(o) = e.as_object_mut() {
-                    o.insert("id".into(), serde_json::json!(new_id));
-                }
-                report.remap.insert(old, new_id);
-                report.entries_renumbered += 1;
-            }
+    }
+
+    // Reserved id universe = survivor ids + ALL free (non-colliding) incoming ids.
+    // Free incoming ids survive un-renumbered, so a renumbered collision must never
+    // land on one of them — seed the whole universe BEFORE allocating any new id.
+    let mut reserved: std::collections::HashSet<String> = into_ids.clone();
+    for entry in &from_arr {
+        let id = id_of(entry);
+        if !into_ids.contains(&id) {
+            reserved.insert(id);
         }
+    }
+
+    // Append FREE incoming entries first (ids preserved verbatim).
+    for entry in &from_arr {
+        let id = id_of(entry);
+        if !into_ids.contains(&id) {
+            merged.push(entry.clone());
+            report.entries_merged += 1;
+        }
+    }
+
+    // Renumber COLLIDING incoming entries over the full reserved universe
+    // (monotonic max+1 per prefix; each freshly allocated id is added to
+    // `reserved` so two collisions on the same prefix get distinct numbers).
+    for entry in &from_arr {
+        let old = id_of(entry);
+        if !into_ids.contains(&old) {
+            continue;
+        }
+        let mut e = entry.clone();
+        if let Some((prefix, _)) = split_id(&old) {
+            let ids_vec: Vec<String> = reserved.iter().cloned().collect();
+            let next = next_index(&ids_vec, prefix);
+            let new_id = format!("{prefix}-{next}");
+            reserved.insert(new_id.clone());
+            if let Some(o) = e.as_object_mut() {
+                o.insert("id".into(), serde_json::json!(new_id));
+            }
+            report.remap.insert(old, new_id);
+            report.entries_renumbered += 1;
+        }
+        // else: id has no numeric suffix (never produced by append_entry). Cannot
+        // prefix-renumber; leave it as-is (accepted, documented limitation). It will
+        // NOT collide with a renumbered id because renumbering only targets numeric
+        // prefixes.
         merged.push(e);
         report.entries_merged += 1;
     }
 
-    into_json[&coll] = Value::Array(merged);
+    // Guard: `unwrap_or_else` above only catches PARSE errors; valid-but-non-object
+    // JSON (e.g. a bare array) would panic on index-assign. Fail recoverably instead.
+    match into_json.as_object_mut() {
+        Some(obj) => {
+            obj.insert(coll.clone(), Value::Array(merged));
+        }
+        None => {
+            return Err(RecoverableError::new(format!(
+                "graft: into_id `{into_id}` augmentation params is not a JSON object"
+            )))
+        }
+    }
     tx.execute(
         "UPDATE artifact_augmentation SET params=?1 WHERE artifact_id=?2",
         params![serde_json::to_string(&into_json)?, into_id],
@@ -496,7 +539,9 @@ mod tests {
             ),
         )
         .unwrap();
-        // Incoming F-2 collides (distinct content) -> renumber to F-3; F-9 is free -> kept.
+        // Incoming F-2 collides (distinct content); F-9 is free -> preserved.
+        // Renumber allocates over the full reserved universe {F-1,F-2,F-9},
+        // so F-2 -> F-10 (max{1,2,9}+1), NEVER onto the free F-9.
         augmentation::upsert(
             &cat,
             &aug(
@@ -510,7 +555,7 @@ mod tests {
         let report = graft_rows(&mut cat, "from", "into").unwrap();
 
         assert_eq!(report.entries_renumbered, 1);
-        assert_eq!(report.remap.get("F-2").map(String::as_str), Some("F-3"));
+        assert_eq!(report.remap.get("F-2").map(String::as_str), Some("F-10"));
         let p: Value =
             serde_json::from_str(&augmentation::get(&cat, "into").unwrap().unwrap().params)
                 .unwrap();
@@ -520,7 +565,7 @@ mod tests {
             .iter()
             .map(|e| e["id"].as_str().unwrap())
             .collect();
-        assert_eq!(ids, vec!["F-1", "F-2", "F-3", "F-9"]);
+        assert_eq!(ids, vec!["F-1", "F-2", "F-9", "F-10"]);
     }
 
     #[test]
@@ -552,5 +597,95 @@ mod tests {
 
         assert_eq!(report.suspicious.len(), 1);
         assert_eq!(report.suspicious[0]["t"], "same bug");
+    }
+
+    #[test]
+    fn graft_renumber_avoids_free_incoming_id_no_duplicate() {
+        // Regression: the common worktree merge — both sides added one unique
+        // entry on a shared base. A naive allocator that seeds only from
+        // survivor + already-appended ids renumbers F-1 onto F-4 (max{1,2,3}+1)
+        // and then ALSO preserves the free incoming F-4 -> two F-4 (silent, since
+        // params is a TEXT blob with no DB uniqueness). The reserved-universe
+        // allocator must avoid the free incoming id entirely.
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "into",
+                "failures",
+                r#"{"failures":[{"id":"F-1","t":"i1"},{"id":"F-2","t":"i2"},{"id":"F-3","t":"i3"}]}"#,
+            ),
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "from",
+                "failures",
+                r#"{"failures":[{"id":"F-1","t":"w1"},{"id":"F-2","t":"w2"},{"id":"F-4","t":"free"}]}"#,
+            ),
+        )
+        .unwrap();
+
+        let report = graft_rows(&mut cat, "from", "into").unwrap();
+
+        // F-4 free -> preserved; F-1 -> F-5, F-2 -> F-6 (allocated above the
+        // reserved universe {F-1,F-2,F-3,F-4}, then monotonically).
+        assert_eq!(report.entries_renumbered, 2);
+        assert_eq!(report.remap.get("F-1").map(String::as_str), Some("F-5"));
+        assert_eq!(report.remap.get("F-2").map(String::as_str), Some("F-6"));
+        let p: Value =
+            serde_json::from_str(&augmentation::get(&cat, "into").unwrap().unwrap().params)
+                .unwrap();
+        let ids: Vec<String> = p["failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, vec!["F-1", "F-2", "F-3", "F-4", "F-5", "F-6"]);
+        // The whole point: NO duplicate id survives the merge.
+        let distinct: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(distinct.len(), 6, "all merged ids must be distinct");
+    }
+
+    #[test]
+    fn graft_no_op_when_entry_collections_differ() {
+        // Both augmented, but different entry_collection names -> into's params
+        // are left untouched (the return Ok(()) no-op branch); from's row is
+        // gone (cascade-deleted with the source artifact).
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "into",
+                "failures",
+                r#"{"failures":[{"id":"F-1","t":"keep"}]}"#,
+            ),
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &aug("from", "wins", r#"{"wins":[{"id":"W-1","t":"other"}]}"#),
+        )
+        .unwrap();
+
+        graft_rows(&mut cat, "from", "into").unwrap();
+
+        // into's params unchanged.
+        let into_aug = augmentation::get(&cat, "into").unwrap().unwrap();
+        assert_eq!(
+            into_aug.params, r#"{"failures":[{"id":"F-1","t":"keep"}]}"#,
+            "into's params must be untouched when collections differ"
+        );
+        // from's augmentation row is gone.
+        assert!(
+            augmentation::get(&cat, "from").unwrap().is_none(),
+            "from's augmentation cascade-deleted with the source"
+        );
     }
 }
