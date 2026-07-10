@@ -140,11 +140,20 @@ Classify each flagged row:
 classification so the skill can act without re-deriving.
 
 **`fix=reseat_worktree`** (added to `run_fix`, `doctor.rs:149`): for
-**no-collision** rows only, re-point the catalog row's `abs_path` to the main
-path **without a filesystem rename** (git already placed the file there; this is
-the gap `artifact(move)` cannot fill — it renames and errors if the destination
-exists). Collisions are left untouched, reported with a `use graft` pointer.
-This is the fully-automatic common case.
+**no-collision** rows only, migrate the row to its main-path identity — **without
+a filesystem rename** (git already placed the merged file there). It does NOT
+simply `UPDATE abs_path` keeping the worktree id: that leaves `id != hash(abs_path)`,
+and `artifact::upsert`'s pre-clean (`DELETE … WHERE abs_path=? AND id != ?`)
+would delete the row — cascade-dropping its git-invisible events/augmentation —
+on the next main-repo reindex. Instead it **seeds a row at `id_M =
+artifact_id_from_abs(main_path)`** (copying the worktree row's metadata) and then
+runs **`graft_rows(id_W → id_M)`**, re-pointing every child + migrating the
+augmentation and deleting `id_W`. The surviving row's id now matches its
+path-hash, so a subsequent reindex updates it in place (`ON CONFLICT(id)`) rather
+than pruning it — the reseat is durable. Collisions are left untouched, reported
+with a `use graft` pointer. This is the fully-automatic common case.
+(The naive abs_path-only UPDATE was this spec's first draft, caught in the final
+whole-branch review — see corrections.)
 
 ### Tool 2 — `artifact(action="graft", from_id, into_id)`
 
