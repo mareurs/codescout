@@ -81,9 +81,9 @@ struct Args {
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("include_body").is_some() {
-        anyhow::bail!(
-            "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section"
-        );
+        return Err(RecoverableError::new(
+            "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section",
+        ));
     }
     let a: Args = serde_json::from_value(args)?;
     let body_selectors = [
@@ -93,13 +93,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         a.start_line.is_some() || a.end_line.is_some(),
     ];
     if body_selectors.iter().filter(|b| **b).count() > 1 {
-        anyhow::bail!(
-            "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` may be set"
-        );
+        return Err(RecoverableError::new(
+            "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` may be set",
+        ));
     }
     if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
         if s > e {
-            anyhow::bail!("start_line ({s}) must be <= end_line ({e})");
+            return Err(RecoverableError::new(format!(
+                "start_line ({s}) must be <= end_line ({e})"
+            )));
         }
     }
 
@@ -591,8 +593,14 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat);
-        let res = call(&ctx, json!({"id": "a", "full": true, "heading": "X"})).await;
-        assert!(res.is_err(), "conflicting selectors must error");
+        let err = call(&ctx, json!({"id": "a", "full": true, "heading": "X"}))
+            .await
+            .expect_err("conflicting selectors must error");
+        assert!(
+            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+                .is_some(),
+            "conflicting-selector error must be recoverable (isError:false), not a fatal bail"
+        );
     }
 
     #[tokio::test]

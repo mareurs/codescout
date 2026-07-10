@@ -1,9 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 
-use super::ToolContext;
+use super::{RecoverableError, ToolContext};
 use crate::librarian::catalog::links;
 
 use rusqlite::OptionalExtension;
@@ -20,7 +20,7 @@ struct Args {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
     if a.depth < 1 || a.depth > 3 {
-        bail!("depth must be between 1 and 3");
+        return Err(RecoverableError::new("depth must be between 1 and 3"));
     }
 
     let cat = ctx.catalog.lock();

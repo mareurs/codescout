@@ -10,7 +10,8 @@
 //! `Scope::Project`. Callers must explicitly pass `all` to get the
 //! pre-scoping workspace-wide behaviour.
 
-use anyhow::{bail, Result};
+use super::RecoverableError;
+use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -61,11 +62,11 @@ pub fn apply_scope(
         scope_name: &str,
     ) -> Result<&'a CurrentProject> {
         current.ok_or_else(|| {
-            anyhow::anyhow!(
+            RecoverableError::new(format!(
                 "scope={} requires an active project. The host has not activated one \
              (call workspace(action='activate', path=...)).",
                 scope_name
-            )
+            ))
         })
     }
 
@@ -82,19 +83,23 @@ pub fn apply_scope(
         Scope::Umbrella => {
             let cp = require(current, "umbrella")?;
             let umbrella_name = cp.umbrella.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
+                RecoverableError::new(format!(
                     "scope=umbrella but no umbrella declared for {}. \
                      Add a [[umbrella]] block to workspace.toml or use scope=repo|all.",
                     cp.abs_path.display(),
-                )
+                ))
             })?;
             let umb = ws
                 .umbrellas
                 .iter()
                 .find(|u| u.name == umbrella_name)
-                .ok_or_else(|| anyhow::anyhow!("umbrella `{umbrella_name}` not found"))?;
+                .ok_or_else(|| {
+                    RecoverableError::new(format!("umbrella `{umbrella_name}` not found"))
+                })?;
             if umb.members.is_empty() {
-                bail!("umbrella `{umbrella_name}` has no members");
+                return Err(RecoverableError::new(format!(
+                    "umbrella `{umbrella_name}` has no members"
+                )));
             }
             Some(or_of_prefixes(&umb.members))
         }

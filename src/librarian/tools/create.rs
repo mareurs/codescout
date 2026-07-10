@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -10,13 +10,24 @@ fn validate_rel_path(rel: &str) -> Result<()> {
     use std::path::{Component, Path};
     let p = Path::new(rel);
     if p.is_absolute() {
-        bail!("rel_path must be relative: {}", rel);
+        return Err(RecoverableError::new(format!(
+            "rel_path must be relative: {}",
+            rel
+        )));
     }
     for c in p.components() {
         match c {
-            Component::ParentDir => bail!("rel_path must not contain `..`: {}", rel),
+            Component::ParentDir => {
+                return Err(RecoverableError::new(format!(
+                    "rel_path must not contain `..`: {}",
+                    rel
+                )))
+            }
             Component::Prefix(_) | Component::RootDir => {
-                bail!("rel_path must be relative: {}", rel)
+                return Err(RecoverableError::new(format!(
+                    "rel_path must be relative: {}",
+                    rel
+                )))
             }
             _ => {}
         }
@@ -90,7 +101,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
     let full = base_dir.join(&a.rel_path);
     if full.exists() {
-        bail!("path exists: {}", full.display());
+        return Err(RecoverableError::new(format!(
+            "path exists: {}",
+            full.display()
+        )));
     }
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)?;

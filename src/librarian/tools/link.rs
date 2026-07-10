@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::ToolContext;
+use super::{RecoverableError, ToolContext};
 use crate::librarian::catalog::{artifact, links};
 
 #[derive(Deserialize)]
@@ -17,10 +17,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let cat = ctx.catalog.lock();
 
     if artifact::get(&cat, &a.src_id)?.is_none() {
-        anyhow::bail!("src artifact `{}` not found", a.src_id);
+        return Err(RecoverableError::new(format!(
+            "src artifact `{}` not found",
+            a.src_id
+        )));
     }
     let dst = artifact::get(&cat, &a.dst_id)?
-        .ok_or_else(|| anyhow::anyhow!("dst artifact `{}` not found", a.dst_id))?;
+        .ok_or_else(|| RecoverableError::new(format!("dst artifact `{}` not found", a.dst_id)))?;
 
     links::insert(
         &cat,
