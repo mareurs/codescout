@@ -93,12 +93,18 @@ pub fn summarize_markdown(content: &str) -> Value {
             })
         })
         .collect();
+    let total_headings = all_headings.len();
     headings.truncate(30);
-    serde_json::json!({
+    let mut out = serde_json::json!({
         "type": "markdown",
         "line_count": line_count,
         "headings": headings,
-    })
+    });
+    if total_headings > 30 {
+        out["total_headings"] = serde_json::json!(total_headings);
+        out["headings_truncated"] = serde_json::json!(true);
+    }
+    out
 }
 
 pub fn heading_level(line: &str) -> Option<usize> {
@@ -393,7 +399,12 @@ pub fn summarize_json(content: &str) -> Value {
                     entry
                 })
                 .collect();
-            serde_json::json!({ "root_type": "object", "keys": keys })
+            let mut obj = serde_json::json!({ "root_type": "object", "keys": keys });
+            if map.len() > 30 {
+                obj["total_keys"] = serde_json::json!(map.len());
+                obj["keys_truncated"] = serde_json::json!(true);
+            }
+            obj
         }
         Value::Array(arr) => {
             let element_type = arr
@@ -726,6 +737,7 @@ pub fn summarize_toml(content: &str) -> Value {
     // If no table headers found, try parsing as TOML and list top-level keys
     if sections.is_empty() {
         if let Ok(table) = content.parse::<toml::Table>() {
+            let total_keys = table.len();
             let keys: Vec<Value> = table
                 .keys()
                 .take(20)
@@ -734,12 +746,17 @@ pub fn summarize_toml(content: &str) -> Value {
                     serde_json::json!({ "key": k, "line": line.unwrap_or(0) })
                 })
                 .collect();
-            return serde_json::json!({
+            let mut out = serde_json::json!({
                 "type": "toml",
                 "format": "toml",
                 "line_count": line_count,
                 "keys": keys,
             });
+            if total_keys > 20 {
+                out["total_keys"] = serde_json::json!(total_keys);
+                out["keys_truncated"] = serde_json::json!(true);
+            }
+            return out;
         }
         let mut fallback = summarize_generic_file(content);
         fallback["type"] = serde_json::json!("toml");
@@ -760,14 +777,20 @@ pub fn summarize_toml(content: &str) -> Value {
             "end_line": end_line,
         }));
     }
+    let total_sections = result_sections.len();
     result_sections.truncate(30);
 
-    serde_json::json!({
+    let mut out = serde_json::json!({
         "type": "toml",
         "format": "toml",
         "line_count": line_count,
         "sections": result_sections,
-    })
+    });
+    if total_sections > 30 {
+        out["total_sections"] = serde_json::json!(total_sections);
+        out["sections_truncated"] = serde_json::json!(true);
+    }
+    out
 }
 
 fn find_toml_key_line(content: &str, key: &str) -> Option<u64> {

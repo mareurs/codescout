@@ -241,6 +241,67 @@ fn toml_summary_handles_nested_tables() {
 }
 
 #[test]
+fn markdown_summary_signals_truncated_headings() {
+    // Silent-cap regression: >30 headings are capped, so the summary must
+    // report the true total. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+    let content: String = (0..40)
+        .map(|i| format!("## H{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = summarize_markdown(&content);
+    assert_eq!(s["headings"].as_array().unwrap().len(), 30, "capped at 30");
+    assert_eq!(s["total_headings"].as_u64().unwrap(), 40);
+    assert_eq!(s["headings_truncated"], serde_json::json!(true));
+}
+
+#[test]
+fn markdown_summary_no_truncation_flag_when_under_cap() {
+    let content = "# A\n## B\n### C";
+    let s = summarize_markdown(content);
+    assert!(s.get("headings_truncated").is_none());
+    assert!(s.get("total_headings").is_none());
+}
+
+#[test]
+fn json_summary_signals_truncated_keys() {
+    let mut obj = serde_json::Map::new();
+    for i in 0..40 {
+        obj.insert(format!("k{i}"), serde_json::json!(i));
+    }
+    let content = serde_json::to_string(&serde_json::Value::Object(obj)).unwrap();
+    let s = summarize_json(&content);
+    let schema = &s["schema"];
+    assert_eq!(schema["keys"].as_array().unwrap().len(), 30, "capped at 30");
+    assert_eq!(schema["total_keys"].as_u64().unwrap(), 40);
+    assert_eq!(schema["keys_truncated"], serde_json::json!(true));
+}
+
+#[test]
+fn toml_summary_signals_truncated_flat_keys() {
+    // No table headers -> flat top-level key branch, capped at 20.
+    let content: String = (0..25)
+        .map(|i| format!("k{i} = {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = summarize_toml(&content);
+    assert_eq!(s["keys"].as_array().unwrap().len(), 20, "capped at 20");
+    assert_eq!(s["total_keys"].as_u64().unwrap(), 25);
+    assert_eq!(s["keys_truncated"], serde_json::json!(true));
+}
+
+#[test]
+fn toml_summary_signals_truncated_sections() {
+    let content: String = (0..35)
+        .map(|i| format!("[t{i}]\nk = {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let s = summarize_toml(&content);
+    assert_eq!(s["sections"].as_array().unwrap().len(), 30, "capped at 30");
+    assert_eq!(s["total_sections"].as_u64().unwrap(), 35);
+    assert_eq!(s["sections_truncated"], serde_json::json!(true));
+}
+
+#[test]
 fn toml_summary_handles_malformed() {
     let content = "not valid toml [[[";
     let s = summarize_toml(content);
