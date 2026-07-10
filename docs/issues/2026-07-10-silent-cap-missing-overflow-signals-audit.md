@@ -1,7 +1,7 @@
 ---
 id: '697ee9464df1d7bf'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: omnibus — survey/query tools return limit-capped results with no "more exists" signal (silent-cap family)'
 owners:
 - marius
@@ -16,6 +16,7 @@ tags:
 - omnibus
 topic: null
 time_scope: null
+fixed: '2026-07-10'
 opened: '2026-07-10'
 related:
 - docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
@@ -51,11 +52,11 @@ duplicate sections to be written from a short-read count).
 ### HIGH (verified first-hand against the code)
 | site | capped field | signal? | note |
 |---|---|---|---|
-| `src/librarian/tools/find.rs` (`call`, resp ~:526) | `items` capped at `limit` (default 50) | `count`=page size only; `more_in_scope` NOT emitted | `build_hints` computes the unbounded `here` scope-total then discards it (only cross-scope deltas surfaced). Most-used query tool. Template: `workspace_state_at.rs`. |
-| `src/librarian/tools/gather.rs` `gather_git_log`/`gather_artifacts`/`gather_observations`/`gather_grep` | bare `json!(array)` capped at `limit` | none | Feeds `artifact_refresh(gather)` → agent synthesizes an incomplete tracker refresh believing it complete. |
-| `src/librarian/tools/timeline.rs` (`call` ~:87) | `Ok(Value::Array(out))` capped at `limit` | none (bare array, no wrapper) | Worst shape — no object to carry a signal. |
-| `src/librarian/tools/context.rs` (~:346) | candidate list truncated to a char budget | none | Dropped `sorted_ids` beyond `char_cap`; no `total_candidates`/`omitted`. |
-| `src/tools/file_summary/file_summary.rs:96` (`summarize_markdown`) | `headings` → 30 | none (`line_count` is wrong dimension) | Same shape as the fixed preview-headings bug; reached via `read_file` oversized-file summary. |
+| `src/librarian/tools/find.rs` (`call`, resp ~:526) | `items` capped at `limit` (default 50) | ✅ FIXED 46d6781b — `more_in_scope` emitted on capped pages | `build_hints` computes the unbounded `here` scope-total then discards it (only cross-scope deltas surfaced). Most-used query tool. Template: `workspace_state_at.rs`. |
+| `src/librarian/tools/gather.rs` `gather_git_log`/`gather_artifacts`/`gather_observations`/`gather_grep` | bare `json!(array)` capped at `limit` | ✅ FIXED 7cb23abc — per-source `truncated` warning via `gather_all` | Feeds `artifact_refresh(gather)`; kept the bare array (consumer contract — see Resume). |
+| `src/librarian/tools/timeline.rs` (`call` ~:87) | `Ok(Value::Array(out))` capped at `limit` | ✅ FIXED 33f2f229 — wrapped as `{items, count, truncated}`; infer_shape updated | Worst shape — no object to carry a signal. |
+| `src/librarian/tools/context.rs` (~:346) | candidate list truncated to a char budget | ✅ FIXED 1d787c8e — `overflow{candidates,included,omitted,candidates_capped}` + line-truncation marker | Dropped `sorted_ids` beyond `char_cap`; no `total_candidates`/`omitted`. |
+| `src/tools/file_summary/file_summary.rs:96` (`summarize_markdown`) | `headings` → 30 | ✅ FIXED e85faba2 — `total_headings`/`total_keys`/`total_sections` + `*_truncated` | Same shape as the fixed preview-headings bug; reached via `read_file` oversized-file summary. |
 
 ### MEDIUM
 | site | capped field | note |
@@ -89,6 +90,7 @@ Apply the existing convention per site:
   `more`/`has_more`/`more_in_scope` hint when it exceeds the returned count; for bare-array
   returns, wrap in `{items, total, truncated}`. Rename misleading `count`/`total` fields or
   make them true totals.
+  - ⚠ **Check the consumer before wrapping.** `gather` (fixed 7cb23abc) could NOT wrap: `refresh.rs` treats each source's `data` as a `Value::Array` in three places (the `source_key` merge, `commits_since_last`, the `hints` loop), so wrapping would silently drop merged same-key sources. It kept the bare array and emitted a `truncated` warning via the existing `warnings` channel instead. `timeline` (bare `Value::Array`, no wrapper) and `context` need the same consumer check before any shape change.
 - **file_summary caps**: emit `total_headings`/`total_keys` + `*_truncated` (mirror the
   `2026-07-10-preview-headings` fix that added `headings::cap`/`stamp_truncation`).
 - **context body previews**: append a "… N of M lines" marker.
@@ -98,18 +100,25 @@ Apply the existing convention per site:
   a `limit`/`MAX_*` carries a sibling total-or-`truncated` signal.
 
 ## Tests added
-N/A — not yet fixed. Each fix gets a regression test asserting the signal fires exactly when
-the cap bites (pattern already established in `preview/headings.rs` tests).
 
+**find** ✅ 46d6781b — `more_in_scope_signals_capped_page`, `no_more_in_scope_when_page_holds_everything`.
+
+**gather** ✅ 7cb23abc — `gather_all_warns_when_source_truncated`, `gather_all_no_truncation_warning_under_limit`; updated `gather_grep_limits_results` to assert `truncated`.
+
+Remaining sites: each fix gets a regression test asserting the signal fires exactly when the cap bites (pattern established in `preview/headings.rs` tests).
 ## Workarounds
 Don't trust a survey tool's returned count as the true total for large sets; cross-check
 with a scoped/unbounded count or a raw `grep` when the result drives a write.
 
 ## Resume
-Fix in priority order: find → gather (feeds refreshes) → timeline → context → file_summary
-caps → the medium/low tail. Reuse `workspace_state_at.rs` (more_in_scope) and
-`preview/headings.rs` (`cap`/`stamp_truncation`) as templates.
 
+✅ **COMPLETE (2026-07-10, branch `experiments`).** All HIGH/MED/LOW sites fixed, each with a regression test asserting the signal fires exactly when the cap bites. Awaiting `master` merge before archiving (per bug-tracking convention).
+
+Commits: find `46d6781b` · gather `7cb23abc` · timeline `33f2f229` · context `1d787c8e` · file_summary `e85faba2` · memory recall `0d62b2ec` · edit_code/text_sweep `b2345fd1` · MED/LOW tail (schema_validate, semantic_search, refresh_stale, link_scan ×2, legibility) `6f3dfacc`.
+
+⚠ **Consumer-contract lesson (load-bearing):** the **Fix** section's generic "wrap bare-array returns in `{items, total, truncated}`" is NOT safe blindly. `gather` could not wrap (`refresh.rs` merges each source's `data` as a `Value::Array`); it rode a `truncated` warning on the existing warnings channel instead. `timeline` COULD wrap, but only after confirming the CLI formatter's defensive `items` path and fixing `infer_shape` to classify the new shape. Always verify the consumer before changing a response shape.
+
+Signal conventions used, by consumer shape: **hints object** (find `more_in_scope`); **warnings channel** (gather); **wrapped `{items,…,truncated}`** (timeline); **sibling response fields** `overflow`/`has_more`/`*_truncated`/`candidates_total`/`scan_truncated` (context, memory, refresh_stale, link_scan, file_summary, edit_code); **inline message suffix** (schema_validate `(+K more)`).
 ## References
 - `docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md` — correctness
   standout from this sweep (wrong output, not just incomplete).
@@ -119,4 +128,3 @@ caps → the medium/low tail. Reuse `workspace_state_at.rs` (more_in_scope) and
   — parallel omnibus (error-handling + Windows paths); F19/F20 touch the same read_file area.
 - Already-fixed family members: `2026-07-07`/`2026-07-09` artifact-get truncation (`97a36905`),
   `2026-07-10-preview-headings-silent-cap-20.md` (`3bccb234`).
-
