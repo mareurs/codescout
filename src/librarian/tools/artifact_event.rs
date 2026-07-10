@@ -111,8 +111,9 @@ mod tests {
             )
             .await
             .unwrap();
-        // timeline returns array even for unknown ids
-        assert!(v.is_array() || v["events"].is_array());
+        // timeline returns {items:[...], count, truncated} even for unknown ids
+        assert!(v["items"].is_array(), "expected items array, got {v}");
+        assert_eq!(v["truncated"], serde_json::json!(false));
     }
 
     #[test]

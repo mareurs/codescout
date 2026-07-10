@@ -46,17 +46,19 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
         if obj.contains_key("threshold_hours") && obj.contains_key("items") {
             return Shape::StaleList;
         }
-        if obj.contains_key("items") && obj.contains_key("total") {
-            // could be FindResult or EventList — disambiguate on shape of items
-            if let Some(first) = obj
-                .get("items")
-                .and_then(|i| i.as_array())
-                .and_then(|a| a.first())
-            {
-                if first.get("kind").is_some() && first.get("created_at").is_some() {
-                    return Shape::EventList;
-                }
+        // EventList can also arrive as an object ({items, count, truncated} from
+        // timeline::call). Event rows carry `created_at` (find items do not), so
+        // this is unambiguous vs FindResult and independent of any `total` field.
+        if let Some(first) = obj
+            .get("items")
+            .and_then(|i| i.as_array())
+            .and_then(|a| a.first())
+        {
+            if first.get("kind").is_some() && first.get("created_at").is_some() {
+                return Shape::EventList;
             }
+        }
+        if obj.contains_key("items") && obj.contains_key("total") {
             return Shape::FindResult;
         }
         if obj.contains_key("nodes") && obj.contains_key("edges") {
@@ -535,6 +537,20 @@ mod tests {
         let v = json!([
             {"id": "ev-1", "kind": "note", "created_at": 1_700_000_000_000_i64, "payload": null}
         ]);
+        assert!(matches!(infer_shape(&v), Shape::EventList));
+    }
+
+    #[test]
+    fn infer_shape_recognises_event_list_object() {
+        // timeline::call wraps events as {items, count, truncated} (no `total`);
+        // must still resolve to EventList so the CLI renders the table, not JSON.
+        let v = json!({
+            "items": [
+                {"id": "ev-1", "kind": "note", "created_at": 1_700_000_000_000_i64, "payload": null}
+            ],
+            "count": 1,
+            "truncated": true
+        });
         assert!(matches!(infer_shape(&v), Shape::EventList));
     }
 

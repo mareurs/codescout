@@ -28,6 +28,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let kinds_refs: Option<Vec<&str>> = kinds_owned
         .as_ref()
         .map(|v| v.iter().map(|s| s.as_str()).collect());
+    // Overfetch one past `limit` so a full-but-complete page is distinguishable
+    // from a truncated one; without the `truncated` flag an agent reads a capped
+    // page as the complete event history (silent-cap family — see
+    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
     let mut rows = {
         let cat = ctx.catalog.lock();
         events::timeline_for_artifact(
@@ -35,9 +39,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             &a.artifact_id,
             kinds_refs.as_deref(),
             a.until,
-            a.limit,
+            a.limit.saturating_add(1),
         )?
     };
+    let truncated = rows.len() > a.limit;
+    rows.truncate(a.limit);
     if let Some(since) = a.since {
         rows.retain(|e| e.created_at >= since);
     }
@@ -83,7 +89,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "resolved_by_verdict_id": resolved_by_verdict_id,
         }));
     }
-    Ok(Value::Array(out))
+
+    let count = out.len();
+    let mut result = json!({
+        "items": out,
+        "count": count,
+        "truncated": truncated,
+    });
+    if truncated {
+        result["truncated_hint"] = json!(
+            "more events match than were returned; raise `limit` (or narrow `kinds`/`since`/`until`)"
+        );
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -122,7 +140,7 @@ mod tests {
             .unwrap();
         }
         let res = call(&ctx, json!({"artifact_id": "a"})).await.unwrap();
-        let arr = res.as_array().unwrap();
+        let arr = res["items"].as_array().unwrap();
         assert_eq!(arr.len(), 3);
         // Newest first: payload.text == "n3" first
         assert_eq!(arr[0]["payload"]["text"], "n3");
@@ -152,7 +170,7 @@ mod tests {
         let res = call(&ctx, json!({"artifact_id": "a", "since": mid_ts}))
             .await
             .unwrap();
-        let arr = res.as_array().unwrap();
+        let arr = res["items"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["payload"]["text"], "new");
     }
@@ -190,12 +208,53 @@ mod tests {
             .unwrap()
             .to_string();
         let res = call(&ctx, json!({"artifact_id": "a"})).await.unwrap();
-        let arr = res.as_array().unwrap();
+        let arr = res["items"].as_array().unwrap();
         // verdict (newest) first
         assert_eq!(arr[0]["id"], verdict_id);
         assert_eq!(arr[0]["resolves_intent_id"], intent_id);
         // intent shows it was resolved
         assert_eq!(arr[1]["id"], intent_id);
         assert_eq!(arr[1]["resolved_by_verdict_id"], verdict_id);
+    }
+
+    #[tokio::test]
+    async fn truncation_signals_capped_page() {
+        // Silent-cap regression: a limit-capped timeline must flag that more
+        // events exist, so an agent does not read the page as the complete
+        // history. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        seed_artifact(&ctx, "a");
+        for i in 1..=3 {
+            crate::librarian::tools::event_create::call(
+                &ctx,
+                json!({"artifact_id": "a", "kind": "note", "payload": {"text": format!("n{i}")}}),
+            )
+            .await
+            .unwrap();
+        }
+        let res = call(&ctx, json!({"artifact_id": "a", "limit": 2}))
+            .await
+            .unwrap();
+        assert_eq!(
+            res["truncated"],
+            json!(true),
+            "3 events, limit 2 -> truncated"
+        );
+        assert_eq!(
+            res["items"].as_array().unwrap().len(),
+            2,
+            "page capped to limit"
+        );
+        // Boundary: a page that holds everything must not flag truncation.
+        let full = call(&ctx, json!({"artifact_id": "a", "limit": 10}))
+            .await
+            .unwrap();
+        assert_eq!(
+            full["truncated"],
+            json!(false),
+            "3 events, limit 10 -> not truncated"
+        );
+        assert_eq!(full["items"].as_array().unwrap().len(), 3);
     }
 }
