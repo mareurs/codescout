@@ -57,6 +57,38 @@ pub fn require_str_param_or<'a>(
         })
 }
 
+/// Like `require_str_param_or`, but emits a caller-supplied usage hint on
+/// failure (missing, or present-but-not-a-string) instead of the generic
+/// "add the required parameter" text.
+///
+/// Use on tools where showing the *correct call shape* materially helps the
+/// agent recover — the path-bearing file/markdown tools especially. usage.db
+/// shows agents habitually either omit `path` entirely (emulating a stateful
+/// editor with an implicit "current file" — codescout has none) or send a
+/// reasonable-but-wrong alias. A hint that echoes a concrete correct call
+/// closes that loop far better than "add the required 'path' parameter".
+pub fn require_str_param_or_hint<'a>(
+    input: &'a serde_json::Value,
+    name: &str,
+    aliases: &[&str],
+    hint: &str,
+) -> anyhow::Result<&'a str> {
+    let value = input
+        .get(name)
+        .or_else(|| aliases.iter().find_map(|a| input.get(*a)));
+    match value {
+        Some(v) => v.as_str().ok_or_else(|| {
+            RecoverableError::with_hint(format!("'{}' must be a string", name), hint.to_string())
+                .into()
+        }),
+        None => Err(RecoverableError::with_hint(
+            format!("missing '{}' parameter", name),
+            hint.to_string(),
+        )
+        .into()),
+    }
+}
+
 /// Convenience: extract a required string parameter from a JSON `Value`.
 pub fn require_str_param<'a>(input: &'a serde_json::Value, name: &str) -> anyhow::Result<&'a str> {
     require_param(input, name)?.as_str().ok_or_else(|| {

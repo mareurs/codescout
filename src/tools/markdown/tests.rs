@@ -137,6 +137,48 @@ async fn edit_markdown_outside_project_returns_pending_ack() {
     assert_eq!(stored.input["content"], json!("new body"));
 }
 
+#[tokio::test]
+async fn read_markdown_accepts_file_path_alias() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "# Title\n\nbody\n").unwrap();
+
+    let out = super::ReadMarkdown
+        .call(json!({ "file_path": file.to_str().unwrap() }), &ctx)
+        .await
+        .expect("read_markdown should accept the file_path alias");
+    assert!(out.to_string().contains("Title"), "got: {out}");
+}
+
+#[tokio::test]
+async fn edit_markdown_accepts_file_path_alias() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "# Title\n\nold body\n").unwrap();
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "replace",
+                "content": "new body"
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "edit_markdown via file_path alias: {result:?}"
+    );
+    let body = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        body.contains("new body"),
+        "edit should have applied: {body}"
+    );
+}
+
 /// Synthesize markdown content with `lines` total lines and `sections` H2 sections.
 fn synth_md(lines: usize, sections: usize) -> String {
     let mut out = String::from("# Title\n\n");

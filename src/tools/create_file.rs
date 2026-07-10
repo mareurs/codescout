@@ -29,6 +29,7 @@ impl Tool for CreateFile {
             "required": ["path", "content"],
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
+                "file_path": { "type": "string", "description": "Alias for path" },
                 "content": { "type": "string", "description": "Content to write" },
                 "overwrite": {
                     "type": "boolean",
@@ -42,7 +43,12 @@ impl Tool for CreateFile {
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let input = super::maybe_replay_ack(ctx, input, "create_file").await?;
-        let path = super::require_str_param(&input, "path")?;
+        let path = super::require_str_param_or_hint(
+            &input,
+            "path",
+            crate::fs::PATH_PARAM_ALIASES,
+            "create_file(path=\"src/new_file.rs\", content=\"...\"). 'file_path' is also accepted; there is no implicit current file.",
+        )?;
         let content = super::require_str_param(&input, "content")?;
         let overwrite = super::parse_bool_param(&input["overwrite"]);
         let resolved =

@@ -147,6 +147,67 @@ fn require_u64_param_rejects_negative_string() {
 }
 
 #[test]
+fn require_str_param_or_hint_prefers_canonical_over_alias() {
+    use serde_json::json;
+    let input = json!({ "path": "canonical.rs", "file_path": "alias.rs" });
+    let got = require_str_param_or_hint(&input, "path", &["file_path"], "hint").unwrap();
+    assert_eq!(got, "canonical.rs");
+}
+
+#[test]
+fn require_str_param_or_hint_falls_back_to_alias() {
+    use serde_json::json;
+    let input = json!({ "file_path": "alias.rs" });
+    let got = require_str_param_or_hint(&input, "path", &["file_path"], "hint").unwrap();
+    assert_eq!(got, "alias.rs");
+}
+
+#[test]
+fn require_str_param_or_hint_missing_surfaces_custom_hint() {
+    use serde_json::json;
+    let err = require_str_param_or_hint(&json!({}), "path", &["file_path"], "call it like X")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("call it like X"),
+        "custom hint should surface: {err}"
+    );
+}
+
+#[test]
+fn require_str_param_or_hint_non_string_surfaces_custom_hint() {
+    use serde_json::json;
+    let err = require_str_param_or_hint(&json!({ "path": 42 }), "path", &[], "call it like X")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("call it like X"),
+        "custom hint should surface on type error: {err}"
+    );
+}
+
+#[test]
+fn require_path_param_accepts_unified_aliases() {
+    use serde_json::json;
+    // Symbol tools (references/edit_code/call_graph/symbol_at) route through this
+    // shared helper; it must accept the same unified alias set as the file tools.
+    assert_eq!(
+        crate::fs::require_path_param(&json!({ "file_path": "src/x.rs" })).unwrap(),
+        "src/x.rs"
+    );
+    assert_eq!(
+        crate::fs::require_path_param(&json!({ "relative_path": "src/y.rs" })).unwrap(),
+        "src/y.rs"
+    );
+    // Canonical `path` still wins when both are present.
+    assert_eq!(
+        crate::fs::require_path_param(&json!({ "path": "canon.rs", "file_path": "alias.rs" }))
+            .unwrap(),
+        "canon.rs"
+    );
+}
+
+#[test]
 fn recoverable_error_downcasts_from_anyhow() {
     let e: anyhow::Error = RecoverableError::new("test error").into();
     assert!(

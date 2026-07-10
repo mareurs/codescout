@@ -223,17 +223,23 @@ pub(crate) async fn resolve_glob_for(
     Ok(matches)
 }
 
-/// Extract an optional file path parameter from input, accepting "path", "relative_path", or "file".
+/// Aliases agents habitually reach for when they mean `path`. Unifying the
+/// path-param surface on one set means any alias an agent learns works on every
+/// path-bearing tool. usage.db shows `file_path` (the native Read/Write
+/// signature) is by far the most common miss; `relative_path`/`file` predate it.
+pub(crate) const PATH_PARAM_ALIASES: &[&str] = &["file_path", "relative_path", "file"];
+
+/// Extract an optional file path parameter from input, accepting "path" plus
+/// the `PATH_PARAM_ALIASES` (`file_path`, `relative_path`, `file`).
 pub(crate) fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>> {
     match input["path"]
         .as_str()
-        .or_else(|| input["relative_path"].as_str())
-        .or_else(|| input["file"].as_str())
+        .or_else(|| PATH_PARAM_ALIASES.iter().find_map(|a| input.get(*a).and_then(|v| v.as_str())))
     {
         Some(p) => Ok(Some(p)),
         None if required => Err(RecoverableError::with_hint(
             "missing 'path' parameter",
-            "Add the required 'path' parameter to the tool call.",
+            "Pass the file path, e.g. path=\"src/foo.rs\" — 'file_path' is also accepted. There is no implicit current file; every call needs the path.",
         )
         .into()),
         None => Ok(None),
@@ -241,16 +247,15 @@ pub(crate) fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Op
 }
 
 /// Extract a required file path parameter from input. Returns `&str` directly.
-/// Accepts "path", "relative_path", or "file" — same aliases as `get_path_param`.
+/// Accepts "path" plus `PATH_PARAM_ALIASES` — same aliases as `get_path_param`.
 pub(crate) fn require_path_param(input: &Value) -> anyhow::Result<&str> {
     input["path"]
         .as_str()
-        .or_else(|| input["relative_path"].as_str())
-        .or_else(|| input["file"].as_str())
+        .or_else(|| PATH_PARAM_ALIASES.iter().find_map(|a| input.get(*a).and_then(|v| v.as_str())))
         .ok_or_else(|| {
             RecoverableError::with_hint(
                 "missing 'path' parameter",
-                "Add the required 'path' parameter to the tool call.",
+                "Pass the file path, e.g. path=\"src/foo.rs\" — 'file_path' is also accepted. There is no implicit current file; every call needs the path.",
             )
             .into()
         })

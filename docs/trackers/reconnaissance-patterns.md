@@ -62,6 +62,7 @@ skill).
 | R-36 | 2026-06-28 | hit (validates R-3 / R-20) | Struct/config-field removal blast radius includes serde **data fixtures**, not just source — scope the verification drift-grep to `tests/` (incl. `tests/fixtures/**/*.toml`), not just `src/`. `SecuritySection` has no `#[serde(deny_unknown_fields)]`, so stale keys (`shell_enabled`, `shell_output_limit_bytes`) in two fixture `project.toml`s were silently dropped — `cargo test` stayed green; only the `src/ tests/` drift-grep surfaced them. Same serde-silent-ignore property that makes the user migration a footgun is what hid the fixture drift from compiler + tests. Promote-when (2 datapoints) → codescout memory `reconnaissance` (project-shaped: Rust+serde+TOML). | issues/2026-06-28-vestigial-shell-output-limit-bytes; tests/fixtures/{rust,kotlin}-library/.codescout/project.toml:18-19; kin R-3/R-20 |
 | R-37 | 2026-07-03 | miss (recurrence of R-28) | Adding a get_guide topic edits TWO gated surfaces beyond registration: the tool description (300-char budget test in `server::tests`) and the no-arg listing (hardcoded topic count). Scout the tests' assertions, not their names; convert hardcoded counts to derive from the canonical const. Full `--lib` gate absorbed the miss pre-commit. | tracker-as-skill session (untrusted-content topic, A-5); kin R-28/R-1/R-7 |
 | R-38 | 2026-07-03 | miss | Re-derived a finding a concurrent session had already MEASURED because the existing audit-log wasn't scouted first — independently built a precision gate for the tracker-hygiene D1 gap, then found the plugins Hamsa ledger had already measured it (n=5, both tiers). The seam for a derive/record-a-finding task includes the KNOWLEDGE state (ledger entries on the subject), not just the code. | A-8/A-9 session (#22); plugins Hamsa ledger; kin R-19 |
+| R-39 | 2026-07-10 | hit | Adding a tool param/alias is additive-safe in codescout: every `*_schema_*` test is positive-presence (`props["x"].is_object()` / `contains_key`), none enumerate the exact prop set, and no `input_schema()` sets `additionalProperties:false` — so a new prop can't break a snapshot, and an unknown key flows through to `call()` (the very mechanism the alias fix relies on). | param-alias-ergonomics session (this session); 3038 lib passed / 0 failed; kin R-28/R-36 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -902,6 +903,20 @@ subject first (`artifact(action="find", semantic=...)` / read the ledger section
 "has this already been measured / recorded?" as a seam to scout, exactly like a struct's
 fields. Promote-when: a second re-derivation-of-prior-work miss → codescout memory
 `reconnaissance`. Kin: R-19 (scout home internals before cross-project claims).
+## R-39 — Adding a tool param/alias is additive-safe (positive-presence schema tests, no `additionalProperties:false`)
+
+**Observed:** 2026-07-10, unifying the path-param alias set across the file/markdown/symbol tools and adding `file_path`/`output_id` schema properties (param-alias-ergonomics session, driven by a usage.db error-pattern sweep across 72 project DBs).
+
+**Scout done (before editing a shared contract + several `input_schema`s):** grepped the whole tree for schema-shape tests. Every `*_schema_*` test is *positive-presence* — `schema["properties"]["x"].is_object()`, `contains_key(...)`, `enum.contains(...)`; none enumerate the exact property set or assert a property is *absent*. Also confirmed no tool `input_schema()` sets `additionalProperties: false` (`src/server.rs` assembles the schema object without it).
+
+**Two consequences, both confirming the edit was safe:** (1) adding schema properties (`file_path`, `output_id`) *cannot* break any existing test; (2) aliases work at runtime *precisely because* there is no strict schema validation — an unknown key flows through to `call()`, which is the whole mechanism the alias fix relies on. The `create_file` `file_path` fix earlier in the session had already proven the passthrough empirically.
+
+**Verdict:** hit — confirmed empirically. After adding `require_str_param_or_hint`, the shared `fs::require_path_param` alias, and 3 schema props, the full `cargo test --lib` run was **3038 passed / 0 failed**. The scout let me add the schema surface without hedging or a discover-by-breakage cycle.
+
+**Generalization:** before worrying that adding a tool param/alias will break a schema snapshot or be rejected by strict validation — in codescout neither risk exists. Schema tests guard *presence*, not exact shape; schemas are *open* (`additionalProperties` unset). A param/alias addition is additive-safe. The one real gate a *description* edit must still clear is `server::tests::tool_descriptions_stay_under_budget` (R-28/R-37) — but adding a schema *property* (not touching `description()`) doesn't approach it. Kin: R-36 (serde has no `deny_unknown_fields` → the sibling open-schema property at the config-data layer).
+
+**Evidence:** positive-presence tests in `src/tools/{memory,semantic,symbol,ast,run_command}/tests.rs` + `src/tools/peer.rs`; schema assembly in `src/server.rs` (no `additionalProperties`); gate: 3038 passed / 0 failed. Promote-when (2nd datapoint): distill "adding a tool param/alias is additive-safe — schema tests are presence-only, schemas are open" into codescout memory `reconnaissance`. param-alias-ergonomics session (this session); commit pending.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

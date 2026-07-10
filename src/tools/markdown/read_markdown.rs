@@ -475,6 +475,7 @@ impl Tool for ReadMarkdown {
             "required": ["path"],
             "properties": {
                 "path": { "type": "string", "description": "Markdown file path relative to project root" },
+                "file_path": { "type": "string", "description": "Alias for path" },
                 "heading": { "type": "string", "description": "Markdown section by heading (e.g. \"## Auth\")." },
                 "headings": {
                     "type": "array",
@@ -488,7 +489,12 @@ impl Tool for ReadMarkdown {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let path = crate::tools::require_str_param(&input, "path")?;
+        let path = crate::tools::require_str_param_or_hint(
+            &input,
+            "path",
+            crate::fs::PATH_PARAM_ALIASES,
+            "read_markdown(path=\"docs/x.md\") — add heading=\"## Section\" to read one section. 'file_path' is also accepted.",
+        )?;
 
         // Resolve path → (resolved PathBuf, text String): @file_ buffer ref or disk read.
         let (resolved, text) = resolve_markdown_source(path, ctx).await?;

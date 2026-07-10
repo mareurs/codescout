@@ -33,6 +33,7 @@ impl Tool for ReadFile {
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
                 "file_path": { "type": "string", "description": "Alias for path" },
+                "output_id": { "type": "string", "description": "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back." },
                 "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
                 "offset": { "type": "integer", "description": "Native-Read-style alias: 1-indexed start line (= start_line). Ignored when start_line/end_line are set." },
@@ -55,11 +56,19 @@ impl Tool for ReadFile {
 
         let raw_path = input["path"]
             .as_str()
-            .or_else(|| input["file_path"].as_str())
+            .or_else(|| {
+                crate::fs::PATH_PARAM_ALIASES
+                    .iter()
+                    .find_map(|a| input.get(*a).and_then(|v| v.as_str()))
+            })
+            // Buffer reads: agents habitually pass the returned handle back under
+            // the key the tool emitted it as (output_id) rather than as path.
+            .or_else(|| input["output_id"].as_str())
+            .or_else(|| input["file_id"].as_str())
             .ok_or_else(|| {
                 RecoverableError::with_hint(
                     "missing required parameter 'path'",
-                    "Provide the file path as: path=\"relative/path/to/file\"",
+                    "read_file(path=\"src/x.rs\") — or read a buffer: read_file(path=\"@tool_abc\"). Aliases: file_path, relative_path, file, output_id.",
                 )
             })?;
         let path = strip_buffer_ref_quotes(raw_path);

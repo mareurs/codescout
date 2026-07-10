@@ -12,7 +12,12 @@ pub struct ListDocs;
 
 /// Resolve input path (relative to project root if not absolute).
 async fn resolve_path(input: &Value, ctx: &ToolContext) -> anyhow::Result<PathBuf> {
-    let path_str = super::require_str_param(input, "path")?;
+    let path_str = super::require_str_param_or_hint(
+        input,
+        "path",
+        crate::fs::PATH_PARAM_ALIASES,
+        "Pass the source file path, e.g. path=\"src/x.rs\". 'file_path' is also accepted.",
+    )?;
     let project_root = ctx
         .agent
         .project_root_for(ctx.workspace_override.as_deref())

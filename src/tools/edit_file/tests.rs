@@ -1122,6 +1122,50 @@ async fn create_text_file_writes_content() {
 }
 
 #[tokio::test]
+async fn create_file_accepts_file_path_alias() {
+    // LLMs habitually reach for `file_path` (the native Write/Read signature).
+    // create_file accepts it as an alias for `path` rather than forcing a retry.
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("aliased.txt");
+
+    let result = CreateFile
+        .call(
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "content": "via alias"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, "ok");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "via alias");
+}
+
+#[tokio::test]
+async fn edit_file_accepts_file_path_alias() {
+    // Same `file_path` alias support on the sibling write tool.
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("edit_me.txt");
+    std::fs::write(&file, "before").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "old_string": "before",
+                "new_string": "after"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_ok(), "edit_file via file_path alias: {result:?}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "after");
+}
+
+#[tokio::test]
 async fn create_text_file_creates_parent_dirs() {
     let (dir, ctx) = project_ctx().await;
     let file = dir.path().join("a").join("b").join("deep.txt");

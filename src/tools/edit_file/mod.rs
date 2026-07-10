@@ -279,6 +279,7 @@ impl Tool for EditFile {
             "required": ["path"],
             "properties": {
                 "path": { "type": "string", "description": "File path" },
+                "file_path": { "type": "string", "description": "Alias for path" },
                 "old_string": { "type": "string", "description": "Exact text to find (whitespace-sensitive). Required unless insert or edits is set." },
                 "new_string": { "type": "string", "description": "Replacement text (empty string = delete). Required for single-edit and insert modes." },
                 "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },
@@ -303,7 +304,12 @@ impl Tool for EditFile {
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let input = super::maybe_replay_ack(ctx, input, "edit_file").await?;
-        let path = super::require_str_param(&input, "path")?;
+        let path = super::require_str_param_or_hint(
+            &input,
+            "path",
+            crate::fs::PATH_PARAM_ALIASES,
+            "edit_file(path=\"src/x.rs\", old_string=\"...\", new_string=\"...\"). path is required on every call — there is no implicit current file.",
+        )?;
         let new_string = input["new_string"].as_str().unwrap_or("");
 
         // Gate: redirect .md files to edit_markdown (except prepend/append

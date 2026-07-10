@@ -564,6 +564,7 @@ impl Tool for EditMarkdown {
             "required": ["path"],
             "properties": {
                 "path": { "type": "string", "description": "Markdown file path" },
+                "file_path": { "type": "string", "description": "Alias for path" },
                 "heading": { "type": "string", "description": "Target section heading (fuzzy matched). Required unless using edits[] batch mode." },
                 "action": {
                     "type": "string",
@@ -622,7 +623,12 @@ impl Tool for EditMarkdown {
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         crate::tools::guard_worktree_write(ctx).await?;
         let input = crate::tools::maybe_replay_ack(ctx, input, "edit_markdown").await?;
-        let path = crate::tools::require_str_param(&input, "path")?;
+        let path = crate::tools::require_str_param_or_hint(
+            &input,
+            "path",
+            crate::fs::PATH_PARAM_ALIASES,
+            "edit_markdown(path=\"docs/x.md\", heading=\"## Section\", action=\"replace\", content=\"...\"). path is required on every call — there is no implicit current file.",
+        )?;
 
         // Gate: .md files only
         if !path.ends_with(".md") && !path.ends_with(".markdown") {
@@ -741,8 +747,18 @@ impl Tool for EditMarkdown {
             }
         } else if has_body_edit {
             // ── Single edit mode ─────────────────────────────────────
-            let heading = crate::tools::require_str_param(&input, "heading")?;
-            let action = crate::tools::require_str_param(&input, "action")?;
+            let heading = crate::tools::require_str_param_or_hint(
+                &input,
+                "heading",
+                &[],
+                "Name the section to edit, e.g. heading=\"## Section\". For multiple edits use edits=[{heading, action, content}].",
+            )?;
+            let action = crate::tools::require_str_param_or_hint(
+                &input,
+                "action",
+                &[],
+                "Set action to one of: replace | insert_before | insert_after | remove | edit. E.g. action=\"replace\", content=\"...\".",
+            )?;
 
             new_content = if action == "edit" {
                 let old_string = crate::tools::require_str_param(&input, "old_string")?;
