@@ -112,6 +112,24 @@ Each scenario runs as A/B (`tracker` arm vs `ledger` arm) plus `--ablate`.
 `librarian-guide` suite's convention of N≥10 with a clear pass-rate delta). Save a
 prompt-tdd baseline so the result is reproducible and regressions are caught.
 
+**Gate outcome (2026-07-10): NOT MET — Phase 1 not justified on agent-behavior grounds.**
+
+Eval ran (prompt-engineering `scenarios/ledger-vs-tracker/`, sonnet, runs:10). Full matrix
+with the librarian guide present: **all four cells 10/10** (tracker append 10/10, tracker
+snapshot 10/10, ledger append 10/10, ledger snapshot 10/10). The `--ablate` control (guide
+stripped) on append-shape returned **NO POWER** for both arms — the scenario passes 10/10 even
+without the guide, so it is tautological for a capable model and cannot detect a word effect.
+
+Conclusion: for sonnet with codescout's tools, the ledger-vs-tracker rename produces **no
+measurable change** in append or snapshot behavior (no win, no regression). Per the
+pre-registered rule (append gate unmet → abandon), the full rename is **not justified by agent
+behavior**; it reverts to a pure human-semantics decision. The eval-first gate succeeded in its
+stated purpose — it prevented a 4-tier cross-repo migration with no measurable agent benefit.
+
+The `ledger-eval` branch (dual-read alias + vocabulary flip) and the two frozen eval binaries
+remain available should a rename be pursued later on semantic grounds. A sharper eval (weaker
+model / more ambiguous task, to escape the ceiling) is the recommended follow-up if the agent-
+behavior question is revisited. Full numbers: `prompt-engineering/scenarios/ledger-vs-tracker/RESULTS.md`.
 ## Phase 1 — Full rename (contingent on the gate)
 
 Sketched at tier granularity here; the detailed implementation plan is written only
