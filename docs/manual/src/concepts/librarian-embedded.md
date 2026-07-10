@@ -118,21 +118,18 @@ binary no longer exists — `crates/librarian-mcp` is now lib-only. The
 separate librarian companion-hint block; the librarian instructions are
 served through codescout's own `instructions` field.
 
-`~/.claude/.claude.json` should have only one MCP server entry (`codescout`)
-with optional `LIBRARIAN_EMBED_*` envs:
+`~/.claude/.claude.json` should have only one MCP server entry (`codescout`).
 
-```json
-{
-  "mcpServers": {
-    "codescout": {
-      "type": "stdio",
-      "command": "/abs/path/to/codescout",
-      "args": ["start", "--debug"],
-      "env": {
-        "LIBRARIAN_EMBED_MODEL": "CodeRankEmbed",
-        "LIBRARIAN_EMBED_URL": "http://localhost:43300/v1"
-      }
-    }
-  }
-}
-```
+codescout self-loads a startup dotenv, so the registration needs no `env` block.
+Point it at a retrieval-profile file once:
+
+    ln -s /abs/path/to/codescout/.env.amd ~/.config/codescout/.env
+    # or export CODESCOUT_ENV_FILE=/abs/path/to/.env.amd
+
+Then register the bare binary:
+
+    claude mcp add codescout -s user -- /abs/path/to/codescout start --debug
+
+The `.env.<profile>` files include both `CODESCOUT_EMBEDDER_*` (retrieval stack)
+and `LIBRARIAN_EMBED_*` (artifact embedder), so one file configures both. Real
+environment variables still override the file.
