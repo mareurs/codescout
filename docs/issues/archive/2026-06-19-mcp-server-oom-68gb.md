@@ -1,12 +1,25 @@
 ---
-status: investigating
-opened: 2026-06-19
-closed:
-severity: high
-owner: marius
-related: ["2026-06-19-kotlin-lsp-uncapped-jvm-heap.md", "2026-06-26-heartbeat-prune-evicts-oom-victim.md"]
-tags: ["memory", "oom", "mcp-server", "stability", "indexing", "backend-kotlin"]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- memory
+- oom
+- mcp-server
+- stability
+- indexing
+- backend-kotlin
+topic: null
+time_scope: null
+closed: '2026-07-10'
+opened: '2026-06-19'
+owner: marius
+related:
+- '2026-06-19-kotlin-lsp-uncapped-jvm-heap.md'
+- '2026-06-26-heartbeat-prune-evicts-oom-victim.md'
+severity: high
 ---
 
 # BUG: codescout MCP server leaked to 68 GB RSS and triggered a kernel OOM-kill, taking down the host
@@ -177,6 +190,11 @@ See Fix item 3.
 1. **Hypothesis:** Chronic/recurring leak. **Test:** `journalctl --since "7 days ago" | grep "Out of memory: Killed"`. **Verdict:** rejected as chronic — 1 occurrence in 7 d (still a real bug). **Evidence:** Kernel OOM section.
 2. **Hypothesis:** Another process (e.g. chromium/brave) was the real hog and codescout was killed only for its high `oom_score_adj`. **Test:** read the kernel victim line's `anon-rss`. **Verdict:** rejected — codescout's own anon-rss was 68.7 GB (kernel-measured), unambiguously the largest single consumer. **Evidence:** Kernel OOM victim line.
 
+## Resolution (2026-07-10)
+
+**Fixed and shipped to `master`.** The core streaming fix landed as commit `7dd67080` *fix(retrieval): stream sync_project to bound index memory at O(batch)*, with `9bdb06c9` + `b74358b9` adding ignore-pattern pruning of dependency dirs. `RetrievalClient::sync_project` now delegates to `stream_index` + `flush_pending`, flushing embed→upsert→drop every `FLUSH_BATCH` (default 256) chunks — peak memory is O(batch), not O(all_files). The background `maybe_auto_index_library` path is gated by `check_index_scope` (declines oversized roots when there is no interactive user), and the durable `op=`-tagged RSS heartbeat (`src/heartbeat.rs`) plus default-ignore globs shipped earlier. Verified on `master` via `git log master -- src/retrieval/sync.rs`.
+
+Deferred blast-radius / defense-in-depth items (systemd cgroup `MemoryMax=` / `MemorySwapMax=0`, `oom_score_adj=200` review, expanding the default-ignore set) are **not** this bug's root cause — they guard a *future* leak — and are tracked separately in `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md`.
 ## Fix
 Plan (not yet implemented):
 1. **Find the leak.** Recover the offending operation. Since the live log was lost,
@@ -208,8 +226,8 @@ is known); stale files are pruned to the 16 most-recent on startup. **Verified:*
 server's header survived on disk at the central path. The 'optionally abort' soft self-limit and the
 cgroup blast-radius cap (Fix 4) remain deferred.
 ## Tests added
-N/A — not yet fixed (root cause unidentified).
 
+`stream_index_flushes_in_bounded_batches` (`src/retrieval/sync.rs` tests module) — drives `stream_index` with a `RecordingStore` + `FakeEmbedder` and asserts no flush exceeds `flush_batch` and that per-batch counts sum to the total added. The background-path scope guard is covered by the `check_index_scope` suite in `src/embed/preflight.rs` (oversized-flag, gitignore, extension allowlist, ignored-dirs).
 ## Workarounds
 - Cap a codescout MCP server's memory so a runaway dies alone, not with the host:
   ```bash
@@ -220,38 +238,7 @@ N/A — not yet fixed (root cause unidentified).
 
 ## Resume
 
-Fix 3 (a durable, discoverable, always-on, `op=`-tagged RSS heartbeat) **shipped** — lives in
-`src/heartbeat.rs`, wired at `src/server.rs` (`run` spawn + `call_tool_inner`). **Caveat (found
-2026-06-30):** `op=` is fed only at the tool-dispatch chokepoint, so a *background* op (the actual
-leaker here) logs a stale/empty `op=` — being fixed as item 3 below.
-
-**Root cause confirmed (2026-06-30):** the leak is `RetrievalClient::sync_project`
-(`src/retrieval/sync.rs:41`) buffering the **entire tree** before embedding (O(all_files) peak,
-2–3 live content copies + all vectors at once). It is **not** the markdown librarian indexer and
-**not** the `.pt` checkpoints (never read). Reached via the background `maybe_auto_index_library`
-path (`src/agent/mod.rs:1489`) with no `check_index_scope` preflight — hence no `tool_calls` row.
-This is the unfinished "streaming pipeline" fix flagged + wontfix'd in the predecessor
-`2026-04-18-memory-leak-x-session-freeze.md` (re-opened 2026-06-30). See the confirmed-root-cause
-update under **Root cause**.
-
-**Fix in progress (plan `abstract-dazzling-peacock`):**
-1. **Stream `sync_project`** — flush embed→upsert→drop every `FLUSH_BATCH`; peak O(batch). *(core)*
-2. **Gate the background path** — `maybe_auto_index_library` runs `check_index_scope` and skips
-   oversized roots with a warning (no interactive user to confirm).
-3. **Heartbeat background-op tag** — tag `op=` at background spawn sites so a background leaker
-   names itself.
-4. **Default-ignore globs (shipped 2026-06-30)** — `sync_project` + `check_index_scope` now honour
-   `[ignored_paths]` via a shared `build_ignore_matcher` (gitignore semantics); the defaults exclude
-   `.venv`/`node_modules`/`target`/etc. **Still deferred:** expanding the default set, the cgroup
-   `MemoryMax`/`MemorySwapMax=0` blast-radius cap, and the `oom_score_adj=200` review
-   (`docs/trackers/index-scope-default-ignores.md`).
-
-**User-side tuning (now effective):** as of the default-ignore-globs change the code index honours
-`[ignored_paths]` — the defaults already exclude `.venv`/`node_modules`/`target`/etc. To also skip
-backend-kotlin's custom `python-services/`, add it to `[ignored_paths] patterns` in that project's
-`.codescout/project.toml`. **Before that change this was a no-op for the code index** (it only
-affected the librarian markdown indexer), so the original "set `[ignored_paths]`" advice would not
-have helped.
+N/A — core fix shipped to `master` (`7dd67080` + siblings `9bdb06c9`, `b74358b9`). Deferred blast-radius ops-hardening tracked in `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md`.
 ## References
 - Host journal: `journalctl -k --since "2026-06-19 16:20" --until "2026-06-19 16:25"`
 - Logging impl: `src/logging.rs` (debug/diagnostic file layers, `.codescout/` dir, non-blocking appender, panic-hook crash.log)

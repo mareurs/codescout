@@ -85,6 +85,11 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Impact:** Subsequent `edit_markdown(path="new/path.md")` fails with "No such file or directory"  
 **Fix:** `update` now rejects `patch.rel_path` with a RecoverableError hinting at `artifact(action="move", id=..., new_rel_path=...)`. Two-call APIs must reject the wrong input shape explicitly, not accept silently — silent divergence is the worst failure mode here because `updated: true` reads as proof of action. Test: `update_rejects_rel_path_with_move_hint` in `src/librarian/tools/update.rs`. The `move` action (`src/librarian/tools/mv.rs`) covers the file-rename use case atomically.
 
+### F-011 — cc.py hardcodes `~/.claude`; sessions from other profiles invisible
+**When:** 2026-07-10, inspecting session fc0e9019 (a `~/.claude-kat` session) with `cc.py stats/tool-calls`.
+**Got:** `ERROR: session not found` — `CLAUDE_DIR = Path.home() / ".claude"` is hardcoded (cc.py:23), so `~/.claude-sdd` / `~/.claude-kat` sessions can't be inspected. This machine runs three profiles by design.
+**Workaround:** sed-copied cc.py to scratchpad with the profile dir patched.
+**Fix idea:** honor `$CLAUDE_CONFIG_DIR` (or add `--claude-dir`), and let `sessions`/`stats` fall back to globbing all three known profile roots when the session id isn't found in the default.
 ## `/analyze-usage`
 
 ### F-005 — `find ~/work` assumption not portable
