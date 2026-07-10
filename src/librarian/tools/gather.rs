@@ -98,19 +98,35 @@ pub async fn gather_all(
                     grep.as_deref(),
                     last_refreshed_at,
                 ) {
-                    Ok(data) => results.push(GatherResult {
-                        source_key: "git_log".to_string(),
-                        data,
-                    }),
+                    Ok((data, truncated)) => {
+                        if truncated {
+                            warnings.push(format!(
+                                "git_log gather truncated at limit={} — more commits match; raise limit or narrow since/grep",
+                                limit.unwrap_or(20)
+                            ));
+                        }
+                        results.push(GatherResult {
+                            source_key: "git_log".to_string(),
+                            data,
+                        });
+                    }
                     Err(e) => warnings.push(format!("git_log gather failed: {e}")),
                 }
             }
             GatherSource::Artifacts { filter, limit } => {
                 match gather_artifacts(ctx, filter.as_ref(), *limit) {
-                    Ok(data) => results.push(GatherResult {
-                        source_key: "artifacts".to_string(),
-                        data,
-                    }),
+                    Ok((data, truncated)) => {
+                        if truncated {
+                            warnings.push(format!(
+                                "artifacts gather truncated at limit={} — more artifacts match the filter; raise limit or narrow the filter",
+                                limit.unwrap_or(20)
+                            ));
+                        }
+                        results.push(GatherResult {
+                            source_key: "artifacts".to_string(),
+                            data,
+                        });
+                    }
                     Err(e) => warnings.push(format!("artifacts gather failed: {e}")),
                 }
             }
@@ -128,10 +144,18 @@ pub async fn gather_all(
                     since_ms,
                     limit.unwrap_or(20),
                 ) {
-                    Ok(data) => results.push(GatherResult {
-                        source_key: "observations".to_string(),
-                        data,
-                    }),
+                    Ok((data, truncated)) => {
+                        if truncated {
+                            warnings.push(format!(
+                                "observations gather truncated at limit={} — more observations exist; raise limit",
+                                limit.unwrap_or(20)
+                            ));
+                        }
+                        results.push(GatherResult {
+                            source_key: "observations".to_string(),
+                            data,
+                        });
+                    }
                     Err(e) => warnings.push(format!("observations gather failed: {e}")),
                 }
             }
@@ -147,10 +171,18 @@ pub async fn gather_all(
                 path,
                 limit,
             } => match gather_grep(ctx, pattern, path.as_deref(), limit.unwrap_or(50)) {
-                Ok(data) => results.push(GatherResult {
-                    source_key: "grep".to_string(),
-                    data,
-                }),
+                Ok((data, truncated)) => {
+                    if truncated {
+                        warnings.push(format!(
+                            "grep gather truncated at limit={} — more lines match '{pattern}'; raise limit or narrow path/pattern",
+                            limit.unwrap_or(50)
+                        ));
+                    }
+                    results.push(GatherResult {
+                        source_key: "grep".to_string(),
+                        data,
+                    });
+                }
                 Err(e) => warnings.push(format!("grep gather failed: {e}")),
             },
         }
@@ -274,7 +306,7 @@ fn gather_git_log(
     branch: Option<&str>,
     grep: Option<&str>,
     last_refreshed_at: Option<&str>,
-) -> Result<Value> {
+) -> Result<(Value, bool)> {
     let root = project_root(ctx).ok_or_else(|| anyhow::anyhow!("no project root"))?;
     let repo = git2::Repository::discover(&root)
         .map_err(|e| anyhow::anyhow!("git repo not found: {e}"))?;
@@ -297,7 +329,12 @@ fn gather_git_log(
     let limit = limit.unwrap_or(20);
     let grep_re = grep.map(regex::Regex::new).transpose()?;
 
-    let commits: Vec<Value> = revwalk
+    // Overfetch one past `limit` so a full-but-complete page is distinguishable
+    // from a truncated one, then trim back to `limit`. Without the `truncated`
+    // signal an agent synthesizing a tracker refresh reads a capped gather as
+    // the complete set (silent-cap family — see
+    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    let mut commits: Vec<Value> = revwalk
         .filter_map(|oid| oid.ok())
         .filter_map(|oid| repo.find_commit(oid).ok())
         .filter(|c| since_secs.is_none_or(|ts| c.time().seconds() > ts))
@@ -306,7 +343,7 @@ fn gather_git_log(
                 .as_ref()
                 .is_none_or(|re| c.summary().is_some_and(|s| re.is_match(s)))
         })
-        .take(limit)
+        .take(limit + 1)
         .map(|c| {
             json!({
                 "hash": &c.id().to_string()[..8],
@@ -317,28 +354,34 @@ fn gather_git_log(
         })
         .collect();
 
-    Ok(json!(commits))
+    let truncated = commits.len() > limit;
+    commits.truncate(limit);
+    Ok((json!(commits), truncated))
 }
 
 fn gather_artifacts(
     ctx: &ToolContext,
     filter: Option<&Value>,
     limit: Option<usize>,
-) -> Result<Value> {
+) -> Result<(Value, bool)> {
     let filter_node: Option<FilterNode> = filter
         .map(|f| serde_json::from_value(f.clone()))
         .transpose()?;
+    let limit = limit.unwrap_or(20);
     let cat = ctx.catalog.lock();
+    // Overfetch limit+1 to detect truncation without a separate COUNT query.
     let rows = find(
         &cat,
         &FindOpts {
             filter: filter_node,
-            limit: limit.unwrap_or(20),
+            limit: limit + 1,
             offset: 0,
         },
     )?;
+    let truncated = rows.len() > limit;
     let items: Vec<Value> = rows
         .iter()
+        .take(limit)
         .map(|r| {
             json!({
                 "id": r.id,
@@ -350,7 +393,7 @@ fn gather_artifacts(
             })
         })
         .collect();
-    Ok(json!(items))
+    Ok((json!(items), truncated))
 }
 
 fn gather_observations(
@@ -358,11 +401,14 @@ fn gather_observations(
     artifact_id: Option<&str>,
     since_ms: Option<i64>,
     limit: usize,
-) -> Result<Value> {
+) -> Result<(Value, bool)> {
     let cat = ctx.catalog.lock();
-    let obs = observations::list_recent(&cat, artifact_id, since_ms, limit)?;
+    // Overfetch limit+1 to detect truncation.
+    let obs = observations::list_recent(&cat, artifact_id, since_ms, limit + 1)?;
+    let truncated = obs.len() > limit;
     let items: Vec<Value> = obs
         .iter()
+        .take(limit)
         .map(|o| {
             json!({
                 "artifact_id": o.artifact_id,
@@ -372,7 +418,7 @@ fn gather_observations(
             })
         })
         .collect();
-    Ok(json!(items))
+    Ok((json!(items), truncated))
 }
 
 fn guard_relative_path(path: &str) -> Result<()> {
@@ -411,7 +457,7 @@ fn gather_grep(
     pattern: &str,
     path: Option<&str>,
     limit: usize,
-) -> Result<Value> {
+) -> Result<(Value, bool)> {
     if let Some(p) = path {
         guard_relative_path(p)?;
     }
@@ -420,6 +466,8 @@ fn gather_grep(
     let search_root = path.map(|p| base.join(p)).unwrap_or(base);
     let re = regex::Regex::new(pattern)?;
 
+    // Collect one past `limit` so a truncated result is distinguishable from a
+    // complete one, then trim back to `limit`.
     let mut matches: Vec<Value> = Vec::new();
     'outer: for entry in WalkDir::new(&search_root)
         .follow_links(false)
@@ -436,7 +484,7 @@ fn gather_grep(
                         "line": lineno + 1,
                         "text": line,
                     }));
-                    if matches.len() >= limit {
+                    if matches.len() > limit {
                         break 'outer;
                     }
                 }
@@ -444,7 +492,9 @@ fn gather_grep(
         }
     }
 
-    Ok(json!(matches))
+    let truncated = matches.len() > limit;
+    matches.truncate(limit);
+    Ok((json!(matches), truncated))
 }
 
 fn last_changed(project_root: &std::path::Path, rel_path: &str) -> Option<(String, String)> {
@@ -600,9 +650,64 @@ mod tests {
             .join("\n");
         std::fs::write(tmp.path().join("test.txt"), content).unwrap();
         let ctx = mk_ctx(&tmp);
-        let result = gather_grep(&ctx, "match line", None, 5).unwrap();
+        let (result, truncated) = gather_grep(&ctx, "match line", None, 5).unwrap();
         let arr = result.as_array().unwrap();
-        assert!(arr.len() <= 5);
+        assert_eq!(arr.len(), 5, "capped to limit");
+        assert!(truncated, "10 matches, limit 5 -> truncated");
+    }
+
+    #[tokio::test]
+    async fn gather_all_warns_when_source_truncated() {
+        // Silent-cap regression: a limit-capped gather must surface a warning so
+        // an agent synthesizing a tracker refresh does not read the capped page as
+        // the complete set. Companion to the find.rs `more_in_scope` fix.
+        // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        let tmp = tempfile::tempdir().unwrap();
+        let content = (0..10)
+            .map(|i| format!("match line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(tmp.path().join("test.txt"), content).unwrap();
+        let ctx = mk_ctx(&tmp);
+        let sources = vec![GatherSource::Grep {
+            pattern: "match line".into(),
+            path: None,
+            limit: Some(5),
+        }];
+        let (results, warnings) = gather_all(&sources, &ctx, None).await.unwrap();
+        // Consumer contract (refresh.rs merge / hints / commits_since_last): the
+        // gathered `data` stays a bare array capped at `limit`.
+        assert_eq!(results[0].data.as_array().unwrap().len(), 5);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("truncated") && w.contains("grep")),
+            "expected a grep truncation warning, got {warnings:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_all_no_truncation_warning_under_limit() {
+        // Boundary guard: a page that holds everything must NOT emit a
+        // truncation warning (mirrors find.rs's no-signal-when-uncapped test).
+        let tmp = tempfile::tempdir().unwrap();
+        let content = (0..3)
+            .map(|i| format!("match line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(tmp.path().join("test.txt"), content).unwrap();
+        let ctx = mk_ctx(&tmp);
+        let sources = vec![GatherSource::Grep {
+            pattern: "match line".into(),
+            path: None,
+            limit: Some(5),
+        }];
+        let (results, warnings) = gather_all(&sources, &ctx, None).await.unwrap();
+        assert_eq!(results[0].data.as_array().unwrap().len(), 3);
+        assert!(
+            !warnings.iter().any(|w| w.contains("truncated")),
+            "3 matches under limit 5 -> no truncation warning, got {warnings:?}"
+        );
     }
 
     #[tokio::test]
