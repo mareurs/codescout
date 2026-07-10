@@ -10,15 +10,18 @@ use serde_json::Value;
 pub fn validate(schema: &Value, params: &Value) -> Result<()> {
     let validator =
         jsonschema::validator_for(schema).map_err(|e| anyhow!("invalid params_schema: {e}"))?;
-    let errors: Vec<String> = validator
+    let all: Vec<String> = validator
         .iter_errors(params)
-        .take(3)
         .map(|e| format!("{}: {}", e.instance_path, e))
         .collect();
-    if errors.is_empty() {
+    if all.is_empty() {
         Ok(())
     } else {
-        Err(anyhow!(errors.join("; ")))
+        let mut msg = all.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+        if all.len() > 3 {
+            msg.push_str(&format!(" (+{} more)", all.len() - 3));
+        }
+        Err(anyhow!(msg))
     }
 }
 
@@ -52,6 +55,22 @@ mod tests {
     fn rejects_missing_required_key() {
         let err = validate(&schema_required_int(), &json!({})).unwrap_err();
         assert!(err.to_string().to_lowercase().contains("count"));
+    }
+
+    #[test]
+    fn many_errors_report_plus_more_suffix() {
+        // Silent-cap regression: >3 validation errors were capped at 3 with no
+        // sign there were more. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        let schema = json!({
+            "type": "object",
+            "required": ["a", "b", "c", "d", "e"]
+        });
+        let err = validate(&schema, &json!({})).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("(+2 more)"),
+            "expected '(+2 more)' for 5 errors shown-3, got: {msg}"
+        );
     }
 
     #[test]

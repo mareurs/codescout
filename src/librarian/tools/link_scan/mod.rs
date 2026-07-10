@@ -73,14 +73,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let cat = ctx.catalog.lock();
     let limit = args.limit.unwrap_or(MAX_ARTIFACTS_DEFAULT);
-    let rows = cat_find::find(
+    // Overfetch limit+1 to signal when the artifact scan itself was capped
+    // (silent-cap family).
+    let mut rows = cat_find::find(
         &cat,
         &cat_find::FindOpts {
             filter: scoped_filter,
-            limit,
+            limit: limit + 1,
             offset: 0,
         },
     )?;
+    let scan_truncated = rows.len() > limit;
+    rows.truncate(limit);
 
     // ---- extraction pass (one body parse per artifact) ----
     let mut extracts: Vec<(usize, extract::DocExtract)> = Vec::new();
@@ -133,13 +137,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     desired.insert((row.id.clone(), dst_id));
                 }
                 Some(resolve::Outcome::SelfCite) => self_cites += 1,
-                Some(resolve::Outcome::Ambiguous { candidates }) => {
+                Some(resolve::Outcome::Ambiguous { candidates, total }) => {
                     ambiguous_total += 1;
                     push_capped(
                         &mut ambiguous,
                         json!({
                             "src_id": row.id, "token": c.raw,
                             "line": c.line, "candidates": candidates,
+                            "candidates_total": total,
                         }),
                     );
                 }
@@ -209,6 +214,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "write": args.write,
         "counts": {
             "artifacts_scanned": extracts.len(),
+            "scan_truncated": scan_truncated,
             "unreadable": unreadable.len(),
             "citations": citations_total,
             "self_cites": self_cites,

@@ -69,7 +69,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             Some(n) => &grouped[..grouped.len().min(n)],
             None => &grouped,
         };
-        return Ok(build_dry_run(head));
+        let mut dry = build_dry_run(head);
+        dry["total_candidates"] = json!(grouped.len());
+        dry["truncated"] = json!(grouped.len() > head.len());
+        return Ok(dry);
     }
 
     // NB: `reconcile` ALWAYS receives the full grouped set — never truncated by

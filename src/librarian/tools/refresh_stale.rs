@@ -54,9 +54,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         cutoff.to_rfc3339()
     };
 
-    let entries = {
+    let (entries, has_more) = {
         let cat = ctx.catalog.lock();
-        augmentation::list_stale(&cat, &threshold_iso, limit, abs_path_prefix)?
+        // Overfetch limit+1 so we can flag that more stale artifacts exist than
+        // the page shows (list_stale has no COUNT(*); silent-cap family).
+        let mut e = augmentation::list_stale(&cat, &threshold_iso, limit + 1, abs_path_prefix)?;
+        let more = e.len() > limit;
+        e.truncate(limit);
+        (e, more)
     };
 
     let now = chrono::Utc::now();
@@ -92,6 +97,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "count": items.len(),
         "threshold_hours": threshold_hours,
         "items": items,
+        "has_more": has_more,
         "next_step": next_step,
     }))
 }

@@ -252,8 +252,18 @@ impl Tool for SemanticSearch {
                 )
             })
             .collect();
-        let total = result_items.len();
-        Ok(serde_json::json!({ "results": result_items, "total": total }))
+        let count = result_items.len();
+        // KNN over a large index: a full page almost always means more relevant
+        // chunks exist. Signal it rather than let `total` read as complete.
+        let truncated = count >= limit;
+        let mut out =
+            serde_json::json!({ "results": result_items, "total": count, "truncated": truncated });
+        if truncated {
+            out["truncated_hint"] = serde_json::json!(
+                "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
+            );
+        }
+        Ok(out)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {

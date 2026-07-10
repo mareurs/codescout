@@ -73,9 +73,14 @@ pub struct Corpus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    Edge { dst_id: String },
+    Edge {
+        dst_id: String,
+    },
     SelfCite,
-    Ambiguous { candidates: Vec<String> },
+    Ambiguous {
+        candidates: Vec<String>,
+        total: usize,
+    },
     Dangling,
     CrossRepo,
 }
@@ -146,6 +151,7 @@ pub fn resolve(
                         })
                     } else {
                         Some(Outcome::Ambiguous {
+                            total: definers.len(),
                             candidates: definers
                                 .iter()
                                 .map(|d| d.artifact_id.clone())
@@ -291,8 +297,9 @@ mod tests {
             &Corpus::default(),
         );
         match got {
-            Some(Outcome::Ambiguous { candidates }) => {
+            Some(Outcome::Ambiguous { candidates, total }) => {
                 assert_eq!(candidates.len(), 2);
+                assert_eq!(total, 2);
             }
             other => panic!("expected Ambiguous, got {other:?}"),
         }
