@@ -780,26 +780,32 @@ fn find_toml_key_line(content: &str, key: &str) -> Option<u64> {
     None
 }
 
-pub fn summarize_yaml(content: &str) -> Value {
-    let line_count = content.lines().count();
-
-    // Scan for top-level keys: lines starting at column 0, containing ':'
-    let mut sections: Vec<(String, usize)> = Vec::new();
+/// Scan a YAML document's top-level keys (column-0 `key:` lines), returning
+/// `(key, 1-indexed line)` for each, UNCAPPED. `summarize_yaml` truncates the
+/// result for display; `extract_yaml_key` uses the full list so key resolution
+/// isn't limited by the display cap (the false-"not found" bug).
+fn yaml_top_level_keys(content: &str) -> Vec<(String, usize)> {
+    let mut keys = Vec::new();
     for (idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with('#') || trimmed.is_empty() || trimmed == "---" || trimmed == "..." {
             continue;
         }
-        // Top-level key: starts at column 0 (no leading whitespace), has a colon
         if !line.starts_with(' ') && !line.starts_with('\t') {
             if let Some(colon_pos) = trimmed.find(':') {
                 let key = trimmed[..colon_pos].trim().to_string();
                 if !key.is_empty() && !key.starts_with('-') {
-                    sections.push((key, idx + 1));
+                    keys.push((key, idx + 1));
                 }
             }
         }
     }
+    keys
+}
+
+pub fn summarize_yaml(content: &str) -> Value {
+    let line_count = content.lines().count();
+    let sections = yaml_top_level_keys(content);
 
     if sections.is_empty() {
         let mut fallback = summarize_generic_file(content);
@@ -863,9 +869,10 @@ pub fn summarize_generic_file(content: &str) -> Value {
 pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
     let summary = summarize_toml(content);
 
-    // Check sections first (table headers like [dependencies])
+    // Fast path: a table header present in the (display-capped) summary gives
+    // precise source line ranges + sibling headers. Enrichment only — the
+    // full-parse fallback below is the authoritative resolver.
     if let Some(sections) = summary["sections"].as_array() {
-        // Match against table names: key could be "dependencies" matching "[dependencies]"
         let table_name = format!("[{}]", key);
         let array_name = format!("[[{}]]", key);
         if let Some(matched) = sections.iter().find(|s| {
@@ -892,89 +899,86 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
                 format: "toml".to_string(),
             });
         }
-
-        // Not found in sections — show available
-        let available: Vec<&str> = sections.iter().filter_map(|s| s["key"].as_str()).collect();
-        return Err(RecoverableError::with_hint(
-            format!("key '{}' not found in TOML", key),
-            format!("Available sections: {}", available.join(", ")),
-        ));
     }
 
-    // No sections found — check top-level keys
-    if let Some(keys) = summary["keys"].as_array() {
-        let available: Vec<&str> = keys.iter().filter_map(|k| k["key"].as_str()).collect();
-        // Try to find the key and extract via parsing
-        if let Ok(table) = content.parse::<toml::Table>() {
-            let segments: Vec<&str> = key.split('.').collect();
-            let mut current: &toml::Value = &toml::Value::Table(table);
-            for seg in &segments {
-                current = current.get(seg).ok_or_else(|| {
-                    RecoverableError::with_hint(
-                        format!("key '{}' not found in TOML", key),
-                        format!("Available keys: {}", available.join(", ")),
-                    )
-                })?;
-            }
-            let pretty =
-                toml::to_string_pretty(current).unwrap_or_else(|_| format!("{:?}", current));
-            return Ok(SectionResult {
-                content: pretty,
-                line_range: (1, content.lines().count()),
-                breadcrumb: segments.iter().map(|s| s.to_string()).collect(),
-                siblings: Vec::new(),
-                format: "toml".to_string(),
-            });
-        }
+    // Authoritative resolution against the FULL parse — independent of
+    // summarize_toml's 30-section display cap and its sections-XOR-keys
+    // branching. Fixes false "not found" for tables past the cap, and the
+    // dead dotted/flat-key fallback for files mixing top-level scalars with
+    // tables. See docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
+    // and docs/issues/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md.
+    let table = content.parse::<toml::Table>().map_err(|e| {
+        RecoverableError::with_hint(
+            format!("failed to parse TOML: {e}"),
+            "File could not be parsed as TOML",
+        )
+    })?;
+    let root = toml::Value::Table(table);
+    let available: Vec<String> = match &root {
+        toml::Value::Table(t) => t.keys().cloned().collect(),
+        _ => Vec::new(),
+    };
+    let segments: Vec<&str> = key.split('.').collect();
+    let mut current: &toml::Value = &root;
+    for seg in &segments {
+        current = current.get(seg).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("key '{}' not found in TOML", key),
+                format!("Available top-level keys: {}", available.join(", ")),
+            )
+        })?;
     }
-
-    Err(RecoverableError::with_hint(
-        format!("key '{}' not found in TOML", key),
-        "File could not be parsed as TOML",
-    ))
+    let pretty = toml::to_string_pretty(current).unwrap_or_else(|_| format!("{current:?}"));
+    Ok(SectionResult {
+        content: pretty,
+        line_range: (1, content.lines().count()),
+        breadcrumb: segments.iter().map(|s| s.to_string()).collect(),
+        siblings: Vec::new(),
+        format: "toml".to_string(),
+    })
 }
 
 pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
-    let summary = summarize_yaml(content);
-
-    if let Some(sections) = summary["sections"].as_array() {
-        if let Some(matched) = sections
-            .iter()
-            .find(|s| s["key"].as_str().unwrap_or("") == key)
-        {
-            let line = matched["line"].as_u64().unwrap_or(1) as usize;
-            let end_line = matched["end_line"].as_u64().unwrap_or(1) as usize;
-            let lines: Vec<&str> = content.lines().collect();
-            let start = (line - 1).min(lines.len());
-            let end = end_line.min(lines.len());
-            let section_content = lines[start..end].join("\n");
-            let siblings: Vec<String> = sections
-                .iter()
-                .filter_map(|s| s["key"].as_str())
-                .filter(|k| *k != key)
-                .map(|s| s.to_string())
-                .collect();
-            return Ok(SectionResult {
-                content: section_content,
-                line_range: (line, end_line),
-                breadcrumb: vec![key.to_string()],
-                siblings,
-                format: "yaml".to_string(),
-            });
-        }
-
-        let available: Vec<String> = sections
-            .iter()
-            .filter_map(|s| s["key"].as_str().map(|s| s.to_string()))
-            .collect();
+    // Resolve against the FULL (uncapped) top-level key scan, not
+    // summarize_yaml's 30-key display cap — fixes false "not found" for keys
+    // past position 30. See
+    // docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md.
+    // (Nested-key resolution remains unsupported — a pre-existing feature gap,
+    // not a regression; no YAML deserializer is a dependency here.)
+    let keys = yaml_top_level_keys(content);
+    if keys.is_empty() {
         return Err(RecoverableError::with_hint(
             format!("key '{}' not found in YAML", key),
-            format!("Available keys: {}", available.join(", ")),
+            "No top-level keys found in file",
         ));
     }
-
+    let line_count = content.lines().count();
+    if let Some(pos) = keys.iter().position(|(k, _)| k == key) {
+        let (_, line) = keys[pos];
+        let end_line = keys
+            .get(pos + 1)
+            .map(|(_, next)| next - 1)
+            .unwrap_or(line_count);
+        let lines: Vec<&str> = content.lines().collect();
+        let start = (line - 1).min(lines.len());
+        let end = end_line.min(lines.len());
+        let section_content = lines[start..end].join("\n");
+        let siblings: Vec<String> = keys
+            .iter()
+            .map(|(k, _)| k.clone())
+            .filter(|k| k != key)
+            .collect();
+        return Ok(SectionResult {
+            content: section_content,
+            line_range: (line, end_line),
+            breadcrumb: vec![key.to_string()],
+            siblings,
+            format: "yaml".to_string(),
+        });
+    }
+    let available: Vec<String> = keys.into_iter().map(|(k, _)| k).collect();
     Err(RecoverableError::with_hint(
         format!("key '{}' not found in YAML", key),
-        "No top-level keys found in file",
+        format!("Available keys: {}", available.join(", ")),
     ))
 }

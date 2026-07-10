@@ -407,6 +407,53 @@ fn extract_yaml_key_not_found() {
 }
 
 #[test]
+fn extract_toml_key_table_past_summary_cap() {
+    // >30 tables: a table past the 30-section summary cap must still resolve,
+    // not false-error. Regression for the summary-cap false-"not found" bug
+    // (docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md).
+    let mut content = String::new();
+    for i in 0..40 {
+        content.push_str(&format!("[table{i:02}]\nval = {i}\n\n"));
+    }
+    let result = extract_toml_key(&content, "table35").unwrap();
+    assert!(
+        result.content.contains("35"),
+        "table past the summary cap must resolve: {}",
+        result.content
+    );
+}
+
+#[test]
+fn extract_toml_key_top_level_scalar_in_mixed_file() {
+    // Mixes top-level scalars with tables: summarize_toml emits `sections`
+    // (tables exist), so the pre-fix sections-first-then-error path never reached
+    // the flat/dotted fallback. The top-level scalar must resolve. Regression for
+    // docs/issues/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md.
+    let content = "edition = \"2021\"\nname = \"foo\"\n\n[deps]\nserde = \"1\"\n";
+    let result = extract_toml_key(content, "edition").unwrap();
+    assert!(
+        result.content.contains("2021"),
+        "top-level scalar must resolve in a mixed file: {}",
+        result.content
+    );
+}
+
+#[test]
+fn extract_yaml_key_past_summary_cap() {
+    // >30 top-level keys: a key past the 30-key display cap must still resolve.
+    let mut content = String::new();
+    for i in 0..40 {
+        content.push_str(&format!("key{i:02}: value{i}\n"));
+    }
+    let result = extract_yaml_key(&content, "key35").unwrap();
+    assert!(
+        result.content.contains("value35"),
+        "yaml key past the cap must resolve: {}",
+        result.content
+    );
+}
+
+#[test]
 fn parse_all_headings_basic() {
     let content = "# Title\ntext\n## Setup\ndo this\n## Usage\nuse it";
     let headings = parse_all_headings(content);
