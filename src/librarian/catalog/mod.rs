@@ -10,6 +10,7 @@ pub mod commits;
 pub mod event_edges;
 pub mod events;
 pub mod find;
+pub mod graft;
 pub mod links;
 mod migrate_v6;
 pub mod observations;
