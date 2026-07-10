@@ -5,8 +5,11 @@
 //! `into_id`, then deletes `from_id`. DELETE IS LAST: those tables all
 //! `REFERENCES artifact(id) ON DELETE CASCADE`, so deleting the source before
 //! re-pointing would destroy the very history we migrate. Augmentation params
-//! merge (`artifact_augmentation`) is added in a later task.
+//! (`artifact_augmentation`) are migrated wholesale when only one side is
+//! augmented, or merged entry-by-entry (renumbering id collisions, flagging
+//! near-dup content) when both sides share an `entry_collection`.
 
+use crate::librarian::catalog::augmentation::next_index;
 use crate::librarian::catalog::Catalog;
 use crate::librarian::tools::RecoverableError;
 use anyhow::Result;
@@ -117,12 +120,7 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
         |r| r.get(0),
     )?;
 
-    // 5. Delete source LAST — cascades any leftover dup links / edges.
-    tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
-
-    tx.commit()?;
-
-    Ok(GraftReport {
+    let mut report = GraftReport {
         events_repointed,
         observations_repointed,
         links_repointed: u1 + u2,
@@ -130,13 +128,159 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
         event_edges_repointed: (ee_before - ee_left) as usize,
         event_edges_dropped: ee_left as usize, // conflicting dups, cascade-deleted above
         ..Default::default()
-    })
+    };
+
+    // 5. Augmentation params — migrate or merge (before the delete: params live
+    //    on `artifact_augmentation`, which also cascade-deletes with the source).
+    merge_augmentation(&tx, from_id, into_id, &mut report)?;
+
+    // 6. Delete source LAST — cascades any leftover dup links / edges / augmentation.
+    tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
+
+    tx.commit()?;
+
+    Ok(report)
+}
+
+/// Split `"F-12"` into `("F", 12)`. Returns `None` for ids without a
+/// trailing `-<int>` (e.g. no dash, or non-numeric suffix).
+fn split_id(id: &str) -> Option<(&str, u64)> {
+    let (prefix, num) = id.rsplit_once('-')?;
+    num.parse::<u64>().ok().map(|n| (prefix, n))
+}
+
+/// Deep-clone of `entry` with the `id` field removed, for near-dup comparison.
+fn strip_id(entry: &Value) -> Value {
+    let mut e = entry.clone();
+    if let Some(o) = e.as_object_mut() {
+        o.remove("id");
+    }
+    e
+}
+
+/// Fold `from_id`'s `artifact_augmentation` row onto `into_id`, before the
+/// caller's final `DELETE FROM artifact` (that delete cascade-deletes
+/// `artifact_augmentation`, so this must run first, same transaction).
+///
+/// - Neither side augmented, or only `from_id` is: re-point (migrate) the
+///   whole row wholesale — nothing to merge.
+/// - Both sides augmented but their `entry_collection`s differ (or either is
+///   unset): leave `into_id`'s params untouched; `from_id`'s row is
+///   cascade-deleted with the source.
+/// - Both sides augmented with the same `entry_collection`: append incoming
+///   entries onto the survivor's array, renumbering any incoming id that
+///   collides with an existing id (`<prefix>-<into_max+k>`, tracked in
+///   `report.remap`), and flagging incoming entries whose content (minus
+///   `id`) already matches a surviving entry (`report.suspicious`).
+fn merge_augmentation(
+    tx: &rusqlite::Transaction<'_>,
+    from_id: &str,
+    into_id: &str,
+    report: &mut GraftReport,
+) -> Result<()> {
+    let fetch = |id: &str| -> Result<Option<(String, Option<String>)>> {
+        tx.query_row(
+            "SELECT params, entry_collection FROM artifact_augmentation WHERE artifact_id=?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other.into()),
+        })
+    };
+
+    let Some((from_params, from_coll)) = fetch(from_id)? else {
+        return Ok(()); // from_id has no augmentation — nothing to merge or migrate.
+    };
+    let into_aug = fetch(into_id)?;
+
+    // into has no augmentation -> migrate from's row wholesale (re-point PK).
+    if into_aug.is_none() {
+        tx.execute(
+            "UPDATE artifact_augmentation SET artifact_id=?1 WHERE artifact_id=?2",
+            params![into_id, from_id],
+        )?;
+        return Ok(());
+    }
+    let (into_params, into_coll) = into_aug.unwrap();
+
+    // Both augmented but no shared entry_collection -> leave into's params as-is;
+    // from's augmentation row cascade-deletes with the source below.
+    let coll = match (&from_coll, &into_coll) {
+        (Some(a), Some(b)) if a == b => a.clone(),
+        _ => return Ok(()),
+    };
+
+    let mut into_json: Value =
+        serde_json::from_str(&into_params).unwrap_or_else(|_| serde_json::json!({}));
+    let from_json: Value =
+        serde_json::from_str(&from_params).unwrap_or_else(|_| serde_json::json!({}));
+    let into_arr = into_json
+        .get(&coll)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let from_arr = from_json
+        .get(&coll)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let into_ids: std::collections::HashSet<String> = into_arr
+        .iter()
+        .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
+        .collect();
+
+    let mut merged = into_arr.clone();
+    for entry in &from_arr {
+        let old = entry
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        // Near-dup detection: same object (minus id) already present on the survivor.
+        if into_arr.iter().any(|e| strip_id(e) == strip_id(entry)) {
+            report.suspicious.push(entry.clone());
+        }
+        let mut e = entry.clone();
+        if into_ids.contains(&old) {
+            // Collision: renumber to <prefix>-<max+k>, computed over the
+            // survivor's original ids PLUS any ids already merged in this
+            // loop, so two incoming collisions on the same prefix don't
+            // collide with each other.
+            if let Some((prefix, _)) = split_id(&old) {
+                let same_prefix: Vec<String> = merged
+                    .iter()
+                    .filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from))
+                    .collect();
+                let next = next_index(&same_prefix, prefix);
+                let new_id = format!("{prefix}-{next}");
+                if let Some(o) = e.as_object_mut() {
+                    o.insert("id".into(), serde_json::json!(new_id));
+                }
+                report.remap.insert(old, new_id);
+                report.entries_renumbered += 1;
+            }
+        }
+        merged.push(e);
+        report.entries_merged += 1;
+    }
+
+    into_json[&coll] = Value::Array(merged);
+    tx.execute(
+        "UPDATE artifact_augmentation SET params=?1 WHERE artifact_id=?2",
+        params![serde_json::to_string(&into_json)?, into_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
+    use crate::librarian::catalog::augmentation::{self, AugmentationRow};
     use crate::librarian::catalog::observations::{self, ObservationRow};
     use crate::librarian::catalog::Catalog;
     use crate::librarian::catalog::{event_edges, events, events::TestEventRowBuilder};
@@ -147,6 +291,26 @@ mod tests {
             .with_kind("tracker")
             .build();
         crate::librarian::catalog::artifact::upsert(cat, &row).unwrap();
+    }
+
+    /// Minimal augmentation row builder for graft tests: fixed prompt/timestamps,
+    /// caller supplies id, entry_collection name, and raw params JSON.
+    fn aug(id: &str, coll: &str, params: &str) -> AugmentationRow {
+        AugmentationRow {
+            artifact_id: id.into(),
+            prompt: "t".into(),
+            params: params.into(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            updated_at: "2026-01-01T00:00:00.000Z".into(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+            entry_collection: Some(coll.into()),
+            refreshed_at_commit: None,
+        }
     }
 
     #[test]
@@ -295,5 +459,98 @@ mod tests {
         art(&cat, "into", "/main/x.md");
         let err = graft_rows(&mut cat, "nope", "into").unwrap_err();
         assert!(err.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn graft_migrates_augmentation_when_into_has_none() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        augmentation::upsert(
+            &cat,
+            &aug("from", "failures", r#"{"failures":[{"id":"F-1","t":"a"}]}"#),
+        )
+        .unwrap();
+
+        graft_rows(&mut cat, "from", "into").unwrap();
+
+        let moved = augmentation::get(&cat, "into").unwrap().unwrap();
+        let p: Value = serde_json::from_str(&moved.params).unwrap();
+        assert_eq!(
+            p["failures"][0]["id"], "F-1",
+            "augmentation migrated wholesale"
+        );
+    }
+
+    #[test]
+    fn graft_renumbers_colliding_incoming_ids_and_reports_remap() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "into",
+                "failures",
+                r#"{"failures":[{"id":"F-1","t":"keep1"},{"id":"F-2","t":"keep2"}]}"#,
+            ),
+        )
+        .unwrap();
+        // Incoming F-2 collides (distinct content) -> renumber to F-3; F-9 is free -> kept.
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "from",
+                "failures",
+                r#"{"failures":[{"id":"F-2","t":"incoming"},{"id":"F-9","t":"free"}]}"#,
+            ),
+        )
+        .unwrap();
+
+        let report = graft_rows(&mut cat, "from", "into").unwrap();
+
+        assert_eq!(report.entries_renumbered, 1);
+        assert_eq!(report.remap.get("F-2").map(String::as_str), Some("F-3"));
+        let p: Value =
+            serde_json::from_str(&augmentation::get(&cat, "into").unwrap().unwrap().params)
+                .unwrap();
+        let ids: Vec<&str> = p["failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["F-1", "F-2", "F-3", "F-9"]);
+    }
+
+    #[test]
+    fn graft_flags_near_dup_as_suspicious() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "into",
+                "failures",
+                r#"{"failures":[{"id":"F-5","t":"same bug"}]}"#,
+            ),
+        )
+        .unwrap();
+        // Same content, different id string: same finding discovered twice.
+        augmentation::upsert(
+            &cat,
+            &aug(
+                "from",
+                "failures",
+                r#"{"failures":[{"id":"F-1","t":"same bug"}]}"#,
+            ),
+        )
+        .unwrap();
+
+        let report = graft_rows(&mut cat, "from", "into").unwrap();
+
+        assert_eq!(report.suspicious.len(), 1);
+        assert_eq!(report.suspicious[0]["t"], "same bug");
     }
 }

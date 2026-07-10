@@ -252,7 +252,7 @@ pub fn append_entry(
     Ok(new_id)
 }
 
-fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
+pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
     let re = regex::Regex::new(&format!(r"^{}-(\d+)$", regex::escape(id_prefix))).unwrap();
     existing_ids
         .iter()
