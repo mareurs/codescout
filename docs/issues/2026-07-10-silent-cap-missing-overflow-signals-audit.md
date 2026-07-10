@@ -1,0 +1,122 @@
+---
+id: '697ee9464df1d7bf'
+kind: bug
+status: open
+title: 'BUG: omnibus — survey/query tools return limit-capped results with no "more exists" signal (silent-cap family)'
+owners:
+- marius
+tags:
+- silent-cap
+- overflow
+- librarian
+- find
+- gather
+- read_file
+- audit
+- omnibus
+topic: null
+time_scope: null
+opened: '2026-07-10'
+related:
+- docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
+- docs/issues/2026-07-10-read-file-buffer-refs-silently-drop-navigation-params.md
+- docs/issues/2026-07-10-subagent-bughunt-omnibus-medium-low-findings.md
+severity: high
+---
+
+## Summary
+Roll-up of the "capped collection/string returned with no overflow/truncation signal"
+family, found in this session's (`fc0e9019`) 5-agent read-only sweep of the tool surface
+and verified first-hand for the high-severity rows. Companion to the already-fixed members
+of this family (`2026-07-07`/`2026-07-09` artifact-get truncation, committed `97a36905`;
+`2026-07-10-preview-headings-silent-cap-20.md`, committed `3bccb234`) and to session
+`5efbda5f`'s error-handling/Windows omnibus
+(`2026-07-10-subagent-bughunt-omnibus-medium-low-findings.md`).
+
+**One anti-pattern, ~15 sites.** The codebase already has the cure — the
+`overflow{shown,total,hint}` convention (grep/tree/symbols/references/list_overview) and
+`more_in_scope` (workspace_state_at). These are the stragglers that return a capped result
+without applying it. Two even carry a field *named* like a signal (`count`/`total`) that
+only ever equals the shown count — worse than silence, because it reads as authoritative.
+
+## Symptom (Effect)
+Survey/query tools cap results at a `limit`/budget and return them with no indication more
+exist. An agent surveying state (triage, ID allocation, tracker refresh) treats a partial
+result as complete → wrong triage, missed entries, duplicate IDs, incomplete tracker bodies.
+This is the same damage class as the already-fixed artifact-get truncation (which caused 7
+duplicate sections to be written from a short-read count).
+
+## Findings
+
+### HIGH (verified first-hand against the code)
+| site | capped field | signal? | note |
+|---|---|---|---|
+| `src/librarian/tools/find.rs` (`call`, resp ~:526) | `items` capped at `limit` (default 50) | `count`=page size only; `more_in_scope` NOT emitted | `build_hints` computes the unbounded `here` scope-total then discards it (only cross-scope deltas surfaced). Most-used query tool. Template: `workspace_state_at.rs`. |
+| `src/librarian/tools/gather.rs` `gather_git_log`/`gather_artifacts`/`gather_observations`/`gather_grep` | bare `json!(array)` capped at `limit` | none | Feeds `artifact_refresh(gather)` → agent synthesizes an incomplete tracker refresh believing it complete. |
+| `src/librarian/tools/timeline.rs` (`call` ~:87) | `Ok(Value::Array(out))` capped at `limit` | none (bare array, no wrapper) | Worst shape — no object to carry a signal. |
+| `src/librarian/tools/context.rs` (~:346) | candidate list truncated to a char budget | none | Dropped `sorted_ids` beyond `char_cap`; no `total_candidates`/`omitted`. |
+| `src/tools/file_summary/file_summary.rs:96` (`summarize_markdown`) | `headings` → 30 | none (`line_count` is wrong dimension) | Same shape as the fixed preview-headings bug; reached via `read_file` oversized-file summary. |
+
+### MEDIUM
+| site | capped field | note |
+|---|---|---|
+| `src/librarian/tools/context.rs:294` | per-artifact body preview `lines().take(30)` | no "N of M lines" marker distinguishing a 25-line body from a cut 500-line one |
+| `src/tools/memory/mod.rs` (`recall` arm) | `results` capped at `limit` (default 5) | no `has_more`/`total`; fix: overfetch `limit+1` |
+| `src/librarian/tools/refresh_stale.rs` | `count` = shown | `list_stale` never issues `COUNT(*)`; no true total exists |
+| `src/tools/file_summary/file_summary.rs:378,731` | JSON keys→30, flat TOML keys→20 (`.take`) | no `total_keys` |
+| `src/librarian/tools/legibility_scan/mod.rs` (`build_dry_run`) | `n` = capped head len | never sees pre-cap `grouped.len()` |
+| `src/tools/symbol/edit_code.rs` (`do_rename`) + `src/symbol/edit.rs` (`text_sweep`) | `textual_matches` → 20 files | `textual_match_count`/`_shown` derived from the already-truncated vec; `text_sweep` discards pre-cap total. (Agent-A rogue-fixed then reverted — fix deliberately here.) |
+
+### LOW
+| site | note |
+|---|---|
+| `src/tools/semantic/semantic_search.rs` | `total` = `result_items.len()` — misleading signal-named field, never reveals more |
+| `src/librarian/tools/link_scan/resolve.rs` (`Ambiguous`) | candidates capped at 5, no "and N more" (unlike `audit_doc_refs` which does it right) |
+| `src/librarian/tools/link_scan/mod.rs` | `artifacts_scanned` bounded by limit, no total (no `count_matching`) |
+| `src/librarian/tools/schema_validate.rs:10` | `.iter_errors().take(3)`, no "+K more" |
+| `src/librarian/tools/context.rs:179,217` | candidate-discovery caps (50/10) feeding the truncation above |
+
+## Root cause
+No missing capability — a missing *convention application*. `OverflowInfo{shown,total,hint}`
+(`src/tools/output.rs`) and `more_in_scope` (`workspace_state_at.rs`) are the established
+signals; grep/tree/symbols/references/list_overview/audit_doc_refs all use them correctly
+(confirmed in the sweep's ruled-out lists). The sites above predate or forgot the convention.
+
+## Fix
+Apply the existing convention per site:
+- **Result-set limit tools** (find/gather/timeline/memory/refresh_stale/legibility/link_scan):
+  compute the unbounded match total (`count_matching`-style) and emit `total` + a
+  `more`/`has_more`/`more_in_scope` hint when it exceeds the returned count; for bare-array
+  returns, wrap in `{items, total, truncated}`. Rename misleading `count`/`total` fields or
+  make them true totals.
+- **file_summary caps**: emit `total_headings`/`total_keys` + `*_truncated` (mirror the
+  `2026-07-10-preview-headings` fix that added `headings::cap`/`stamp_truncation`).
+- **context body previews**: append a "… N of M lines" marker.
+- **edit_code rename**: thread pre-cap file count out of `text_sweep`; add
+  `textual_files_total`/`textual_files_truncated`.
+- **Prevent regressions**: consider a test/lint asserting that any response field capped by
+  a `limit`/`MAX_*` carries a sibling total-or-`truncated` signal.
+
+## Tests added
+N/A — not yet fixed. Each fix gets a regression test asserting the signal fires exactly when
+the cap bites (pattern already established in `preview/headings.rs` tests).
+
+## Workarounds
+Don't trust a survey tool's returned count as the true total for large sets; cross-check
+with a scoped/unbounded count or a raw `grep` when the result drives a write.
+
+## Resume
+Fix in priority order: find → gather (feeds refreshes) → timeline → context → file_summary
+caps → the medium/low tail. Reuse `workspace_state_at.rs` (more_in_scope) and
+`preview/headings.rs` (`cap`/`stamp_truncation`) as templates.
+
+## References
+- `docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md` — correctness
+  standout from this sweep (wrong output, not just incomplete).
+- `docs/issues/2026-07-10-read-file-buffer-refs-silently-drop-navigation-params.md` (session
+  5efbda5f) — a sibling silent-drop in the same read_file surface.
+- `docs/issues/2026-07-10-subagent-bughunt-omnibus-medium-low-findings.md` (session 5efbda5f)
+  — parallel omnibus (error-handling + Windows paths); F19/F20 touch the same read_file area.
+- Already-fixed family members: `2026-07-07`/`2026-07-09` artifact-get truncation (`97a36905`),
+  `2026-07-10-preview-headings-silent-cap-20.md` (`3bccb234`).
+
