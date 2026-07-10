@@ -44,7 +44,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 
 ## Protocol — subtract-and-measure (P-1..P-8)
 
-Codified 2026-07-07 (fable-tuning T-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`.
+Codified 2026-07-07 (fable-tuning T-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`. P-3's base-arm-first rule is promoted to cross-repo craft as **prompt-hamsa Heuristic 12** (claude-plugins:`5202cca`, 2026-07-07) — the skill now demands it on every snippet-addition audit, in any repo.
 
 - **P-1 — Name the failure first.** A prompt change needs a locally observed failure (field transcript, tracker entry) or an explicitly-flagged imported claim (migration guide, forum). An imported claim is a hypothesis to test, not evidence to act on (A-14: FND-8 imported, did not manifest).
 - **P-2 — Pre-register before running.** Append the A-N row (gap, move, prediction, confidence) **with a decision rule** — numeric ship/no-ship thresholds — before any arm runs. Outcome stays empty until evidence lands. A post-hoc threshold is a rationalization.

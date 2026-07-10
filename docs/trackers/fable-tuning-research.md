@@ -41,7 +41,7 @@ How did Fable behave when it "ran great" (Jun 9 2026 GA / April Mythos Preview) 
 
 *Caveat:* detection relies on the response `model` field being honest. That is the same channel BridgeMind used to count 9/12 rerouted tasks (FND-7), so the mechanism *as reported* would have been visible here.
 
-*Verdict:* **silent Opus fallback REFUTED for local usage** → FND-14 (findings), FND-12 resolved, T-9 done, T-12 dropped as moot. Forward monitoring **SHIPPED same day** (user go-ahead): llm-proxy now captures `/message/model` as `served_model` — trace metadata `requested_model`/`served_model`, `lf.py find` SERVED column + `lf.py trace` mismatch marker; verified live post-restart. See llm-proxy `docs/issues/2026-07-07-langfuse-served-model-not-logged.md` (fixed).
+*Verdict:* **silent Opus fallback REFUTED for local usage** → FND-14 (findings), FND-12 resolved, T-9 done, T-12 dropped as moot. Forward monitoring **SHIPPED same day** (user go-ahead): llm-proxy now captures `/message/model` as `served_model` — trace metadata `requested_model`/`served_model`, `lf.py find` SERVED column + `lf.py trace` mismatch marker; verified live post-restart. See llm-proxy `docs/issues/2026-07-07-langfuse-served-model-not-logged.md` (fixed). Operationalized as a one-command check 2026-07-07: **`lf.py mismatches`** (llm-proxy:`b72d0f6`, paginated scan, pre-capture traces counted as no-data) — first run: 300 scanned / 293 with model data / **0 mismatches**.
 ## Sources (reliability noted)
 
 **Official / primary:**
