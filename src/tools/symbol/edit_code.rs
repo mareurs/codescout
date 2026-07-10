@@ -364,39 +364,42 @@ impl EditCode {
         }
 
         let old_name_str = name_path.rsplit('/').next().unwrap_or(name_path);
-        let (textual, sweep_skipped, sweep_skip_reason) = if old_name_str.len() < 4 {
-            (
-                vec![],
-                true,
-                Some(format!(
-                    "name too short ({} chars, minimum 4)",
-                    old_name_str.len()
-                )),
-            )
-        } else {
-            let sweep_root = root.clone();
-            let sweep_name = old_name_str.to_string();
-            let sweep_files = lsp_files.clone();
-            let sweep_result = tokio::task::spawn_blocking(move || {
-                text_sweep(&sweep_root, &sweep_name, &sweep_files, 20, 2)
-            })
-            .await;
-            match sweep_result {
-                Ok(Ok(matches)) => (matches, false, None::<String>),
-                Ok(Err(e)) => {
-                    tracing::warn!("text sweep after rename failed: {e}");
-                    (vec![], false, Some(format!("sweep error: {e}")))
+        let (textual, sweep_skipped, sweep_skip_reason, textual_files_total) =
+            if old_name_str.len() < 4 {
+                (
+                    vec![],
+                    true,
+                    Some(format!(
+                        "name too short ({} chars, minimum 4)",
+                        old_name_str.len()
+                    )),
+                    0,
+                )
+            } else {
+                let sweep_root = root.clone();
+                let sweep_name = old_name_str.to_string();
+                let sweep_files = lsp_files.clone();
+                let sweep_result = tokio::task::spawn_blocking(move || {
+                    text_sweep(&sweep_root, &sweep_name, &sweep_files, 20, 2)
+                })
+                .await;
+                match sweep_result {
+                    Ok(Ok((matches, total_files))) => (matches, false, None::<String>, total_files),
+                    Ok(Err(e)) => {
+                        tracing::warn!("text sweep after rename failed: {e}");
+                        (vec![], false, Some(format!("sweep error: {e}")), 0)
+                    }
+                    Err(join_err) => {
+                        tracing::warn!("text sweep task join failed: {join_err}");
+                        (
+                            vec![],
+                            false,
+                            Some(format!("sweep task failed: {join_err}")),
+                            0,
+                        )
+                    }
                 }
-                Err(join_err) => {
-                    tracing::warn!("text sweep task join failed: {join_err}");
-                    (
-                        vec![],
-                        false,
-                        Some(format!("sweep task failed: {join_err}")),
-                    )
-                }
-            }
-        };
+            };
 
         let textual_total: usize = textual.iter().map(|m| m.occurrence_count).sum();
         let textual_shown = textual.len();
@@ -422,6 +425,8 @@ impl EditCode {
             "textual_matches": textual_json,
             "textual_match_count": textual_total,
             "textual_matches_shown": textual_shown,
+            "textual_files_total": textual_files_total,
+            "textual_files_truncated": textual_files_total > textual_shown,
             "sweep_skipped": sweep_skipped,
             "verify_hint": "LSP rename may match occurrences inside string literals, comments, or macro arguments. Verify each changed file is still valid (e.g. cargo check / tsc --noEmit).",
         });

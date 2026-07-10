@@ -376,7 +376,7 @@ pub fn text_sweep(
     lsp_modified_files: &std::collections::HashSet<PathBuf>,
     max_matches: usize,
     max_previews_per_file: usize,
-) -> anyhow::Result<Vec<TextualMatch>> {
+) -> anyhow::Result<(Vec<TextualMatch>, usize)> {
     const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
     let escaped = regex::escape(old_name);
@@ -455,10 +455,13 @@ pub fn text_sweep(
     // Sort: documentation first, config second, source third
     file_matches.sort_by_key(|m| classify_sort_key(m.kind));
 
-    // Cap total entries
+    // Pre-cap file total, so callers can signal truncation instead of deriving
+    // counts from the already-truncated vec (silent-cap family — see
+    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    let total_files = file_matches.len();
     file_matches.truncate(max_matches);
 
-    Ok(file_matches)
+    Ok((file_matches, total_files))
 }
 
 /// Write lines back to a file, preserving a trailing newline if the original had one.

@@ -2366,7 +2366,7 @@ fn text_sweep_finds_matches_in_comments_and_docs() {
     .unwrap();
 
     let lsp_files = std::collections::HashSet::new();
-    let matches = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
+    let (matches, _total) = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
 
     // Should find matches in all 3 files
     assert_eq!(matches.len(), 3);
@@ -2398,7 +2398,7 @@ fn text_sweep_skips_lsp_modified_files() {
     let mut lsp_files = std::collections::HashSet::new();
     lsp_files.insert(modified_file);
 
-    let matches = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
+    let (matches, _total) = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
 
     assert_eq!(matches.len(), 1);
     assert!(matches[0].file.contains("untouched.md"));
@@ -2418,9 +2418,13 @@ fn text_sweep_respects_max_matches_cap() {
     }
 
     let lsp_files = std::collections::HashSet::new();
-    let matches = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
+    let (matches, total) = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
 
     assert_eq!(matches.len(), 20);
+    assert_eq!(
+        total, 30,
+        "pre-cap file total preserved despite the 20-file cap"
+    );
 }
 
 #[test]
@@ -2435,7 +2439,7 @@ fn text_sweep_limits_previews_per_file() {
     std::fs::write(dir.path().join("many.rs"), &content).unwrap();
 
     let lsp_files = std::collections::HashSet::new();
-    let matches = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
+    let (matches, _total) = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
 
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].occurrence_count, 10);
@@ -2454,7 +2458,7 @@ fn text_sweep_uses_word_boundary() {
     .unwrap();
 
     let lsp_files = std::collections::HashSet::new();
-    let matches = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
+    let (matches, _total) = text_sweep(dir.path(), "FooHandler", &lsp_files, 20, 2).unwrap();
 
     assert_eq!(matches.len(), 1);
     // \bFooHandler\b does NOT match inside FooHandlerConfig because
