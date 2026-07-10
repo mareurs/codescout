@@ -1570,3 +1570,42 @@ fn refresh_in_flight_guard_is_exclusive_per_project() {
     assert!(super::refresh_begin(&pid), "acquire after end must succeed");
     super::refresh_end(&pid);
 }
+#[tokio::test]
+async fn workspace_activate_injects_bootstrap_guide_body_v2() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let blocks = Workspace
+        .call_content(
+            json!({ "action": "activate", "path": dir.path().to_str().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        blocks.len(),
+        2,
+        "first workspace(activate) must append the bootstrap guide body block, got {}",
+        blocks.len()
+    );
+    let second = blocks[1].as_text().expect("second block must be text");
+    assert!(
+        second
+            .text
+            .contains("<!-- auto-injected get_guide('project-activation-bootstrap')"),
+        "second block missing the auto-inject opening marker"
+    );
+}

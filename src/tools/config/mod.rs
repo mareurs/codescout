@@ -88,6 +88,14 @@ impl Tool for Workspace {
             Some(format_project_status(result))
         }
     }
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        // Fires the project-activation-bootstrap guide via the V2 hard-injection
+        // path. Tool-granular (no access to `action`), but `activate` clears the
+        // guide ledger in `call()` before `call_content` re-checks it, so the
+        // guide re-injects on every activate. A pre-activate status/list call
+        // fires it once (harmless); post-activate calls are ledger-suppressed.
+        Some("project-activation-bootstrap")
+    }
 }
 
 pub struct ActivateProject;
