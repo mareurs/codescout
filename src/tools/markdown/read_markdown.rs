@@ -186,7 +186,7 @@ fn read_markdown_single_heading(
                             .collect();
                     return Ok(json!({
                         "ok": false,
-                        "error": format!("heading {:?} not found", heading_query),
+                        "error": format!("heading '{}' not found", heading_query),
                         "headings": headings_json,
                         "hint": "pick a heading from the list above, or use start_line/end_line",
                     }));

@@ -1986,6 +1986,36 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
         "rendered output must contain 'next: ' cue"
     );
 }
+#[tokio::test]
+async fn heading_not_found_error_uses_single_quotes_not_debug() {
+    // The heading-not-found error must use the single-quote convention
+    // (heading '<x>' not found), not Debug/`{:?}` double-quotes.
+    use crate::tools::Tool;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("q.md");
+    std::fs::write(&path, "# A\n\n## B\n").unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let value = tool
+        .call(
+            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Missing"}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let err_msg = value["error"]
+        .as_str()
+        .expect("error field must be a string");
+    assert!(
+        err_msg.contains("'## Missing'"),
+        "error must single-quote the heading, got: {err_msg}"
+    );
+    assert!(
+        !err_msg.contains("\"## Missing\""),
+        "error must NOT use Debug/double-quotes, got: {err_msg}"
+    );
+}
 
 // ── apply_frontmatter_mutation wrapper tests ────────────────────────────────
 
