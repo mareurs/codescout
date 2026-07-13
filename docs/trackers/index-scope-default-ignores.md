@@ -48,10 +48,49 @@ Open questions:
 `sync_project` and `check_index_scope` now honour `[ignored_paths]` via a shared
 `build_ignore_matcher` (gitignore semantics; defaults exclude `.venv`/`node_modules`/`target`/etc.).
 
+**Default set EXPANDED (2026-07-13, under `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md` item 3).**
+`default_ignored_patterns()` went from 10 → 25 entries. Added: `venv`, `site-packages`,
+`.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`, `.next`, `.nuxt`, `.svelte-kit`,
+`.turbo`, `.parcel-cache`, `.gradle`, `.terraform`, `.dart_tool`, `.stack-work`, `.direnv`, `.idea`.
+
+### The "default-on vs opt-in" question is now ANSWERED — by a criterion, not a vote
+
+This tracker's open question was *"Default-on risks silently skipping code a user wants indexed."*
+The resolution is a rule that makes the answer mechanical:
+
+> Because the code index compiles these with **gitignore semantics**, a bare name prunes at **any
+> depth**. Therefore a default may only name a directory that **cannot plausibly contain
+> hand-authored source.**
+
+Under that rule, default-on is safe — *for entries that pass it*. The entries that fail it stay
+opt-in, permanently.
+
+### Candidates from this tracker that were REJECTED
+
+- **`models`** — proposed above, but it is a very common *source* directory (Django / Rails / domain
+  models). At any depth it would silently prune `src/models/`. This is exactly the failure the
+  tracker warned about, and the proposal contained it.
+- **`checkpoint-*`** — not shipped. Plausible enough, but unlike the caches it is a *glob*, and the
+  list is currently bare-name/directory-oriented. Revisit with the glob work below.
+- **`vendor` / `bin` / `obj` / `out`** — legitimate source dirs in some ecosystems.
+- **`*.pt` / `*.safetensors` / `*.onnx` / `*.gguf`** — already excluded from *embedding* by the
+  `lang_for_ext` allowlist, so listing them saves walk time but not memory. Not the OOM lever they
+  look like.
+
+The rejections are pinned by a regression test
+(`default_ignores_cover_dependency_trees_but_never_plausible_source_dirs`, `src/config/project.rs`),
+not just by comment — a future edit cannot quietly re-add `models` and start dropping source.
+
 **Still open (this tracker):**
-- **Expand the default set** — `**/site-packages/`, `**/models/`, `**/checkpoint-*/`, `*.pt`,
-  `*.safetensors`, `*.onnx`, `*.gguf`. Current defaults are bare dir names only.
-- **Librarian matcher inconsistency** — the librarian markdown indexer shares the `[ignored_paths]`
-  *list* but compiles it with plain `globset::Glob` (`compile_ignore`), so bare names don't match
-  nested dirs there the way the code index's gitignore matcher does. Unify or document.
-- Aggregate walk/embed budget; cgroup `MemoryMax`/`MemorySwapMax=0` cap; `oom_score_adj=200` review.
+- **Librarian matcher inconsistency** — UNCHANGED and now more consequential: the librarian markdown
+  indexer shares the `[ignored_paths]` *list* but compiles it with plain `globset::Glob`
+  (`compile_ignore`), so bare names do **not** match nested dirs there the way the code index's
+  gitignore matcher does. The 15 new defaults therefore have **narrower reach in the librarian than
+  in the code index**. Unify or document.
+- **File-extension / glob patterns** (`checkpoint-*`, weight files) — needs the list to grow beyond
+  bare directory names first.
+- **Un-ignore path** — still no way to *remove* a built-in default per project. Not urgent while the
+  defaults obey the criterion above, but it is the escape hatch if one ever proves wrong.
+- Aggregate walk/embed budget; cgroup `MemoryMax`/`MemorySwapMax=0` cap (now drafted in
+  `contrib/systemd/README.md`); `oom_score_adj=200` review (**done** — inherited from the terminal's
+  KDE `app.slice` scope, not set by codescout, and the bias is correct; see the same README).

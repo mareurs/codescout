@@ -374,19 +374,71 @@ fn default_embed_model() -> String {
     "local:AllMiniLML6V2Q".into()
 }
 
+/// Directories excluded from indexing by default.
+///
+/// These are compiled with **gitignore semantics** for the code index
+/// (`build_ignore_matcher`), so a bare name matches at ANY depth — `target`
+/// prunes `crates/foo/target` too. That reach is what makes the selection
+/// criterion strict:
+///
+/// > **A default may only name a directory that cannot plausibly contain
+/// > hand-authored source.**
+///
+/// Deliberately NOT included, despite being proposed in
+/// `docs/trackers/index-scope-default-ignores.md`:
+/// - `models` — a *very* common source directory (Django/Rails/domain models).
+///   At any depth it would silently prune `src/models/`, which is exactly the
+///   "default-on risks silently skipping code a user wants indexed" failure the
+///   tracker warns about.
+/// - `vendor`, `bin`, `obj`, `out` — conventionally build output or vendored
+///   deps, but each is a legitimate source directory in some ecosystems. Left to
+///   per-project `[ignored_paths]`.
+///
+/// Binary weights (`*.pt`, `*.safetensors`, `*.onnx`, `*.gguf`) are NOT listed:
+/// they are already excluded from *embedding* by the `lang_for_ext` extension
+/// allowlist. Adding them here would only save walk time, not memory, and this
+/// list is directory-oriented.
 fn default_ignored_patterns() -> Vec<String> {
-    vec![
-        ".git".into(),
-        "node_modules".into(),
-        "target".into(),
-        "__pycache__".into(),
-        ".venv".into(),
-        "dist".into(),
-        "build".into(),
-        ".codescout".into(),
-        ".worktrees".into(),
-        ".claude".into(),
+    [
+        // VCS / codescout's own state
+        ".git",
+        ".codescout",
+        ".worktrees",
+        ".claude",
+        // Build output / dependency trees (unambiguous)
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        // Python: venvs, vendored deps, tool caches
+        ".venv",
+        "venv",
+        "site-packages",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        // JS/TS build + package-manager caches
+        ".next",
+        ".nuxt",
+        ".svelte-kit",
+        ".turbo",
+        ".parcel-cache",
+        // JVM / Gradle
+        ".gradle",
+        // Other ecosystems' caches
+        ".terraform",
+        ".dart_tool",
+        ".stack-work",
+        // Environment / editor state
+        ".direnv",
+        ".idea",
     ]
+    .iter()
+    .map(|s| (*s).to_string())
+    .collect()
 }
 
 #[allow(dead_code)]
@@ -1151,6 +1203,58 @@ model = "local:test"
             err.to_string().contains("ignored_paths.patterns"),
             "expected ignored_paths limit error, got {err}"
         );
+    }
+
+    #[test]
+    fn default_ignores_cover_dependency_trees_but_never_plausible_source_dirs() {
+        // docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md, item 3: broaden the
+        // default-ignore set so more dependency/cache trees are pruned out of the box.
+        let d = default_ignored_patterns();
+
+        // The set is compiled with GITIGNORE semantics for the code index, so a bare
+        // name prunes at any depth. Everything here must be a directory that cannot
+        // plausibly hold hand-authored source.
+        for expected in [
+            "node_modules",
+            "target",
+            ".venv",
+            "venv",
+            "site-packages",
+            "__pycache__",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".tox",
+            ".next",
+            ".gradle",
+            ".terraform",
+            ".direnv",
+        ] {
+            assert!(
+                d.iter().any(|p| p == expected),
+                "`{expected}` must be ignored by default; got {d:?}"
+            );
+        }
+
+        // GUARD: these read like build output but are real source dirs in some
+        // ecosystems. With gitignore semantics a bare entry would prune `src/models/`
+        // (Django/Rails) or a legitimate `vendor/`/`bin/` — silently dropping code the
+        // user wanted indexed. Keep them per-project, never default-on.
+        // See docs/trackers/index-scope-default-ignores.md ("default-on risks silently
+        // skipping code a user wants indexed").
+        for forbidden in ["models", "vendor", "bin", "obj", "out", "src", "lib"] {
+            assert!(
+                !d.iter().any(|p| p == forbidden),
+                "`{forbidden}` must NOT be a default ignore — it is a plausible source \
+                 directory and gitignore semantics would prune it at any depth"
+            );
+        }
+
+        // No duplicates — the list is unioned with the user's patterns.
+        let mut sorted = d.clone();
+        sorted.sort();
+        let before = sorted.len();
+        sorted.dedup();
+        assert_eq!(before, sorted.len(), "default ignore list has duplicates");
     }
 
     #[test]
