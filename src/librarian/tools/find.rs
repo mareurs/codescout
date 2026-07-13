@@ -333,7 +333,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let semantic_vec: Option<Vec<f32>> = if let Some(ref query) = a.semantic {
         match ctx.embedding.as_ref() {
             Some(svc) => Some(svc.embedder.embed_query(query).await?),
-            None => anyhow::bail!("semantic search requires an embedding service"),
+            // Correctable by the caller — drop `semantic` and the same query runs
+            // as a plain filter. Recoverable, not a hard failure that aborts
+            // sibling calls (omnibus 49ee6a03, F11).
+            None => {
+                return Err(RecoverableError::with_hint(
+                    "semantic search requires an embedding service, which is not configured",
+                    "Retry without the `semantic` param (use `filter` with a `contains` op on \
+                     title/rel_path for a literal match), or configure an embedder.",
+                ))
+            }
         }
     } else {
         None
@@ -626,6 +635,26 @@ mod tests {
             .with_title(title)
             .with_updated_at(1)
             .build()
+    }
+
+    #[tokio::test]
+    async fn semantic_without_embedder_is_recoverable() {
+        // BUG (omnibus 49ee6a03, F11): find() hard-failed via anyhow::bail! when
+        // `semantic=` was passed with no embedding service configured. That is a
+        // user-CORRECTABLE input error — the agent can simply retry without the
+        // `semantic` param — so it must be a RecoverableError (isError:false at
+        // the MCP boundary), not a hard failure that aborts sibling calls.
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = mk_ctx(cat); // no embedder
+
+        let err = call(&ctx, json!({"semantic": "some query"}))
+            .await
+            .expect_err("semantic without an embedder must error");
+
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "must be RecoverableError so the agent can retry without `semantic`; got: {err}"
+        );
     }
 
     #[tokio::test]

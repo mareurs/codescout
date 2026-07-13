@@ -16,7 +16,7 @@ use crate::fs::{
 use crate::symbol::edit::{
     apply_text_edits, clamp_range_to_parent, collect_all_name_paths, editing_end_line,
     editing_end_line_strict, editing_start_line, find_ast_name_path, find_parent_symbol,
-    text_sweep, write_lines,
+    text_sweep, write_lines, CorruptionVerdict,
 };
 use crate::symbol::query::{
     count_symbols_by_name_path, fetch_validated_symbol, find_unique_symbol_by_name_path,
@@ -343,11 +343,7 @@ impl EditCode {
                     let Ok(content) = std::fs::read_to_string(path) else {
                         continue;
                     };
-                    let rel = path
-                        .strip_prefix(&root)
-                        .unwrap_or(path)
-                        .display()
-                        .to_string();
+                    let rel = crate::util::fs::relative_forward_slash(path, &root);
                     let mut flagged_lines: Vec<u32> = vec![];
                     let mut previews: Vec<String> = vec![];
                     for (i, line) in content.lines().enumerate() {
@@ -703,62 +699,54 @@ impl EditCode {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
 
-        let post_ast = crate::ast::extract_symbols(&full_path).ok();
-        if pre_count > 0 {
-            let post_count = post_ast
-                .as_ref()
-                .map(|syms| count_symbols_by_name_path(syms, &sym.name_path))
-                .unwrap_or(pre_count);
+        // Keep the re-extraction ERROR rather than discarding it with `.ok()` — when
+        // the post-edit AST is unavailable the corruption checks cannot run, and the
+        // agent needs to know that (omnibus 49ee6a03, F10).
+        let post_ast = crate::ast::extract_symbols(&full_path);
+        let extract_err = post_ast.as_ref().err().map(|e| e.to_string());
+        let post_ast = post_ast.ok();
 
-            if post_count == 0 {
-                write_lines(&full_path, &lines, content.ends_with('\n'))?;
-                ctx.lsp.notify_file_changed(&full_path).await;
-                ctx.agent
-                    .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path)
-                    .await;
-                ctx.agent
-                    .mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path)
-                    .await;
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "edit_code replace('{name_path}') dropped the symbol definition — \
-                         body must be the complete declaration (attributes, doc comments, \
-                         signature, and body), not just body statements. File restored."
-                    ),
-                    "Use symbols(symbol=..., include_body=true) to see the expected format.",
-                )
-                .into());
-            }
-        }
+        let verdict = crate::symbol::edit::corruption_verdict(
+            pre_count,
+            pre_set.as_ref(),
+            target_ast_name_path.as_deref(),
+            &sym.name_path,
+            post_ast.as_deref(),
+        );
 
-        if let (Some(pre), Some(post)) = (pre_set.as_ref(), post_ast.as_ref()) {
-            let post_set = collect_all_name_paths(post);
-            let dropped: Vec<String> = pre
-                .difference(&post_set)
-                .filter(|np| target_ast_name_path.as_deref() != Some(np.as_str()))
-                .cloned()
-                .collect();
-            if !dropped.is_empty() {
-                write_lines(&full_path, &lines, content.ends_with('\n'))?;
-                ctx.lsp.notify_file_changed(&full_path).await;
-                ctx.agent
-                    .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path)
-                    .await;
-                ctx.agent
-                    .mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path)
-                    .await;
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "edit_code replace('{name_path}') would have dropped sibling symbols: {}. \
-                         The edit range overshot into adjacent code (likely a stale LSP range). \
-                         File restored.",
-                        dropped.join(", ")
-                    ),
-                    "Try symbols(path) to refresh, then retry; or narrow the edit via \
-                     edit_file with unique anchors.",
-                )
-                .into());
-            }
+        // Both corrupting verdicts roll the file back identically; only the message differs.
+        let rollback_reason = match &verdict {
+            CorruptionVerdict::TargetDropped => Some((
+                format!(
+                    "edit_code replace('{name_path}') dropped the symbol definition — \
+                     body must be the complete declaration (attributes, doc comments, \
+                     signature, and body), not just body statements. File restored."
+                ),
+                "Use symbols(symbol=..., include_body=true) to see the expected format.",
+            )),
+            CorruptionVerdict::SiblingsDropped(dropped) => Some((
+                format!(
+                    "edit_code replace('{name_path}') would have dropped sibling symbols: {}. \
+                     The edit range overshot into adjacent code (likely a stale LSP range). \
+                     File restored.",
+                    dropped.join(", ")
+                ),
+                "Try symbols(path) to refresh, then retry; or narrow the edit via \
+                 edit_file with unique anchors.",
+            )),
+            CorruptionVerdict::Clean | CorruptionVerdict::Unverified => None,
+        };
+
+        if let Some((msg, hint)) = rollback_reason {
+            write_lines(&full_path, &lines, content.ends_with('\n'))?;
+            ctx.lsp.notify_file_changed(&full_path).await;
+            ctx.agent
+                .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path)
+                .await;
+            ctx.agent
+                .mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path)
+                .await;
+            return Err(RecoverableError::with_hint(msg, hint).into());
         }
 
         ctx.lsp.notify_file_changed(&full_path).await;
@@ -772,6 +760,19 @@ impl EditCode {
             json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) });
         if let Some(r) = range_repair {
             response["warning"] = json!(r.warning(&sym.name));
+        }
+        // The write succeeded but the dropped-symbol / dropped-sibling checks could
+        // not run. Say so — the previous code reported a bare "ok" here, which read
+        // as "verified clean" when nothing had actually been verified.
+        if verdict == CorruptionVerdict::Unverified {
+            response["corruption_check"] = json!("skipped");
+            response["corruption_check_error"] = json!(
+                extract_err.unwrap_or_else(|| "post-edit symbol extraction failed".to_string())
+            );
+            response["hint"] = json!(
+                "The edit was written but NOT verified against dropped symbols. \
+                 Re-read the file with symbols(path) to confirm it is intact."
+            );
         }
         Ok(response)
     }

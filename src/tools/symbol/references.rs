@@ -315,7 +315,7 @@ impl Tool for References {
                 let sample = others
                     .iter()
                     .take(3)
-                    .map(|p| p.strip_prefix(&root).unwrap_or(p).display().to_string())
+                    .map(|p| crate::util::fs::relative_forward_slash(p, &root))
                     .collect::<Vec<_>>()
                     .join(", ");
                 result["completeness_warning"] = json!(format!("LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex. Re-run, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.", n = others.len()));

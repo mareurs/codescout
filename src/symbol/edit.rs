@@ -232,6 +232,77 @@ pub fn collect_all_name_paths(
     out
 }
 
+/// Verdict of `edit_code`'s post-edit corruption check.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CorruptionVerdict {
+    /// The rewritten file re-parsed, and it still contains the target symbol and
+    /// every sibling that was there before.
+    Clean,
+    /// The edit dropped the target symbol's own definition — caller must roll back.
+    TargetDropped,
+    /// The edit overshot and dropped these sibling symbols — caller must roll back.
+    /// Sorted, so the resulting error message is deterministic.
+    SiblingsDropped(Vec<String>),
+    /// The post-edit AST could not be re-extracted, so NEITHER check could run.
+    /// The edit stands, but it is UNVERIFIED and must never be reported as clean.
+    Unverified,
+}
+
+/// Decide the post-edit corruption verdict by comparing the pre- and post-write ASTs.
+///
+/// `post_ast: None` means re-extraction FAILED, and handling that case is the whole
+/// reason this function exists. The previous inline code did
+/// `post_ast.map(count).unwrap_or(pre_count)` — on failure it fabricated
+/// `post_count == pre_count`, i.e. it actively asserted "nothing was dropped" — and
+/// then skipped the sibling-drop check too (it was gated on `post_ast` being `Some`).
+/// Both safety nets silently disengaged in exactly the case where the file was most
+/// suspicious, and `.ok()` threw away the reason. See omnibus
+/// `docs/issues/2026-07-10-subagent-bughunt-omnibus-medium-low-findings.md`, F10.
+///
+/// A failure to re-extract is now its own verdict (`Unverified`) rather than being
+/// laundered into `Clean`.
+pub fn corruption_verdict(
+    pre_count: usize,
+    pre_set: Option<&std::collections::HashSet<String>>,
+    target_ast_name_path: Option<&str>,
+    counted_name_path: &str,
+    post_ast: Option<&[SymbolInfo]>,
+) -> CorruptionVerdict {
+    let Some(post) = post_ast else {
+        // If the PRE-edit AST was unavailable too (e.g. unsupported language), then
+        // neither check could ever have run and nothing was silently skipped — the
+        // edit is as verified as it was always going to be.
+        return if pre_count > 0 || pre_set.is_some() {
+            CorruptionVerdict::Unverified
+        } else {
+            CorruptionVerdict::Clean
+        };
+    };
+
+    if pre_count > 0
+        && crate::symbol::query::count_symbols_by_name_path(post, counted_name_path) == 0
+    {
+        return CorruptionVerdict::TargetDropped;
+    }
+
+    if let Some(pre) = pre_set {
+        let post_set = collect_all_name_paths(post);
+        let mut dropped: Vec<String> = pre
+            .difference(&post_set)
+            .filter(|np| target_ast_name_path != Some(np.as_str()))
+            .cloned()
+            .collect();
+        if !dropped.is_empty() {
+            // HashSet::difference yields in arbitrary order; sort so the
+            // "would have dropped sibling symbols: ..." message is stable.
+            dropped.sort();
+            return CorruptionVerdict::SiblingsDropped(dropped);
+        }
+    }
+
+    CorruptionVerdict::Clean
+}
+
 /// Locate the AST `name_path` of the symbol matching `lsp_name` at `lsp_start` (±1 line).
 ///
 /// LSP and AST name_paths diverge on Rust impl blocks (LSP: `impl Type/m`, AST: `Type/m`),
@@ -434,11 +505,7 @@ pub fn text_sweep(
         }
 
         if !lines.is_empty() {
-            let rel_path = path
-                .strip_prefix(project_root)
-                .unwrap_or(path)
-                .display()
-                .to_string();
+            let rel_path = crate::util::fs::relative_forward_slash(path, project_root);
             let kind = classify_file(path);
             let occurrence_count = lines.len();
 
@@ -609,4 +676,95 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
     }
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lsp::SymbolKind;
+    use std::collections::HashSet;
+
+    fn sym(name_path: &str) -> SymbolInfo {
+        SymbolInfo {
+            name: name_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(name_path)
+                .to_string(),
+            name_path: name_path.to_string(),
+            kind: SymbolKind::Function,
+            file: std::path::PathBuf::from("x.rs"),
+            start_line: 0,
+            end_line: 1,
+            range_start_line: None,
+            start_col: 0,
+            children: vec![],
+            detail: None,
+        }
+    }
+
+    fn set(paths: &[&str]) -> HashSet<String> {
+        paths.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn failed_post_extraction_is_unverified_not_clean() {
+        // BUG (omnibus 49ee6a03, F10): the old inline code did
+        // `post_ast.map(count).unwrap_or(pre_count)` — on re-extraction failure it
+        // fabricated post_count == pre_count, actively asserting "nothing dropped",
+        // and skipped the sibling check too. Both safety nets silently disengaged
+        // exactly when the file was most suspicious. A failed re-extraction must be
+        // its own verdict, never laundered into Clean.
+        let pre = set(&["foo", "bar"]);
+        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", None);
+        assert_eq!(
+            verdict,
+            CorruptionVerdict::Unverified,
+            "a failed post-edit re-extraction must NOT be reported as a clean check"
+        );
+    }
+
+    #[test]
+    fn failed_post_extraction_is_clean_when_there_was_nothing_to_verify() {
+        // If the PRE-edit AST was unavailable too (unsupported language), neither
+        // check could ever have run — nothing was silently skipped, so this is not
+        // an "unverified" regression, it is the normal no-AST path.
+        let verdict = corruption_verdict(0, None, None, "foo", None);
+        assert_eq!(verdict, CorruptionVerdict::Clean);
+    }
+
+    #[test]
+    fn target_dropped_when_symbol_vanishes_from_post_ast() {
+        let pre = set(&["foo"]);
+        let post = [sym("bar")]; // foo is gone
+        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post));
+        assert_eq!(verdict, CorruptionVerdict::TargetDropped);
+    }
+
+    #[test]
+    fn siblings_dropped_is_sorted_and_excludes_the_target() {
+        // The target itself may legitimately disappear from the name-path set (a
+        // rename), so it is excluded; the remaining losses are the overshoot.
+        // HashSet::difference yields arbitrary order — the list must be sorted so
+        // the resulting error message is deterministic.
+        let pre = set(&["target", "zeta", "alpha", "mid"]);
+        let post = [sym("target")];
+        let verdict = corruption_verdict(1, Some(&pre), Some("target"), "target", Some(&post));
+        assert_eq!(
+            verdict,
+            CorruptionVerdict::SiblingsDropped(vec![
+                "alpha".to_string(),
+                "mid".to_string(),
+                "zeta".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn clean_when_target_and_siblings_all_survive() {
+        let pre = set(&["foo", "bar"]);
+        let post = [sym("foo"), sym("bar")];
+        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post));
+        assert_eq!(verdict, CorruptionVerdict::Clean);
+    }
 }

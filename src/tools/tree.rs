@@ -135,7 +135,11 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         } else {
             ""
         };
-        entries.push(format!("{}{}", entry.path().display(), suffix));
+        // Normalize like the sibling glob branch (:228) — a raw `.display()` here
+        // emits backslashes on Windows, which defeats post_process's
+        // forward-slash root-stripping and degrades the `/`-based
+        // common_path_prefix + tree indentation (omnibus 49ee6a03, F7).
+        entries.push(format!("{}{}", to_forward_slash(entry.path()), suffix));
         if let Some(c) = cap {
             if entries.len() >= c {
                 break;

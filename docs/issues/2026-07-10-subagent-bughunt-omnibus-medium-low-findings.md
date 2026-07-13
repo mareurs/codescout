@@ -1,14 +1,26 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: medium
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- omnibus
+- windows
+- error-handling
+- edit_code
+- tree
+- list_overview
+- onboarding
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
 owner: marius
 related:
 - docs/issues/2026-07-10-librarian-recoverable-error-downcast-never-matches.md
 - docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md
-tags: [omnibus, windows, error-handling, edit_code, tree, list_overview, onboarding]
-kind: bug
+severity: medium
 ---
 
 # BUG: omnibus — medium/low findings from the 2026-07-10 three-arm subagent bug-hunt
@@ -17,6 +29,19 @@ kind: bug
 Verified medium/low findings from the 3-arm × 3-direction subagent bug-hunt (session 5efbda5f), collected in one file per the omnibus precedent (`2026-07-10-silent-cap-missing-overflow-signals-audit.md`). Each entry cites the reporting agent(s); items marked **verified** were re-read at the bytes by the main agent, others are **traced** (agent-cited lines, not independently re-read).
 
 ## Progress (2026-07-13)
+**ALL findings now closed.** F14/F19/F20 turned out to be **zombie-open** — already fixed by commits `c5528d5c` and `4d13e673`, but this file was never updated when they shipped. Exactly the fix-then-forget pattern CLAUDE.md's verify-open cadence exists to catch.
+
+| Finding | State | Where |
+|---|---|---|
+| F7 | **fixed** | `tree.rs:138` → `to_forward_slash(entry.path())`, matching sibling `glob_impl:228` |
+| F8 | fixed earlier | `efda2e30` |
+| F9 | **fixed** | `symbol/edit.rs::text_sweep`, `edit_code.rs::do_rename`, `references.rs:318` → `relative_forward_slash` |
+| F10 | **fixed** | pure `corruption_verdict()`; failed re-extraction is now its own `Unverified` verdict |
+| F11 | **fixed** | only `find.rs:336` remained; create/get/graph/link/scope were already `RecoverableError` |
+| F14 | zombie-open → already fixed | `4d13e673` — `let _ = store.write(...)` is now `if let Err(e) => tracing::warn!` |
+| F18 | FALSE ALARM | `efda2e30` (evidence below) |
+| F19 | zombie-open → already fixed | `c5528d5c` — `ReadFile::json_path_hint` override + test |
+| F20 | zombie-open → already fixed | `c5528d5c` — `.lock` coerced to TOML + test |
 
 ### F18 — **FALSE ALARM, closed with evidence** (was UNVERIFIED)
 Does **not** reproduce. `grep(mode="files")` counts are exactly correct, validated at scale against an independent shell-grep oracle (`acknowledge_risk` was required precisely because using codescout's grep to audit codescout's grep would be circular):
@@ -35,10 +60,24 @@ Per-file counts also sum exactly to the reported total. codescout counts matchin
 Test: `symbols_single_file_overview_normalizes_echoed_path` — asserts both the `./`-prefix and absolute-path cases relativize. RED before (`left: "./src/lib.rs"`, `right: "src/lib.rs"`), GREEN after.
 
 ### Still open — and *why* (testability, not laziness)
-These are the reason this omnibus and `88398b06` were rated L-effort. The fixes are one-liners; the **RED tests are the hard part**:
 
-- **F7** (`tree.rs:138` `.display()`) and **F9** (rename path idiom) — **Windows-only**. On Linux `entry.path().display()` already yields `/`, so a test passes both before AND after the fix. A genuine RED test needs either a Windows/wine CI assertion or a literal-backslash-in-filename fixture (which asserts `to_forward_slash`'s documented *caveat* — an ugly test of a known tradeoff). Should be done as one sweep with `88398b06`, with a deliberate testing strategy.
-- **F10** (post-edit corruption check disabled when extraction fails) — **real and confirmed** (`edit_code.rs:706-711`: on `Err`, `post_count` falls back to `pre_count` → "no change", so the dropped-symbol rollback is bypassed, and the sibling-drop check is skipped when `post_ast` is `None` — both safety nets off exactly when the file is *most* suspicious, and `.ok()` discards the reason). But `extract_symbols` only errors on unsupported-language (which fails *pre*-edit too, making the checks already inert) or an IO race. Triggering "pre succeeds, post fails" requires a **dependency-injection seam** into a safety-critical function. Not refactored unasked; practical risk is near-zero, but the defensive gap is genuine.
+*(Superseded 2026-07-13 — both are now fixed. Kept for the reasoning, which turned out to be half right.)*
+
+### F10 — fixed WITHOUT the dependency-injection seam it was thought to need
+
+The deferral rationale was that triggering "pre-extraction succeeds, post fails" needs DI into a safety-critical function. It doesn't — the *decision* can be lifted out and tested directly. `corruption_verdict()` (`src/symbol/edit.rs`) is a pure function over `(pre_count, pre_set, target_name_path, counted_name_path, post_ast)` returning `Clean | TargetDropped | SiblingsDropped | Unverified`.
+
+The defect: the old inline code did `post_ast.map(count).unwrap_or(pre_count)` — on re-extraction failure it **fabricated `post_count == pre_count`**, i.e. actively asserted "nothing was dropped" — and the sibling-drop check was gated on `post_ast` being `Some`, so it was skipped too. Both safety nets silently disengaged exactly when the file was most suspicious, and `.ok()` discarded the reason. A failed re-extraction is now `Unverified`: the edit stands, but the response carries `corruption_check: "skipped"`, the underlying error, and a hint to re-check with `symbols(path)` — instead of a bare `"ok"` that reads as "verified clean".
+
+Incidental fix: `SiblingsDropped` is now sorted — `HashSet::difference` yields in arbitrary order, so the "would have dropped sibling symbols: ..." message was nondeterministic.
+
+### F7 / F9 — fixed; no Linux RED is possible, and that is not a gap in rigor
+
+The original reasoning here was **correct**: `to_forward_slash` replaces `\` on *every* platform (it is not `cfg(windows)`-gated), and `relative_forward_slash` is exactly the `strip_prefix(root).unwrap_or(path)` idiom these sites hand-rolled, plus that replacement. On Linux with ordinary filenames, before and after are byte-identical — so no test can distinguish them, and any test that could would be asserting `to_forward_slash`'s documented *caveat* (mangling a legal POSIX backslash-in-filename), which is not behavior worth pinning.
+
+The guarantee for these two is therefore "identical to the shared helper already used at ~23 audited sibling sites," not "proven by a new regression test." Stated plainly rather than papered over with a tautological test. An independent sweep for `88398b06` re-derived both sites from scratch, corroborating them.
+
+**Correction worth recording:** `Path::display()` does *not* convert `/`→`\`. It renders the `PathBuf`'s internal string verbatim; backslashes appear only when the `PathBuf` is OS-derived (a directory walk, `canonicalize`, `join`). So **provenance decides risk, not the shape of the call chain** — which is why catalog-sourced `row.abs_path.display()` sites are genuinely safe (SQLite hands back forward-slash text). Both F7 and F9 are OS-derived (`WalkBuilder` entries, LSP-returned paths), hence real.
 ## Findings
 
 ### F7 — tree.rs non-glob listing emits unnormalized native paths (Windows) — MEDIUM, verified
@@ -81,8 +120,21 @@ Per-finding above; branch `experiments`, 2026-07-10.
 Per-finding above. Suggested order: F11 after the downcast fix; F7/F8/F9 as one Windows-path sweep (same class as the fixed `260752eb609a8903`); F19/F20 quick wins; F18 repro first.
 
 ## Tests added
-N/A — nothing fixed yet.
 
+| Test | Finding | File |
+|---|---|---|
+| `failed_post_extraction_is_unverified_not_clean` | F10 (the core defect) | `src/symbol/edit.rs` |
+| `failed_post_extraction_is_clean_when_there_was_nothing_to_verify` | F10 (no-AST path unchanged) | `src/symbol/edit.rs` |
+| `target_dropped_when_symbol_vanishes_from_post_ast` | F10 | `src/symbol/edit.rs` |
+| `siblings_dropped_is_sorted_and_excludes_the_target` | F10 (+ determinism) | `src/symbol/edit.rs` |
+| `clean_when_target_and_siblings_all_survive` | F10 | `src/symbol/edit.rs` |
+| `semantic_without_embedder_is_recoverable` | F11 | `src/librarian/tools/find.rs` |
+
+F10's core test was **mutation-checked**: reverting the `None` branch to the old launder-into-`Clean` behavior makes it fail (`left: Clean, right: Unverified`), proving it catches the real defect rather than passing vacuously. F11 produced a natural RED.
+
+F7/F9 have no new test — see the rationale above. Deliberate and stated, not an oversight.
+
+Full suite: 3202 passed, 0 failed. `cargo fmt` + `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 N/A per finding.
 
