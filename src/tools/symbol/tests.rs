@@ -833,6 +833,64 @@ async fn get_symbols_overview_finds_nested_files() {
     );
 }
 
+/// F8 (omnibus 49ee6a03): the single-file branch of `list_overview` echoed the
+/// RAW caller path into `"file"`, while every sibling branch normalizes via
+/// `to_forward_slash` / `relative_forward_slash`. So `./src/lib.rs` came back as
+/// `"./src/lib.rs"`, and an ABSOLUTE input came back absolute — leaking the
+/// caller's filesystem layout. Under a `workspace=` pin that composes with the
+/// post_process unpinned-root gap (5695424c §2) into a cross-workspace leak.
+///
+/// The tool must normalize against the resolved (pinned) root itself, rather
+/// than relying on `post_process` root-stripping to clean up after it.
+#[tokio::test]
+async fn symbols_single_file_overview_normalizes_echoed_path() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub fn nested_function() -> i32 { 42 }\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    // A `./`-prefixed path must come back project-relative, not echoed verbatim.
+    let result = Symbols
+        .call(json!({ "path": "./src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result["file"].as_str().unwrap(),
+        "src/lib.rs",
+        "single-file overview must normalize the echoed path, not return the raw input"
+    );
+
+    // An ABSOLUTE input must be relativized against the project root, never echoed.
+    let abs = dir.path().join("src/lib.rs");
+    let result = Symbols
+        .call(json!({ "path": abs.to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    let file = result["file"].as_str().unwrap();
+    assert_eq!(
+        file, "src/lib.rs",
+        "absolute input must be relativized to the project root, got: {file}"
+    );
+}
+
 #[tokio::test]
 async fn symbols_overview_small_tree_recurses_fully() {
     // When targeting a specific subdirectory with a small file count (≤ RECURSE_SMALL),

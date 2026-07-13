@@ -464,7 +464,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         };
         if let Some(ov) = overflow {
             let total = ov.total;
-            let mut result = json!({ "file": rel_path, "symbols": json_symbols, "total": total });
+            let mut result = json!({ "file": relative_forward_slash(&full_path, &root), "symbols": json_symbols, "total": total });
             result["overflow"] = OutputGuard::overflow_json(&ov);
             if include_docs {
                 result["docstrings"] = json!(collect_docstrings(&full_path));
@@ -478,7 +478,11 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             }
             return Ok(result);
         }
-        let mut result = json!({ "file": rel_path, "symbols": json_symbols });
+        // F8: normalize against the resolved (pinned) root — never echo the raw
+        // caller input. Sibling branches already do this; the single-file branch
+        // leaked `./`-prefixed and absolute paths verbatim.
+        let mut result =
+            json!({ "file": relative_forward_slash(&full_path, &root), "symbols": json_symbols });
         if include_docs {
             result["docstrings"] = json!(collect_docstrings(&full_path));
         }

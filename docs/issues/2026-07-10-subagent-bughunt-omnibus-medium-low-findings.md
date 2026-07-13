@@ -16,6 +16,29 @@ kind: bug
 ## Summary
 Verified medium/low findings from the 3-arm × 3-direction subagent bug-hunt (session 5efbda5f), collected in one file per the omnibus precedent (`2026-07-10-silent-cap-missing-overflow-signals-audit.md`). Each entry cites the reporting agent(s); items marked **verified** were re-read at the bytes by the main agent, others are **traced** (agent-cited lines, not independently re-read).
 
+## Progress (2026-07-13)
+
+### F18 — **FALSE ALARM, closed with evidence** (was UNVERIFIED)
+Does **not** reproduce. `grep(mode="files")` counts are exactly correct, validated at scale against an independent shell-grep oracle (`acknowledge_risk` was required precisely because using codescout's grep to audit codescout's grep would be circular):
+
+| Metric | `grep(mode="files")` | `grep -r` ground truth |
+|---|---|---|
+| total matches (`pub fn` in `src/tools`) | 150 | 150 ✅ |
+| files with matches | 20 | 20 ✅ |
+| per-file counts | 35, 16, 15, 13, 13, 12… | 35, 16, 15, 13, 13, 12… ✅ |
+
+Per-file counts also sum exactly to the reported total. codescout counts matching *lines* (150), not raw occurrences (153) — a consistent, sensible choice. The original "73 vs 4" was almost certainly comparing different scopes/patterns, not a tool defect. **No fix needed; do not re-investigate.**
+
+### F8 — **FIXED**
+`list_overview`'s single-file branch echoed the RAW caller path into `"file"` at two sites (`:467`, `:481`) while every sibling branch normalized. Now uses `relative_forward_slash(&full_path, &root)` — the **pinned** root (`require_project_root_for(workspace_override)`), so it respects a `workspace=` pin rather than relying on `post_process` root-stripping to clean up after it.
+
+Test: `symbols_single_file_overview_normalizes_echoed_path` — asserts both the `./`-prefix and absolute-path cases relativize. RED before (`left: "./src/lib.rs"`, `right: "src/lib.rs"`), GREEN after.
+
+### Still open — and *why* (testability, not laziness)
+These are the reason this omnibus and `88398b06` were rated L-effort. The fixes are one-liners; the **RED tests are the hard part**:
+
+- **F7** (`tree.rs:138` `.display()`) and **F9** (rename path idiom) — **Windows-only**. On Linux `entry.path().display()` already yields `/`, so a test passes both before AND after the fix. A genuine RED test needs either a Windows/wine CI assertion or a literal-backslash-in-filename fixture (which asserts `to_forward_slash`'s documented *caveat* — an ugly test of a known tradeoff). Should be done as one sweep with `88398b06`, with a deliberate testing strategy.
+- **F10** (post-edit corruption check disabled when extraction fails) — **real and confirmed** (`edit_code.rs:706-711`: on `Err`, `post_count` falls back to `pre_count` → "no change", so the dropped-symbol rollback is bypassed, and the sibling-drop check is skipped when `post_ast` is `None` — both safety nets off exactly when the file is *most* suspicious, and `.ok()` discards the reason). But `extract_symbols` only errors on unsupported-language (which fails *pre*-edit too, making the checks already inert) or an IO race. Triggering "pre succeeds, post fails" requires a **dependency-injection seam** into a safety-critical function. Not refactored unasked; practical risk is near-zero, but the defensive gap is genuine.
 ## Findings
 
 ### F7 — tree.rs non-glob listing emits unnormalized native paths (Windows) — MEDIUM, verified
