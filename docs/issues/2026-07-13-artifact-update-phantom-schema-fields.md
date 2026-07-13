@@ -1,7 +1,7 @@
 ---
 id: '258d7eb859a12041'
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: artifact(update) schema documents `owner`, `activeForm`, `addBlocks`, `addBlockedBy` — none exist anywhere in the implementation'
 owners:
 - marius
@@ -109,7 +109,7 @@ None needed — these fields never worked, so there's no existing caller relying
 
 ## Resume
 
-Decide whether to commit this fix (branch `experiments`). Once committed, cite the SHA here — do NOT flip `status` to a master-referencing `fixed` until after cherry-pick per CLAUDE.md § "After cherry-pick".
+Fixed on branch `experiments`, commit `a5743870` ("fix(librarian): remove phantom addBlocks/addBlockedBy/owner/activeForm from artifact schema"). Not yet cherry-picked to `master` — per CLAUDE.md § "After cherry-pick", once it lands on `master` re-run `git rev-parse HEAD` there and cite that SHA before archiving to `docs/issues/archive/`.
 ## References
 
 - Sibling finding from the same sweep, same root mechanism: `docs/issues/2026-07-13-artifact-create-drops-topic.md` (id `8dfa0da20703f46c`).
