@@ -1,7 +1,7 @@
 ---
 id: '5695424c48c90964'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: residual workspace_override pin gaps found while auditing the edit_code write-path bug (peer.rs, server.rs::post_process, usage telemetry x2, lsp_mux_override, onboarding.rs)'
 owners: []
 tags:
@@ -48,15 +48,27 @@ Same shape as the `edit_code` bug and its predecessor (`3fb29bc678a32562`): `ctx
 Low-to-medium across the board — no data-corruption risk (unlike the 3 fixed bugs, which could silently write/mutate the wrong project). Worst case is wrong-project telemetry (#3, #4), a stale/wrong root name in a `.codescout/peers.toml` (#1), a misleading path-relative banner (#2), a wrong LSP mux config (#5), or onboarding writing into the wrong project (#6).
 
 ## Status
-open — triaged and scoped, not yet fixed. Deliberately deferred in the same session that fixed the 3 CONFIRMED bugs (`docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md`), per explicit scope decision to fix only the CONFIRMED, same-function-inconsistency-shaped bugs first.
 
+**fixed (2026-07-13)** — all 6 findings migrated to the pin-aware accessors, each with its own regression test. Branch `experiments`.
 ## Tests added
-None yet — no fix implemented. Each fix should get its own regression test mirroring the `_honors_workspace_override_pin` naming/pattern used throughout this codebase's test suite.
 
+One per finding, all following the established two-workspace pattern (default = B, pin THIS call to A, assert the effect landed in A and NOT in B):
+
+| # | Test | Location |
+|---|---|---|
+| 1 | `peer_tool_honors_workspace_override_pin` | `src/tools/peer.rs` |
+| 2 | `post_process_strips_and_annotates_against_the_pinned_root` | `src/server.rs` |
+| 3 | `get_usage_stats_honors_workspace_override_pin` | `src/tools/usage.rs` |
+| 4 | `record_content_honors_workspace_override_pin` | `src/usage/mod.rs` |
+| 5 | `lsp_mux_override_resolves_pin_over_default` | `src/agent/mod.rs` |
+| 6 | `onboarding_honors_workspace_override_pin` | `src/tools/run_command/tests.rs` |
+
+Every test was confirmed to FAIL before its fix and pass after. For findings 2 and 4 — where the signature change and the fix landed in the same edit, so no natural RED was observed — the fix was mutated back to the unpinned accessor to prove the test actually catches the bug, then restored. Finding 2's mutation check is the most instructive: it caught workspace A's ABSOLUTE path (`/tmp/.tmpXXXX/src/lib.rs`) leaking unstripped into the response, confirming the cross-workspace path leak was real and not theoretical.
+
+Full suite after: 3196 passed, 0 failed. `cargo fmt` + `cargo clippy --all-targets -- -D warnings` clean.
 ## Resume
-Pick off findings 1-5 individually (small, independent, mechanical) or as a batch; #6 (`onboarding.rs`) is the largest and most mechanical — good candidate for a dedicated pass given its 11 call sites.
 
+N/A — fixed. Cherry-pick to `master` still pending; cite the master-side SHA here after the pick, per CLAUDE.md § "After cherry-pick", before archiving to `docs/issues/archive/`.
 ## References
 - `docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md` — the 3 CONFIRMED bugs fixed this session (symbols.rs glob path, auto_register.rs, server.rs::call_tool_inner).
 - `docs/issues/2026-06-11-lsp-tools-ignore-workspace-pin-path.md` (catalog id `3fb29bc678a32562`) — the earlier read-path/LSP-root fix (`85dc92f9`) that these 6 findings fell outside the scope of.
-

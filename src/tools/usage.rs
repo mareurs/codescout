@@ -37,7 +37,7 @@ impl Tool for GetUsageStats {
 
         let project_root = ctx
             .agent
-            .with_project(|p| Ok(p.root.clone()))
+            .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.root.clone()))
             .await
             .map_err(|_| {
                 RecoverableError::with_hint(
@@ -169,6 +169,40 @@ mod tests {
         assert!(
             err.downcast_ref::<RecoverableError>().is_some(),
             "no-project error must be RecoverableError so sibling calls are not aborted"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_usage_stats_honors_workspace_override_pin() {
+        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // finding 3): GetUsageStats::call resolved the project root via the plain,
+        // unpinned `with_project`, so a pinned call read the SESSION-DEFAULT
+        // project's usage.db instead of the pinned workspace's. Telemetry-only,
+        // but it silently misattributes every pinned call's stats.
+        let dir_a = TempDir::new().unwrap();
+        let dir_b = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        let canon_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Default (unpinned) project is B; pin THIS call to A.
+        let mut ctx = ctx_with_project(dir_b.path()).await;
+        ctx.workspace_override = Some(canon_a.clone());
+
+        GetUsageStats
+            .call(serde_json::json!({}), &ctx)
+            .await
+            .unwrap();
+
+        // open_db creates `.codescout/usage.db` under whichever root it resolved,
+        // so the file's location is direct evidence of which project was opened.
+        assert!(
+            canon_a.join(".codescout").join("usage.db").exists(),
+            "usage.db must be opened in the PINNED workspace A"
+        );
+        assert!(
+            !dir_b.path().join(".codescout").join("usage.db").exists(),
+            "usage.db must NOT be opened in the session-default workspace B"
         );
     }
 

@@ -233,7 +233,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 continue;
             };
             let language_id = crate::lsp::servers::lsp_language_id(lang);
-            let mux_override = ctx.agent.lsp_mux_override(lang).await;
+            let mux_override = ctx
+                .agent
+                .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+                .await;
             let budget_client = crate::lsp::client_within_budget(
                 ctx.lsp.clone(),
                 lang,
@@ -331,7 +334,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             .agent
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
-        let mux_override = ctx.agent.lsp_mux_override(raw_lang).await;
+        let mux_override = ctx
+            .agent
+            .lsp_mux_override(ctx.workspace_override.as_deref(), raw_lang)
+            .await;
         let lang = crate::lsp::servers::lsp_language_id(raw_lang).to_string();
         let mut lsp_warming = false;
         let symbols = match crate::lsp::client_within_budget(
@@ -562,7 +568,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 };
                 let language_id = crate::lsp::servers::lsp_language_id(lang);
 
-                let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                let mux_override = ctx
+                    .agent
+                    .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+                    .await;
                 let mut symbols =
                     if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
                         let timer = LspTimer::start();

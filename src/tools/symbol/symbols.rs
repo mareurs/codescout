@@ -382,7 +382,10 @@ async fn search_files_restricted(
             continue;
         };
         let language_id = crate::lsp::servers::lsp_language_id(lang);
-        let mux_override = ctx.agent.lsp_mux_override(lang).await;
+        let mux_override = ctx
+            .agent
+            .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+            .await;
         let Ok(client) = ctx.lsp.get_or_start(lang, root, mux_override).await else {
             continue;
         };
@@ -460,7 +463,10 @@ async fn search_project_symbols(
         let lsp = ctx.lsp.clone();
         let root = root.to_path_buf();
         let pattern = pattern_lower.to_owned();
-        let mux_override = ctx.agent.lsp_mux_override(lang).await;
+        let mux_override = ctx
+            .agent
+            .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+            .await;
         join_set.spawn(async move {
             match tokio::time::timeout(PER_LANG_BUDGET, async {
                 let client = lsp.get_or_start(lang, &root, mux_override).await?;
@@ -628,7 +634,10 @@ async fn search_library_symbols(
                 // INVARIANT: Always use project root as workspace_root, not the
                 // library root. LspManager caches one client per language; passing
                 // a different root kills and restarts the server.
-                let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                let mux_override = ctx
+                    .agent
+                    .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+                    .await;
                 if let Ok(client) = ctx.lsp.get_or_start(lang, root, mux_override).await {
                     let language_id = crate::lsp::servers::lsp_language_id(lang);
                     symbols = client

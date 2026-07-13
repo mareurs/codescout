@@ -249,5 +249,4 @@ mod tests {
             "a second identical update must be a no-op; churn is not allowed to recur"
         );
     }
-
 }

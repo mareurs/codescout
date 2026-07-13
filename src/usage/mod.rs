@@ -21,10 +21,17 @@ impl UsageRecorder {
         }
     }
 
+    /// Record a tool call's telemetry against the project named by
+    /// `workspace_override`, falling back to the session default when `None`.
+    /// The pin MUST match the one the tool body itself resolved, or a pinned
+    /// call's stats land in the wrong project's `usage.db` (see
+    /// `docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
+    /// finding 4).
     pub async fn record_content<F, Fut>(
         &self,
         tool_name: &str,
         input: &Value,
+        workspace_override: Option<&std::path::Path>,
         f: F,
     ) -> Result<Vec<Content>>
     where
@@ -36,7 +43,7 @@ impl UsageRecorder {
         let latency_ms = start.elapsed().as_millis() as i64;
         // Best-effort — never let recording fail the tool call
         let _ = self
-            .write_content(tool_name, latency_ms, input, &result)
+            .write_content(tool_name, latency_ms, input, workspace_override, &result)
             .await;
         result
     }
@@ -46,11 +53,14 @@ impl UsageRecorder {
         tool_name: &str,
         latency_ms: i64,
         input: &Value,
+        workspace_override: Option<&std::path::Path>,
         result: &Result<Vec<Content>>,
     ) -> Result<()> {
         let (project_root, head_sha) = self
             .agent
-            .with_project(|p| Ok((p.root.clone(), p.head_sha.clone())))
+            .with_project_at(workspace_override, |p| {
+                Ok((p.root.clone(), p.head_sha.clone()))
+            })
             .await?;
         let conn = db::open_db(&project_root)?;
         let (outcome, overflowed, error_msg) = classify_content_result(result);
@@ -278,7 +288,7 @@ mod content_tests {
         let input = json!({"query": "test_symbol", "path": "src/lib.rs"});
 
         let _ = recorder
-            .record_content("symbols", &input, || async {
+            .record_content("symbols", &input, None, || async {
                 Ok(vec![Content::text("found it")])
             })
             .await;
@@ -307,6 +317,52 @@ mod content_tests {
     }
 
     #[tokio::test]
+    async fn record_content_honors_workspace_override_pin() {
+        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // finding 4): write_content resolved the usage-db root via the plain,
+        // unpinned with_project. call_tool_inner already computed the pin and
+        // threaded it into check_tool_access/timeout_secs/the write guard — but
+        // not into the recorder, so EVERY pinned call's telemetry silently
+        // landed in the session-default project's usage.db.
+        use serde_json::json;
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        let canon_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Default (unpinned) project is B; pin THIS call to A.
+        let agent = crate::agent::Agent::new(Some(dir_b.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(agent, false, "pin-session".to_string());
+        let input = json!({"query": "x"});
+
+        let _ = recorder
+            .record_content("symbols", &input, Some(&canon_a), || async {
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        let rows_in = |root: &std::path::Path| -> i64 {
+            let conn = crate::usage::db::open_db(root).unwrap();
+            conn.query_row("SELECT COUNT(*) FROM tool_calls", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            rows_in(&canon_a),
+            1,
+            "the pinned call's telemetry must land in workspace A's usage.db"
+        );
+        assert_eq!(
+            rows_in(dir_b.path()),
+            0,
+            "it must NOT land in the session-default workspace B's usage.db"
+        );
+    }
+
+    #[tokio::test]
     async fn record_content_stores_output_for_errors_in_debug_mode() {
         use serde_json::json;
 
@@ -319,7 +375,7 @@ mod content_tests {
         let input = json!({"path": "/bad/path"});
 
         let _ = recorder
-            .record_content("read_file", &input, || async {
+            .record_content("read_file", &input, None, || async {
                 Err(anyhow::anyhow!("file not found"))
             })
             .await;
@@ -349,7 +405,7 @@ mod content_tests {
         let input = json!({"query": "test_symbol"});
 
         let _ = recorder
-            .record_content("symbols", &input, || async {
+            .record_content("symbols", &input, None, || async {
                 Ok(vec![Content::text("found it")])
             })
             .await;
@@ -380,7 +436,7 @@ mod content_tests {
         let input = json!({"name_path": "LspManager/get_or_start", "path": "src/lsp/manager.rs"});
 
         let _ = recorder
-            .record_content("symbols", &input, || async {
+            .record_content("symbols", &input, None, || async {
                 Ok(vec![Content::text(
                     r#"{"output_id":"@tool_x","summary":"...","buffered_bytes":10000}"#.to_string(),
                 )])

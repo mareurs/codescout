@@ -603,7 +603,10 @@ pub async fn resolve_range_via_document_symbols(
         .require_project_root_for(ctx.workspace_override.as_deref())
         .await
         .ok()?;
-    let mux_override = ctx.agent.lsp_mux_override(lang).await;
+    let mux_override = ctx
+        .agent
+        .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+        .await;
     let client = ctx.lsp.get_or_start(lang, &root, mux_override).await.ok()?;
     let doc_symbols = client.document_symbols(&sym.file, language_id).await.ok()?;
     find_matching_symbol(&doc_symbols, &sym.name, sym.start_line)

@@ -460,6 +460,42 @@ async fn onboarding_creates_config() {
 }
 
 #[tokio::test]
+async fn onboarding_honors_workspace_override_pin() {
+    // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+    // finding 6): onboarding.rs was never wired for per-request pinning at all —
+    // all 16 call sites used the plain require_project_root / with_project /
+    // reload_config_if_project_toml. Onboarding WRITES (.codescout/project.toml,
+    // memory files), so a pinned call silently onboarded the SESSION-DEFAULT
+    // project instead of the one the caller named.
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    // Workspace A is the pin target; give it source files to detect.
+    std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+    std::fs::write(dir_a.path().join("main.rs"), "fn main() {}").unwrap();
+    let canon_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+    // Session default is B (project_ctx_at also seeds B with a main.rs).
+    let mut ctx = project_ctx_at(dir_b.path()).await;
+    let _ = std::fs::remove_file(dir_b.path().join(".codescout/project.toml"));
+    let _ = std::fs::remove_file(dir_a.path().join(".codescout/project.toml"));
+
+    // Pin THIS call to A.
+    ctx.workspace_override = Some(canon_a.clone());
+
+    let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+    assert_eq!(result["config_created"], true);
+
+    assert!(
+        canon_a.join(".codescout/project.toml").exists(),
+        "onboarding must write project.toml into the PINNED workspace A"
+    );
+    assert!(
+        !dir_b.path().join(".codescout/project.toml").exists(),
+        "onboarding must NOT write project.toml into the session-default workspace B"
+    );
+}
+
+#[tokio::test]
 async fn onboarding_returns_status_when_already_done() {
     let (dir, ctx) = project_ctx().await;
     let _ = std::fs::remove_file(dir.path().join(".codescout/project.toml"));

@@ -1410,12 +1410,27 @@ impl Agent {
         }
     }
 
-    /// Resolve the per-language `mux` override from the active project's config.
-    /// Returns `None` when no project is active or no override is set for the language.
-    pub async fn lsp_mux_override(&self, language: &str) -> Option<bool> {
-        self.with_project(|p| Ok(p.config.lsp.langs.get(language).and_then(|o| o.mux)))
-            .await
-            .unwrap_or(None)
+    /// Resolve the per-language `mux` override from the config of the project
+    /// named by `workspace_override` (resident-on-demand), or the session default
+    /// when `None`. Returns `None` if no project is active or the language has no
+    /// override set.
+    ///
+    /// Takes the pin directly rather than offering an unpinned twin: every call
+    /// site sits next to an already-pinned `require_project_root_for`, so an
+    /// unpinned variant would only be a footgun (see
+    /// `docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
+    /// finding 5 — this helper resolved a *different* project's LSP config than
+    /// the root it was about to be used with).
+    pub async fn lsp_mux_override(
+        &self,
+        workspace_override: Option<&Path>,
+        language: &str,
+    ) -> Option<bool> {
+        self.with_project_at(workspace_override, |p| {
+            Ok(p.config.lsp.langs.get(language).and_then(|o| o.mux))
+        })
+        .await
+        .unwrap_or(None)
     }
 
     /// Get a clone of the library registry, if a project is active.
@@ -1944,6 +1959,47 @@ mod tests {
         assert_eq!(
             inner.default_workspace_root.as_deref(),
             Some(root_b.as_path())
+        );
+    }
+
+    #[tokio::test]
+    async fn lsp_mux_override_resolves_pin_over_default() {
+        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // finding 5): lsp_mux_override read the config via the plain, unpinned
+        // with_project. Every call site sits one line below an already-pinned
+        // require_project_root_for — so a pinned call started an LSP server at
+        // workspace A's ROOT but with workspace B's MUX CONFIG.
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        for dir in [&dir_a, &dir_b] {
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        }
+        // A and B disagree about rust's mux setting — so the value returned is
+        // direct evidence of WHICH project's config was consulted.
+        std::fs::write(
+            dir_a.path().join(".codescout").join("project.toml"),
+            "[project]\nname = \"a\"\n\n[lsp.rust]\nmux = true\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir_b.path().join(".codescout").join("project.toml"),
+            "[project]\nname = \"b\"\n\n[lsp.rust]\nmux = false\n",
+        )
+        .unwrap();
+        let root_a = canonical(dir_a.path());
+
+        // Default (unpinned) workspace is B.
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+
+        assert_eq!(
+            agent.lsp_mux_override(None, "rust").await,
+            Some(false),
+            "unpinned call must read the session-default project B's config"
+        );
+        assert_eq!(
+            agent.lsp_mux_override(Some(&root_a), "rust").await,
+            Some(true),
+            "pinned call must read the PINNED project A's config, not the default B's"
         );
     }
 

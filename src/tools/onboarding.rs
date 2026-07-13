@@ -271,7 +271,10 @@ impl Tool for Onboarding {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let force = parse_bool_param(&input["force"]);
         let refresh_prompt = parse_bool_param(&input["refresh_prompt"]);
 
@@ -300,7 +303,10 @@ impl Tool for Onboarding {
         if let Some(prompt) = val["subagent_prompt"].as_str() {
             let compact = format_onboarding(&val);
 
-            let root = ctx.agent.require_project_root().await?;
+            let root = ctx
+                .agent
+                .require_project_root_for(ctx.workspace_override.as_deref())
+                .await?;
             let tmp_dir = root.join(".codescout").join("tmp");
             std::fs::create_dir_all(&tmp_dir)?;
             let prompt_path = tmp_dir.join("onboarding-prompt.md");
@@ -444,7 +450,7 @@ impl Tool for Onboarding {
 async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
     let status = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let has_config = p.root.join(".codescout").join("project.toml").exists();
             let memories = p.memory.list()?;
             let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
@@ -462,7 +468,7 @@ async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
 
     let (stored_version, config_languages) = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             Ok((
                 p.config.project.onboarding_version,
                 p.config.project.languages.clone(),
@@ -472,7 +478,7 @@ async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
 
     let config_path = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let config_path = p.root.join(".codescout").join("project.toml");
             if config_path.exists() {
                 let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
@@ -483,7 +489,9 @@ async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
             Ok(config_path)
         })
         .await?;
-    ctx.agent.reload_config_if_project_toml(&config_path).await;
+    ctx.agent
+        .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
+        .await;
 
     let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
 
@@ -504,7 +512,7 @@ async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
 async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Value>> {
     let status = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let has_config = p.root.join(".codescout").join("project.toml").exists();
             let memories = p.memory.list()?;
             let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
@@ -525,7 +533,7 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
     // --- Version check: refresh system prompt if stale ---
     let (stored_version, config_languages) = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             Ok((
                 p.config.project.onboarding_version,
                 p.config.project.languages.clone(),
@@ -554,7 +562,7 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
         // Optimistic version write to disk (prevents re-trigger across sessions)
         let config_path = ctx
             .agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 let config_path = p.root.join(".codescout").join("project.toml");
                 if config_path.exists() {
                     let mut config =
@@ -568,7 +576,9 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
             .await?;
         // Reload in-memory config so subsequent calls in the same session
         // see the updated version (prevents re-trigger within session)
-        ctx.agent.reload_config_if_project_toml(&config_path).await;
+        ctx.agent
+            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
+            .await;
 
         let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
 
@@ -721,7 +731,9 @@ fn write_workspace_config_if_needed(
 async fn probe_index_status(ctx: &ToolContext) -> Value {
     let project_id = ctx
         .agent
-        .with_project(|p| Ok(p.project_id().to_string()))
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            Ok(p.project_id().to_string())
+        })
         .await
         .unwrap_or_else(|_| String::new());
     if project_id.is_empty() {
@@ -752,7 +764,7 @@ async fn write_onboarding_memories(
     gathered: &GatheredContext,
 ) -> anyhow::Result<()> {
     ctx.agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let summary = format!(
                 "Languages: {}\nHas README: {}\nHas CLAUDE.md: {}\nBuild file: {}\nEntry points: {}\nTest dirs: {}",
                 lang_list.join(", "),
@@ -827,7 +839,9 @@ async fn gather_per_project_protected(
     }
     let protected = ctx
         .agent
-        .with_project(|p| Ok(p.config.memory.protected.clone()))
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            Ok(p.config.memory.protected.clone())
+        })
         .await
         .unwrap_or_default();
     let mut map = serde_json::Map::new();
@@ -902,7 +916,9 @@ async fn perform_full_onboarding(
         let toml_str = toml::to_string_pretty(&config)?;
         std::fs::write(&config_path, &toml_str)?;
         // Reload in-memory config so the version is visible within this session
-        ctx.agent.reload_config_if_project_toml(&config_path).await;
+        ctx.agent
+            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
+            .await;
         true
     } else {
         false
@@ -927,7 +943,7 @@ async fn perform_full_onboarding(
     // Gather protected memory state for the LLM merge flow
     let protected_memories = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let memories_dir = p.root.join(".codescout").join("memories");
             let protected = &p.config.memory.protected;
             Ok(gather_protected_memory_state(
@@ -1042,7 +1058,7 @@ async fn perform_full_onboarding(
 
     // Optimistic version write for full onboarding (force=true on existing project)
     ctx.agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let config_path = p.root.join(".codescout").join("project.toml");
             if config_path.exists() {
                 let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;

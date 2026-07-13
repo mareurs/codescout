@@ -44,7 +44,7 @@ impl Tool for PeerTool {
             .unwrap_or("status");
         let registry_path = ctx
             .agent
-            .project_root()
+            .project_root_for(ctx.workspace_override.as_deref())
             .await
             .map(|r| r.join(".codescout").join("peers.toml"))
             .ok_or_else(|| anyhow!("no active project to resolve the peer registry"))?;
@@ -127,5 +127,57 @@ mod tests {
         for a in ["status", "query", "explore", "knowledge"] {
             assert!(actions.iter().any(|v| v == a), "missing action {a}");
         }
+    }
+
+    #[tokio::test]
+    async fn peer_tool_honors_workspace_override_pin() {
+        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // finding 1): PeerTool never overrides Tool::pinnable(), so its schema
+        // advertises a `workspace` param and ctx.workspace_override IS populated —
+        // but the body resolved `.codescout/peers.toml` via the plain, unpinned
+        // project_root(). A pinned call read the session-default project's registry.
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+
+        // Only workspace A has a peer registry. If the pin is honored, `status`
+        // lists A's peer; if it is ignored, it reads B's (absent) registry and
+        // Registry::load returns an empty registry — an empty peer list.
+        std::fs::write(
+            dir_a.path().join(".codescout").join("peers.toml"),
+            "[[peer]]\nid = \"alpha\"\ntarget = \"/tmp/alpha\"\ndescription = \"the pinned peer\"\ndefault_access = \"ro\"\n",
+        )
+        .unwrap();
+        let canon_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Default (unpinned) project is B; pin THIS call to A.
+        let agent = crate::agent::Agent::new(Some(dir_b.path().to_path_buf()))
+            .await
+            .unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: crate::lsp::manager::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: Some(canon_a),
+        };
+
+        let out = PeerTool
+            .call(serde_json::json!({"action": "status"}), &ctx)
+            .await
+            .unwrap();
+        let peers = out["peers"].as_array().unwrap();
+        assert_eq!(
+            peers.len(),
+            1,
+            "must read the PINNED workspace A's peers.toml, not the default B's; got: {out}"
+        );
+        assert_eq!(peers[0]["id"], "alpha");
     }
 }

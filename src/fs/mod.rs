@@ -296,7 +296,7 @@ pub(crate) async fn get_lsp_client(
         )
     })?;
     let root = agent.require_project_root_for(workspace_override).await?;
-    let mux_override = agent.lsp_mux_override(lang).await;
+    let mux_override = agent.lsp_mux_override(workspace_override, lang).await;
     let client = lsp.get_or_start(lang, &root, mux_override).await?;
     let language_id = crate::lsp::servers::lsp_language_id(lang);
     Ok((client, language_id.to_string()))

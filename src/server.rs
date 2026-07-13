@@ -454,10 +454,22 @@ impl CodeScoutServer {
     /// message. `run_command` is exempt — its stdout is raw shell output where
     /// stripping would corrupt path literals (see the path-literals bug file),
     /// so @tool_xxx buffer content surfaced via run_command is left verbatim.
-    async fn post_process(&self, call_result: CallToolResult, tool_name: &str) -> CallToolResult {
+    ///
+    /// `workspace_override` MUST be the same pin the tool body resolved against.
+    /// Stripping against the session-default root while the tool emitted paths
+    /// under a *pinned* root strips nothing and annotates the wrong root — a
+    /// cross-workspace absolute-path leak (see
+    /// `docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
+    /// finding 2).
+    async fn post_process(
+        &self,
+        call_result: CallToolResult,
+        tool_name: &str,
+        workspace_override: Option<&std::path::Path>,
+    ) -> CallToolResult {
         let root_prefix = self
             .agent
-            .project_root()
+            .project_root_for(workspace_override)
             .await
             .map(|p| format!("{}/", to_forward_slash(&p)))
             .unwrap_or_default();
@@ -696,9 +708,12 @@ impl CodeScoutServer {
             Err(result) => return Ok(result),
         };
 
-        let tool_call_fut = recorder.record_content(&req.name, &input_for_record, || {
-            tool.call_content(input, &ctx)
-        });
+        let tool_call_fut = recorder.record_content(
+            &req.name,
+            &input_for_record,
+            ctx.workspace_override.as_deref(),
+            || tool.call_content(input, &ctx),
+        );
 
         let result = Self::race_against_cancel(
             tool_call_fut,
@@ -725,7 +740,9 @@ impl CodeScoutServer {
             "tool_done"
         );
 
-        let call_result = self.post_process(call_result, &req.name).await;
+        let call_result = self
+            .post_process(call_result, &req.name, ctx.workspace_override.as_deref())
+            .await;
 
         Ok(call_result)
     }
@@ -2482,6 +2499,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn post_process_strips_and_annotates_against_the_pinned_root() {
+        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // finding 2): post_process resolved the strip prefix via the plain,
+        // unpinned project_root(). Under a `workspace=` pin the tool body emits
+        // paths under workspace A, but post_process stripped against the
+        // session-default B — so A's ABSOLUTE paths survived into the response
+        // (a cross-workspace path leak) and the "paths are relative to" banner
+        // named the wrong root.
+        let dir_a = tempdir().unwrap();
+        let (_dir_b, server) = make_server().await;
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+        let root_a_fwd = to_forward_slash(&root_a);
+
+        // A payload shaped like a pinned tool's output: paths under workspace A.
+        let payload = CallToolResult::success(vec![Content::text(format!(
+            "{{\"file\": \"{root_a_fwd}/src/lib.rs\"}}"
+        ))]);
+
+        let processed = server
+            .post_process(payload, "read_file", Some(&root_a))
+            .await;
+        let joined: String = processed
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            !joined.contains(&format!("{root_a_fwd}/src/lib.rs")),
+            "the PINNED root must be stripped from the response; A's absolute \
+             path leaked through: {joined}"
+        );
+        assert!(
+            joined.contains("\"file\": \"src/lib.rs\""),
+            "path must be rewritten relative to the pinned root A; got: {joined}"
+        );
+        assert!(
+            joined.contains(&format!("paths are relative to {root_a_fwd}")),
+            "the banner must name the PINNED root A, not the session default; got: {joined}"
+        );
+    }
+
+    #[tokio::test]
     async fn call_tool_inner_grants_write_access_to_a_fresh_pinned_workspace() {
         // FINDING (docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
         // "Live-verification finding"): a workspace pin defaulted to read-only
@@ -2560,7 +2622,7 @@ mod tests {
         };
 
         // First stripped response — annotation MUST appear.
-        let first = server.post_process(make_payload(), "read_file").await;
+        let first = server.post_process(make_payload(), "read_file", None).await;
         let joined: String = first
             .content
             .iter()
@@ -2575,7 +2637,7 @@ mod tests {
         // Subsequent stripped responses across multiple tool names — annotation
         // MUST NOT re-appear within the same activation window.
         for tool_name in ["read_file", "tree", "symbols", "librarian", "grep"] {
-            let processed = server.post_process(make_payload(), tool_name).await;
+            let processed = server.post_process(make_payload(), tool_name, None).await;
             let joined: String = processed
                 .content
                 .iter()
@@ -2593,7 +2655,9 @@ mod tests {
         // contain the project root. Independent of the novelty gate — the
         // run_command branch in post_process skips the strip+annotate path
         // entirely.
-        let processed = server.post_process(make_payload(), "run_command").await;
+        let processed = server
+            .post_process(make_payload(), "run_command", None)
+            .await;
         let joined: String = processed
             .content
             .iter()
@@ -2610,7 +2674,7 @@ mod tests {
         server
             .path_note_emitted_since_activation
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        let after_reset = server.post_process(make_payload(), "read_file").await;
+        let after_reset = server.post_process(make_payload(), "read_file", None).await;
         let joined: String = after_reset
             .content
             .iter()
