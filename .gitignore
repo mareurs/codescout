@@ -11,6 +11,9 @@
 /.codescout/usage.db
 /.codescout/usage.db-wal
 /.codescout/usage.db-shm
+# Same runtime files, but for crates with their own .codescout/ (e.g. librarian-mcp)
+crates/*/.codescout/usage.db-wal
+crates/*/.codescout/usage.db-shm
 /.codescout/debug.log*
 /.codescout/diagnostic-*.log
 /.codescout/libraries.json
