@@ -132,22 +132,10 @@ impl Tool for Artifact {
                     "default": false,
                     "description": "update: bypass the body-shrink guard. Required when a body write would reduce the file by more than 50%. Use only when shrinkage is intentional (full rewrite, archiving stale sections). Default false. See get_guide(\"librarian\") § Body Editing Surfaces."
                 },
-                "addBlocks": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "update: task IDs this artifact blocks"
-                },
-                "addBlockedBy": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "update: task IDs that block this artifact"
-                },
-                "owner": { "type": "string", "description": "update: set owner field" },
                 "commit_refresh": {
                     "type": "boolean",
                     "description": "update: atomically record a completed refresh cycle"
                 },
-                "activeForm": { "type": "string", "description": "update: present-continuous label shown in spinner" },
                 "src_id": { "type": "string", "description": "link: source artifact id" },
                 "dst_id": { "type": "string", "description": "link: destination artifact id" },
                 "rel": { "type": "string", "description": "link: relation type (supersedes, implements, ...)" },
@@ -286,5 +274,21 @@ mod tests {
             .await
             .unwrap();
         assert!(v["count"].is_number());
+    }
+
+    #[test]
+    fn input_schema_has_no_phantom_update_fields() {
+        // owner/activeForm/addBlocks/addBlockedBy were copy-pasted from the
+        // harness's unrelated TaskUpdate tool schema and never had any backing
+        // implementation in update.rs — see
+        // docs/issues/2026-07-13-artifact-update-phantom-schema-fields.md.
+        let schema = Artifact.input_schema();
+        let props = &schema["properties"];
+        for phantom in ["owner", "activeForm", "addBlocks", "addBlockedBy"] {
+            assert!(
+                props.get(phantom).is_none(),
+                "schema documents `{phantom}` but update.rs has no field backing it"
+            );
+        }
     }
 }

@@ -1,7 +1,7 @@
 ---
 id: '8dfa0da20703f46c'
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: artifact(create) silently drops `topic` — not a recognized create param, hardcoded to null'
 owners:
 - marius
@@ -11,6 +11,9 @@ tags:
 - create
 topic: null
 time_scope: null
+opened: '2026-07-13'
+owner: marius
+severity: low
 ---
 
 ## Summary
@@ -110,7 +113,7 @@ artifact(action="update", id="<id>", patch={topic: "my-topic"})
 
 ## Resume
 
-Decide whether to commit this fix (branch `experiments`) — awaiting user go-ahead per project convention (commits require explicit request). Once committed, cite the SHA here and flip `closed:` — but do NOT flip `status` to `fixed` referencing a `master`-side SHA until after cherry-pick per CLAUDE.md § "After cherry-pick"; until then this stays `investigating` with the experiments-branch SHA noted informally. Optionally: after `/mcp` reconnect, do one live `artifact(action="create", ..., topic="...")` + `artifact(action="get")` round trip to confirm the rebuilt binary behaves as the unit test predicts.
+Fixed on branch `experiments`, commit `d3842c7c` ("fix(librarian): honor topic on artifact(create), was silently dropped"). Not yet cherry-picked to `master` — per CLAUDE.md § "After cherry-pick", once it lands on `master` re-run `git rev-parse HEAD` there and cite that SHA (not this experiments-side one, which orphans after rebase) before archiving to `docs/issues/archive/`.
 ## References
 
 - Related but distinct (already fixed): `docs/issues/2026-06-18-artifact-create-no-custom-frontmatter.md` (id `13164fb35d6f71ed`) — same class of "create can't set field X" bug, but for `time_scope`/`extra`, already resolved.
