@@ -44,6 +44,33 @@ fn init_sqlite_vec() {
 /// IF NOT EXISTS is naturally idempotent); v4+ uses ALTER TABLE which isn't,
 /// so each migration checks for its own preconditions before running.
 fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()> {
+    // Atomicity across connections. Each block in `apply_migrations_in_txn` is
+    // guarded by `column_exists`, but that check and the following
+    // `ALTER TABLE ADD COLUMN` are separate statements. In autocommit mode two
+    // connections sharing this database file can both observe a column as
+    // missing and both issue the ALTER; the loser fails with "duplicate column
+    // name" (bug 33e4ae68 — a guide_hint CI test flake, and a real hazard when
+    // two codescout instances open a shared catalog that still needs migration).
+    // Running the whole sequence in one write transaction makes the
+    // check-then-ALTER atomic; combined with the connection's `busy_timeout`,
+    // the second writer blocks on BEGIN IMMEDIATE, then re-checks and no-ops.
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    match apply_migrations_in_txn(conn, ws) {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// The v4+ ALTER/backfill sequence run inside the write transaction opened by
+/// `run_migrations`. Split out only so the transaction wrapper stays readable;
+/// it assumes an open transaction and is not meant to be called directly.
+fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()> {
     // v4: render_template + params_schema columns on artifact_augmentation
     if !column_exists(conn, "artifact_augmentation", "render_template")? {
         conn.execute(
@@ -296,6 +323,58 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 6);
+    }
+
+    #[test]
+    fn run_migrations_is_safe_under_concurrent_connections() {
+        // Reproduces bug 33e4ae68 (guide_hint CI flake) at its true root: the
+        // check-then-ALTER blocks in run_migrations are not atomic, so two
+        // connections opening the SAME catalog file can both observe a v4+
+        // column as missing and both issue `ALTER TABLE ... ADD COLUMN`; the
+        // loser fails with "duplicate column name". Also a real production
+        // hazard when two codescout instances open a shared catalog that still
+        // needs migration.
+        use std::sync::{Arc, Barrier};
+
+        // schema.sql references the `vec0` virtual table, so the sqlite-vec
+        // auto-extension must be registered before any connection is opened
+        // (Catalog::open does this internally; we call run_migrations directly).
+        init_sqlite_vec();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+
+        // Seed ONLY the v3 baseline (SCHEMA_SQL) — no migrations yet — so every
+        // connection below must attempt the v4+ ALTERs and can collide on them.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
+                .unwrap();
+            conn.execute_batch(SCHEMA_SQL).unwrap();
+        }
+
+        let n = 16;
+        let barrier = Arc::new(Barrier::new(n));
+        let handles: Vec<_> = (0..n)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let conn = Connection::open(&path).unwrap();
+                    conn.execute_batch("PRAGMA busy_timeout = 5000;").unwrap();
+                    // Release all threads into run_migrations simultaneously to
+                    // maximise overlap on the check-then-ALTER window.
+                    barrier.wait();
+                    run_migrations(&conn, None)
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap().expect(
+                "run_migrations must be safe under concurrent connections sharing a catalog",
+            );
+        }
     }
 
     #[test]

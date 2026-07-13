@@ -10,7 +10,6 @@ tags:
 - librarian
 topic: null
 time_scope: null
-closed: '2026-07-05'
 opened: '2026-07-02'
 owner: marius
 related:
@@ -29,6 +28,30 @@ source (runs on 88b8fb27, its rerun — which failed on the sibling heartbeat ra
 instead — and d936eb0f); the same source was green at 218e0a4c and passes
 locally (2987/0/43, multiple runs).
 
+## Resolution (2026-07-13) — CONFIRMED root cause + fix
+
+**The prior env-race hypotheses were wrong.** Instrumenting `try_build_runtime` to `eprintln` the swallowed `build_tool_context` error, then looping the full `cargo test --lib` on this box, reproduced the failure on run 6/10 with the decisive message:
+
+    [[LIBRARIAN_BUILD_FAILED]] running migrations: duplicate column name: entry_collection
+
+The failing step is `Catalog::open_with_workspace` -> `run_migrations`, **not** a corrupted env read of `LIBRARIAN_WORKSPACE`/`LIBRARIAN_DB`.
+
+**Root cause — TOCTOU in `run_migrations`.** Each v4+ migration block was a non-atomic check-then-act:
+
+    if !column_exists(conn, "artifact_augmentation", "entry_collection")? {   // CHECK
+        conn.execute("ALTER TABLE ... ADD COLUMN entry_collection TEXT", [])?; // ACT
+    }
+
+In autocommit mode the `SELECT` check holds no lock, so two connections sharing one catalog file can both observe the column missing and both issue the `ALTER`; the loser fails with `duplicate column name`. This is a genuine production hazard too — `open_with_workspace`'s own comment documents that separate codescout instances share one catalog file.
+
+**Fix.** Wrap the whole migration sequence in one `BEGIN IMMEDIATE` … `COMMIT` write transaction (body extracted to `apply_migrations_in_txn`; `ROLLBACK` on error). With the connection's `busy_timeout = 5000`, the second writer blocks on `BEGIN IMMEDIATE`, then re-checks and no-ops. Migration is now atomic (add_columns + backfill all-or-nothing). File: `src/librarian/catalog/mod.rs`.
+
+**Regression test.** `run_migrations_is_safe_under_concurrent_connections` (same file's test module): seeds the v3 baseline, then hammers `run_migrations` from 16 barrier-synced connections on one shared db. Deterministically RED before the fix (`duplicate column name: render_template`), GREEN after.
+
+**Verified.** New test RED->GREEN; full `cargo test` = 3183 passed / 0 failed; the full-suite flake loop went from FAIL-on-run-6 to **15/15 clean passes** post-fix; `clippy -D warnings` clean.
+
+### Secondary finding (NOT fixed here) — test env-access UB
+The *trigger* that let a pinned guide_hint test land on a shared/wrong `LIBRARIAN_DB`: `build_tool_context` does ~17 `std::env::var()` reads during construction, and several env-mutating tests are neither `#[serial]` nor under `lock_env_for_tests()` (e.g. `audit_doc_refs::tests::glob_explosion_returns_recoverable` sets/removes `LIBRARIAN_AUDIT_MAX_FILES` with no lock). `serial_test`'s lock and `ENV_LOCK` are **disjoint**, so env *writes* can race the guide_hint env *reads* (glibc setenv/getenv UB). The migration fix makes this benign for the observed failure, but the broader env-isolation gap remains a latent test-hygiene issue (fix would be: unify on one lock, or inject config instead of reading process env). Left as a follow-up.
 ## Symptom (Effect)
 ```
 thread 'server::guide_hint_tests::second_artifact_call_no_hint' (5233) panicked at src/server.rs:2966:32:
@@ -134,12 +157,15 @@ Re-run the failed CI job (`gh run rerun <id> --failed`).
 
 ## Resume
 
-Done. If the flake ever recurs, the next suspect is the *silent* degrade in
-`try_build_runtime` (`src/librarian/adapter.rs:20-24`): it logs a failed
-`build_tool_context` at `info` and returns `None`, which is what made this root
-cause opaque. Consider raising that to `warn` (a louder signal would have named
-the cause immediately), or the deeper fix: thread the librarian config/DB path
-through construction so tests don't depend on process-global HOME at all.
+**REOPENED 2026-07-13.** The 2026-07-02 mitigation (pin LIBRARIAN_WORKSPACE + LIBRARIAN_DB via EnvGuard in `make_server`; `#[serial]` on every guide_hint test) is INSUFFICIENT. Reliably reproduced locally: adding 2 unrelated non-serial lib tests (`tools::read_file`, commit 3af52f1e) tipped `activate_project_resets_hints` from green→red under the full parallel `cargo test` (~50–100% on this box; passes in isolation; baseline without the 2 tests was green).
+
+Diagnosis so far:
+- Failure is `try_build_runtime`/`build_tool_context` returning None during `make_server` → the `artifact` tool never registers (panic in `tool_by_name`).
+- Every test that mutates LIBRARIAN_DB / LIBRARIAN_WORKSPACE / HOME / XDG_CONFIG_HOME is ALREADY `#[serial]` or holds `lock_env_for_tests()` (verified: `reindex_cli_indexes_repo` #[serial]; `config::project.rs` + `config::global.rs` use `lock_env_for_tests()`). So a named env-clobber racer is NOT the cause.
+- Adding `lock_env_for_tests()` to `make_server` (to bridge serial_test's `#[serial]` and the bespoke ENV_LOCK) did NOT reliably fix it — one green run then red — so the race is not (only) HOME/XDG. Reverted.
+- Leading hypothesis: a process-global resource/timing contention in `CodeScoutServer::new` / `build_tool_context` under parallel load (catalog open, Qdrant connect), or an unguarded `std::env::set_current_dir` racer affecting current-dir-derived resolution.
+
+Next: instrument `build_tool_context` to log WHICH step fails (workspace::load vs Catalog::open vs current_dir) when the flake fires; grep tests for `set_current_dir`; consider making `artifact` registration not hinge on transient runtime build success, or making `make_server` assert+retry. **This blocks reliable full-suite gating and should be fixed before further parallel-test additions.**
 ## References
 - CI run on 88b8fb27 (Test ubuntu-latest/default job log, scratchpad
   ubuntu-default-88b8.log this session)
