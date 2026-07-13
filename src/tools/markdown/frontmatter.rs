@@ -6,7 +6,7 @@
 //! and anchors/aliases are out of scope — if they're ever needed, replace this module
 //! with `serde_yaml` and revisit.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use serde_json::Value;
 
 #[derive(Debug)]
@@ -86,10 +86,14 @@ pub fn apply_ops(
             continue;
         }
         if key.is_empty() || key.chars().any(|c| c.is_whitespace() || c == ':') {
-            bail!(
-                "invalid frontmatter key '{}' — must be non-empty with no whitespace or colons",
-                key
-            );
+            return Err(crate::tools::RecoverableError::with_hint(
+                format!(
+                    "invalid frontmatter key '{}' — must be non-empty with no whitespace or colons",
+                    key
+                ),
+                "Use a flat key with no whitespace or ':' (e.g. `status`, `owner`).",
+            )
+            .into());
         }
         out.push(format!("{key}: {}", serialize_value(value)?));
     }
@@ -154,9 +158,11 @@ fn serialize_value(v: &Value) -> Result<String> {
             let parts: Result<Vec<String>> = items.iter().map(serialize_array_elem).collect();
             Ok(format!("[{}]", parts?.join(", ")))
         }
-        Value::Object(_) => {
-            bail!("nested objects are not supported — this frontmatter editor is flat-only")
-        }
+        Value::Object(_) => Err(crate::tools::RecoverableError::with_hint(
+            "nested objects are not supported — this frontmatter editor is flat-only",
+            "Flatten the value: use a scalar or a flat array of strings.",
+        )
+        .into()),
     }
 }
 

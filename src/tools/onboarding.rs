@@ -795,9 +795,19 @@ async fn write_onboarding_memories(
                     project.relative_root.display(),
                     project.manifest.as_deref().unwrap_or("none"),
                 );
-                let _ = store.write("onboarding", &proj_summary);
+                if let Err(e) = store.write("onboarding", &proj_summary) {
+                    tracing::warn!(
+                        "onboarding memory write failed for sub-project '{}': {e}",
+                        project.id
+                    );
+                }
                 if let Some(patterns) = build_language_patterns_memory(&project.languages) {
-                    let _ = store.write("language-patterns", &patterns);
+                    if let Err(e) = store.write("language-patterns", &patterns) {
+                        tracing::warn!(
+                            "language-patterns memory write failed for sub-project '{}': {e}",
+                            project.id
+                        );
+                    }
                 }
             }
         }
