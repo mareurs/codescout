@@ -1213,8 +1213,16 @@ impl LspManager {
 
     /// Shut down all active LSP servers.
     pub async fn shutdown_all(&self) {
-        let mut clients = self.clients.lock().await;
-        for (key, client) in clients.drain() {
+        // Drain the map under the lock, then RELEASE it before awaiting each
+        // client's shutdown(). Holding `clients` across every shutdown().await
+        // blocks all concurrent LSP navigation (and a post_compact flush) for
+        // the full shutdown duration.
+        // (docs/issues/2026-07-10-lsp-shutdown-all-holds-clients-lock-across-await.md)
+        let drained: Vec<(LspKey, Arc<LspClient>)> = {
+            let mut clients = self.clients.lock().await;
+            clients.drain().collect()
+        };
+        for (key, client) in drained {
             tracing::info!("Shutting down LSP for: {}", key);
             match client.shutdown().await {
                 Ok(()) => tracing::debug!("LSP server shut down cleanly: {}", key),
