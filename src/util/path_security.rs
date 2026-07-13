@@ -27,10 +27,14 @@
 //!
 //! # Agent Safety
 //!
-//! Violations return [`anyhow::Error`] wrapping a [`crate::tools::RecoverableError`],
-//! which the MCP layer surfaces as `isError: false` with a corrective hint.
-//! This means a write-boundary violation does **not** abort sibling parallel
-//! tool calls — the agent can recover and continue without user intervention.
+//! Violations return a hard [`anyhow::Error`] carrying a corrective message
+//! (e.g. "outside the project root. Call approve_write(…)"). The MCP layer
+//! surfaces this as `isError: true` — a path/security-boundary violation is a
+//! **fatal** tool error. This is a deliberate exception to the general
+//! "input-driven failure → RecoverableError" convention (see
+//! `get_guide("error-handling")`): a boundary breach fails loudly rather than
+//! being silently absorbed by sibling parallel calls. The hard-fail behavior is
+//! pinned by `validate_write_path_still_bails_outside_with_unchanged_message`.
 
 use anyhow::{bail, Result};
 use regex::Regex;
