@@ -5969,6 +5969,107 @@ async fn symbols_propagates_error_when_fallback_also_fails() {
     );
 }
 
+/// fb330855: rust-analyzer can report a truncated (even degenerate) range for a
+/// method inside an `impl` block. The suspicious-range guard used to REFUSE the
+/// edit, leaving edit_code unusable for that symbol and pushing callers to
+/// `edit_file` on a definition body — a worse corruption risk (BUG-027).
+///
+/// `validate_symbol_position` has already confirmed the symbol's START is
+/// correct, so the tree-sitter AST end belongs to the same symbol and is
+/// authoritative for the file on disk. Repair the end from the AST, splice
+/// correctly, and REPORT the repair (never silently).
+#[tokio::test]
+async fn edit_code_replace_repairs_truncated_lsp_range_from_ast() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    std::fs::write(
+        &file,
+        "struct Point { x: f64, y: f64 }\nimpl Point {\n    fn distance(&self) -> f64 {\n        (self.x * self.x + self.y * self.y).sqrt()\n    }\n}\n",
+    )
+    .unwrap();
+
+    // document_symbols reports a DEGENERATE range for the impl method: start ==
+    // end on the `fn` line, though the method really spans lines 2..=4.
+    let truncated = SymbolInfo {
+        name: "distance".to_string(),
+        name_path: "Point/distance".to_string(),
+        kind: SymbolKind::Method,
+        file: file.clone(),
+        start_line: 2,
+        end_line: 2, // truncated — the real end is line 4 (the method's `}`)
+        start_col: 7,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+
+    let mock = MockLspClient::new().with_symbols(&file, vec![truncated]);
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = EditCode
+        .call(
+            json!({
+                "action": "replace",
+                "symbol": "Point/distance",
+                "path": "src/lib.rs",
+                "body": "    fn distance(&self) -> f64 {\n        42.0\n    }",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("replace must repair the truncated range instead of refusing");
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains("42.0"),
+        "new body missing; got:\n{content}"
+    );
+    assert!(
+        !content.contains("sqrt()"),
+        "old body should be replaced; got:\n{content}"
+    );
+    // The enclosing impl must survive intact — splicing with the truncated
+    // end_line (2) would have left the orphaned body lines and a stray `}`.
+    assert!(
+        content.contains("impl Point {"),
+        "impl header lost; got:\n{content}"
+    );
+    assert_eq!(
+        content.matches('{').count(),
+        content.matches('}').count(),
+        "braces must balance after the splice; got:\n{content}"
+    );
+
+    // The repair must be REPORTED, not silent.
+    let warning = result
+        .get("warning")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    assert!(
+        warning.contains("truncated") && warning.contains("AST"),
+        "repair must be reported in the response; got warning: {warning:?}"
+    );
+}
+
 // ── resolve_library_roots ────────────────────────────────────────────────
 
 #[tokio::test]

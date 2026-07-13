@@ -202,6 +202,70 @@ pub fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A truncated LSP range that was widened to the tree-sitter AST extent.
+#[derive(Debug, Clone, Copy)]
+pub struct RangeRepair {
+    /// The (too-small) end line the LSP reported. 0-indexed.
+    pub lsp_end_line: u32,
+    /// The end line tree-sitter resolved. 0-indexed, always > `lsp_end_line`.
+    pub ast_end_line: u32,
+}
+
+impl RangeRepair {
+    /// Human-facing note for the tool response. Lines are 1-indexed for display.
+    pub fn warning(&self, name: &str) -> String {
+        format!(
+            "LSP returned a truncated range for '{}' (ended at line {}); repaired from the AST \
+             to line {}. The edit used the AST extent — verify the result.",
+            name,
+            self.lsp_end_line + 1,
+            self.ast_end_line + 1,
+        )
+    }
+}
+
+/// Repair a truncated LSP `end_line` from the tree-sitter AST extent.
+///
+/// Counterpart to [`validate_symbol_range`], which *refuses* a truncated range.
+/// Refusing is right for read paths, but on an EDIT it makes the tool unusable
+/// for the symbol and pushes callers to `edit_file` on a definition body — a
+/// strictly worse corruption risk (BUG-027). So the edit path repairs instead,
+/// and reports the repair; it is never applied silently.
+///
+/// Callers MUST run [`validate_symbol_position`] first. Once the symbol's start
+/// is confirmed correct, the AST end belongs to that same symbol and is
+/// authoritative for the file as it exists on disk — tree-sitter re-parses the
+/// source, whereas the LSP index may lag or (fb330855) hand back a selection
+/// range for an `impl` method.
+///
+/// Returns `Some` when the range was widened. Returns `None` — trusting the LSP
+/// range as-is — when the file is unreadable, has syntax errors (a broken parse
+/// tree under-reports spans), the AST has no matching symbol, or the LSP range
+/// was already correct.
+///
+/// Regression: docs/issues/2026-07-10-edit-code-impl-method-selection-range-refusal.md
+pub fn repair_symbol_range(sym: &mut SymbolInfo) -> Option<RangeRepair> {
+    let source = std::fs::read_to_string(&sym.file).ok()?;
+    let lang = crate::ast::detect_language(&sym.file);
+    if let Some(lang) = lang {
+        if crate::ast::has_syntax_errors(&source, lang) {
+            return None;
+        }
+    }
+    let ast_syms =
+        crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file).ok()?;
+    let ast_end = find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line, Some(&sym.name_path))?;
+    if ast_end <= sym.end_line {
+        return None;
+    }
+    let repair = RangeRepair {
+        lsp_end_line: sym.end_line,
+        ast_end_line: ast_end,
+    };
+    sym.end_line = ast_end;
+    Some(repair)
+}
+
 /// Validate that the LSP symbol position matches the actual file content.
 ///
 /// LSP `start_line` (selectionRange.start) should point at the line containing
@@ -464,34 +528,37 @@ pub async fn fetch_validated_symbol(
     path: &std::path::Path,
     lang: &str,
     name_path: &str,
-) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>)> {
+) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>, Option<RangeRepair>)> {
     const MAX_RETRIES: u32 = 3;
     let mut last_err: Option<anyhow::Error> = None;
 
     for attempt in 0..MAX_RETRIES {
         let attempt_result = async {
             let symbols = client.document_symbols(path, lang).await?;
-            let sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
+            let mut sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
             let content = std::fs::read_to_string(path)?;
             let lines: Vec<&str> = content.lines().collect();
-            // Staleness/position check BEFORE the suspicious-range heuristic.
-            // A stale LSP range puts `start_line` on an unrelated line, which
-            // validate_symbol_position correctly diagnoses as staleness and the
-            // retry loop can recover from. Since 758801d5 removed the line-gate
-            // from find_ast_end_line_in, validate_symbol_range now resolves the
-            // real AST end even for a stale range, so running it first would
-            // surface a misleading "suspicious range" before the staleness path.
-            // Ordering position first keeps BUG-041's diagnosis intact; the
-            // suspicious-range guard still fires below for a correctly-positioned
-            // but truncated range. See docs/trackers/bug-fix-session-log.md F-26.
+            // Staleness/position check FIRST. A stale LSP range puts `start_line`
+            // on an unrelated line, which validate_symbol_position correctly
+            // diagnoses as staleness and the retry loop can recover from. Running
+            // any range logic before it would surface a misleading range error
+            // ahead of the staleness path. Ordering position first keeps BUG-041's
+            // diagnosis intact. See docs/trackers/bug-fix-session-log.md F-26.
             validate_symbol_position(&sym, &lines)?;
-            validate_symbol_range(&sym)?;
-            anyhow::Ok((sym, symbols))
+            // Position is confirmed, so a too-small `end_line` is a TRUNCATED LSP
+            // range, not staleness — retrying cannot fix it (fb330855: rust-analyzer
+            // can hand back a selection range for an `impl` method, persistently).
+            // Repair from the AST rather than refusing: the old refusal left
+            // edit_code unusable for the symbol and steered callers to `edit_file`
+            // on a definition body, a worse corruption risk (BUG-027). The repair
+            // is returned to the caller and surfaced in the response — never silent.
+            let repair = repair_symbol_range(&mut sym);
+            anyhow::Ok((sym, symbols, repair))
         }
         .await;
 
         match attempt_result {
-            Ok(pair) => return Ok(pair),
+            Ok(triple) => return Ok(triple),
             Err(e) => {
                 last_err = Some(e);
                 if attempt < MAX_RETRIES - 1 {

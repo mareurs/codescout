@@ -1,12 +1,20 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: low
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- lsp
+- edit_code
+- rust
+topic: null
+time_scope: null
+closed: null
+opened: '2026-07-10'
 owner: marius
 related: []
-tags: [lsp, edit_code, rust]
-kind: bug
+severity: low
 ---
 
 # BUG: edit_code replace rejects impl-block method — LSP returns selection range instead of full symbol range
@@ -18,6 +26,37 @@ while the AST knew the true extent. The guard (correctly) refused to edit, but t
 tool is unusable for that symbol — the workaround is a manual `edit_file`, which the
 companion hooks then warn about (BUG-027 risk).
 
+## Resolution (2026-07-13) — repair instead of refuse
+
+**Scope note, stated plainly:** this fixes the *vulnerability* (edit_code being unusable), **not** the upstream LSP behavior. WHY rust-analyzer hands back a truncated/selection range for that particular impl method is still unexplained. What changed is codescout's *response* to it — which is the right behavior regardless of the LSP's reason.
+
+### Hypotheses DISPROVEN by reading the code (do not re-tread)
+1. ~~Missing `hierarchicalDocumentSymbolSupport` capability~~ — the direct client **does** set `hierarchical_document_symbol_support: Some(true)` (`src/lsp/client.rs:791`); the mux sets it too (`src/lsp/mux/process.rs:152`).
+2. ~~Hierarchical/flat `DocumentSymbol` mis-parse~~ — `document_symbols` tries `Vec<DocumentSymbol>` first and falls back to `Vec<SymbolInformation>` (`client.rs:1053-1060`). The two types have **disjoint required fields** (`range`+`selectionRange` vs `location`), so they cannot cross-parse. Order is correct.
+3. ~~A degenerate `workspace/symbol` range leaking into the edit~~ — `edit_code` (3 sites) goes **only** through `fetch_validated_symbol` → `document_symbols`, never `workspace_symbols`. (`workspace_symbols` *does* produce degenerate ranges by design — rust-analyzer returns identifier ranges there — which is precisely why the **Symbols tool** has a `document_symbols` fallback. Different path; not this bug.)
+
+**Still standing:** hypothesis #2 from the original filing — foreign-workspace / detached-file degraded rust-analyzer state. Not reproducible without the original llm-proxy conditions.
+
+### Root cause of the *failure mode* (what was actually fixed)
+The suspicious-range guard (`validate_symbol_range`) **refused** the edit. That refusal was self-defeating: its own hint said *"Try edit_file for this symbol"* — and `edit_file` on a definition body is flagged by the companion hooks as **BUG-027** (LSP range-corruption risk). The "safe" refusal therefore steered callers to the *more dangerous* path, while leaving `edit_code` unusable for the symbol.
+
+### Fix
+New `repair_symbol_range()` + `RangeRepair` in `src/symbol/query.rs`. On the **edit** path only (`fetch_validated_symbol`), once `validate_symbol_position` has confirmed the symbol's **start** is correct, a too-small `end_line` is a *truncated* range (not staleness — retrying cannot fix it). We then widen `end_line` to the tree-sitter AST extent, which is authoritative for the file **as it exists on disk** (tree-sitter re-parses; the LSP index may lag).
+
+The repair is **reported, never silent** — honoring the original "don't silently fix" design intent:
+- `fetch_validated_symbol` now returns `Option<RangeRepair>`;
+- all three `edit_code` actions (replace / remove / insert) attach a `warning` field;
+- `EditCode::format_compact` surfaces the warning in the **compact** output too (a warning only in raw JSON would be a silent fix in practice).
+
+The **read** path is untouched: `validate_symbol_range` still refuses, and the Symbols tool's `match` on it (`symbols.rs:511`) is unchanged — all 10 existing guard tests still pass.
+
+### Tests
+- **New:** `edit_code_replace_repairs_truncated_lsp_range_from_ast` (`src/tools/symbol/tests.rs`) — impl method with a **degenerate** LSP range (start==end); asserts the splice consumes the whole method, braces balance, and the repair is reported. RED before (reproduced the production error verbatim: *"suspicious range for 'distance' (lines 3-3, but AST shows it spans to line 5)"*), GREEN after.
+- **Rewritten (contract change, safety preserved):** `replace_symbol_repairs_truncated_end_line` and `insert_code_after_repairs_truncated_end_in_nested_fn` (`tests/symbol_lsp.rs`) — previously asserted *refusal + file untouched*. They now assert *repair + correct splice*. **The BUG-018/BUG-016 no-corruption property is retained and still asserted** (braces balance / no stray closer; insert lands after the whole body, never mid-body).
+
+**Verified:** full `cargo test` = 3184 passed / 0 failed; `clippy -D warnings` clean.
+
+Shipped on `experiments` — archive after cherry-pick to `master`.
 ## Symptom (Effect)
 During llm-proxy work on 2026-07-07 (recorded then, filed late — capture-on-notice
 debt paid 2026-07-10):

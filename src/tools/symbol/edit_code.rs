@@ -77,6 +77,12 @@ impl Tool for EditCode {
         } else {
             None
         };
+        // A repaired (truncated) LSP range must reach the caller in the COMPACT
+        // form too — a warning only present in the raw JSON is a silent fix.
+        if let (Some(s), Some(w)) = (base.as_mut(), result["warning"].as_str()) {
+            s.push('\n');
+            s.push_str(w);
+        }
         if let (Some(s), Some(h)) = (base.as_mut(), result["hint"].as_str()) {
             s.push('\n');
             s.push_str(h);
@@ -461,7 +467,8 @@ impl EditCode {
         )
         .await?;
 
-        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+        let (sym, symbols, range_repair) =
+            fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -511,11 +518,15 @@ impl EditCode {
             .await;
         let line_count = end - start;
         let removed_range = format!("{}-{}", start + 1, end);
-        Ok(json!({
+        let mut response = json!({
             "status": "ok",
             "removed_lines": removed_range,
             "line_count": line_count,
-        }))
+        });
+        if let Some(r) = range_repair {
+            response["warning"] = json!(r.warning(&sym.name));
+        }
+        Ok(response)
     }
 
     async fn do_replace(
@@ -537,7 +548,8 @@ impl EditCode {
         )
         .await?;
 
-        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+        let (sym, symbols, range_repair) =
+            fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -756,7 +768,12 @@ impl EditCode {
         ctx.agent
             .mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path)
             .await;
-        Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
+        let mut response =
+            json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) });
+        if let Some(r) = range_repair {
+            response["warning"] = json!(r.warning(&sym.name));
+        }
+        Ok(response)
     }
 
     async fn do_insert(
@@ -778,7 +795,8 @@ impl EditCode {
         )
         .await?;
 
-        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+        let (sym, symbols, range_repair) =
+            fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -914,6 +932,9 @@ impl EditCode {
             json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position });
         if repaired {
             response["note"] = json!(crate::tools::edit_repair::REPAIR_NOTE);
+        }
+        if let Some(r) = range_repair {
+            response["warning"] = json!(r.warning(&sym.name));
         }
         Ok(response)
     }

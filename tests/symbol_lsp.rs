@@ -236,18 +236,24 @@ async fn replace_symbol_clean_start_line() {
 // ── BUG-018: replace_symbol truncated end_line (inside body, misses closing `}`) ──
 
 /// When LSP reports an end_line that lands inside the function body instead of
-/// at the closing `}`, trusting that range causes replace_symbol to splice only
-/// the first N lines and leave the tail of the old body in the file — stray
-/// tokens, compilation failure, silent corruption.
+/// at the closing `}`, trusting that range would splice only the first N lines
+/// and leave the tail of the old body in the file — stray tokens, compilation
+/// failure, silent corruption.
 ///
-/// validate_symbol_range must catch `end_line < AST end_line` and return
-/// RecoverableError before touching the file. Regression test for BUG-018.
+/// Since fb330855 the EDIT path repairs the truncated end from the tree-sitter
+/// AST (position is validated first, so the AST end belongs to the same symbol)
+/// and reports the repair, rather than refusing. Refusing left edit_code unusable
+/// for the symbol and steered callers to `edit_file` on a definition body — a
+/// strictly worse corruption risk (BUG-027).
+///
+/// BUG-018's property still holds and is what this asserts: the splice consumes
+/// the WHOLE symbol, leaving no stray closer.
 #[tokio::test]
-async fn replace_symbol_rejects_truncated_end_line() {
+async fn replace_symbol_repairs_truncated_end_line() {
     // File layout (0-indexed):
     //  0: "fn target() {"       ← LSP start=0 (correct)
     //  1: "    old_body();"     ← LSP end=1   (WRONG — truncated, misses `}`)
-    //  2: "}"                   ← actual end=2, not covered by LSP range
+    //  2: "}"                   ← actual end=2, resolved from the AST
     let src = "fn target() {\n    old_body();\n}\n";
 
     let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
@@ -260,7 +266,7 @@ async fn replace_symbol_rejects_truncated_end_line() {
     })
     .await;
 
-    let err = EditCode
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
@@ -271,19 +277,34 @@ async fn replace_symbol_rejects_truncated_end_line() {
             &ctx,
         )
         .await
-        .unwrap_err();
+        .expect("truncated range must be repaired from the AST, not refused");
 
-    let msg = err.to_string();
+    // The repair must be REPORTED, never applied silently.
+    let warning = result["warning"].as_str().unwrap_or_default();
     assert!(
-        msg.contains("suspicious range"),
-        "expected suspicious range error, got: {msg}"
+        warning.contains("truncated") && warning.contains("AST"),
+        "repair must be reported in the response; got: {warning:?}"
     );
 
-    // File must be untouched — truncated splice would have left a stray `}`
+    // BUG-018's core property, preserved: the splice consumed the WHOLE symbol.
     let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
     assert!(
-        content.contains("old_body()"),
-        "file must be unmodified after truncated-range guard; got:\n{content}"
+        !content.contains("old_body()"),
+        "old body must be fully replaced; got:\n{content}"
+    );
+    assert!(
+        content.contains("new_body()"),
+        "new body missing; got:\n{content}"
+    );
+    assert_eq!(
+        content.matches('{').count(),
+        content.matches('}').count(),
+        "braces must balance — a truncated splice would leave a stray closer; got:\n{content}"
+    );
+    assert_eq!(
+        content.matches('}').count(),
+        1,
+        "exactly one closing brace expected; got:\n{content}"
     );
 }
 
@@ -1579,23 +1600,22 @@ async fn remove_last_python_method_removes_trailing_stmt() {
 
 /// BUG-016 regression: insert_code(after) on a nested `mod tests` function
 /// where LSP reports end_line as a line *inside* the body (truncated range).
-/// validate_symbol_range catches ast_end > sym.end_line and returns
-/// RecoverableError — the file is never corrupted.
+///
+/// Since fb330855 the edit path repairs the end from the AST and reports it
+/// instead of refusing. The no-corruption property is unchanged and is what this
+/// asserts: the insert lands after the WHOLE body, never mid-body.
 #[tokio::test]
-async fn insert_code_after_rejects_truncated_end_in_nested_fn() {
+async fn insert_code_after_repairs_truncated_end_in_nested_fn() {
     // File layout (0-indexed):
-    //  0: "#[cfg(test)]"
-    //  1: "mod tests {"
-    //  2: "    #[test]"
-    //  3: "    fn target_test() {"
-    //  4: "        let x = 1;"         <- LSP (wrongly) reports end_line here
+    //  3: "    fn target_test() {"      ← LSP start=3 (correct)
+    //  4: "        let x = 1;"          ← LSP end=4   (WRONG — truncated)
     //  5: "        assert_eq!(x, 1);"
-    //  6: "    }"                       <- true end (AST knows this)
-    //  7: "}"
+    //  6: "    }"                       ← actual end=6, resolved from the AST
+    //  7: "}"                           ← module closer
     let src =
         "#[cfg(test)]\nmod tests {\n    #[test]\n    fn target_test() {\n        let x = 1;\n        assert_eq!(x, 1);\n    }\n}\n";
 
-    let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
         let file = root.join("src/lib.rs");
         // LSP reports end_line=4 (inside the body), not 6 (closing `}`)
         let inner = SymbolInfo {
@@ -1637,15 +1657,34 @@ async fn insert_code_after_rejects_truncated_end_in_nested_fn() {
             }),
             &ctx,
         )
-        .await;
+        .await
+        .expect("truncated range must be repaired from the AST, not refused");
 
-    // validate_symbol_range must catch ast_end (6) > sym.end_line (4)
-    // and return RecoverableError — not silently insert mid-body
-    let err = result.expect_err("should fail with RecoverableError for truncated end_line");
-    let msg = format!("{err:#}");
+    // The repair must be REPORTED, never applied silently.
+    let warning = result["warning"].as_str().unwrap_or_default();
     assert!(
-        msg.contains("suspicious range"),
-        "error should mention suspicious range; got: {msg}"
+        warning.contains("truncated") && warning.contains("AST"),
+        "repair must be reported in the response; got: {warning:?}"
+    );
+
+    // Core property preserved: the insert lands AFTER the whole target_test body.
+    // Trusting the truncated end (line 4) would have spliced `new_test` between
+    // `let x = 1;` and `assert_eq!(...)`, orphaning the assertion mid-body.
+    let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    let assert_pos = content
+        .find("assert_eq!(x, 1)")
+        .expect("the original assertion must survive inside target_test");
+    let new_fn_pos = content
+        .find("fn new_test")
+        .expect("new_test must have been inserted");
+    assert!(
+        assert_pos < new_fn_pos,
+        "new_test must be inserted AFTER the whole target_test body, not mid-body; got:\n{content}"
+    );
+    assert_eq!(
+        content.matches('{').count(),
+        content.matches('}').count(),
+        "braces must balance; got:\n{content}"
     );
 }
 
