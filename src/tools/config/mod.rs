@@ -442,8 +442,12 @@ static INDEX_STATUS_CACHE: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<String, bool>>,
 > = std::sync::OnceLock::new();
 
-/// A slow or hung vector store must not stall the first activation either.
-const FIRST_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+/// A slow or hung vector store must not stall the first activation. Sized for a
+/// cold retrieval stack: the prior 500ms bound frequently timed out on the first
+/// activation after a restart/sync. A timeout is NOT cached (see
+/// `resolve_first_probe`), so a rare slow probe self-corrects on the next
+/// activation instead of poisoning the session cache with a false `not_indexed`.
+const FIRST_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn index_status_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
     INDEX_STATUS_CACHE.get_or_init(Default::default)
@@ -470,6 +474,20 @@ fn index_status_remove(project_id: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(project_id);
+}
+/// Decide the cached index-status value from a first-probe outcome.
+/// `Some(v)` = the probe completed with result `v`; `None` = it timed out.
+fn resolve_first_probe(project_id: &str, probe: Option<bool>) -> bool {
+    match probe {
+        // Completed probe → cache the definitive result.
+        Some(v) => {
+            index_status_put(project_id, v);
+            v
+        }
+        // Timed out → report false for this call but do NOT cache it, so the
+        // next activation re-probes instead of serving a poisoned negative.
+        None => false,
+    }
 }
 
 /// At most one detached refresh per project id at a time (thundering-herd guard).
@@ -516,14 +534,13 @@ async fn check_has_index_cached(project_id: &str, project_root: &std::path::Path
         }
         return cached;
     }
-    let fresh = tokio::time::timeout(
+    let probe = tokio::time::timeout(
         FIRST_PROBE_TIMEOUT,
         check_has_index(project_id, project_root),
     )
     .await
-    .unwrap_or(false);
-    index_status_put(project_id, fresh);
-    fresh
+    .ok();
+    resolve_first_probe(project_id, probe)
 }
 
 /// Build the activation response JSON for both full-activation and focus-switch paths.

@@ -1557,6 +1557,30 @@ async fn index_status_cache_serves_stale_then_refreshes() {
     super::index_status_remove(&pid);
     assert!(!super::check_has_index_cached(&pid, &root).await);
 }
+#[test]
+fn first_probe_timeout_is_not_cached() {
+    // A first-probe TIMEOUT (None) must NOT be cached as a definitive
+    // `false` — caching it poisons the session cache and reports
+    // not_indexed for a fully queryable index until a later refresh lands.
+    // A COMPLETED probe (Some) is still cached.
+    let pid = "test-first-probe-timeout-not-cached";
+    super::index_status_remove(pid);
+
+    // Timed-out probe: returns false for this call but leaves the cache
+    // empty so the next activation re-probes.
+    assert!(!super::resolve_first_probe(pid, None));
+    assert_eq!(
+        super::index_status_get(pid),
+        None,
+        "a timed-out first probe must NOT be cached"
+    );
+
+    // Completed probe: cached.
+    assert!(super::resolve_first_probe(pid, Some(true)));
+    assert_eq!(super::index_status_get(pid), Some(true));
+
+    super::index_status_remove(pid);
+}
 
 #[test]
 fn refresh_in_flight_guard_is_exclusive_per_project() {
