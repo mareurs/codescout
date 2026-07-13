@@ -524,31 +524,23 @@ impl OutputBuffer {
                         "Buffer refs expire when the session resets. Re-run the original command to get a fresh handle.",
                     )
                 })?;
-                let content = std::fs::read_to_string(&log_path).map_err(|e| {
-                    RecoverableError::with_hint(
-                        format!("background job log unavailable: {}", e),
-                        format!(
-                            "Check if the process is still running. Log path: {}",
-                            log_path.display()
-                        ),
+                // Substitute the LIVE log file directly, not a point-in-time
+                // snapshot copy: a snapshot never grows, so `tail -f @bg_xxx`
+                // would follow a dead file and block forever. The bg log is an
+                // existing appendable file owned by the background job, so it is
+                // recorded in `temp_path_strings` (for the buffer-only
+                // classification) but NOT in `temp_paths` (it is not a temp to
+                // delete after the command completes).
+                if !log_path.exists() {
+                    return Err(RecoverableError::with_hint(
+                        format!("background job log unavailable: {}", log_path.display()),
+                        "Check if the process is still running; its log file no longer exists.",
                     )
-                })?;
-                let mut tmp = NamedTempFile::new()?;
-                tmp.write_all(content.as_bytes())?;
-                tmp.flush()?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let perms = std::fs::Permissions::from_mode(0o444);
-                    std::fs::set_permissions(tmp.path(), perms)?;
+                    .into());
                 }
-                let (_, path) = tmp
-                    .keep()
-                    .map_err(|e| anyhow::anyhow!("failed to persist temp file: {e}"))?;
-                let path_str = path.to_string_lossy().to_string();
+                let path_str = log_path.to_string_lossy().to_string();
                 result = result.replace(token, &path_str);
                 temp_path_strings.push(path_str);
-                temp_paths.push(path);
                 continue;
             }
 
@@ -1355,6 +1347,33 @@ mod tests {
         let id = buf.store_background(path.clone());
         assert!(id.starts_with("@bg_"), "expected @bg_ prefix, got {id}");
         assert_eq!(buf.get_background(&id), Some(path));
+    }
+    #[test]
+    fn resolve_refs_bg_substitutes_live_log_not_snapshot() {
+        // A @bg_ ref must resolve to the LIVE log file so `tail -f @bg_xxx`
+        // follows the growing log, not a static point-in-time snapshot copy
+        // (which never grows and makes tail -f block forever).
+        let buf = OutputBuffer::new(10);
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("bg.log");
+        std::fs::write(&log_path, "line1\n").unwrap();
+        let id = buf.store_background(log_path.clone());
+
+        let (resolved, temp_paths, is_buffer_only, _refreshed) =
+            buf.resolve_refs(&format!("tail -f {id}")).unwrap();
+
+        assert!(
+            resolved.contains(&log_path.to_string_lossy().to_string()),
+            "expected the LIVE log path in the resolved command, got: {resolved}"
+        );
+        assert!(
+            !temp_paths.contains(&log_path),
+            "the live bg log must NOT be scheduled for temp cleanup"
+        );
+        assert!(
+            is_buffer_only,
+            "tail -f on a @bg_ ref should be buffer-only"
+        );
     }
 
     #[test]
