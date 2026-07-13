@@ -97,8 +97,11 @@ JSON tree ported from Redis agent-memory-server. Composition `and` / `or` /
 Optional. Set `LIBRARIAN_EMBED_MODEL` to any model codescout supports (local
 via `fastembed`, remote via Ollama / OpenAI-compatible endpoint). On reindex,
 each artifact's first chunk is embedded into sqlite-vec's `vec0` virtual table.
-`artifact_find` and `librarian_context` accept `semantic: "<natural language>"`
-and fall back to SQL `LIKE` when no embedder is configured.
+`artifact_find` and `librarian_context` accept `semantic: "<natural language>"`.
+When no embedder is configured, `librarian_context` (and its `topic` param)
+degrades to a title/topic SQL `LIKE` match, whereas `artifact_find`'s `semantic`
+search **requires** the embedder and errors with a hint to set
+`LIBRARIAN_EMBED_MODEL` — it does not fall back to `LIKE`.
 
 ## Classification
 

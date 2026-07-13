@@ -15,6 +15,13 @@ fn run_cmd(tmp: &TempDir) -> Command {
     cmd.env("LIBRARIAN_DB", &db);
     cmd.env("LIBRARIAN_WORKSPACE", &ws);
     cmd.env_remove("LIBRARIAN_EMBED_MODEL");
+    // Hermeticity: block the startup dotenv (main.rs `load_startup_env`) from
+    // re-supplying LIBRARIAN_EMBED_MODEL out of the machine's global
+    // ~/.config/codescout/.env. dotenvy does not override already-set vars but
+    // WILL set a var we just removed, which would defeat the env_remove above
+    // and make no-embedder assertions env-dependent. Point CODESCOUT_ENV_FILE
+    // at a path that does not exist so load_startup_env is a no-op.
+    cmd.env("CODESCOUT_ENV_FILE", tmp.path().join("no-startup.env"));
     cmd
 }
 
