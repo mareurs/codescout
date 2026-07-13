@@ -45,6 +45,10 @@ impl Tool for Artifact {
                     "type": "string",
                     "description": "find: shortcut eq-filter on status (disables archived-hide). create/update: set status."
                 },
+                "topic": {
+                    "type": "string",
+                    "description": "create/update: semantic topic used by librarian(action=\"context\") grouping. NOT filterable via find."
+                },
                 "time_scope": {
                     "type": "string",
                     "description": "create/update: temporal scope tag written to frontmatter + catalog (e.g. '2026-W25', a date, or 'dated_snapshot'). Filterable via find."

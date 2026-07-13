@@ -53,6 +53,7 @@ pub struct Args {
     #[serde(default)]
     pub tags: Vec<String>,
     pub status: Option<String>,
+    pub topic: Option<String>,
     pub time_scope: Option<String>,
     #[serde(default)]
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
@@ -118,7 +119,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         title: Some(a.title.clone()),
         owners: a.owners.clone(),
         tags: a.tags.clone(),
-        topic: None,
+        topic: a.topic.clone(),
         time_scope: a.time_scope.clone(),
         extra: a.extra.clone(),
     };
@@ -132,7 +133,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         title: Some(a.title),
         owners: a.owners,
         tags: a.tags,
-        topic: None,
+        topic: a.topic,
         time_scope: a.time_scope,
         source: Some("generated".into()),
         created_at: now,
@@ -411,6 +412,39 @@ mod tests {
         let on_disk = std::fs::read_to_string(&abs).unwrap();
         let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
         assert_eq!(fm.unwrap().time_scope.as_deref(), Some("2026-W25"));
+    }
+    #[tokio::test]
+    async fn create_with_topic_persists_to_row_and_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "trackers/topical.md",
+                "kind": "tracker",
+                "title": "Topical",
+                "body": "",
+                "topic": "auth middleware"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let abs = tmp.path().join("trackers/topical.md");
+        let row = crate::librarian::catalog::artifact::get(
+            &ctx.catalog.lock(),
+            &crate::librarian::ids::artifact_id_from_abs(&abs),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(row.topic.as_deref(), Some("auth middleware"));
+
+        // The value must also land in the YAML frontmatter, not just the catalog.
+        let on_disk = std::fs::read_to_string(&abs).unwrap();
+        let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
+        assert_eq!(fm.unwrap().topic.as_deref(), Some("auth middleware"));
     }
 
     #[tokio::test]
