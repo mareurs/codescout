@@ -154,6 +154,16 @@ impl Tool for ReadFile {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_read_file(result))
     }
+    fn json_path_hint(&self, val: &Value) -> String {
+        // Buffered read results carry the payload under `content` (line ranges,
+        // toml_key/json_path extractions, full reads). Point agents there rather
+        // than the generic default `$.field`.
+        if val["content"].is_string() {
+            "$.content".to_string()
+        } else {
+            "$.field".to_string()
+        }
+    }
 }
 
 /// Strip surrounding quotes from buffer ref paths.
@@ -471,7 +481,13 @@ fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Resul
 
 /// Handle `toml_key` navigation for TOML and YAML files.
 fn read_toml_yaml_key(text: &str, resolved: &std::path::Path, tk: &str) -> Result<Value> {
-    let file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
+    let mut file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
+    // Cargo.lock (and most `.lock` files) are TOML, but detect_file_type
+    // classifies `.lock` as Config. Coerce to TOML so toml_key works; a
+    // non-TOML `.lock` (e.g. yarn.lock) surfaces a clear parse error below.
+    if resolved.to_string_lossy().to_lowercase().ends_with(".lock") {
+        file_type = crate::tools::file_summary::FileSummaryType::Toml;
+    }
     match file_type {
         crate::tools::file_summary::FileSummaryType::Toml => {
             let result = crate::tools::file_summary::extract_toml_key(text, tk)?;
@@ -1260,6 +1276,44 @@ mod tests {
             msg.contains("toml_key"),
             "error must name the offending param; got: {msg}"
         );
+    }
+    #[tokio::test]
+    async fn read_file_toml_key_works_on_lock_file() {
+        // Cargo.lock is TOML; toml_key must work on it even though `.lock`
+        // is classified as Config by detect_file_type.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Cargo.lock");
+        std::fs::write(
+            &path,
+            "version = 3\n\n[[package]]\nname = \"foo\"\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "toml_key": "version" }),
+                &ctx,
+            )
+            .await
+            .expect("toml_key must work on a Cargo.lock (TOML) file");
+        assert_eq!(
+            value["format"], "toml",
+            "expected toml format, got: {value}"
+        );
+        assert!(
+            value.get("content").is_some(),
+            "expected content for the key, got: {value}"
+        );
+    }
+    #[tokio::test]
+    async fn read_file_json_path_hint_points_at_content() {
+        // ReadFile's buffered results carry `content` (not `field`); the
+        // json_path hint must point at $.content, not the generic default.
+        let with_content = json!({ "content": "hello", "total_lines": 1 });
+        assert_eq!(ReadFile.json_path_hint(&with_content), "$.content");
+        // Falls back to the generic default when there is no content field.
+        let without = json!({ "file_id": "@file_x", "total_lines": 9 });
+        assert_eq!(ReadFile.json_path_hint(&without), "$.field");
     }
 
     #[tokio::test]
