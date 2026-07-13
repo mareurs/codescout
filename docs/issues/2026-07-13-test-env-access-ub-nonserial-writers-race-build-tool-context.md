@@ -1,19 +1,25 @@
 ---
 id: a656f8cec220d347
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: test env-access UB — non-#[serial] env writers race build_tool_context''s ~17 env reads (disjoint serial_test vs ENV_LOCK)'
 owners: []
 tags: []
 topic: null
 time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-13'
+owner: marius
+severity: medium
 ---
 
 # BUG: test env-access UB — non-#[serial] env writers race build_tool_context's env reads
 
 ## Status
-open — latent test-hygiene issue; currently **benign** after the bug-33e4ae68 migration-atomicity fix (2026-07-13), but the underlying UB remains.
 
+**fixed (2026-07-13)** — by *deleting* the env writes, not coordinating them. Branch `experiments`.
+
+The originally-chosen approach (option 1, "unify the locks") was attempted first and proven **not viable**. The reasoning is kept below, because it is the whole lesson.
 ## Summary
 `build_tool_context` performs ~17 `std::env::var()` reads during server
 construction (`LIBRARIAN_WORKSPACE`, `LIBRARIAN_DB`, `LIBRARIAN_EMBED_*`,
@@ -46,45 +52,74 @@ some other test's assertion fails).
 
 ## Fix options (not yet done)
 
-### ⚠️ Option 1 was attempted 2026-07-13 and is **NOT VIABLE**. Do not retry it.
+### ⚠️ Option 1 ("unify serialization") was attempted and is NOT VIABLE. Do not retry it.
 
-The reason is worth writing down, because option 1 *reads* as the obvious mechanical fix and it is a trap.
+It *reads* like the obvious mechanical fix. It is a trap, for two compounding reasons:
 
-**The env READER set is not "the `build_tool_context` test paths." It is essentially the whole suite.** Verified at the bytes:
+**1. The env READER set is not "the `build_tool_context` test paths." It is essentially the whole suite.** Verified at the bytes:
 
 ```
 Agent::new
-  -> Agent::load_project_resources        (src/agent/mod.rs:529)
-  -> ProjectConfig::load_or_default       (src/config/project.rs:418)
-  -> GlobalConfig::load                   (src/config/global.rs)
-  -> global_config_path -> global_config_dir
-  -> std::env::var_os("XDG_CONFIG_HOME") / std::env::var_os("HOME")
+  -> Agent::load_project_resources     (src/agent/mod.rs)
+  -> ProjectConfig::load_or_default    (src/config/project.rs)
+  -> GlobalConfig::load                (src/config/global.rs)
+  -> global_config_dir -> std::env::var_os("XDG_CONFIG_HOME") / ("HOME")
 ```
 
-Every test that constructs an `Agent` with a project root reads process env. That is *hundreds* of tests, and essentially none of them are annotated.
+Every test that constructs an `Agent` with a project root reads process env — *hundreds* of them, essentially none annotated.
 
-**`serial_test` cannot help with unannotated tests.** `#[serial]` serializes a test only against other `#[serial]` / `#[parallel]` tests. A plain, untagged test runs in parallel with a `#[serial]` one — by design; `serial_test` has no lock an unannotated test participates in. So a `#[serial]`-tagged env writer **still races** the hundreds of untagged `Agent::new` readers, and the `setenv`-reallocs-`environ` UB is untouched.
+**2. `serial_test` cannot help with unannotated tests.** `#[serial]` serializes a test only against other `#[serial]` / `#[parallel]` tests. A plain, untagged test runs in parallel with a `#[serial]` one — by design; there is no lock an unannotated test participates in. So a `#[serial]`-tagged env writer **still races** the hundreds of untagged `Agent::new` readers, and the `setenv`-reallocs-`environ` UB is untouched.
 
-Making option 1 sound would require annotating essentially the entire test suite (`#[parallel]` on every env reader), which serializes the suite end-to-end. That is not a fix, it is a different problem.
+Making option 1 sound would require annotating essentially the whole suite `#[parallel]`, serializing it end-to-end. That is not a fix, it is a different problem.
 
-This is the same **"serialize a subset" trap** that made the two prior `33e4ae68` mitigations insufficient — option 1 is just a bigger subset. The bug file already warned about the trap under option 3 and the warning applies to option 1 too. (Note the named example, `glob_explosion_returns_recoverable`, has since *gained* `#[serial_test::serial]` — and the UB still stands, which is itself the proof.)
+(The proof it was always a trap: the bug's own named example, `glob_explosion_returns_recoverable`, had *since gained* `#[serial_test::serial]` — and the UB still stood.)
 
-### The only sound fix: stop mutating process env in tests (was "option 2")
+### ✅ What was actually done: delete the writes
 
-Any `setenv` can `realloc` the `environ` array, so **any** env write races **any** concurrent env read of **any** variable — the vars don't have to match. Partial removal therefore does not partially fix it. The env writes have to go.
+Any `setenv` can `realloc` the `environ` array, so **any** env write races **any** concurrent env read of **any** variable — the names need not match. Partial removal therefore does not partially fix it. The writes had to go, not get coordinated.
 
-Scope, in dependency order:
+Config resolution now takes its inputs as *data*. Each seam is a pure function or an explicit parameter, so tests inject instead of mutating:
 
-1. **`GlobalConfig` / `global_config_dir`** — take the config dir explicitly instead of reading `HOME`/`XDG_CONFIG_HOME`. Kills the 5–9 `HOME`/`XDG` writers in `src/config/global.rs` + `src/config/project.rs`. `ProjectConfig::load_with_global_base(root, global_base)` already exists as exactly this seam for the project layer — the global layer needs its twin.
-2. **`build_tool_context`** (`src/librarian/mod.rs:29`) — accept an injected config struct instead of reading `LIBRARIAN_WORKSPACE`, `LIBRARIAN_DB`, `LIBRARIAN_EMBED_{MODEL,URL,API_KEY}`, `LIBRARIAN_CWD`. Keep an env-reading thin wrapper for the real server entry point. Kills the `EnvGuard` writers in `src/server.rs::guide_hint_tests::make_server` and `src/librarian/mod.rs`.
-3. **`RetrievalConfig::from_env`** / `ArtifactBackend::resolve` — same treatment (9 more reads).
-4. Delete the three duplicated `EnvGuard` copies (`src/agent/mod.rs`, `src/librarian/mod.rs`, `src/server.rs`) and `ENV_LOCK`/`lock_env_for_tests` once nothing mutates env.
+| Seam | Replaces reading… |
+|---|---|
+| `global_config_dir_from(xdg, home)` | `XDG_CONFIG_HOME` / `HOME` |
+| `GlobalConfig::load_from_dir(dir)` | ↑ (via `global_config_path`) |
+| `ProjectConfig::load_with_global_base(root, base)` | ↑ — **already existed**; the tests just weren't using it |
+| `ProjectConfig::apply_embed_overrides(model, url)` | `CODESCOUT_EMBED_MODEL` / `_URL` |
+| `plan_startup_env(explicit, default, exists)` + `startup_env_assignments(pairs, is_set)` | `CODESCOUT_ENV_FILE` + dotenv precedence |
+| `LibrarianEnv { workspace, db, embed_*, cwd }` + `build_tool_context_with` | the 6 `LIBRARIAN_*` vars |
+| `ServerEnv { probe, cc_session_id, librarian }` + `CodeScoutServer::from_parts_with_env` | `CODESCOUT_PROBE`, `CLAUDE_CODE_SESSION_ID`, + the above |
+| `import_codescout(registry, ws)` / `reindex_cli(env, …)` | `CODESCOUT_REGISTRY`, `LIBRARIAN_*` |
+| `enforce_file_cap(count, max)` | `LIBRARIAN_AUDIT_MAX_FILES` |
 
-**Not attempted in this pass** — it is a real refactor of production config plumbing, materially larger than what was signed up for, and doing half of it would reproduce the very trap above. Left `investigating` with the analysis rather than shipping a placebo.
+Each production entry point keeps a thin env-reading wrapper (`LibrarianEnv::from_env`, `ServerEnv::from_env`, `GlobalConfig::load`, …), so runtime behaviour is unchanged.
 
-### Non-fix worth noting
+`ENV_LOCK` and `lock_env_for_tests` are **deleted**. So is every `EnvGuard` in the default build, and every `#[serial]` that existed only to guard env.
 
-`src/cli/mod.rs::open_ctx` also calls `set_var("LIBRARIAN_CWD")` — but in **production**, not tests, and it carries a doc comment correctly arguing that the codescout binary runs one command per process so no other threads exist yet. That one is fine as-is; it is called out here only so a future sweep does not "fix" it unnecessarily.
+**`set_var` / `remove_var` in the default `cargo test` build: 119 → 0.**
+
+### The result is *better isolation*, not merely less UB
+
+The `guide_hint_tests` — the very cluster whose flake opened bug `33e4ae68` ("tool 'artifact' not registered") — all 11 now run **fully in parallel, with no `#[serial]` at all**, because their librarian workspace/db and CC session id are per-server values rather than process-global ones. They were never really "tests that need to take turns"; they were tests that mutated global state. Same for `librarian::tests` (`imports_codescout_projects`, `reindex_cli_indexes_repo`).
+
+Four tests in `config/project.rs` (`load_or_default_*`) were `#[allow(dead_code)]` "stale test — missing `#[test]`" stubs. They had been **disabled because exercising config layering required faking `HOME`**. With the global base injected they are real, running tests again — the env problem had been silently costing coverage.
+
+### Remaining: ONE writer, deliberately, and it cannot affect the default suite
+
+`EnvGuard` in `src/agent/mod.rs`, used only by `semantic_memory_store_bootstrap_times_out_on_hung_qdrant`:
+
+- It is **`server-stack`-gated, and `server-stack` is not a default feature** — so it does not compile into the default `cargo test` run and cannot corrupt it.
+- The test exists precisely to exercise the **env-driven** construction path (`VectorBackend::resolve` + `RetrievalConfig::from_env`) against a black-hole Qdrant. Injecting past that path would delete the thing under test.
+
+Closing it properly means threading a `RetrievalConfig` through `Agent`. Worth doing; not done here. The `EnvGuard` carries a comment saying exactly this, plus "do not copy this pattern into a default-feature test".
+
+Also still present, and **sound**: `src/cli/mod.rs::open_ctx` and `config::global::load_startup_env` both `set_var` in **production**, at process startup, before any worker threads exist. Single-threaded `setenv` is fine. Called out so a future sweep does not "fix" them unnecessarily.
+
+Out of scope (separate test binaries / crate, each its own process): `tests/retrieval_unit.rs` (5), `crates/codescout-embed/src/remote.rs` (6).
+
+### Verification
+
+3216 passed, 0 failed (up from 3204 — the four revived stale tests plus the new pure ones). `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo clippy --features server-stack --all-targets -- -D warnings` all clean.
 ## References
 - docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md — parent; the migration TOCTOU this UB triggered
 - docs/conventions/test-env-isolation.md

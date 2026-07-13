@@ -1,7 +1,7 @@
 //! librarian — workspace artifact registry embedded in codescout.
 
 pub mod adapter;
-pub use adapter::{adapters_for, try_build_runtime};
+pub use adapter::{adapters_for, try_build_runtime, try_build_runtime_with};
 
 pub mod classify;
 pub mod filter;
@@ -26,37 +26,82 @@ pub mod tools;
 
 use anyhow::Result;
 
+/// The environment-derived inputs to [`build_tool_context`], captured as data.
+///
+/// Exists so tests can *inject* these instead of calling `std::env::set_var`. Mutating
+/// process env in a parallel test binary is UB (glibc may `realloc` `environ` under a
+/// concurrent `getenv`), and the reader set is effectively the whole suite. See
+/// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+#[derive(Debug, Clone, Default)]
+pub struct LibrarianEnv {
+    /// `LIBRARIAN_WORKSPACE` — path to workspace.toml. `None` → the default config path.
+    pub workspace: Option<std::path::PathBuf>,
+    /// `LIBRARIAN_DB` — catalog path. `None` → the platform data-local default.
+    pub db: Option<std::path::PathBuf>,
+    /// `LIBRARIAN_EMBED_MODEL` — absent disables the embedding service entirely.
+    pub embed_model: Option<String>,
+    pub embed_url: Option<String>,
+    pub embed_api_key: Option<String>,
+    /// `LIBRARIAN_CWD` — overrides the process cwd for current-project resolution.
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+impl LibrarianEnv {
+    /// Read the real process environment. The production entry point.
+    pub fn from_env() -> Self {
+        use std::path::PathBuf;
+        Self {
+            workspace: std::env::var_os("LIBRARIAN_WORKSPACE").map(PathBuf::from),
+            db: std::env::var_os("LIBRARIAN_DB").map(PathBuf::from),
+            embed_model: std::env::var("LIBRARIAN_EMBED_MODEL").ok(),
+            embed_url: std::env::var("LIBRARIAN_EMBED_URL").ok(),
+            embed_api_key: std::env::var("LIBRARIAN_EMBED_API_KEY").ok(),
+            cwd: std::env::var_os("LIBRARIAN_CWD").map(PathBuf::from),
+        }
+    }
+}
+
 pub async fn build_tool_context(
     lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
+) -> Result<tools::ToolContext> {
+    build_tool_context_with(lsp, &LibrarianEnv::from_env()).await
+}
+
+pub async fn build_tool_context_with(
+    lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
+    env: &LibrarianEnv,
 ) -> Result<tools::ToolContext> {
     use anyhow::Context as _;
     use std::path::PathBuf;
 
-    let cfg_path = std::env::var("LIBRARIAN_WORKSPACE")
-        .map(PathBuf::from)
-        .map_or_else(|_| workspace::default_config_path(), Ok)?;
+    let cfg_path = match env.workspace.clone() {
+        Some(p) => p,
+        None => workspace::default_config_path()?,
+    };
     let ws = workspace::load(&cfg_path).with_context(|| {
         format!(
             "Load workspace from {}. Run `librarian-mcp import-codescout` to seed.",
             cfg_path.display()
         )
     })?;
-    let db_path = std::env::var("LIBRARIAN_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join("librarian/catalog.db")
-        });
+    let db_path = env.db.clone().unwrap_or_else(|| {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("librarian/catalog.db")
+    });
     let ws_arc = std::sync::Arc::new(ws);
     let catalog = catalog::Catalog::open_with_workspace(&db_path, &ws_arc)?;
 
-    // Optionally initialise the embedding service. Requires LIBRARIAN_EMBED_MODEL env var.
+    // Optionally initialise the embedding service. Requires an embed model.
     // When absent (CI, tests, first-run) we skip embedding silently.
-    let embedding = if let Ok(model) = std::env::var("LIBRARIAN_EMBED_MODEL") {
-        let url = std::env::var("LIBRARIAN_EMBED_URL").ok();
-        let api_key = std::env::var("LIBRARIAN_EMBED_API_KEY").ok();
-        match codescout_embed::create_embedder_with_config(&model, url.as_deref(), api_key).await {
+    let embedding = if let Some(model) = env.embed_model.as_deref() {
+        match codescout_embed::create_embedder_with_config(
+            model,
+            env.embed_url.as_deref(),
+            env.embed_api_key.clone(),
+        )
+        .await
+        {
             Ok(e) => Some(std::sync::Arc::new(embedding::EmbeddingService::new(
                 std::sync::Arc::from(e),
             ))),
@@ -69,9 +114,9 @@ pub async fn build_tool_context(
         None
     };
 
-    let current_project = std::env::var("LIBRARIAN_CWD")
-        .map(PathBuf::from)
-        .ok()
+    let current_project = env
+        .cwd
+        .clone()
         .or_else(|| std::env::current_dir().ok())
         .and_then(|cwd| current_project::resolve(&cwd, &ws_arc))
         .map(std::sync::Arc::new);
@@ -170,20 +215,12 @@ pub(crate) async fn run_stdio_server() -> Result<()> {
 }
 
 #[cfg(test)]
-pub(crate) fn import_codescout() -> Result<()> {
+pub(crate) fn import_codescout(
+    registry_path: &std::path::Path,
+    ws_path: &std::path::Path,
+) -> Result<()> {
     use anyhow::Context as _;
     use std::path::PathBuf;
-
-    // --- locate registry ---
-    let registry_path = std::env::var("CODESCOUT_REGISTRY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            // Default: ~/.codescout-registry.toml — a user-maintained TOML
-            // listing project roots. Override via CODESCOUT_REGISTRY=<path>.
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/"))
-                .join(".codescout-registry.toml")
-        });
 
     // --- parse registry ---
     #[derive(serde::Deserialize)]
@@ -197,19 +234,9 @@ pub(crate) fn import_codescout() -> Result<()> {
         projects: Vec<CodescoutProject>,
     }
 
-    let raw = std::fs::read_to_string(&registry_path).with_context(|| {
-        format!(
-            "reading codescout registry at {}. \
-             Set CODESCOUT_REGISTRY=<path> to override.",
-            registry_path.display()
-        )
-    })?;
+    let raw = std::fs::read_to_string(registry_path)
+        .with_context(|| format!("reading codescout registry at {}", registry_path.display()))?;
     let reg: CodescoutRegistry = toml::from_str(&raw).context("parsing codescout registry TOML")?;
-
-    // --- determine workspace output path ---
-    let ws_path = std::env::var("LIBRARIAN_WORKSPACE")
-        .map(PathBuf::from)
-        .map_or_else(|_| workspace::default_config_path(), Ok)?;
 
     if ws_path.exists() {
         anyhow::bail!(
@@ -309,37 +336,35 @@ pub(crate) fn import_codescout() -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating dir {}", parent.display()))?;
     }
-    std::fs::write(&ws_path, &toml_str)
-        .with_context(|| format!("writing {}", ws_path.display()))?;
+    std::fs::write(ws_path, &toml_str).with_context(|| format!("writing {}", ws_path.display()))?;
 
     println!("imported {} roots and 9 rules to {}", n, ws_path.display());
     Ok(())
 }
 
 #[cfg(test)]
-pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
+pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>, force: bool) -> Result<()> {
     use std::path::PathBuf;
 
-    let cfg_path = std::env::var("LIBRARIAN_WORKSPACE")
-        .map(PathBuf::from)
-        .map_or_else(|_| workspace::default_config_path(), Ok)?;
+    let cfg_path = match env.workspace.clone() {
+        Some(p) => p,
+        None => workspace::default_config_path()?,
+    };
     let ws = workspace::load(&cfg_path)?;
     let ignore = workspace::compile_ignore(&ws.ignore)?;
     let mut rules = classify::compile_rules(&ws.rules)?;
     rules.extend(classify::default_rules()?);
-    let db_path = std::env::var("LIBRARIAN_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join("librarian/catalog.db")
-        });
+    let db_path = env.db.clone().unwrap_or_else(|| {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("librarian/catalog.db")
+    });
     let cat = catalog::Catalog::open(&db_path)?;
 
-    let embedding = if let Ok(model) = std::env::var("LIBRARIAN_EMBED_MODEL") {
-        let url = std::env::var("LIBRARIAN_EMBED_URL").ok();
-        let api_key = std::env::var("LIBRARIAN_EMBED_API_KEY").ok();
-        match codescout_embed::create_embedder_with_config(&model, url.as_deref(), api_key).await {
+    let embedding = if let Some(model) = env.embed_model.as_deref() {
+        let url = env.embed_url.clone();
+        let api_key = env.embed_api_key.clone();
+        match codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await {
             Ok(e) => Some(embedding::EmbeddingService::new(std::sync::Arc::from(e))),
             Err(err) => {
                 eprintln!("warn: embedding service unavailable: {err:#}");
@@ -449,39 +474,13 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
-    /// RAII guard: save current value of an env var, set new value, restore on drop.
-    /// Without this, tests that mutate LIBRARIAN_WORKSPACE / LIBRARIAN_DB /
-    /// CODESCOUT_REGISTRY leak their values into the rest of the process — e.g.
-    /// `build_tool_context()` later picks up a stale tempdir path that no longer
-    /// exists, and unrelated tests (e.g. `server::guide_hint_tests::*`) fail with
-    /// "tool 'artifact' not registered". `#[serial]` only serializes tests against
-    /// each other; it does not undo env mutations.
-    struct EnvGuard {
-        key: &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set<V: AsRef<std::ffi::OsStr>>(key: &'static str, value: V) -> Self {
-            let original = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.original.take() {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
+    // No `#[serial]`: these tests take their workspace/db/registry paths as ARGUMENTS
+    // now, so they are isolated by construction. They used to serialize only because
+    // they mutated process env, which is UB in a parallel test binary. See
+    // docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
     #[test]
-    #[serial]
     fn imports_codescout_projects() {
         let tmp = tempfile::TempDir::new().unwrap();
         let registry = tmp.path().join("projects.toml");
@@ -499,18 +498,15 @@ path = "/tmp/proj-b"
         )
         .unwrap();
         let ws_path = tmp.path().join("workspace.toml");
-        let _registry_env = EnvGuard::set("CODESCOUT_REGISTRY", &registry);
-        let _ws_env = EnvGuard::set("LIBRARIAN_WORKSPACE", &ws_path);
-        import_codescout().unwrap();
+        import_codescout(&registry, &ws_path).unwrap();
         let cfg = workspace::load(&ws_path).unwrap();
         assert_eq!(cfg.roots.len(), 2);
         assert_eq!(cfg.rules.len(), 9);
         // Second call must refuse (file already exists).
-        assert!(import_codescout().is_err());
+        assert!(import_codescout(&registry, &ws_path).is_err());
     }
 
     #[tokio::test]
-    #[serial]
     async fn reindex_cli_indexes_repo() {
         let tmp = tempfile::TempDir::new().unwrap();
         let repo_root = tmp.path().join("repo_a");
@@ -536,12 +532,15 @@ kind = "spec"
         std::fs::write(&ws_path, ws_content).unwrap();
 
         let db_path = tmp.path().join("catalog.db");
-        let _ws_env = EnvGuard::set("LIBRARIAN_WORKSPACE", &ws_path);
-        let _db_env = EnvGuard::set("LIBRARIAN_DB", &db_path);
+        let env = LibrarianEnv {
+            workspace: Some(ws_path.clone()),
+            db: Some(db_path.clone()),
+            ..Default::default()
+        };
 
-        reindex_cli(None, false).await.unwrap();
+        reindex_cli(&env, None, false).await.unwrap();
         // Second call is idempotent.
-        reindex_cli(None, false).await.unwrap();
+        reindex_cli(&env, None, false).await.unwrap();
 
         // Verify catalog contents: 1 artifact indexed.
         let cat = catalog::Catalog::open(&db_path).unwrap();

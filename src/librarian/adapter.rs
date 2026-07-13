@@ -20,7 +20,17 @@ use crate::librarian::tools::{all_tools as lib_all_tools, ToolContext as LibTool
 pub async fn try_build_runtime(
     lsp: Arc<dyn crate::lsp::LspProvider>,
 ) -> Option<Arc<LibToolContext>> {
-    match crate::librarian::build_tool_context(lsp).await {
+    try_build_runtime_with(lsp, &crate::librarian::LibrarianEnv::from_env()).await
+}
+
+/// [`try_build_runtime`] with the environment inputs supplied explicitly, so tests can
+/// point the librarian at a tempdir workspace/db without `set_var`. See
+/// [`crate::librarian::LibrarianEnv`].
+pub async fn try_build_runtime_with(
+    lsp: Arc<dyn crate::lsp::LspProvider>,
+    env: &crate::librarian::LibrarianEnv,
+) -> Option<Arc<LibToolContext>> {
+    match crate::librarian::build_tool_context_with(lsp, env).await {
         Ok(ctx) => Some(Arc::new(ctx)),
         Err(err) => {
             tracing::info!("librarian disabled: {err:#}");

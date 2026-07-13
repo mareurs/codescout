@@ -261,7 +261,9 @@ mod tests {
 
     #[test]
     fn classify_path_detects_home_directory() {
-        let _guard = crate::config::global::lock_env_for_tests();
+        // Reads HOME only. No lock needed: nothing in the suite MUTATES env any more
+        // (see docs/issues/2026-07-13-test-env-access-ub-...md), and concurrent
+        // getenv readers do not race each other.
         let Some(home) = crate::platform::home_dir() else {
             return;
         };
@@ -270,7 +272,6 @@ mod tests {
 
     #[test]
     fn classify_path_detects_home_parent() {
-        let _guard = crate::config::global::lock_env_for_tests();
         let Some(home) = crate::platform::home_dir() else {
             return;
         };
@@ -291,7 +292,6 @@ mod tests {
 
     #[test]
     fn classify_path_detects_usr_etc_var() {
-        let _guard = crate::config::global::lock_env_for_tests();
         for p in ["/usr", "/etc", "/var", "/tmp", "/opt"] {
             if !Path::new(p).exists() {
                 continue;

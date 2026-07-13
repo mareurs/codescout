@@ -44,6 +44,42 @@ use crate::util::fs::to_forward_slash;
 // memory writes are small; the `memory` tool's write actions cover the
 // common case.
 
+/// Everything `CodeScoutServer::from_parts` would otherwise read from the process
+/// environment, captured as data so tests can inject it.
+///
+/// Tests must never call `std::env::set_var`: mutating `environ` while other test
+/// threads call `getenv` is UB (glibc may `realloc` it under a concurrent reader), and
+/// the reader set is effectively the whole suite — every `Agent::new` reads `HOME`.
+/// See `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+#[derive(Debug, Clone, Default)]
+pub struct ServerEnv {
+    /// `CODESCOUT_PROBE` — registers the oversized-description probe tool.
+    pub probe: bool,
+    /// `CLAUDE_CODE_SESSION_ID` — keys the persisted guide-hint ledger.
+    pub cc_session_id: Option<String>,
+    /// Inputs for the librarian runtime (workspace/db/embed/cwd).
+    #[cfg(feature = "librarian")]
+    pub librarian: crate::librarian::LibrarianEnv,
+}
+
+impl ServerEnv {
+    /// Read the real process environment. The production entry point.
+    pub fn from_env() -> Self {
+        Self {
+            probe: std::env::var("CODESCOUT_PROBE")
+                .ok()
+                .filter(|v| !v.is_empty() && v != "0")
+                .is_some(),
+            cc_session_id: std::env::var("CLAUDE_CODE_SESSION_ID")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            #[cfg(feature = "librarian")]
+            librarian: crate::librarian::LibrarianEnv::from_env(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CodeScoutServer {
     agent: Agent,
@@ -100,6 +136,17 @@ impl CodeScoutServer {
 
     /// Create a server with an existing LspManager (used for HTTP multi-session).
     pub async fn from_parts(agent: Agent, lsp: Arc<dyn LspProvider>, debug: bool) -> Self {
+        Self::from_parts_with_env(agent, lsp, debug, ServerEnv::from_env()).await
+    }
+
+    /// [`Self::from_parts`] with the environment supplied explicitly — the test seam.
+    /// See [`ServerEnv`] for why tests inject rather than `set_var`.
+    pub async fn from_parts_with_env(
+        agent: Agent,
+        lsp: Arc<dyn LspProvider>,
+        debug: bool,
+        env: ServerEnv,
+    ) -> Self {
         let status = agent.project_status().await;
         let instructions = crate::prompts::build_server_instructions(status.as_ref());
         #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
@@ -137,11 +184,7 @@ impl CodeScoutServer {
             #[cfg(unix)]
             Arc::new(crate::tools::peer::PeerTool),
         ];
-        if std::env::var("CODESCOUT_PROBE")
-            .ok()
-            .filter(|v| !v.is_empty() && v != "0")
-            .is_some()
-        {
+        if env.probe {
             tools.push(Arc::new(crate::tools::probe::ProbeTool));
             tracing::warn!(
                 "CODESCOUT_PROBE=1 — registering __probe_description_cap__ \
@@ -150,7 +193,9 @@ impl CodeScoutServer {
         }
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
-            if let Some(lib_ctx) = crate::librarian::try_build_runtime(lsp.clone()).await {
+            if let Some(lib_ctx) =
+                crate::librarian::try_build_runtime_with(lsp.clone(), &env.librarian).await
+            {
                 tools.extend(crate::librarian::adapters_for(lib_ctx));
             }
         }
@@ -167,10 +212,9 @@ impl CodeScoutServer {
         // docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md and
         // memory `claude-code-mcp-env`.
         let guide_project_root = agent.project_root().await;
-        let cc_session_id = std::env::var("CLAUDE_CODE_SESSION_ID")
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+        let cc_session_id = env
+            .cc_session_id
+            .clone()
             .or_else(|| {
                 guide_project_root
                     .as_ref()
@@ -3105,69 +3149,52 @@ mod guide_hint_tests {
     use super::*;
     use serde_json::{json, Value};
 
-    use serial_test::serial;
+    // No `use serial_test::serial` and no `#[serial]` anywhere in this module: the
+    // librarian workspace/db and the CC session id are INJECTED per server
+    // (see `ServerEnv`), so these tests are isolated by construction rather than by
+    // taking turns. They used to serialize only because they mutated process env.
 
-    /// RAII env-var guard mirroring the pattern in `librarian::tests::EnvGuard`.
+    /// Build a server with a per-test librarian workspace + catalog, INJECTED.
     ///
-    /// `make_server()` sets `LIBRARIAN_DB` to a per-test path so each test gets an
-    /// isolated SQLite catalog. Without isolation, all tests resolve the env
-    /// fallback (`dirs::data_local_dir().join("librarian/catalog.db")`) and race
-    /// on the shared file — intermittent on Linux (POSIX advisory locks), routine
-    /// hangs on Windows (mandatory file locks). The guard restores the prior
-    /// value on drop so test ordering does not bleed env state forward.
-    struct EnvGuard {
-        key: &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set<V: AsRef<std::ffi::OsStr>>(key: &'static str, value: V) -> Self {
-            let original = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.original.take() {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
-    async fn make_server() -> (tempfile::TempDir, EnvGuard, CodeScoutServer) {
+    /// This used to `set_var` LIBRARIAN_WORKSPACE / LIBRARIAN_DB behind an RAII guard.
+    /// It no longer touches the environment at all — see [`ServerEnv`].
+    ///
+    /// The two values it injects are still load-bearing, for the reasons the old
+    /// comment recorded:
+    /// - **workspace:** without it, `build_tool_context` falls back to
+    ///   `dirs::config_dir()/librarian/workspace.toml`, which is absent under
+    ///   wine/windows-gnu — the deterministic cause of the 8-test guide_hint wine
+    ///   cluster (`docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md`): the
+    ///   missing file fails the build, `try_build_runtime` returns None, and the
+    ///   `artifact` tool never registers. An empty file is valid — `WorkspaceConfig`
+    ///   is `#[derive(Default)]` with all fields `#[serde(default)]`.
+    /// - **db:** without per-test isolation every test resolves the shared default
+    ///   catalog (`dirs::data_local_dir()/librarian/catalog.db`) and they race on it —
+    ///   intermittent on Linux (advisory locks), routine hangs on Windows (mandatory).
+    ///
+    /// Injecting gives strictly BETTER isolation than the env guards did: the values
+    /// are scoped to this one server, so tests need no `#[serial]` to keep them apart.
+    async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
-        // Seed an empty librarian workspace and pin LIBRARIAN_WORKSPACE so
-        // build_tool_context() resolves the workspace from here rather than
-        // falling back to dirs::config_dir()/librarian/workspace.toml. That
-        // fallback is $HOME/.config-derived, which is (a) absent under
-        // wine/windows-gnu — the DETERMINISTIC cause of the 8-test guide_hint
-        // wine cluster (docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md),
-        // where the missing file makes build_tool_context fail, try_build_runtime
-        // silently returns None, and the `artifact` tool never registers — and
-        // (b) a process-global HOME dependency other (non-#[serial]) tests race
-        // (docs/issues/2026-07-02-guide-hint-artifact-not-registered-ci-flake.md).
-        // An empty file is valid: WorkspaceConfig is #[derive(Default)] with all
-        // fields #[serde(default)]. The guard is local — build_tool_context only
-        // reads LIBRARIAN_WORKSPACE during CodeScoutServer::new, below.
         let ws_path = dir.path().join("librarian-workspace.toml");
         std::fs::write(&ws_path, "").unwrap();
-        let _ws_env = EnvGuard::set("LIBRARIAN_WORKSPACE", &ws_path);
-        // Per-test LIBRARIAN_DB isolation. Combined with `#[serial]` on every
-        // test that calls this helper, this prevents the Windows
-        // mandatory-locking deadlock on the shared default catalog path
-        // (`dirs::data_local_dir().join("librarian/catalog.db")`). The guard's
-        // restore-on-drop semantics keep the env clean for non-guide_hint tests
-        // that run after.
-        let db_env = EnvGuard::set("LIBRARIAN_DB", dir.path().join("librarian.db"));
+
+        let env = ServerEnv {
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
             .await
             .unwrap();
-        let server = CodeScoutServer::new(agent).await;
-        (dir, db_env, server)
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        (dir, server)
     }
 
     fn tool_by_name(server: &CodeScoutServer, name: &str) -> Arc<dyn crate::tools::Tool> {
@@ -3201,9 +3228,8 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn first_artifact_call_emits_librarian_hint() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "artifact");
         let result = tool
@@ -3222,9 +3248,8 @@ mod guide_hint_tests {
     /// classified as a read and the main server's write-guard never engaged for
     /// catalog mutations. Pins the real names + per-action classification.
     #[tokio::test]
-    #[serial]
     async fn is_write_call_classifies_librarian_surface() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         // artifact: mutating actions write; queries read.
         assert!(server.is_write_call("artifact", &json!({"action": "create"})));
         assert!(server.is_write_call("artifact", &json!({"action": "update"})));
@@ -3269,9 +3294,8 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn second_artifact_call_no_hint() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "artifact");
         let _ = tool
@@ -3289,12 +3313,11 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn first_artifact_call_appends_librarian_guide_body_v2() {
         // V2 hard-injection: first call to a tool whose relevant_guide_topic
         // returns Some("librarian") gets a SECOND Content block containing
         // the full guide body wrapped in `<!-- auto-injected ... -->` markers.
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "artifact");
         let result = tool
@@ -3328,11 +3351,10 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn second_artifact_call_no_guide_body_block_v2() {
         // V2: dedup applies — second call within the same session does NOT
         // re-append the guide body block. Only the primary response block.
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "artifact");
         let _ = tool
@@ -3352,9 +3374,8 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn artifact_event_after_artifact_no_hint() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let artifact = tool_by_name(&server, "artifact");
         let event = tool_by_name(&server, "artifact_event");
@@ -3377,9 +3398,8 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn activate_project_resets_hints() {
-        let (dir, _env, server) = make_server().await;
+        let (dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let artifact = tool_by_name(&server, "artifact");
         let workspace = tool_by_name(&server, "workspace");
@@ -3406,27 +3426,41 @@ mod guide_hint_tests {
         );
     }
 
+    #[tokio::test]
     /// The fix for docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md:
     /// the guide-hint ledger is persisted per CLAUDE_CODE_SESSION_ID, so a `/mcp`
     /// reconnect (which re-spawns the codescout process) reloads it instead of
     /// re-injecting every guide body the conversation already holds.
-    #[tokio::test]
-    #[serial]
+    ///
+    /// No `#[serial]`, no `set_var`: the session id and librarian db are INJECTED, so
+    /// this test's state cannot collide with any other's. See [`ServerEnv`].
     async fn guide_ledger_survives_mcp_restart() {
-        // Pin the CC conversation id so both server incarnations key on the same
-        // persisted file (otherwise the fallback mints a random uuid and the test
-        // is non-deterministic between dev — where the var is set — and CI).
-        let _sid = EnvGuard::set("CLAUDE_CODE_SESSION_ID", "restart-survival-session");
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
-        let _db = EnvGuard::set("LIBRARIAN_DB", dir.path().join("librarian.db"));
+
+        // Pin the CC conversation id so both server incarnations key on the same
+        // persisted file (otherwise the fallback mints a random uuid and the test is
+        // non-deterministic).
+        let env_for = |session: &str| ServerEnv {
+            cc_session_id: Some(session.to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let build = |session: &'static str| {
+            let dir_path = dir.path().to_path_buf();
+            let env = env_for(session);
+            async move {
+                let agent = crate::agent::Agent::new(Some(dir_path)).await.unwrap();
+                CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await
+            }
+        };
 
         // First MCP process: record a guide topic (write-through persists to disk).
         {
-            let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
-                .await
-                .unwrap();
-            let server = CodeScoutServer::new(agent).await;
+            let server = build("restart-survival-session").await;
             assert!(
                 !server.guide_hints_emitted.lock().contains("librarian"),
                 "a fresh session starts with an empty ledger"
@@ -3439,10 +3473,7 @@ mod guide_hint_tests {
 
         // Second MCP process, same project + same session id: must RELOAD the
         // persisted ledger, not re-arm. This is the regression bar.
-        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
-            .await
-            .unwrap();
-        let server2 = CodeScoutServer::new(agent).await;
+        let server2 = build("restart-survival-session").await;
         assert!(
             server2.guide_hints_emitted.lock().contains("librarian"),
             "guide ledger must survive MCP restart within one conversation"
@@ -3450,11 +3481,7 @@ mod guide_hint_tests {
 
         // A different conversation id on the same project sees a fresh ledger —
         // concurrent CC windows must not inherit each other's emitted set.
-        let _sid2 = EnvGuard::set("CLAUDE_CODE_SESSION_ID", "other-session");
-        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
-            .await
-            .unwrap();
-        let server3 = CodeScoutServer::new(agent).await;
+        let server3 = build("other-session").await;
         assert!(
             !server3.guide_hints_emitted.lock().contains("librarian"),
             "a different session must not inherit another session's ledger"
@@ -3466,9 +3493,8 @@ mod guide_hint_tests {
     /// let them re-inject (a bare `/mcp` restart keeps them via persistence; only
     /// compaction re-arms).
     #[tokio::test]
-    #[serial]
     async fn post_compact_rearms_guide_hints() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let artifact = tool_by_name(&server, "artifact");
         let workspace = tool_by_name(&server, "workspace");
@@ -3499,9 +3525,8 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn run_command_without_overflow_no_progressive_hint() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "run_command");
         let result = tool
@@ -3519,9 +3544,8 @@ mod guide_hint_tests {
         ignore = "uses 'yes filler | head -2000' shell pipeline — both 'yes' and 'head' are Unix-only and the inject_tee path-validator rejects Windows temp file paths (C:\\Users\\...\\Temp\\codescout-unfiltered-XXX has chars outside the [a-zA-Z0-9/_-.] allowlist). See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
     )]
     #[tokio::test]
-    #[serial]
     async fn run_command_with_overflow_emits_progressive_hint_once() {
-        let (_dir, _env, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "run_command");
         let big = tool

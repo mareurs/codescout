@@ -1776,6 +1776,23 @@ mod tests {
         std::fs::canonicalize(p).expect("path canonicalizes")
     }
 
+    /// THE LAST env-mutating test helper in the crate — and the only one left on
+    /// purpose. Everything else now injects (see `ServerEnv`, `LibrarianEnv`,
+    /// `GlobalConfig::load_from_dir`, `ProjectConfig::load_with_global_base`).
+    ///
+    /// Why this one survives:
+    /// - It is `server-stack`-gated, and `server-stack` is NOT a default feature — so
+    ///   it does not compile into, and cannot corrupt, the default `cargo test` run.
+    /// - Its single consumer
+    ///   (`semantic_memory_store_bootstrap_times_out_on_hung_qdrant`) exists precisely
+    ///   to exercise the ENV-DRIVEN construction path (`VectorBackend::resolve` +
+    ///   `RetrievalConfig::from_env`) against a black-hole Qdrant. Injecting past that
+    ///   path would delete the thing under test.
+    ///
+    /// Closing it properly means threading a `RetrievalConfig` through `Agent` — worth
+    /// doing, not done here. Tracked in
+    /// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+    /// Do NOT copy this pattern into a default-feature test.
     #[cfg(feature = "server-stack")]
     struct EnvGuard {
         key: &'static str,

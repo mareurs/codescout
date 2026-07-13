@@ -460,6 +460,20 @@ fn merge_toml(base: toml::Value, overlay: toml::Value) -> toml::Value {
 }
 
 impl ProjectConfig {
+    /// Apply the highest-precedence embedding overrides to an already-resolved config.
+    ///
+    /// Pure — takes the values rather than reading `CODESCOUT_EMBED_*` itself, so the
+    /// precedence rule is testable without `set_var`. See
+    /// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+    pub(crate) fn apply_embed_overrides(&mut self, model: Option<String>, url: Option<String>) {
+        if let Some(model) = model {
+            self.embeddings.model = model;
+        }
+        if let Some(url) = url {
+            self.embeddings.url = Some(url);
+        }
+    }
+
     /// Load from `.codescout/project.toml`, or return a sensible default
     /// derived from the directory name.  Global config (~/.config/codescout/config.toml)
     /// is loaded first as the base layer; project.toml is merged on top.
@@ -475,14 +489,10 @@ impl ProjectConfig {
             .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
 
         let mut config = Self::load_with_global_base(root, global_base)?;
-
-        if let Ok(model) = std::env::var("CODESCOUT_EMBED_MODEL") {
-            config.embeddings.model = model;
-        }
-        if let Ok(url) = std::env::var("CODESCOUT_EMBED_URL") {
-            config.embeddings.url = Some(url);
-        }
-
+        config.apply_embed_overrides(
+            std::env::var("CODESCOUT_EMBED_MODEL").ok(),
+            std::env::var("CODESCOUT_EMBED_URL").ok(),
+        );
         Ok(config)
     }
 
@@ -624,9 +634,6 @@ name = "demo"
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::config::global::lock_env_for_tests;
-    use serial_test::serial;
 
     #[test]
     fn default_embed_model_is_allminilm() {
@@ -995,187 +1002,116 @@ model = "local:AllMiniLML6V2Q"
         assert_eq!(cfg.embeddings.chunk_size, None);
     }
 
-    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
+    // The four `load_with_global_base` tests below were previously
+    // `#[allow(dead_code)]` "stale test — missing #[test]" stubs: they were DISABLED
+    // because exercising the layering required faking HOME, and faking HOME meant
+    // `set_var` in a parallel test binary. Injecting the global base instead removes
+    // the env entirely — so they are real, running tests again.
+    #[test]
     fn load_or_default_applies_global_when_project_absent() {
-        let _guard = lock_env_for_tests();
-        let saved_home = std::env::var_os("HOME");
-        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
-        let global_dir = dir.path().join(".config").join("codescout");
-        std::fs::create_dir_all(&global_dir).unwrap();
-        std::fs::write(
-            global_dir.join("config.toml"),
-            "[embeddings]\nmodel = \"local:BGESmallENV15\"\n",
-        )
-        .unwrap();
-        std::env::set_var("HOME", dir.path());
-        std::env::remove_var("XDG_CONFIG_HOME");
+        let global_base =
+            toml::from_str::<toml::Value>("[embeddings]\nmodel = \"local:BGESmallENV15\"\n")
+                .unwrap();
 
-        let project_dir = dir.path().join("my-project");
-        std::fs::create_dir_all(&project_dir).unwrap();
-        let cfg = ProjectConfig::load_or_default(&project_dir).unwrap();
-        match saved_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), global_base).unwrap();
         assert_eq!(cfg.embeddings.model, "local:BGESmallENV15");
-        assert_eq!(cfg.project.name, "my-project");
     }
 
-    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
+    #[test]
     fn load_or_default_project_wins_over_global() {
-        let _guard = lock_env_for_tests();
-        let saved_home = std::env::var_os("HOME");
-        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
-        let global_dir = dir.path().join(".config").join("codescout");
-        std::fs::create_dir_all(&global_dir).unwrap();
-        std::fs::write(
-            global_dir.join("config.toml"),
-            "[embeddings]\nmodel = \"global-model\"\n",
-        )
-        .unwrap();
-        std::env::set_var("HOME", dir.path());
-        std::env::remove_var("XDG_CONFIG_HOME");
-
-        let project_dir = dir.path().join("proj");
-        let codescout_dir = project_dir.join(".codescout");
+        let codescout_dir = dir.path().join(".codescout");
         std::fs::create_dir_all(&codescout_dir).unwrap();
         std::fs::write(
             codescout_dir.join("project.toml"),
             "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"project-model\"\n",
         )
         .unwrap();
-        let cfg = ProjectConfig::load_or_default(&project_dir).unwrap();
-        match saved_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
-        assert_eq!(cfg.embeddings.model, "project-model");
+        let global_base =
+            toml::from_str::<toml::Value>("[embeddings]\nmodel = \"global-model\"\n").unwrap();
+
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), global_base).unwrap();
+        assert_eq!(
+            cfg.embeddings.model, "project-model",
+            "project.toml must override the global layer"
+        );
     }
 
-    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
+    #[test]
     fn load_or_default_global_fills_gap_in_project() {
-        let _guard = lock_env_for_tests();
-        let saved_home = std::env::var_os("HOME");
-        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        // project.toml sets `model` but not `max_index_bytes`; the global layer
+        // supplies the latter without being clobbered by the overlay.
         let dir = tempfile::tempdir().unwrap();
-        let global_dir = dir.path().join(".config").join("codescout");
-        std::fs::create_dir_all(&global_dir).unwrap();
-        std::fs::write(
-            global_dir.join("config.toml"),
-            "[security]\nfile_write_enabled = false\n",
-        )
-        .unwrap();
-        std::env::set_var("HOME", dir.path());
-        std::env::remove_var("XDG_CONFIG_HOME");
-
-        let project_dir = dir.path().join("proj");
-        let codescout_dir = project_dir.join(".codescout");
+        let codescout_dir = dir.path().join(".codescout");
         std::fs::create_dir_all(&codescout_dir).unwrap();
         std::fs::write(
             codescout_dir.join("project.toml"),
             "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"project-model\"\n",
         )
         .unwrap();
-        let cfg = ProjectConfig::load_or_default(&project_dir).unwrap();
-        match saved_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
-        assert!(!cfg.security.file_write_enabled);
+        let global_base =
+            toml::from_str::<toml::Value>("[security]\nmax_index_bytes = 12345\n").unwrap();
+
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), global_base).unwrap();
         assert_eq!(cfg.embeddings.model, "project-model");
+        assert_eq!(
+            cfg.security.max_index_bytes, 12345,
+            "global layer must fill fields the project layer does not set"
+        );
     }
 
-    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
+    #[test]
     fn load_or_default_no_global_behaves_as_before() {
-        let _guard = lock_env_for_tests();
-        let saved_home = std::env::var_os("HOME");
-        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        // Empty global base == no global config on disk.
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", dir.path());
-        std::env::remove_var("XDG_CONFIG_HOME");
-
-        let project_dir = dir.path().join("proj");
-        let codescout_dir = project_dir.join(".codescout");
+        let codescout_dir = dir.path().join(".codescout");
         std::fs::create_dir_all(&codescout_dir).unwrap();
         std::fs::write(
             codescout_dir.join("project.toml"),
             "[project]\nname = \"proj\"\n",
         )
         .unwrap();
-        let cfg = ProjectConfig::load_or_default(&project_dir).unwrap();
-        match saved_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
-        assert_eq!(cfg.embeddings.model, default_embed_model());
-        assert!(cfg.security.file_write_enabled);
+        let empty = toml::Value::Table(toml::map::Map::new());
+
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty).unwrap();
+        assert_eq!(cfg.project.name, "proj");
+        assert_eq!(
+            cfg.embeddings.model,
+            default_embed_model(),
+            "with no global layer the built-in defaults stand"
+        );
     }
 
     #[test]
-    #[serial]
     fn env_vars_override_model_and_url() {
-        let _guard = lock_env_for_tests();
-        let saved_home = std::env::var_os("HOME");
-        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
-        let saved_model = std::env::var_os("CODESCOUT_EMBED_MODEL");
-        let saved_url = std::env::var_os("CODESCOUT_EMBED_URL");
-        let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", dir.path());
-        std::env::remove_var("XDG_CONFIG_HOME");
-        unsafe {
-            std::env::set_var("CODESCOUT_EMBED_MODEL", "EnvModel");
-            std::env::set_var("CODESCOUT_EMBED_URL", "http://env-host/v1");
-        }
+        // CODESCOUT_EMBED_* are the highest-precedence layer: they beat both the
+        // project and global config. Tested through the pure `apply_embed_overrides`
+        // seam rather than by mutating process env — see the module note in
+        // config/global.rs on why no test here may call set_var.
+        let mut cfg = ProjectConfig::default_for("proj".into());
+        cfg.embeddings.model = "config-model".into();
+        cfg.embeddings.url = Some("http://config-host/v1".into());
 
-        let project_dir = dir.path().join("proj");
-        let codescout_dir = project_dir.join(".codescout");
-        std::fs::create_dir_all(&codescout_dir).unwrap();
-        std::fs::write(
-            codescout_dir.join("project.toml"),
-            "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"project-model\"\n",
-        )
-        .unwrap();
-        let cfg = ProjectConfig::load_or_default(&project_dir).unwrap();
-
-        match saved_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
-        unsafe {
-            match saved_model {
-                Some(v) => std::env::set_var("CODESCOUT_EMBED_MODEL", v),
-                None => std::env::remove_var("CODESCOUT_EMBED_MODEL"),
-            }
-            match saved_url {
-                Some(v) => std::env::set_var("CODESCOUT_EMBED_URL", v),
-                None => std::env::remove_var("CODESCOUT_EMBED_URL"),
-            }
-        }
+        cfg.apply_embed_overrides(
+            Some("EnvModel".to_string()),
+            Some("http://env-host/v1".to_string()),
+        );
 
         assert_eq!(cfg.embeddings.model, "EnvModel");
         assert_eq!(cfg.embeddings.url.as_deref(), Some("http://env-host/v1"));
+    }
+
+    #[test]
+    fn absent_env_vars_leave_config_untouched() {
+        let mut cfg = ProjectConfig::default_for("proj".into());
+        cfg.embeddings.model = "config-model".into();
+        cfg.embeddings.url = Some("http://config-host/v1".into());
+
+        cfg.apply_embed_overrides(None, None);
+
+        assert_eq!(cfg.embeddings.model, "config-model");
+        assert_eq!(cfg.embeddings.url.as_deref(), Some("http://config-host/v1"));
     }
 
     #[test]

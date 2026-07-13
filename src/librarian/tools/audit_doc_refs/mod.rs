@@ -204,16 +204,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(MAX_FILES_DEFAULT);
-    if files.len() > max_files {
-        return Err(RecoverableError::with_hint(
-            format!(
-                "audit_doc_refs: glob matched {} files (cap {})",
-                files.len(),
-                max_files
-            ),
-            "tighten `paths` glob or set LIBRARIAN_AUDIT_MAX_FILES",
-        ));
-    }
+    enforce_file_cap(files.len(), max_files)?;
 
     let memory_globs: Vec<_> = severity::DEFAULT_MEMORY_GLOBS
         .iter()
@@ -512,6 +503,22 @@ async fn find_tracker_path(ctx: &ToolContext, id: &str) -> Option<String> {
                 .map(|p| p.to_string_lossy().into_owned())
                 .ok()
         })
+}
+
+/// Refuse a glob that matched more files than the cap allows.
+///
+/// Pure — takes the count and the cap rather than reading `LIBRARIAN_AUDIT_MAX_FILES`
+/// itself, so the "glob explosion is RECOVERABLE, not a hard failure" contract can be
+/// tested without `set_var`. See
+/// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+fn enforce_file_cap(file_count: usize, max_files: usize) -> Result<()> {
+    if file_count > max_files {
+        return Err(RecoverableError::with_hint(
+            format!("audit_doc_refs: glob matched {file_count} files (cap {max_files})"),
+            "tighten `paths` glob or set LIBRARIAN_AUDIT_MAX_FILES",
+        ));
+    }
+    Ok(())
 }
 
 fn collect_markdown_files(
@@ -1065,23 +1072,30 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn glob_explosion_returns_recoverable() {
-        let tmp = TempDir::new().unwrap();
-        for i in 0..5 {
-            std::fs::write(tmp.path().join(format!("doc{i}.md")), "x").unwrap();
-        }
-        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
-        std::env::set_var("LIBRARIAN_AUDIT_MAX_FILES", "1");
-        let err = call(&ctx, serde_json::json!({"paths": ["*.md"]}))
-            .await
-            .unwrap_err();
-        std::env::remove_var("LIBRARIAN_AUDIT_MAX_FILES");
+    #[test]
+    fn glob_explosion_returns_recoverable() {
+        // A glob that matches more files than the cap must be a RECOVERABLE error —
+        // the caller can tighten the glob and retry — not a hard failure.
+        //
+        // Tested through the pure `enforce_file_cap` seam. It used to set
+        // LIBRARIAN_AUDIT_MAX_FILES=1 with `set_var` (and needed `#[serial]` for it),
+        // which is UB in a parallel test binary. See the note in config/global.rs.
+        let err = enforce_file_cap(5, 1).unwrap_err();
         assert!(
-            format!("{err}").contains("cap") || format!("{err}").contains("files"),
-            "error should mention the file cap; got: {err}"
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "a glob explosion must be recoverable, not a hard failure; got: {err}"
         );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("cap") && msg.contains('5'),
+            "error should name the cap and the actual count; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn within_the_cap_is_ok() {
+        assert!(enforce_file_cap(1, 5).is_ok());
+        assert!(enforce_file_cap(5, 5).is_ok(), "the cap itself is allowed");
     }
 
     #[tokio::test]
