@@ -256,7 +256,7 @@ pub(crate) fn build_system_prompt_draft(
             draft.push_str(&format!("### {}{}\n", p.id, langs));
             draft.push_str(&format!(
                 "1. `symbols(\"{}\")` — [fill in entry point during onboarding]\n",
-                p.relative_root.display()
+                crate::util::fs::to_forward_slash(&p.relative_root)
             ));
             draft.push_str(&format!(
                 "2. `semantic_search(\"your concept\", project_id=\"{}\")` — search within this project\n",
@@ -351,7 +351,7 @@ pub(crate) fn build_system_prompt_draft(
             draft.push_str(&format!(
                 "| {} | {} | {} | {} |\n",
                 p.id,
-                p.relative_root.display(),
+                crate::util::fs::to_forward_slash(&p.relative_root),
                 p.languages.join(", "),
                 p.manifest.as_deref().unwrap_or("-"),
             ));
@@ -736,7 +736,7 @@ pub(crate) fn build_per_project_prompt(
     prompt.push_str(&format!("- **ID:** {}\n", project.id));
     prompt.push_str(&format!(
         "- **Root:** {}\n",
-        project.relative_root.display()
+        crate::util::fs::to_forward_slash(&project.relative_root)
     ));
     prompt.push_str(&format!(
         "- **Languages:** {}\n",
@@ -763,7 +763,7 @@ pub(crate) fn build_per_project_prompt(
          - `tree` on each subdirectory\n\
          - `read_file` on the build config\n\
          - `read_markdown(\"README.md\")` if present\n\n",
-        root = project.relative_root.display()
+        root = crate::util::fs::to_forward_slash(&project.relative_root)
     ));
     prompt.push_str(
         "### Step 2: Full Symbol Survey\n\n\

@@ -438,7 +438,10 @@ mod tests {
     fn mk_ctx(tmp_root: std::path::PathBuf, cat: Catalog) -> ToolContext {
         // Realign rows whose `sample_row` placeholder abs_path is `/r/{rel}`
         // to point under `tmp_root`, so files written under tmp_root resolve.
-        let new_prefix = format!("{}/", tmp_root.display());
+        // Forward-slash — the catalog's abs_path column is a RepoPath and every
+        // LIKE query against it assumes `/`. A native-separator prefix here would
+        // write backslash paths into the catalog on Windows.
+        let new_prefix = format!("{}/", crate::util::fs::to_forward_slash(&tmp_root));
         cat.conn
             .execute(
                 "UPDATE artifact SET abs_path = REPLACE(abs_path, '/r/', ?1)",

@@ -42,6 +42,20 @@ pub fn content_hash(text: &str) -> String {
     format!("{:x}", h.finalize())
 }
 
+/// Build the vector-store chunk id for a file chunk.
+///
+/// The path component MUST be forward-slash normalized. `rel_path` is OS-derived
+/// (it comes from a `strip_prefix` of a filesystem-walk path), so on Windows a raw
+/// `.display()` yields `src\lib.rs` — which would (a) persist native separators as
+/// the vector store's primary key, (b) make the id disagree with the `file_path`
+/// field of its own payload (which normalizes one line below), and (c) make the id
+/// platform-dependent, so the `local_ids` / `server_ids` delete-set diff cannot be
+/// compared across hosts. See
+/// `docs/issues/2026-07-07-display-audit-scope-gap-non-to-string-sites.md`.
+pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String {
+    format!("{project_id}:{}:{content_hash}", to_forward_slash(rel_path))
+}
+
 /// Embed `pending`'s chunk content and upsert it, then clear `pending` so the
 /// content + embeddings are dropped — keeping peak memory at O(flush_batch).
 async fn flush_pending(
@@ -127,7 +141,7 @@ async fn stream_index(
                 continue;
             }
             let hash = content_hash(&c.content);
-            let chunk_id = format!("{project_id}:{}:{hash}", rel_path.display());
+            let chunk_id = chunk_id(project_id, rel_path, &hash);
             // Every local chunk id participates in the delete-set diff, even when
             // it is already indexed and skipped for re-embedding.
             local_ids.insert(chunk_id.clone());
@@ -268,6 +282,33 @@ mod tests {
     use crate::retrieval::payload::CodePayload;
     use crate::retrieval::search::Hit;
     use std::sync::Mutex;
+
+    #[test]
+    fn chunk_id_normalizes_native_separators() {
+        // BUG (docs/issues/2026-07-07-display-audit-scope-gap-non-to-string-sites.md):
+        // chunk_id was built with `rel_path.display()`, which renders a PathBuf's
+        // internal string VERBATIM. rel_path is OS-derived (strip_prefix of a
+        // filesystem-walk path), so on Windows it carries backslashes — persisting
+        // native separators as the vector store's primary key, and disagreeing with
+        // the `file_path` field of its own payload, which normalizes one line below.
+        //
+        // to_forward_slash is not cfg(windows)-gated, so a PathBuf built from a
+        // literal backslash string reproduces the Windows shape on any host — the
+        // same technique util/fs.rs's own tests use.
+        let windows_shaped = std::path::PathBuf::from("src\\retrieval\\sync.rs");
+        assert_eq!(
+            chunk_id("proj", &windows_shaped, "deadbeef"),
+            "proj:src/retrieval/sync.rs:deadbeef",
+            "the path component of a chunk id must be forward-slash normalized"
+        );
+
+        // Already-forward-slash input is untouched (the Linux/macOS path).
+        let posix = std::path::PathBuf::from("src/retrieval/sync.rs");
+        assert_eq!(
+            chunk_id("proj", &posix, "deadbeef"),
+            "proj:src/retrieval/sync.rs:deadbeef"
+        );
+    }
 
     /// Records every `upsert_chunks` batch size + the refs it upserted, so a test
     /// can assert the indexer flushes in bounded batches (regression guard for the

@@ -373,7 +373,7 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
             prompt.push_str(&format!(
                 "| {} | {} | {} | {} |\n",
                 p.id,
-                p.relative_root.display(),
+                crate::util::fs::to_forward_slash(&p.relative_root),
                 p.languages.join(", "),
                 p.manifest.as_deref().unwrap_or("-"),
             ));

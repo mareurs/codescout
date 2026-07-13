@@ -2606,13 +2606,16 @@ mod tests {
         // an extended-length path that differs from dir.path()'s plain/8.3 form, so
         // using dir.path() here would never match the strip prefix and the
         // annotation would never fire.
-        let root = server
-            .agent
-            .project_root()
-            .await
-            .expect("server has an active project root")
-            .display()
-            .to_string();
+        // to_forward_slash, NOT .display() — post_process builds its strip prefix
+        // with to_forward_slash, so on Windows a .display() form would never match
+        // the string the code under test actually produces.
+        let root = to_forward_slash(
+            &server
+                .agent
+                .project_root()
+                .await
+                .expect("server has an active project root"),
+        );
         let trimmed_root = root.trim_end_matches('/');
 
         let make_payload = || {

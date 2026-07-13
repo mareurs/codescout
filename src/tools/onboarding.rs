@@ -712,7 +712,9 @@ fn write_workspace_config_if_needed(
                         crate::workspace::infer_depends_on(&project_abs, root, &gathered.projects);
                     crate::config::workspace::ProjectEntry {
                         id: p.id.clone(),
-                        root: p.relative_root.to_string_lossy().to_string(),
+                        // Persisted into workspace.toml and read back as a path —
+                        // must not carry native separators (Windows).
+                        root: crate::util::fs::to_forward_slash(&p.relative_root),
                         languages: p.languages.clone(),
                         depends_on,
                     }
@@ -804,7 +806,7 @@ async fn write_onboarding_memories(
                 let proj_summary = format!(
                     "Languages: {}\nRoot: {}\nManifest: {}",
                     project.languages.join(", "),
-                    project.relative_root.display(),
+                    crate::util::fs::to_forward_slash(&project.relative_root),
                     project.manifest.as_deref().unwrap_or("none"),
                 );
                 if let Err(e) = store.write("onboarding", &proj_summary) {
@@ -997,7 +999,7 @@ async fn perform_full_onboarding(
         .map(|p| {
             serde_json::json!({
                 "id": p.id,
-                "root": p.relative_root.to_string_lossy(),
+                "root": crate::util::fs::to_forward_slash(&p.relative_root),
                 "languages": p.languages,
                 "manifest": p.manifest,
             })

@@ -622,7 +622,9 @@ mod tests {
     /// so files written into `dir.path()` resolve correctly.
     fn mk_ctx_with_root(cat: Catalog) -> (ToolContext, TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let new_prefix = format!("{}/", dir.path().display());
+        // Forward-slash — see the note in context.rs's mk_ctx: the catalog's
+        // abs_path column is forward-slash by invariant.
+        let new_prefix = format!("{}/", crate::util::fs::to_forward_slash(dir.path()));
         cat.conn
             .execute(
                 "UPDATE artifact SET abs_path = REPLACE(abs_path, '/test/r/', ?1)",
