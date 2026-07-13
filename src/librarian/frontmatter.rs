@@ -1,23 +1,32 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+/// A document's YAML frontmatter.
+///
+/// Every field carries BOTH `#[serde(default)]` (absent key → empty on read)
+/// AND a `skip_serializing_if` (empty → absent key on write). The pair is what
+/// makes a parse→edit→write round-trip idempotent: with `default` alone, an
+/// unset `Option` came back out as an explicit `null` and an empty `Vec` as
+/// `[]`, so any update churned the frontmatter of every file it touched with
+/// keys the author never wrote. See
+/// `docs/issues/2026-07-13-artifact-update-frontmatter-null-churn.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Frontmatter {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_scope: Option<String>,
     /// Custom / unrecognized frontmatter keys, captured verbatim so they
     /// survive a parse→edit→write round-trip (otherwise an update would
@@ -186,4 +195,59 @@ mod tests {
         assert!(updated.contains("kind: doc"));
         assert!(updated.ends_with("# Heading\n\nbody\n"));
     }
+
+    #[test]
+    fn write_omits_unset_optional_fields_instead_of_emitting_null() {
+        // Regression: `#[serde(default)]` governs deserialization only, so an
+        // unset Option round-tripped back out as an explicit `null`, churning
+        // the frontmatter of every file an update touched.
+        // See docs/issues/2026-07-13-artifact-update-frontmatter-null-churn.md.
+        let fm = Frontmatter {
+            kind: Some("bug".into()),
+            status: Some("open".into()),
+            ..Default::default()
+        };
+        let doc = write(&fm, "\nbody\n");
+        for absent in ["id", "title", "topic", "time_scope"] {
+            assert!(
+                !doc.contains(&format!("{absent}: null")),
+                "unset `{absent}` must be omitted, not emitted as null; got:\n{doc}"
+            );
+        }
+        assert!(doc.contains("kind: bug"));
+        assert!(doc.contains("status: open"));
+    }
+
+    #[test]
+    fn update_in_place_does_not_introduce_null_keys() {
+        // A real bug file's shape: no id/title/topic/time_scope keys at all.
+        // Flipping `status` must not conjure those keys into existence.
+        let doc = "---\nstatus: open\nseverity: medium\nkind: bug\n---\n\nbody\n";
+        let updated = update_in_place(doc, |fm| {
+            fm.status = Some("fixed".into());
+        })
+        .unwrap();
+        assert!(updated.contains("status: fixed"));
+        assert!(
+            !updated.contains("null"),
+            "update must not introduce explicit nulls; got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn update_in_place_is_idempotent_after_first_normalization() {
+        // Re-serializing through serde cannot preserve the source's key order or
+        // inline-vs-block scalar style, so the FIRST update of a hand-written file
+        // still normalizes its shape. What must hold is that the normalization is
+        // one-time: updating an already-normalized file changes nothing but the
+        // field being set. Otherwise every update would re-churn the same file.
+        let doc = "---\nstatus: open\nseverity: medium\nkind: bug\ntags: [a, b]\n---\n\nbody\n";
+        let once = update_in_place(doc, |fm| fm.status = Some("investigating".into())).unwrap();
+        let twice = update_in_place(&once, |fm| fm.status = Some("investigating".into())).unwrap();
+        assert_eq!(
+            once, twice,
+            "a second identical update must be a no-op; churn is not allowed to recur"
+        );
+    }
+
 }

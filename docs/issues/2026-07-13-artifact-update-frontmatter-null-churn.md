@@ -1,7 +1,7 @@
 ---
 id: '9bd3484eca701d4f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(update) rewrites bug-file frontmatter to canonical shape — emits id/title/topic/time_scope as explicit null, reflows inline tags'
 owners: []
 tags: []
@@ -12,8 +12,10 @@ time_scope: null
 # BUG: artifact(update) rewrites bug-file frontmatter to canonical shape, emitting explicit `null`s
 
 ## Severity
+
 low — cosmetic / diff-noise. **Inert**: the catalog derives `id = sha256(abs_path)`, so a `null` id in frontmatter is never read back. Confirmed by `artifact(find, kind="bug")` resolving all affected files to their real ids (e.g. `33e4ae68188322ee`) while the on-disk frontmatter said `id: null`.
 
+**Self-healing:** an `id: null` already on disk parses back to `None`, so the fixed serializer simply omits the key on the next update. Files churned before the fix clean themselves up the next time they are touched — no migration needed.
 ## Summary
 Any `artifact(action="update", ...)` on a bug file rewrites the whole YAML
 frontmatter into the librarian's canonical field set, rather than patching only
@@ -56,11 +58,14 @@ serializing them as `null`. The `extra` field already documents round-trip-safe
 behavior for custom keys; the canonical keys should be no worse.
 
 ## Fix idea
-In the frontmatter serializer, skip `Option::None` fields on write (serde
-`skip_serializing_if = "Option::is_none"`), and preserve the source document's
-key order + scalar style where unchanged. Alternatively, do a true YAML merge
-against the parsed source rather than re-serializing the struct.
 
+**Implemented (2026-07-13).** Root cause was a serde asymmetry in `src/librarian/frontmatter.rs`: every `Frontmatter` field carried `#[serde(default)]`, which governs *deserialization* only (absent key → `None`/empty). Nothing governed the write direction, so an unset `Option` was faithfully re-emitted as an explicit `null` and an empty `Vec` as `[]`.
+
+Fix: pair each `default` with a `skip_serializing_if` — `Option::is_none` for the six `Option` fields (`id`, `kind`, `status`, `title`, `topic`, `time_scope`) and `Vec::is_empty` for `owners`/`tags`. `write()` is the single choke point for `create.rs`, `update.rs`, and `update_in_place`, so one change covers every call site.
+
+**Scope note — effect (1) fixed, plus one the report missed; effects (2) and (3) are inherent and now proven harmless.** The failing test surfaced churn the original report didn't mention: `owners: []` and `tags: []` were *also* being injected into files that never had those keys (same defect class), and are now skipped too.
+
+Effects (2) tag reflow and (3) key reordering are NOT fixed and cannot be by this approach: serde re-serializes the struct, so it cannot preserve the source document's key order or inline-vs-block scalar style. Preserving those would need a format-preserving YAML layer (no good Rust equivalent of ruamel.yaml exists). What makes this acceptable is that the remaining normalization is **one-time, not recurring** — a file is reshaped on its first update and is byte-stable from then on. That property is now pinned by a regression test (`update_in_place_is_idempotent_after_first_normalization`), so the churn cannot start recurring silently.
 ## Workarounds
 None needed — the churn is inert. Reviewers should read bug-file diffs with
 `git diff -- <file>` and ignore the frontmatter block.
@@ -68,4 +73,3 @@ None needed — the churn is inert. Reviewers should read bug-file diffs with
 ## References
 - Commit `61a800af` — the drift commit that surfaced this
 - get_guide("tracker-conventions") — frontmatter shape + status vocabulary
-
