@@ -314,6 +314,84 @@ async fn memory_remember_then_recall_e2e_via_test_seams() {
         .unwrap()
         .contains("migration default path"));
 }
+/// Regression for the workspace-pin gap: cross-embedding a memory under a
+/// `workspace=` pin must store it under the PINNED project_id, not the
+/// session-default project. Previously `cross_embed_memory` resolved the
+/// project via `active_project()` (the session default), silently landing
+/// the semantic memory in the wrong project.
+#[tokio::test]
+async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::{MemoryFilter, SemanticMemoryStore};
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    // Session-default project (from Agent::new in the helper).
+    let (_default_dir, mut ctx) = test_ctx_with_project().await;
+
+    // A second, DISTINCT project we will pin via workspace_override.
+    let pinned_dir = tempdir().unwrap();
+    std::fs::create_dir_all(pinned_dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        pinned_dir.path().join(".codescout").join("project.toml"),
+        "[project]\nname = \"pinned-proj\"\n",
+    )
+    .unwrap();
+    // Make the pinned workspace resident so the pin can resolve it.
+    ctx.agent
+        .ensure_resident(pinned_dir.path().to_path_buf(), None)
+        .await
+        .unwrap();
+
+    // Network-free stubs: constant embedder + in-memory store.
+    struct FixedEmbedder;
+    #[async_trait::async_trait]
+    impl DenseEmbedder for FixedEmbedder {
+        async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        }
+    }
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    let stub: Arc<InMemorySemanticMemoryStore> = Arc::new(InMemorySemanticMemoryStore::new());
+    ctx.agent
+        .set_semantic_memory_store_for_test(stub.clone() as Arc<dyn SemanticMemoryStore>)
+        .map_err(|_| ())
+        .expect("set store");
+
+    let default_id = ctx
+        .agent
+        .with_project(|p| Ok(p.config.project.name.clone()))
+        .await
+        .unwrap();
+    assert_ne!(default_id, "pinned-proj", "test setup: names must differ");
+
+    // Cross-embed a memory UNDER THE PIN.
+    ctx.workspace_override = Some(pinned_dir.path().to_path_buf());
+    super::cross_embed_memory(&ctx, "pinned-note", "belongs to the pinned project")
+        .await
+        .unwrap();
+
+    // It must land under the pinned project_id, not the session default.
+    assert_eq!(
+        stub.list("pinned-proj", MemoryFilter::default())
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "cross-embed must store under the pinned project_id"
+    );
+    assert_eq!(
+        stub.list(&default_id, MemoryFilter::default())
+            .await
+            .unwrap()
+            .len(),
+        0,
+        "cross-embed must NOT store under the session-default project_id"
+    );
+}
 
 #[tokio::test]
 async fn memory_recall_signals_has_more_when_capped() {

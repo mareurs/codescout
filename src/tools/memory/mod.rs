@@ -343,13 +343,12 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
 async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
-    let project_id = {
-        let inner = ctx.agent.inner.read().await;
-        let p = inner
-            .active_project()
-            .ok_or_else(|| anyhow::anyhow!("no project"))?;
-        p.config.project.name.clone()
-    };
+    let project_id = ctx
+        .agent
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            Ok(p.config.project.name.clone())
+        })
+        .await?;
 
     let dense = ctx.agent.memory_embedder().await?.embed(content).await?;
 
@@ -383,17 +382,16 @@ async fn create_semantic_anchors(
     content: &str,
     path_anchor_files: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let (project_id, min_sim, top_n) = {
-        let inner = ctx.agent.inner.read().await;
-        let p = inner
-            .active_project()
-            .ok_or_else(|| anyhow::anyhow!("no project"))?;
-        (
-            p.config.project.name.clone(),
-            p.config.memory.semantic_anchor_min_similarity,
-            p.config.memory.semantic_anchor_top_n,
-        )
-    };
+    let (project_id, min_sim, top_n) = ctx
+        .agent
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            Ok((
+                p.config.project.name.clone(),
+                p.config.memory.semantic_anchor_min_similarity,
+                p.config.memory.semantic_anchor_top_n,
+            ))
+        })
+        .await?;
 
     let dense = ctx.agent.memory_embedder().await?.embed(content).await?;
 
@@ -827,12 +825,13 @@ impl Tool for Memory {
                 // The point id is derived from (project_id, "structured", topic),
                 // so we can delete without looking it up first.
                 if !private {
-                    let project_id = {
-                        let inner = ctx.agent.inner.read().await;
-                        inner
-                            .active_project()
-                            .map(|p| p.config.project.name.clone())
-                    };
+                    let project_id = ctx
+                        .agent
+                        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                            Ok(p.config.project.name.clone())
+                        })
+                        .await
+                        .ok();
                     if let Some(project_id) = project_id {
                         let id = crate::retrieval::memory_payload::point_id_for(
                             &project_id,
