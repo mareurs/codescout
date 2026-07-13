@@ -193,6 +193,25 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         })?
         .stdout;
 
+    // Navigation params this buffer ref cannot honor must fail loudly, not be
+    // silently ignored (which masks caller misuse). `toml_key` is never valid
+    // on a buffer (buffers are not TOML files); `json_path` is only meaningful
+    // for @tool_* JSON refs — @cmd_*/@file_* buffers are raw text.
+    if input["toml_key"].as_str().is_some() {
+        return Err(RecoverableError::with_hint(
+            format!("toml_key is not supported on buffer refs (got '{path}')"),
+            "Buffer refs are not TOML files. Slice with start_line/end_line, or grep the ref, e.g. run_command(\"grep pattern @ref\").",
+        )
+        .into());
+    }
+    if input["json_path"].as_str().is_some() && !path.starts_with("@tool_") {
+        return Err(RecoverableError::with_hint(
+            format!("json_path is only supported on @tool_* refs, not '{path}'"),
+            "@cmd_*/@file_* buffers are raw text. Slice with start_line/end_line, or grep the ref.",
+        )
+        .into());
+    }
+
     // @tool_* refs contain compact single-line JSON — pretty-print so
     // start_line/end_line navigation and json_path extraction are useful.
     let text: String = if path.starts_with("@tool_") {
@@ -1220,6 +1239,49 @@ mod tests {
         assert!(
             body.contains("fn alpha"),
             "json_path $.symbols[0].body should return the body string, got: {result}"
+        );
+    }
+    #[tokio::test]
+    async fn read_file_toml_key_on_buffer_ref_errors_not_silently_ignored() {
+        // Regression: toml_key was silently dropped for every buffer ref —
+        // the caller got the whole buffer back instead of an error, masking
+        // a misuse. It must fail loudly.
+        let ctx = test_ctx().await;
+        let buf_id = ctx
+            .output_buffer
+            .store_tool("cmd", "hello = 1\n".to_string());
+
+        let err = ReadFile
+            .call(json!({ "path": buf_id, "toml_key": "hello" }), &ctx)
+            .await
+            .expect_err("toml_key on a buffer ref must error, not be silently ignored");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("toml_key"),
+            "error must name the offending param; got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_json_path_on_non_tool_buffer_ref_errors() {
+        // json_path is only meaningful for @tool_* JSON refs; on @cmd_/@file_
+        // refs it was silently ignored. It must error instead.
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store(
+            "echo hi".to_string(),
+            "{\"a\": 1}".to_string(),
+            String::new(),
+            0,
+        );
+
+        let err = ReadFile
+            .call(json!({ "path": buf_id, "json_path": "$.a" }), &ctx)
+            .await
+            .expect_err("json_path on a @cmd_ ref must error, not be silently ignored");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("json_path"),
+            "error must name the offending param; got: {msg}"
         );
     }
 
