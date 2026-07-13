@@ -1,12 +1,21 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: high
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- error-handling
+- recoverable-error
+- path-security
+- doc-drift
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
 owner: marius
 related: []
-tags: [error-handling, recoverable-error, path-security, doc-drift]
-kind: bug
+severity: high
 ---
 
 # BUG: path_security.rs module doc promises RecoverableError / isError:false, but every validator uses anyhow::bail! (hard failure)
@@ -35,11 +44,13 @@ Doc-vs-code drift. `bail!` sites verified at `src/util/path_security.rs:216, 219
 1. **Hypothesis:** a caller converts bail! errors to RecoverableError before routing. **Test:** B3 traced all callers listed above; bare `?` throughout. **Verdict:** confirmed drift.
 
 ## Fix
-Not yet decided: (a) make the validators return `RecoverableError::with_hint` for agent-correctable violations (empty path, outside-root write, protected location) and keep `bail!` only for genuinely fatal states, matching `get_guide("error-handling")`; or (b) rewrite the module doc to match reality. (a) matches the doc's intent and the guidance-shaped message text. Related judgment call: `check_tool_access` (`src/server.rs:284-292`) hard-fails writes-disabled/indexing-disabled with correctable-sounding messages — same tension, possibly intentional policy gate.
 
+**Shipped on `experiments` in `2fbcff80`** (`docs(path_security): correct module doc to match hard-fail behavior`). Archive after cherry-pick to `master`.
+
+Resolution: **fix the doc**, not the code. Investigation showed the hard-`bail!` (isError:true) behavior is intentional and pinned by `validate_write_path_still_bails_outside_with_unchanged_message` — a path/security-boundary breach should fail loudly rather than be silently absorbed by sibling parallel calls (a deliberate exception to the input-driven→RecoverableError convention). The module doc (which wrongly promised RecoverableError/isError:false) was the stale side and is now corrected. No behavior change.
 ## Tests added
-N/A — not yet fixed. Regression: write-denial through `call_tool_inner` asserts `isError:false` + `approve_write` hint (if fix (a)).
 
+None — doc-only change. The intended hard-fail behavior is already guarded by `validate_write_path_still_bails_outside_with_unchanged_message` and the `validate_approve_path_rejects_*` / `classify_*` tests (125 `util::path_security` tests pass, unchanged).
 ## Workarounds
 None needed for correctness; agents should treat these hard failures as correctable despite `isError:true`.
 

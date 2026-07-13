@@ -1,12 +1,23 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: high
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- read_file
+- buffers
+- progressive-disclosure
+- json_path
+- toml_key
+- silent-failure
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
 owner: marius
 related: []
-tags: [read_file, buffers, progressive-disclosure, json_path, toml_key, silent-failure]
-kind: bug
+severity: high
 ---
 
 # BUG: read_file buffer refs silently drop navigation params — toml_key ignored on all refs, json_path ignored on @file_/@cmd_
@@ -39,11 +50,13 @@ codescout MCP server, branch `experiments`, 2026-07-10.
 1. **Hypothesis:** validation rejects the combination before the silent path. **Test:** trace `validate_read_nav_params` call sites. **Verdict:** rejected — disk path only.
 
 ## Fix
-Not yet designed. Minimum: (a) support `json_path` on any buffer whose content parses as JSON (`@file_`/`@cmd_` included) and `toml_key` on TOML/YAML-typed buffered files; or (b) return a `RecoverableError` ("navigation params not supported on buffer refs — use start_line/end_line or grep @ref") instead of silently ignoring. (b) is the 5-line honesty fix; (a) is the feature-complete one; they compose ((b) now, (a) later).
 
+**Shipped on `experiments` in `3af52f1e`** (`fix(read_file): error on unsupported nav params for buffer refs`). Archive after cherry-pick to `master`.
+
+`read_from_buffer` (`src/tools/read_file.rs`) now guards early: `toml_key` on any buffer ref, or `json_path` on a `@cmd_`/`@file_` ref, returns a `RecoverableError` with a hint (slice with start_line/end_line, or grep the ref) instead of silently falling through to a line-range/full read. `json_path` on `@tool_` refs is unchanged.
 ## Tests added
-N/A — not yet fixed. Regression: buffer ref + `toml_key`/`json_path` must either navigate or error — never plain-text fall-through.
 
+`read_file_toml_key_on_buffer_ref_errors_not_silently_ignored` and `read_file_json_path_on_non_tool_buffer_ref_errors` (`src/tools/read_file.rs` tests). Both RED before the guard (the call returned the buffer content), GREEN after. The existing `read_file_buffer_json_path_array_element_returns_value` (json_path on a `@tool_` ref) still passes.
 ## Workarounds
 `grep(pattern, @ref)` or `read_file(@ref, start_line/end_line)`; for `@tool_*` refs json_path works as documented.
 

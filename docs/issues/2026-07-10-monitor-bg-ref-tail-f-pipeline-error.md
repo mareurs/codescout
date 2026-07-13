@@ -1,12 +1,21 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: medium
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- monitor
+- background
+- buffer-ref
+- run_command
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
 owner: marius
 related: []
-tags: [monitor, background, buffer-ref, run_command]
-kind: bug
+severity: medium
 ---
 
 # BUG: Monitor pipeline errors when a `@bg`/`@cmd_*` background ref is fed to `tail -f`
@@ -56,14 +65,13 @@ produced it.
 *(none yet — captured on notice)*
 
 ## Fix
-Plan pending root-cause confirmation. Likely one of: (a) document that
-`@`-ref buffers are not `tail -f`-followable and give the supported pattern
-for streaming a background command, or (b) back background refs with a real
-appendable file path so `tail -f` works.
 
+**Shipped on `experiments` in `b33ad329`** (`fix(run_command): resolve @bg refs to the live log so tail -f works`). Archive after cherry-pick to `master`.
+
+Root cause (confirmed): `OutputBuffer::resolve_refs`'s `@bg_*` branch read the log into a fresh read-only `NamedTempFile` snapshot and substituted THAT path. A snapshot never grows, so `tail -f @bg_xxx` followed a dead inode and blocked until timeout. Fix: substitute the live `log_path` directly, record it in `temp_path_strings` (buffer-only classification preserved) but NOT in `temp_paths` (the live job log must not be deleted after the command). Missing log → clear `RecoverableError`.
 ## Tests added
-N/A — not yet fixed.
 
+`resolve_refs_bg_substitutes_live_log_not_snapshot` (`src/tools/output_buffer.rs`): asserts a `@bg_` ref resolves to the live log path, that path is not queued for temp cleanup, and the command is still classified buffer-only. RED before (resolved to a `/tmp/.tmpXXXX` snapshot); GREEN after. Existing `resolve_refs_bg_rejects_err_suffix` + is_buffer_only tests still pass.
 ## Workarounds
 Avoid `tail -f` on a `@`-ref buffer in a Monitor pipeline. To follow a
 long-running command's output live, redirect it to a real file

@@ -1,12 +1,22 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: medium
-owner: marius
-related: ['2026-07-10-librarian-semantic-no-like-fallback-doc-drift']
-tags: [librarian, embedding, silent-failure, ux]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- embedding
+- silent-failure
+- ux
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
+owner: marius
+related:
+- '2026-07-10-librarian-semantic-no-like-fallback-doc-drift'
+severity: medium
 ---
 
 # BUG: librarian(context, topic=…) returns empty SILENTLY when no embedder is configured, while find(semantic=…) errors — inconsistent no-embedder handling
@@ -72,16 +82,13 @@ when that var is set ("when absent … we skip embedding silently").
 N/A — root cause read directly from source.
 
 ## Fix
-Not started. Options (decide alongside the related doc-drift bug):
-1. Make `context` bail with the same message as `find` when `a.topic.is_some()` and
-   `ctx.embedding.is_none()`.
-2. OR implement the SQL `LIKE` fallback the manual promises (see related bug), so
-   `context` degrades to keyword search on the topic instead of erroring/emptying.
-Option 2 is the more useful behavior and would also satisfy the documented contract.
 
+**Already resolved in code** (verified 2026-07-13 during triage). `src/librarian/tools/context.rs` fn `call` no longer emits an empty bundle when the embedder is absent: when `ctx.embedding` is `None` it falls back to a title/topic SQL `LIKE` match (the semantic path is hoisted above, then a `FilterNode::Or` over `title`/`topic` `contains` runs). So `librarian(context, topic=…)` returns matching artifacts rather than silently empty.
+
+The related doc-drift and the (separate) `artifact_find` no-embedder contract are handled under [[2026-07-10-librarian-semantic-no-like-fallback-doc-drift]] (337fae9d), whose fix `83430da8` also corrects the manual to document this `context` LIKE fallback accurately.
 ## Tests added
-N/A — not yet fixed.
 
+Existing regression test `topic_search_returns_matching_artifacts` (`src/librarian/tools/context.rs`) runs against a `TestToolContextBuilder` whose `embedding` defaults to `None` and asserts `context(topic=…)` returns the matching artifacts (not an empty bundle) — i.e. it pins the no-embedder LIKE fallback. No new test required; behavior confirmed present.
 ## Workarounds
 Configure the embedder (`LIBRARIAN_EMBED_MODEL` + `LIBRARIAN_EMBED_URL` in the MCP
 launch env), or use `artifact(action="find", filter={…contains…})` for keyword

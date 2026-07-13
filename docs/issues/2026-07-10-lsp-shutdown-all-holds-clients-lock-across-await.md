@@ -1,12 +1,22 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: high
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- concurrency
+- lsp
+- async
+- lock-across-await
+- post-compact
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
 owner: marius
 related: []
-tags: [concurrency, lsp, async, lock-across-await, post-compact]
-kind: bug
+severity: high
 ---
 
 # BUG: LspManager::shutdown_all holds the clients mutex across every client's shutdown().await — a post_compact tool call can stall all concurrent LSP navigation
@@ -46,11 +56,13 @@ for (key, client) in clients.drain() {
 1. **Hypothesis:** shutdown_all only runs at process exit, so no live contention. **Test:** grep call sites. **Verdict:** rejected — `config/mod.rs:248` invokes it from a live `workspace(post_compact=true)` tool call.
 
 ## Fix
-Drop the `clients` guard before awaiting shutdowns: under the lock, `drain()` into a local `Vec`, release the guard, then `client.shutdown().await` each (optionally concurrently via `join_all`). Mirrors the lock-drop discipline `do_start` already uses.
 
+**Shipped on `experiments` in `51f9e6fb`** (`fix(lsp): drop clients lock before awaiting shutdowns in shutdown_all`). Archive after cherry-pick to `master`.
+
+`LspManager::shutdown_all` now drains the `clients` map into a local `Vec<(LspKey, Arc<LspClient>)>` under the lock, releases the guard, then awaits each `client.shutdown()` outside the lock — the canonical pattern `do_start` already uses. The `clients` mutex is no longer held across any `shutdown().await`.
 ## Tests added
-N/A — not yet fixed. Regression is timing-dependent; at minimum an assertion that `shutdown_all` does not hold `clients` across the await (structural), or a concurrency test that a `get_or_start` completes promptly while a slow shutdown is in flight.
 
+None new. `LspManager` holds concrete `Arc<LspClient>` built from real language-server processes (no trait/mock seam), so the lock-release *timing* is not unit-testable without a larger LspClient-mockability refactor (out of scope). Behavior is unchanged and guarded by the existing `manager_shutdown_all_empty` and `shutdown_all_stops_running_servers` tests (both green; the latter exercises a real rust-analyzer). The lock-hoist is verified by inspection against `do_start`'s established lock-drop discipline.
 ## Workarounds
 Avoid `workspace(post_compact=true)` during heavy concurrent navigation; or serialize post_compact flushes to quiescent moments.
 

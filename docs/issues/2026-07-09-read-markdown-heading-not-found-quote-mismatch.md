@@ -1,12 +1,20 @@
 ---
-status: open
-opened: 2026-07-09
-closed:
-severity: low
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- read_markdown
+- error-handling
+- usage-db
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-09'
 owner: marius
 related: []
-tags: [read_markdown, error-handling, usage-db]
-kind: bug
+severity: low
 ---
 
 # BUG: `read_markdown`'s heading-not-found message uses double-quoted `{:?}` formatting, inconsistent with `RecoverableError`'s single-quoted convention
@@ -66,22 +74,13 @@ propagates unchanged via `.map_err(|e| anyhow::anyhow!("{}", e))`.
    directly by the controller.
 
 ## Fix
-Not yet implemented. Two options, either acceptable:
-1. Make `read_markdown_single_heading` reuse `e.message` (or reformat with single
-   quotes) instead of re-deriving via `{:?}`, matching `edit_markdown`'s approach and
-   removing the inconsistency at the source.
-2. Leave both message shapes as-is but ensure any classifier reading these messages
-   (e.g. `usage::db::normalize_err_family`) matches both quote styles — this was
-   applied as an immediate, narrow fix in Task 1's follow-up commit (tool-friction-
-   reduction plan) without touching `read_markdown.rs`, since that file was outside
-   Task 1's declared scope. Option 1 (the actual root-cause fix) remains open.
 
+**Shipped on `experiments` in `d8698284`** (`fix(read_markdown): single-quote the heading-not-found message`). Archive after cherry-pick to `master`.
+
+`src/tools/markdown/read_markdown.rs` heading-not-found error changed from `format!("heading {:?} not found", heading_query)` to `format!("heading '{}' not found", heading_query)` — `{:?}` on a `&str` renders double quotes, inconsistent with the single-quote convention.
 ## Tests added
-N/A — no fix landed yet against `read_markdown.rs` itself. Task 1's follow-up commit
-added test coverage for the classifier's tolerance of both quote styles in
-`src/usage/db.rs`'s `normalize_err_family_maps_iron_law_routing_errors` test, which is
-a mitigation, not a fix for this bug's root cause.
 
+`heading_not_found_error_uses_single_quotes_not_debug` (`src/tools/markdown/tests.rs`) — drives read_markdown with a missing heading and asserts the `error` field single-quotes it and does NOT contain the Debug double-quoted form. RED before, GREEN after.
 ## Workarounds
 None needed for callers — the double-quoted message is still human-readable and
 still triggers the same downstream behavior (returning the `headings` list + hint).

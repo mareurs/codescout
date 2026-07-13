@@ -1,12 +1,22 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: low
-owner: marius
-related: ['2026-07-10-librarian-context-silent-empty-no-embedder']
-tags: [librarian, docs, doc-vs-code-drift, embedding]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- docs
+- doc-vs-code-drift
+- embedding
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
+owner: marius
+related:
+- '2026-07-10-librarian-context-silent-empty-no-embedder'
+severity: low
 ---
 
 # BUG: docs promise librarian find/context "fall back to SQL LIKE when no embedder" — neither actually does (doc-vs-code drift)
@@ -54,16 +64,17 @@ No path derives a `LIKE` filter from the semantic/topic string.
 N/A — divergence read directly from doc + source.
 
 ## Fix
-Not started. Decide the intended contract:
-- **If LIKE fallback is desired:** implement it in both `find` (on `semantic`) and
-  `context` (on `topic`) — derive a `title/body LIKE '%…%'` filter when
-  `ctx.embedding` is `None`. This also resolves the related silent-empty bug.
-- **If not:** correct `librarian-mcp.md` to say the semantic param requires an
-  embedder and errors without one, and fix `context` to error rather than empty.
 
+**Shipped on `experiments` in `83430da8`** (`fix(librarian): hermetic no-embedder find test + correct manual`). Archive after cherry-pick to `master`.
+
+Contract chosen (2026-07-13): **error cleanly + narrow the docs** (no LIKE fallback for `artifact_find`).
+
+- The CLI `artifact find --semantic` already errors cleanly with `--semantic requires the embedding service. Set LIBRARIAN_EMBED_MODEL ...` — the apparent “silent empty” was a **test-hermeticity flake**: `run_cmd` `env_remove`d `LIBRARIAN_EMBED_MODEL` but the startup dotenv (`main.rs load_startup_env`) re-supplied it from `~/.config/codescout/.env`. `run_cmd` now sets `CODESCOUT_ENV_FILE` to a nonexistent path so the dotenv is a no-op.
+- `docs/manual/src/concepts/librarian-mcp.md` § Semantic search corrected: only `librarian_context`/`topic` falls back to SQL LIKE; `artifact_find`/`semantic` requires the embedder and errors.
+- `librarian_context` LIKE fallback already shipped (see [[2026-07-10-librarian-context-silent-empty-no-embedder]] / 97ae6388), so the manual is now accurate for both surfaces.
 ## Tests added
-N/A — not yet fixed.
 
+`artifact_find_semantic_without_embedder_reports_hint` (`tests/cli_artifact.rs`) is now hermetic (via the `CODESCOUT_ENV_FILE`→nonexistent guard in `run_cmd`) and reliably asserts `artifact find --semantic` fails with a `LIBRARIAN_EMBED_MODEL` hint when no embedder is configured. Full `cargo test` green (3175 passed) after the fix; this was the last remaining failure.
 ## Workarounds
 Use explicit `artifact(action="find", filter={…contains…})` for keyword discovery
 without an embedder (works today; measured high-precision on real trackers).

@@ -1,13 +1,23 @@
 ---
-status: open
-opened: 2026-07-10
-closed:
-severity: high
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- workspace-pin
+- memory
+- semantic-store
+- cross-embed
+- data-integrity
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-10'
 owner: marius
 related:
 - docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md
-tags: [workspace-pin, memory, semantic-store, cross-embed, data-integrity]
-kind: bug
+severity: high
 ---
 
 # BUG: memory() write/delete cross-embed resolves semantic-store project_id unpinned — writes/deletes land in the session-default project, not the workspace= pin
@@ -45,11 +55,16 @@ Contrast (same file, correct): markdown paths at `:46, :84, :131, :214, :662, :7
 1. **Hypothesis:** cross-embed might intentionally use the active project regardless of pin. **Test:** compare to `remember`/`recall`/`forget` in the same file. **Verdict:** rejected — those pin correctly; the write/delete cross-embed is an inconsistent omission, not a deliberate design.
 
 ## Fix
-Thread `ctx.workspace_override` into `cross_embed_memory` and `create_semantic_anchors` (resolve `project_id` via `with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.config.project.name.clone()))`, matching the `remember`/`recall`/`forget` pattern), and the same for the inline `delete`-action removal block. Consider consolidating the "get pinned project_id" into one helper to prevent recurrence.
 
+**Shipped on `experiments` in `0cefd1f3`** (`fix(memory): pin project_id in cross-embed/anchor/delete paths`). Not yet on `master` — archive after cherry-pick, cite the master-side SHA then.
+
+All three sites in `src/tools/memory/mod.rs` now resolve `project_id` via `ctx.agent.with_project_at(ctx.workspace_override.as_deref(), |p| ...)` instead of `inner.active_project()`:
+- `cross_embed_memory` (write-path semantic cross-embed)
+- `create_semantic_anchors` (write-path semantic-anchor creation)
+- the `delete`-action cross-embed removal block
 ## Tests added
-N/A — not yet fixed. Regression: `write`/`delete` under a `workspace=` pin ≠ session default must store/remove the semantic point under the pinned project's `project_id`.
 
+`cross_embed_memory_stores_under_pinned_project_not_session_default` (`src/tools/memory/tests.rs`) — sets up a session-default project plus a distinct pinned project, cross-embeds under the pin, and asserts the memory lands under the pinned `project_id` and NOT the session default. Network-free via the `FixedEmbedder` + `InMemorySemanticMemoryStore` test seams. RED confirmed before the fix (pinned store empty: left 0, right 1); GREEN after.
 ## Workarounds
 Activate the target project (`workspace(action="activate")`) before `memory()` write/delete rather than relying on a per-call `workspace=` pin, so active_project() and the pin agree.
 

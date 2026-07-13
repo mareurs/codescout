@@ -1,12 +1,23 @@
 ---
-status: open
-opened: 2026-07-12
-closed:
-severity: low
+id: null
+kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- activation
+- index-status
+- qdrant
+- cache
+- false-negative
+- ux
+topic: null
+time_scope: null
+closed: '2026-07-13'
+opened: '2026-07-12'
 owner: marius
 related: []
-tags: [activation, index-status, qdrant, cache, false-negative, ux]
-kind: bug
+severity: low
 ---
 
 # BUG: workspace(activate) reports index.status="not_indexed" for a fully queryable index — 500ms first-probe timeout poisons a session-lived cache
@@ -126,28 +137,15 @@ with no 500 ms deadline and no negative caching**, so they report
    as the mechanism consistent with all three observations.
 
 ## Fix
-Not started. Options (prefer 1+3 together):
-1. **Do not cache timeouts.** On the first-probe timeout branch, return `false`
-   for *this* response but skip `index_status_put` (or store a distinct
-   "unknown/expired" sentinel), so the next activation re-probes instead of
-   serving a poisoned negative.
-2. **Widen `FIRST_PROBE_TIMEOUT`** (500 ms → ~2 s) to tolerate cold-stack
-   latency. Cheap but still races on a very cold stack.
-3. **Don't assert a false negative.** When the probe times out / the stack is
-   unreachable, report `{"status":"unknown"}` (or omit the field) rather than
-   `not_indexed` — the current wording actively tells the agent to run
-   `index(action='build')` on an already-built index.
-4. Optionally have activation fall back to the live `project_index_stats` path
-   (as `ProjectStatus::call` does) when the cached value is negative.
 
+**Shipped on `experiments` in `0ef6c7bc`** (`fix(activate): don't cache a first-probe timeout as not_indexed`). Archive after cherry-pick to `master`. Contract chosen: don't cache timeouts + widen the probe bound (options 1+2 from the original analysis).
+
+- `check_has_index_cached` now routes the first-probe outcome through `resolve_first_probe(id, Option<bool>)`: a completed probe (`Some`) is cached; a timeout (`None`) returns `false` for that call but is NOT cached, so the next activation re-probes rather than serving a poisoned negative.
+- `FIRST_PROBE_TIMEOUT` widened 500ms → 2s for cold-stack tolerance.
+- The activation response shape is unchanged (still `indexed`/`not_indexed`); no `status:"unknown"` was introduced, so the activation-format fixtures were untouched.
 ## Tests added
-N/A — not yet fixed. A regression test should assert that a first-probe timeout
-does not persist a cached `false` across activations (inject a slow/offline
-retrieval client, assert the second activation re-probes rather than returning
-the cached negative). Note `src/tools/config/tests.rs` already fixes
-`not_indexed` in several activation-format fixtures — those pin the *rendering*,
-not the probe policy, and would need a timing-aware harness.
 
+`first_probe_timeout_is_not_cached` (`src/tools/config/tests.rs`) — asserts `resolve_first_probe(id, None)` returns false and leaves the cache empty, while `Some(true)` caches. RED before the fix (the timeout cached `Some(false)`); GREEN after. Extracting `resolve_first_probe` is what makes the timeout path unit-testable without a real slow Qdrant. Existing `index_status_cache_serves_stale_then_refreshes` (completed-false IS cached) still passes.
 ## Workarounds
 Ignore `workspace(activate)`'s `index` field; treat `index(action="status")`
 (or `workspace(action="status")`) as authoritative — both query Qdrant live and
