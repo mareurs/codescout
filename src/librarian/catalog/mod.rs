@@ -15,6 +15,7 @@ pub mod links;
 mod migrate_v6;
 pub mod observations;
 pub mod sources;
+pub mod worktree;
 
 /// `RepoPath` stores its inner string in forward-slash normalized form
 /// (see `src/util/fs.rs`). Implementing `ToSql` here keeps `fs.rs`

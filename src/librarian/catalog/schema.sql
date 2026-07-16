@@ -129,3 +129,16 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 
 -- v6: legacy repo/rel_path columns dropped; abs_path replaces them.
 INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+
+-- Worktree overlay: durable registration of linked git worktrees that have
+-- written to the catalog. Survives `git worktree remove`; the merge flow
+-- (librarian action=merge_worktree) closes it. See
+-- docs/superpowers/specs/2026-07-17-worktree-overlay-design.md.
+CREATE TABLE IF NOT EXISTS worktree_registration (
+    worktree_root TEXT PRIMARY KEY,
+    main_root     TEXT NOT NULL,
+    branch        TEXT,
+    created_at    INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'active',
+    closed_at     INTEGER
+);
