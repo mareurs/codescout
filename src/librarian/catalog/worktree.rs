@@ -62,12 +62,21 @@ pub fn get(cat: &Catalog, worktree_root: &str) -> Result<Option<RegistrationRow>
 
 /// The ACTIVE registration whose root is `abs_path` or an ancestor of it.
 pub fn covering(cat: &Catalog, abs_path: &str) -> Result<Option<RegistrationRow>> {
+    // worktree_root is used below as a LIKE *pattern*, so its own `%`/`_`
+    // characters must be escaped (backslash first, then `%`, then `_`) or a
+    // root like `.worktrees/fix_1` has its `_` read as a single-char
+    // wildcard, false-matching unrelated siblings such as `.worktrees/fixe1`.
+    // Mirrors the LeafOp::Prefix escaping in filter.rs; done via SQL
+    // REPLACE() rather than a bound Rust parameter because the value being
+    // escaped is a per-row column, not a value already held in Rust.
     Ok(cat
         .conn
         .query_row(
             &format!(
                 "SELECT {COLS} FROM worktree_registration \
-                 WHERE status='active' AND (?1 = worktree_root OR ?1 LIKE worktree_root || '/%')"
+                 WHERE status='active' AND (?1 = worktree_root OR ?1 LIKE \
+                 REPLACE(REPLACE(REPLACE(worktree_root, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
+                 || '/%' ESCAPE '\\')"
             ),
             [abs_path],
             row_from_sql,
@@ -133,6 +142,24 @@ mod tests {
         assert!(covering(&cat, "/repo/.worktrees/feat/docs/t.md")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn covering_escapes_like_wildcards_in_root() {
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert_active(&cat, "/repo/.worktrees/fix_1", "/repo", None, 1000).unwrap();
+        // The stored '_' must be a literal, not a single-char wildcard.
+        assert!(covering(&cat, "/repo/.worktrees/fixe1/readme.md")
+            .unwrap()
+            .is_none());
+        assert!(covering(&cat, "/repo/.worktrees/fix.1/readme.md")
+            .unwrap()
+            .is_none());
+        // The real path still matches.
+        assert!(covering(&cat, "/repo/.worktrees/fix_1/readme.md")
+            .unwrap()
+            .is_some());
+        assert!(covering(&cat, "/repo/.worktrees/fix_1").unwrap().is_some());
     }
 
     #[test]
