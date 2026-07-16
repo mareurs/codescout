@@ -826,6 +826,7 @@ mod tests {
                 crate::librarian::current_project::CurrentProject {
                     abs_path: proj_dir.clone(),
                     git_root: root.clone(),
+                    main_root: None,
                     umbrella: None,
                 },
             ))

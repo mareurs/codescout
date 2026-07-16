@@ -555,6 +555,7 @@ mod tests {
         ctx.current_project = Some(Arc::new(CurrentProject {
             abs_path: path.clone(),
             git_root: path.clone(),
+            main_root: None,
             umbrella: None,
         }));
         let result = call(
@@ -586,6 +587,7 @@ mod tests {
         ctx.current_project = Some(Arc::new(CurrentProject {
             abs_path: proj_path.clone(),
             git_root: root_path.clone(),
+            main_root: None,
             umbrella: None,
         }));
         let result = call(

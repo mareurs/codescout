@@ -21,6 +21,10 @@ pub struct CurrentProject {
     pub abs_path: PathBuf,
     /// Nearest enclosing `.git/` ancestor; falls back to abs_path.
     pub git_root: PathBuf,
+    /// Main checkout root when `git_root` is a *linked* git worktree
+    /// (`git worktree add`); `None` for a plain checkout. Drives overlay
+    /// reads and fork-on-first-write in `librarian::tools`.
+    pub main_root: Option<PathBuf>,
     /// Umbrella name if this project is a descendant of any umbrella member.
     pub umbrella: Option<String>,
 }
@@ -28,10 +32,18 @@ pub struct CurrentProject {
 pub fn resolve(active_path: &Path, ws: &WorkspaceConfig) -> Option<CurrentProject> {
     let abs_path = std::fs::canonicalize(active_path).ok()?;
     let git_root = lookup_git_root(&abs_path).unwrap_or_else(|| abs_path.clone());
-    let umbrella = lookup_umbrella(&abs_path, ws);
+    let main_root = if is_linked_worktree(&git_root) {
+        worktree_main_root(&git_root).and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
+    } else {
+        None
+    };
+    // Umbrella membership is a property of the PROJECT, not the checkout —
+    // resolve it against the main root so worktree sessions keep umbrella scope.
+    let umbrella = lookup_umbrella(main_root.as_deref().unwrap_or(&abs_path), ws);
     Some(CurrentProject {
         abs_path,
         git_root,
+        main_root,
         umbrella,
     })
 }
@@ -366,5 +378,58 @@ mod tests {
     fn load_project_umbrellas_empty_when_file_absent() {
         let tmp = TempDir::new().unwrap();
         assert!(load_project_umbrellas(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn resolve_populates_main_root_for_linked_worktree() {
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+        let ws = WorkspaceConfig::default();
+        let cp = resolve(&wt, &ws).unwrap();
+        assert_eq!(
+            cp.main_root.as_deref(),
+            Some(std::fs::canonicalize(&main).unwrap().as_path())
+        );
+    }
+
+    #[test]
+    fn resolve_main_root_none_for_plain_repo() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ws = WorkspaceConfig::default();
+        let cp = resolve(tmp.path(), &ws).unwrap();
+        assert!(cp.main_root.is_none());
+    }
+
+    #[test]
+    fn umbrella_resolves_via_main_root_from_worktree() {
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+        let canon_main = std::fs::canonicalize(&main).unwrap();
+        let ws = WorkspaceConfig {
+            umbrellas: vec![Umbrella {
+                name: "u".into(),
+                members: vec![canon_main.clone()],
+            }],
+            ..Default::default()
+        };
+        let cp = resolve(&wt, &ws).unwrap();
+        assert_eq!(cp.umbrella.as_deref(), Some("u"));
     }
 }

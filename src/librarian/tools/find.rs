@@ -601,6 +601,7 @@ mod tests {
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),
                     git_root: std::path::PathBuf::from("/test/code-explorer"),
+                    main_root: None,
                     umbrella: None,
                 },
             ))
@@ -764,6 +765,7 @@ mod tests {
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),
                     git_root: std::path::PathBuf::from("/test/code-explorer"),
+                    main_root: None,
                     umbrella: Some("main".into()),
                 },
             ))
@@ -1136,6 +1138,7 @@ mod tests {
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),
                     git_root: std::path::PathBuf::from("/test/code-explorer"),
+                    main_root: None,
                     umbrella: Some("main".into()),
                 },
             ))

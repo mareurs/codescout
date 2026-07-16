@@ -592,6 +592,7 @@ mod tests {
             .with_current_project(Arc::new(CurrentProject {
                 abs_path: std::path::PathBuf::from("/test/x/y"),
                 git_root: std::path::PathBuf::from("/test/x"),
+                main_root: None,
                 umbrella: None,
             }))
             .build()

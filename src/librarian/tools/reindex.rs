@@ -366,6 +366,7 @@ mod tests {
                 crate::librarian::current_project::CurrentProject {
                     abs_path: tmp_root.join(project_subdir),
                     git_root: tmp_root.clone(),
+                    main_root: None,
                     umbrella: None,
                 },
             ))
@@ -431,6 +432,7 @@ mod tests {
                 crate::librarian::current_project::CurrentProject {
                     abs_path: root.join("p1"),
                     git_root: root.to_path_buf(),
+                    main_root: None,
                     umbrella: None,
                 },
             )),

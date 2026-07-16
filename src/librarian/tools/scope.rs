@@ -168,6 +168,7 @@ mod tests {
         CurrentProject {
             abs_path: std::path::PathBuf::from(abs_path),
             git_root: std::path::PathBuf::from(git_root),
+            main_root: None,
             umbrella: umbrella.map(str::to_string),
         }
     }

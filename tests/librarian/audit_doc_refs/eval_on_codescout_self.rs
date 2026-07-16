@@ -32,6 +32,7 @@ fn mk_ctx(root: PathBuf) -> ToolContext {
         current_project: Some(Arc::new(CurrentProject {
             abs_path: root.clone(),
             git_root: root,
+            main_root: None,
             umbrella: None,
         })),
     }

@@ -147,6 +147,7 @@ impl LibrarianAdapter {
                     crate::librarian::current_project::CurrentProject {
                         abs_path,
                         git_root,
+                        main_root: None,
                         umbrella,
                     },
                 ))

@@ -1050,6 +1050,7 @@ mod tests {
             .with_current_project(Arc::new(CurrentProject {
                 abs_path: git_root.clone(),
                 git_root,
+                main_root: None,
                 umbrella: None,
             }))
             .build()

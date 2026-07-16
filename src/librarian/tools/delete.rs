@@ -208,6 +208,7 @@ mod tests {
             crate::librarian::current_project::CurrentProject {
                 abs_path: tmp.path().to_path_buf(),
                 git_root: tmp.path().to_path_buf(),
+                main_root: None,
                 umbrella: None,
             },
         ));
