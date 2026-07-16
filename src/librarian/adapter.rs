@@ -136,10 +136,20 @@ impl LibrarianAdapter {
             Ok(abs_path) => {
                 let git_root = crate::librarian::current_project::lookup_git_root(&abs_path)
                     .unwrap_or_else(|| abs_path.clone());
+                let main_root = if crate::librarian::current_project::is_linked_worktree(&git_root)
+                {
+                    crate::librarian::current_project::worktree_main_root(&git_root)
+                        .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
+                } else {
+                    None
+                };
                 let project_local =
                     crate::librarian::current_project::load_project_umbrellas(&abs_path);
+                // Umbrella membership is a property of the PROJECT, not the
+                // checkout — resolve it against the main root (when present)
+                // so worktree sessions keep umbrella scope.
                 let umbrella = crate::librarian::current_project::resolve_umbrella(
-                    &abs_path,
+                    main_root.as_deref().unwrap_or(&abs_path),
                     &project_local,
                     &self.ctx.workspace.umbrellas,
                 );
@@ -147,7 +157,7 @@ impl LibrarianAdapter {
                     crate::librarian::current_project::CurrentProject {
                         abs_path,
                         git_root,
-                        main_root: None,
+                        main_root,
                         umbrella,
                     },
                 ))
@@ -288,5 +298,78 @@ mod tests {
             "genuine failures must stay fatal (isError: true)"
         );
         assert!(bridged.to_string().contains("database exploded"));
+    }
+
+    #[test]
+    fn derive_ctx_populates_main_root_for_linked_worktree() {
+        // derive_ctx is the LIVE per-tool-call path (see its doc comment) —
+        // current_project::resolve() only runs once at boot. A regression
+        // here silently makes the whole worktree-overlay feature dead code
+        // on every real MCP call, since later tasks branch on main_root.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let adapter = LibrarianAdapter {
+            inner: lib_all_tools()
+                .into_iter()
+                .next()
+                .expect("at least one librarian tool registered"),
+            ctx,
+        };
+
+        let derived = adapter.derive_ctx(Some(&wt));
+        let cp = derived
+            .current_project
+            .as_deref()
+            .expect("resolvable active path must yield a current_project");
+        assert_eq!(
+            cp.main_root.as_deref(),
+            Some(std::fs::canonicalize(&main).unwrap().as_path()),
+            "derive_ctx must populate main_root for a linked worktree, mirroring resolve()"
+        );
+    }
+
+    #[test]
+    fn derive_ctx_main_root_none_for_plain_repo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let adapter = LibrarianAdapter {
+            inner: lib_all_tools()
+                .into_iter()
+                .next()
+                .expect("at least one librarian tool registered"),
+            ctx,
+        };
+
+        let derived = adapter.derive_ctx(Some(tmp.path()));
+        let cp = derived
+            .current_project
+            .as_deref()
+            .expect("resolvable active path must yield a current_project");
+        assert!(
+            cp.main_root.is_none(),
+            "plain repo must not get a main_root"
+        );
     }
 }
