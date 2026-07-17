@@ -2240,15 +2240,12 @@ fn line_offsets_reproduces_join_boundaries() {
     let content = "# H\n\nbody line\n## Sub\nmore\n";
     let lines: Vec<&str> = content.split('\n').collect();
     let off = LineOffsets::new(content);
-    // NOTE: bounded to `lines.len()` exclusive, not `0..=lines.len()`. `join_lines`
-    // unconditionally appends a trailing '\n' (see its doc comment), so passing the
-    // *full* line slice (i == lines.len()) always yields one extra '\n' beyond
-    // `content`'s actual end — verified empirically (assertion fails at the top
-    // edge with content ending "...more\n" vs "...more\n\n"). Every real call site
-    // (`perform_section_edit_ext`'s `before = join_lines(&lines[..heading_idx])` /
-    // `..insert_idx`) always passes an index strictly less than `lines.len()` —
-    // even "insert at end of file" uses `lines.len() - 1`, since a trailing '\n'
-    // in `content` means the last split element is already the empty tail line.
+    // NOTE: bounded to `lines.len()` exclusive. `join_lines` unconditionally
+    // appends a trailing '\n', so `join_lines(&lines[..lines.len()])` equals
+    // `content + "\n"` — one extra newline — and the invariant holds only for
+    // `i < lines.len()`. The one production path that reaches `i == lines.len()`
+    // is `plan_section_edit`'s `insert_after` end-of-section on the LAST section,
+    // which compensates with an explicit "\n" prefix (see that arm).
     for i in 0..lines.len() {
         assert_eq!(&content[..off.line_start(i)], join_lines(&lines[..i]));
     }
@@ -2351,6 +2348,47 @@ fn apply_planned_edits_orders_coincident_inserts_by_order() {
     ];
     let out = super::edit_markdown::apply_planned_edits(original, edits);
     assert_eq!(out.trim_end_matches('\n'), "AabB");
+}
+
+#[test]
+fn batch_coincident_insert_and_span_is_order_independent() {
+    use serde_json::json;
+    // insert_before B is a zero-width insert at B's start byte; remove B is a
+    // non-zero span starting at the SAME byte. detect_overlaps allows this pair.
+    // Both array orders must produce identical, uncorrupted output.
+    let doc = "## A\naaa\n## B\nbbb\n";
+    let ins = json!({"heading":"B","action":"insert_before","content":"INSERTED"});
+    let rem = json!({"heading":"B","action":"remove"});
+
+    let out1 = super::edit_markdown::apply_planned_edits(
+        doc,
+        super::edit_markdown::plan_batch(
+            doc,
+            json!([ins.clone(), rem.clone()]).as_array().unwrap(),
+            false,
+        )
+        .unwrap(),
+    );
+    let out2 = super::edit_markdown::apply_planned_edits(
+        doc,
+        super::edit_markdown::plan_batch(doc, json!([rem, ins]).as_array().unwrap(), false)
+            .unwrap(),
+    );
+
+    assert_eq!(
+        out1, out2,
+        "coincident insert+span must be order-independent (C-1)"
+    );
+    assert!(out1.contains("INSERTED"), "insert survived: {out1:?}");
+    assert!(!out1.contains("bbb"), "B removed: {out1:?}");
+    assert!(
+        out1.starts_with("## A\naaa\n"),
+        "A section intact and uncorrupted: {out1:?}"
+    );
+    assert_eq!(
+        out1, "## A\naaa\nINSERTED\n",
+        "expected exact output: {out1:?}"
+    );
 }
 
 #[test]

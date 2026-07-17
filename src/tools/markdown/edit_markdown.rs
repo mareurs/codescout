@@ -517,9 +517,21 @@ pub(crate) fn detect_overlaps(edits: &[PlannedEdit]) -> anyhow::Result<()> {
 }
 
 pub(crate) fn apply_planned_edits(original: &str, mut edits: Vec<PlannedEdit>) -> String {
-    // Apply end-to-start: highest start first. For coincident starts, apply the
-    // higher `order` first so that after all splices the lower `order` sits first.
-    edits.sort_by(|a, b| b.span.start.cmp(&a.span.start).then(b.order.cmp(&a.order)));
+    // End-to-start (highest start first) so an applied splice never shifts a
+    // not-yet-applied lower offset. At an EQUAL start, a non-zero span MUST apply
+    // before a coincident zero-width insert: applying the insert first would shift
+    // the shared start byte and make the span's replace_range corrupt the buffer
+    // (C-1). Among coincident zero-width inserts, higher `order` first so the lower
+    // `order` ends up leftmost in the final document.
+    edits.sort_by(|a, b| {
+        let a_zero = a.span.start == a.span.end;
+        let b_zero = b.span.start == b.span.end;
+        b.span
+            .start
+            .cmp(&a.span.start)
+            .then(a_zero.cmp(&b_zero)) // false (non-zero) sorts before true (zero-width)
+            .then(b.order.cmp(&a.order))
+    });
     let mut out = original.to_string();
     for e in &edits {
         out.replace_range(e.span.clone(), &e.replacement);
