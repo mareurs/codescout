@@ -190,20 +190,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 )
                 .optional()?
                 .flatten();
-            match slug {
-                Some(s) => {
-                    let out_items: Vec<Value> = entry_cite::outgoing(&cat, &s)?
-                        .into_iter()
-                        .map(|e| json!({"src_local": e.src_local, "dst_ref": e.dst_ref, "rel": e.rel}))
-                        .collect();
-                    let in_items: Vec<Value> = entry_cite::incoming(&cat, &a.id)?
-                        .into_iter()
-                        .chain(entry_cite::incoming_like(&cat, &format!("{s}:%"))?)
-                        .map(|e| json!({"src": format!("{}:{}", e.src_slug, e.src_local), "rel": e.rel}))
-                        .collect();
-                    Some(json!({"outgoing": out_items, "incoming": in_items}))
-                }
-                None => None,
+            let in_by_id = entry_cite::incoming(&cat, &a.id)?;
+            let (out_rows, in_like) = match &slug {
+                Some(s) => (
+                    entry_cite::outgoing(&cat, s)?,
+                    entry_cite::incoming_like(&cat, &format!("{s}:%"))?,
+                ),
+                None => (vec![], vec![]),
+            };
+            let out_items: Vec<Value> = out_rows
+                .into_iter()
+                .map(|e| json!({"src_local": e.src_local, "dst_ref": e.dst_ref, "rel": e.rel}))
+                .collect();
+            let in_items: Vec<Value> = in_by_id
+                .into_iter()
+                .chain(in_like)
+                .map(|e| json!({"src": format!("{}:{}", e.src_slug, e.src_local), "rel": e.rel}))
+                .collect();
+            if out_items.is_empty() && in_items.is_empty() {
+                None
+            } else {
+                Some(json!({"outgoing": out_items, "incoming": in_items}))
             }
         } else {
             None
@@ -1459,6 +1466,36 @@ mod tests {
             .unwrap();
         assert_eq!(v["entry_links"]["incoming"].as_array().unwrap().len(), 1);
         assert_eq!(v["entry_links"]["incoming"][0]["src"], "tracker-b:W-1");
+    }
+
+    #[tokio::test]
+    async fn include_links_surfaces_incoming_for_slugless_target() {
+        use crate::librarian::catalog::entry_cite::{self, EntryCiteRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("src")).unwrap();
+        artifact::upsert(&cat, &mk_row("tgt")).unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='src-tracker' WHERE id='src'", [])
+            .unwrap();
+        // 'tgt' is deliberately left slug-less.
+        entry_cite::insert_with(
+            &cat.conn,
+            &EntryCiteRow {
+                src_slug: "src-tracker".into(),
+                src_local: "F-1".into(),
+                dst_ref: "tgt".into(),
+                rel: "cites".into(),
+                origin: "write".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"id": "tgt", "include_links": true}))
+            .await
+            .unwrap();
+        assert_eq!(v["entry_links"]["incoming"].as_array().unwrap().len(), 1);
+        assert_eq!(v["entry_links"]["incoming"][0]["src"], "src-tracker:F-1");
     }
 
     #[tokio::test]

@@ -328,9 +328,13 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
         )));
     }
     // 3. rel_path suffix match — must resolve to exactly one artifact.
-    let like = format!("%/{raw}");
-    let mut stmt =
-        conn.prepare("SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2")?;
+    let escaped = raw
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let like = format!("%/{escaped}");
+    let mut stmt = conn
+        .prepare("SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2 ESCAPE '\\'")?;
     let ids: Vec<String> = stmt
         .query_map(rusqlite::params![raw, like], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1100,5 +1104,27 @@ mod tests {
 
         let err = resolve_cite_ref(&cat.conn, "dup.md").unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    #[test]
+    fn resolve_cite_ref_escapes_like_wildcards_in_rel_path() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("underscore")
+                .with_abs_path("/x/foo_bar.md")
+                .build(),
+        )
+        .unwrap();
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("letterx")
+                .with_abs_path("/x/fooXbar.md")
+                .build(),
+        )
+        .unwrap();
+
+        let resolved = resolve_cite_ref(&cat.conn, "foo_bar.md").unwrap();
+        assert_eq!(resolved, "underscore");
     }
 }
