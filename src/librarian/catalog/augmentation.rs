@@ -4,6 +4,7 @@ use anyhow::Result;
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 
+#[derive(Debug, Clone)]
 pub struct AugmentationRow {
     pub artifact_id: String,
     pub prompt: String,

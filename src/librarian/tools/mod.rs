@@ -273,6 +273,10 @@ pub mod artifact_event;
 pub mod artifact_refresh;
 pub mod librarian;
 
+// Not a registered `Tool` — an internal write-gate helper (overlay
+// fork-on-first-write) consumed by mutating tool call sites.
+pub(crate) mod worktree;
+
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(artifact::Artifact),

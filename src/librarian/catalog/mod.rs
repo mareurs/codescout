@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
 use crate::librarian::workspace::WorkspaceConfig;
@@ -59,13 +59,16 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
     match apply_migrations_in_txn(conn, ws) {
         Ok(()) => {
             conn.execute_batch("COMMIT")?;
-            Ok(())
         }
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK");
-            Err(e)
+            return Err(e);
         }
     }
+    // v9: widen events.kind CHECK to allow 'worktree_fork'. Table-copy, so it
+    // cannot run inside the BEGIN IMMEDIATE above (needs its own
+    // foreign_keys=OFF window — see widen_events_kind_check doc comment).
+    widen_events_kind_check(conn)
 }
 
 /// The v4+ ALTER/backfill sequence run inside the write transaction opened by
@@ -134,6 +137,91 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
         let drop_orphans = std::env::var("LIBRARIAN_MIGRATE_DROP_ORPHANS").as_deref() == Ok("1");
         migrate_v6::backfill(conn, ws, drop_orphans)?;
     }
+    Ok(())
+}
+
+/// True if the `events` table's `kind` CHECK constraint already allows
+/// `'worktree_fork'`. SQLite records a CHECK constraint's text only in the
+/// table's own `CREATE TABLE` statement (`sqlite_master.sql`) — there is no
+/// `PRAGMA` to introspect it column-wise the way `column_exists` does for
+/// plain columns via `table_info`.
+fn events_check_allows_worktree_fork(conn: &Connection) -> Result<bool> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(match sql {
+        Some(s) => s.contains("worktree_fork"),
+        // No events table yet: SCHEMA_SQL (already run by the time this is
+        // called) creates it fresh with the current (widened) CHECK text, so
+        // there is nothing to migrate.
+        None => true,
+    })
+}
+
+/// v9: widen the `events.kind` CHECK constraint to allow `'worktree_fork'`
+/// (the fork-on-first-write event kind — see
+/// docs/superpowers/specs/2026-07-17-worktree-overlay-design.md §3). A
+/// pre-existing catalog created before this constraint was widened has the
+/// old CHECK baked into its `events` table and would reject every
+/// `worktree_fork` insert with `CHECK constraint failed`; editing
+/// `schema.sql` alone only affects catalogs created from scratch, since
+/// `CREATE TABLE IF NOT EXISTS` is a no-op once the table exists.
+///
+/// SQLite has no `ALTER TABLE ... ALTER COLUMN` for CHECK constraints, so
+/// this is a table-copy migration, following the same shape (and FK-pragma
+/// caution) as `migrate_v6::drop_legacy_and_stamp`: `DROP TABLE events`
+/// under `foreign_keys=ON` would cascade-delete every `event_edges` row
+/// referencing it (both `src_event_id` and `dst_event_id` reference
+/// `events(id) ON DELETE CASCADE`), so foreign keys are held OFF for the
+/// swap and restored after — and, per that same function's note, this must
+/// run OUTSIDE any already-open transaction, because `PRAGMA foreign_keys`
+/// is a silent no-op inside one.
+fn widen_events_kind_check(conn: &Connection) -> Result<()> {
+    if events_check_allows_worktree_fork(conn)? {
+        return Ok(());
+    }
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let copy = conn.execute_batch(
+        r#"
+        BEGIN;
+        DROP TABLE IF EXISTS events_new;
+        CREATE TABLE events_new (
+          id            TEXT PRIMARY KEY,
+          artifact_id   TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+          kind          TEXT NOT NULL CHECK (kind IN (
+                          'note', 'reviewed', 'status_change', 'field_patch',
+                          'superseded_by', 'external_signal',
+                          'intent', 'verdict', 'worktree_fork'
+                        )),
+          payload       TEXT NOT NULL,
+          anchor_commit TEXT,
+          head_commit   TEXT,
+          author        TEXT,
+          created_at    INTEGER NOT NULL
+        );
+        INSERT INTO events_new
+          SELECT id, artifact_id, kind, payload, anchor_commit, head_commit, author, created_at
+          FROM events;
+        DROP TABLE events;
+        ALTER TABLE events_new RENAME TO events;
+        CREATE INDEX idx_events_artifact ON events(artifact_id, created_at DESC);
+        CREATE INDEX idx_events_head_commit ON events(head_commit);
+        CREATE INDEX idx_events_anchor_commit ON events(anchor_commit);
+        CREATE INDEX idx_events_kind ON events(kind);
+        COMMIT;
+        "#,
+    );
+    if copy.is_err() {
+        // A failed batch leaves the transaction open; close it so the pragma
+        // re-enable below is honored (it is ignored inside a transaction).
+        let _ = conn.execute_batch("ROLLBACK;");
+    }
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    copy?;
     Ok(())
 }
 
@@ -324,6 +412,112 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 6);
+    }
+    #[test]
+    fn widen_events_kind_check_migrates_pre_existing_catalog_and_preserves_data() {
+        // Regression: a catalog created before the events.kind CHECK constraint
+        // was widened to allow 'worktree_fork' has the OLD constraint baked
+        // into its on-disk `events` table forever — editing schema.sql alone
+        // only affects catalogs created from scratch (`CREATE TABLE IF NOT
+        // EXISTS` is a no-op once the table exists). Seed exactly that
+        // pre-existing shape, with a pre-existing event + an event_edges row
+        // referencing it, then confirm: (a) the migration widens the CHECK so
+        // a worktree_fork event can be inserted, (b) the pre-existing event and
+        // edge survive (foreign_keys=OFF during the table-copy must not
+        // cascade-delete them), (c) a second open is idempotent.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE artifact (
+                    id TEXT PRIMARY KEY, abs_path TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+                    status TEXT NOT NULL, title TEXT, owners TEXT NOT NULL DEFAULT '[]',
+                    tags TEXT NOT NULL DEFAULT '[]', topic TEXT, time_scope TEXT, source TEXT,
+                    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                    file_mtime INTEGER NOT NULL, file_sha256 TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 1.0
+                );
+                CREATE TABLE events (
+                    id            TEXT PRIMARY KEY,
+                    artifact_id   TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+                    kind          TEXT NOT NULL CHECK (kind IN (
+                                    'note', 'reviewed', 'status_change', 'field_patch',
+                                    'superseded_by', 'external_signal',
+                                    'intent', 'verdict'
+                                  )),
+                    payload       TEXT NOT NULL,
+                    anchor_commit TEXT,
+                    head_commit   TEXT,
+                    author        TEXT,
+                    created_at    INTEGER NOT NULL
+                );
+                CREATE TABLE event_edges (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    src_event_id    TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                    dst_event_id    TEXT REFERENCES events(id) ON DELETE CASCADE,
+                    dst_artifact_id TEXT REFERENCES artifact(id) ON DELETE CASCADE,
+                    dst_source_id   TEXT,
+                    rel             TEXT NOT NULL
+                );
+                CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+                INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+
+                INSERT INTO artifact(id, abs_path, kind, status, created_at, updated_at, file_mtime, file_sha256)
+                  VALUES ('a1', '/test/a1.md', 'tracker', 'active', 0, 0, 0, 'sha');
+                INSERT INTO events(id, artifact_id, kind, payload, created_at)
+                  VALUES ('e1', 'a1', 'note', '{}', 0);
+                INSERT INTO event_edges(src_event_id, rel) VALUES ('e1', 'parent');
+                "#,
+            )
+            .unwrap();
+        }
+
+        // Open via the real entry point, which runs widen_events_kind_check as
+        // part of run_migrations.
+        let cat = Catalog::open(&path).unwrap();
+
+        // (a) the CHECK is now widened.
+        cat.conn
+            .execute(
+                "INSERT INTO events(id, artifact_id, kind, payload, created_at) VALUES ('e2', 'a1', 'worktree_fork', '{}', 1)",
+                [],
+            )
+            .expect("events.kind CHECK must now allow 'worktree_fork'");
+
+        // (b) pre-existing event + edge survived the table-copy.
+        let ev_count: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM events WHERE id='e1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            ev_count, 1,
+            "pre-existing event must survive the CHECK-widening migration"
+        );
+        let edge_count: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM event_edges WHERE src_event_id='e1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            edge_count, 1,
+            "event_edges referencing the pre-existing event must survive the swap"
+        );
+
+        // (c) idempotent: re-opening (which re-runs widen_events_kind_check) must not error.
+        drop(cat);
+        let cat2 = Catalog::open(&path).unwrap();
+        let ev_count2: i64 = cat2
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ev_count2, 2, "second open must not duplicate or lose rows");
     }
 
     #[test]
