@@ -533,6 +533,89 @@ mod tests {
             .unwrap();
         assert_eq!(ev_count2, 3, "second open must not duplicate or lose rows");
     }
+    #[test]
+    fn widen_events_kind_check_migrates_catalog_that_already_allows_worktree_fork_but_not_worktree_merge(
+    ) {
+        // Discriminating regression for `events_check_allows_worktree_merge`.
+        // The guard MUST test for `'worktree_merge'` specifically. The sibling
+        // test above (`..._migrates_pre_existing_catalog_and_preserves_data`)
+        // only seeds a catalog whose CHECK has NEITHER worktree kind, so a
+        // mutation reverting the guard to `contains("worktree_fork")` would
+        // still pass it (both guards agree "needs migration" when fork is
+        // absent too) — it does not discriminate the correct guard from the
+        // buggy one.
+        //
+        // This test seeds the intermediate Task-4-era shape instead: CHECK
+        // already lists 'worktree_fork' (added when forking landed) but not
+        // yet 'worktree_merge' (added later, for this merge feature) — exactly
+        // where the two guards diverge. The correct guard (checks for
+        // 'worktree_merge') reports "still needs migration" and widens the
+        // CHECK; the buggy guard (checks for 'worktree_fork') would report
+        // "already migrated", skip the widen, and leave 'worktree_merge'
+        // inserts rejected by the stale CHECK constraint.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                    r#"
+                    CREATE TABLE artifact (
+                        id TEXT PRIMARY KEY, abs_path TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+                        status TEXT NOT NULL, title TEXT, owners TEXT NOT NULL DEFAULT '[]',
+                        tags TEXT NOT NULL DEFAULT '[]', topic TEXT, time_scope TEXT, source TEXT,
+                        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                        file_mtime INTEGER NOT NULL, file_sha256 TEXT NOT NULL,
+                        confidence REAL NOT NULL DEFAULT 1.0
+                    );
+                    CREATE TABLE events (
+                        id            TEXT PRIMARY KEY,
+                        artifact_id   TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+                        kind          TEXT NOT NULL CHECK (kind IN (
+                                        'note', 'reviewed', 'status_change', 'field_patch',
+                                        'superseded_by', 'external_signal',
+                                        'intent', 'verdict', 'worktree_fork'
+                                      )),
+                        payload       TEXT NOT NULL,
+                        anchor_commit TEXT,
+                        head_commit   TEXT,
+                        author        TEXT,
+                        created_at    INTEGER NOT NULL
+                    );
+                    CREATE TABLE event_edges (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        src_event_id    TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                        dst_event_id    TEXT REFERENCES events(id) ON DELETE CASCADE,
+                        dst_artifact_id TEXT REFERENCES artifact(id) ON DELETE CASCADE,
+                        dst_source_id   TEXT,
+                        rel             TEXT NOT NULL
+                    );
+                    CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+
+                    INSERT INTO artifact(id, abs_path, kind, status, created_at, updated_at, file_mtime, file_sha256)
+                      VALUES ('a1', '/test/a1.md', 'tracker', 'active', 0, 0, 0, 'sha');
+                    INSERT INTO events(id, artifact_id, kind, payload, created_at)
+                      VALUES ('e1', 'a1', 'worktree_fork', '{}', 0);
+                    "#,
+                )
+                .unwrap();
+        }
+
+        // Open via the real entry point, which runs widen_events_kind_check as
+        // part of run_migrations.
+        let cat = Catalog::open(&path).unwrap();
+
+        cat.conn
+            .execute(
+                "INSERT INTO events(id, artifact_id, kind, payload, created_at) VALUES ('e2', 'a1', 'worktree_merge', '{}', 1)",
+                [],
+            )
+            .expect(
+                "events.kind CHECK must allow 'worktree_merge' even when the catalog already \
+                 allowed 'worktree_fork' before open — the guard must key off \
+                 'worktree_merge' specifically, not 'worktree_fork'",
+            );
+    }
 
     #[test]
     fn run_migrations_is_safe_under_concurrent_connections() {

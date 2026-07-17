@@ -405,6 +405,22 @@ fn merge_one(
         params![serde_json::to_string(&new_main_params)?, main_id],
     )?;
 
+    // Delete the shadow's own worktree_of lineage link BEFORE repoint_history
+    // runs. repoint_history's `UPDATE OR IGNORE artifact_link SET src_id=main
+    // WHERE src_id=shadow` would otherwise turn this
+    // (src=shadow, dst=main, rel=worktree_of) row into a self-referential
+    // (src=main, dst=main, rel=worktree_of) row: there is no pre-existing
+    // (main,main,worktree_of) row for `OR IGNORE` to skip on, so the update
+    // succeeds and creates the self-link — and since neither endpoint is
+    // `shadow_id` anymore, the shadow's cascade-delete below no longer
+    // touches it, leaving main durably (and wrongly) recorded as a
+    // worktree-shadow of itself. Deleting it here leaves nothing for
+    // `repoint_history` to mis-repoint.
+    tx.execute(
+        "DELETE FROM artifact_link WHERE src_id=?1 AND dst_id=?2 AND rel=?3",
+        params![shadow_id, main_id, LINEAGE_REL],
+    )?;
+
     // Re-point events (fork event included, as audit trail), observations,
     // links, and event_edges from shadow to main. NEVER graft::graft_rows /
     // graft::merge_augmentation here — see module doc comment (F-2).
@@ -629,6 +645,37 @@ mod tests {
                 .status,
             "merged"
         );
+        // Regression: repoint_history's `UPDATE OR IGNORE artifact_link SET
+        // src_id=main WHERE src_id=shadow` turns the shadow's
+        // (src=shadow, dst=main, rel=worktree_of) lineage link into a
+        // self-referential (src=main, dst=main, rel=worktree_of) row — there is
+        // no pre-existing (main,main,worktree_of) row for OR IGNORE to skip on,
+        // and the shadow cascade-delete no longer touches it since neither
+        // endpoint is shadow_id anymore. Merge must leave NO such self-link.
+        let self_link: i64 = c
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_link WHERE src_id=?1 AND rel='worktree_of'",
+                [&main_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+                    self_link, 0,
+                    "merge must not leave a worktree_of lineage link with main as its own source (self-link)"
+                );
+        let dst_from_shadow: i64 = c
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM artifact_link WHERE dst_id=?1 AND src_id=?2 AND rel='worktree_of'",
+                        [&main_id, &shadow_id],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+        assert_eq!(
+            dst_from_shadow, 0,
+            "the shadow's own worktree_of link must be gone after merge, not re-pointed"
+        );
     }
 
     #[tokio::test]
@@ -762,6 +809,154 @@ mod tests {
                 .unwrap()
                 .status,
             "abandoned"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_skips_shadow_missing_fork_event_and_leaves_main_untouched() {
+        // Integrity backstop: a shadow row that sits under the worktree root
+        // and carries a `worktree_of` lineage link but has NO `worktree_fork`
+        // event (e.g. a corrupted/legacy row) must never be folded — there is
+        // no recorded base snapshot to diff against, so merge_one must skip it
+        // with a `missing_fork_event` conflict rather than guessing.
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        let main_id = {
+            let c = ctx.catalog.lock();
+            seed_main_tracker(&c)
+        };
+        let shadow_id = {
+            let c = ctx.catalog.lock();
+            let id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+                "/repo/.worktrees/feat/docs/trackers/t.md",
+            ));
+            artifact::upsert(
+                &c,
+                &artifact::TestArtifactRowBuilder::new(&id)
+                    .with_abs_path("/repo/.worktrees/feat/docs/trackers/t.md")
+                    .with_kind("tracker")
+                    .build(),
+            )
+            .unwrap();
+            // Lineage link present, but deliberately NO worktree_fork event.
+            crate::librarian::catalog::links::insert(
+                &c,
+                &crate::librarian::catalog::links::LinkRow {
+                    src_id: id.clone(),
+                    dst_id: main_id.clone(),
+                    rel: super::LINEAGE_REL.to_string(),
+                    created_at: 0,
+                },
+            )
+            .unwrap();
+            crate::librarian::tools::worktree::ensure_registration(
+                &c,
+                ctx.current_project.as_deref().unwrap(),
+            )
+            .unwrap();
+            id
+        };
+        let before_params: serde_json::Value = {
+            let c = ctx.catalog.lock();
+            serde_json::from_str(&augmentation::get(&c, &main_id).unwrap().unwrap().params).unwrap()
+        };
+        let out = call(&ctx, serde_json::json!({"root": "/repo/.worktrees/feat"}))
+            .await
+            .unwrap();
+        let conflicts = out["conflicts"].as_array().unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0]["kind"], "missing_fork_event");
+        assert_eq!(conflicts[0]["shadow"], shadow_id);
+        assert!(
+            !out["merged"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["shadow"] == shadow_id),
+            "a hard-skipped shadow must never be reported as merged"
+        );
+        let c = ctx.catalog.lock();
+        let after_params: serde_json::Value =
+            serde_json::from_str(&augmentation::get(&c, &main_id).unwrap().unwrap().params)
+                .unwrap();
+        assert_eq!(
+            before_params, after_params,
+            "main params must be untouched when the fork event is missing (no fold, no corruption)"
+        );
+        assert!(
+            artifact::get(&c, &shadow_id).unwrap().is_some(),
+            "skipped shadow row must survive the merge, not be silently dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn worktree_born_row_reseat_collision_reports_conflict_and_leaves_main_untouched() {
+        // Integrity backstop: a lineage-less (worktree-born) row must NOT be
+        // grafted onto an unrelated main-repo artifact that already occupies
+        // its would-be main path. reseat_one must record a `reseat_collision`
+        // conflict and leave both rows untouched.
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        {
+            let c = ctx.catalog.lock();
+            seed_main_tracker(&c);
+        }
+        // Pre-existing, UNRELATED main-repo artifact at the path the
+        // worktree-born row would reseat to.
+        let main_collide_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/docs/existing.md",
+        ));
+        {
+            let c = ctx.catalog.lock();
+            artifact::upsert(
+                &c,
+                &artifact::TestArtifactRowBuilder::new(&main_collide_id)
+                    .with_abs_path("/repo/docs/existing.md")
+                    .with_title("pre-existing main artifact")
+                    .build(),
+            )
+            .unwrap();
+        }
+        // worktree-born row (no lineage link) at the same relative path.
+        let wt_born = {
+            let c = ctx.catalog.lock();
+            let id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+                "/repo/.worktrees/feat/docs/existing.md",
+            ));
+            artifact::upsert(
+                &c,
+                &artifact::TestArtifactRowBuilder::new(&id)
+                    .with_abs_path("/repo/.worktrees/feat/docs/existing.md")
+                    .build(),
+            )
+            .unwrap();
+            crate::librarian::tools::worktree::ensure_registration(
+                &c,
+                ctx.current_project.as_deref().unwrap(),
+            )
+            .unwrap();
+            id
+        };
+        let out = call(&ctx, serde_json::json!({"root": "/repo/.worktrees/feat"}))
+            .await
+            .unwrap();
+        let conflicts = out["conflicts"].as_array().unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0]["kind"], "reseat_collision");
+        assert_eq!(conflicts[0]["shadow"], wt_born);
+        assert_eq!(conflicts[0]["into_id"], main_collide_id);
+        assert!(
+            out["reseated"].as_array().unwrap().is_empty(),
+            "collision must not be reported as a successful reseat"
+        );
+        let c = ctx.catalog.lock();
+        let row = artifact::get(&c, &main_collide_id).unwrap().unwrap();
+        assert_eq!(
+            row.title.as_deref(),
+            Some("pre-existing main artifact"),
+            "pre-existing unrelated main row must be intact, not overwritten by the graft"
+        );
+        assert!(
+            artifact::get(&c, &wt_born).unwrap().is_some(),
+            "worktree-born row must survive the collision, not be silently dropped"
         );
     }
 }
