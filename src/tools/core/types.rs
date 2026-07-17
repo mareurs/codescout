@@ -458,9 +458,14 @@ pub trait Tool: Send + Sync {
     /// the optional `workspace` pin (regime-3). Drives central `workspace`-param
     /// schema injection in `ServerHandler::list_tools`.
     ///
-    /// Default: every tool is pinnable EXCEPT session/global/registry tools and
-    /// the librarian family (which resolve via `LIBRARIAN_WORKSPACE`, not
-    /// `ctx.workspace_override`) — those must not advertise a pin they ignore.
+    /// Default: every tool is pinnable EXCEPT session/global/registry tools —
+    /// those resolve no per-request project and must not advertise a pin they
+    /// ignore. The librarian family (`artifact`, `artifact_event`,
+    /// `artifact_refresh`, `artifact_augment`, `librarian`) IS pinnable: its
+    /// adapter resolves `ctx.workspace_override` before deriving each call's
+    /// `current_project` (see `LibrarianAdapter::call`), so a `workspace=` pin
+    /// scopes catalog reads and writes to the named workspace.
+    /// See docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md.
     fn pinnable(&self) -> bool {
         !matches!(
             self.name(),
@@ -469,11 +474,6 @@ pub trait Tool: Send + Sync {
                 | "onboarding"
                 | "get_usage_stats"
                 | "get_guide"
-                | "artifact"
-                | "artifact_event"
-                | "artifact_refresh"
-                | "artifact_augment"
-                | "librarian"
                 | "__probe_description_cap__"
         )
     }

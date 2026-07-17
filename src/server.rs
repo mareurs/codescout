@@ -2155,10 +2155,17 @@ mod tests {
             .filter(|t| t.pinnable())
             .map(|t| t.name())
             .collect();
-        for n in ["read_file", "edit_file", "memory", "grep"] {
+        for n in [
+            "read_file",
+            "edit_file",
+            "memory",
+            "grep",
+            "artifact",
+            "librarian",
+        ] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
-        for n in ["workspace", "get_guide", "librarian", "get_usage_stats"] {
+        for n in ["workspace", "get_guide", "get_usage_stats"] {
             assert!(!pinnable.contains(n), "{n} must NOT be pinnable");
         }
     }
@@ -2632,6 +2639,161 @@ mod tests {
         assert!(
             dir_a.path().join("new_file.txt").exists(),
             "file must be created in the pinned workspace A"
+        );
+    }
+
+    #[tokio::test]
+    async fn artifact_find_honors_workspace_pin() {
+        // BUG (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md): the
+        // librarian adapter derived current_project from the session-default
+        // active_project() and ignored ctx.workspace_override, so artifact(find)
+        // pinned to a foreign workspace silently returned the SESSION project's
+        // rows (fails silent-wrong). A pinned find must scope to the pinned
+        // workspace, not the default.
+        let dir_a = tempdir().unwrap();
+        let (_dir_b, server) = make_server().await; // default (session) workspace B
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Seed ONE tracker in the session-default workspace B via an UNPINNED
+        // create — unaffected by the bug, so the fixture is stable regardless of
+        // the fix.
+        let create = CallToolRequestParams::new("artifact").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "create",
+                "kind": "tracker",
+                "title": "B-only tracker",
+                "rel_path": "docs/trackers/b-only.md",
+                "body": "seed",
+            }))
+            .unwrap(),
+        );
+        let created = server
+            .call_tool_inner(
+                create,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            created.is_error,
+            Some(true),
+            "seed create in the default workspace B must succeed"
+        );
+
+        // Find pinned to A (which has NO rows). It must scope to A and return
+        // zero rows — NOT fall back to B and hand back B's tracker.
+        let find_a = CallToolRequestParams::new("artifact").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "find",
+                "kind": "tracker",
+                "workspace": root_a.to_string_lossy(),
+            }))
+            .unwrap(),
+        );
+        let res_a = server
+            .call_tool_inner(
+                find_a,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let text_a = res_a
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("")
+            .to_string();
+        let body_a: serde_json::Value = serde_json::from_str(&text_a).unwrap();
+        assert_eq!(
+            body_a["count"].as_u64(),
+            Some(0),
+            "find pinned to workspace A (no rows) must return zero, not B's rows; got: {text_a}"
+        );
+
+        // Sanity: the UNPINNED find still sees B's tracker (default preserved).
+        let find_default = CallToolRequestParams::new("artifact").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "find",
+                "kind": "tracker",
+            }))
+            .unwrap(),
+        );
+        let res_d = server
+            .call_tool_inner(
+                find_default,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let text_d = res_d
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("")
+            .to_string();
+        let body_d: serde_json::Value = serde_json::from_str(&text_d).unwrap();
+        assert_eq!(
+            body_d["count"].as_u64(),
+            Some(1),
+            "unpinned find must still see the session-default workspace B's tracker; got: {text_d}"
+        );
+    }
+
+    #[tokio::test]
+    async fn artifact_create_honors_workspace_pin() {
+        // Whole-family pin (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md):
+        // resolving the pin in the adapter's call() covers writes too — a pinned
+        // artifact(create) must land in the PINNED workspace, not the default.
+        let dir_a = tempdir().unwrap();
+        let (dir_b, server) = make_server().await; // default (session) workspace B
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        let create = CallToolRequestParams::new("artifact").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "create",
+                "kind": "tracker",
+                "title": "A tracker",
+                "rel_path": "docs/trackers/a.md",
+                "body": "seed",
+                "workspace": root_a.to_string_lossy(),
+            }))
+            .unwrap(),
+        );
+        let res = server
+            .call_tool_inner(
+                create,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let text = res
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("")
+            .to_string();
+        assert_ne!(
+            res.is_error,
+            Some(true),
+            "create pinned to a never-activated workspace must succeed; got: {text}"
+        );
+        assert!(
+            dir_a.path().join("docs/trackers/a.md").exists(),
+            "artifact must be created in the PINNED workspace A"
+        );
+        assert!(
+            !dir_b.path().join("docs/trackers/a.md").exists(),
+            "artifact must NOT be created in the session-default workspace B"
         );
     }
 

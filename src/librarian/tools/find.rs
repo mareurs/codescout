@@ -188,9 +188,16 @@ fn build_hints(
         }
     }
 
-    // Only hint scope="all" when an umbrella exists — without one, workspace projects
-    // are unrelated and crossing into them would be misleading.
-    if !matches!(applied.scope, Scope::All) && current.and_then(|c| c.umbrella.as_deref()).is_some()
+    // Hint that more rows exist beyond the current scope only when there is a
+    // BROADER reachable scope to widen to. `scope="all"` aliases to umbrella
+    // whenever the project has one (see the alias in `call`), so at umbrella
+    // scope the user is already as wide as the scope param can reach —
+    // suggesting scope="all" there just re-aliases to umbrella (self-referential,
+    // and it counts extra-umbrella catalog rows the alias can never reach).
+    // Excluding Umbrella keeps this hint reachable and non-self-referential.
+    // See docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md (sub-finding #2).
+    if !matches!(applied.scope, Scope::All | Scope::Umbrella)
+        && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
         let in_workspace = count_for_scope(cat, base, ws, current, Scope::All, exclude_worktrees)?;
         let extra = in_workspace.saturating_sub(here);
@@ -896,6 +903,70 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(v_all["count"].as_u64(), Some(2));
+    }
+
+    #[tokio::test]
+    async fn scope_all_does_not_self_reference_expand_hint() {
+        // BUG (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md,
+        // sub-finding #2): passing scope="all" aliases to umbrella
+        // (applied="umbrella"). build_hints counted rows OUTSIDE the umbrella —
+        // unreachable, since "all" always re-aliases to umbrella — and emitted
+        // expand:["scope=\"all\""], suggesting the exact param already passed.
+        // At the broadest reachable scope there is nothing to widen to.
+        let cat = Catalog::open_in_memory().unwrap();
+        // One row INSIDE the umbrella, one OUTSIDE it (a foreign / ghost repo,
+        // mirroring the deleted-repo + /tmp rows the real shared catalog holds).
+        let mut inside = sample_row("a", "in-umbrella");
+        inside.abs_path = std::path::PathBuf::from("/test/agents/x/y.md");
+        artifact::upsert(&cat, &inside).unwrap();
+        let mut outside = sample_row("b", "outside-umbrella");
+        outside.abs_path = std::path::PathBuf::from("/other/ghost/z.md");
+        artifact::upsert(&cat, &outside).unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "main".into(),
+                members: vec![
+                    std::path::PathBuf::from("/test/code-explorer"),
+                    std::path::PathBuf::from("/test/agents"),
+                ],
+            }])
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: std::path::PathBuf::from("/test/code-explorer"),
+                    git_root: std::path::PathBuf::from("/test/code-explorer"),
+                    main_root: None,
+                    umbrella: Some("main".into()),
+                },
+            ))
+            .build();
+
+        let v = call(
+            &ctx,
+            json!({"filter": {"kind": {"eq": "spec"}}, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+        // scope="all" aliases to umbrella → only the in-umbrella row is reachable.
+        assert_eq!(v["scope"]["applied"], "umbrella");
+        assert_eq!(v["count"].as_u64(), Some(1));
+        // No widen hint at the broadest reachable scope; in particular no
+        // count of the unreachable extra-umbrella row.
+        assert!(
+            v["hints"]["more_in_workspace"].is_null(),
+            "at umbrella scope there is nothing broader to reach; got hints: {}",
+            v["hints"]
+        );
+        // And crucially the expand list must never suggest scope="all" — the
+        // very parameter that was passed (the self-referential bug).
+        let suggests_all = v["hints"]["expand"]
+            .as_array()
+            .is_some_and(|e| e.iter().any(|s| s == "scope=\"all\""));
+        assert!(
+            !suggests_all,
+            "expand must not suggest the already-passed scope=\"all\"; got hints: {}",
+            v["hints"]
+        );
     }
 
     #[tokio::test]

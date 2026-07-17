@@ -72,10 +72,26 @@ impl crate::tools::Tool for LibrarianAdapter {
     }
 
     async fn call(&self, input: Value, ctx: &crate::tools::ToolContext) -> Result<Value> {
-        let active_root: Option<std::path::PathBuf> = {
-            let inner = ctx.agent.inner.read().await;
-            inner.active_project().map(|p| p.root.clone())
-        };
+        // Honor the per-request `workspace=` pin the dispatcher stashed in
+        // `ctx.workspace_override` — resolve the pinned workspace's focused root
+        // (resident-on-demand) exactly as every other pinnable tool does, rather
+        // than always reaching for the session-default active project. Without
+        // this, a librarian call pinned to a foreign workspace silently scoped to
+        // the session project and returned the wrong repo's rows (fails
+        // silent-wrong). An unresolvable pin surfaces loudly instead of falling
+        // back. See docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md.
+        let active_root: Option<std::path::PathBuf> =
+            if let Some(pin) = ctx.workspace_override.as_deref() {
+                Some(
+                    ctx.agent
+                        .require_project_root_for(Some(pin))
+                        .await
+                        .map_err(bridge_recoverable_error)?,
+                )
+            } else {
+                let inner = ctx.agent.inner.read().await;
+                inner.active_project().map(|p| p.root.clone())
+            };
         let lib_ctx = self.derive_ctx(active_root.as_deref());
         self.inner
             .call(&lib_ctx, input)
