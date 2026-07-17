@@ -182,6 +182,7 @@ pub fn append_entry(
     entry_collection: &str,
     id_prefix: &str,
     mut entry: Value,
+    cites: &[String],
 ) -> Result<String> {
     let tx = cat
         .conn
@@ -249,8 +250,102 @@ pub fn append_entry(
          WHERE artifact_id = ?2",
         rusqlite::params![new_params_text, artifact_id],
     )?;
+
+    if !cites.is_empty() {
+        let slug = crate::librarian::catalog::artifact::ensure_slug(&tx, artifact_id)?;
+        let now = chrono::Utc::now().timestamp_millis();
+        for raw in cites {
+            let dst_ref = resolve_cite_ref(&tx, raw)?;
+            crate::librarian::catalog::entry_cite::insert_with(
+                &tx,
+                &crate::librarian::catalog::entry_cite::EntryCiteRow {
+                    src_slug: slug.clone(),
+                    src_local: new_id.clone(),
+                    dst_ref,
+                    rel: "cites".to_string(),
+                    origin: "write".to_string(),
+                    created_at: now,
+                },
+            )?;
+        }
+    }
     tx.commit()?;
     Ok(new_id)
+}
+
+/// Resolve a user-supplied cite ref to a stable `entry_cite.dst_ref`.
+/// Accepts: a 16-hex artifact id that exists; a `<slug>:<local>` whose slug is a
+/// known artifact and whose local exists in that artifact's entry_collection; or a
+/// rel_path (suffix of exactly one artifact's abs_path). Rejects anything else.
+fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
+    // 1. artifact id (16 lowercase hex chars).
+    let is_hex16 = raw.len() == 16 && raw.bytes().all(|b| b.is_ascii_hexdigit());
+    if is_hex16 {
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM artifact WHERE id=?1",
+                rusqlite::params![raw],
+                |_| Ok(true),
+            )
+            .optional()?
+            .is_some();
+        if exists {
+            return Ok(raw.to_string());
+        }
+    }
+    // 2. <slug>:<local>
+    if let Some((slug, local)) = raw.split_once(':') {
+        let coll: Option<Option<String>> = conn
+            .query_row(
+                "SELECT au.entry_collection
+                   FROM artifact a JOIN artifact_augmentation au ON au.artifact_id = a.id
+                  WHERE a.slug = ?1",
+                rusqlite::params![slug],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(Some(collection)) = coll {
+            let params_text: String = conn.query_row(
+                "SELECT au.params FROM artifact a
+                   JOIN artifact_augmentation au ON au.artifact_id = a.id
+                  WHERE a.slug = ?1",
+                rusqlite::params![slug],
+                |r| r.get(0),
+            )?;
+            let params: Value = serde_json::from_str(&params_text).unwrap_or_else(|_| json!({}));
+            let local_exists = params
+                .get(&collection)
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .any(|e| e.get("id").and_then(|v| v.as_str()) == Some(local));
+            if local_exists {
+                return Ok(raw.to_string());
+            }
+        }
+        return Err(RecoverableError::new(format!(
+            "append_entry: cite `{raw}` — no such entry (slug or local id not found)"
+        )));
+    }
+    // 3. rel_path suffix match — must resolve to exactly one artifact.
+    let like = format!("%/{raw}");
+    let mut stmt =
+        conn.prepare("SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2")?;
+    let ids: Vec<String> = stmt
+        .query_map(rusqlite::params![raw, like], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    match ids.len() {
+        1 => Ok(ids.into_iter().next().unwrap()),
+        0 => Err(RecoverableError::with_hint(
+            format!("append_entry: cite `{raw}` did not resolve"),
+            "Use a 16-hex artifact id, a `<slug>:<local>` entry id, or a unique rel_path."
+                .to_string(),
+        )),
+        _ => Err(RecoverableError::new(format!(
+            "append_entry: cite `{raw}` is ambiguous ({} artifacts match)",
+            ids.len()
+        ))),
+    }
 }
 
 pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
@@ -696,8 +791,15 @@ mod tests {
         a.params = r#"{"failures":[]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id =
-            append_entry(&mut cat, "art1", "failures", "F", json!({"status": "fail"})).unwrap();
+        let id = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({"status": "fail"}),
+            &[],
+        )
+        .unwrap();
 
         assert_eq!(id, "F-1");
         let row = get(&cat, "art1").unwrap().unwrap();
@@ -715,7 +817,7 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-3"},{"id":"F-9"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id = append_entry(&mut cat, "art1", "failures", "F", json!({})).unwrap();
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap();
         assert_eq!(id, "F-10");
     }
 
@@ -728,7 +830,7 @@ mod tests {
         a.params = r#"{"failures":[]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let err = append_entry(&mut cat, "art1", "bugs", "B", json!({})).unwrap_err();
+        let err = append_entry(&mut cat, "art1", "bugs", "B", json!({}), &[]).unwrap_err();
         assert!(err.to_string().contains("failures"));
     }
 
@@ -737,7 +839,7 @@ mod tests {
         let mut cat = Catalog::open_in_memory().unwrap();
         art_upsert(&cat, &sample_art("art1")).unwrap();
 
-        let err = append_entry(&mut cat, "art1", "failures", "F", json!({})).unwrap_err();
+        let err = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap_err();
         assert!(err.to_string().contains("no augmentation"));
     }
 
@@ -774,6 +876,7 @@ mod tests {
             "failures",
             "F",
             json!({"status": "bogus"}),
+            &[],
         )
         .unwrap_err();
         assert!(err.to_string().contains("params_schema"));
@@ -799,6 +902,7 @@ mod tests {
             "rules",
             "C",
             json!({"paths": ["[invalid"], "rule": "R", "status": "active"}),
+            &[],
         )
         .unwrap_err();
         assert!(
@@ -827,6 +931,7 @@ mod tests {
             "rules",
             "C",
             json!({"paths": ["src/**/*.rs"], "rule": "R", "status": "active"}),
+            &[],
         )
         .unwrap();
         assert_eq!(id, "C-1");
@@ -849,6 +954,7 @@ mod tests {
             "failures",
             "F",
             json!({"paths": ["[invalid"], "status": "fail"}),
+            &[],
         )
         .unwrap();
         assert_eq!(id, "F-1");
@@ -893,11 +999,27 @@ mod tests {
         let path2 = path.clone();
         let h1 = std::thread::spawn(move || {
             let mut cat = Catalog::open(&path1).unwrap();
-            append_entry(&mut cat, "art1", "failures", "F", json!({"who": "one"})).unwrap()
+            append_entry(
+                &mut cat,
+                "art1",
+                "failures",
+                "F",
+                json!({"who": "one"}),
+                &[],
+            )
+            .unwrap()
         });
         let h2 = std::thread::spawn(move || {
             let mut cat = Catalog::open(&path2).unwrap();
-            append_entry(&mut cat, "art1", "failures", "F", json!({"who": "two"})).unwrap()
+            append_entry(
+                &mut cat,
+                "art1",
+                "failures",
+                "F",
+                json!({"who": "two"}),
+                &[],
+            )
+            .unwrap()
         });
 
         let id1 = h1.join().unwrap();

@@ -11,6 +11,8 @@ struct Args {
     id_prefix: String,
     #[serde(default = "default_entry")]
     entry: Value,
+    #[serde(default)]
+    cites: Vec<String>,
 }
 
 fn default_entry() -> Value {
@@ -26,12 +28,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     let mut cat = ctx.catalog.lock();
     let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+    if !a.cites.is_empty() && target != a.id {
+        return Err(RecoverableError::with_hint(
+            "append_entry: `cites` is not supported from a worktree checkout".to_string(),
+            "Entry-graph edges must key to the main tracker. Omit `cites`, or append from the main checkout.".to_string(),
+        ));
+    }
     let id = augmentation::append_entry(
         &mut cat,
         &target,
         &a.entry_collection,
         &a.id_prefix,
         a.entry,
+        &a.cites,
     )?;
     Ok(json!({"id": id, "artifact_id": target}))
 }
@@ -178,5 +187,82 @@ mod tests {
         let c = ctx.catalog.lock();
         let main_aug = augmentation::get(&c, &main_id).unwrap().unwrap();
         assert!(!main_aug.params.contains("from-worktree"), "main untouched");
+    }
+
+    #[tokio::test]
+    async fn append_with_cites_writes_entry_cite_and_not_artifact_link() {
+        let ctx = mk_ctx();
+        seed(&ctx, "art1"); // seeds an augmented tracker with entry_collection "failures"
+        seed(&ctx, "art2");
+        let out = call(
+            &ctx,
+            json!({
+                "id": "art1", "entry_collection": "failures", "id_prefix": "F",
+                "entry": {"status": "fail"}, "cites": ["art2.md"]
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "F-1");
+        let cat = ctx.catalog.lock();
+        // slug minted on art1; one entry_cite row; zero artifact_link rows.
+        let slug: String = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id='art1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let ec = crate::librarian::catalog::entry_cite::outgoing(&cat, &slug).unwrap();
+        assert_eq!(ec.len(), 1);
+        assert_eq!(ec[0].dst_ref, "art2");
+        let al: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_link", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(al, 0, "cites must not touch artifact_link");
+    }
+
+    #[tokio::test]
+    async fn append_with_unresolvable_cite_writes_nothing() {
+        let ctx = mk_ctx();
+        seed(&ctx, "art1");
+        let err = call(
+            &ctx,
+            json!({
+                "id": "art1", "entry_collection": "failures", "id_prefix": "F",
+                "entry": {"status": "fail"}, "cites": ["no-such-target"]
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        let cat = ctx.catalog.lock();
+        // atomic: entry NOT appended.
+        let aug = augmentation::get(&cat, "art1").unwrap().unwrap();
+        assert!(
+            !aug.params.contains("F-1"),
+            "entry must not be written when a cite is bad"
+        );
+    }
+
+    #[tokio::test]
+    async fn append_with_cites_from_worktree_is_refused() {
+        let ctx = crate::librarian::tools::worktree::test_support::wt_ctx(
+            Catalog::open_in_memory().unwrap(),
+        );
+        let main_id = {
+            let c = ctx.catalog.lock();
+            crate::librarian::tools::worktree::test_support::seed_main_tracker(&c)
+        };
+        let err = call(
+            &ctx,
+            json!({
+                "id": main_id, "entry_collection": "items", "id_prefix": "F",
+                "entry": {"t": "x"}, "cites": ["deadbeefdeadbeef"]
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
     }
 }

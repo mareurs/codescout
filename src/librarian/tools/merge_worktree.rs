@@ -590,8 +590,15 @@ mod tests {
             let sid =
                 crate::librarian::tools::worktree::resolve_write_target(&mut c, &ctx, &main_id)
                     .unwrap();
-            augmentation::append_entry(&mut c, &sid, "items", "F", serde_json::json!({"t":"wt"}))
-                .unwrap();
+            augmentation::append_entry(
+                &mut c,
+                &sid,
+                "items",
+                "F",
+                serde_json::json!({"t":"wt"}),
+                &[],
+            )
+            .unwrap();
             sid
         };
         // main concurrently appends its own F-2
@@ -603,6 +610,7 @@ mod tests {
                 "items",
                 "F",
                 serde_json::json!({"t":"main"}),
+                &[],
             )
             .unwrap();
         }
