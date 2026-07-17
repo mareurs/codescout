@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS artifact (
   updated_at    INTEGER NOT NULL,
   file_mtime    INTEGER NOT NULL,
   file_sha256   TEXT NOT NULL,
-  confidence    REAL NOT NULL DEFAULT 1.0
+  confidence    REAL NOT NULL DEFAULT 1.0,
+  slug          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS artifact_link (
@@ -24,6 +25,17 @@ CREATE TABLE IF NOT EXISTS artifact_link (
   created_at    INTEGER NOT NULL,
   PRIMARY KEY (src_id, dst_id, rel)
 );
+
+-- ux_artifact_slug / entry_cite are NOT created here even though this is the
+-- fresh-DB shape: SCHEMA_SQL runs as an unconditional execute_batch on every
+-- Catalog::open, including against pre-existing on-disk catalogs where
+-- `artifact` already exists without a `slug` column (CREATE TABLE IF NOT
+-- EXISTS is then a no-op). Referencing artifact(slug) here would fail with
+-- "no such column: slug" for every such catalog. They are instead created by
+-- the v9 block in apply_migrations_in_txn (mod.rs), which runs after the
+-- ALTER TABLE that guarantees the column exists — idempotent (IF NOT EXISTS)
+-- so it's a correct no-op for genuinely fresh DBs too, where schema.sql above
+-- already created the `slug` column as part of CREATE TABLE artifact.
 
 CREATE TABLE IF NOT EXISTS artifact_observation (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,

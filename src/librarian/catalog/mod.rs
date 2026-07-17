@@ -129,6 +129,38 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
     // with the other artifact_augmentation column adds. Order is irrelevant — each
     // block is independently guarded (column_exists / catalog_needs_v6_migration),
     // so run_migrations is correct top-to-bottom regardless of version sequence.
+    // v9: entry-graph — artifact.slug + entry_cite table (Stage 2, TMR-1/TMR-7).
+    if !column_exists(conn, "artifact", "slug")? {
+        conn.execute("ALTER TABLE artifact ADD COLUMN slug TEXT", [])?;
+    }
+    // Note: no WHERE clause — SQLite requires a FK parent key to be covered by a
+    // non-partial UNIQUE index (entry_cite.src_slug references artifact(slug) below).
+    // NULLs are still treated as distinct by SQLite's UNIQUE index semantics, so this
+    // still permits any number of NULL slugs; only non-null duplicates are rejected.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_artifact_slug ON artifact(slug)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS entry_cite (
+           src_slug   TEXT NOT NULL REFERENCES artifact(slug) ON DELETE CASCADE,
+           src_local  TEXT NOT NULL,
+           dst_ref    TEXT NOT NULL,
+           rel        TEXT NOT NULL,
+           origin     TEXT NOT NULL DEFAULT 'write',
+           created_at INTEGER NOT NULL,
+           PRIMARY KEY (src_slug, src_local, dst_ref, rel)
+         )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entry_cite_dst ON entry_cite(dst_ref)",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (9)",
+        [],
+    )?;
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
     // drop_legacy_and_stamp is called separately by open_with_workspace after
     // backfill — NOT here, because backfill requires a workspace config and
@@ -383,7 +415,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 9);
     }
 
     #[test]
@@ -418,7 +450,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 9);
     }
     #[test]
     fn widen_events_kind_check_migrates_pre_existing_catalog_and_preserves_data() {
@@ -684,6 +716,20 @@ mod tests {
             tables.iter().any(|t| t == "artifact_augmentation"),
             "expected artifact_augmentation table, got: {tables:?}"
         );
+    }
+    #[test]
+    fn migration_v9_adds_slug_column_and_entry_cite_table() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(column_exists(&cat.conn, "artifact", "slug").unwrap());
+        let has_entry_cite: bool = cat
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entry_cite'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        assert!(has_entry_cite, "entry_cite table must exist");
     }
 
     #[test]
