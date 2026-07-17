@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — VDI Reliability Hardening
 
 > Two-sided observation log for the VDI reliability work stream

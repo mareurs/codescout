@@ -1,9 +1,12 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Codescout Lessons 2026-05-20 — Bug + Hint Follow-up
-owners: []
-tags: ["foreign-session-feedback", "bugs", "agentic-surface", "hints"]
+tags:
+- foreign-session-feedback
+- bugs
+- agentic-surface
+- hints
 ---
 
 # Session Log — Codescout Lessons 2026-05-20 — Bug + Hint Follow-up

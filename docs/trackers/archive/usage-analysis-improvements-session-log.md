@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — Usage-Analysis Improvements (2026-05-27)
 
 > **Topic:** Improvements derived from /analyze-usage report 2026-05-27.

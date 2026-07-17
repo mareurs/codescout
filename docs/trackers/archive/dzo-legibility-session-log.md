@@ -1,13 +1,12 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Session Log — Dzo Legibility Survey
-owners: []
 tags:
-  - legibility
-  - dzo
-  - flight-recorder
-  - reconnaissance
+- legibility
+- dzo
+- flight-recorder
+- reconnaissance
 ---
 
 # Session Log — Dzo Legibility Survey

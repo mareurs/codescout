@@ -74,6 +74,16 @@ re-deferring — model as distinct state").
 `docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md`,
 `docs/issues/2026-07-17-catalog-dead-rows-no-gc.md`.
 
+### 2026-07-17 — rehomed from codescout-lessons session log (D10 distill)
+
+The first D10 hygiene sweep archived `codescout-lessons-2026-05-20-session-log.md` (36d stale). Four of its open frictions are direct prior-art evidence for the TMR requirements and are rehomed here so they survive the archive:
+
+- **F-9** — *tracker-level frontmatter `status:` drifts from entry-level prose `**Status:**`; multiple incompatible enums coexist with no documented authority.* Direct evidence for **TMR-5** (enforced small vocabularies) — independently observed on codescout's own trackers before the multi-repo survey.
+- **F-12** — *`kind: unknown` is the #1 row in the librarian catalog (550 of ~2k, >25%).* The vocabulary-discipline gap at the first axis; reinforces **TMR-5** and the `kind=unknown` counts the survey found per repo (52–66).
+- **F-7** — *frontmatter `topic` (1/36) and `time_scope` (0/36) are zombie columns — fields exist as catalog columns, nobody fills them.* A schema-adoption gap relevant to any redesign that adds structured fields.
+- **F-8** — *tags semantically overloaded (topic + shape + lifecycle all stuffed into `tags:`)* — argues for dedicated typed fields, relevant to TMR-1/TMR-5 modelling.
+
+Full original entries in git history at `docs/trackers/archive/codescout-lessons-2026-05-20-session-log.md`.
 ## Requirements rationale
 
 ### TMR-1 — entries as nodes, globally unique IDs
