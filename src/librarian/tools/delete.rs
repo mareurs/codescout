@@ -28,6 +28,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
+    // Fork-on-first-write gate: a worktree session may not delete an artifact
+    // that belongs to the main checkout — that would delete the shared row/file
+    // out from under the main checkout. Merge first, or run from the main
+    // checkout.
+    if let Some(cp) = ctx.current_project.as_deref() {
+        if let Some(main_root) = cp.main_root.as_ref() {
+            let main_s = crate::util::fs::RepoPath::from(main_root.as_path()).into_string();
+            let row_path = crate::util::fs::RepoPath::from(row.abs_path.as_path()).into_string();
+            if row_path == main_s || row_path.starts_with(&format!("{main_s}/")) {
+                return Err(super::RecoverableError::new(
+                    "refused from a worktree session: this artifact belongs to the main checkout. \
+                     Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
+                ));
+            }
+        }
+    }
+
     // Guard: only delete artifacts under a managed root — a workspace
     // `[[roots]]` entry or the active project. See `super::managed_roots`.
     let abs_path = row.abs_path.clone();
@@ -250,6 +267,25 @@ mod tests {
         assert!(
             tmp.path().join("docs/trackers/doomed.md").exists(),
             "refused delete must not remove the file"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_of_main_artifact_from_worktree_is_refused() {
+        let ctx = crate::librarian::tools::worktree::test_support::wt_ctx(
+            Catalog::open_in_memory().unwrap(),
+        );
+        let main_id = {
+            let c = ctx.catalog.lock();
+            crate::librarian::tools::worktree::test_support::seed_main_tracker(&c)
+        };
+
+        let err = delete::call(&ctx, serde_json::json!({"id": main_id}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("worktree"),
+            "refusal names the worktree overlay: {err}"
         );
     }
 }

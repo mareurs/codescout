@@ -14,12 +14,13 @@ struct Args {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
     let now = chrono::Utc::now().timestamp_millis();
-    let cat = ctx.catalog.lock();
+    let mut cat = ctx.catalog.lock();
+    let src_id = super::worktree::resolve_write_target(&mut cat, ctx, &a.src_id)?;
 
-    if artifact::get(&cat, &a.src_id)?.is_none() {
+    if artifact::get(&cat, &src_id)?.is_none() {
         return Err(RecoverableError::new(format!(
             "src artifact `{}` not found",
-            a.src_id
+            src_id
         )));
     }
     let dst = artifact::get(&cat, &a.dst_id)?
@@ -28,7 +29,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     links::insert(
         &cat,
         &links::LinkRow {
-            src_id: a.src_id.clone(),
+            src_id: src_id.clone(),
             dst_id: a.dst_id.clone(),
             rel: a.rel.clone(),
             created_at: now,
@@ -45,7 +46,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             &cat,
             &crate::librarian::catalog::events::EventRow {
                 id: ulid::Ulid::new().to_string(),
-                artifact_id: a.src_id.clone(),
+                artifact_id: src_id.clone(),
                 kind: "superseded_by".into(),
                 payload: serde_json::json!({"target_artifact_id": a.dst_id}).to_string(),
                 anchor_commit: None,

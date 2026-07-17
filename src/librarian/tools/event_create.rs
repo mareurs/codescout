@@ -222,6 +222,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     validate_payload(&a.kind, &a.payload)?;
 
+    let a = {
+        let mut cat = ctx.catalog.lock();
+        let artifact_id = super::worktree::resolve_write_target(&mut cat, ctx, &a.artifact_id)?;
+        Args { artifact_id, ..a }
+    };
+
     let _write_guard = write_locks().lock_for(&a.artifact_id).lock_owned().await;
 
     if let Some(ref target) = a.resolves_intent_event_id {

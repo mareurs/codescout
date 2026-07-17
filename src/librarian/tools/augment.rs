@@ -294,6 +294,11 @@ impl Tool for ArtifactAugment {
             a.params = Some(parsed);
         }
 
+        {
+            let mut cat = ctx.catalog.lock();
+            a.id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+        }
+
         // D11: when the gate ran and passed, capture evidence to emit a
         // `note` event after the catalog lock is released (event_create is
         // async and acquires its own lock).

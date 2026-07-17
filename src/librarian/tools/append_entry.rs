@@ -25,9 +25,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
     let mut cat = ctx.catalog.lock();
-    let id =
-        augmentation::append_entry(&mut cat, &a.id, &a.entry_collection, &a.id_prefix, a.entry)?;
-    Ok(json!({"id": id}))
+    let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+    let id = augmentation::append_entry(
+        &mut cat,
+        &target,
+        &a.entry_collection,
+        &a.id_prefix,
+        a.entry,
+    )?;
+    Ok(json!({"id": id, "artifact_id": target}))
 }
 
 #[cfg(test)]
@@ -144,5 +150,33 @@ mod tests {
         .unwrap_err();
 
         assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    #[tokio::test]
+    async fn append_from_worktree_lands_on_shadow_not_main() {
+        let ctx = crate::librarian::tools::worktree::test_support::wt_ctx(
+            Catalog::open_in_memory().unwrap(),
+        );
+        let main_id = {
+            let c = ctx.catalog.lock();
+            crate::librarian::tools::worktree::test_support::seed_main_tracker(&c)
+        };
+
+        let out = call(
+            &ctx,
+            json!({
+                "id": main_id,
+                "entry_collection": "items",
+                "id_prefix": "F",
+                "entry": {"t": "from-worktree"}
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "F-2"); // base had F-1
+
+        let c = ctx.catalog.lock();
+        let main_aug = augmentation::get(&c, &main_id).unwrap().unwrap();
+        assert!(!main_aug.params.contains("from-worktree"), "main untouched");
     }
 }

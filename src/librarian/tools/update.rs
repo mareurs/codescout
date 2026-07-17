@@ -199,6 +199,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     let a: Args = serde_json::from_value(args)?;
+    let a = {
+        let mut cat = ctx.catalog.lock();
+        let id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+        Args { id, ..a }
+    };
     let cat = ctx.catalog.lock();
     let row =
         artifact::get(&cat, &a.id)?.ok_or_else(|| anyhow::anyhow!("unknown id `{}`", a.id))?;

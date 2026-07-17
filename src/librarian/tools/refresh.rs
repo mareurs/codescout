@@ -24,7 +24,11 @@ fn read_body(ctx: &ToolContext, artifact_id: &str) -> Result<Option<String>> {
     }
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args)?;
+    let mut a: Args = serde_json::from_value(args)?;
+    {
+        let mut cat = ctx.catalog.lock();
+        a.id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+    }
 
     let aug_row = {
         let cat = ctx.catalog.lock();

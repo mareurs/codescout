@@ -177,6 +177,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // is the durable record. If a catalog upsert above fails, no orphan file
     // is left on disk to block a retry (BUG-058).
     std::fs::write(&full, &content)?;
+
+    // A worktree-born artifact has no main-checkout twin to fork — just make
+    // sure the worktree session itself is durably registered.
+    if let Some(cp) = ctx.current_project.as_deref() {
+        let cat = ctx.catalog.lock();
+        super::worktree::ensure_registration(&cat, cp)?;
+    }
+
     let mut result = json!({"id": id, "abs_path": row.abs_path.display().to_string()});
     if a.kind == "tracker" && a.augment.is_none() {
         result["tracker_hint"] = json!(

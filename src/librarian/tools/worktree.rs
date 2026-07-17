@@ -1,11 +1,10 @@
 //! Fork-on-first-write for the worktree overlay. See
 //! docs/superpowers/specs/2026-07-17-worktree-overlay-design.md §3.
 //!
-//! Not yet wired into any write-tool call site — a later worktree-overlay
-//! task threads `resolve_write_target`/`ensure_registration` into the
-//! mutating tools (create/update/delete/mv/event_create/augment/...).
-//! Suppress dead_code until then.
-#![allow(dead_code)]
+//! Wired into every mutating artifact handler (append_entry/update/
+//! event_create/augment/refresh/link/delete/mv/create) — see the
+//! `resolve_write_target`/`ensure_registration` call sites in
+//! `librarian::tools::*`.
 
 use anyhow::Result;
 use serde_json::json;

@@ -38,6 +38,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
+    // Fork-on-first-write gate: a worktree session may not move an artifact
+    // that belongs to the main checkout — that would rename the shared
+    // file/row out from under the main checkout. Merge first, or run from
+    // the main checkout.
+    if let Some(cp) = ctx.current_project.as_deref() {
+        if let Some(main_root) = cp.main_root.as_ref() {
+            let main_s = crate::util::fs::RepoPath::from(main_root.as_path()).into_string();
+            let row_path = crate::util::fs::RepoPath::from(row.abs_path.as_path()).into_string();
+            if row_path == main_s || row_path.starts_with(&format!("{main_s}/")) {
+                return Err(super::RecoverableError::new(
+                    "refused from a worktree session: this artifact belongs to the main checkout. \
+                     Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
+                ));
+            }
+        }
+    }
+
     // Find the managed root that contains this artifact — a workspace
     // `[[roots]]` entry or the active project. `new_rel_path` is interpreted
     // relative to that root. See `super::managed_roots`.
