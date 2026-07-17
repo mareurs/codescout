@@ -108,6 +108,31 @@ keeps `docs/issues/` showing only bugs whose fix is unreleased — see `_TEMPLAT
 Step 5 is the drift-detection step — `audit_doc_refs` is the canonical lint for stale
 path / link / line references across all markdown surfaces.
 
+### Before cherry-pick: mutation-test the diff (recommended for load-bearing logic)
+
+Static tests + clippy prove code compiles and passes the assertions you wrote — they say
+nothing about whether those assertions actually *pin* the behavior. The entry-graph Stage 2
+review found three defects a green suite hid: a guard test that still passed with the guard
+deleted, two untested resolution branches, and a read/write asymmetry — all invisible to
+`cargo test`. Mutation testing is the mechanical catch: it mutates the changed code and
+reports mutants no test kills (a surviving mutant = behavior no test discriminates).
+
+Run it scoped to the diff being shipped, before the cherry-pick, whenever the diff touches
+load-bearing logic (migrations, catalog schema, resolvers, parity/contract code):
+
+```bash
+# One-time: cargo install cargo-mutants
+git diff master...experiments > /tmp/ship.diff
+cargo mutants --in-diff /tmp/ship.diff --package codescout
+# Each surviving mutant is a changed line whose mutation left every test green:
+# add a discriminating test, or confirm the mutant is equivalent / unreachable.
+```
+
+Advisory, not a hard gate — `cargo-mutants` is not yet a workspace dev-dependency and mutation
+runs are minutes-scale. Skip for docs-only or trivial mechanical diffs. Rationale + the
+per-defect analysis: tracker `test-escape-hardening` (intervention I-3) and memory
+`test-design-discipline`.
+
 ### After cherry-pick: cite the master SHA, not the experiments-side original
 
 When tracking a multi-fix shipping session (running tally in chat, notes in a tracker, F-N entries citing evidence), record the **master-side SHA** assigned by `cherry-pick` — not the original SHA on `experiments`. After the subsequent `git rebase master`, the experiments-side originals become orphans (rebase detects cherry-picks and drops them). `git branch --contains <orphan-sha>` then returns empty for every fix, and the running tally fails the "are they all on master?" audit even though every fix shipped.
