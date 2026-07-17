@@ -526,17 +526,49 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 },
             )?,
         };
+
+        // Overlay dedup: a worktree session sees its shadow INSTEAD of the main
+        // twin. `worktree_of` links (src=shadow, dst=main) whose shadow lives
+        // under THIS session's own worktree root identify the main ids to drop;
+        // survivors carrying a shadow are flagged `overlay: true` below. Gated
+        // on `main_root.is_some()` — a plain (non-worktree) session never runs
+        // this query and its find results are unaffected.
+        let mut rows = rows;
+        let mut overlay_ids: std::collections::HashSet<String> = Default::default();
+        if let Some(cp) = current.filter(|c| c.main_root.is_some()) {
+            let wt = crate::util::fs::RepoPath::from(cp.git_root.as_path()).into_string();
+            let mut stmt = cat.conn.prepare(
+                "SELECT l.src_id, l.dst_id FROM artifact_link l \
+                 JOIN artifact s ON s.id = l.src_id \
+                 WHERE l.rel = ?1 AND (s.abs_path = ?2 OR s.abs_path LIKE ?2 || '/%')",
+            )?;
+            let pairs: Vec<(String, String)> = stmt
+                .query_map(
+                    rusqlite::params![crate::librarian::tools::worktree::LINEAGE_REL, &wt],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?
+                .collect::<rusqlite::Result<_>>()?;
+            let shadowed: std::collections::HashSet<&str> =
+                pairs.iter().map(|(_, d)| d.as_str()).collect();
+            rows.retain(|r| !shadowed.contains(r.id.as_str()));
+            overlay_ids = pairs.into_iter().map(|(s, _)| s).collect();
+        }
+
         let items: Vec<Value> = rows
             .into_iter()
             .map(|r| {
-                json!({
+                let mut item = json!({
                     "id": r.id,
                     "kind": r.kind,
                     "status": r.status,
                     "title": r.title,
                     "abs_path": r.abs_path.display().to_string(),
                     "updated_at": r.updated_at,
-                })
+                });
+                if overlay_ids.contains(&r.id) {
+                    item["overlay"] = json!(true);
+                }
+                item
             })
             .collect();
 
@@ -852,6 +884,79 @@ mod tests {
             v["hints"]["more_in_scope"].is_null(),
             "nothing capped → no more_in_scope signal"
         );
+    }
+    #[tokio::test]
+    async fn worktree_find_shadows_main_twin_and_flags_overlay() {
+        use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        let main_id = {
+            let c = ctx.catalog.lock();
+            seed_main_tracker(&c)
+        };
+        let shadow_id = {
+            let mut c = ctx.catalog.lock();
+            crate::librarian::tools::worktree::resolve_write_target(&mut c, &ctx, &main_id).unwrap()
+        };
+        let out = call(&ctx, serde_json::json!({"scope": "repo"}))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = out["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&shadow_id.as_str()), "shadow visible: {ids:?}");
+        assert!(
+            !ids.contains(&main_id.as_str()),
+            "main twin suppressed: {ids:?}"
+        );
+        let shadow_item = out["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == shadow_id.as_str())
+            .unwrap();
+        assert_eq!(shadow_item["overlay"], true);
+    }
+
+    #[tokio::test]
+    async fn non_worktree_find_does_not_dedup_or_flag_despite_worktree_of_link() {
+        // A worktree_of link existing in the catalog must never affect a plain
+        // (non-worktree) session's find results — the dedup is gated on
+        // `main_root.is_some()`, not merely on whether a matching link exists.
+        use crate::librarian::catalog::links::{self, LinkRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("main-1", "Main")).unwrap();
+        artifact::upsert(&cat, &sample_row("shadow-1", "Shadow")).unwrap();
+        links::insert(
+            &cat,
+            &LinkRow {
+                src_id: "shadow-1".into(),
+                dst_id: "main-1".into(),
+                rel: "worktree_of".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(cat);
+        let out = call(
+            &ctx,
+            json!({"filter": {"id": {"in": ["main-1", "shadow-1"]}}}),
+        )
+        .await
+        .unwrap();
+        let items = out["items"].as_array().unwrap();
+        let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"main-1"), "main not suppressed: {ids:?}");
+        assert!(ids.contains(&"shadow-1"), "shadow not suppressed: {ids:?}");
+        for item in items {
+            assert!(
+                item.get("overlay").is_none(),
+                "no overlay flag for non-worktree session: {item:?}"
+            );
+        }
     }
 
     struct MockEmbedder;

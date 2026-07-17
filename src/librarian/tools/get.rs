@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use super::{RecoverableError, ToolContext};
 use crate::librarian::catalog::{artifact, augmentation, links, observations};
 use rusqlite;
+use rusqlite::OptionalExtension;
 
 use crate::librarian::frontmatter;
 use crate::librarian::preview::headings;
@@ -256,6 +257,37 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     });
+
+    // Overlay hint: a worktree session `get`-ing a main id that already has a
+    // shadow forked in THIS worktree gets pointed at it — advisory only. `get`
+    // stays id-literal and never redirects; the caller decides whether to
+    // re-`get`/write the shadow id instead. Gated on `main_root.is_some()` — a
+    // plain (non-worktree) session never runs this query and is unaffected.
+    if let Some(cp) = ctx
+        .current_project
+        .as_deref()
+        .filter(|c| c.main_root.is_some())
+    {
+        let wt = crate::util::fs::RepoPath::from(cp.git_root.as_path()).into_string();
+        let cat = ctx.catalog.lock();
+        let shadow_id: Option<String> = cat
+            .conn
+            .query_row(
+                "SELECT l.src_id FROM artifact_link l \
+                 JOIN artifact s ON s.id = l.src_id \
+                 WHERE l.rel = ?1 AND l.dst_id = ?2 \
+                   AND (s.abs_path = ?3 OR s.abs_path LIKE ?3 || '/%')",
+                rusqlite::params![crate::librarian::tools::worktree::LINEAGE_REL, &a.id, &wt],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(sid) = shadow_id {
+            out["overlay_hint"] = json!({
+                "shadow_id": sid,
+                "hint": "This session has forked this artifact; reads of the worktree state and all writes use the shadow id.",
+            });
+        }
+    }
 
     if let Some(v) = observations_json {
         out["observations"] = v;
@@ -1198,6 +1230,66 @@ mod tests {
         let ctx = mk_ctx(cat);
         let result = call(&ctx, json!({"id": "plain-art"})).await.unwrap();
         assert!(result["augmentation"].is_null());
+    }
+    #[tokio::test]
+    async fn worktree_get_of_main_id_with_shadow_returns_overlay_hint() {
+        use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        let main_id = {
+            let c = ctx.catalog.lock();
+            seed_main_tracker(&c)
+        };
+        let shadow_id = {
+            let mut c = ctx.catalog.lock();
+            crate::librarian::tools::worktree::resolve_write_target(&mut c, &ctx, &main_id).unwrap()
+        };
+        let out = call(&ctx, json!({"id": main_id})).await.unwrap();
+        assert_eq!(out["overlay_hint"]["shadow_id"], shadow_id);
+        // `get` stays id-literal — it does NOT redirect the returned row itself.
+        assert_eq!(out["id"], main_id);
+    }
+
+    #[tokio::test]
+    async fn worktree_get_of_main_id_without_shadow_omits_overlay_hint() {
+        use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        let main_id = {
+            let c = ctx.catalog.lock();
+            seed_main_tracker(&c)
+        };
+        let out = call(&ctx, json!({"id": main_id})).await.unwrap();
+        assert!(
+            out.get("overlay_hint").is_none(),
+            "no shadow forked yet: {out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_worktree_get_omits_overlay_hint_even_when_link_exists() {
+        // A worktree_of link existing in the catalog must never surface an
+        // overlay_hint for a plain (non-worktree) session — gated on
+        // `main_root.is_some()`, not merely on whether a matching link exists.
+        use crate::librarian::catalog::links::{self, LinkRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("main-1")).unwrap();
+        artifact::upsert(&cat, &mk_row("shadow-1")).unwrap();
+        links::insert(
+            &cat,
+            &LinkRow {
+                src_id: "shadow-1".into(),
+                dst_id: "main-1".into(),
+                rel: "worktree_of".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx_with_project(cat, std::path::PathBuf::from("/test/repo"));
+        let out = call(&ctx, json!({"id": "main-1"})).await.unwrap();
+        assert!(
+            out.get("overlay_hint").is_none(),
+            "non-worktree session must never emit overlay_hint: {out:?}"
+        );
     }
 
     #[tokio::test]
