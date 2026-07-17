@@ -24,11 +24,7 @@ fn read_body(ctx: &ToolContext, artifact_id: &str) -> Result<Option<String>> {
     }
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let mut a: Args = serde_json::from_value(args)?;
-    {
-        let mut cat = ctx.catalog.lock();
-        a.id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
-    }
+    let a: Args = serde_json::from_value(args)?;
 
     let aug_row = {
         let cat = ctx.catalog.lock();
@@ -588,5 +584,48 @@ mod tests {
         let meta = &result["context"]["refresh_meta"];
         assert_eq!(meta["children_status_delta"].as_array().unwrap().len(), 0);
         assert_eq!(meta["unchanged_refreshes"], 5);
+    }
+
+    #[tokio::test]
+    async fn refresh_from_worktree_does_not_fork() {
+        // F-4: refresh is read-only (gathers sources, returns regeneration
+        // context) — it must NOT go through the fork-on-first-write gate.
+        // Forking on a read would spuriously create a shadow artifact and
+        // freeze the worktree's overlay view of it.
+        use crate::librarian::catalog::{artifact, events, links};
+        use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
+
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        let main_id = {
+            let cat = ctx.catalog.lock();
+            seed_main_tracker(&cat)
+        };
+
+        let result = call(&ctx, serde_json::json!({"id": main_id}))
+            .await
+            .unwrap();
+        // The id refresh operated against must be the main id, unchanged —
+        // no redirect to a shadow id.
+        assert_eq!(result["artifact_id"], serde_json::json!(main_id));
+
+        let shadow_path = "/repo/.worktrees/feat/docs/trackers/t.md";
+        let shadow_id =
+            crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(shadow_path));
+
+        let cat = ctx.catalog.lock();
+        assert!(
+            artifact::get(&cat, &shadow_id).unwrap().is_none(),
+            "refresh must not fork a shadow artifact row"
+        );
+        assert!(
+            events::latest_for_artifact(&cat, &shadow_id)
+                .unwrap()
+                .is_none(),
+            "refresh must not emit a worktree_fork event"
+        );
+        assert!(
+            links::outgoing(&cat, &shadow_id).unwrap().is_empty(),
+            "refresh must not create a worktree_of lineage link"
+        );
     }
 }
