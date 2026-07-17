@@ -189,19 +189,25 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
           updated_at    INTEGER NOT NULL,
           file_mtime    INTEGER NOT NULL,
           file_sha256   TEXT NOT NULL,
-          confidence    REAL NOT NULL DEFAULT 1.0
-        );
-        INSERT INTO artifact_new
+          confidence    REAL NOT NULL DEFAULT 1.0,
+          slug          TEXT
+          );
+          INSERT INTO artifact_new
           SELECT id, abs_path, kind, status, title, owners, tags, topic,
                  time_scope, source, created_at, updated_at, file_mtime,
-                 file_sha256, confidence
+                 file_sha256, confidence, slug
           FROM artifact;
 
-        -- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.
-        DROP TABLE artifact;
-        ALTER TABLE artifact_new RENAME TO artifact;
-        CREATE UNIQUE INDEX idx_artifact_abs_path  ON artifact(abs_path);
-        CREATE        INDEX idx_artifact_kind_status ON artifact(kind, status);
+          -- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.
+          DROP TABLE artifact;
+          ALTER TABLE artifact_new RENAME TO artifact;
+          CREATE UNIQUE INDEX idx_artifact_abs_path  ON artifact(abs_path);
+          CREATE        INDEX idx_artifact_kind_status ON artifact(kind, status);
+          -- Plain (non-partial) unique index — required as FK parent key for
+          -- entry_cite.src_slug REFERENCES artifact(slug); NULLs stay distinct
+          -- under SQLite's UNIQUE index semantics, so this doesn't restrict
+          -- artifacts that have no slug yet.
+          CREATE UNIQUE INDEX ux_artifact_slug ON artifact(slug);
         CREATE TRIGGER artifact_vec_cascade_delete
           AFTER DELETE ON artifact BEGIN
             DELETE FROM artifact_vec WHERE id = OLD.id;
@@ -456,6 +462,66 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 9);
+    }
+    #[test]
+    fn migration_v6_single_open_preserves_v9_entry_graph_shape() {
+        // Regression: drop_legacy_and_stamp rebuilds `artifact` via table-copy
+        // (CREATE artifact_new / INSERT SELECT / DROP / RENAME). Before this fix
+        // the copy's column list and index recreation stopped at `confidence`,
+        // silently dropping `slug` and `ux_artifact_slug` on the legacy (v3->v6)
+        // upgrade path — a single `open_with_workspace` call left the live
+        // `artifact` table without `slug`, without `ux_artifact_slug`, and with
+        // `entry_cite`'s FK dangling. It "self-healed" on a SECOND open (the v9
+        // `IF NOT EXISTS` guards re-add slug), which is why a twice-open test
+        // like `migration_v6_full_is_idempotent` couldn't catch it. This test
+        // exercises exactly ONE open of a legacy DB and asserts the v9 shape is
+        // already correct immediately after.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        seed_v3_db(&db_path);
+        let ws = ws_with("r", tmp.path().to_str().unwrap());
+        let cat = crate::librarian::catalog::Catalog::open_with_workspace(&db_path, &ws).unwrap();
+
+        assert!(
+            crate::librarian::catalog::column_exists(&cat.conn, "artifact", "slug").unwrap(),
+            "artifact.slug must survive the single-open legacy upgrade"
+        );
+
+        let has_slug_index: bool = cat
+            .conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='ux_artifact_slug'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        assert!(
+            has_slug_index,
+            "ux_artifact_slug index must survive the table-copy"
+        );
+
+        // entry_cite's FK must be intact, not dangling: set a slug and insert a
+        // citing row referencing it — this fails with "foreign key mismatch" (or
+        // a constraint violation) if the FK's parent key isn't a real non-partial
+        // unique index on artifact(slug).
+        cat.conn
+            .execute("UPDATE artifact SET slug = 'a1-slug' WHERE id = 'a1'", [])
+            .unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO entry_cite (src_slug, src_local, dst_ref, rel, created_at)
+                 VALUES ('a1-slug', 'e1', 'other-artifact', 'cites', 0)",
+                [],
+            )
+            .unwrap();
+
+        let fk_violations: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(fk_violations, 0, "no foreign key violations expected");
     }
 
     #[test]
