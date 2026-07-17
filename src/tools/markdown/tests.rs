@@ -2478,3 +2478,74 @@ fn plan_scoped_edit_missing_old_string_errors() {
     let err = super::edit_markdown::plan_scoped_edit(content, &off, "## A", "nope", "z", false, 0);
     assert!(err.is_err());
 }
+
+#[test]
+fn batch_rename_heading_and_add_row_is_order_independent() {
+    use serde_json::json;
+    let doc = "# T\n\n## The 7 cases\n| 7 | seven |\n";
+    let rename = json!({"heading":"The 7 cases","action":"edit",
+        "old_string":"## The 7 cases","new_string":"## The 8 cases"});
+    let addrow = json!({"heading":"The 7 cases","action":"edit",
+        "old_string":"| 7 | seven |","new_string":"| 7 | seven |\n| 8 | eight |"});
+
+    let plan_a =
+        super::edit_markdown::plan_batch(doc, json!([rename, addrow]).as_array().unwrap(), false)
+            .unwrap();
+    let plan_b =
+        super::edit_markdown::plan_batch(doc, json!([addrow, rename]).as_array().unwrap(), false)
+            .unwrap();
+    let out_a = super::edit_markdown::apply_planned_edits(doc, plan_a);
+    let out_b = super::edit_markdown::apply_planned_edits(doc, plan_b);
+
+    assert_eq!(out_a, out_b, "batch must be order-independent");
+    assert!(
+        out_a.contains("## The 8 cases"),
+        "heading renamed: {out_a:?}"
+    );
+    assert!(out_a.contains("| 8 | eight |"), "row 8 added: {out_a:?}");
+    assert!(out_a.contains("| 7 | seven |"), "row 7 kept: {out_a:?}");
+}
+
+#[test]
+fn batch_true_overlap_is_rejected() {
+    use serde_json::json;
+    let doc = "## A\nhello world\n";
+    let arr = json!([
+        {"heading":"A","action":"replace","content":"brand new"},
+        {"heading":"A","action":"edit","old_string":"hello","new_string":"HELLO"}
+    ]);
+    let res = super::edit_markdown::plan_batch(doc, arr.as_array().unwrap(), false);
+    assert!(
+        res.is_err(),
+        "overlapping replace+edit on same section must be rejected"
+    );
+}
+
+#[test]
+fn batch_mixed_actions_scrambled_order_is_stable() {
+    use serde_json::json;
+    let doc = "## A\naaa\n## B\nbbb\n## C\nccc\n";
+    let edits = json!([
+        {"heading":"C","action":"edit","old_string":"ccc","new_string":"CCC"},
+        {"heading":"A","action":"insert_after","content":"after-a","at":"after-heading-line"},
+        {"heading":"B","action":"remove"}
+    ]);
+    let rev = json!([
+        {"heading":"B","action":"remove"},
+        {"heading":"A","action":"insert_after","content":"after-a","at":"after-heading-line"},
+        {"heading":"C","action":"edit","old_string":"ccc","new_string":"CCC"}
+    ]);
+    let out1 = super::edit_markdown::apply_planned_edits(
+        doc,
+        super::edit_markdown::plan_batch(doc, edits.as_array().unwrap(), false).unwrap(),
+    );
+    let out2 = super::edit_markdown::apply_planned_edits(
+        doc,
+        super::edit_markdown::plan_batch(doc, rev.as_array().unwrap(), false).unwrap(),
+    );
+    assert_eq!(out1, out2, "disjoint edits must be permutation-invariant");
+    assert!(
+        out1.contains("CCC") && out1.contains("after-a") && !out1.contains("bbb"),
+        "got: {out1:?}"
+    );
+}

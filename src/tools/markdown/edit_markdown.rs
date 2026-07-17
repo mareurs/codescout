@@ -423,8 +423,6 @@ pub(crate) fn join_lines(lines: &[&str]) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-// Consumed starting Task 2 of the batch-mode order-independence plan; unused for now.
-#[allow(dead_code)]
 /// Maps 0-based line indices (per `content.split('\n')`) to byte offsets in `content`.
 /// `line_start(i)` is the byte where line `i` begins; `line_start(line_count)` and any
 /// larger index return `content.len()`. Because `join_lines(&lines[..i])` re-adds the
@@ -436,7 +434,6 @@ pub(crate) struct LineOffsets {
     len: usize,
 }
 
-#[allow(dead_code)]
 impl LineOffsets {
     pub(crate) fn new(content: &str) -> Self {
         let mut starts = vec![0usize];
@@ -482,10 +479,6 @@ fn normalize_trailing_newline(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n');
     format!("{}\n", trimmed)
 }
-// Consumed starting Task 3 of the batch-mode order-independence plan; unused
-// for now (only exercised by this file's #[cfg(test)] tests, which clippy's
-// default lib-only build does not count as a use).
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct PlannedEdit {
     pub span: Range<usize>,
@@ -494,7 +487,6 @@ pub(crate) struct PlannedEdit {
     pub order: usize,      // collection order; tie-break for coincident inserts
 }
 
-#[allow(dead_code)]
 fn spans_conflict(a: &Range<usize>, b: &Range<usize>) -> bool {
     let a_zero = a.start == a.end;
     let b_zero = b.start == b.end;
@@ -506,7 +498,6 @@ fn spans_conflict(a: &Range<usize>, b: &Range<usize>) -> bool {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn detect_overlaps(edits: &[PlannedEdit]) -> anyhow::Result<()> {
     for i in 0..edits.len() {
         for j in (i + 1)..edits.len() {
@@ -525,7 +516,6 @@ pub(crate) fn detect_overlaps(edits: &[PlannedEdit]) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(crate) fn apply_planned_edits(original: &str, mut edits: Vec<PlannedEdit>) -> String {
     // Apply end-to-start: highest start first. For coincident starts, apply the
     // higher `order` first so that after all splices the lower `order` sits first.
@@ -535,6 +525,81 @@ pub(crate) fn apply_planned_edits(original: &str, mut edits: Vec<PlannedEdit>) -
         out.replace_range(e.span.clone(), &e.replacement);
     }
     normalize_trailing_newline(&out)
+}
+
+/// Plan a whole `edits[]` batch against a single, unmutated `snapshot`.
+///
+/// Every entry resolves its `heading` against `snapshot` — never against a
+/// running mutated buffer — which is what makes batch application
+/// order-independent: a rename of a heading and an edit scoped under that
+/// same heading both resolve against the pre-edit document, so either
+/// ordering in the input array produces the same planned spans (and thus,
+/// after `apply_planned_edits`, the same output). Collects every edit's
+/// `PlannedEdit`s, runs `detect_overlaps` once over the full set, and
+/// returns the validated plan for the caller to apply.
+pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result<Vec<PlannedEdit>> {
+    let off = LineOffsets::new(snapshot);
+    let mut planned: Vec<PlannedEdit> = Vec::new();
+
+    for (i, edit) in edits.iter().enumerate() {
+        let heading = edit["heading"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("edits[{}]: missing required 'heading' field", i))?;
+        let action = edit["action"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("edits[{}]: missing required 'action' field", i))?;
+
+        let mut sub = if action == "edit" {
+            let old_string = edit["old_string"].as_str().ok_or_else(|| {
+                anyhow::anyhow!("edits[{}]: old_string is required for action='edit'", i)
+            })?;
+            let new_string = edit["new_string"].as_str().unwrap_or("");
+            let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
+            plan_scoped_edit(
+                snapshot,
+                &off,
+                heading,
+                old_string,
+                new_string,
+                replace_all,
+                i,
+            )
+            .map_err(|e| {
+                RecoverableError::with_hint(
+                    format!("edits[{}]: {}", i, e),
+                    "Check heading name and old_string content.",
+                )
+            })?
+        } else {
+            if action == "replace" && !edit["include_subsections"].as_bool().unwrap_or(false) {
+                if let Ok(victims) = find_consumed_subsections(snapshot, heading) {
+                    if !victims.is_empty() {
+                        return Err(subsection_guard_error(Some(i), heading, &victims).into());
+                    }
+                }
+            }
+            plan_section_edit(
+                snapshot,
+                &off,
+                heading,
+                action,
+                edit["content"].as_str(),
+                edit["at"].as_str(),
+                force,
+                i,
+            )
+            .map_err(|e| {
+                RecoverableError::with_hint(
+                    format!("edits[{}]: {}", i, e),
+                    "Check heading name and action.",
+                )
+            })?
+        };
+        planned.append(&mut sub);
+    }
+
+    detect_overlaps(&planned)?;
+    Ok(planned)
 }
 
 /// Plan the byte-span edit(s) that a heading-scoped `old_string` -> `new_string`
@@ -881,63 +946,14 @@ impl Tool for EditMarkdown {
 
         if has_edits {
             // ── Batch mode ───────────────────────────────────────────
+            // Every edit resolves its heading against `snapshot` (the buffer as it
+            // stood right after frontmatter mutation, before any body edit) rather
+            // than a running mutated buffer — this is what makes the batch
+            // order-independent. See `plan_batch`.
             let edits = input["edits"].as_array().unwrap();
-            for (i, edit) in edits.iter().enumerate() {
-                let heading = edit["heading"].as_str().ok_or_else(|| {
-                    anyhow::anyhow!("edits[{}]: missing required 'heading' field", i)
-                })?;
-                let action = edit["action"].as_str().ok_or_else(|| {
-                    anyhow::anyhow!("edits[{}]: missing required 'action' field", i)
-                })?;
-
-                new_content = if action == "edit" {
-                    let old_string = edit["old_string"].as_str().ok_or_else(|| {
-                        anyhow::anyhow!("edits[{}]: old_string is required for action='edit'", i)
-                    })?;
-                    let new_string = edit["new_string"].as_str().unwrap_or("");
-                    let replace_all_val = edit["replace_all"].as_bool().unwrap_or(false);
-                    perform_scoped_edit(
-                        &new_content,
-                        heading,
-                        old_string,
-                        new_string,
-                        replace_all_val,
-                    )
-                    .map_err(|e| {
-                        RecoverableError::with_hint(
-                            format!("edits[{}]: {}", i, e),
-                            "Check heading name and old_string content.",
-                        )
-                    })?
-                } else {
-                    let edit_content = edit["content"].as_str();
-                    if action == "replace"
-                        && !edit["include_subsections"].as_bool().unwrap_or(false)
-                    {
-                        if let Ok(victims) = find_consumed_subsections(&new_content, heading) {
-                            if !victims.is_empty() {
-                                return Err(
-                                    subsection_guard_error(Some(i), heading, &victims).into()
-                                );
-                            }
-                        }
-                    }
-                    perform_section_edit_ext(
-                        &new_content,
-                        heading,
-                        action,
-                        edit_content,
-                        edit["at"].as_str(),
-                        input["force"].as_bool().unwrap_or(false),
-                    )
-                    .map_err(|e| {
-                        RecoverableError::with_hint(
-                            format!("edits[{}]: {}", i, e),
-                            "Check heading name and action.",
-                        )
-                    })?
-                };
-            }
+            let snapshot = new_content.clone();
+            let planned = plan_batch(&snapshot, edits, input["force"].as_bool().unwrap_or(false))?;
+            new_content = apply_planned_edits(&snapshot, planned);
         } else if has_body_edit {
             // ── Single edit mode ─────────────────────────────────────
             let heading = crate::tools::require_str_param_or_hint(
