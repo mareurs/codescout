@@ -14,32 +14,33 @@ impl Tool for Librarian {
 
     fn description(&self) -> &'static str {
         "Workspace-level librarian operations. \
-         action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs | legibility_scan | link_scan | doctor. \
-         context: pack topic/anchor neighbourhood into a markdown bundle. \
-         reindex: re-scan and classify markdown artifacts. \
-         tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \
-         workspace_state_at: time-travel snapshot of all artifacts at a commit/timestamp. \
-         audit_doc_refs: scan markdown for stale code refs (file paths, symbols, \
-         line refs, link targets, module paths) against the current filesystem \
-         + LSP symbol index. Manual cadence — run before a doc-heavy PR merges \
-         or when drift is suspected. Output is an `audit_issues` tracker. \
-         legibility_scan: rank code-legibility refactor candidates from usage.db \
-         friction + the AST symbol index. Writes/updates the legibility-backlog \
-         tracker — open targets ranked by observed cost (tier 1 biting-now, tier 2 \
-         latent), auto-closing refactored ones with a before/after delta. \
-         write=false for a dry-run JSON. \
-         link_scan: derive rel=\"cites\" edges from prose citations (entry \
-         tokens, ids, md links); default reports, write=true \
-         materializes/prunes cites edges. \
-         doctor: catalog drift scanner (read-only by default). Checks abs_path \
-         columns for absolute-form, forward-slash form, NTFS ADS colons, '..' \
-         segments, and missing files on disk; checks commits.git_root for \
-         forward-slash form; flags worktree-scoped rows (worktree_scoped_row). \
-         Returns a JSON report with per-check violation counts. Run after large \
-         refactors or when LIKE queries return empty. Opt-in repairs: \
-         fix=prune_missing + root=<dead/renamed repo root> prunes rows under it; \
-         fix=reseat_worktree re-points no-collision rows to the main-repo path \
-         (collisions need manual graft)."
+             action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs | legibility_scan | link_scan | doctor | merge_worktree. \
+             context: pack topic/anchor neighbourhood into a markdown bundle. \
+             reindex: re-scan and classify markdown artifacts. \
+             tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \
+             workspace_state_at: time-travel snapshot of all artifacts at a commit/timestamp. \
+             audit_doc_refs: scan markdown for stale code refs (file paths, symbols, \
+             line refs, link targets, module paths) against the current filesystem \
+             + LSP symbol index. Manual cadence — run before a doc-heavy PR merges \
+             or when drift is suspected. Output is an `audit_issues` tracker. \
+             legibility_scan: rank code-legibility refactor candidates from usage.db \
+             friction + the AST symbol index. Writes/updates the legibility-backlog \
+             tracker — open targets ranked by observed cost (tier 1 biting-now, tier 2 \
+             latent), auto-closing refactored ones with a before/after delta. \
+             write=false for a dry-run JSON. \
+             link_scan: derive rel=\"cites\" edges from prose citations (entry \
+             tokens, ids, md links); default reports, write=true \
+             materializes/prunes cites edges. \
+             doctor: catalog drift scanner (read-only by default): abs_path form, \
+             ADS colons, '..' segments, missing files; commits.git_root form; \
+             worktree-scoped rows. JSON violation-count report. Opt-in repairs: \
+             fix=prune_missing + root=<dead root> prunes rows under it; \
+             fix=reseat_worktree auto-reseats no-collision worktree rows (collisions \
+             need manual graft). \
+             merge_worktree: fold a worktree's shadow rows onto their main twins \
+             (delta-only, never duplicates base entries); reseats worktree-born \
+             rows. root=<worktree_root>; dry_run=true previews only; abandon=true \
+             drops the shadows."
     }
 
     fn input_schema(&self) -> Value {
@@ -49,7 +50,7 @@ impl Tool for Librarian {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "link_scan", "doctor"],
+                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "link_scan", "doctor", "merge_worktree"],
                     "description": "Operation to perform"
                 },
                 "topic": { "type": "string", "description": "context: subject for semantic/LIKE search across titles and topics" },
@@ -88,31 +89,34 @@ impl Tool for Librarian {
                 "write": { "type": "boolean", "description": "legibility_scan (default true): reconcile the backlog tracker (false = dry-run JSON only). link_scan (default false): materialize/prune cites edges (false = report only)." },
                 "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
                 "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap artifacts scanned (default 10000)." },
-                "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual artifact(action=\"graft\"). Omit for a read-only scan." },
-                "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune. Refused if the path still exists on disk." }
+                "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual artifact(action=\"graft\")). Omit for a read-only scan." },
+                "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune. Refused if the path still exists on disk. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
+                "dry_run": { "type": "boolean", "description": "merge_worktree: compute and return the full merge report without writing anything." },
+                "abandon": { "type": "boolean", "description": "merge_worktree: delete all of the worktree's shadow rows and mark its registration abandoned, instead of merging." }
             }
         })
     }
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
-            RecoverableError::new(
-                "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor",
-            )
-        })?;
+                RecoverableError::new(
+                    "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree",
+                )
+            })?;
         match action {
-            "context"            => super::context::call(ctx, args).await,
-            "reindex"            => super::reindex::call(ctx, args).await,
-            "tracker_design"     => super::tracker_design::call(ctx, args).await,
-            "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
-            "audit_doc_refs"     => super::audit_doc_refs::call(ctx, args).await,
-            "legibility_scan"    => super::legibility_scan::call(ctx, args).await,
-            "link_scan"          => super::link_scan::call(ctx, args).await,
-            "doctor"             => super::doctor::call(ctx, args).await,
-            other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor"
-            ))),
-        }
+                "context"            => super::context::call(ctx, args).await,
+                "reindex"            => super::reindex::call(ctx, args).await,
+                "tracker_design"     => super::tracker_design::call(ctx, args).await,
+                "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
+                "audit_doc_refs"     => super::audit_doc_refs::call(ctx, args).await,
+                "legibility_scan"    => super::legibility_scan::call(ctx, args).await,
+                "link_scan"          => super::link_scan::call(ctx, args).await,
+                "doctor"             => super::doctor::call(ctx, args).await,
+                "merge_worktree"     => super::merge_worktree::call(ctx, args).await,
+                other => Err(RecoverableError::new(format!(
+                    "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree"
+                ))),
+            }
     }
 }
 

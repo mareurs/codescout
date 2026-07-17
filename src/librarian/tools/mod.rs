@@ -275,6 +275,7 @@ pub mod librarian;
 
 // Not a registered `Tool` — an internal write-gate helper (overlay
 // fork-on-first-write) consumed by mutating tool call sites.
+pub mod merge_worktree;
 pub(crate) mod worktree;
 
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {

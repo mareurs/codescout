@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS events (
   kind          TEXT NOT NULL CHECK (kind IN (
                   'note', 'reviewed', 'status_change', 'field_patch',
                   'superseded_by', 'external_signal',
-                  'intent', 'verdict', 'worktree_fork'
+                  'intent', 'verdict', 'worktree_fork', 'worktree_merge'
                 )),
   payload       TEXT NOT NULL,
   anchor_commit TEXT,
