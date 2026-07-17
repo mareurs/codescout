@@ -227,10 +227,7 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
                     "Provide a string value, e.g. `{\"prefix\": \"docs/\"}`.",
                 )
             })?;
-            let escaped = s
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
+            let escaped = crate::librarian::util::escape_like_pattern(s);
             Ok(SqlFragment {
                 sql: format!("{sql_field} LIKE ? ESCAPE '\\'"),
                 params: vec![rusqlite::types::Value::Text(format!("{escaped}%"))],

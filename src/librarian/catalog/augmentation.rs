@@ -328,10 +328,7 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
         )));
     }
     // 3. rel_path suffix match — must resolve to exactly one artifact.
-    let escaped = raw
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
+    let escaped = crate::librarian::util::escape_like_pattern(raw);
     let like = format!("%/{escaped}");
     let mut stmt = conn
         .prepare("SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2 ESCAPE '\\'")?;
