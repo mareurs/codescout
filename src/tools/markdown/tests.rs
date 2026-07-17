@@ -2206,3 +2206,49 @@ fn replace_preserves_asterisk_hr_separator() {
         "`***` HR must survive replace: {result:?}"
     );
 }
+
+// ── LineOffsets tests ───────────────────────────────────────────────────────
+
+#[test]
+fn line_offsets_maps_indices_to_byte_starts() {
+    use super::edit_markdown::LineOffsets;
+    // "a\nb\nc" -> lines ["a","b","c"], starts at 0,2,4; past-end = len 5
+    let off = LineOffsets::new("a\nb\nc");
+    assert_eq!(off.line_start(0), 0);
+    assert_eq!(off.line_start(1), 2);
+    assert_eq!(off.line_start(2), 4);
+    assert_eq!(off.line_start(3), 5); // == content.len()
+    assert_eq!(off.line_start(99), 5);
+}
+
+#[test]
+fn line_offsets_handles_trailing_newline() {
+    use super::edit_markdown::LineOffsets;
+    // "a\nb\n" -> split yields ["a","b",""], 3 lines; len = 4
+    let off = LineOffsets::new("a\nb\n");
+    assert_eq!(off.line_start(0), 0);
+    assert_eq!(off.line_start(1), 2);
+    assert_eq!(off.line_start(2), 4); // the trailing empty line starts at len
+    assert_eq!(off.line_start(3), 4);
+}
+
+#[test]
+fn line_offsets_reproduces_join_boundaries() {
+    use super::edit_markdown::{join_lines, LineOffsets};
+    // Invariant the whole design rests on: content[..line_start(i)] == join_lines(&lines[..i])
+    let content = "# H\n\nbody line\n## Sub\nmore\n";
+    let lines: Vec<&str> = content.split('\n').collect();
+    let off = LineOffsets::new(content);
+    // NOTE: bounded to `lines.len()` exclusive, not `0..=lines.len()`. `join_lines`
+    // unconditionally appends a trailing '\n' (see its doc comment), so passing the
+    // *full* line slice (i == lines.len()) always yields one extra '\n' beyond
+    // `content`'s actual end — verified empirically (assertion fails at the top
+    // edge with content ending "...more\n" vs "...more\n\n"). Every real call site
+    // (`perform_section_edit_ext`'s `before = join_lines(&lines[..heading_idx])` /
+    // `..insert_idx`) always passes an index strictly less than `lines.len()` —
+    // even "insert at end of file" uses `lines.len() - 1`, since a trailing '\n'
+    // in `content` means the last split element is already the empty tail line.
+    for i in 0..lines.len() {
+        assert_eq!(&content[..off.line_start(i)], join_lines(&lines[..i]));
+    }
+}

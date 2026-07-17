@@ -361,11 +361,44 @@ fn subsection_guard_error(
 
 /// Join a non-tail slice of lines back into a string.
 /// Always appends a '\n' after the last element to act as a separator.
-fn join_lines(lines: &[&str]) -> String {
+pub(crate) fn join_lines(lines: &[&str]) -> String {
     if lines.is_empty() {
         return String::new();
     }
     format!("{}\n", lines.join("\n"))
+}
+
+// Consumed starting Task 2 of the batch-mode order-independence plan; unused for now.
+#[allow(dead_code)]
+/// Maps 0-based line indices (per `content.split('\n')`) to byte offsets in `content`.
+/// `line_start(i)` is the byte where line `i` begins; `line_start(line_count)` and any
+/// larger index return `content.len()`. Because `join_lines(&lines[..i])` re-adds the
+/// newline that `split('\n')` removed, `content[..line_start(i)] == join_lines(&lines[..i])`
+/// and `content[line_start(j)..] == join_lines_tail(&lines[j..])` — this is what lets a
+/// byte-offset splice reproduce the existing before/section/after boundaries exactly.
+pub(crate) struct LineOffsets {
+    starts: Vec<usize>,
+    len: usize,
+}
+
+#[allow(dead_code)]
+impl LineOffsets {
+    pub(crate) fn new(content: &str) -> Self {
+        let mut starts = vec![0usize];
+        for (i, b) in content.bytes().enumerate() {
+            if b == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        Self {
+            starts,
+            len: content.len(),
+        }
+    }
+
+    pub(crate) fn line_start(&self, idx: usize) -> usize {
+        self.starts.get(idx).copied().unwrap_or(self.len)
+    }
 }
 
 /// Join a tail slice (including any trailing "" from split('\n')).
