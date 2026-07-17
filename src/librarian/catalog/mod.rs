@@ -34,6 +34,57 @@ pub struct Catalog {
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 
+/// Parses the column names declared by `CREATE TABLE [IF NOT EXISTS] <table> ( ... );`
+/// in `schema_sql`. Used by the schema-invariant migration test so that every
+/// column `SCHEMA_SQL` declares for `table` is checked automatically against
+/// every migration path — no hand-maintained column list to fall out of sync.
+/// Test-only: gated behind `#[cfg(test)]` so it doesn't count as dead code in
+/// the non-test build (its only caller is the test module).
+///
+/// Grammar assumed (matches this file's schema.sql formatting): one column
+/// per line between the opening `(` and a line that is exactly `);`. The
+/// first whitespace-delimited token on each line is the column name; lines
+/// that are blank, `--` comments, or table-level constraints (PRIMARY,
+/// UNIQUE, FOREIGN, CHECK, CONSTRAINT) are skipped.
+
+#[cfg(test)]
+fn parse_create_table_columns(schema_sql: &str, table: &str) -> Vec<String> {
+    let marker_if_not_exists = format!("CREATE TABLE IF NOT EXISTS {table} (");
+    let marker_plain = format!("CREATE TABLE {table} (");
+    let start = schema_sql
+        .find(&marker_if_not_exists)
+        .map(|i| i + marker_if_not_exists.len())
+        .or_else(|| {
+            schema_sql
+                .find(&marker_plain)
+                .map(|i| i + marker_plain.len())
+        })
+        .unwrap_or_else(|| panic!("no CREATE TABLE found for `{table}` in schema_sql"));
+
+    let rest = &schema_sql[start..];
+    let end = rest
+        .find("\n);")
+        .unwrap_or_else(|| panic!("no closing `);` found for CREATE TABLE `{table}`"));
+    let body = &rest[..end];
+
+    const TABLE_CONSTRAINT_KEYWORDS: &[&str] =
+        &["PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"];
+
+    body.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim().trim_end_matches(',');
+            if trimmed.is_empty() || trimmed.starts_with("--") {
+                return None;
+            }
+            let first = trimmed.split_whitespace().next()?;
+            if TABLE_CONSTRAINT_KEYWORDS.contains(&first.to_uppercase().as_str()) {
+                return None;
+            }
+            Some(first.to_string())
+        })
+        .collect()
+}
+
 /// Register sqlite-vec as a global auto-extension. Delegates to the shared,
 /// non-feature-gated registration in `crate::sqlite_vec_ext` so there is exactly
 /// one `Once` across the librarian catalog and the retrieval stores (registering
@@ -731,6 +782,33 @@ mod tests {
             )
             .unwrap_or(false);
         assert!(has_entry_cite, "entry_cite table must exist");
+    }
+
+    #[test]
+    fn parse_create_table_columns_extracts_artifact_columns() {
+        let cols = parse_create_table_columns(SCHEMA_SQL, "artifact");
+        assert_eq!(
+            cols,
+            vec![
+                "id",
+                "abs_path",
+                "kind",
+                "status",
+                "title",
+                "owners",
+                "tags",
+                "topic",
+                "time_scope",
+                "source",
+                "created_at",
+                "updated_at",
+                "file_mtime",
+                "file_sha256",
+                "confidence",
+                "slug",
+            ],
+            "parse_create_table_columns must return every artifact column schema.sql declares, in order"
+        );
     }
 
     #[test]

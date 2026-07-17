@@ -626,4 +626,94 @@ mod tests {
             "v6 migration should have dropped legacy repo column"
         );
     }
+
+    #[test]
+    fn every_schema_sql_artifact_column_survives_every_migration_path() {
+        // Generalizes migration_v6_single_open_preserves_v9_entry_graph_shape:
+        // instead of hand-checking `slug` (the one column that regressed),
+        // parse the canonical column list straight out of SCHEMA_SQL and check
+        // ALL of them, for every migration path we seed a fixture for. Any
+        // future column added to `artifact` is covered automatically, with no
+        // test update required.
+        let expected_columns = crate::librarian::catalog::parse_create_table_columns(
+            crate::librarian::catalog::SCHEMA_SQL,
+            "artifact",
+        );
+        assert!(
+            expected_columns.contains(&"slug".to_string()),
+            "sanity check: slug must be part of the parsed column set"
+        );
+
+        fn assert_index_exists(conn: &Connection, name: &str, path_label: &str) {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1",
+                    [name],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            assert!(exists, "[{path_label}] index {name} must exist");
+        }
+
+        fn assert_no_fk_violations(conn: &Connection, path_label: &str) {
+            let fk_violations: i64 = conn
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(
+                fk_violations, 0,
+                "[{path_label}] expected no foreign key violations"
+            );
+        }
+
+        // Path 1: fresh DB (Catalog::open_in_memory). Never runs
+        // drop_legacy_and_stamp's table-copy (that only fires for on-disk
+        // catalogs below schema_version 6), so idx_artifact_abs_path — which
+        // is created solely by that table-copy — is NOT expected here; a
+        // fresh DB instead gets an implicit unique index off schema.sql's
+        // `abs_path TEXT NOT NULL UNIQUE`, not one named idx_artifact_abs_path.
+        {
+            let path_label = "fresh open_in_memory";
+            let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+            for col in &expected_columns {
+                assert!(
+                    crate::librarian::catalog::column_exists(&cat.conn, "artifact", col).unwrap(),
+                    "[{path_label}] artifact.{col} missing"
+                );
+            }
+            for idx in ["idx_artifact_kind_status", "ux_artifact_slug"] {
+                assert_index_exists(&cat.conn, idx, path_label);
+            }
+            assert_no_fk_violations(&cat.conn, path_label);
+        }
+
+        // Path 2: legacy v3 DB, single open_with_workspace — the table-copy
+        // path (drop_legacy_and_stamp) that previously dropped `slug` and
+        // `ux_artifact_slug` silently. All three indexes are expected here.
+        {
+            let path_label = "legacy v3 -> v6 single open_with_workspace";
+            let tmp = tempfile::TempDir::new().unwrap();
+            let db_path = tmp.path().join("catalog.db");
+            seed_v3_db(&db_path);
+            let ws = ws_with("r", tmp.path().to_str().unwrap());
+            let cat =
+                crate::librarian::catalog::Catalog::open_with_workspace(&db_path, &ws).unwrap();
+
+            for col in &expected_columns {
+                assert!(
+                    crate::librarian::catalog::column_exists(&cat.conn, "artifact", col).unwrap(),
+                    "[{path_label}] artifact.{col} missing"
+                );
+            }
+            for idx in [
+                "idx_artifact_abs_path",
+                "idx_artifact_kind_status",
+                "ux_artifact_slug",
+            ] {
+                assert_index_exists(&cat.conn, idx, path_label);
+            }
+            assert_no_fk_violations(&cat.conn, path_label);
+        }
+    }
 }
