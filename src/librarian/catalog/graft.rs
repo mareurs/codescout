@@ -69,6 +69,33 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
+    // 1-4. Re-point events / observations / links / event_edges onto `into_id`.
+    let mut report = GraftReport::default();
+    repoint_history(&tx, from_id, into_id, &mut report)?;
+
+    // 5. Augmentation params — migrate or merge (before the delete: params live
+    //    on `artifact_augmentation`, which also cascade-deletes with the source).
+    merge_augmentation(&tx, from_id, into_id, &mut report)?;
+
+    // 6. Delete source LAST — cascades any leftover dup links / edges / augmentation.
+    tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
+
+    tx.commit()?;
+
+    Ok(report)
+}
+
+/// Re-point `events`, `artifact_observation`, `artifact_link`, and
+/// `event_edges.dst_artifact_id` rows from `from_id` onto `into_id`, recording
+/// counts on `report`. A link or edge re-point that would collide with an
+/// existing unique key on `into_id` is dropped (not an error); the caller's
+/// subsequent cascade-delete of `from_id` cleans up the leftover dup rows.
+pub(crate) fn repoint_history(
+    tx: &rusqlite::Transaction<'_>,
+    from_id: &str,
+    into_id: &str,
+    report: &mut GraftReport,
+) -> Result<()> {
     // 1. Events — plain re-point (event id is unique, no conflict). Re-pointing
     //    events.artifact_id does NOT touch event_edges' src_event_id/dst_event_id
     //    (event row ids are unchanged), so only dst_artifact_id needs handling (4).
@@ -120,26 +147,14 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
         |r| r.get(0),
     )?;
 
-    let mut report = GraftReport {
-        events_repointed,
-        observations_repointed,
-        links_repointed: u1 + u2,
-        links_dropped: links_left as usize, // conflicting dups, cascade-deleted above
-        event_edges_repointed: (ee_before - ee_left) as usize,
-        event_edges_dropped: ee_left as usize, // conflicting dups, cascade-deleted above
-        ..Default::default()
-    };
+    report.events_repointed = events_repointed;
+    report.observations_repointed = observations_repointed;
+    report.links_repointed = u1 + u2;
+    report.links_dropped = links_left as usize; // conflicting dups, cascade-deleted above
+    report.event_edges_repointed = (ee_before - ee_left) as usize;
+    report.event_edges_dropped = ee_left as usize; // conflicting dups, cascade-deleted above
 
-    // 5. Augmentation params — migrate or merge (before the delete: params live
-    //    on `artifact_augmentation`, which also cascade-deletes with the source).
-    merge_augmentation(&tx, from_id, into_id, &mut report)?;
-
-    // 6. Delete source LAST — cascades any leftover dup links / edges / augmentation.
-    tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
-
-    tx.commit()?;
-
-    Ok(report)
+    Ok(())
 }
 
 /// Split `"F-12"` into `("F", 12)`. Returns `None` for ids without a
@@ -156,6 +171,97 @@ fn strip_id(entry: &Value) -> Value {
         o.remove("id");
     }
     e
+}
+
+/// Fold `incoming` entries onto `into_arr`, applying the reserved-universe
+/// collision-renumber and near-dup detection shared by `merge_augmentation`.
+/// Operates on arbitrary arrays (not necessarily a whole seeded collection) so
+/// callers can fold a partial delta (e.g. a worktree's new entries) through the
+/// same machinery.
+///
+/// - Incoming entries whose id doesn't collide with `into_arr` are appended
+///   verbatim.
+/// - Incoming entries whose id collides with a surviving `into_arr` id are
+///   renumbered to the next free `<prefix>-N`, allocated over the whole
+///   reserved universe (survivor ids + all free incoming ids + ids already
+///   allocated this fold) so the result never contains a duplicate id
+///   (`report.remap` records old->new).
+/// - Incoming entries whose content (minus `id`) already matches a surviving
+///   entry are flagged in `report.suspicious`.
+pub(crate) fn fold_entries(
+    into_arr: &[Value],
+    incoming: &[Value],
+    report: &mut GraftReport,
+) -> Vec<Value> {
+    let into_ids: std::collections::HashSet<String> = into_arr
+        .iter()
+        .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
+        .collect();
+
+    let id_of = |e: &Value| {
+        e.get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let mut merged = into_arr.to_vec();
+
+    // Near-dup detection: incoming object (minus id) deep-equals a surviving original.
+    for entry in incoming {
+        if into_arr.iter().any(|e| strip_id(e) == strip_id(entry)) {
+            report.suspicious.push(entry.clone());
+        }
+    }
+
+    // Reserved id universe = survivor ids + ALL free (non-colliding) incoming ids.
+    // Free incoming ids survive un-renumbered, so a renumbered collision must never
+    // land on one of them — seed the whole universe BEFORE allocating any new id.
+    let mut reserved: std::collections::HashSet<String> = into_ids.clone();
+    for entry in incoming {
+        let id = id_of(entry);
+        if !into_ids.contains(&id) {
+            reserved.insert(id);
+        }
+    }
+
+    // Append FREE incoming entries first (ids preserved verbatim).
+    for entry in incoming {
+        let id = id_of(entry);
+        if !into_ids.contains(&id) {
+            merged.push(entry.clone());
+            report.entries_merged += 1;
+        }
+    }
+
+    // Renumber COLLIDING incoming entries over the full reserved universe
+    // (monotonic max+1 per prefix; each freshly allocated id is added to
+    // `reserved` so two collisions on the same prefix get distinct numbers).
+    for entry in incoming {
+        let old = id_of(entry);
+        if !into_ids.contains(&old) {
+            continue;
+        }
+        let mut e = entry.clone();
+        if let Some((prefix, _)) = split_id(&old) {
+            let ids_vec: Vec<String> = reserved.iter().cloned().collect();
+            let next = next_index(&ids_vec, prefix);
+            let new_id = format!("{prefix}-{next}");
+            reserved.insert(new_id.clone());
+            if let Some(o) = e.as_object_mut() {
+                o.insert("id".into(), serde_json::json!(new_id));
+            }
+            report.remap.insert(old, new_id);
+            report.entries_renumbered += 1;
+        }
+        // else: id has no numeric suffix (never produced by append_entry). Cannot
+        // prefix-renumber; leave it as-is (accepted, documented limitation). It will
+        // NOT collide with a renumbered id because renumbering only targets numeric
+        // prefixes.
+        merged.push(e);
+        report.entries_merged += 1;
+    }
+
+    merged
 }
 
 /// Fold `from_id`'s `artifact_augmentation` row onto `into_id`, before the
@@ -232,73 +338,7 @@ fn merge_augmentation(
         .cloned()
         .unwrap_or_default();
 
-    let into_ids: std::collections::HashSet<String> = into_arr
-        .iter()
-        .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
-        .collect();
-
-    let id_of = |e: &Value| {
-        e.get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string()
-    };
-    let mut merged = into_arr.clone();
-
-    // Near-dup detection: incoming object (minus id) deep-equals a surviving original.
-    for entry in &from_arr {
-        if into_arr.iter().any(|e| strip_id(e) == strip_id(entry)) {
-            report.suspicious.push(entry.clone());
-        }
-    }
-
-    // Reserved id universe = survivor ids + ALL free (non-colliding) incoming ids.
-    // Free incoming ids survive un-renumbered, so a renumbered collision must never
-    // land on one of them — seed the whole universe BEFORE allocating any new id.
-    let mut reserved: std::collections::HashSet<String> = into_ids.clone();
-    for entry in &from_arr {
-        let id = id_of(entry);
-        if !into_ids.contains(&id) {
-            reserved.insert(id);
-        }
-    }
-
-    // Append FREE incoming entries first (ids preserved verbatim).
-    for entry in &from_arr {
-        let id = id_of(entry);
-        if !into_ids.contains(&id) {
-            merged.push(entry.clone());
-            report.entries_merged += 1;
-        }
-    }
-
-    // Renumber COLLIDING incoming entries over the full reserved universe
-    // (monotonic max+1 per prefix; each freshly allocated id is added to
-    // `reserved` so two collisions on the same prefix get distinct numbers).
-    for entry in &from_arr {
-        let old = id_of(entry);
-        if !into_ids.contains(&old) {
-            continue;
-        }
-        let mut e = entry.clone();
-        if let Some((prefix, _)) = split_id(&old) {
-            let ids_vec: Vec<String> = reserved.iter().cloned().collect();
-            let next = next_index(&ids_vec, prefix);
-            let new_id = format!("{prefix}-{next}");
-            reserved.insert(new_id.clone());
-            if let Some(o) = e.as_object_mut() {
-                o.insert("id".into(), serde_json::json!(new_id));
-            }
-            report.remap.insert(old, new_id);
-            report.entries_renumbered += 1;
-        }
-        // else: id has no numeric suffix (never produced by append_entry). Cannot
-        // prefix-renumber; leave it as-is (accepted, documented limitation). It will
-        // NOT collide with a renumbered id because renumbering only targets numeric
-        // prefixes.
-        merged.push(e);
-        report.entries_merged += 1;
-    }
+    let merged = fold_entries(&into_arr, &from_arr, report);
 
     // Guard: `unwrap_or_else` above only catches PARSE errors; valid-but-non-object
     // JSON (e.g. a bare array) would panic on index-assign. Fail recoverably instead.
@@ -687,5 +727,27 @@ mod tests {
             augmentation::get(&cat, "from").unwrap().is_none(),
             "from's augmentation cascade-deleted with the source"
         );
+    }
+
+    // `fold_entries` must work directly on an arbitrary slice (e.g. a worktree
+    // delta), not only a whole seeded collection — this is the shape Task 8's
+    // merge_worktree needs. Exercise it with a 1-entry `incoming` delta against
+    // a 2-entry survivor array, asserting the collision renumbers to F-3 (not
+    // F-1 or F-2) and the remap is recorded.
+    #[test]
+    fn fold_entries_on_delta_slice_renumbers_collision() {
+        let into_arr = vec![
+            serde_json::json!({"id": "F-1", "t": "keep1"}),
+            serde_json::json!({"id": "F-2", "t": "keep2"}),
+        ];
+        let incoming = vec![serde_json::json!({"id": "F-2", "t": "incoming-different"})];
+
+        let mut report = GraftReport::default();
+        let merged = fold_entries(&into_arr, &incoming, &mut report);
+
+        assert_eq!(report.entries_renumbered, 1);
+        assert_eq!(report.remap.get("F-2").map(String::as_str), Some("F-3"));
+        let ids: Vec<&str> = merged.iter().map(|e| e["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["F-1", "F-2", "F-3"]);
     }
 }
