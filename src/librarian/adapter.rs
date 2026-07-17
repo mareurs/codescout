@@ -372,4 +372,55 @@ mod tests {
             "plain repo must not get a main_root"
         );
     }
+
+    #[test]
+    fn derive_ctx_resolves_umbrella_via_main_root() {
+        // Task 2's fix made derive_ctx resolve umbrella membership against
+        // `main_root.as_deref().unwrap_or(&abs_path)` for a worktree session
+        // rather than the worktree's own abs_path. The umbrella's only member
+        // is the MAIN root — if derive_ctx regressed to resolving against
+        // `&abs_path` (the worktree checkout), the worktree path is not a
+        // member of any umbrella and this assertion fails.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+
+        let main_canon = std::fs::canonicalize(&main).unwrap();
+
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "wto-umbrella".into(),
+                members: vec![main_canon],
+            }])
+            .build(),
+        );
+        let adapter = LibrarianAdapter {
+            inner: lib_all_tools()
+                .into_iter()
+                .next()
+                .expect("at least one librarian tool registered"),
+            ctx,
+        };
+
+        let derived = adapter.derive_ctx(Some(&wt));
+        let cp = derived
+            .current_project
+            .as_deref()
+            .expect("resolvable active path must yield a current_project");
+        assert_eq!(
+            cp.umbrella.as_deref(),
+            Some("wto-umbrella"),
+            "derive_ctx must resolve umbrella membership against main_root for a worktree session"
+        );
+    }
 }

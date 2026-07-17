@@ -79,6 +79,7 @@ use serde_json::{json, Value};
 
 use crate::librarian::catalog::artifact::{self, ArtifactRow};
 use crate::librarian::catalog::graft;
+use crate::librarian::catalog::worktree;
 use crate::librarian::{current_project, ids};
 
 use super::{RecoverableError, ToolContext};
@@ -186,7 +187,7 @@ fn validate_prune_request<'a>(
         )));
     }
     let root_str = crate::util::fs::RepoPath::from_path(root_path).to_string();
-    if active_worktree_registration_covers(conn, &root_str)? {
+    if worktree::covering_conn(conn, &root_str)?.is_some() {
         return Err(RecoverableError::with_hint(
             format!(
                 "root '{root}' is covered by an ACTIVE worktree registration — pruning would delete the catalog's only record of an unmerged worktree's history"
@@ -469,26 +470,6 @@ fn shared_entry_overlap(
     ))
 }
 
-/// Whether an ACTIVE `worktree_registration` row covers `path` — exactly, or
-/// `path` nested under it. Mirrors
-/// [`crate::librarian::catalog::worktree::covering`]'s wildcard-escaped
-/// `LIKE` (that helper takes `&Catalog`; call sites here only have a bare
-/// `&rusqlite::Connection` in scope, so the query is inlined rather than
-/// threading a `Catalog` through signatures that don't otherwise need one).
-fn active_worktree_registration_covers(conn: &rusqlite::Connection, path: &str) -> Result<bool> {
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM worktree_registration \
-             WHERE status='active' AND (?1 = worktree_root OR ?1 LIKE \
-             REPLACE(REPLACE(REPLACE(worktree_root, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
-             || '/%' ESCAPE '\\')",
-            rusqlite::params![path],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
 /// Flags artifact rows whose `abs_path` lives inside a linked git worktree.
 /// For each such row, computes the row's would-be path in the MAIN repo and
 /// classifies whether a catalog row already exists there:
@@ -544,7 +525,7 @@ fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
             .is_some();
 
         let worktree_root_str = crate::util::fs::RepoPath::from_path(worktree_root).to_string();
-        let registered = active_worktree_registration_covers(conn, &worktree_root_str)?;
+        let registered = worktree::covering_conn(conn, &worktree_root_str)?.is_some();
 
         let mut detail = json!({
             "main_path": main_path_str,

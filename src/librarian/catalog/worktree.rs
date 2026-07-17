@@ -62,6 +62,16 @@ pub fn get(cat: &Catalog, worktree_root: &str) -> Result<Option<RegistrationRow>
 
 /// The ACTIVE registration whose root is `abs_path` or an ancestor of it.
 pub fn covering(cat: &Catalog, abs_path: &str) -> Result<Option<RegistrationRow>> {
+    covering_conn(&cat.conn, abs_path)
+}
+
+/// Connection-level core of [`covering`], for call sites that only hold a
+/// bare `&rusqlite::Connection` (e.g. `doctor.rs`, which doesn't otherwise
+/// need a full `&Catalog`).
+pub(crate) fn covering_conn(
+    conn: &rusqlite::Connection,
+    abs_path: &str,
+) -> Result<Option<RegistrationRow>> {
     // worktree_root is used below as a LIKE *pattern*, so its own `%`/`_`
     // characters must be escaped (backslash first, then `%`, then `_`) or a
     // root like `.worktrees/fix_1` has its `_` read as a single-char
@@ -69,8 +79,7 @@ pub fn covering(cat: &Catalog, abs_path: &str) -> Result<Option<RegistrationRow>
     // Mirrors the LeafOp::Prefix escaping in filter.rs; done via SQL
     // REPLACE() rather than a bound Rust parameter because the value being
     // escaped is a per-row column, not a value already held in Rust.
-    Ok(cat
-        .conn
+    Ok(conn
         .query_row(
             &format!(
                 "SELECT {COLS} FROM worktree_registration \
