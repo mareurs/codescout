@@ -196,6 +196,79 @@ pub fn get(cat: &Catalog, id: &str) -> Result<Option<ArtifactRow>> {
         .map_err(Into::into)
 }
 
+/// Lowercase, non-alphanumeric runs -> single '-', trimmed of leading/trailing '-'.
+pub fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Return `artifact.slug` for `artifact_id`, minting + persisting one if NULL.
+/// Base = slugify(title) or, if empty, slugify(abs_path file stem). Dedups with
+/// `-2`, `-3`, ... against the unique index. Assumes an open write context on `conn`.
+pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<String> {
+    let existing: Option<Option<String>> = conn
+        .query_row(
+            "SELECT slug FROM artifact WHERE id = ?1",
+            params![artifact_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(slug_col) = existing else {
+        anyhow::bail!("ensure_slug: no artifact with id {artifact_id}");
+    };
+    if let Some(s) = slug_col {
+        return Ok(s);
+    }
+    let (title, abs_path): (Option<String>, String) = conn.query_row(
+        "SELECT title, abs_path FROM artifact WHERE id = ?1",
+        params![artifact_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let mut base = title.as_deref().map(slugify).unwrap_or_default();
+    if base.is_empty() {
+        let stem = std::path::Path::new(&abs_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("tracker");
+        base = slugify(stem);
+    }
+    if base.is_empty() {
+        base = "tracker".to_string();
+    }
+    let mut candidate = base.clone();
+    let mut n = 2;
+    loop {
+        let taken: bool = conn
+            .query_row(
+                "SELECT 1 FROM artifact WHERE slug = ?1",
+                params![candidate],
+                |_| Ok(true),
+            )
+            .optional()?
+            .is_some();
+        if !taken {
+            break;
+        }
+        candidate = format!("{base}-{n}");
+        n += 1;
+    }
+    conn.execute(
+        "UPDATE artifact SET slug = ?1 WHERE id = ?2",
+        params![candidate, artifact_id],
+    )?;
+    Ok(candidate)
+}
+
 pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
     Ok(cat
         .conn
@@ -335,6 +408,38 @@ mod tests {
             .with_file_mtime(3)
             .with_file_sha256("abc")
             .build()
+    }
+
+    #[test]
+    fn ensure_slug_mints_dedups_and_is_idempotent() {
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("a")
+                .with_title("My Tracker")
+                .build(),
+        )
+        .unwrap();
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("b")
+                .with_title("My Tracker")
+                .build(),
+        )
+        .unwrap();
+
+        let s1 = ensure_slug(&cat.conn, "a").unwrap();
+        assert_eq!(s1, "my-tracker");
+        // Idempotent: second call returns the same slug, does not re-mint.
+        assert_eq!(ensure_slug(&cat.conn, "a").unwrap(), "my-tracker");
+        // Collision on the same base gets a numeric suffix.
+        assert_eq!(ensure_slug(&cat.conn, "b").unwrap(), "my-tracker-2");
+    }
+
+    #[test]
+    fn slugify_normalizes() {
+        assert_eq!(slugify("Fable Tuning — Findings!"), "fable-tuning-findings");
+        assert_eq!(slugify("  A/B  test "), "a-b-test");
     }
 
     #[test]
