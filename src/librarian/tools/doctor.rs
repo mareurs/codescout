@@ -31,8 +31,11 @@
 //!    the same forward-slash invariant applies (commits.rs writes via
 //!    `RepoPath::from_path(...).into_string()` post-#66).
 //! 7. `worktree_scoped_row` — flags catalog rows whose abs_path is under a
-//!    linked git worktree; classifies no_collision vs collision; feeds
-//!    `fix=reseat_worktree`.
+//!    linked git worktree; classifies no_collision vs collision, and flags
+//!    `registered` (an ACTIVE `worktree_registration` covers the row's
+//!    worktree root — pending `librarian(action="merge_worktree")`, not a
+//!    reseat). Unregistered rows still feed `fix=reseat_worktree`, which is
+//!    now the LEGACY fallback for catalog drift the overlay never saw.
 //!
 //! Deferred to a follow-up: NFC unicode normalization, orphan
 //! `artifact_augmentation` rows (the FK already cascades on artifact
@@ -58,7 +61,14 @@
 //! reindex's `artifact::upsert` pre-clean (`DELETE FROM artifact WHERE
 //! abs_path=? AND id != ?`) would delete it — cascading away exactly the
 //! history this exists to preserve. `collision` rows are left untouched and
-//! reported for a manual `graft`.
+//! reported for a manual `graft`. `registered` rows (an ACTIVE
+//! `worktree_registration` covers them) are SKIPPED entirely and reported
+//! under `skipped` — they belong to `librarian(action="merge_worktree")`.
+//!
+//! `fix=prune_missing` carries the same registration guard in the other
+//! direction: it refuses to prune a dead root an ACTIVE registration still
+//! covers, so a `git worktree remove` before merge can't silently delete the
+//! catalog's only remaining record of that worktree's unmerged history.
 
 use std::path::{Path, PathBuf};
 
@@ -141,11 +151,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }))
 }
 
-/// Validate a `prune_missing` request without touching the catalog. Returns the
-/// validated dead-root path, or a `RecoverableError` for an unsupported fix, a
-/// missing/relative root, or a root that still exists (a live root's rows are
-/// not orphans — per-file deletions belong to reindex's walk, not a bulk prune).
-fn validate_prune_request<'a>(fix: &str, root: Option<&'a str>) -> Result<&'a std::path::Path> {
+/// Validate a `prune_missing` request without touching the catalog beyond a
+/// read-only registration check. Returns the validated dead-root path, or a
+/// `RecoverableError` for an unsupported fix, a missing/relative root, a root
+/// that still exists (a live root's rows are not orphans — per-file
+/// deletions belong to reindex's walk, not a bulk prune), or a root an
+/// ACTIVE `worktree_registration` still covers (pruning it would delete the
+/// catalog's only remaining record of an unmerged worktree's history — that
+/// belongs to `librarian(action="merge_worktree")`, not a bulk prune).
+fn validate_prune_request<'a>(
+    fix: &str,
+    root: Option<&'a str>,
+    conn: &rusqlite::Connection,
+) -> Result<&'a std::path::Path> {
     if fix != "prune_missing" {
         return Err(RecoverableError::new(format!(
             "unknown fix '{fix}' — supported: prune_missing (requires root=<absolute path of the dead/renamed repo root>)"
@@ -167,6 +185,17 @@ fn validate_prune_request<'a>(fix: &str, root: Option<&'a str>) -> Result<&'a st
             "root '{root}' still exists on disk — prune_missing only removes rows under a dead/renamed root; nothing pruned"
         )));
     }
+    let root_str = crate::util::fs::RepoPath::from_path(root_path).to_string();
+    if active_worktree_registration_covers(conn, &root_str)? {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "root '{root}' is covered by an ACTIVE worktree registration — pruning would delete the catalog's only record of an unmerged worktree's history"
+            ),
+            format!(
+                "merge it first via librarian(action=\"merge_worktree\", root=\"{root}\"), or if the worktree is being discarded, librarian(action=\"merge_worktree\", root=\"{root}\", abandon=true) — then retry prune_missing"
+            ),
+        ));
+    }
     Ok(root_path)
 }
 
@@ -178,15 +207,16 @@ fn validate_prune_request<'a>(fix: &str, root: Option<&'a str>) -> Result<&'a st
 async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>) -> Result<Value> {
     match fix {
         "prune_missing" => {
-            let root_path = validate_prune_request(fix, root)?;
             let cat = ctx.catalog.lock();
+            let root_path = validate_prune_request(fix, root, &cat.conn)?;
             let (artifact_rows, commit_rows) = prune_dead_root(&cat.conn, root_path)?;
-            drop(cat);
-            Ok(json!({
+            let out = json!({
                 "fix": "prune_missing",
                 "root": root_path.to_string_lossy(),
                 "pruned": { "artifact_rows": artifact_rows, "commit_rows": commit_rows },
-            }))
+            });
+            drop(cat);
+            Ok(out)
         }
         "reseat_worktree" => reseat_worktree(ctx),
         other => Err(RecoverableError::new(format!(
@@ -195,15 +225,24 @@ async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>) -> Result<Val
     }
 }
 
-/// `fix=reseat_worktree`: consume `scan_worktree_scoped` violations. For each
-/// `no_collision` row (`id_w`, at the worktree path), durably re-seed a row
-/// at the main-repo path instead of a bare `abs_path` UPDATE. Catalog
-/// identity is `id == artifact_id_from_abs(abs_path)`; keeping `id_w` while
-/// pointing `abs_path` at the main path would leave that invariant broken,
-/// and the next MAIN-repo reindex's [`artifact::upsert`] pre-clean (`DELETE
-/// FROM artifact WHERE abs_path=? AND id != ?`) would delete the row —
-/// cascading away its events / links / event_edges / augmentation (the
-/// git-invisible `append_entry` history this feature exists to preserve).
+/// `fix=reseat_worktree`: consume `scan_worktree_scoped` violations. Rows
+/// where an ACTIVE `worktree_registration` covers the worktree root
+/// (`detail.registered == true`) are SKIPPED — they are pending
+/// `librarian(action="merge_worktree")`, which folds registered shadows onto
+/// their main-repo counterparts via the overlay, not this legacy reseat
+/// path; reseating them here would sever the row from the registration
+/// bookkeeping `merge_worktree` depends on. Skipped rows are reported under
+/// `skipped`, not silently dropped.
+///
+/// For each remaining (unregistered) `no_collision` row (`id_w`, at the
+/// worktree path), durably re-seed a row at the main-repo path instead of a
+/// bare `abs_path` UPDATE. Catalog identity is `id ==
+/// artifact_id_from_abs(abs_path)`; keeping `id_w` while pointing `abs_path`
+/// at the main path would leave that invariant broken, and the next
+/// MAIN-repo reindex's [`artifact::upsert`] pre-clean (`DELETE FROM
+/// artifact WHERE abs_path=? AND id != ?`) would delete the row — cascading
+/// away its events / links / event_edges / augmentation (the git-invisible
+/// `append_entry` history this feature exists to preserve).
 ///
 /// Instead: seed a fresh row at `id_m = artifact_id_from_abs(main_path)`
 /// (`no_collision` means nothing lives there yet, so the pre-clean deletes
@@ -219,11 +258,20 @@ fn reseat_worktree(ctx: &ToolContext) -> Result<Value> {
     let violations = scan_worktree_scoped(&cat.conn)?;
     let mut reseated = Vec::new();
     let mut collisions = Vec::new();
+    let mut skipped = Vec::new();
     for v in &violations {
         let Some(id_w) = v.artifact_id.as_deref() else {
             continue;
         };
         let detail: Value = serde_json::from_str(&v.detail).unwrap_or_default();
+        if detail["registered"].as_bool() == Some(true) {
+            skipped.push(json!({
+                "id": id_w,
+                "main_path": detail["main_path"].clone(),
+                "reason": "registered — pending librarian(action=\"merge_worktree\"), not reseat_worktree",
+            }));
+            continue;
+        }
         let main_path = detail["main_path"].as_str().unwrap_or_default();
         match detail["classification"].as_str() {
             Some("no_collision") => {
@@ -262,6 +310,7 @@ fn reseat_worktree(ctx: &ToolContext) -> Result<Value> {
         "fix": "reseat_worktree",
         "reseated": reseated,
         "collisions": collisions,
+        "skipped": skipped,
     }))
 }
 
@@ -420,6 +469,26 @@ fn shared_entry_overlap(
     ))
 }
 
+/// Whether an ACTIVE `worktree_registration` row covers `path` — exactly, or
+/// `path` nested under it. Mirrors
+/// [`crate::librarian::catalog::worktree::covering`]'s wildcard-escaped
+/// `LIKE` (that helper takes `&Catalog`; call sites here only have a bare
+/// `&rusqlite::Connection` in scope, so the query is inlined rather than
+/// threading a `Catalog` through signatures that don't otherwise need one).
+fn active_worktree_registration_covers(conn: &rusqlite::Connection, path: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM worktree_registration \
+             WHERE status='active' AND (?1 = worktree_root OR ?1 LIKE \
+             REPLACE(REPLACE(REPLACE(worktree_root, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
+             || '/%' ESCAPE '\\')",
+            rusqlite::params![path],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// Flags artifact rows whose `abs_path` lives inside a linked git worktree.
 /// For each such row, computes the row's would-be path in the MAIN repo and
 /// classifies whether a catalog row already exists there:
@@ -431,6 +500,12 @@ fn shared_entry_overlap(
 ///   SAME `entry_collection`, the overlapping entry ids are surfaced too —
 ///   `fix=reseat_worktree` (a follow-up change) will need this to merge
 ///   safely instead of clobbering.
+///
+/// Every row also carries `registered`: whether an ACTIVE
+/// `worktree_registration` covers the row's worktree root. Registered rows
+/// are pending a `librarian(action="merge_worktree")`, not a `reseat` —
+/// `fix=reseat_worktree` skips them (see [`reseat_worktree`]) and the detail
+/// carries a `hint` pointing at `merge_worktree` instead.
 ///
 /// Filesystem-only: walks each `abs_path`'s ancestor directories looking for
 /// one [`current_project::is_linked_worktree`] recognizes (a `.git` *file*
@@ -468,9 +543,13 @@ fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
             .optional()?
             .is_some();
 
+        let worktree_root_str = crate::util::fs::RepoPath::from_path(worktree_root).to_string();
+        let registered = active_worktree_registration_covers(conn, &worktree_root_str)?;
+
         let mut detail = json!({
             "main_path": main_path_str,
             "classification": if exists_at_main { "collision" } else { "no_collision" },
+            "registered": registered,
         });
 
         if exists_at_main {
@@ -478,6 +557,10 @@ fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
             if let Some(overlap) = shared_entry_overlap(conn, id, &main_id)? {
                 detail["id_overlap"] = json!(overlap);
             }
+        }
+
+        if registered {
+            detail["hint"] = json!("pending merge — use librarian(action=\"merge_worktree\")");
         }
 
         violations.push(Violation::new(
@@ -580,6 +663,7 @@ mod tests {
     use crate::librarian::catalog::artifact::{self, upsert as art_upsert, TestArtifactRowBuilder};
     use crate::librarian::catalog::augmentation;
     use crate::librarian::catalog::events::{self, TestEventRowBuilder};
+    use crate::librarian::catalog::worktree as reg;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::tools::TestToolContextBuilder;
     use rusqlite::params;
@@ -741,12 +825,14 @@ mod tests {
 
     #[test]
     fn validate_prune_request_gates() {
+        let cat = Catalog::open_in_memory().unwrap();
+
         // unknown fix → refused (rejected before any path check)
-        assert!(validate_prune_request("zap", Some("/gone")).is_err());
+        assert!(validate_prune_request("zap", Some("/gone"), &cat.conn).is_err());
         // missing root → refused
-        assert!(validate_prune_request("prune_missing", None).is_err());
+        assert!(validate_prune_request("prune_missing", None, &cat.conn).is_err());
         // relative root → refused (relative on every platform)
-        assert!(validate_prune_request("prune_missing", Some("relative/path")).is_err());
+        assert!(validate_prune_request("prune_missing", Some("relative/path"), &cat.conn).is_err());
 
         // live root refused — an existing absolute dir is not an orphan. Derive it from
         // the OS temp dir so the path is absolute AND present on every platform (Unix
@@ -754,14 +840,14 @@ mod tests {
         // broke this test under wine / windows (BUG 36d475f3).
         let live = std::env::temp_dir();
         let live = live.to_str().expect("temp_dir path is valid UTF-8");
-        assert!(validate_prune_request("prune_missing", Some(live)).is_err());
+        assert!(validate_prune_request("prune_missing", Some(live), &cat.conn).is_err());
 
         // dead absolute root → accepted. Build a temp-dir-rooted path that does not
         // exist, so it is absolute on every platform.
         let dead = std::env::temp_dir().join("codescout-nonexistent-root-6f3a1c9e");
         assert!(!dead.exists(), "test fixture path must not exist");
         let dead = dead.to_str().expect("temp path is valid UTF-8");
-        assert!(validate_prune_request("prune_missing", Some(dead)).is_ok());
+        assert!(validate_prune_request("prune_missing", Some(dead), &cat.conn).is_ok());
     }
 
     #[test]
@@ -1101,6 +1187,79 @@ mod tests {
                 "augmentation survives the next reindex"
             );
         }
+    }
+
+    /// A worktree-scoped row covered by an ACTIVE `worktree_registration` is
+    /// pending merge, not a legacy orphan — `scan_worktree_scoped` must flag
+    /// it as `registered` (with a hint pointing at `merge_worktree`), and
+    /// `reseat_worktree` must SKIP it rather than reseating it: reseating
+    /// would sever the row from the registration's overlay bookkeeping that
+    /// `merge_worktree` depends on.
+    #[tokio::test]
+    async fn worktree_scoped_row_marks_registered_rows_pending_merge() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        let wt_doc = worktree_root.join("docs/x.md");
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let wt_row = TestArtifactRowBuilder::new("wt-row")
+            .with_abs_path(wt_doc.clone())
+            .with_kind("tracker")
+            .build();
+        art_upsert(&cat, &wt_row).unwrap();
+
+        let worktree_root_str = crate::util::fs::RepoPath::from_path(&worktree_root).to_string();
+        let main_root_str = crate::util::fs::RepoPath::from_path(&main_root).to_string();
+        reg::upsert_active(&cat, &worktree_root_str, &main_root_str, None, 1000).unwrap();
+
+        let violations = scan_worktree_scoped(&cat.conn).unwrap();
+        assert_eq!(violations.len(), 1);
+        let detail: serde_json::Value = serde_json::from_str(&violations[0].detail).unwrap();
+        assert_eq!(
+            detail["registered"], true,
+            "an ACTIVE registration covers this worktree root"
+        );
+        assert!(
+            detail["hint"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("merge_worktree"),
+            "registered rows point at merge_worktree, not reseat: {detail}"
+        );
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        assert!(
+            out["reseated"].as_array().unwrap().is_empty(),
+            "a registered row must not be reseated — it belongs to merge_worktree: {out}"
+        );
+        assert_eq!(
+            out["skipped"].as_array().unwrap().len(),
+            1,
+            "the registered row is reported as skipped: {out}"
+        );
+    }
+
+    /// `prune_missing` must refuse a dead root that an ACTIVE registration
+    /// still covers — the worktree was `git worktree remove`d before its
+    /// shadow rows were merged, and pruning would delete the catalog's only
+    /// remaining record of that unmerged history.
+    #[test]
+    fn prune_missing_refuses_root_with_active_registration() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let dead_root = std::env::temp_dir().join("codescout-nonexistent-registered-root-9c2e7b1a");
+        assert!(!dead_root.exists(), "test fixture path must not exist");
+        let dead_root_str = dead_root.to_str().expect("temp path is valid UTF-8");
+        let normalized = crate::util::fs::RepoPath::from_path(&dead_root).to_string();
+        reg::upsert_active(&cat, &normalized, &normalized, None, 1000).unwrap();
+
+        let err =
+            validate_prune_request("prune_missing", Some(dead_root_str), &cat.conn).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("merge_worktree"),
+            "hint names merge_worktree: {msg}"
+        );
+        assert!(msg.contains("abandon"), "hint names abandon=true: {msg}");
     }
 
     fn aug_row(

@@ -133,20 +133,32 @@ worktree's overlay view of a forked tracker is self-contained.
   {
     "main_id": "<id of the main twin>",
     "branch": "<branch>",
-    "base_event_seq": <main row's max event seq at fork>,
     "base_params": { ...full params snapshot at fork... },
     "base_frontmatter": { "status": "...", "title": "...", "tags": [...] }
   }
   ```
 
-  Events carry JSON payloads and are already re-pointed atomically by
-  `graft_rows`, so the base cursor survives every later operation. The full
-  `base_params` snapshot (not a hash) is what makes merge-time delta extraction
-  and three-way scalar comparison **exact** instead of heuristic (F-2 workaround).
+  **Deviation from the original design (landed):** the payload carries the
+  full `base_params` snapshot and deliberately carries NO `base_event_seq`.
+  A shadow row is only ever created by `resolve_write_target` at fork time,
+  and every event recorded on it afterwards is inserted strictly after the
+  fork event by construction — so "events since the fork" needs no
+  seq-number cursor; the fork event itself is the boundary. The full
+  `base_params` snapshot (not a hash) is what makes merge-time delta
+  extraction and three-way scalar comparison **exact** instead of heuristic
+  (F-2 workaround).
 
 New artifacts born in the worktree have no link/fork event; merge classifies
 "row under a registered `worktree_root`, no `worktree_of` edge" as *new* and
 reuses the existing reseat machinery.
+
+**Migration note (landed):** `events.kind`'s CHECK constraint was widened
+(schema v9/v10, `widen_events_kind_check` in `catalog/mod.rs`) to allow
+`'worktree_fork'` and `'worktree_merge'` — a table-copy migration run outside
+the per-open `BEGIN IMMEDIATE` transaction (needs its own `foreign_keys=OFF`
+window), guarded idempotent via `events_check_allows_worktree_merge`. A
+catalog created before this constraint was widened would otherwise reject
+every `worktree_fork`/`worktree_merge` insert with `CHECK constraint failed`.
 
 ## Read path — overlay
 
@@ -179,7 +191,7 @@ resolve_write_target(ctx, target_id) -> target_id'
 
 Called at the top of every mutating action handler — `append_entry`, `update`,
 `artifact_event`, `artifact_augment`, `link` (when `src_id` resolves under
-`main_root`), `commit_refresh`. Behavior when the session is a worktree AND the
+`main_root`). Behavior when the session is a worktree AND the
 target row's abs_path is under `main_root` (and not under `worktree_root`):
 
 1. Upsert the `worktree_registration` (status `active`).
@@ -187,6 +199,15 @@ target row's abs_path is under `main_root` (and not under `worktree_root`):
    from the main row, write the `worktree_fork` event (base payload above),
    write the `worktree_of` link. Single transaction.
 3. Return the shadow id; the action proceeds against the shadow.
+
+**Deviation from the original design (landed):** `commit_refresh` dropped
+from the gated-handler list above. It was never a separate mutating action —
+it's a boolean flag on `artifact(action="update")`, already covered by the
+`update` entry — and the sibling `artifact_refresh(action="gather"|
+"list_stale")` tool is read-only (`gather` synthesizes context but does NOT
+write; the caller writes back via a normal `update` call). Reads never
+redirect; only writes do, so a read-only surface has no write-gate site to
+add.
 
 Non-worktree sessions, worktree-born targets, and cross-repo targets pass
 through unchanged. `delete` and `move` targeting main-root artifacts from a

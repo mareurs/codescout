@@ -225,6 +225,7 @@ Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, bod
 | `audit_doc_refs` | Lint markdown for stale code refs (paths, symbols, link targets, line refs). Manual — run before doc-heavy merges or when drift is suspected. Emits an `audit_issues` tracker. |
 | `legibility_scan` | Rank code-legibility refactor candidates from usage.db friction + the symbol index. Writes the `legibility-backlog` tracker (open targets by observed cost; auto-closes refactored ones). `write=false` for dry-run. |
 | `doctor` | Read-only catalog drift scan (forward-slash form, NTFS ADS colons, `..` segments, missing-on-disk files, `abs_path_must_be_absolute`). Manual — run after large refactors or when downstream LIKE queries return empty. Returns a per-check JSON report; does NOT mutate catalog state. |
+| `merge_worktree` | Fold a worktree session's shadow rows onto their main twins (delta-only) and close the registration. See § Worktree overlay below. |
 
 **context params:**
 ```
@@ -257,6 +258,36 @@ artifact(action="graph", id="...", depth=2, rels=["implements", "supersedes"])
 Returns BFS traversal of linked artifacts up to `depth` (1–3).
 
 ---
+
+## Worktree overlay
+
+A session running from a linked git worktree gets a live overlay onto the
+main checkout's catalog instead of a wholesale fork:
+
+- **Overlay reads:** a worktree session sees main-repo artifacts live until
+  it writes one. `find`/`get` dedup shadow vs. main — where both exist for
+  the same lineage, the shadow wins and is annotated `"overlay": true`.
+- **Fork-on-first-write:** the first mutating call (`append_entry`, `update`,
+  `artifact_event`, `artifact_augment`, `link`) against a main-root artifact
+  from a worktree session forks it — seeds a shadow row at the worktree path,
+  a `worktree_fork` event carrying the fork-time base params/frontmatter, and
+  a `worktree_of` lineage link. Every write after that lands on the shadow.
+  `delete`/`move` on a main-root target from a worktree session are refused —
+  merge or act from the main checkout instead.
+- **Merge:**
+  ```
+  librarian(action="merge_worktree", root="/repo/.worktrees/feat", dry_run=true)
+  ```
+  Folds each shadow's delta (vs. its fork-time base) onto its main twin,
+  reseats worktree-born rows, and closes the registration. Drop `dry_run`
+  to write; `abandon=true` instead drops the shadows and marks the
+  registration abandoned.
+- **`doctor`'s `worktree_scoped_row` / `fix=reseat_worktree` is now the
+  LEGACY fallback** — it only applies to worktree-scoped rows with no
+  ACTIVE registration (pre-overlay drift, or a lost registration). A
+  registered row's violation carries `"registered": true` and a hint
+  pointing at `merge_worktree`; `reseat_worktree` skips those rows rather
+  than reseating them.
 
 ## Archiving / Moving Trackers
 
