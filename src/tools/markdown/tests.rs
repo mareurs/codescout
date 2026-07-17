@@ -2352,3 +2352,91 @@ fn apply_planned_edits_orders_coincident_inserts_by_order() {
     let out = super::edit_markdown::apply_planned_edits(original, edits);
     assert_eq!(out.trim_end_matches('\n'), "AabB");
 }
+
+#[test]
+fn plan_section_edit_replace_matches_legacy_output() {
+    let content = "# Doc\n\n## A\nold body\n\n## B\ntail\n";
+    let legacy = super::edit_markdown::perform_section_edit_ext(
+        content,
+        "## A",
+        "replace",
+        Some("new body"),
+        None,
+        false,
+    )
+    .unwrap();
+    let off = super::edit_markdown::LineOffsets::new(content);
+    let planned = super::edit_markdown::plan_section_edit(
+        content,
+        &off,
+        "## A",
+        "replace",
+        Some("new body"),
+        None,
+        false,
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        super::edit_markdown::apply_planned_edits(content, planned),
+        legacy
+    );
+}
+
+#[test]
+fn plan_section_edit_insert_after_and_remove_match_legacy() {
+    let content = "## A\nbody\n## B\nmore\n";
+    for (action, arg, at) in [
+        ("insert_after", Some("added"), None),
+        ("insert_before", Some("added"), None),
+        ("remove", None, None),
+    ] {
+        let legacy =
+            super::edit_markdown::perform_section_edit_ext(content, "## A", action, arg, at, false)
+                .unwrap();
+        let off = super::edit_markdown::LineOffsets::new(content);
+        let planned = super::edit_markdown::plan_section_edit(
+            content, &off, "## A", action, arg, at, false, 0,
+        )
+        .unwrap();
+        assert_eq!(
+            super::edit_markdown::apply_planned_edits(content, planned),
+            legacy,
+            "mismatch for action {action}"
+        );
+    }
+}
+
+#[test]
+fn plan_section_edit_insert_after_last_section_matches_legacy() {
+    // EOF-append edge (note ‡): insert_after end-of-section on the LAST section,
+    // file ending in '\n'. insert_idx == lines.len(); legacy emits a blank line
+    // before the inserted text and the span model must reproduce it via the "\n" prefix.
+    let content = "## A\nbody\n"; // A is the last (and only) section
+    let legacy = super::edit_markdown::perform_section_edit_ext(
+        content,
+        "## A",
+        "insert_after",
+        Some("added"),
+        None,
+        false,
+    )
+    .unwrap();
+    let off = super::edit_markdown::LineOffsets::new(content);
+    let planned = super::edit_markdown::plan_section_edit(
+        content,
+        &off,
+        "## A",
+        "insert_after",
+        Some("added"),
+        None,
+        false,
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        super::edit_markdown::apply_planned_edits(content, planned),
+        legacy,
+        "insert_after on the last section must reproduce legacy EOF blank-line behavior"
+    );
+}

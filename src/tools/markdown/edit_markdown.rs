@@ -64,27 +64,24 @@ pub fn perform_section_edit(
     perform_section_edit_ext(content, heading_query, action, new_content, None, false)
 }
 
-/// Extended form: `at` controls where `insert_after` lands. Pass
-/// `Some("end-of-section")` (or `None`) for the historical behavior
-/// of inserting at the end of the heading's section, or
-/// `Some("after-heading-line")` to insert content immediately after
-/// the heading line itself. Ignored by other actions.
-///
-/// `force` bypasses the F-7 surface-marker-preservation gate: when `false`
-/// (default for the user-facing tool path), a `replace` whose new content
-/// would drop `<!-- @surface NAME -->` or `<!-- @end -->` lines present in
-/// the OLD body returns `RecoverableError` naming the lost markers. Pass
-/// `true` to override (e.g. intentional structural change). See F-7 in
-/// `docs/trackers/prompt-guide-refactor-session-log.md` for the bug-class
-/// rationale.
-pub fn perform_section_edit_ext(
+/// Plan the byte-span edit(s) that `action` on `heading_query` would produce,
+/// without applying them. Behavior-identical to the historical
+/// `perform_section_edit_ext` (see that function's doc comment for the full
+/// contract on `at`/`force`) -- `perform_section_edit_ext` is now a thin
+/// wrapper delegating here + `apply_planned_edits`, and batch-mode callers
+/// use this directly to collect edits from multiple `edits[]` entries before
+/// detecting overlaps and applying them together.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn plan_section_edit(
     content: &str,
+    off: &LineOffsets,
     heading_query: &str,
     action: &str,
     new_content: Option<&str>,
     at: Option<&str>,
     force: bool,
-) -> Result<String> {
+    edit_index: usize,
+) -> Result<Vec<PlannedEdit>> {
     use crate::tools::core::types::RecoverableError;
     use crate::tools::file_summary::{heading_level, resolve_section_range};
 
@@ -195,35 +192,38 @@ pub fn perform_section_edit_ext(
                 }
             };
 
-            let result = if replace_heading {
-                let before = join_lines(&lines[..heading_idx]);
-                let after = join_lines_tail(&lines[replace_end_idx..]);
-                format!("{}{}{}", before, ensure_trailing_newline(new), after)
+            let span = off.line_start(heading_idx)..off.line_start(replace_end_idx);
+            let replacement = if replace_heading {
+                ensure_trailing_newline(new)
             } else {
                 let heading_line_str = lines[heading_idx];
-                let before = join_lines(&lines[..heading_idx]);
-                let after = join_lines_tail(&lines[replace_end_idx..]);
                 let separator = if new.starts_with('\n') { "\n" } else { "\n\n" };
                 format!(
-                    "{}{}{}{}{}",
-                    before,
+                    "{}{}{}",
                     heading_line_str,
                     separator,
-                    ensure_trailing_newline(new),
-                    after
+                    ensure_trailing_newline(new)
                 )
             };
-            Ok(normalize_trailing_newline(&result))
+            Ok(vec![PlannedEdit {
+                span,
+                replacement,
+                edit_index,
+                order: edit_index,
+            }])
         }
 
         "insert_before" => {
             let new = new_content.ok_or_else(|| {
                 anyhow::anyhow!("content is required for the insert_before action")
             })?;
-            let before = join_lines(&lines[..heading_idx]);
-            let rest = join_lines_tail(&lines[heading_idx..]);
-            let result = format!("{}{}{}", before, ensure_trailing_newline(new), rest);
-            Ok(normalize_trailing_newline(&result))
+            let span = off.line_start(heading_idx)..off.line_start(heading_idx);
+            Ok(vec![PlannedEdit {
+                span,
+                replacement: ensure_trailing_newline(new),
+                edit_index,
+                order: edit_index,
+            }])
         }
 
         "insert_after" => {
@@ -240,15 +240,22 @@ pub fn perform_section_edit_ext(
                     ));
                 }
             };
-            let before = join_lines(&lines[..insert_idx]);
-            let after = join_lines_tail(&lines[insert_idx..]);
-            // Guarantee `new` ends with a newline so its last line never fuses
-            // onto whatever follows. At end-of-section the next line is often a
-            // sibling/parent heading; without this, `new entry## Heading` lands
-            // on one line and silently demotes the heading to body text. Matches
-            // the `replace` / `insert_before` arms, which already normalize.
-            let result = format!("{}{}{}", before, ensure_trailing_newline(new), after);
-            Ok(normalize_trailing_newline(&result))
+            let span = off.line_start(insert_idx)..off.line_start(insert_idx);
+            // EOF-append edge: `compute_section_end`'s fallback returns
+            // `lines.len()` for the last section, and legacy's
+            // `join_lines(&lines[..insert_idx])` unconditionally appends a
+            // newline even for the full slice -- i.e. it equals `content +
+            // "\n"`, not `content`. Reproduce that blank line here; this is
+            // the one arm where `off.line_start(i)` does not equal the
+            // legacy before-boundary when `i == lines.len()`.
+            let prefix = if insert_idx == lines.len() { "\n" } else { "" };
+            let replacement = format!("{prefix}{}", ensure_trailing_newline(new));
+            Ok(vec![PlannedEdit {
+                span,
+                replacement,
+                edit_index,
+                order: edit_index,
+            }])
         }
 
         "remove" => {
@@ -256,10 +263,13 @@ pub fn perform_section_edit_ext(
             if remove_end < lines.len() && lines[remove_end].trim().is_empty() {
                 remove_end += 1;
             }
-            let before = join_lines(&lines[..heading_idx]);
-            let after = join_lines_tail(&lines[remove_end..]);
-            let result = format!("{}{}", before, after);
-            Ok(normalize_trailing_newline(&result))
+            let span = off.line_start(heading_idx)..off.line_start(remove_end);
+            Ok(vec![PlannedEdit {
+                span,
+                replacement: String::new(),
+                edit_index,
+                order: edit_index,
+            }])
         }
 
         other => Err(anyhow::anyhow!(
@@ -267,6 +277,45 @@ pub fn perform_section_edit_ext(
             other
         )),
     }
+}
+/// Extended form: `at` controls where `insert_after` lands. Pass
+/// `Some("end-of-section")` (or `None`) for the historical behavior
+/// of inserting at the end of the heading's section, or
+/// `Some("after-heading-line")` to insert content immediately after
+/// the heading line itself. Ignored by other actions.
+///
+/// `force` bypasses the F-7 surface-marker-preservation gate: when `false`
+/// (default for the user-facing tool path), a `replace` whose new content
+/// would drop `<!-- @surface NAME -->` or `<!-- @end -->` lines present in
+/// the OLD body returns `RecoverableError` naming the lost markers. Pass
+/// `true` to override (e.g. intentional structural change). See F-7 in
+/// `docs/trackers/prompt-guide-refactor-session-log.md` for the bug-class
+/// rationale.
+///
+/// Thin wrapper over `plan_section_edit` + `apply_planned_edits`: plans a
+/// single edit at `edit_index=0` and applies it immediately, preserving the
+/// historical single-edit string-in-string-out contract for callers that
+/// don't need batch-mode overlap detection.
+pub fn perform_section_edit_ext(
+    content: &str,
+    heading_query: &str,
+    action: &str,
+    new_content: Option<&str>,
+    at: Option<&str>,
+    force: bool,
+) -> Result<String> {
+    let off = LineOffsets::new(content);
+    let edits = plan_section_edit(
+        content,
+        &off,
+        heading_query,
+        action,
+        new_content,
+        at,
+        force,
+        0,
+    )?;
+    Ok(apply_planned_edits(content, edits))
 }
 
 /// Compute the exclusive-end index (into `split('\n')` lines) for a section
