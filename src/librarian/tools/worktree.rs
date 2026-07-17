@@ -241,7 +241,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(ev.kind, "worktree_fork");
-        assert!(ev.payload.contains(r#""main_id""#) && ev.payload.contains(r#""base_params""#));
+        assert!(ev.payload.contains(r#""main_id""#));
+        // base_params VALUE must be the full base snapshot — not a hash, not a
+        // subset, not an empty object. Task 8's merge extracts the worktree
+        // delta by diffing against this exact value, so a mutation that
+        // shrinks/replaces it must fail here.
+        let payload: serde_json::Value = serde_json::from_str(&ev.payload).unwrap();
+        let base = &payload["base_params"];
+        assert_eq!(base["items"][0]["id"], "F-1");
+        assert_eq!(base["note"], "base");
         // durable registration
         assert!(
             reg::get(&cat, "/repo/.worktrees/feat")
@@ -322,5 +330,38 @@ mod tests {
             resolve_write_target(&mut c, &ctx, &peer_id).unwrap()
         };
         assert_eq!(got, peer_id);
+    }
+
+    #[test]
+    fn worktree_born_target_passes_through() {
+        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
+        let id = {
+            let cat = ctx.catalog.lock();
+            let id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+                "/repo/.worktrees/feat/docs/new.md",
+            ));
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new(&id)
+                    .with_abs_path("/repo/.worktrees/feat/docs/new.md")
+                    .build(),
+            )
+            .unwrap();
+            id
+        };
+        let got = {
+            let mut cat = ctx.catalog.lock();
+            resolve_write_target(&mut cat, &ctx, &id).unwrap()
+        };
+        assert_eq!(got, id);
+        // pure passthrough: no fork, no new shadow row, no lineage link
+        let cat = ctx.catalog.lock();
+        let count: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(events::latest_for_artifact(&cat, &id).unwrap().is_none());
+        assert!(links::outgoing(&cat, &id).unwrap().is_empty());
     }
 }
