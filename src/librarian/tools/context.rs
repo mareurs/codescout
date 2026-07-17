@@ -90,8 +90,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         .collect(),
                 ))
             };
-            let (scoped_filter, _) =
-                apply_scope(archived_clause, effective_scope, &ctx.workspace, current)?;
+            let (scoped_filter, _) = apply_scope(
+                archived_clause,
+                effective_scope,
+                &ctx.workspace,
+                current,
+                &[],
+            )?;
             let project_id = if effective_scope == Scope::Project {
                 current.and_then(|cp| {
                     let roots: Vec<std::path::PathBuf> =
@@ -151,8 +156,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         .collect(),
                 ))
             };
-            let (scoped_filter, _) =
-                apply_scope(archived_clause, effective_scope, &ctx.workspace, current)?;
+            let (scoped_filter, _) = apply_scope(
+                archived_clause,
+                effective_scope,
+                &ctx.workspace,
+                current,
+                &[],
+            )?;
 
             // topic_vec was None here (the semantic path is hoisted above) —
             // fall back to a title/topic substring filter.
@@ -215,8 +225,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 ));
             }
             let goal_filter = FilterNode::And { and: clauses };
-            let (scoped_filter, _) =
-                apply_scope(Some(goal_filter), effective_scope, &ctx.workspace, current)?;
+            let (scoped_filter, _) = apply_scope(
+                Some(goal_filter),
+                effective_scope,
+                &ctx.workspace,
+                current,
+                &[],
+            )?;
             let mut rows = find(
                 &cat,
                 &FindOpts {

@@ -56,6 +56,7 @@ pub fn apply_scope(
     scope: Scope,
     ws: &WorkspaceConfig,
     current: Option<&CurrentProject>,
+    exclude_worktrees: &[String],
 ) -> Result<(Option<FilterNode>, ScopeApplied)> {
     fn require<'a>(
         current: Option<&'a CurrentProject>,
@@ -74,11 +75,23 @@ pub fn apply_scope(
         Scope::All => None,
         Scope::Project => {
             let cp = require(current, "project")?;
-            Some(path_prefix_clause(&cp.abs_path))
+            Some(match &cp.main_root {
+                // Overlay: a worktree session sees its own rows AND the main
+                // checkout's rows; shadow-vs-main dedup happens post-query in find.
+                Some(main) => FilterNode::Or {
+                    or: vec![path_prefix_clause(&cp.abs_path), path_prefix_clause(main)],
+                },
+                None => path_prefix_clause(&cp.abs_path),
+            })
         }
         Scope::Repo => {
             let cp = require(current, "repo")?;
-            Some(path_prefix_clause(&cp.git_root))
+            Some(match &cp.main_root {
+                Some(main) => FilterNode::Or {
+                    or: vec![path_prefix_clause(&cp.git_root), path_prefix_clause(main)],
+                },
+                None => path_prefix_clause(&cp.git_root),
+            })
         }
         Scope::Umbrella => {
             let cp = require(current, "umbrella")?;
@@ -103,6 +116,21 @@ pub fn apply_scope(
             }
             Some(or_of_prefixes(&umb.members))
         }
+    };
+
+    // Shadow rows belong to their worktree's overlay: every other session
+    // excludes them. (In-repo layouts like <main>/.worktrees/<n> would
+    // otherwise match the main prefix.)
+    let scope_clause = match (scope_clause, exclude_worktrees.is_empty()) {
+        (Some(sc), false) => Some(FilterNode::And {
+            and: vec![
+                sc,
+                FilterNode::Not {
+                    not: Box::new(or_of_prefix_strings(exclude_worktrees)),
+                },
+            ],
+        }),
+        (sc, _) => sc,
     };
 
     let combined = match (user_filter, scope_clause) {
@@ -150,6 +178,18 @@ fn or_of_prefixes(members: &[std::path::PathBuf]) -> FilterNode {
     }
 }
 
+// Sibling of `or_of_prefixes` over `&[String]` — `exclude_worktrees` carries
+// forward-slash root strings (from `worktree::active_roots`), not the
+// `PathBuf` umbrella-member list `or_of_prefixes` takes.
+fn or_of_prefix_strings(roots: &[String]) -> FilterNode {
+    FilterNode::Or {
+        or: roots
+            .iter()
+            .map(|s| path_prefix_clause(std::path::Path::new(s)))
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,10 +213,19 @@ mod tests {
         }
     }
 
+    fn cp_wt(abs_path: &str, git_root: &str, main_root: &str) -> CurrentProject {
+        CurrentProject {
+            abs_path: abs_path.into(),
+            git_root: git_root.into(),
+            main_root: Some(main_root.into()),
+            umbrella: None,
+        }
+    }
+
     #[test]
     fn project_scope_without_current_project_errors() {
         let w = ws(vec![], vec![]);
-        let err = apply_scope(None, Scope::Project, &w, None).unwrap_err();
+        let err = apply_scope(None, Scope::Project, &w, None, &[]).unwrap_err();
         assert!(err.to_string().contains("scope=project"));
     }
 
@@ -188,7 +237,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        let (filter, applied) = apply_scope(Some(user.clone()), Scope::All, &w, None).unwrap();
+        let (filter, applied) = apply_scope(Some(user.clone()), Scope::All, &w, None, &[]).unwrap();
         assert!(matches!(filter, Some(FilterNode::Leaf(_))));
         assert_eq!(applied.scope, Scope::All);
     }
@@ -203,7 +252,7 @@ mod tests {
             }],
         );
         let cur = cp("infra", "svc-a", Some("platform"));
-        let (filter, _) = apply_scope(None, Scope::Umbrella, &w, Some(&cur)).unwrap();
+        let (filter, _) = apply_scope(None, Scope::Umbrella, &w, Some(&cur), &[]).unwrap();
         match filter.unwrap() {
             FilterNode::Or { or } => assert_eq!(or.len(), 2),
             f => panic!("expected Or, got {f:?}"),
@@ -214,7 +263,7 @@ mod tests {
     fn umbrella_scope_without_umbrella_errors() {
         let w = ws(vec![], vec![]);
         let cur = cp("infra", "svc-a", None);
-        let err = apply_scope(None, Scope::Umbrella, &w, Some(&cur)).unwrap_err();
+        let err = apply_scope(None, Scope::Umbrella, &w, Some(&cur), &[]).unwrap_err();
         assert!(err.to_string().contains("umbrella"));
     }
 
@@ -227,11 +276,57 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        let (filter, _) = apply_scope(Some(user), Scope::Project, &w, Some(&cur)).unwrap();
+        let (filter, _) = apply_scope(Some(user), Scope::Project, &w, Some(&cur), &[]).unwrap();
         // Outer And combines user + scope
         match filter.unwrap() {
             FilterNode::And { and } => assert_eq!(and.len(), 2),
             f => panic!("expected outer And, got {f:?}"),
         }
+    }
+
+    #[test]
+    fn worktree_project_scope_unions_worktree_and_main_prefixes() {
+        let ws = ws(vec![], vec![]);
+        let current = cp_wt("/repo/.worktrees/feat", "/repo/.worktrees/feat", "/repo");
+        let (f, _) = apply_scope(None, Scope::Project, &ws, Some(&current), &[]).unwrap();
+        let s = serde_json::to_string(&f.unwrap()).unwrap();
+        assert!(
+            s.contains("/repo/.worktrees/feat/"),
+            "worktree prefix present: {s}"
+        );
+        assert!(
+            s.contains(r#""prefix":"/repo/""#),
+            "main prefix present: {s}"
+        );
+    }
+
+    #[test]
+    fn exclusion_wraps_scope_with_not_prefix() {
+        let ws = ws(vec![], vec![]);
+        let current = cp("/repo", "/repo", None);
+        let (f, _) = apply_scope(
+            None,
+            Scope::Project,
+            &ws,
+            Some(&current),
+            &["/repo/.worktrees/feat".to_string()],
+        )
+        .unwrap();
+        let s = serde_json::to_string(&f.unwrap()).unwrap();
+        assert!(s.contains(r#""not""#), "NOT clause present: {s}");
+        assert!(
+            s.contains("/repo/.worktrees/feat/"),
+            "excluded prefix present: {s}"
+        );
+    }
+
+    #[test]
+    fn no_exclusion_clause_when_list_empty() {
+        let ws = ws(vec![], vec![]);
+        let current = cp("/repo", "/repo", None);
+        let (f, _) = apply_scope(None, Scope::Project, &ws, Some(&current), &[]).unwrap();
+        assert!(!serde_json::to_string(&f.unwrap())
+            .unwrap()
+            .contains(r#""not""#));
     }
 }

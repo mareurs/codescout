@@ -119,6 +119,7 @@ fn build_hints(
     include_archived: bool,
     returned_count: usize,
     offset: usize,
+    exclude_worktrees: &[String],
 ) -> Result<Value> {
     let mut hints = serde_json::Map::new();
 
@@ -129,7 +130,7 @@ fn build_hints(
         );
     }
 
-    let here = count_for_scope(cat, base, ws, current, applied.scope)?;
+    let here = count_for_scope(cat, base, ws, current, applied.scope, exclude_worktrees)?;
 
     // More matched in THIS scope than were returned on this page? The result
     // set is capped by `limit`/`offset`; without this signal an agent reads the
@@ -149,7 +150,7 @@ fn build_hints(
     }
 
     if !matches!(applied.scope, Scope::Repo | Scope::All) && current.is_some() {
-        let in_repo = count_for_scope(cat, base, ws, current, Scope::Repo)?;
+        let in_repo = count_for_scope(cat, base, ws, current, Scope::Repo, exclude_worktrees)?;
         let extra = in_repo.saturating_sub(here);
         if extra > 0 {
             hints.insert("more_in_repo".into(), json!(extra));
@@ -159,7 +160,8 @@ fn build_hints(
     if !matches!(applied.scope, Scope::Umbrella | Scope::All)
         && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
-        let in_umbrella = count_for_scope(cat, base, ws, current, Scope::Umbrella)?;
+        let in_umbrella =
+            count_for_scope(cat, base, ws, current, Scope::Umbrella, exclude_worktrees)?;
         let extra = in_umbrella.saturating_sub(here);
         if extra > 0 {
             hints.insert("more_in_umbrella".into(), json!(extra));
@@ -170,7 +172,7 @@ fn build_hints(
     // are unrelated and crossing into them would be misleading.
     if !matches!(applied.scope, Scope::All) && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
-        let in_workspace = count_for_scope(cat, base, ws, current, Scope::All)?;
+        let in_workspace = count_for_scope(cat, base, ws, current, Scope::All, exclude_worktrees)?;
         let extra = in_workspace.saturating_sub(here);
         if extra > 0 {
             hints.insert("more_in_workspace".into(), json!(extra));
@@ -179,7 +181,14 @@ fn build_hints(
 
     if !user_constrains_status && !include_archived {
         let stripped = base.cloned().map(strip_status_clause);
-        let with_archived = count_for_scope(cat, stripped.as_ref(), ws, current, applied.scope)?;
+        let with_archived = count_for_scope(
+            cat,
+            stripped.as_ref(),
+            ws,
+            current,
+            applied.scope,
+            exclude_worktrees,
+        )?;
         let hidden = with_archived.saturating_sub(here);
         if hidden > 0 {
             hints.insert("hidden_archived".into(), json!(hidden));
@@ -213,6 +222,7 @@ fn count_for_scope(
     ws: &crate::librarian::workspace::WorkspaceConfig,
     current: Option<&crate::librarian::current_project::CurrentProject>,
     scope: Scope,
+    exclude_worktrees: &[String],
 ) -> Result<usize> {
     if matches!(scope, Scope::Project | Scope::Repo) && current.is_none() {
         return Ok(0);
@@ -220,7 +230,7 @@ fn count_for_scope(
     if matches!(scope, Scope::Umbrella) && current.and_then(|c| c.umbrella.as_deref()).is_none() {
         return Ok(0);
     }
-    let (filter, _) = apply_scope(base.cloned(), scope, ws, current)?;
+    let (filter, _) = apply_scope(base.cloned(), scope, ws, current, exclude_worktrees)?;
     count_matching(cat, filter.as_ref())
 }
 
@@ -435,8 +445,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
 
     let current = ctx.current_project.as_deref();
-    let (scoped_filter, applied) =
-        apply_scope(base.clone(), effective_scope, &ctx.workspace, current)?;
+    let exclude_worktrees: Vec<String> = {
+        let cat = ctx.catalog.lock();
+        let own = current
+            .filter(|c| c.main_root.is_some())
+            .map(|c| crate::util::fs::RepoPath::from(c.git_root.as_path()).into_string());
+        crate::librarian::catalog::worktree::active_roots(&cat)?
+            .into_iter()
+            .filter(|r| own.as_deref() != Some(r.as_str()))
+            .collect()
+    };
+    let (scoped_filter, applied) = apply_scope(
+        base.clone(),
+        effective_scope,
+        &ctx.workspace,
+        current,
+        &exclude_worktrees,
+    )?;
 
     // Semantic path runs the async store-backed coordinator (it manages its own
     // catalog locking); the sync `find` below handles the non-semantic case.
@@ -531,6 +556,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 a.include_archived,
                 items.len(),
                 offset,
+                &exclude_worktrees,
             )?
         };
 

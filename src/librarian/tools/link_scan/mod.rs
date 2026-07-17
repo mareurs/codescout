@@ -66,8 +66,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let effective_scope = args.scope.unwrap_or(Scope::Project);
     let current = ctx.current_project.as_ref();
-    let (scoped_filter, applied) =
-        apply_scope(None, effective_scope, &ctx.workspace, current.map(|v| &**v))?;
+    let (scoped_filter, applied) = apply_scope(
+        None,
+        effective_scope,
+        &ctx.workspace,
+        current.map(|v| &**v),
+        &[],
+    )?;
 
     let git_root = current.map(|c| c.git_root.clone());
 

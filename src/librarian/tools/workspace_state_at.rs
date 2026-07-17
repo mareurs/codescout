@@ -128,7 +128,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let base_filter = build_base_filter(a.kinds.as_deref(), a.include_archived);
     let current = ctx.current_project.as_deref();
     let (scoped_filter, applied) =
-        apply_scope(base_filter, effective_scope, &ctx.workspace, current)?;
+        apply_scope(base_filter, effective_scope, &ctx.workspace, current, &[])?;
 
     let (total_in_scope, all_rows) = {
         let cat = ctx.catalog.lock();
