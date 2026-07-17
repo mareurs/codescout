@@ -87,6 +87,8 @@ pub fn apply_scope(
         Scope::Repo => {
             let cp = require(current, "repo")?;
             Some(match &cp.main_root {
+                // Overlay: a worktree session sees its own rows AND the main
+                // checkout's rows; shadow-vs-main dedup happens post-query in find.
                 Some(main) => FilterNode::Or {
                     or: vec![path_prefix_clause(&cp.git_root), path_prefix_clause(main)],
                 },
@@ -289,6 +291,22 @@ mod tests {
         let ws = ws(vec![], vec![]);
         let current = cp_wt("/repo/.worktrees/feat", "/repo/.worktrees/feat", "/repo");
         let (f, _) = apply_scope(None, Scope::Project, &ws, Some(&current), &[]).unwrap();
+        let s = serde_json::to_string(&f.unwrap()).unwrap();
+        assert!(
+            s.contains("/repo/.worktrees/feat/"),
+            "worktree prefix present: {s}"
+        );
+        assert!(
+            s.contains(r#""prefix":"/repo/""#),
+            "main prefix present: {s}"
+        );
+    }
+
+    #[test]
+    fn worktree_repo_scope_unions_worktree_and_main_prefixes() {
+        let ws = ws(vec![], vec![]);
+        let current = cp_wt("/repo/.worktrees/feat", "/repo/.worktrees/feat", "/repo");
+        let (f, _) = apply_scope(None, Scope::Repo, &ws, Some(&current), &[]).unwrap();
         let s = serde_json::to_string(&f.unwrap()).unwrap();
         assert!(
             s.contains("/repo/.worktrees/feat/"),
