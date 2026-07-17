@@ -2,7 +2,7 @@
 //! docs/superpowers/specs/2026-07-17-worktree-overlay-design.md §3.
 //!
 //! Wired into every mutating artifact handler (append_entry/update/
-//! event_create/augment/refresh/link/delete/mv/create) — see the
+//! event_create/augment/link/delete/mv/create) — see the
 //! `resolve_write_target`/`ensure_registration` call sites in
 //! `librarian::tools::*`.
 
@@ -20,6 +20,22 @@ pub(crate) const LINEAGE_REL: &str = "worktree_of";
 
 fn under(path: &str, root: &str) -> bool {
     path == root || path.starts_with(&format!("{root}/"))
+}
+/// True iff `row_abs_path` belongs to the MAIN checkout as seen from session `cp`:
+/// the session is a worktree (`main_root.is_some()`), and the path is under
+/// `main_root` but NOT under the worktree's own root. False for non-worktree
+/// sessions, worktree-born rows (under the worktree root), and foreign-repo rows.
+pub(crate) fn is_main_checkout_artifact(
+    cp: &CurrentProject,
+    row_abs_path: &std::path::Path,
+) -> bool {
+    let Some(main_root) = cp.main_root.as_ref() else {
+        return false;
+    };
+    let main_s = RepoPath::from(main_root.as_path()).into_string();
+    let wt_s = RepoPath::from(cp.git_root.as_path()).into_string();
+    let row = RepoPath::from(row_abs_path).into_string();
+    under(&row, &main_s) && !under(&row, &wt_s)
 }
 
 /// Best-effort branch name: worktree `.git` file → gitdir → `<gitdir>/HEAD`
@@ -70,13 +86,13 @@ pub(crate) fn resolve_write_target(
     let Some(row) = artifact::get(cat, id)? else {
         return Ok(id.to_string()); // unknown id: let the caller produce its own error
     };
-    let main_s = RepoPath::from(main_root.as_path()).into_string();
-    let wt_s = RepoPath::from(cp.git_root.as_path()).into_string();
-    let row_path = RepoPath::from(row.abs_path.as_path()).into_string();
-    if under(&row_path, &wt_s) || !under(&row_path, &main_s) {
+    if !is_main_checkout_artifact(cp, &row.abs_path) {
         return Ok(id.to_string()); // already shadow, or foreign repo — no isolation (spec non-goal)
     }
 
+    let main_s = RepoPath::from(main_root.as_path()).into_string();
+    let wt_s = RepoPath::from(cp.git_root.as_path()).into_string();
+    let row_path = RepoPath::from(row.abs_path.as_path()).into_string();
     let rel = row_path
         .strip_prefix(&format!("{main_s}/"))
         .unwrap_or(&row_path);

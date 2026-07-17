@@ -33,15 +33,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // out from under the main checkout. Merge first, or run from the main
     // checkout.
     if let Some(cp) = ctx.current_project.as_deref() {
-        if let Some(main_root) = cp.main_root.as_ref() {
-            let main_s = crate::util::fs::RepoPath::from(main_root.as_path()).into_string();
-            let row_path = crate::util::fs::RepoPath::from(row.abs_path.as_path()).into_string();
-            if row_path == main_s || row_path.starts_with(&format!("{main_s}/")) {
-                return Err(super::RecoverableError::new(
-                    "refused from a worktree session: this artifact belongs to the main checkout. \
-                     Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
-                ));
-            }
+        if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
+            return Err(super::RecoverableError::new(
+                "refused from a worktree session: this artifact belongs to the main checkout. \
+                 Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
+            ));
         }
     }
 
@@ -286,6 +282,67 @@ mod tests {
         assert!(
             err.to_string().contains("worktree"),
             "refusal names the worktree overlay: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_of_worktree_born_artifact_is_allowed() {
+        // /repo/.worktrees/feat is the worktree's OWN root — an artifact born
+        // there is not a main-checkout artifact and must not be refused, even
+        // though its path also starts with /repo (main_root).
+        let tmp = tempfile::tempdir().unwrap();
+        let main_root = tmp.path().to_path_buf();
+        let wt_root = main_root.join(".worktrees/feat");
+        std::fs::create_dir_all(wt_root.join("docs")).unwrap();
+        let file_path = wt_root.join("docs/new.md");
+        std::fs::write(
+            &file_path,
+            "---\nid: wtbornwtbornwtb1\nkind: tracker\n---\n# New\n",
+        )
+        .unwrap();
+
+        let id = "wtbornwtbornwtb1";
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &ArtifactRow {
+                id: id.into(),
+                abs_path: file_path.clone(),
+                kind: "tracker".into(),
+                status: "active".into(),
+                title: Some("Worktree-born".into()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: 0,
+                updated_at: 0,
+                file_mtime: 0,
+                file_sha256: String::new(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: wt_root.clone(),
+                    git_root: wt_root.clone(),
+                    main_root: Some(main_root.clone()),
+                    umbrella: None,
+                },
+            ))
+            .build();
+
+        let result = delete::call(&ctx, serde_json::json!({"id": id}))
+            .await
+            .unwrap();
+        assert_eq!(result["deleted"], true);
+        assert!(
+            !file_path.exists(),
+            "worktree-born artifact must actually be deleted, not refused"
         );
     }
 }

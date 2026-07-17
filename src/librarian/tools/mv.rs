@@ -43,15 +43,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // file/row out from under the main checkout. Merge first, or run from
     // the main checkout.
     if let Some(cp) = ctx.current_project.as_deref() {
-        if let Some(main_root) = cp.main_root.as_ref() {
-            let main_s = crate::util::fs::RepoPath::from(main_root.as_path()).into_string();
-            let row_path = crate::util::fs::RepoPath::from(row.abs_path.as_path()).into_string();
-            if row_path == main_s || row_path.starts_with(&format!("{main_s}/")) {
-                return Err(super::RecoverableError::new(
-                    "refused from a worktree session: this artifact belongs to the main checkout. \
-                     Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
-                ));
-            }
+        if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
+            return Err(super::RecoverableError::new(
+                "refused from a worktree session: this artifact belongs to the main checkout. \
+                 Merge the worktree (librarian action=\"merge_worktree\") or run this from the main checkout.",
+            ));
         }
     }
 
@@ -344,6 +340,93 @@ mod tests {
         assert!(
             err.to_string().contains("..") || err.to_string().contains("relative"),
             "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mv_of_main_artifact_from_worktree_is_refused() {
+        let ctx = crate::librarian::tools::worktree::test_support::wt_ctx(
+            Catalog::open_in_memory().unwrap(),
+        );
+        let main_id = {
+            let c = ctx.catalog.lock();
+            crate::librarian::tools::worktree::test_support::seed_main_tracker(&c)
+        };
+
+        let err = mv::call(
+            &ctx,
+            serde_json::json!({"id": main_id, "new_rel_path": "docs/trackers/moved.md"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("worktree"),
+            "refusal names the worktree overlay: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mv_of_worktree_born_artifact_is_allowed() {
+        // Mirror of the delete-side test: an artifact born under the
+        // worktree's own root (nested inside main_root) must not be refused.
+        let tmp = tempfile::tempdir().unwrap();
+        let main_root = tmp.path().to_path_buf();
+        let wt_root = main_root.join(".worktrees/feat");
+        std::fs::create_dir_all(wt_root.join("docs")).unwrap();
+        let file_path = wt_root.join("docs/new.md");
+        std::fs::write(
+            &file_path,
+            "---\nid: mvwtbornmvwtbo1\nkind: tracker\n---\n# New\n",
+        )
+        .unwrap();
+
+        let id = "mvwtbornmvwtbo1";
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &ArtifactRow {
+                id: id.into(),
+                abs_path: file_path.clone(),
+                kind: "tracker".into(),
+                status: "active".into(),
+                title: Some("Worktree-born".into()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: 0,
+                updated_at: 0,
+                file_mtime: 0,
+                file_sha256: String::new(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: wt_root.clone(),
+                    git_root: wt_root.clone(),
+                    main_root: Some(main_root.clone()),
+                    umbrella: None,
+                },
+            ))
+            .build();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({"id": id, "new_rel_path": "docs/moved.md"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["moved"], true);
+        assert!(wt_root.join("docs/moved.md").exists());
+        assert!(
+            !file_path.exists(),
+            "worktree-born artifact must actually be moved, not refused"
         );
     }
 }
