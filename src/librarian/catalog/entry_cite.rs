@@ -39,6 +39,13 @@ pub fn incoming(cat: &Catalog, dst_ref: &str) -> Result<Vec<EntryCiteRow>> {
     collect(cat, "WHERE dst_ref = ?1", params![dst_ref])
 }
 
+/// Incoming edges whose dst_ref matches a SQL LIKE pattern (e.g. "<slug>:%"
+/// to find everything citing any entry of a tracker). Exact-match `incoming`
+/// stays the right call for artifact-id targets.
+pub fn incoming_like(cat: &Catalog, pattern: &str) -> Result<Vec<EntryCiteRow>> {
+    collect(cat, "WHERE dst_ref LIKE ?1", params![pattern])
+}
+
 fn collect(
     cat: &Catalog,
     where_clause: &str,

@@ -3,8 +3,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{RecoverableError, ToolContext};
-use crate::librarian::catalog::{artifact, augmentation, links, observations};
+use crate::librarian::catalog::{artifact, augmentation, entry_cite, links, observations};
 use rusqlite;
+use rusqlite::OptionalExtension;
 
 use crate::librarian::frontmatter;
 use crate::librarian::preview::headings;
@@ -112,6 +113,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         row,
         observations_json,
         links_json,
+        entry_links_json,
         latest_event_row,
         latest_reviewed_at,
         aug,
@@ -178,6 +180,35 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             None
         };
 
+        let entry_links_json = if want_links {
+            let slug: Option<String> = cat
+                .conn
+                .query_row(
+                    "SELECT slug FROM artifact WHERE id = ?1",
+                    rusqlite::params![a.id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .flatten();
+            match slug {
+                Some(s) => {
+                    let out_items: Vec<Value> = entry_cite::outgoing(&cat, &s)?
+                        .into_iter()
+                        .map(|e| json!({"src_local": e.src_local, "dst_ref": e.dst_ref, "rel": e.rel}))
+                        .collect();
+                    let in_items: Vec<Value> = entry_cite::incoming(&cat, &a.id)?
+                        .into_iter()
+                        .chain(entry_cite::incoming_like(&cat, &format!("{s}:%"))?)
+                        .map(|e| json!({"src": format!("{}:{}", e.src_slug, e.src_local), "rel": e.rel}))
+                        .collect();
+                    Some(json!({"outgoing": out_items, "incoming": in_items}))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
         let latest_event_row = crate::librarian::catalog::events::latest_for_artifact(&cat, &a.id)?;
         let latest_reviewed_at: Option<i64> = cat
             .conn
@@ -235,6 +266,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             row,
             observations_json,
             links_json,
+            entry_links_json,
             latest_event_row,
             latest_reviewed_at,
             aug,
@@ -289,6 +321,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     if let Some(v) = links_json {
         out["links"] = v;
+    }
+    if let Some(v) = entry_links_json {
+        out["entry_links"] = v;
     }
 
     let freshness =
@@ -1365,6 +1400,65 @@ mod tests {
         let outgoing = result["links"]["outgoing"].as_array().unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0]["rel"], "implements");
+    }
+    #[tokio::test]
+    async fn include_links_surfaces_entry_cite_edges() {
+        use crate::librarian::catalog::entry_cite::{self, EntryCiteRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='tracker-a' WHERE id='a'", [])
+            .unwrap();
+        entry_cite::insert_with(
+            &cat.conn,
+            &EntryCiteRow {
+                src_slug: "tracker-a".into(),
+                src_local: "W-1".into(),
+                dst_ref: "some-target".into(),
+                rel: "cites".into(),
+                origin: "write".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"id": "a", "include_links": true}))
+            .await
+            .unwrap();
+        assert_eq!(v["entry_links"]["outgoing"].as_array().unwrap().len(), 1);
+        assert_eq!(v["entry_links"]["outgoing"][0]["dst_ref"], "some-target");
+    }
+
+    #[tokio::test]
+    async fn include_links_surfaces_entry_cite_incoming_via_like() {
+        use crate::librarian::catalog::entry_cite::{self, EntryCiteRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        artifact::upsert(&cat, &mk_row("b")).unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='tracker-a' WHERE id='a'", [])
+            .unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='tracker-b' WHERE id='b'", [])
+            .unwrap();
+        entry_cite::insert_with(
+            &cat.conn,
+            &EntryCiteRow {
+                src_slug: "tracker-b".into(),
+                src_local: "W-1".into(),
+                dst_ref: "tracker-a:F-3".into(),
+                rel: "cites".into(),
+                origin: "write".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"id": "a", "include_links": true}))
+            .await
+            .unwrap();
+        assert_eq!(v["entry_links"]["incoming"].as_array().unwrap().len(), 1);
+        assert_eq!(v["entry_links"]["incoming"][0]["src"], "tracker-b:W-1");
     }
 
     #[tokio::test]
