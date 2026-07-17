@@ -254,15 +254,31 @@ mod tests {
             let c = ctx.catalog.lock();
             crate::librarian::tools::worktree::test_support::seed_main_tracker(&c)
         };
+        // Cite the main tracker's own id — resolvable via the 16-hex branch, so
+        // WITHOUT the worktree guard this append would succeed. This makes the
+        // guard the only possible source of the error (discriminating test).
         let err = call(
             &ctx,
             json!({
                 "id": main_id, "entry_collection": "items", "id_prefix": "F",
-                "entry": {"t": "x"}, "cites": ["deadbeefdeadbeef"]
+                "entry": {"t": "x"}, "cites": [main_id.clone()]
             }),
         )
         .await
         .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the worktree-guard error, got: {err}"
+        );
+        let c = ctx.catalog.lock();
+        let n: i64 = c
+            .conn
+            .query_row("SELECT COUNT(*) FROM entry_cite", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            n, 0,
+            "guard must refuse before any entry_cite row is written"
+        );
     }
 }

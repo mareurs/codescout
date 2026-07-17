@@ -1038,4 +1038,67 @@ mod tests {
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert_eq!(params["failures"].as_array().unwrap().len(), 2);
     }
+
+    #[test]
+    fn resolve_cite_ref_resolves_existing_hex_id() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("0123456789abcdef")).unwrap();
+
+        let resolved = resolve_cite_ref(&cat.conn, "0123456789abcdef").unwrap();
+        assert_eq!(resolved, "0123456789abcdef");
+    }
+
+    #[test]
+    fn resolve_cite_ref_resolves_slug_local() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='trk' WHERE id='art1'", [])
+            .unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("items".to_string());
+        a.params = r#"{"items":[{"id":"F-1"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let resolved = resolve_cite_ref(&cat.conn, "trk:F-1").unwrap();
+        assert_eq!(resolved, "trk:F-1");
+    }
+
+    #[test]
+    fn resolve_cite_ref_rejects_unknown_local() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='trk' WHERE id='art1'", [])
+            .unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("items".to_string());
+        a.params = r#"{"items":[{"id":"F-1"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let err = resolve_cite_ref(&cat.conn, "trk:F-99").unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    #[test]
+    fn resolve_cite_ref_rejects_ambiguous_rel_path() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("dup-a")
+                .with_abs_path("/a/dup.md")
+                .build(),
+        )
+        .unwrap();
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("dup-b")
+                .with_abs_path("/b/dup.md")
+                .build(),
+        )
+        .unwrap();
+
+        let err = resolve_cite_ref(&cat.conn, "dup.md").unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
 }
