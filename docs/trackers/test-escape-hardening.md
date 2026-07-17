@@ -86,3 +86,9 @@ review-lens/recon-seam encoding, coverage-diff feasibility, buddy/memory homes).
 Remaining interventions scheduled — I-1/I-2 via subagent-driven TDD, I-3 as a RELEASE.md edit,
 I-4/I-5 skill edits (reconnaissance staged behind its eval).
 
+
+### 2026-07-17 — interventions implemented (5 of 6; I-6 deferred)
+
+All actionable interventions shipped this session. **I-1** schema-invariant guard `every_schema_sql_artifact_column_survives_every_migration_path` (commit `3e2459da`, mutation-verified: dropping a column from the migrate_v6 table-copy fails it). **I-2** extracted `escape_like_pattern` to `src/librarian/util.rs`, routed the two Rust-side sites, added the DRY gate `like_escape_idiom_is_not_inlined_outside_helper` (commit `14bd8b55`). **I-3** RELEASE.md now recommends `cargo mutants --in-diff` before cherry-pick (commit `1af2be8e`; advisory until `cargo-mutants` is adopted as a dev-dependency). **I-4/I-5** codescout memories `catalog-sql-hazards` + `test-design-discipline` (commit `fb9fd244`); `claude-plugins@627bbde` added L3/L4/L5 to buddy `testing-snow-leopard` and the two Phase-1 seam classes to `reconnaissance`. Bug filed for the LIKE duplication (`docs/issues/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md`, now fixed for the 2 Rust-side sites by I-2; SQL-side chains remain out of scope).
+
+**Open follow-up:** the `reconnaissance` SKILL.md edit is a scout-behavior change — establish/re-score the `docs/evals/reconnaissance-output.md` baseline (n=0) via prompt-tdd to bless it. **I-6** stays deferred (mutation testing / I-3 dominates a call_graph reachability detector on coverage-per-value).

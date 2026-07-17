@@ -1,5 +1,5 @@
 ---
-status: open
+status: mitigated
 opened: 2026-07-17
 closed:
 severity: low
@@ -61,18 +61,26 @@ commit `4b922ac4` ("escape LIKE wildcards in worktree_registration covering()").
 N/A — static duplication confirmed by grep at filing time.
 
 ## Fix
-Plan: extract `pub(crate) fn escape_like_pattern(s: &str) -> String` (the
-Rust-side idiom) and route `filter.rs` + `augmentation.rs` through it. Pair with
-a source-grepping `#[test]` (mirroring `claude_md_contains_no_deprecated_tool_names`
-in `src/prompts/mod.rs:1076`) that asserts every `LIKE` SQL literal in the tree
-also contains an `ESCAPE` clause — a mechanical CI gate for the coarse defect
-shape. The SQL-side `REPLACE(...)` chains are a separate concern; the ESCAPE-
-presence gate covers them without forcing a unification.
 
+**Mitigated 2026-07-17 (intervention I-2, commit `14bd8b55` on `experiments`).** Extracted
+`pub(crate) fn escape_like_pattern` into `src/librarian/util.rs` and routed the two Rust-side
+needle-escaping sites (`filter.rs`, `augmentation.rs::resolve_cite_ref`) through it. Added the
+DRY gate `#[test] like_escape_idiom_is_not_inlined_outside_helper`, which fails CI if the
+inline `.replace('%', "\\%")` idiom reappears anywhere except the helper — preventing a sixth
+Rust-side copy.
+
+Status is `mitigated`, not `fixed`, because the three SQL-side *haystack*-escaping chains
+(`REPLACE(REPLACE(REPLACE(col, ...)))` in `catalog/worktree.rs`, `tools/worktree.rs`,
+`merge_worktree.rs`) are a distinct idiom (escaping the stored column inside SQL, not the
+Rust-side pattern) and were left untouched — the shared helper does not cover them. A future
+pass could unify or gate those too; lower risk since they are column-escaping, not the
+user-pattern escaping that caused the original `resolve_cite_ref` defect.
 ## Tests added
-N/A — pending. When fixed: the `escape_like_pattern` unit tests + the
-`every_like_query_pairs_with_escape_clause` grep gate.
 
+- `escape_like_pattern` unit tests (`src/librarian/util.rs`) — `%`, `_`, `\` each escaped,
+  ordinary chars pass through, combined input correct.
+- `like_escape_idiom_is_not_inlined_outside_helper` (DRY gate) — asserts the inline idiom
+  appears only in the helper; mutation-verified (injecting it into a second file fails CI).
 ## Workarounds
 Copy the idiom from `src/librarian/filter.rs:230-236` verbatim when writing a
 new Rust-side LIKE pattern; always add the `ESCAPE '\\'` clause.
