@@ -63,8 +63,69 @@ pub fn parse(doc: &str) -> Result<(Option<Frontmatter>, &str)> {
 }
 
 pub fn write(fm: &Frontmatter, body: &str) -> String {
-    let yaml = serde_yml::to_string(fm).expect("frontmatter serializes");
+    // Serialize the first-class fields with serde_yml, but emit the `extra` map
+    // ourselves. serde_yml conservatively quotes any string YAML 1.1 could
+    // reinterpret — including ISO dates like `2026-07-17` → `'2026-07-17'`. The
+    // `extra` values are consumed as raw text by downstream regex readers (e.g.
+    // the SessionStart next-sweep-due nudge tests `/^\d{4}-\d{2}-\d{2}$/`), which
+    // a quoted scalar silently fails. Emit each extra scalar bare when — and only
+    // when — doing so round-trips as the identical string, so we shed spurious
+    // quotes without ever turning a `"30"`/`"true"` string into a number/bool.
+    // See docs/issues/2026-07-17-artifact-extra-quotes-frontmatter-scalars.md.
+    let mut first_class = fm.clone();
+    let extra = std::mem::take(&mut first_class.extra);
+    let mut yaml = serde_yml::to_string(&first_class).expect("frontmatter serializes");
+    // An all-unset struct serializes to the empty-map token; drop it so only the
+    // extra keys follow (matches the flatten behaviour for extra-only frontmatter).
+    if yaml.trim() == "{}" {
+        yaml.clear();
+    }
+    for (k, v) in &extra {
+        match v {
+            serde_json::Value::String(s) if scalar_can_be_bare(s) => {
+                yaml.push_str(&format!("{k}: {s}\n"));
+            }
+            _ => {
+                // Delegate this single pair to serde_yml — its quoting for
+                // type-ambiguous scalars and its block style for arrays / nested
+                // maps are preserved exactly as before.
+                let mut pair = serde_json::Map::new();
+                pair.insert(k.clone(), v.clone());
+                let rendered = serde_yml::to_string(&serde_json::Value::Object(pair))
+                    .expect("frontmatter pair serializes");
+                yaml.push_str(&rendered);
+            }
+        }
+    }
     format!("---\n{yaml}---\n{body}")
+}
+
+/// Whether a string scalar can be emitted WITHOUT quotes on a `key: value`
+/// frontmatter line. Two conditions must hold: it is structurally safe on a
+/// single plain-scalar line (no newline, no YAML-significant punctuation, no
+/// leading indicator char), AND it round-trips through the YAML parser as the
+/// identical string. The round-trip check is what keeps type-ambiguous strings
+/// (`"30"`, `"true"`, `"~"`) quoted — bare, YAML would resolve them to a
+/// number / bool / null — while letting genuinely string-valued scalars such as
+/// ISO dates (`2026-07-17`) stay bare, since the core schema resolves them to
+/// strings anyway.
+fn scalar_can_be_bare(s: &str) -> bool {
+    if s.is_empty()
+        || s != s.trim()
+        || s.contains('\n')
+        || s.contains(':')
+        || s.contains('#')
+        || s.contains('"')
+        || s.contains('\'')
+        || s.starts_with([
+            '[', '{', '*', '?', '&', '!', '|', '>', '@', '`', '-', ',', ' ',
+        ])
+    {
+        return false;
+    }
+    serde_yml::from_str::<serde_json::Value>(s)
+        .map(|parsed| parsed == serde_json::Value::String(s.to_string()))
+        .unwrap_or(false)
 }
 
 pub fn update_in_place(doc: &str, edit: impl FnOnce(&mut Frontmatter)) -> Result<String> {
@@ -170,6 +231,64 @@ mod tests {
         assert_eq!(parsed.extra.get("branch"), fm.extra.get("branch"));
         // And the first-class fields survive alongside the flattened map.
         assert_eq!(parsed.kind.as_deref(), Some("tracker"));
+    }
+
+    #[test]
+    fn extra_scalar_date_is_emitted_bare_not_quoted() {
+        // BUG (docs/issues/2026-07-17-artifact-extra-quotes-frontmatter-scalars.md):
+        // serde_yml quoted date-like extra scalars ('2026-07-17'), breaking raw-text
+        // regex consumers (the SessionStart next-sweep-due nudge tests
+        // /^\d{4}-\d{2}-\d{2}$/). Date-like and plain strings must serialize BARE;
+        // genuinely type-ambiguous strings (number/bool-like) stay quoted so their
+        // string type still round-trips.
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert(
+            "next-sweep-due".to_string(),
+            serde_json::json!("2026-07-17"),
+        );
+        extra.insert("sweep-interval-days".to_string(), serde_json::json!(30));
+        extra.insert("origin_session_id".to_string(), serde_json::json!("abc123"));
+        extra.insert("numish".to_string(), serde_json::json!("30")); // string, looks numeric
+        extra.insert("boolish".to_string(), serde_json::json!("true")); // string, looks bool
+        let fm = Frontmatter {
+            kind: Some("tracker".into()),
+            extra,
+            ..Default::default()
+        };
+        let doc = write(&fm, "\nbody\n");
+
+        // Date-like + plain strings emit bare (the fix):
+        assert!(
+            doc.contains("next-sweep-due: 2026-07-17\n"),
+            "date-like extra scalar must be bare, not quoted: {doc}"
+        );
+        assert!(
+            doc.contains("origin_session_id: abc123\n"),
+            "plain string extra scalar must be bare: {doc}"
+        );
+        // A real number is unchanged (still a bare number):
+        assert!(
+            doc.contains("sweep-interval-days: 30\n"),
+            "numeric value must stay a bare number: {doc}"
+        );
+        // Type-ambiguous STRINGS stay quoted so they never round-trip as number/bool:
+        assert!(
+            doc.contains("numish: '30'") || doc.contains("numish: \"30\""),
+            "numeric-looking string must stay quoted: {doc}"
+        );
+        assert!(
+            doc.contains("boolish: 'true'") || doc.contains("boolish: \"true\""),
+            "bool-looking string must stay quoted: {doc}"
+        );
+
+        // Idempotent round-trip: parse back yields the identical Frontmatter —
+        // every extra value keeps its original type.
+        let (parsed, _) = parse(&doc).unwrap();
+        assert_eq!(
+            parsed.unwrap(),
+            fm,
+            "round-trip must preserve every extra value's type"
+        );
     }
 
     #[test]
