@@ -164,6 +164,31 @@ deferred rel_path-sha problem — but the entry edges no longer depend on it.)
   file-grain-addressable via prose + scanner.
 - No existing row is rewritten; both new columns are additive with safe defaults.
 
+## Integration with the worktree overlay (parallel work, 2026-07-17)
+
+A parallel work-stream landed worktree-overlay machinery this session
+(`CurrentProject.main_root` worktree-aware resolve, `worktree_registration`,
+`covering_conn` shared with doctor, `merge_worktree` link handling — commits
+`58ec4c1b`, `1bee7f9a`, `c2104e90`, `85e3d72c`). It does **not** touch this design's
+five dependency files (`append_entry.rs`, `augmentation.rs`, `links.rs`,
+`link_scan/{diff,resolve}.rs`), so no design assumption changes. Two integration
+points:
+
+- **Graft/merge re-pointing skips entry edges — by construction, correctly.**
+  `graft::repoint_history` re-points `artifact_link.src_id/dst_id` by matching a
+  16-hex `from_id` artifact id. A `<slug>:<local>` entry endpoint can never match a
+  hex id, so merging two artifact *rows* leaves slug-keyed entry edges untouched —
+  which is the right behavior (a row merge is not an entry-identity change).
+
+- **The slug is keyed to the logical artifact (rel_path), shared across a worktree
+  shadow and its main row.** `append_entry` lands worktree appends on the shadow
+  row (`append_from_worktree_lands_on_shadow_not_main`). If shadow and main held
+  *different* slugs, entry ids would diverge and `merge_worktree` would orphan the
+  entry edges. Therefore: mint the slug on the **main-root** artifact and resolve the
+  same slug for a shadow via the existing `main_root` / `worktree_registration`
+  resolution — the write path builds on that substrate rather than minting a
+  second slug per physical row. `append_entry` from a worktree writes entry ids and
+  cites edges under the shared (main) slug.
 ## Testing
 
 Unit (catalog + tool layer):
@@ -179,6 +204,10 @@ Unit (catalog + tool layer):
   edges intact while still pruning a stale `origin='scanner'` edge.
 - **Move durability:** create a tracker with a slug + a write-time entry edge, move it
   via `artifact(move)`, and assert the entry edge still resolves (endpoint unchanged).
+- **Worktree-merge durability:** in a worktree shadow, `append_entry(cites=[…])` on a
+  tracker whose main row holds the slug; assert the entry id and its cites edges use
+  the shared (main) slug, and that after `merge_worktree` the entry edges survive
+  (not orphaned, not re-pointed) — the shadow/main slug-sharing guarantee.
 
 Integration:
 - End-to-end: `artifact(append_entry, cites=[…])` then `get(include_links=true)`
