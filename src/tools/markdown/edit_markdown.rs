@@ -1,5 +1,7 @@
 //! EditMarkdown tool — heading-addressed section editing.
 
+use std::ops::Range;
+
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -422,6 +424,60 @@ fn ensure_trailing_newline(s: &str) -> String {
 fn normalize_trailing_newline(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n');
     format!("{}\n", trimmed)
+}
+// Consumed starting Task 3 of the batch-mode order-independence plan; unused
+// for now (only exercised by this file's #[cfg(test)] tests, which clippy's
+// default lib-only build does not count as a use).
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct PlannedEdit {
+    pub span: Range<usize>,
+    pub replacement: String,
+    pub edit_index: usize, // user-facing edits[] index, for error messages
+    pub order: usize,      // collection order; tie-break for coincident inserts
+}
+
+#[allow(dead_code)]
+fn spans_conflict(a: &Range<usize>, b: &Range<usize>) -> bool {
+    let a_zero = a.start == a.end;
+    let b_zero = b.start == b.end;
+    match (a_zero, b_zero) {
+        (true, true) => false,
+        (true, false) => b.start < a.start && a.start < b.end,
+        (false, true) => a.start < b.start && b.start < a.end,
+        (false, false) => a.start < b.end && b.start < a.end,
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn detect_overlaps(edits: &[PlannedEdit]) -> anyhow::Result<()> {
+    for i in 0..edits.len() {
+        for j in (i + 1)..edits.len() {
+            if spans_conflict(&edits[i].span, &edits[j].span) {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "edits[{}] and edits[{}] rewrite overlapping regions (bytes {:?} and {:?})",
+                        edits[i].edit_index, edits[j].edit_index, edits[i].span, edits[j].span
+                    ),
+                    "Split into separate edit_markdown calls, or target disjoint regions.",
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub(crate) fn apply_planned_edits(original: &str, mut edits: Vec<PlannedEdit>) -> String {
+    // Apply end-to-start: highest start first. For coincident starts, apply the
+    // higher `order` first so that after all splices the lower `order` sits first.
+    edits.sort_by(|a, b| b.span.start.cmp(&a.span.start).then(b.order.cmp(&a.order)));
+    let mut out = original.to_string();
+    for e in &edits {
+        out.replace_range(e.span.clone(), &e.replacement);
+    }
+    normalize_trailing_newline(&out)
 }
 
 /// Perform a heading-scoped string replacement within a markdown file.

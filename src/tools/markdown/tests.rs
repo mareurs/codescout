@@ -72,6 +72,7 @@ async fn read_markdown_large_no_headings_hint_pivots_to_line_ranges() {
 
 use super::edit_markdown::{
     find_consumed_subsections, perform_scoped_edit, perform_section_edit, perform_section_edit_ext,
+    PlannedEdit,
 };
 
 // ── perform_section_edit tests (moved from section_edit.rs) ──────────
@@ -2251,4 +2252,103 @@ fn line_offsets_reproduces_join_boundaries() {
     for i in 0..lines.len() {
         assert_eq!(&content[..off.line_start(i)], join_lines(&lines[..i]));
     }
+}
+#[test]
+fn detect_overlaps_allows_disjoint_and_boundary_inserts() {
+    let e = |s: usize, en: usize, order: usize| PlannedEdit {
+        span: s..en,
+        replacement: "X".into(),
+        edit_index: order,
+        order,
+    };
+    assert!(super::edit_markdown::detect_overlaps(&[e(0, 5, 0), e(5, 10, 1)]).is_ok());
+    let ins = PlannedEdit {
+        span: 5..5,
+        replacement: "I".into(),
+        edit_index: 1,
+        order: 1,
+    };
+    assert!(super::edit_markdown::detect_overlaps(&[e(0, 5, 0), ins]).is_ok());
+}
+
+#[test]
+fn detect_overlaps_rejects_true_intersection() {
+    let a = PlannedEdit {
+        span: 0..8,
+        replacement: "A".into(),
+        edit_index: 0,
+        order: 0,
+    };
+    let b = PlannedEdit {
+        span: 4..12,
+        replacement: "B".into(),
+        edit_index: 1,
+        order: 1,
+    };
+    let err = super::edit_markdown::detect_overlaps(&[a, b])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("edits[0]") && err.contains("edits[1]"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn detect_overlaps_rejects_interior_insert() {
+    let span = PlannedEdit {
+        span: 0..8,
+        replacement: "A".into(),
+        edit_index: 0,
+        order: 0,
+    };
+    let ins = PlannedEdit {
+        span: 4..4,
+        replacement: "I".into(),
+        edit_index: 1,
+        order: 1,
+    };
+    assert!(super::edit_markdown::detect_overlaps(&[span, ins]).is_err());
+}
+
+#[test]
+fn apply_planned_edits_splices_end_to_start() {
+    let original = "0123456789";
+    let edits = vec![
+        PlannedEdit {
+            span: 6..8,
+            replacement: "ZZ".into(),
+            edit_index: 1,
+            order: 1,
+        },
+        PlannedEdit {
+            span: 2..4,
+            replacement: "XY".into(),
+            edit_index: 0,
+            order: 0,
+        },
+    ];
+    let out = super::edit_markdown::apply_planned_edits(original, edits);
+    assert_eq!(out.trim_end_matches('\n'), "01XY45ZZ89");
+}
+
+#[test]
+fn apply_planned_edits_orders_coincident_inserts_by_order() {
+    let original = "AB";
+    let edits = vec![
+        PlannedEdit {
+            span: 1..1,
+            replacement: "b".into(),
+            edit_index: 1,
+            order: 1,
+        },
+        PlannedEdit {
+            span: 1..1,
+            replacement: "a".into(),
+            edit_index: 0,
+            order: 0,
+        },
+    ];
+    let out = super::edit_markdown::apply_planned_edits(original, edits);
+    assert_eq!(out.trim_end_matches('\n'), "AabB");
 }
