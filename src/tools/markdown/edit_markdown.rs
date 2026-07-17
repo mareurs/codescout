@@ -410,6 +410,10 @@ fn subsection_guard_error(
     )
 }
 
+// No longer called from production code as of Task 4 (perform_scoped_edit now
+// delegates to plan_scoped_edit + apply_planned_edits); still exercised by
+// #[cfg(test)] tests. Unused for now -- a later task strips this allow.
+#[allow(dead_code)]
 /// Join a non-tail slice of lines back into a string.
 /// Always appends a '\n' after the last element to act as a separator.
 pub(crate) fn join_lines(lines: &[&str]) -> String {
@@ -452,6 +456,10 @@ impl LineOffsets {
     }
 }
 
+// No longer called from production code as of Task 4 (perform_scoped_edit now
+// delegates to plan_scoped_edit + apply_planned_edits). Unused for now -- a
+// later task strips this allow.
+#[allow(dead_code)]
 /// Join a tail slice (including any trailing "" from split('\n')).
 fn join_lines_tail(lines: &[&str]) -> String {
     if lines.is_empty() {
@@ -529,20 +537,22 @@ pub(crate) fn apply_planned_edits(original: &str, mut edits: Vec<PlannedEdit>) -
     normalize_trailing_newline(&out)
 }
 
-/// Perform a heading-scoped string replacement within a markdown file.
-///
-/// Finds the section identified by `heading_query`, locates `old_string` within it,
-/// and replaces with `new_string`. If `replace_all` is true, replaces all occurrences
-/// within the section; otherwise only the first.
-///
-/// Returns the full modified file content.
-pub(crate) fn perform_scoped_edit(
+/// Plan the byte-span edit(s) that a heading-scoped `old_string` -> `new_string`
+/// replacement would produce, without applying them. Finds the section identified
+/// by `heading_query`, locates `old_string` within its byte range, and emits one
+/// `PlannedEdit` per match (first-only, or one per non-overlapping match when
+/// `replace_all` is true). Behavior-identical to the historical `perform_scoped_edit`
+/// (see that function's doc comment) -- `perform_scoped_edit` is now a thin wrapper
+/// delegating here + `apply_planned_edits`.
+pub(crate) fn plan_scoped_edit(
     content: &str,
+    off: &LineOffsets,
     heading_query: &str,
     old_string: &str,
     new_string: &str,
     replace_all: bool,
-) -> Result<String> {
+    edit_index: usize,
+) -> Result<Vec<PlannedEdit>> {
     use crate::tools::file_summary::resolve_section_range;
 
     let range =
@@ -552,10 +562,11 @@ pub(crate) fn perform_scoped_edit(
     let heading_idx = range.heading_line - 1;
     let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
 
-    // Extract the section content (heading + body) with trailing newline
-    let section_text = format!("{}\n", join_lines_tail(&lines[heading_idx..end_idx]));
+    let sec_start = off.line_start(heading_idx);
+    let sec_end = off.line_start(end_idx);
+    let section = &content[sec_start..sec_end];
 
-    if !section_text.contains(old_string) {
+    if !section.contains(old_string) {
         return Err(anyhow::anyhow!(
             "old_string not found in section '{}'. \
              The text must match exactly (whitespace-sensitive).",
@@ -563,25 +574,69 @@ pub(crate) fn perform_scoped_edit(
         ));
     }
 
-    let new_section = if replace_all {
-        section_text.replace(old_string, new_string)
-    } else {
-        section_text.replacen(old_string, new_string, 1)
-    };
+    let mut edits = Vec::new();
+    let mut search_from = 0usize;
+    let mut order = edit_index * 1_000; // headroom so multi-span edits keep global order
+    while let Some(rel) = section[search_from..].find(old_string) {
+        let mstart = sec_start + search_from + rel;
+        let mend = mstart + old_string.len();
+        edits.push(PlannedEdit {
+            span: mstart..mend,
+            replacement: new_string.to_string(),
+            edit_index,
+            order,
+        });
+        order += 1;
+        search_from += rel + old_string.len().max(1);
+        if !replace_all {
+            break;
+        }
+    }
 
-    let before = join_lines(&lines[..heading_idx]);
-    let after = join_lines_tail(&lines[end_idx..]);
-    // Guarantee the section keeps a trailing newline so it never fuses onto the
-    // following heading. A scoped replace whose old_string consumed the section's
-    // trailing newline (and whose new_string omitted it) would otherwise demote
-    // the next heading to body text — the same Class-A fusion as insert_after.
-    let result = format!(
-        "{}{}{}",
-        before,
-        ensure_trailing_newline(&new_section),
-        after
-    );
-    Ok(normalize_trailing_newline(&result))
+    // Class-A fusion guard (mirrors legacy's `ensure_trailing_newline(&new_section)`):
+    // if the rightmost match consumes the section's trailing newline (the byte just
+    // before the next heading, or EOF) and `new_string` doesn't restore it, splice in
+    // a corrective newline so the edited section never fuses onto what follows.
+    if !new_string.ends_with('\n') {
+        if let Some(last) = edits.last_mut() {
+            if last.span.end == sec_end {
+                last.replacement.push('\n');
+            }
+        }
+    }
+
+    Ok(edits)
+}
+
+/// Perform a heading-scoped string replacement within a markdown file.
+///
+/// Finds the section identified by `heading_query`, locates `old_string` within it,
+/// and replaces with `new_string`. If `replace_all` is true, replaces all occurrences
+/// within the section; otherwise only the first.
+///
+/// Returns the full modified file content.
+///
+/// Thin wrapper over `plan_scoped_edit` + `apply_planned_edits`: plans the edit(s) at
+/// `edit_index=0` and applies them immediately, preserving the historical single-edit
+/// string-in-string-out contract for callers that don't need batch-mode overlap detection.
+pub(crate) fn perform_scoped_edit(
+    content: &str,
+    heading_query: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> Result<String> {
+    let off = LineOffsets::new(content);
+    let edits = plan_scoped_edit(
+        content,
+        &off,
+        heading_query,
+        old_string,
+        new_string,
+        replace_all,
+        0,
+    )?;
+    Ok(apply_planned_edits(content, edits))
 }
 
 // ---------------------------------------------------------------------------

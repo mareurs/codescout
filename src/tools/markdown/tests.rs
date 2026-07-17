@@ -2440,3 +2440,41 @@ fn plan_section_edit_insert_after_last_section_matches_legacy() {
         "insert_after on the last section must reproduce legacy EOF blank-line behavior"
     );
 }
+
+#[test]
+fn plan_scoped_edit_first_only_matches_legacy() {
+    let content = "## A\nrow one\nrow one\n## B\n";
+    let legacy =
+        super::edit_markdown::perform_scoped_edit(content, "## A", "row one", "row X", false)
+            .unwrap();
+    let off = super::edit_markdown::LineOffsets::new(content);
+    let planned =
+        super::edit_markdown::plan_scoped_edit(content, &off, "## A", "row one", "row X", false, 0)
+            .unwrap();
+    assert_eq!(
+        super::edit_markdown::apply_planned_edits(content, planned),
+        legacy
+    );
+}
+
+#[test]
+fn plan_scoped_edit_replace_all_matches_legacy() {
+    let content = "## A\nx\nx\n## B\nx\n"; // only the two x's under A should change
+    let legacy =
+        super::edit_markdown::perform_scoped_edit(content, "## A", "x", "y", true).unwrap();
+    let off = super::edit_markdown::LineOffsets::new(content);
+    let planned =
+        super::edit_markdown::plan_scoped_edit(content, &off, "## A", "x", "y", true, 0).unwrap();
+    assert_eq!(
+        super::edit_markdown::apply_planned_edits(content, planned),
+        legacy
+    );
+}
+
+#[test]
+fn plan_scoped_edit_missing_old_string_errors() {
+    let content = "## A\nbody\n";
+    let off = super::edit_markdown::LineOffsets::new(content);
+    let err = super::edit_markdown::plan_scoped_edit(content, &off, "## A", "nope", "z", false, 0);
+    assert!(err.is_err());
+}
