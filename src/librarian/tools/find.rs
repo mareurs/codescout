@@ -120,6 +120,7 @@ fn build_hints(
     returned_count: usize,
     offset: usize,
     exclude_worktrees: &[String],
+    deduped_main_ids: &[String],
 ) -> Result<Value> {
     let mut hints = serde_json::Map::new();
 
@@ -131,6 +132,25 @@ fn build_hints(
     }
 
     let here = count_for_scope(cat, base, ws, current, applied.scope, exclude_worktrees)?;
+    // Overlay dedup (see `call`) drops main twins whose shadow lives under
+    // this worktree session's own root before `items` is built, but `here` is
+    // a raw scope COUNT that still counts both the shadow and its main twin.
+    // Subtract however many of the deduped main ids are themselves counted in
+    // `here` so `more_in_scope` reflects the post-dedup page, not the
+    // pre-dedup union. A worktree session's own root is never excluded from
+    // scope (see `exclude_worktrees`), so a deduped main id counted here
+    // always has its shadow counted here too — the adjustment never
+    // over-subtracts.
+    let deduped_here = count_deduped_main_ids(
+        cat,
+        base,
+        ws,
+        current,
+        applied.scope,
+        exclude_worktrees,
+        deduped_main_ids,
+    )?;
+    let here = here.saturating_sub(deduped_here);
 
     // More matched in THIS scope than were returned on this page? The result
     // set is capped by `limit`/`offset`; without this signal an agent reads the
@@ -214,6 +234,40 @@ fn build_hints(
     }
 
     Ok(Value::Object(hints))
+}
+
+/// How many of `deduped_main_ids` are themselves counted by `count_for_scope`
+/// under (`base`, `scope`). Used to correct `more_in_scope`: `find`'s overlay
+/// dedup drops these ids from `items` before returning, but the raw scope
+/// COUNT (`here`) still counts them — without this adjustment `more_in_scope`
+/// overcounts by exactly the number of deduped main twins.
+#[allow(clippy::too_many_arguments)]
+fn count_deduped_main_ids(
+    cat: &crate::librarian::catalog::Catalog,
+    base: Option<&FilterNode>,
+    ws: &crate::librarian::workspace::WorkspaceConfig,
+    current: Option<&crate::librarian::current_project::CurrentProject>,
+    scope: Scope,
+    exclude_worktrees: &[String],
+    deduped_main_ids: &[String],
+) -> Result<usize> {
+    if deduped_main_ids.is_empty() {
+        return Ok(0);
+    }
+    let (filter, _) = apply_scope(base.cloned(), scope, ws, current, exclude_worktrees)?;
+    let id_values: Vec<Value> = deduped_main_ids.iter().map(|id| json!(id)).collect();
+    let id_filter = FilterNode::Leaf(
+        [("id".to_string(), json!({"in": id_values}))]
+            .into_iter()
+            .collect(),
+    );
+    let combined = match filter {
+        Some(f) => FilterNode::And {
+            and: vec![f, id_filter],
+        },
+        None => id_filter,
+    };
+    count_matching(cat, Some(&combined))
 }
 
 fn count_for_scope(
@@ -528,30 +582,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         };
 
         // Overlay dedup: a worktree session sees its shadow INSTEAD of the main
-        // twin. `worktree_of` links (src=shadow, dst=main) whose shadow lives
+        // twin. `worktree_of` pairs (main_id, shadow_id) whose shadow lives
         // under THIS session's own worktree root identify the main ids to drop;
         // survivors carrying a shadow are flagged `overlay: true` below. Gated
         // on `main_root.is_some()` — a plain (non-worktree) session never runs
-        // this query and its find results are unaffected.
+        // this query and its find results are unaffected. `shadow_main_pairs`
+        // (shared with get.rs) wildcard-escapes the worktree-root LIKE pattern.
         let mut rows = rows;
         let mut overlay_ids: std::collections::HashSet<String> = Default::default();
+        let mut deduped_main_ids: Vec<String> = Vec::new();
         if let Some(cp) = current.filter(|c| c.main_root.is_some()) {
             let wt = crate::util::fs::RepoPath::from(cp.git_root.as_path()).into_string();
-            let mut stmt = cat.conn.prepare(
-                "SELECT l.src_id, l.dst_id FROM artifact_link l \
-                 JOIN artifact s ON s.id = l.src_id \
-                 WHERE l.rel = ?1 AND (s.abs_path = ?2 OR s.abs_path LIKE ?2 || '/%')",
-            )?;
-            let pairs: Vec<(String, String)> = stmt
-                .query_map(
-                    rusqlite::params![crate::librarian::tools::worktree::LINEAGE_REL, &wt],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )?
-                .collect::<rusqlite::Result<_>>()?;
+            let pairs = crate::librarian::tools::worktree::shadow_main_pairs(&cat, &wt)?;
             let shadowed: std::collections::HashSet<&str> =
-                pairs.iter().map(|(_, d)| d.as_str()).collect();
+                pairs.iter().map(|(main_id, _)| main_id.as_str()).collect();
             rows.retain(|r| !shadowed.contains(r.id.as_str()));
-            overlay_ids = pairs.into_iter().map(|(s, _)| s).collect();
+            overlay_ids = pairs
+                .iter()
+                .map(|(_, shadow_id)| shadow_id.clone())
+                .collect();
+            deduped_main_ids = pairs.into_iter().map(|(main_id, _)| main_id).collect();
         }
 
         let items: Vec<Value> = rows
@@ -589,6 +639,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 items.len(),
                 offset,
                 &exclude_worktrees,
+                &deduped_main_ids,
             )?
         };
 
@@ -918,6 +969,21 @@ mod tests {
             .find(|i| i["id"] == shadow_id.as_str())
             .unwrap();
         assert_eq!(shadow_item["overlay"], true);
+        // Canonical Defect-2 regression: `here` (a raw scope COUNT) counts BOTH
+        // the shadow and its deduped main twin, but `items.len()` passed to
+        // `build_hints` is post-dedup — 1 tracker + 1 fork, scope=repo, default
+        // paging must page-complete with NO more_in_scope hint (nothing is left
+        // to page to).
+        assert!(
+            out["hints"].get("more_in_scope").is_none(),
+            "spurious more_in_scope after dedup: {:?}",
+            out["hints"]
+        );
+        assert!(
+            out["hints"].get("more_in_scope_hint").is_none(),
+            "spurious more_in_scope_hint after dedup: {:?}",
+            out["hints"]
+        );
     }
 
     #[tokio::test]

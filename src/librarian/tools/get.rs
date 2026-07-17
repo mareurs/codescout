@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 use super::{RecoverableError, ToolContext};
 use crate::librarian::catalog::{artifact, augmentation, links, observations};
 use rusqlite;
-use rusqlite::OptionalExtension;
 
 use crate::librarian::frontmatter;
 use crate::librarian::preview::headings;
@@ -80,6 +79,7 @@ struct Args {
     #[serde(default)]
     entry_filter: Option<FilterNode>,
 }
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("include_body").is_some() {
         return Err(RecoverableError::new(
@@ -270,17 +270,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     {
         let wt = crate::util::fs::RepoPath::from(cp.git_root.as_path()).into_string();
         let cat = ctx.catalog.lock();
-        let shadow_id: Option<String> = cat
-            .conn
-            .query_row(
-                "SELECT l.src_id FROM artifact_link l \
-                 JOIN artifact s ON s.id = l.src_id \
-                 WHERE l.rel = ?1 AND l.dst_id = ?2 \
-                   AND (s.abs_path = ?3 OR s.abs_path LIKE ?3 || '/%')",
-                rusqlite::params![crate::librarian::tools::worktree::LINEAGE_REL, &a.id, &wt],
-                |r| r.get(0),
-            )
-            .optional()?;
+        // `shadow_main_pairs` (shared with find.rs's overlay dedup)
+        // wildcard-escapes the worktree-root LIKE pattern.
+        let pairs = crate::librarian::tools::worktree::shadow_main_pairs(&cat, &wt)?;
+        let shadow_id = pairs
+            .into_iter()
+            .find_map(|(main_id, shadow_id)| (main_id == a.id).then_some(shadow_id));
         if let Some(sid) = shadow_id {
             out["overlay_hint"] = json!({
                 "shadow_id": sid,

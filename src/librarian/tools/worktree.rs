@@ -157,6 +157,39 @@ pub(crate) fn resolve_write_target(
     Ok(shadow_id)
 }
 
+/// Every (main_id, shadow_id) lineage pair whose SHADOW lives under
+/// `worktree_root`. The LIKE pattern is wildcard-escaped (mirrors
+/// `catalog::worktree::covering`), so a root containing `%`/`_` never
+/// false-matches a sibling (e.g. `.worktrees/fix_1` vs `.worktrees/fixe1`).
+/// Shared by `find`'s overlay dedup and `get`'s `overlay_hint` so this
+/// escaping lives in exactly one place.
+pub(crate) fn shadow_main_pairs(
+    cat: &Catalog,
+    worktree_root: &str,
+) -> Result<Vec<(String, String)>> {
+    // worktree_root is bound as a LIKE *pattern* below (`... || '/%'`), so its
+    // own `%`/`_` characters must be escaped (backslash first, then `%`, then
+    // `_`) or a root like `.worktrees/fix_1` has its `_` read as a
+    // single-char wildcard, false-matching unrelated siblings such as
+    // `.worktrees/fixe1`. Mirrors `catalog::worktree::covering`'s escaping;
+    // applied to the bound parameter here (rather than a column, as
+    // `covering` does) because the wildcard-bearing value is the
+    // caller-supplied worktree root, not a stored column.
+    let mut stmt = cat.conn.prepare(
+        "SELECT l.dst_id, l.src_id FROM artifact_link l \
+         JOIN artifact s ON s.id = l.src_id \
+         WHERE l.rel = ?1 AND (s.abs_path = ?2 OR s.abs_path LIKE \
+         REPLACE(REPLACE(REPLACE(?2, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
+         || '/%' ESCAPE '\\')",
+    )?;
+    let pairs = stmt
+        .query_map(rusqlite::params![LINEAGE_REL, worktree_root], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+    Ok(pairs)
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
@@ -378,5 +411,81 @@ mod tests {
         assert_eq!(count, 1);
         assert!(events::latest_for_artifact(&cat, &id).unwrap().is_none());
         assert!(links::outgoing(&cat, &id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn shadow_main_pairs_escapes_like_wildcards() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // Main tracker + its shadow forked under a root containing `_`.
+        let main_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/docs/trackers/t.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&main_id)
+                .with_abs_path("/repo/docs/trackers/t.md")
+                .build(),
+        )
+        .unwrap();
+        let shadow_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/.worktrees/fix_1/docs/trackers/t.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&shadow_id)
+                .with_abs_path("/repo/.worktrees/fix_1/docs/trackers/t.md")
+                .build(),
+        )
+        .unwrap();
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: shadow_id.clone(),
+                dst_id: main_id.clone(),
+                rel: LINEAGE_REL.into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        // A sibling shadow under a DIFFERENT root that would false-match if
+        // `_` were read as a single-char wildcard: /repo/.worktrees/fixe1/...
+        let other_main_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/docs/trackers/other.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&other_main_id)
+                .with_abs_path("/repo/docs/trackers/other.md")
+                .build(),
+        )
+        .unwrap();
+        let sibling_shadow_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/.worktrees/fixe1/docs/trackers/other.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&sibling_shadow_id)
+                .with_abs_path("/repo/.worktrees/fixe1/docs/trackers/other.md")
+                .build(),
+        )
+        .unwrap();
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: sibling_shadow_id.clone(),
+                dst_id: other_main_id.clone(),
+                rel: LINEAGE_REL.into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let pairs = shadow_main_pairs(&cat, "/repo/.worktrees/fix_1").unwrap();
+        assert_eq!(
+            pairs,
+            vec![(main_id, shadow_id)],
+            "must not false-match the fixe1 sibling via unescaped `_` wildcard"
+        );
     }
 }
