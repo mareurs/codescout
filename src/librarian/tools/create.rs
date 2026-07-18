@@ -98,6 +98,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             })?,
     };
 
+    // Prevention: refuse writing a temp-dir-rooted artifact into the real shared
+    // catalog. See docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
+    super::temp_write_guard::guard_temp_workspace_write(&base_dir, &ctx.catalog.lock().conn)?;
+
     validate_rel_path(&a.rel_path)?;
     a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
     let full = base_dir.join(&a.rel_path);
@@ -635,6 +639,38 @@ mod tests {
         assert!(
             msg.contains('"') || msg.contains('r'),
             "should list valid repos"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_refuses_temp_workspace_into_real_catalog() {
+        // The real pollution shape: catalog OUTSIDE the OS temp dir, workspace UNDER
+        // it. `TempDir::new_in(current_dir())` puts the catalog under the repo cwd
+        // (outside /tmp) and auto-cleans on drop — the only way to construct an
+        // outside-temp catalog in a test without leaking files. (Assumes the repo
+        // checkout is not itself under the OS temp dir, which holds here.)
+        let outside = tempfile::TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let cat = Catalog::open(&outside.path().join("catalog.db")).unwrap();
+        let ws = TempDir::new().unwrap(); // under the OS temp dir
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: ws.path().to_path_buf(),
+            })
+            .build();
+
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/specs/x.md",
+                "kind": "spec", "title": "X", "body": "hi",
+            }),
+        )
+        .await
+        .expect_err("temp workspace + real (outside-temp) catalog must be refused");
+        assert!(
+            err.to_string().contains("temp dir"),
+            "unexpected error: {err}"
         );
     }
 }

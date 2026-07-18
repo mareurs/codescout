@@ -5,18 +5,12 @@
 
 use std::path::Path;
 
-// No non-test caller until Task 3 wires this into `create`/`reindex`; drop
-// this allow once that caller lands.
-#[allow(dead_code)]
 const ALLOW_ENV: &str = "CODESCOUT_ALLOW_TEMP_WORKSPACE";
 
 /// Pure decision: refuse iff the workspace `root` is under `temp_dir`, the
 /// catalog is the real one (file-backed AND its file is outside `temp_dir`), and
 /// the caller has not opted in. All inputs are pre-resolved so this is testable
 /// with fabricated absolute paths (no filesystem access).
-// No non-test caller until Task 3 wires this into `create`/`reindex`; drop
-// this allow once that caller lands.
-#[allow(dead_code)]
 fn should_refuse(root: &Path, catalog_db: Option<&Path>, temp_dir: &Path, opted_in: bool) -> bool {
     if opted_in {
         return false;
@@ -29,9 +23,6 @@ fn should_refuse(root: &Path, catalog_db: Option<&Path>, temp_dir: &Path, opted_
 /// Refuse a write whose workspace `root` is under the OS temp dir when the
 /// catalog is the real/shared one. Canonicalizes the real inputs, then defers to
 /// [`should_refuse`].
-// No non-test caller until Task 3 wires this into `create`/`reindex`; drop
-// this allow once that caller lands.
-#[allow(dead_code)]
 pub(crate) fn guard_temp_workspace_write(
     root: &Path,
     conn: &rusqlite::Connection,

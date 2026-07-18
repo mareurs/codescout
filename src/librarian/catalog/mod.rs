@@ -365,10 +365,6 @@ fn backup_db(db_path: &Path) -> Result<()> {
 /// `PRAGMA database_list` yields rows `(seq, name, file)`; the `main` database's
 /// `file` column is `""` for an in-memory/temp connection and an absolute path
 /// for a file-backed one.
-// Foundation for the temp-write prevention guard: no non-test caller exists yet
-// (that lands with the guard module), so this is dead code from this task's
-// commit alone. Remove this attribute once that caller lands.
-#[allow(dead_code)]
 pub(crate) fn catalog_db_path(conn: &rusqlite::Connection) -> Option<std::path::PathBuf> {
     let file: String = conn
         .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
