@@ -234,12 +234,25 @@ async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>, confirm: bool
                         let (mut ta, mut tc) = (0usize, 0usize);
                         for r in &dead_roots {
                             let (a, c) = count_dead_root(&cat.conn, r)?;
-                            ta += a;
-                            tc += c;
-                            rows.push(json!({
-                                "root": r.to_string_lossy(),
-                                "artifact_rows": a, "commit_rows": c,
-                            }));
+                            let root_str = crate::util::fs::RepoPath::from_path(r).to_string();
+                            let covered = worktree::covering_conn(&cat.conn, &root_str)?.is_some();
+                            if covered {
+                                // Mirror the apply-time skip so the dry-run
+                                // preview's totals never promise more than
+                                // `confirm=true` would actually delete.
+                                rows.push(json!({
+                                    "root": r.to_string_lossy(),
+                                    "artifact_rows": a, "commit_rows": c,
+                                    "would_skip": "active worktree registration",
+                                }));
+                            } else {
+                                ta += a;
+                                tc += c;
+                                rows.push(json!({
+                                    "root": r.to_string_lossy(),
+                                    "artifact_rows": a, "commit_rows": c,
+                                }));
+                            }
                         }
                         return Ok(json!({
                             "fix": "prune_missing", "mode": "dry_run",
@@ -1067,6 +1080,52 @@ mod tests {
         assert!(artifact::get(&ctx.catalog.lock(), "a1").unwrap().is_some());
     }
 
+    /// A dead root an ACTIVE worktree registration covers must be excluded
+    /// from the dry-run `totals` (marked `would_skip` instead) so the preview
+    /// promises exactly what `confirm=true` will actually delete — before this
+    /// fix the dry-run counted every dead root's rows even though the
+    /// apply-time skip would leave the covered root untouched.
+    #[tokio::test]
+    async fn prune_missing_batch_dry_run_excludes_worktree_covered_root_from_totals() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let live_parent = tempfile::tempdir().unwrap();
+        let covered_root = live_parent.path().join("repo");
+        seed_artifact(&cat, "wt", &covered_root.join("x.md").to_string_lossy());
+        let covered_root_str = crate::util::fs::RepoPath::from_path(&covered_root).to_string();
+        reg::upsert_active(&cat, &covered_root_str, &covered_root_str, None, 1000).unwrap();
+        // A second, uncovered dead root so the totals assertion isn't
+        // vacuously true either way.
+        seed_artifact(&cat, "uncovered", "/nonexistent-uncovered-root/repo/y.md");
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let v = call(&ctx, json!({ "fix": "prune_missing" })).await.unwrap();
+        assert_eq!(v["mode"], "dry_run");
+
+        let rows = v["dead_roots"].as_array().unwrap();
+        let covered_row = rows
+            .iter()
+            .find(|r| r["root"].as_str().unwrap() == covered_root.to_string_lossy())
+            .expect("covered root present in dry-run preview");
+        assert!(
+            covered_row["would_skip"]
+                .as_str()
+                .expect("covered root marked would_skip")
+                .contains("active worktree registration"),
+            "would_skip names the guard: {covered_row}"
+        );
+        assert_eq!(
+            covered_row["artifact_rows"].as_u64().unwrap(),
+            1,
+            "per-root counts are still shown even for a covered root"
+        );
+
+        assert_eq!(
+            v["totals"]["artifact_rows"].as_u64().unwrap(),
+            1,
+            "only the uncovered root's row counts toward the aggregate total"
+        );
+    }
+
     #[tokio::test]
     async fn prune_missing_batch_confirm_prunes_dead_roots_only() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1093,6 +1152,50 @@ mod tests {
                 .unwrap()
                 .is_some(),
             "live row kept"
+        );
+    }
+
+    /// The worktree-registration skip is the ONLY delete-safety guard in the
+    /// batch path: a dead root an ACTIVE `worktree_registration` still covers
+    /// must be reported `skipped`, not pruned, or the catalog's only record of
+    /// an unmerged worktree's history is deleted out from under it. If the
+    /// `.is_some()` check in `run_fix` were inverted (or removed), this test
+    /// fails: the row would be gone and `totals.artifact_rows` would be 1.
+    #[tokio::test]
+    async fn prune_missing_batch_skips_dead_root_covered_by_active_registration() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // A real tempdir boundary (exists on disk) pins the derived dead root
+        // to exactly `dead_root`, mirroring
+        // `derive_dead_roots_groups_gone_subtrees_and_skips_live_dir_files`.
+        let live_parent = tempfile::tempdir().unwrap();
+        let dead_root = live_parent.path().join("repo");
+        seed_artifact(&cat, "wt", &dead_root.join("x.md").to_string_lossy());
+        let dead_root_str = crate::util::fs::RepoPath::from_path(&dead_root).to_string();
+        reg::upsert_active(&cat, &dead_root_str, &dead_root_str, None, 1000).unwrap();
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let v = call(&ctx, json!({ "fix": "prune_missing", "confirm": true }))
+            .await
+            .unwrap();
+
+        assert_eq!(v["mode"], "applied");
+        let pruned = v["pruned"].as_array().unwrap();
+        assert_eq!(pruned.len(), 1, "the one dead root must be reported");
+        let msg = pruned[0]["skipped"]
+            .as_str()
+            .expect("covered root reports 'skipped', not 'artifact_rows'");
+        assert!(
+            msg.contains("active worktree registration"),
+            "skip reason names the guard: {msg}"
+        );
+        assert_eq!(
+            v["totals"]["artifact_rows"].as_u64().unwrap(),
+            0,
+            "nothing pruned while the registration is active"
+        );
+        assert!(
+            artifact::get(&ctx.catalog.lock(), "wt").unwrap().is_some(),
+            "seeded row must survive — the registration guard protects it"
         );
     }
 
