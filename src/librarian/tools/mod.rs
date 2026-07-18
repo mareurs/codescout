@@ -278,6 +278,10 @@ pub mod librarian;
 pub mod merge_worktree;
 pub(crate) mod worktree;
 
+// Not a registered `Tool` — an internal prevention guard (refuse
+// temp-workspace writes into the real catalog) consumed by `create`/`reindex`.
+pub(crate) mod temp_write_guard;
+
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(artifact::Artifact),
