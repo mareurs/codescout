@@ -361,6 +361,25 @@ fn backup_db(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The catalog's backing DB file, or `None` for an in-memory connection.
+/// `PRAGMA database_list` yields rows `(seq, name, file)`; the `main` database's
+/// `file` column is `""` for an in-memory/temp connection and an absolute path
+/// for a file-backed one.
+// Foundation for the temp-write prevention guard: no non-test caller exists yet
+// (that lands with the guard module), so this is dead code from this task's
+// commit alone. Remove this attribute once that caller lands.
+#[allow(dead_code)]
+pub(crate) fn catalog_db_path(conn: &rusqlite::Connection) -> Option<std::path::PathBuf> {
+    let file: String = conn
+        .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
+        .ok()?;
+    if file.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(file))
+    }
+}
+
 impl Catalog {
     pub fn open(db_path: &Path) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
@@ -820,5 +839,21 @@ mod tests {
             .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
             .unwrap();
         assert_eq!(ms, 5000);
+    }
+
+    #[test]
+    fn catalog_db_path_none_for_in_memory() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(catalog_db_path(&cat.conn).is_none());
+    }
+
+    #[test]
+    fn catalog_db_path_some_for_file_backed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.db");
+        let cat = Catalog::open(&path).unwrap();
+        let got = catalog_db_path(&cat.conn).expect("file-backed catalog must report a path");
+        // SQLite may hand back a canonicalized form; compare on the file name.
+        assert_eq!(got.file_name(), path.file_name());
     }
 }
