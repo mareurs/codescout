@@ -487,6 +487,43 @@ pub(crate) struct PlannedEdit {
     pub order: usize,      // collection order; tie-break for coincident inserts
 }
 
+/// Byte range of each CRLF-tolerant match of `old_string` within `text`: exact
+/// except for a lone trailing `\r` per line. Mirrors `edit_file`'s
+/// `find_crlf_tolerant_windows` (see that function's doc comment for the
+/// real-world trigger) — a Windows-checked-out markdown file has `\r\n` line
+/// endings, but a multi-line `old_string` arrives with bare `\n` newlines (the
+/// normal shape for an MCP payload), so the exact byte match fails at every
+/// line boundary even though the content is otherwise identical. Returned
+/// ranges are relative to `text` (a section slice, not the whole file).
+fn find_crlf_tolerant_ranges(text: &str, old_string: &str) -> Vec<(usize, usize)> {
+    let old_lines: Vec<&str> = old_string
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
+    let k = old_lines.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let mut spans: Vec<(&str, usize, usize)> = Vec::new();
+    let mut offset = 0usize;
+    for raw in text.split_inclusive('\n') {
+        let no_lf = raw.strip_suffix('\n').unwrap_or(raw);
+        let line_text = no_lf.strip_suffix('\r').unwrap_or(no_lf);
+        spans.push((line_text, offset, offset + line_text.len()));
+        offset += raw.len();
+    }
+    let mut out = Vec::new();
+    if spans.len() < k {
+        return out;
+    }
+    for i in 0..=(spans.len() - k) {
+        if (0..k).all(|j| spans[i + j].0 == old_lines[j]) {
+            out.push((spans[i].1, spans[i + k - 1].2));
+        }
+    }
+    out
+}
+
 fn spans_conflict(a: &Range<usize>, b: &Range<usize>) -> bool {
     let a_zero = a.start == a.end;
     let b_zero = b.start == b.end;
@@ -644,6 +681,38 @@ pub(crate) fn plan_scoped_edit(
     let section = &content[sec_start..sec_end];
 
     if !section.contains(old_string) {
+        // CRLF-tolerant fallback: only kicks in when the exact match failed and
+        // there's exactly one tolerant match (same conservative uniqueness gate
+        // edit_file uses), so it never silently picks among ambiguous candidates.
+        let crlf_ranges = find_crlf_tolerant_ranges(section, old_string);
+        if crlf_ranges.len() == 1 {
+            let (rel_start, rel_end) = crlf_ranges[0];
+            let matched = &section[rel_start..rel_end];
+            // Adapt the replacement's line endings to match this region's convention
+            // so the edit doesn't leave a mixed CRLF/LF block behind.
+            let adapted = if matched.contains("\r\n") {
+                new_string.replace("\r\n", "\n").replace('\n', "\r\n")
+            } else {
+                new_string.replace("\r\n", "\n")
+            };
+            let mstart = sec_start + rel_start;
+            let mend = sec_start + rel_end;
+            let mut edits = vec![PlannedEdit {
+                span: mstart..mend,
+                replacement: adapted,
+                edit_index,
+                order: edit_index * 1_000,
+            }];
+            if !new_string.ends_with('\n') {
+                if let Some(last) = edits.last_mut() {
+                    if last.span.end == sec_end {
+                        last.replacement.push('\n');
+                    }
+                }
+            }
+            return Ok(edits);
+        }
+
         return Err(anyhow::anyhow!(
             "old_string not found in section '{}'. \
              The text must match exactly (whitespace-sensitive).",
