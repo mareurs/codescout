@@ -1611,9 +1611,23 @@ mod tests {
 
     async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        let ws_path = codescout_dir.join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+
+        let env = ServerEnv {
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(codescout_dir.join("librarian.db")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-        let server = CodeScoutServer::new(agent).await;
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
         (dir, server)
     }
 
