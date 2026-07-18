@@ -50,59 +50,74 @@ whether the catalog stays clean on its own.
 **Placement.** A shared helper invoked at the two write entry points that introduce *new*
 catalog rows:
 
-- `src/librarian/tools/create.rs::call` (single-artifact create)
-- `src/librarian/tools/reindex.rs` (bulk scan/upsert)
+- `src/librarian/tools/create.rs::call` — guard the resolved `base_dir` (the workspace root
+  the artifact is written under; it always exists, so it canonicalizes cleanly).
+- `src/librarian/tools/reindex.rs::call` — guard each `target` scan root before the walk.
 
-`update` / `augment` / `append_entry` / `event_create` act on an existing artifact `id`;
-if `create` and `reindex` cannot introduce a temp-rooted row, there is nothing for them to
-mutate. **Documented assumption:** guarding the two introduction points is sufficient; if a
-future path introduces rows another way, it must call the same helper.
+`update` / `augment` / `append_entry` / `event_create` act on an existing artifact `id`; if
+`create` and `reindex` cannot introduce a temp-rooted row, there is nothing for them to
+mutate. **Documented assumption:** guarding the two introduction points is sufficient; a
+future path that introduces rows another way must call the same helper.
 
 **Predicate — refuse the write when BOTH hold:**
 
-1. The write targets a path under `std::env::temp_dir()` (canonicalized comparison) — for
-   `create`, the artifact's resolved `abs_path`; for `reindex`, the scan root being indexed;
-   AND
-2. The catalog is **persistent** (file-backed), detected from the connection via
-   `PRAGMA database_list` — the `main` database's `file` column is non-empty. An in-memory
-   catalog reports an empty file and is therefore *not* persistent.
+1. The workspace root being written (create's `base_dir`, or a reindex `target`) is under
+   `std::env::temp_dir()` (canonicalized comparison); AND
+2. The catalog is the **real / shared** one — its backing DB file exists **and lives outside**
+   the temp dir. Detected via `PRAGMA database_list`: the `main` database's `file` column is
+   non-empty (file-backed, not in-memory) **and** that file is not itself under
+   `std::env::temp_dir()`.
 
-Both conditions are required so that the existing test architecture — which pairs
-`Catalog::open_in_memory()` with `/tmp` `TempDir` workspaces — is unaffected: the catalog is
-in-memory, so condition 2 is false and the write proceeds.
+**Why condition 2 is "outside temp", not merely "file-backed".** Server / integration tests
+are the load-bearing case: they run against a *file-backed* catalog whose DB lives **under the
+test's own `TempDir`** (`src/server.rs`: `db: Some(dir.path().join("librarian.db"))`), paired
+with `TempDir` workspaces. A bare "file-backed" predicate would refuse those legitimate creates
+and break the suite. Requiring the catalog file to be *outside* temp lets an isolated /
+ephemeral catalog (test or scratch, under temp) accept temp-workspace writes, while the guard
+still fires for the real pollution vector: a temp workspace writing into the shared
+`~/.local/share/librarian/catalog.db`, which is outside temp. Unit-level librarian tests use
+`Catalog::open_in_memory()` (no file) and are likewise unaffected.
 
-**Escape hatch.** Environment variable `CODESCOUT_ALLOW_TEMP_WORKSPACE=1` bypasses the guard,
-for the rare legitimate case of a real session working a scratch project under the temp dir.
+**Escape hatch.** `CODESCOUT_ALLOW_TEMP_WORKSPACE=1` bypasses the guard, for the rare
+legitimate case of a real session working a scratch project under the temp dir.
 
 **Error.** `RecoverableError` (non-fatal, correctable) whose hint names both the opt-in env
-var and the in-memory/isolated-catalog alternative for test harnesses.
+var and the isolated-catalog alternative for test harnesses.
 
 **Sketch.**
 
 ```rust
-// catalog persistence probe (free fn over &Connection, or Catalog method)
-fn catalog_is_persistent(conn: &rusqlite::Connection) -> bool {
-    // PRAGMA database_list → row (seq, name, file); main.file == "" for in-memory/temp.
+/// The catalog's backing DB file, or None for an in-memory connection.
+/// PRAGMA database_list yields (seq, name, file); `main.file` is "" in-memory.
+fn catalog_db_path(conn: &rusqlite::Connection) -> Option<std::path::PathBuf> { /* ... */ }
+
+fn is_under_temp(path: &Path) -> bool {
+    let temp = std::fs::canonicalize(std::env::temp_dir())
+        .unwrap_or_else(|_| std::env::temp_dir());
+    std::fs::canonicalize(path)
+        .map(|p| p.starts_with(&temp))
+        .unwrap_or_else(|_| path.starts_with(&temp))
 }
 
-// shared guard, called by create + reindex before any upsert
-fn guard_temp_workspace_write(root: &Path, conn: &rusqlite::Connection) -> Result<()> {
+/// Refuse iff the workspace root is under temp AND the catalog is the real one
+/// (file-backed, outside temp) AND the caller did not opt in.
+fn guard_temp_workspace_write(root: &Path, conn: &rusqlite::Connection) -> anyhow::Result<()> {
     if std::env::var_os("CODESCOUT_ALLOW_TEMP_WORKSPACE").is_some() {
         return Ok(());
     }
-    let under_temp = /* canonical(root).starts_with(canonical(env::temp_dir())) */;
-    if under_temp && catalog_is_persistent(conn) {
+    let catalog_is_real = catalog_db_path(conn).is_some_and(|p| !is_under_temp(&p));
+    if is_under_temp(root) && catalog_is_real {
         return Err(RecoverableError::with_hint(
-            "refusing to write an artifact rooted under the system temp dir into the \
+            "refusing to write an artifact rooted under the system temp dir into the shared \
              persistent catalog — this is how probe/test runs pollute the shared catalog",
-            "Use an in-memory / isolated catalog for tests, or set \
+            "Use an isolated catalog (under the temp dir, or in-memory) for tests, or set \
              CODESCOUT_ALLOW_TEMP_WORKSPACE=1 if this scratch workspace is intentional.",
-        ).into());
+        )
+        .into());
     }
     Ok(())
 }
 ```
-
 ## Component 2 — Batch dead-root cleanup
 
 **Shape.** Extend `librarian(action="doctor")`'s existing `fix="prune_missing"` — **no new
@@ -161,11 +176,14 @@ doctor(fix="prune_missing")            # no root=
 
 **Prevention**
 
-- `catalog_is_persistent`: in-memory → `false`; file-backed (tempfile) → `true`.
-- temp-dir root + **file-backed** catalog → write **refused**.
-- temp-dir root + **in-memory** catalog → write **allowed** (existing tests keep passing).
-- non-temp root + file-backed catalog → allowed.
-- `CODESCOUT_ALLOW_TEMP_WORKSPACE=1` bypasses the refusal.
+- `catalog_db_path`: in-memory → `None`; file-backed (tempfile) → `Some(path)`.
+- temp-dir root + **real** catalog (DB file **outside** temp) → write **refused**.
+- temp-dir root + catalog whose DB file is **under** temp (isolated) → **allowed** — this is
+  the case that keeps server / integration tests green.
+- temp-dir root + **in-memory** catalog → **allowed**.
+- non-temp root + real catalog → allowed.
+- opt-in decision (`should_refuse(under_temp, real_catalog, opted_in=true) == false`) covers
+  the `CODESCOUT_ALLOW_TEMP_WORKSPACE` bypass without mutating global env in tests.
 
 **Cleanup**
 
