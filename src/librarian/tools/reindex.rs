@@ -134,6 +134,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     };
 
+    // Prevention: refuse indexing a temp-dir root into the real shared catalog.
+    {
+        let cat = ctx.catalog.lock();
+        for target in &targets {
+            super::temp_write_guard::guard_temp_workspace_write(target, &cat.conn)?;
+        }
+    }
+
     // NOTE: previously, `force=true` issued
     // `DELETE FROM artifact WHERE abs_path LIKE <root>/%` here, *before* the
     // re-walk. That was destructive: `artifact_augmentation` is declared
@@ -484,6 +492,31 @@ mod tests {
         let v = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v["scope"].as_str().unwrap(), "all");
         assert_eq!(v["added"].as_u64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn reindex_refuses_temp_root_into_real_catalog() {
+        // Catalog OUTSIDE the OS temp dir; workspace root UNDER it. With no current
+        // project, reindex defaults to scope=All and walks the workspace roots — so
+        // the guard fires on the temp root before any file walk. (No rules / fixtures
+        // needed: the refusal happens before classification.)
+        let outside = tempfile::TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let cat = Catalog::open(&outside.path().join("catalog.db")).unwrap();
+        let ws = TempDir::new().unwrap(); // under the OS temp dir
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: ws.path().to_path_buf(),
+            })
+            .build();
+
+        let err = call(&ctx, json!({})).await.expect_err(
+            "reindexing a temp root into a real (outside-temp) catalog must be refused",
+        );
+        assert!(
+            err.to_string().contains("temp dir"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
