@@ -352,6 +352,12 @@ fn derive_dead_roots(conn: &rusqlite::Connection) -> anyhow::Result<Vec<std::pat
     let mut roots = std::collections::BTreeSet::new();
     for p in &paths {
         let path = std::path::Path::new(p);
+        // Malformed (non-absolute) abs_path rows are abs_path_must_be_absolute's
+        // eviction job, not a dead-root: skip them so the climb never bottoms out
+        // at an empty PathBuf (whose prune WHERE would match every absolute row).
+        if !path.is_absolute() {
+            continue;
+        }
         if path.exists() {
             continue; // not a missing row
         }
@@ -963,14 +969,39 @@ mod tests {
     }
 
     #[test]
+    fn derive_dead_roots_skips_non_absolute_paths() {
+        // A malformed relative abs_path row must NOT yield a dead root — otherwise
+        // the climb bottoms out at an empty PathBuf whose prune matches everything.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "rel", "relative/does/not/exist.md");
+        let roots = derive_dead_roots(&cat.conn).unwrap();
+        assert!(
+            roots.is_empty(),
+            "non-absolute row must not yield a dead root, got: {roots:?}"
+        );
+    }
+
+    #[test]
     fn count_dead_root_counts_rows_under_root() {
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact(&cat, "a1", "/nonexistent-root/repo/docs/x.md");
         seed_artifact(&cat, "a2", "/nonexistent-root/repo/y.md");
         seed_artifact(&cat, "z1", "/nonexistent-root/other/z.md");
-        let (arts, _commits) =
+        // Prefix sibling: /nonexistent-root/repo-other must NOT match the
+        // LIKE '/nonexistent-root/repo/%' clause scoped to .../repo.
+        seed_artifact(&cat, "sibling", "/nonexistent-root/repo-other/z.md");
+        seed_commit(&cat, "deadbeef", "/nonexistent-root/repo");
+        seed_commit(&cat, "cafef00d", "/nonexistent-root/repo-other");
+        let (arts, commits) =
             count_dead_root(&cat.conn, std::path::Path::new("/nonexistent-root/repo")).unwrap();
-        assert_eq!(arts, 2);
+        assert_eq!(
+            arts, 2,
+            "prefix-sibling repo-other rows must not be counted under repo"
+        );
+        assert_eq!(
+            commits, 1,
+            "prefix-sibling commit git_root must not be counted under repo"
+        );
     }
 
     #[test]
