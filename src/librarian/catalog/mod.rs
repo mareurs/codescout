@@ -46,7 +46,6 @@ const SCHEMA_SQL: &str = include_str!("schema.sql");
 /// first whitespace-delimited token on each line is the column name; lines
 /// that are blank, `--` comments, or table-level constraints (PRIMARY,
 /// UNIQUE, FOREIGN, CHECK, CONSTRAINT) are skipped.
-
 #[cfg(test)]
 fn parse_create_table_columns(schema_sql: &str, table: &str) -> Vec<String> {
     let marker_if_not_exists = format!("CREATE TABLE IF NOT EXISTS {table} (");
