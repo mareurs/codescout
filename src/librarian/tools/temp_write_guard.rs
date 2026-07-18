@@ -38,11 +38,15 @@ pub(crate) fn guard_temp_workspace_write(
 ) -> anyhow::Result<()> {
     let opted_in = std::env::var_os(ALLOW_ENV).is_some();
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    // Fail-open: if `root` cannot be canonicalized (e.g. it does not exist), fall
+    // back to the raw path. create/reindex roots exist at guard time, so this only
+    // risks a false-ALLOW on a symlinked temp dir for a nonexistent root — never a
+    // false-REFUSE.
     let root_c = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let catalog_db = crate::librarian::catalog::catalog_db_path(conn)
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
     if should_refuse(&root_c, catalog_db.as_deref(), &temp, opted_in) {
-        return Err(crate::tools::RecoverableError::with_hint(
+        return Err(crate::librarian::tools::RecoverableError::with_hint(
             format!(
                 "refusing to write an artifact rooted under the system temp dir ({}) into the \
                  shared persistent catalog — this is how probe/test runs pollute the catalog",
@@ -52,8 +56,7 @@ pub(crate) fn guard_temp_workspace_write(
                 "Use an isolated catalog (under the temp dir, or in-memory) for tests, or set \
                  {ALLOW_ENV}=1 if this scratch workspace is intentional."
             ),
-        )
-        .into());
+        ));
     }
     Ok(())
 }
@@ -132,5 +135,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         assert!(guard_temp_workspace_write(dir.path(), &cat.conn).is_ok());
+    }
+
+    #[test]
+    fn wrapper_refuses_temp_workspace_into_real_outside_temp_catalog() {
+        // Catalog OUTSIDE the OS temp dir (a temp dir under the repo cwd, auto-cleaned);
+        // workspace UNDER the OS temp dir. This is the real pollution shape and the only
+        // way to build an outside-temp catalog in a test without leaking files.
+        // (Assumes the repo checkout is not itself under the OS temp dir, which holds here.)
+        let outside = tempfile::TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let cat = Catalog::open(&outside.path().join("catalog.db")).unwrap();
+        let ws = tempfile::TempDir::new().unwrap(); // under the OS temp dir
+        let err = guard_temp_workspace_write(ws.path(), &cat.conn)
+            .expect_err("temp workspace + real (outside-temp) catalog must be refused");
+        assert!(
+            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+                .is_some(),
+            "refusal must be a librarian RecoverableError (routes to isError:false): {err}"
+        );
+        assert!(
+            err.to_string().contains("temp dir"),
+            "unexpected error: {err}"
+        );
     }
 }
