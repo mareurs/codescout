@@ -336,6 +336,67 @@ fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Resul
     Ok((artifact_rows, commit_rows))
 }
 
+/// Distinct DEAD ROOTS to prune, derived from the catalog's missing rows. A
+/// missing artifact is included ONLY if its parent directory is ALSO missing (a
+/// whole subtree is gone, not a single file under a live dir — single-file
+/// deletions under a live repo are reindex's job). The dead root is the highest
+/// nonexistent ancestor whose parent still exists. Returns a sorted, de-duped list.
+// No non-test caller until Task 6 wires the batch dead-root cleanup; drop
+// this allow once that caller lands.
+#[allow(dead_code)]
+fn derive_dead_roots(conn: &rusqlite::Connection) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let mut stmt = conn.prepare("SELECT abs_path FROM artifact")?;
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut roots = std::collections::BTreeSet::new();
+    for p in &paths {
+        let path = std::path::Path::new(p);
+        if path.exists() {
+            continue; // not a missing row
+        }
+        match path.parent() {
+            Some(parent) if parent.exists() => continue, // single file under a live dir
+            None => continue,
+            _ => {}
+        }
+        // Walk up to the highest nonexistent ancestor whose parent exists.
+        let mut dead = path.to_path_buf();
+        while let Some(parent) = dead.parent() {
+            if parent.exists() {
+                break;
+            }
+            dead = parent.to_path_buf();
+        }
+        roots.insert(dead);
+    }
+    Ok(roots.into_iter().collect())
+}
+
+/// Read-only count of `(artifact_rows, commit_rows)` under `root`, mirroring the
+/// WHERE clauses `prune_dead_root` deletes with.
+// No non-test caller until Task 6 wires the batch dead-root cleanup; drop
+// this allow once that caller lands.
+#[allow(dead_code)]
+fn count_dead_root(
+    conn: &rusqlite::Connection,
+    root: &std::path::Path,
+) -> anyhow::Result<(usize, usize)> {
+    let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
+    let under = format!("{root_fwd}/%");
+    let arts: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2",
+        rusqlite::params![root_fwd, under],
+        |r| r.get(0),
+    )?;
+    let commits: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM commits WHERE git_root = ?1 OR git_root LIKE ?2",
+        rusqlite::params![root_fwd, under],
+        |r| r.get(0),
+    )?;
+    Ok((arts.max(0) as usize, commits.max(0) as usize))
+}
+
 /// Pulls every `(id, abs_path)` row once and runs five per-row checks
 /// (abs_path_must_be_absolute / backslash / ads_colon / dotdot /
 /// missing_file). Single SQL fetch + in-memory passes is cheaper than five
@@ -870,6 +931,46 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM commits", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n_com, 1, "only the /tmp commit remains");
+    }
+
+    #[test]
+    fn derive_dead_roots_groups_gone_subtrees_and_skips_live_dir_files() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let live = tempfile::tempdir().unwrap(); // exists on disk
+
+        // Boundary that "still exists" (e.g. a real ~/work/ parent dir); the
+        // deleted repo lives one level below it and is never created.
+        let dead_parent = tempfile::tempdir().unwrap();
+        let dead_root = dead_parent.path().join("repo");
+
+        // (a) whole subtree gone: parent dir does not exist -> included.
+        seed_artifact(&cat, "a1", &dead_root.join("docs/x.md").to_string_lossy());
+        seed_artifact(&cat, "a2", &dead_root.join("docs/y.md").to_string_lossy());
+        // (b) single missing file under a LIVE dir -> excluded (reindex's job).
+        let missing_under_live = live.path().join("gone.md");
+        seed_artifact(&cat, "b1", &missing_under_live.to_string_lossy());
+        // (c) a live file -> not missing, excluded.
+        let live_file = live.path().join("here.md");
+        std::fs::write(&live_file, "x").unwrap();
+        seed_artifact(&cat, "c1", &live_file.to_string_lossy());
+
+        let roots = derive_dead_roots(&cat.conn).unwrap();
+        assert_eq!(
+            roots,
+            vec![dead_root],
+            "only the gone subtree's highest-nonexistent-ancestor is a dead root"
+        );
+    }
+
+    #[test]
+    fn count_dead_root_counts_rows_under_root() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "a1", "/nonexistent-root/repo/docs/x.md");
+        seed_artifact(&cat, "a2", "/nonexistent-root/repo/y.md");
+        seed_artifact(&cat, "z1", "/nonexistent-root/other/z.md");
+        let (arts, _commits) =
+            count_dead_root(&cat.conn, std::path::Path::new("/nonexistent-root/repo")).unwrap();
+        assert_eq!(arts, 2);
     }
 
     #[test]
