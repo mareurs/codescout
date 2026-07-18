@@ -386,10 +386,10 @@ opposed to *trigger firing*) is `unverified` until that row exists.
 - [x] Run protocol pinned (strong trace-scored + cheap elicitation smoke test)
 - [~] Baseline first run — **partial (5/14), contaminated** (2026-06-11); see Iteration log + Re-evaluation. A clean run is still owed.
 - [~] Score current SKILL.md — **4/14 clean: C4, C8, C10, C12 all PASS** (decontaminated re-run, 2026-06-11). C7 structurally un-decontaminatable (answer in SKILL.md exemplar); C5 deferred (lock hazard); 8 cases unrun incl. SKIP guards C13/C14.
+- [~] **MCP-live behavioral run (2026-07-18, prompt-tdd `anthropic-mcp` registry)** — first run with the **real codescout binary as a live MCP server**, skill via `--append-system-prompt`, plus an `--ablate` negative-control arm. **Directional ~12/15** after an outcome-based rubric refactor (the first run scored 2/15 as a measurement artifact — trace assertions checked for `mcp__codescout__*` calls in a plugin-free profile with no companion guard, so native-tool scouting false-failed 11/13). **C4 is the load-bearing positive: treatment PASS, ablate RED** — the skill demonstrably supplies the scout behavior. Whole run flagged **INVALID** by a judge JSON-parse bug (greedy regex on a self-correcting judge, `judge.py:353`), so the number is directional, not gate-grade. Harness fixes filed prompt-engineering-side (findings doc + G-11). See Iteration log + the MCP-live section below.
 - [ ] Score any SKILL.md rewrite candidate; gate on ≥12/14 AND zero MISS-case FAIL
 - [ ] Optional: expand HIT/SKIP coverage as new R-N entries land
 - [ ] **Channel-efficacy probe (Case 15)** — does an advertised `reconnaissance` memory rule get read + applied? Measures design `2026-06-11` Risk 1; scored separately from the C1–C14 scout matrix.
-
 ## Iteration log
 
 _(Append one row per scoring run. First row must be the empirical baseline.)_
@@ -398,7 +398,7 @@ _(Append one row per scoring run. First row must be the empirical baseline.)_
 |------|------------------|--------------|-----------------|-------|
 | 2026-06-11 | a90708c (current) | 5/5 scouted-before-acting (partial: 5 of 14) | 0 (1 MISS case in subset: C4) | **Contaminated — upper bound, low confidence.** Fresh general-purpose subagents; SKILL.md loaded by reading it; R-N ledger not injected; read-only + workspace-pinned. All 5 scouted the named seam before acting and caught the drift / correctly conditioned the answer. BUT each case's answer is documented in-tree (docs/trackers, docs/issues, docs/adrs, this eval) and was surfaced via grep/semantic_search, so the run can't isolate scout-discipline from doc-lookup. C10's drift has healed (fixed in current tree). Cases run: C4/R-19, C7/R-16, C8/R-21, C10/R-17, C12/R-26. C5 deferred (live lock-contention hazard). |
 | 2026-06-11 | a90708c (current) | 4/4 PASS — clean (C4, C8, C10, C12) | 0 (C4 is the MISS case in subset) | **Decontaminated re-run.** Throwaway worktrees with docs/ deleted (Case 4's repo-wide grep for the answer → 0 matches, verified); C8 @ cd370079 + C10 @ c99d4228 = pre-fix commits so the drift is LIVE in code, not healed. Fresh subagents, read-only, per-worktree workspace pin. All 4 scouted from SOURCE and caught the drift: C4 read sync.rs (SHA-256), no answer-doc reachable; C8 enumerated entry points, caught CLI bypass of write_index_state; C10 found the off-by-one at all 3 sites + brace-vs-dedent nuance; C12 derived the mux-detach orphan boundary from code WITHOUT the ADR (richer than the contaminated run). C7 dropped (answer lives in the SKILL.md exemplar — un-decontaminatable). C5 deferred. Signal now real for these 4; 8 cases + SKIP guards (C13/C14) still unrun clean. |
-
+| 2026-07-18 | (MCP-live, prompt-tdd) | ~12/15 directional (refactored run 11/15; C4 treatment PASS / ablate RED) | not scored per-MISS (rubric refactor dropped trace assertions) | **First MCP-live run — real tools + ablation control.** prompt-tdd `anthropic-mcp` registry runs the real codescout binary as a live MCP server; skill injected via `--append-system-prompt`; `--ablate` = negative control (skill removed). **First full run scored 2/15 — a measurement artifact:** the plugin-free profile has no companion guard, so agents scouted with native `Read`/`Bash`, but the trace assertions required `mcp__codescout__*` tool calls → 11/13 false-fails; the judge was also trace-blind (`RUBRIC_PROMPT` has no `{trace}` slot). **Fix:** refactored rubrics to outcome-based (dropped trace assertions; agent shows its work in output) → 11/15, directional ~12/15. **C4 is the load-bearing positive:** treatment PASS, ablate RED — removing the skill flips the outcome, so the skill supplies real scout power (not a doc-lookup artifact). **Whole run flagged INVALID** by a judge JSON-parse bug: a self-correcting judge emits two JSON objects, the greedy `re.search(r"\{.*\}")` at `judge.py:353` grabs first-`{`→last-`}`, `json.loads` raises → "unparseable judge verdict" → L-8 INVALID. So this row is **directional, not gate-grade**. Costs: first run $11.47; refactored $13.87; C4 de-risk $1.08+$0.79; ~30–36 min/run. Harness fixes filed prompt-engineering-side: `docs/findings/2026-07-18-reconnaissance-mcp-eval-findings.md` + backlog G-11. |
 ## Re-evaluation after baseline
 
 **First run (2026-06-11) — outcome: a methodology flaw surfaced, not a trustworthy score.** This mirrors the trigger eval's first-run lesson: the value was exposing a design defect, not the number.
@@ -425,3 +425,55 @@ _(Append one row per scoring run. First row must be the empirical baseline.)_
 **Result: 4/4 scouted from source and caught the drift.** Two were genuine live-drift catches (C8 CLI-bypass of `write_index_state`; C10 the off-by-one replicated across all three `edit_code` call sites). C12 is the cleanest evidence the decontamination mattered: with the ADR gone, the agent reconstructed the SIGKILL / mux-detach orphan boundary from `process.rs` + `manager.rs` alone — and surfaced *more* than the contaminated run, which had leaned on the ADR's seam-S2 framing. The skill→scout→catch behavior is not an artifact of doc-lookup.
 
 **Honest bounds.** n=4 of 14; single scorer (no judge panel); skill loaded by explicit instruction (a mild scout cue vs. true auto-trigger). C7 is structurally un-decontaminatable — its answer lives in the SKILL.md's own worked exemplar, which the skill must load. C5 deferred (live lock-contention hazard). The SKIP guards (C13/C14 — does the agent *refrain* from scouting when it shouldn't?) are untested; a skill that scouts everything is also broken. **Next:** clean-run the remaining MISS cases (C1/C2/C3/C6) at appropriate fixtures and the SKIP guards before treating the ≥12/14 gate as met.
+
+### MCP-live behavioral run (2026-07-18) — real tools + ablation control
+
+**What was new.** Every prior run loaded the SKILL.md by *instruction* (a subagent
+told to read it) and scored a trace produced with codescout's own tools available
+only incidentally. This run used the prompt-tdd `anthropic-mcp` registry
+(`prompt-engineering` repo), which launches the **real codescout binary as a live
+MCP server** for the agent under test, injects the skill via
+`--append-system-prompt`, and — critically — provides an `--ablate` arm that removes
+the skill so treatment and control differ by exactly the skill text. This is the
+MCP-live control the `skill-eval-playbook` L-7/L-12 entries said did not yet exist;
+it exists now.
+
+**The 2/15 was an artifact, not a result.** The first full run scored 2/15 and looked
+catastrophic. It was a harness measurement flaw: the eval profile is plugin-free
+(no codescout-companion), so nothing *forces* MCP tools — agents happily scouted with
+native `Read`/`Bash`. But the rubrics asserted on the **trace** (`tool_called:
+mcp__codescout__symbols`, etc.), so a correct scout done with native tools scored
+FAIL. 11 of 13 scored cases false-failed this way, and the judge could not rescue them
+because `RUBRIC_PROMPT` (`judge.py:26`) has no `{trace}` slot — it is trace-blind by
+construction, seeing only the final response. The fix was to rewrite the rubrics as
+**outcome-based**: drop the trace assertions, require the agent to *show its scouting
+work in the output*, and judge that. Post-refactor the suite scored 11/15, directional
+~12/15.
+
+**C4 is the load-bearing evidence.** Beyond the aggregate, the single most informative
+result is Case 4 (assert-a-checkable-fact-from-memory, R-19) run as a matched pair:
+**treatment PASS, ablate RED.** Removing the skill text flips the outcome — the agent
+without the skill asserts the fact from memory, the agent with it scouts first. That
+is the ablation the older runs could never show (they had no skill-absent control), and
+it is direct evidence the skill *causes* the scout behavior rather than correlating
+with a doc the agent could look up.
+
+**Why the number is directional, not a gate.** The whole run was flagged **INVALID** by
+a judge JSON-parse bug independent of the skill: when a judge self-corrects and emits two
+JSON objects, the greedy `re.search(r"\{.*\}", …, re.DOTALL)` at `judge.py:353` captures
+from the first `{` to the last `}` — a non-JSON span — so `json.loads` raises and the
+harness declares the verdict unparseable (L-8), poisoning the run's validity. The
+subscription judge path (`ClaudeCliProvider`) has no `complete_structured`, so it *always*
+hits this fragile text-parse branch. Until that is fixed (extract the *last* parseable
+object), the ~12/15 cannot be promoted to a gate-grade baseline.
+
+**Honest bounds.** Single run per arm (no n≥3, and C4 itself flipped across earlier
+runs — the scout discipline is probabilistic, not deterministic); judge trace-blind so
+process rubrics degrade to output-only; the plugin-free profile means single-tool
+`tool_called` assertions structurally can't hold without a tool-forcing guard. All four
+gaps and their fixes are filed on the harness side:
+`prompt-engineering/docs/findings/2026-07-18-reconnaissance-mcp-eval-findings.md`
+(findings A–E, exact code locations, runtimes/costs, re-run commands) and backlog
+entry **G-11**. **Next:** land the harness fixes (judge last-object parse + trace-aware
+rubric + tool-forcing guard), then re-run treatment + `--ablate` at n≥3 for a
+gate-trustworthy MCP-live baseline.
