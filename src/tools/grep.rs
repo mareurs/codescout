@@ -1361,4 +1361,75 @@ mod tests {
             .unwrap();
         assert_eq!(r["total"].as_u64().unwrap(), 1, "result: {r:?}");
     }
+
+    /// 2026-07-18: existing glob tests only cover wildcard patterns (`"*.rs"`).
+    /// Regression coverage for a literal, wildcard-free `glob` value matched
+    /// against a multi-segment relative path — the originally reported bug
+    /// (a false negative here) was not reproducible on retest, but this gap
+    /// in coverage was real and worth closing.
+    #[tokio::test]
+    async fn glob_matches_literal_multi_segment_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub").join("dir");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("file.rs"), "TARGET\n").unwrap();
+        std::fs::write(dir.path().join("file.rs"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+
+        let r = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET",
+                    "path": dir.path().to_str().unwrap(),
+                    "glob": "sub/dir/file.rs",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            1,
+            "literal multi-segment glob must match the nested file only: {r:?}"
+        );
+        let s = r.to_string();
+        assert!(
+            s.contains("sub") && s.contains("dir") && s.contains("file.rs"),
+            "result must reference the nested file: {s}"
+        );
+    }
+
+    /// Same as above but with the array form of `glob`, and asserting the
+    /// root-level decoy file (outside the literal path) is excluded.
+    #[tokio::test]
+    async fn glob_array_matches_literal_multi_segment_path_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub").join("dir");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("file.rs"), "TARGET\n").unwrap();
+        std::fs::write(dir.path().join("other.rs"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+
+        let r = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET",
+                    "path": dir.path().to_str().unwrap(),
+                    "glob": ["sub/dir/file.rs"],
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            1,
+            "array-form literal glob must match only the nested file: {r:?}"
+        );
+        let s = r.to_string();
+        assert!(
+            !s.contains("other.rs"),
+            "file outside the literal glob must never be included: {s}"
+        );
+    }
 }
