@@ -27,7 +27,11 @@ pub(crate) fn guard_temp_workspace_write(
     root: &Path,
     conn: &rusqlite::Connection,
 ) -> anyhow::Result<()> {
-    let opted_in = std::env::var_os(ALLOW_ENV).is_some();
+    // Value-based opt-in: only an explicit truthy value disables the guard, so a
+    // stray `CODESCOUT_ALLOW_TEMP_WORKSPACE=0` can't silently defeat prevention.
+    let opted_in = std::env::var(ALLOW_ENV)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
     // Fail-open: if `root` cannot be canonicalized (e.g. it does not exist), fall
     // back to the raw path. create/reindex roots exist at guard time, so this only
