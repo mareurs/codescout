@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 
 use crate::ast;
 use crate::tools::output::{OutputGuard, OverflowInfo};
-use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, ToolContext};
+use crate::tools::{
+    optional_bool_param, optional_u64_param, parse_bool_param, RecoverableError, ToolContext,
+};
 use crate::util::fs::{relative_forward_slash, to_forward_slash};
 
 use crate::fs::{
@@ -226,7 +228,8 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             .agent
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
-        let include_body = guard.should_include_body();
+        let include_body_explicit = optional_bool_param(&input, "include_body");
+        let include_body = include_body_explicit.unwrap_or_else(|| guard.should_include_body());
         let mut result = vec![];
         for file_path in &files {
             let Some(lang) = ast::detect_language(file_path) else {
@@ -407,7 +410,8 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         } else {
             symbols
         };
-        let include_body = guard.should_include_body();
+        let include_body_explicit = optional_bool_param(&input, "include_body");
+        let include_body = include_body_explicit.unwrap_or_else(|| guard.should_include_body());
         let source = if include_body {
             std::fs::read_to_string(&full_path).ok()
         } else {
@@ -559,7 +563,8 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
             let (dir_files, file_overflow) =
                 guard.cap_files(dir_files, "Narrow with a more specific glob or file path");
-            let include_body = guard.should_include_body();
+            let include_body_explicit = optional_bool_param(&input, "include_body");
+            let include_body = include_body_explicit.unwrap_or_else(|| guard.should_include_body());
 
             let mut result = vec![];
             for (display_path, abs_path) in &dir_files {
