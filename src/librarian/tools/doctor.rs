@@ -125,7 +125,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Opt-in mutation: prune catalog rows under a dead/renamed repo root.
     // Default (no `fix`) stays read-only.
     if let Some(fix) = args.get("fix").and_then(Value::as_str) {
-        return run_fix(ctx, fix, args.get("root").and_then(Value::as_str)).await;
+        let confirm = args
+            .get("confirm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        return run_fix(ctx, fix, args.get("root").and_then(Value::as_str), confirm).await;
     }
 
     let cat = ctx.catalog.lock();
@@ -205,19 +209,71 @@ fn validate_prune_request<'a>(
 /// `no_collision` worktree-scoped rows (from `scan_worktree_scoped`) onto
 /// their main-repo path, leaving `collision` rows untouched for a manual
 /// `graft`.
-async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>) -> Result<Value> {
+async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>, confirm: bool) -> Result<Value> {
     match fix {
         "prune_missing" => {
             let cat = ctx.catalog.lock();
-            let root_path = validate_prune_request(fix, root, &cat.conn)?;
-            let (artifact_rows, commit_rows) = prune_dead_root(&cat.conn, root_path)?;
-            let out = json!({
-                "fix": "prune_missing",
-                "root": root_path.to_string_lossy(),
-                "pruned": { "artifact_rows": artifact_rows, "commit_rows": commit_rows },
-            });
-            drop(cat);
-            Ok(out)
+            match root {
+                Some(_) => {
+                    // Single-root path (unchanged behaviour).
+                    let root_path = validate_prune_request(fix, root, &cat.conn)?;
+                    let (artifact_rows, commit_rows) = prune_dead_root(&cat.conn, root_path)?;
+                    let out = json!({
+                        "fix": "prune_missing",
+                        "root": root_path.to_string_lossy(),
+                        "pruned": { "artifact_rows": artifact_rows, "commit_rows": commit_rows },
+                    });
+                    drop(cat);
+                    Ok(out)
+                }
+                None => {
+                    // Batch mode over all doctor-identified dead roots.
+                    let dead_roots = derive_dead_roots(&cat.conn)?;
+                    if !confirm {
+                        let mut rows = Vec::new();
+                        let (mut ta, mut tc) = (0usize, 0usize);
+                        for r in &dead_roots {
+                            let (a, c) = count_dead_root(&cat.conn, r)?;
+                            ta += a;
+                            tc += c;
+                            rows.push(json!({
+                                "root": r.to_string_lossy(),
+                                "artifact_rows": a, "commit_rows": c,
+                            }));
+                        }
+                        return Ok(json!({
+                            "fix": "prune_missing", "mode": "dry_run",
+                            "dead_roots": rows,
+                            "totals": { "roots": dead_roots.len(), "artifact_rows": ta, "commit_rows": tc },
+                            "hint": "re-run with confirm=true to prune these rows",
+                        }));
+                    }
+                    let mut results = Vec::new();
+                    let (mut ta, mut tc) = (0usize, 0usize);
+                    for r in &dead_roots {
+                        let root_str = crate::util::fs::RepoPath::from_path(r).to_string();
+                        if worktree::covering_conn(&cat.conn, &root_str)?.is_some() {
+                            results.push(json!({
+                                "root": r.to_string_lossy(),
+                                "skipped": "active worktree registration — merge_worktree first",
+                            }));
+                            continue;
+                        }
+                        let (a, c) = prune_dead_root(&cat.conn, r)?;
+                        ta += a;
+                        tc += c;
+                        results.push(json!({
+                            "root": r.to_string_lossy(),
+                            "artifact_rows": a, "commit_rows": c,
+                        }));
+                    }
+                    Ok(json!({
+                        "fix": "prune_missing", "mode": "applied",
+                        "pruned": results,
+                        "totals": { "artifact_rows": ta, "commit_rows": tc },
+                    }))
+                }
+            }
         }
         "reseat_worktree" => reseat_worktree(ctx),
         other => Err(RecoverableError::new(format!(
@@ -341,9 +397,6 @@ fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Resul
 /// whole subtree is gone, not a single file under a live dir — single-file
 /// deletions under a live repo are reindex's job). The dead root is the highest
 /// nonexistent ancestor whose parent still exists. Returns a sorted, de-duped list.
-// No non-test caller until Task 6 wires the batch dead-root cleanup; drop
-// this allow once that caller lands.
-#[allow(dead_code)]
 fn derive_dead_roots(conn: &rusqlite::Connection) -> anyhow::Result<Vec<std::path::PathBuf>> {
     let mut stmt = conn.prepare("SELECT abs_path FROM artifact")?;
     let paths: Vec<String> = stmt
@@ -381,9 +434,6 @@ fn derive_dead_roots(conn: &rusqlite::Connection) -> anyhow::Result<Vec<std::pat
 
 /// Read-only count of `(artifact_rows, commit_rows)` under `root`, mirroring the
 /// WHERE clauses `prune_dead_root` deletes with.
-// No non-test caller until Task 6 wires the batch dead-root cleanup; drop
-// this allow once that caller lands.
-#[allow(dead_code)]
 fn count_dead_root(
     conn: &rusqlite::Connection,
     root: &std::path::Path,
@@ -1004,6 +1054,48 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn prune_missing_batch_dry_run_lists_dead_roots_without_deleting() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "a1", "/nonexistent-root/repo/docs/x.md");
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let v = call(&ctx, json!({ "fix": "prune_missing" })).await.unwrap(); // no root, no confirm
+        assert_eq!(v["mode"], "dry_run");
+        assert_eq!(v["totals"]["artifact_rows"].as_u64().unwrap(), 1);
+        // Nothing deleted.
+        assert!(artifact::get(&ctx.catalog.lock(), "a1").unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn prune_missing_batch_confirm_prunes_dead_roots_only() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        let live_file = live.path().join("here.md");
+        std::fs::write(&live_file, "x").unwrap();
+        seed_artifact(&cat, "dead", "/nonexistent-root/repo/x.md"); // gone subtree
+        seed_artifact(&cat, "live", &live_file.to_string_lossy()); // live file
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let v = call(&ctx, json!({ "fix": "prune_missing", "confirm": true }))
+            .await
+            .unwrap();
+        assert_eq!(v["mode"], "applied");
+        assert_eq!(v["totals"]["artifact_rows"].as_u64().unwrap(), 1);
+        assert!(
+            artifact::get(&ctx.catalog.lock(), "dead")
+                .unwrap()
+                .is_none(),
+            "dead row pruned"
+        );
+        assert!(
+            artifact::get(&ctx.catalog.lock(), "live")
+                .unwrap()
+                .is_some(),
+            "live row kept"
+        );
+    }
+
     #[test]
     fn scan_worktree_scoped_empty_when_no_worktree_rows() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1138,7 +1230,7 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
         assert_eq!(out["fix"], "reseat_worktree");
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
@@ -1185,7 +1277,7 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
         assert!(out["reseated"].as_array().unwrap().is_empty());
         assert_eq!(out["collisions"].as_array().unwrap().len(), 1);
 
@@ -1236,7 +1328,7 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
         assert_eq!(out["reseated"][0]["old_id"], "wt-row");
@@ -1340,7 +1432,7 @@ mod tests {
         );
 
         let ctx = TestToolContextBuilder::new(cat).build();
-        let out = run_fix(&ctx, "reseat_worktree", None).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
         assert!(
             out["reseated"].as_array().unwrap().is_empty(),
             "a registered row must not be reseated — it belongs to merge_worktree: {out}"

@@ -90,7 +90,8 @@ impl Tool for Librarian {
                 "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
                 "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap artifacts scanned (default 10000)." },
                 "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual artifact(action=\"graft\"). Omit for a read-only scan." },
-                "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune. Refused if the path still exists on disk. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
+                "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune (refused if the path still exists on disk). OMIT root to run BATCH mode: dry-run lists every dead root (whole-subtree-gone) with row counts; pass confirm=true to prune them all. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
+                "confirm": { "type": "boolean", "description": "doctor fix=prune_missing batch mode: pass true to apply the prune; omitted/false = dry-run." },
                 "dry_run": { "type": "boolean", "description": "merge_worktree: compute and return the full merge report without writing anything." },
                 "abandon": { "type": "boolean", "description": "merge_worktree: delete all of the worktree's shadow rows and mark its registration abandoned, instead of merging." }
             }
