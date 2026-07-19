@@ -88,6 +88,8 @@ neutral (streak unchanged).
 **Proposal:** D10 step-1 ("promote wins") should explicitly say: check for a superseding correction/ADR before promoting a fired win, and weigh curated-surface bloat (defer low-impact rules to the archived body, don't force them into a capped memory). Promote-when firing is necessary, not sufficient.
 
 **Promote-when:** same shape (superseded-fired-win, or curated-surface-decline) recurs in a second sweep → PR the step-1 refinement into `tracker-hygiene/SKILL.md`.
+
+**Resolution 2026-07-17 (codescout A-18, prompt-tdd):** the step-1 refinement is **NO-SHIP**. Base-arm eval (skill @1.15.0, no guard, sonnet, n=10×2): superseded-win scenario 10/10 WITHHOLD, non-superseded mutation twin 10/10 PROMOTE = 20/20 correct discrimination. Sonnet already cross-checks a superseding correction before promoting, so adding a supersession guard to step-1 would be a dead rule (H2 accretion). HY-1 stays a **hit** (D10 fired correctly); the *refinement proposal* is retired as unwarranted. Residue: sonnet-only (Fable/Haiku untested); the curated-surface-bloat half (vdi W-5) is taste, never evalled. Regression guards kept: `prompt-engineering/scenarios/skills/tracker-hygiene-d10-{superseded,clean-twin}`.
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:

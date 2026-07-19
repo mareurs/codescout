@@ -49,6 +49,23 @@ carries the exact target, so it never enters the scanner's ambiguity pool.
 - Backfilling slugs/entry-edges for the existing corpus. Slugs are minted lazily;
   old file-grain edges keep working unchanged.
 
+## MVP boundaries (implemented by the Stage-2 plan)
+
+The plan implements a correct, additive subset; three faithful-to-the-spec refinements
+are explicit follow-ons so the MVP stays small and safe:
+
+1. **Slug is catalog-only** (`artifact.slug`); the frontmatter mirror is deferred. A
+   full catalog wipe/`reindex --force` would drop slugs (and cascade `entry_cite`) —
+   the graph degrades gracefully to file-grain prose scanning until re-minted.
+   Follow-on: write `slug:` into frontmatter on mint for rebuild-durability.
+2. **Slug is minted on first `append_entry`** to a tracker (on the resolved write
+   `target` row if its `slug` is NULL) — every entry-bearing tracker becomes
+   addressable, not just ones that write cites.
+3. **`cites` are refused from a worktree checkout** (`target != a.id`, the existing
+   `resolve_write_target` redirect signal) with a `RecoverableError` — entry-only
+   worktree appends keep working. This guarantees every `entry_cite.src_slug` keys to
+   a main-checkout slug, sidestepping shadow/merge reconciliation. Follow-on: full
+   main-root slug resolution so cites work from worktrees too.
 ## Design decisions (brainstorm 2026-07-17)
 
 1. **Entry id = `<frozen-slug>:<local-id>`** (e.g. `tracker-mgmt-redesign:TMR-7`).
