@@ -929,10 +929,11 @@ git commit -m "feat(doctor): fix=rehome — dry-run/confirm move recovery with g
 
 ## Task 9: Move-candidate detection (commit-hash overlap) + surfacing
 
+> **Re-scoped 2026-07-19:** surfacing moves to `librarian(action="doctor")` (Task 6's `catalog_health` block), NOT `workspace(status)`/activate caching — same reason as Task 6 (config-tool ToolContext has no catalog). Task 9 fills the `move_candidates` placeholder that Task 6 set to `0`.
+
 **Files:**
 - Modify: `src/librarian/catalog/gc.rs` (`detect_move_candidates`)
-- Modify: `src/librarian/tools/doctor.rs` (report candidates in the read-only scan)
-- Modify: `src/tools/config/mod.rs` (fill `catalog_health.move_candidates`; record candidate count during the activate reconcile)
+- Modify: `src/librarian/tools/doctor.rs` (fill `catalog_health.move_candidates` in the read-only `call`)
 
 **Interfaces:**
 - Consumes: `commits` table (git_root, hash), `artifact.file_sha256`.
@@ -964,12 +965,14 @@ fn detect_move_by_shared_commit_hash() {
 }
 ```
 
+Also add an **ambiguity test**: active root shares commits with TWO distinct gone roots → `detect_move_candidates` returns empty (no actionable candidate).
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cargo test detect_move_by_shared_commit_hash`
 Expected: FAIL — `detect_move_candidates` undefined.
 
-- [ ] **Step 3: Implement `detect_move_candidates`** in `gc.rs`. A `git_root` is a move candidate for `active_git_root` iff it (a) shares ≥1 commit hash with the active root, (b) is NOT itself on disk, and (c) is the unique such gone root for those hashes (ambiguous = overlaps 2+ gone roots → skip, per spec):
+- [ ] **Step 3: Implement `detect_move_candidates`** in `gc.rs`. A `git_root` is a move candidate for `active_git_root` iff it (a) shares ≥1 commit hash with the active root, (b) is NOT itself on disk, and (c) is the unique such gone root (ambiguous = overlaps 2+ gone roots → return empty, per spec):
 
 ```rust
 pub struct MoveCandidate {
@@ -992,9 +995,12 @@ pub fn detect_move_candidates(conn: &Connection, active_git_root: &str) -> Resul
     let mut out = Vec::new();
     for (old_root, shared) in rows {
         if std::path::Path::new(&old_root).exists() { continue; } // only GONE roots
+        // escape LIKE metachars in old_root (memory catalog-sql-hazards) — use the
+        // same escape_like_pattern helper plan_rehome uses.
+        let like = format!("{}/%", crate::librarian::util::escape_like_pattern(&old_root));
         let artifact_rows: i64 = conn.query_row(
             "SELECT COUNT(*) FROM artifact WHERE abs_path LIKE ?1 ESCAPE '\\'",
-            [format!("{old_root}/%")], |r| r.get(0))?;
+            [like], |r| r.get(0))?;
         out.push(MoveCandidate {
             old_root, new_root: active_git_root.to_string(),
             shared_commits: shared.max(0) as usize,
@@ -1008,23 +1014,25 @@ pub fn detect_move_candidates(conn: &Connection, active_git_root: &str) -> Resul
 }
 ```
 
-> `file_sha256` confirmation (spec) can be added as a second filter once the artifact-content match is needed; commit-hash overlap alone is already near-certain identity. Note in code if you defer the sha256 cross-check.
+> `file_sha256` confirmation (spec) can be added as a second filter later; commit-hash overlap alone is near-certain identity. Note in code that the sha256 cross-check is deferred.
 
-- [ ] **Step 3b: Surface candidates.** In `doctor.rs`'s read-only `call`, after the existing scans, add candidate reporting for the active repo's git root (grep how the active root is available on `ctx`; if not available in doctor, surface via `workspace(status)` only). In `src/tools/config/mod.rs`, during the throttled activate reconcile, call `detect_move_candidates(&cat.conn, active_git_root)` and store the count in `catalog_meta` (`move_candidates`); Task 6's status block reads it into `catalog_health.move_candidates`. Add a status test asserting the count surfaces.
+- [ ] **Step 3b: Surface in doctor's `catalog_health`.** In `doctor.rs`'s read-only `call` (where Task 6 added the `catalog_health` block with `move_candidates: 0`), replace the placeholder with a real count: resolve the ACTIVE repo's git root from the librarian ToolContext (grep how doctor/other librarian tools get the active project root — e.g. `ctx.active` / the resident project root; if the active root is a git repo it is the `git_root` used in `commits`), call `gc::detect_move_candidates(&cat.conn, active_git_root)`, set `move_candidates` to `candidates.len()`, and include a `move_candidates_detail` array (old_root → new_root, shared_commits, artifact_rows) when non-empty. Extend the health hint: when `move_candidates > 0`, mention `doctor(fix="rehome", old_root=…, new_root=…)`.
+> If the active git root is not readily resolvable in doctor's `call`, report NEEDS_CONTEXT — do NOT fabricate it.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test detect_move_by_shared_commit_hash && cargo test workspace_status_reports_hidden_rows`
-Expected: PASS
+Run: `cargo test detect_move_by_shared_commit_hash && cargo test -- doctor`
+Expected: PASS. Extend the Task-6 doctor test (or add a new one) to seed a move-candidate (active + gone root sharing a commit hash, gone root absent on disk) and assert `catalog_health.move_candidates >= 1`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
-git add src/librarian/catalog/gc.rs src/librarian/tools/doctor.rs src/tools/config/mod.rs src/tools/config/tests.rs
-git commit -m "feat(gc): move-candidate detection via commit-hash overlap + status surfacing"
+git add src/librarian/catalog/gc.rs src/librarian/tools/doctor.rs
+git commit -m "feat(gc): move-candidate detection via commit-hash overlap, surfaced in doctor catalog_health"
 ```
 
+---
 ---
 
 ## Final verification (after all tasks)
