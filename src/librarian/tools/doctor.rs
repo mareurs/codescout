@@ -129,7 +129,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .get("confirm")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        return run_fix(ctx, fix, args.get("root").and_then(Value::as_str), confirm).await;
+        return run_fix(
+            ctx,
+            fix,
+            args.get("root").and_then(Value::as_str),
+            args.get("new_root").and_then(Value::as_str),
+            confirm,
+        )
+        .await;
     }
 
     let cat = ctx.catalog.lock();
@@ -225,12 +232,70 @@ fn validate_prune_request<'a>(
     Ok(root_path)
 }
 
+/// Validate a `rehome` request without touching the catalog. Returns the
+/// validated `(old_root, new_root)` path pair, or a `RecoverableError` for a
+/// missing/relative `old_root`/`new_root`, an `old_root` that still exists
+/// on disk (rehome only migrates rows from a path that is gone — a live
+/// root's rows are not orphans), a `new_root` that does not exist (rehoming
+/// onto a missing directory would leave the catalog pointing at nothing), or
+/// an `old_root` an ACTIVE `worktree_registration` still covers (mirrors
+/// `validate_prune_request`'s guard — that history belongs to
+/// `librarian(action="merge_worktree")`, not a bulk rehome).
+fn validate_rehome_request<'a>(
+    old_root: Option<&'a str>,
+    new_root: Option<&'a str>,
+    conn: &rusqlite::Connection,
+) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let old = old_root.ok_or_else(|| {
+        RecoverableError::new(
+            "fix=rehome requires old_root=<absolute path the repo used to live at>",
+        )
+    })?;
+    let new = new_root.ok_or_else(|| {
+        RecoverableError::new("fix=rehome requires new_root=<absolute path the repo now lives at>")
+    })?;
+    let (op, np) = (std::path::Path::new(old), std::path::Path::new(new));
+    if !op.is_absolute() || !np.is_absolute() {
+        return Err(RecoverableError::new(
+            "old_root and new_root must both be absolute paths",
+        ));
+    }
+    if op.exists() {
+        return Err(RecoverableError::new(format!(
+            "old_root '{old}' still exists — rehome only migrates rows from a path that is gone"
+        )));
+    }
+    if !np.exists() {
+        return Err(RecoverableError::new(format!(
+            "new_root '{new}' does not exist — cannot rehome onto a missing directory"
+        )));
+    }
+    let old_str = crate::util::fs::RepoPath::from_path(op).to_string();
+    if worktree::covering_conn(conn, &old_str)?.is_some() {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "old_root '{old}' is covered by an ACTIVE worktree registration — rehoming would orphan the catalog's only record of an unmerged worktree's history"
+            ),
+            format!(
+                "merge it first via librarian(action=\"merge_worktree\", root=\"{old}\"), or if the worktree is being discarded, librarian(action=\"merge_worktree\", root=\"{old}\", abandon=true) — then retry rehome"
+            ),
+        ));
+    }
+    Ok((op.to_path_buf(), np.to_path_buf()))
+}
+
 /// Opt-in catalog repair. Two fixes: `prune_missing` — remove every row
 /// anchored under a dead/renamed repo `root`; `reseat_worktree` — re-point
 /// `no_collision` worktree-scoped rows (from `scan_worktree_scoped`) onto
 /// their main-repo path, leaving `collision` rows untouched for a manual
 /// `graft`.
-async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>, confirm: bool) -> Result<Value> {
+async fn run_fix(
+    ctx: &ToolContext,
+    fix: &str,
+    root: Option<&str>,
+    new_root: Option<&str>,
+    confirm: bool,
+) -> Result<Value> {
     match fix {
         "prune_missing" => {
             let cat = ctx.catalog.lock();
@@ -310,8 +375,37 @@ async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>, confirm: bool
             }
         }
         "reseat_worktree" => reseat_worktree(ctx),
+        "rehome" => {
+            let cat = ctx.catalog.lock();
+            let (old, new) = validate_rehome_request(root, new_root, &cat.conn)?;
+            let plan = crate::librarian::catalog::gc::plan_rehome(&cat.conn, &old, &new)?;
+            if plan.rows.is_empty() && plan.collisions.is_empty() {
+                return Err(RecoverableError::new(format!(
+                    "no catalog rows found under old_root '{}'",
+                    old.display()
+                )));
+            }
+            if !confirm {
+                return Ok(json!({
+                    "fix": "rehome", "mode": "dry_run",
+                    "old_root": old.to_string_lossy(), "new_root": new.to_string_lossy(),
+                    "artifact_rows": plan.rows.len(),
+                    "commit_rows": plan.commit_rows,
+                    "collisions": plan.collisions,
+                    "hint": "re-run with confirm=true to migrate these rows (ids + history preserved)",
+                }));
+            }
+            let stats = crate::librarian::catalog::gc::apply_rehome(&cat.conn, &plan)?;
+            crate::librarian::catalog::gc::rehome_commits(&cat.conn, &old, &new)?;
+            Ok(json!({
+                "fix": "rehome", "mode": "applied",
+                "old_root": old.to_string_lossy(), "new_root": new.to_string_lossy(),
+                "migrated": { "artifact_rows": stats.artifact_rows, "commit_rows": plan.commit_rows,
+                              "skipped_collisions": stats.skipped_collisions },
+            }))
+        }
         other => Err(RecoverableError::new(format!(
-            "unknown fix '{other}' — expected 'prune_missing' or 'reseat_worktree'"
+            "unknown fix '{other}' — expected 'prune_missing', 'reseat_worktree', or 'rehome'"
         ))),
     }
 }
@@ -1008,6 +1102,165 @@ mod tests {
     }
 
     #[test]
+    fn validate_rehome_gates() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        let live = dir.path().join("live");
+        std::fs::create_dir_all(&live).unwrap();
+        // new_root must exist
+        assert!(validate_rehome_request(Some("/gone/old"), Some("/also/gone"), &cat.conn).is_err());
+        // old_root must NOT exist
+        assert!(validate_rehome_request(
+            Some(live.to_str().unwrap()),
+            Some(live.to_str().unwrap()),
+            &cat.conn
+        )
+        .is_err());
+        // both required + absolute
+        assert!(validate_rehome_request(None, Some(live.to_str().unwrap()), &cat.conn).is_err());
+        assert!(validate_rehome_request(
+            Some("relative/old"),
+            Some(live.to_str().unwrap()),
+            &cat.conn
+        )
+        .is_err());
+        // happy path: old gone, new exists
+        assert!(validate_rehome_request(
+            Some("/gone/old"),
+            Some(live.to_str().unwrap()),
+            &cat.conn
+        )
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn run_fix_rehome_dry_run_then_confirm_migrates_rows() {
+        let new_dir = tempfile::tempdir().unwrap();
+        let new_root = new_dir.path().to_str().unwrap();
+        let new_root_str = crate::util::fs::RepoPath::from_path(new_dir.path()).into_string();
+        let old_root = "/nonexistent-rehome-root/repo";
+        let expected_new_abs = format!("{new_root_str}/docs/x.md");
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "a1", &format!("{old_root}/docs/x.md"));
+        seed_commit(&cat, "c1", old_root);
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        // Dry run: reports the plan, must NOT mutate anything.
+        let dry = call(
+            &ctx,
+            json!({ "fix": "rehome", "root": old_root, "new_root": new_root }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(dry["mode"], "dry_run");
+        assert_eq!(dry["artifact_rows"], 1);
+        assert_eq!(dry["commit_rows"], 1);
+        assert_eq!(dry["collisions"].as_array().unwrap().len(), 0);
+
+        assert!(
+            artifact::get(&ctx.catalog.lock(), "a1").unwrap().is_some(),
+            "dry-run must not mutate the artifact row"
+        );
+        {
+            let cat = ctx.catalog.lock();
+            let commit_root: String = cat
+                .conn
+                .query_row("SELECT git_root FROM commits WHERE hash = 'c1'", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(
+                commit_root, old_root,
+                "dry-run must not mutate commits.git_root"
+            );
+        }
+
+        // Confirm: actually migrates.
+        let applied = call(
+            &ctx,
+            json!({ "fix": "rehome", "root": old_root, "new_root": new_root, "confirm": true }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(applied["mode"], "applied");
+        assert_eq!(applied["migrated"]["artifact_rows"], 1);
+        assert_eq!(applied["migrated"]["commit_rows"], 1);
+        assert_eq!(applied["migrated"]["skipped_collisions"], 0);
+
+        assert!(
+            artifact::get(&ctx.catalog.lock(), "a1").unwrap().is_none(),
+            "old id must no longer exist after rehome"
+        );
+        let cat = ctx.catalog.lock();
+        let new_abs: String = cat
+            .conn
+            .query_row(
+                "SELECT abs_path FROM artifact WHERE abs_path = ?1",
+                params![expected_new_abs],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_abs, expected_new_abs);
+        let commit_root: String = cat
+            .conn
+            .query_row("SELECT git_root FROM commits WHERE hash = 'c1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(commit_root, new_root_str);
+    }
+
+    #[tokio::test]
+    async fn run_fix_rehome_errors_when_no_rows_under_old_root() {
+        let new_dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let err = call(
+            &ctx,
+            json!({
+                "fix": "rehome",
+                "root": "/nonexistent-rehome-root/empty",
+                "new_root": new_dir.path().to_str().unwrap(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("no catalog rows found"));
+    }
+
+    /// `rehome` must refuse an `old_root` that an ACTIVE registration still
+    /// covers, mirroring `prune_missing_refuses_root_with_active_registration`
+    /// — rehoming out from under an unmerged worktree's only catalog record
+    /// would silently orphan its history the same way pruning would.
+    #[test]
+    fn validate_rehome_request_refuses_old_root_with_active_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        let new_root = dir.path().join("new");
+        std::fs::create_dir_all(&new_root).unwrap();
+        let dead_root =
+            std::env::temp_dir().join("codescout-nonexistent-rehome-registered-root-3f8a5d2c");
+        assert!(!dead_root.exists(), "test fixture path must not exist");
+        let dead_root_str = dead_root.to_str().expect("temp path is valid UTF-8");
+        let normalized = crate::util::fs::RepoPath::from_path(&dead_root).to_string();
+        reg::upsert_active(&cat, &normalized, &normalized, None, 1000).unwrap();
+
+        let err = validate_rehome_request(
+            Some(dead_root_str),
+            Some(new_root.to_str().unwrap()),
+            &cat.conn,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("merge_worktree"),
+            "hint names merge_worktree: {msg}"
+        );
+        assert!(msg.contains("abandon"), "hint names abandon=true: {msg}");
+    }
+
+    #[test]
     fn prune_dead_root_removes_rows_under_root_only() {
         let cat = Catalog::open_in_memory().unwrap();
         // Rows under a dead root /gone/repo (exact + nested).
@@ -1379,7 +1632,9 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+            .await
+            .unwrap();
         assert_eq!(out["fix"], "reseat_worktree");
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
@@ -1426,7 +1681,9 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+            .await
+            .unwrap();
         assert!(out["reseated"].as_array().unwrap().is_empty());
         assert_eq!(out["collisions"].as_array().unwrap().len(), 1);
 
@@ -1477,7 +1734,9 @@ mod tests {
 
         let ctx = TestToolContextBuilder::new(cat).build();
 
-        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+            .await
+            .unwrap();
         assert_eq!(out["reseated"].as_array().unwrap().len(), 1);
         assert!(out["collisions"].as_array().unwrap().is_empty());
         assert_eq!(out["reseated"][0]["old_id"], "wt-row");
@@ -1581,7 +1840,9 @@ mod tests {
         );
 
         let ctx = TestToolContextBuilder::new(cat).build();
-        let out = run_fix(&ctx, "reseat_worktree", None, false).await.unwrap();
+        let out = run_fix(&ctx, "reseat_worktree", None, None, false)
+            .await
+            .unwrap();
         assert!(
             out["reseated"].as_array().unwrap().is_empty(),
             "a registered row must not be reseated — it belongs to merge_worktree: {out}"

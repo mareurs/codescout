@@ -170,9 +170,21 @@ pub struct RehomeStats {
 /// the relative tail. Returns `None` if `old_abs` is not actually under
 /// `old_root` (defensive — the caller's SQL scoping should already guarantee
 /// this).
+///
+/// `old_abs == old_root` exactly (the row IS the root, not a descendant —
+/// the common case for `commits.git_root`, and possible for `artifact.abs_path`
+/// via `plan_rehome`'s `abs_path = ?1` clause) yields an EMPTY relative tail.
+/// `PathBuf::join` on an empty path still appends a separator (`"/a".join("")
+/// == "/a/"`), which would silently leave a trailing-slash-mangled path — so
+/// that case returns `new_root` verbatim instead of joining.
 fn rebase(old_abs: &str, old_root: &Path, new_root: &Path) -> Option<String> {
     let rel = Path::new(old_abs).strip_prefix(old_root).ok()?;
-    Some(crate::util::fs::RepoPath::from_path(&new_root.join(rel)).into_string())
+    let rebased = if rel.as_os_str().is_empty() {
+        new_root.to_path_buf()
+    } else {
+        new_root.join(rel)
+    };
+    Some(crate::util::fs::RepoPath::from_path(&rebased).into_string())
 }
 
 /// Dry-run: derive the old-id → new-id/path mapping for every catalog row
@@ -230,6 +242,46 @@ pub fn plan_rehome(conn: &Connection, old_root: &Path, new_root: &Path) -> Resul
         collisions,
         commit_rows: commit_rows.max(0) as usize,
     })
+}
+
+/// Rewrite `commits.git_root` for the root being rehomed and any nested
+/// child roots under it (e.g. a worktree's `git_root` sitting below the
+/// moved main-repo root). `plan_rehome`'s `commit_rows` only counts matching
+/// rows for the dry-run summary; this is the corresponding apply step,
+/// deferred from Task 7 into the `confirm=true` path of `fix=rehome`.
+///
+/// Reuses `rebase()` (the same old-root/new-root strip-and-rejoin `plan_rehome`
+/// uses) rather than an SQL-side `REPLACE`, so a `git_root` that merely
+/// *contains* `old_root` as a substring elsewhere in the string can't be
+/// mis-rewritten — only an exact-prefix match under `old_root` qualifies.
+/// Also reuses `crate::librarian::util::escape_like_pattern` rather than
+/// re-inlining the LIKE-escape idiom (`like_escape_idiom_is_not_inlined_outside_helper`
+/// in `librarian/util.rs` pins this).
+///
+/// Returns the number of `commits` rows rewritten.
+pub fn rehome_commits(conn: &Connection, old_root: &Path, new_root: &Path) -> Result<usize> {
+    let old_root_str = crate::util::fs::RepoPath::from_path(old_root).into_string();
+    let escaped_root = crate::librarian::util::escape_like_pattern(&old_root_str);
+    let like = format!("{escaped_root}/%");
+
+    let matched_roots: Vec<String> = conn
+        .prepare(
+            "SELECT DISTINCT git_root FROM commits WHERE git_root = ?1 OR git_root LIKE ?2 ESCAPE '\\'",
+        )?
+        .query_map(rusqlite::params![old_root_str, like], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut total = 0usize;
+    for old_git_root in matched_roots {
+        let Some(new_git_root) = rebase(&old_git_root, old_root, new_root) else {
+            continue;
+        };
+        total += conn.execute(
+            "UPDATE commits SET git_root = ?1 WHERE git_root = ?2",
+            rusqlite::params![new_git_root, old_git_root],
+        )?;
+    }
+    Ok(total)
 }
 
 /// Migrate an `artifact_vec` embedding row from `old_id` to `new_id`.
@@ -733,6 +785,91 @@ mod tests {
                     plan.commit_rows, 1,
                     "commit_rows has no strip_prefix re-check — an unescaped `_` would wrongly count the sibling repo's commit too"
                 );
+    }
+
+    #[test]
+    fn rehome_commits_rewrites_git_root_for_root_and_children() {
+        // Mirrors plan_rehome_like_pattern_escapes_underscore_wildcard's hazard:
+        // old_root contains a literal underscore, and a sibling path differing
+        // only at that position must NOT be swept up by an unescaped LIKE `_`
+        // wildcard.
+        let cat = Catalog::open_in_memory().unwrap();
+        let old_root = "/tmp/proj_x";
+        let new_root = std::path::PathBuf::from("/tmp/newhome");
+        // The root's own commits row.
+        cat.conn
+            .execute(
+                "INSERT INTO commits(hash, git_root) VALUES ('root-commit', '/tmp/proj_x')",
+                [],
+            )
+            .unwrap();
+        // A child root nested under it (e.g. a worktree-scoped commits row).
+        cat.conn
+            .execute(
+                "INSERT INTO commits(hash, git_root) VALUES ('child-commit', '/tmp/proj_x/.worktrees/foo')",
+                [],
+            )
+            .unwrap();
+        // Sibling differing only at the underscore position — must be left alone.
+        cat.conn
+            .execute(
+                "INSERT INTO commits(hash, git_root) VALUES ('sib-commit', '/tmp/projYx/sub')",
+                [],
+            )
+            .unwrap();
+        // Unrelated root — must be left alone.
+        cat.conn
+            .execute(
+                "INSERT INTO commits(hash, git_root) VALUES ('unrelated-commit', '/tmp/unrelated')",
+                [],
+            )
+            .unwrap();
+
+        let n = rehome_commits(&cat.conn, std::path::Path::new(old_root), &new_root).unwrap();
+        assert_eq!(
+            n, 2,
+            "root row + child row rewritten; sibling/unrelated untouched"
+        );
+
+        let root_git_root: String = cat
+            .conn
+            .query_row(
+                "SELECT git_root FROM commits WHERE hash = 'root-commit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(root_git_root, "/tmp/newhome");
+
+        let child_git_root: String = cat
+            .conn
+            .query_row(
+                "SELECT git_root FROM commits WHERE hash = 'child-commit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(child_git_root, "/tmp/newhome/.worktrees/foo");
+
+        let sib_git_root: String = cat
+            .conn
+            .query_row(
+                "SELECT git_root FROM commits WHERE hash = 'sib-commit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(sib_git_root, "/tmp/projYx/sub", "sibling untouched");
+
+        let unrelated_git_root: String = cat
+            .conn
+            .query_row(
+                "SELECT git_root FROM commits WHERE hash = 'unrelated-commit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unrelated_git_root, "/tmp/unrelated", "unrelated untouched");
     }
 
     #[test]
