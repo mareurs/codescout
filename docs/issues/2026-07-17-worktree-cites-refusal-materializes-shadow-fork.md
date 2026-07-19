@@ -75,12 +75,14 @@ Append `cites` from the main checkout (the MVP-supported path). The stray shadow
 is harmless (idempotent; reused by the next real worktree append).
 
 ## Resume
-Add a pre-`resolve_write_target` worktree-main check in
-`src/librarian/tools/append_entry.rs` `call`; verify against
-`src/librarian/tools/worktree.rs` fork path that no `worktree_fork` event is
-emitted on the refusal path. Anchor with an extended
-`append_with_cites_from_worktree_is_refused` test.
-
+Fixed at `4c0f8874` (branch `experiments`). `append_entry::call` now checks
+`is_main_checkout_artifact` directly (predicting `resolve_write_target`'s
+`target != a.id` outcome) and refuses BEFORE ever calling
+`resolve_write_target` when `cites` is non-empty — no shadow fork is
+materialized on the refused path. `append_with_cites_from_worktree_is_refused`
+extended to assert artifact count, `worktree_fork` event count, and
+`worktree_of` link count all stay at zero/baseline after refusal. Kept
+`open`->`fixed` in `docs/issues/`; archives once the fix ships to `master`.
 ## References
 - Final whole-branch review, entry-graph Stage 2 (range `37560641..27176006`).
 - `docs/superpowers/plans/2026-07-17-tracker-entry-graph-stage2.md` (Task 4).
