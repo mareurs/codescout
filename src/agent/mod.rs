@@ -2181,7 +2181,11 @@ mod tests {
         let status = status.unwrap();
         assert!(!status.name.is_empty());
         let canonical_dir = canonical(dir.path());
-        assert!(status.path.contains(canonical_dir.to_str().unwrap()));
+        // status.path is forward-slash normalized (RepoPath convention); the
+        // raw canonicalized PathBuf renders with native separators on Windows.
+        assert!(status
+            .path
+            .contains(&crate::util::fs::to_forward_slash(&canonical_dir)));
     }
 
     #[tokio::test]

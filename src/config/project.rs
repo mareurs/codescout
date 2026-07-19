@@ -138,6 +138,17 @@ pub struct EmbeddingsSection {
 pub struct IgnoredPathsSection {
     #[serde(default = "default_ignored_patterns")]
     pub patterns: Vec<String>,
+    /// Glob patterns that the librarian walker visits even when
+    /// `.gitignore`/`.git/info/exclude`/a global excludesfile would otherwise
+    /// skip them — e.g. a directory tracked only on a local/private branch
+    /// and deliberately excluded from whatever branch the repo publishes.
+    /// Read directly from `.codescout/project.toml` by
+    /// `crate::librarian::indexer::read_force_include`, not threaded through
+    /// this struct at runtime (librarian's `ToolContext` doesn't carry the
+    /// main server's parsed config) — this field exists for schema
+    /// documentation/validation, not as the live read path.
+    #[serde(default)]
+    pub force_include: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

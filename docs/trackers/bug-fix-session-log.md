@@ -75,7 +75,9 @@ time_scope: open-ended
 | F-27 | 2026-07-07 | med | self-friction | mitigated | Prior-session summary claimed two bug files were logged; neither exists on disk or in git history |
 | F-28 | 2026-07-07 | low | plan-prose | wontfix-false-alarm | Inherited "stray lsp: field" claim in mv.rs was stale — ToolContext.lsp is now a legitimate field |
 | F-29 | 2026-07-07 | med | self-friction | fixed-verified | Pre-compaction estimate of `ArtifactRow` fixture duplication ("3-4 sites") undercounted reality by 5x — actual: 21 constructors, 20 files |
-| F-30 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
+| F-30 | 2026-07-07 | high | release-pipeline | fixed-verified | Upstream commit `62457959` bundled a stray `try_build_runtime(lsp.clone())` arg + `mv.rs` test had a phantom `lsp:` field — both broke `cargo rb` |
+| F-31 | 2026-07-07 | med | self-friction | open | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
+| F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 
 ## Wins Index
 
@@ -104,6 +106,8 @@ time_scope: open-ended
 | W-20 | 2026-07-05 | high | Didn't accept a "triage the findings" task at face value — empirically bisected a surprising self-cite failure down to root cause instead of writing it off as expected noise | Would have reported 366 dangling / 232 ambiguous findings as "mostly expected per-tracker-ID-reuse noise" without noticing ~34 dangling + ~19 ambiguous were a real `link_scan` parsing defect (`ENABLE_YAML_STYLE_METADATA_BLOCKS` pairing any two bare `---` lines as YAML metadata, swallowing every other session-log entry's heading); found + fixed + live-verified (dangling 366→332, ambiguous 232→213, +16 edges, 8 pruned) instead of shipping an inflated triage report | validated |
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
+| W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 
 ## Category conventions
 
@@ -1788,6 +1792,71 @@ live-LSP class I initially misattributed to).
 
 ---
 
+## F-30 — Upstream commit bundled an unrelated stray argument that broke `cargo rb` twice in one pull cycle
+
+**Observed:** 2026-07-07, during a `git fetch` + `git pull --rebase origin experiments` + `cargo rb` cycle to pick up 15-46 new upstream commits from a large forward-slash-normalization work stream.
+
+**When:** Rebuilding the release binary immediately after rebasing local work onto `origin/experiments`.
+
+**Expected:** A clean rebuild — the pulled commits' own stated purpose (forward-slash path normalization) should not touch unrelated call signatures.
+
+**Got:** `cargo rb` failed with `E0061: this function takes 0 arguments but 1 argument was supplied` at `src/server.rs:153` — commit `62457959` ("fix(server): normalize post_process's root_prefix to forward-slash") bundled an unrelated third diff hunk changing `crate::librarian::try_build_runtime().await` to `crate::librarian::try_build_runtime(lsp.clone()).await`, even though `try_build_runtime`'s signature has taken zero arguments since its creation (`git log -p -S "pub async fn try_build_runtime"` shows exactly one match, the original definition). After fixing that and re-running `cargo test --lib`, a SECOND unrelated compile error surfaced in `src/librarian/tools/mv.rs`'s test fixture: a stray `lsp:` field on `librarian::tools::ToolContext`, a field that has never existed on that struct — same abandoned "thread lsp into librarian" attempt, different file.
+
+**Probable cause:** Someone (or an agent) mid-session experimented with threading an `lsp` handle into librarian's runtime, abandoned it, and the revert was incomplete — two call/construction sites were left referencing the abandoned shape while the actual struct/fn definitions were never changed.
+
+**Workaround:** Removed the stray `lsp.clone()` argument (`src/server.rs`) and the stray `lsp:` field (`src/librarian/tools/mv.rs`) to match the unchanged real signatures. Verified via `cargo test --lib` (2860 passed) before proceeding.
+
+**Severity:** high — blocked the release build entirely; would have blocked ANY session rebuilding on `experiments` at that commit, not just this one.
+
+**Status:** fixed-verified — `cargo rb` compiles clean at commit `0a1d8736` (server.rs fix) + part of `3149384b` (mv.rs fix); logged as `docs/issues/2026-07-07-upstream-try-build-runtime-stray-arg-compile-break.md`.
+
+**Fix idea / Pointer:** `docs/issues/2026-07-07-upstream-try-build-runtime-stray-arg-compile-break.md`; before assuming a rebuild failure is local/environmental, `git log -p -S "<literal call text>"` on the specific broken call site to check whether the break shipped upstream.
+
+---
+
+## F-31 — Memory-tool bug blocked reading the documented Windows binary-lock workaround, forcing rediscovery from scratch
+
+**Observed:** 2026-07-07, mid-session, `cargo rb` failed with `error: failed to remove file ...codescout.exe ... Access is denied (os error 5)` because 3 running `codescout.exe` MCP-server processes held the target binary open.
+
+**When:** Attempting to rebuild the release binary while the MCP server (this very session's own connection) was live.
+
+**Expected:** CLAUDE.md explicitly documents this exact scenario: "the binary symlink gotcha → memory `gotchas` (MCP Binary Symlink)" — a one-line memory read should have surfaced the known, established workaround immediately.
+
+**Got:** `memory(action="read", topic="gotchas")` (and every other project-scoped topic except `language-patterns`/`onboarding`) failed with "topic not found" — a separate bug this same session had already found and filed (`docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`): `workspace(activate)` reports 16 memory topics for the `codescout` project, but `memory(list/read)` only sees 2, even with `project_id` passed explicitly. With the documented fix unreadable, the `CARGO_TARGET_DIR=target-release-new` + `Stop-Process -Force` + copy-into-place workaround had to be re-derived from first principles (inspecting `git status` for a pre-existing `target-release-new/` directory as a clue, then confirming the pattern via `Get-Process`).
+
+**Probable cause:** The memory-tool project-scoping bug (F-cited above) made the documented institutional knowledge for this EXACT situation completely inaccessible mid-task, at the worst possible time (blocked on a build).
+
+**Workaround:** Re-derived the fix independently: build into a side `CARGO_TARGET_DIR`, `Stop-Process -Force` the locking PIDs, copy the fresh exe over the locked path. Worked, but the user was not available to confirm the force-kill of their own live MCP session before it was performed autonomously — an operational-safety judgment call made harder by not having the documented precedent in hand.
+
+**Severity:** med — no incorrect fix shipped, but real risk: an autonomous `Stop-Process -Force` against a live session's own server process, made without the benefit of prior documented guidance on whether that's the sanctioned procedure.
+
+**Status:** open — root bug (memory-tool project-scoping) is filed but not yet fixed; this entry documents the downstream cost of that bug biting mid-task.
+
+**Fix idea / Pointer:** Fix `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`, then re-verify this specific recovery path against the (currently unreadable) `gotchas` memory's actual documented procedure to confirm today's improvised workaround matches or diverges from it.
+
+---
+
+## W-23 — Running the FULL `cargo test --lib` after a single targeted fix surfaced 5 more failures and 1 real shipped defect the narrow fix would have missed
+
+**Observed:** 2026-07-07, after fixing the `librarian(doctor)` `ads_colon_in_abs_path` false-positive (a Windows extended-length-path `//?/` prefix not being recognized by `check_ads_colon`), the fix + its own 2 new unit tests were green in isolation.
+
+**Pattern:** Instead of stopping at "the specific test I was asked about now passes," ran the full `cargo test --lib` before considering the task done. This surfaced 5 MORE pre-existing failures in unrelated modules (`agent::tests`, `server::tests`, 3x `tools::config::tests`), all from the same upstream forward-slash-normalization series but never caught because no one had run the full suite on Windows against that series before.
+
+**Counterfactual:** Without the full-suite run, the task would have been reported "done" with `ads_colon` fixed but 6 tests still red in CI — including one (`activate_hint_shows_switched_when_away_from_home`) that, on inspection, was not test rot at all: `build_activation_response`'s `SwitchAway` hint text genuinely mixed forward-slash (`project_root_str`, via `to_forward_slash`) and native-backslash (`home_str`, via `.display().to_string()`) path renderings in the SAME sentence on Windows — a real, shipped production inconsistency in the MCP hint text served to every agent switching projects, not a test-only issue. Narrow-scoping to "just fix ads_colon" would have shipped that defect untouched.
+
+**Confirming data points:**
+1. `cargo test --lib` after the ads_colon-only fix: 2858 passed, 6 failed (vs. 2864/0 after all 7 fixes).
+2. 5 of 6 failures were pure test-assertion drift (comparing native-separator `PathBuf::to_str()`/`.display()` against now-normalized forward-slash output) — test-side fixes.
+3. 1 of 6 (`activate_hint_shows_switched_when_away_from_home`) traced to `src/tools/config/mod.rs:602-621` — a genuine source-side bug, fixed at the root (`home_str` now uses `to_forward_slash` like `project_root_str` does).
+
+**Impact:** high — caught a real, user-facing (agent-facing) production defect that a narrowly-scoped "fix the one thing I was asked about" pass would have shipped.
+
+**Promote-when:** Second occurrence of "narrow fix passes cargo test on the touched file/module, but full `cargo test --lib` finds sibling breakage from the same root-cause series" — this session is the first datapoint; W-6 (2026-05-24, cross-platform read/write seam misses) is a closely related but distinct prior instance.
+
+**Status:** validated
+
+---
+
 ## F-29 — Pre-compaction estimate of `ArtifactRow` fixture duplication ("3-4 sites") undercounted reality by 5x
 
 **Observed:** 2026-07-07, resuming the code-duplication hunt after `/compact`, following up on the `TestToolContextBuilder` refactor's closing note that flagged `mk_row`/`seed_artifact`-style `ArtifactRow` fixtures as a smaller, secondary duplication candidate "at the rule-of-three threshold with only 3-4 sites."
@@ -1826,7 +1895,28 @@ live-LSP class I initially misattributed to).
 
 ---
 
-## F-30 — `edit_code` rewrite of a test fn dropped a trailing assertion line outside the read window
+## W-24 — Cross-session correlation of a live bug report against this session's own concrete observation produced an appropriately-confidence-labeled hypothesis instead of speculation
+
+**Observed:** 2026-07-07, asked to re-read an unrelated (Mercury BOM project) bug report describing `reindex`/`find` catalog inconsistency and a suspected "restart reverts catalog to a stale snapshot" mechanism, then asked whether this session's own practice of `Stop-Process -Force`-killing `codescout.exe` before a binary swap could be a contributing cause.
+
+**Pattern:** Rather than asserting a causal link on intuition, traced the actual catalog-open code (`src/librarian/catalog/mod.rs:157-176`) to confirm WAL mode + `busy_timeout=5000` is an explicitly *designed-for* multi-process scenario, checked for (and found none) any single-instance guard or graceful-shutdown checkpoint on `Catalog`, and cited this session's OWN directly-observed evidence (3 concurrent `codescout.exe` processes found via `Get-Process` before any intervention) as the reproduction path for the *precondition* — while explicitly labeling the causal claim itself "confidence: medium, plausible aggravating factor, not a confirmed root cause" rather than overclaiming a fix.
+
+**Counterfactual:** Without tracing the actual `Catalog::open` code, the answer would have been speculation ("probably yes/no") with no citable evidence, either wrongly reassuring the user that force-killing is safe, or wrongly implicating a mechanism (e.g. WAL corruption) that the code doesn't actually support (WAL is crash-safe by design; the real gap is the ABSENCE of a single-instance guard, a subtler and more actionable finding).
+
+**Confirming data points:**
+1. `src/librarian/catalog/mod.rs:157-176` comment: "Cross-process writers (separate codescout server instances sharing one catalog file) block and retry instead of failing immediately" — confirms multi-process-by-design, not accidental.
+2. `grep` for `wal_checkpoint`/`impl Drop for Catalog` across the whole repo: zero matches — confirms no explicit checkpoint-on-shutdown exists.
+3. This session's own `Get-Process codescout` output, twice, each showing 3 live PIDs before any manual kill — direct, first-party evidence for the precondition (not inferred from the Mercury BOM report alone).
+
+**Impact:** med — produced a citable, appropriately-hedged addition (Evidence E10, Hypothesis 6) to another project's live bug tracker instead of either silence or overclaimed certainty.
+
+**Promote-when:** A second cross-project correlation where tracing actual code (not just citing symptoms) changes the confidence level assigned to a hypothesis.
+
+**Status:** validated
+
+---
+
+## F-32 — `edit_code` rewrite of a test fn dropped a trailing assertion line outside the read window
 
 **Observed:** 2026-07-08, flattening `CommonOpts` into 15 CLI arg structs (`src/cli/*.rs`). Rewrote `tests/run_state_at_rejects_missing_cutoff` in `artifact.rs` via `edit_code(action="replace")`.
 

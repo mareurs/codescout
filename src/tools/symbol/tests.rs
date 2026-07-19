@@ -891,6 +891,70 @@ async fn symbols_single_file_overview_normalizes_echoed_path() {
     );
 }
 
+/// 2026-07-18 Bug A: the single-file branch of `list_overview` (and its
+/// glob/directory-scan siblings) always derived `include_body` from
+/// `guard.should_include_body()`, ignoring an explicit `include_body: true`
+/// param from the caller. `symbols(name=..., include_body=true)` honored the
+/// explicit param correctly (see `symbols.rs`), but the overview (no
+/// name/query/symbol) path did not — so overview-mode body requests were
+/// silently dropped.
+#[tokio::test]
+async fn symbols_overview_honors_explicit_include_body_true() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub fn nested_function() -> i32 { 42 }\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    // Single-file overview branch (no query/symbol/name) with explicit include_body.
+    let result = Symbols
+        .call(json!({ "path": "src/lib.rs", "include_body": true }), &ctx)
+        .await
+        .unwrap();
+    let symbols = result["symbols"].as_array().expect("symbols array");
+    assert!(!symbols.is_empty(), "expected at least one symbol");
+    let body = symbols[0]["body"].as_str();
+    assert!(
+        body.is_some_and(|b| b.contains("nested_function")),
+        "single-file overview must honor explicit include_body=true; got symbols: {symbols:?}"
+    );
+
+    // Directory-scan overview branch (targeting "src") with explicit include_body.
+    let result = Symbols
+        .call(json!({ "path": "src", "include_body": true }), &ctx)
+        .await
+        .unwrap();
+    let files = result["files"].as_array().expect("files array");
+    assert!(!files.is_empty(), "expected at least one file entry");
+    let first_file_symbols = files[0]["symbols"].as_array().expect("symbols array");
+    assert!(
+        !first_file_symbols.is_empty(),
+        "expected at least one symbol in first file"
+    );
+    let body = first_file_symbols[0]["body"].as_str();
+    assert!(
+        body.is_some_and(|b| b.contains("nested_function")),
+        "directory-scan overview must honor explicit include_body=true; got files: {files:?}"
+    );
+}
+
 #[tokio::test]
 async fn symbols_overview_small_tree_recurses_fully() {
     // When targeting a specific subdirectory with a small file count (≤ RECURSE_SMALL),
@@ -6089,7 +6153,16 @@ async fn edit_code_replace_repairs_truncated_lsp_range_from_ast() {
     let src_dir = dir.path().join("src");
     std::fs::create_dir_all(&src_dir).unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
-    let file = src_dir.join("lib.rs");
+    // `Agent::new` canonicalizes the project root (so home_root is always
+    // absolute — see `src/agent/mod.rs`), which on Windows can rewrite the
+    // path to the extended-length `\\?\` verbatim form. The mock's
+    // `document_symbols` does an exact `PathBuf` lookup, so the key stored
+    // here must match what the tool will actually resolve and pass at call
+    // time — build it from the CANONICALIZED root, not the raw tempdir path
+    // (2026-07-13: mismatched forms made this test see zero symbols on
+    // Windows and never reach the range-repair path it exists to guard).
+    let canonical_root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = canonical_root.join("src").join("lib.rs");
     std::fs::write(
         &file,
         "struct Point { x: f64, y: f64 }\nimpl Point {\n    fn distance(&self) -> f64 {\n        (self.x * self.x + self.y * self.y).sqrt()\n    }\n}\n",

@@ -776,6 +776,22 @@ fn scoped_edit_empty_replacement() {
     assert_eq!(result, "# Title\n## Setup\nremove word\n");
 }
 
+/// CRLF-tolerant fallback: a Windows-checked-out markdown file has `\r\n` line
+/// endings, but a multi-line `old_string` arrives with bare `\n` newlines (the
+/// normal MCP-payload shape) — the exact `contains` check fails on every line
+/// boundary even though the content is otherwise identical. Mirrors edit_file's
+/// own `find_crlf_tolerant_windows` fallback (see that function's doc comment).
+#[test]
+fn scoped_edit_crlf_tolerant_multiline_old_string() {
+    let content = "# Title\r\n## Setup\r\nfoo\r\nbar\r\nbaz\r\n";
+    let old_string = "foo\nbar";
+    let result = perform_scoped_edit(content, "## Setup", old_string, "FOO\nBAR", false).unwrap();
+    assert!(
+        result.contains("FOO\r\nBAR\r\nbaz"),
+        "expected CRLF-tolerant replace preserving \\r\\n, got: {result:?}"
+    );
+}
+
 /// Class-A fusion (sibling of the insert_after bug): when the scoped-edit
 /// old_string consumes the section's trailing newline and new_string does
 /// not restore it, the edited section fuses onto the following heading,
