@@ -868,6 +868,30 @@ pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String>
     Some(notes.join("; "))
 }
 
+/// True iff `line_idx` (0-based into section.split('\n')) is inside a fenced
+/// ``` block or is an indented (≥4 leading spaces / a tab) code line. Whitespace
+/// there is significant — the caller warns the agent not to normalize it.
+#[allow(dead_code)] // consumed by Task 4
+pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
+    let mut in_fence = false;
+    for (i, line) in section.split('\n').enumerate() {
+        if line.trim_start().starts_with("```") {
+            if i == line_idx {
+                return true;
+            }
+            in_fence = !in_fence;
+            continue;
+        }
+        if i == line_idx {
+            if in_fence {
+                return true;
+            }
+            return line.starts_with("    ") || line.starts_with('\t');
+        }
+    }
+    false
+}
+
 pub struct EditMarkdown;
 
 #[async_trait::async_trait]

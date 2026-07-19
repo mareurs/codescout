@@ -2631,3 +2631,15 @@ fn classify_whitespace_diff_names_the_culprit() {
     );
     assert!(classify_whitespace_diff("v1.0", "v2.0").is_none());
 }
+
+#[test]
+fn line_in_code_block_detects_fence_and_indent() {
+    use super::edit_markdown::line_in_code_block;
+    let section = "## H\nprose\n```\ncode line\n```\nmore prose\n    indented code\n";
+    let lines: Vec<&str> = section.split('\n').collect();
+    let idx = |t: &str| lines.iter().position(|l| *l == t).unwrap();
+    assert!(!line_in_code_block(section, idx("prose")));
+    assert!(line_in_code_block(section, idx("code line")));
+    assert!(!line_in_code_block(section, idx("more prose")));
+    assert!(line_in_code_block(section, idx("    indented code")));
+}
