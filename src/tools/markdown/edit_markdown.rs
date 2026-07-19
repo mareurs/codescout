@@ -787,6 +787,12 @@ pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result
         }
     }
 }
+/// Normalized Levenshtein similarity in [0.0, 1.0] (1.0 = identical). Used only
+/// to LOCATE the closest line for a miss diagnostic — never to alter bytes.
+#[allow(dead_code)] // consumed by Task 4's diagnose_scoped_miss
+pub(crate) fn similarity(a: &str, b: &str) -> f64 {
+    strsim::normalized_levenshtein(a, b)
+}
 
 pub struct EditMarkdown;
 

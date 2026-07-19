@@ -43,6 +43,7 @@ path = "src/main.rs"
 
 [dependencies]
 fs4 = "0.12"
+strsim = "0.11"
 # Startup dotenv self-load (non-overriding)
 dotenvy = "0.15"
 # Async runtime

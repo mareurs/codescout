@@ -632,6 +632,7 @@ dependencies = [
  "serial_test",
  "sha2",
  "sqlite-vec",
+ "strsim",
  "temp-env",
  "tempfile",
  "thiserror 2.0.18",

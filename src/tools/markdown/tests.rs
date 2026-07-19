@@ -2587,3 +2587,16 @@ fn batch_mixed_actions_scrambled_order_is_stable() {
         "got: {out1:?}"
     );
 }
+
+#[test]
+fn similarity_ranks_closeness() {
+    use super::edit_markdown::similarity;
+    assert!((similarity("abc", "abc") - 1.0).abs() < 1e-9);
+    let a = "_Last refresh: `8481bea`_";
+    let b = "_Last refresh: `ddf8215`_";
+    assert!(
+        similarity(a, b) > 0.6,
+        "framed lines with a changed token stay similar"
+    );
+    assert!(similarity("totally different", "xxxxxxxxxxxxx") < 0.4);
+}
