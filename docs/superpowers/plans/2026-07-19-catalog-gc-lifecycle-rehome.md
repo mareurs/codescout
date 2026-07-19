@@ -640,6 +640,8 @@ git commit -m "feat(doctor): catalog_health block — hidden-row count + prune/r
 
 ## Task 7: Rehome core — transactional id-rewrite (gc.rs)
 
+> **Schema verified 2026-07-19 against `src/librarian/catalog/schema.sql`.** The FK-children of `artifact(id)` are: `events.artifact_id`, `event_edges.dst_artifact_id`, `artifact_augmentation.artifact_id`, `artifact_observation.artifact_id`, and `artifact_link.src_id` + `artifact_link.dst_id` (columns are `src_id`/`dst_id`, NOT `src`/`dst`). `artifact_vec` is a **vec0 virtual table** with `id TEXT PRIMARY KEY` and NO FK — only an `AFTER DELETE` trigger; its id must be handled manually. `entry_cite` references `artifact(slug)` (not id) → **unaffected** by an id rewrite. All real FKs are `ON DELETE CASCADE` only (no `ON UPDATE`), so an id UPDATE needs `PRAGMA defer_foreign_keys = ON` within the transaction.
+
 **Files:**
 - Modify: `src/librarian/catalog/gc.rs`
 
@@ -652,11 +654,11 @@ git commit -m "feat(doctor): catalog_health block — hidden-row count + prune/r
   - `#[derive(Debug, Default)] pub struct RehomeStats { pub artifact_rows: usize, pub commit_rows: usize, pub skipped_collisions: usize }`
   - `pub fn apply_rehome(conn: &Connection, plan: &RehomePlan) -> Result<RehomeStats>`
 
-- [ ] **Step 1: Write the failing test** (in `gc.rs` tests — assert children follow the id and history is preserved):
+- [ ] **Step 1: Write the failing test** (in `gc.rs` tests — assert EVERY child table follows the id, and no orphan remains under the old id):
 
 ```rust
 #[test]
-fn rehome_rewrites_id_and_preserves_children() {
+fn rehome_rewrites_id_and_preserves_all_children() {
     let dir = tempfile::tempdir().unwrap();
     let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
     let new_root = dir.path().join("newrepo");
@@ -664,36 +666,54 @@ fn rehome_rewrites_id_and_preserves_children() {
     std::fs::write(new_root.join("docs/t.md"), "x").unwrap();
     let old_abs = "/oldrepo/docs/t.md";
     let old_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(old_abs));
-    cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at) \
-        VALUES (?1,?2,'tracker','active','t',0,0)", rusqlite::params![old_id, old_abs]).unwrap();
-    // attach a child event keyed by old id
-    cat.conn.execute("INSERT INTO events(id, artifact_id, kind, payload, created_at) \
-        VALUES ('e1', ?1, 'note', '{}', 0)", [&old_id]).unwrap();
+    // a second, stable artifact to be the other endpoint of a link
+    seed(&cat, "other", "/oldrepo/docs/o.md"); // seed helper from earlier tasks (sets NOT NULL cols)
+    cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256) \
+        VALUES (?1,?2,'tracker','active','t',0,0,0,'')", rusqlite::params![old_id, old_abs]).unwrap();
+    // one child in EACH table keyed by old_id:
+    cat.conn.execute("INSERT INTO events(id,artifact_id,kind,payload,created_at) VALUES ('e1',?1,'note','{}',0)", [&old_id]).unwrap();
+    cat.conn.execute("INSERT INTO event_edges(src_event_id,dst_artifact_id,rel) VALUES ('e1',?1,'mutates')", [&old_id]).unwrap();
+    cat.conn.execute("INSERT INTO artifact_augmentation(artifact_id,prompt) VALUES (?1,'p')", [&old_id]).unwrap();
+    cat.conn.execute("INSERT INTO artifact_observation(artifact_id,text,created_at) VALUES (?1,'obs',0)", [&old_id]).unwrap();
+    cat.conn.execute("INSERT INTO artifact_link(src_id,dst_id,rel,created_at) VALUES (?1,'other','implements',0)", [&old_id]).unwrap();
+    cat.conn.execute("INSERT INTO artifact_link(src_id,dst_id,rel,created_at) VALUES ('other',?1,'implements',0)", [&old_id]).unwrap();
+    // artifact_vec (vec0): embedding under old_id
+    cat.conn.execute("INSERT INTO artifact_vec(id,embedding) VALUES (?1, ?2)",
+        rusqlite::params![old_id, vec![0.0f32; 768].iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>()]).unwrap();
 
     let plan = plan_rehome(&cat.conn, std::path::Path::new("/oldrepo"), &new_root).unwrap();
-    assert_eq!(plan.rows.len(), 1);
-    let new_id = plan.rows[0].new_id.clone();
-    assert_ne!(new_id, old_id);
+    // "other" also lives under /oldrepo but its file is absent → it rebases too;
+    // for THIS test we only assert on the t.md row. (Either assert plan.rows has both, or narrow old_root.)
+    let new_id = crate::librarian::ids::artifact_id_from_abs(
+        std::path::Path::new(&new_root.join("docs/t.md").to_string_lossy().into_owned()));
+    apply_rehome(&cat.conn, &plan).unwrap();
 
-    let stats = apply_rehome(&cat.conn, &plan).unwrap();
-    assert_eq!(stats.artifact_rows, 1);
-    // artifact row moved to new id + new abs_path
-    let cnt_old: i64 = cat.conn.query_row("SELECT COUNT(*) FROM artifact WHERE id=?1", [&old_id], |r| r.get(0)).unwrap();
-    assert_eq!(cnt_old, 0);
-    let abs_new: String = cat.conn.query_row("SELECT abs_path FROM artifact WHERE id=?1", [&new_id], |r| r.get(0)).unwrap();
-    assert!(abs_new.ends_with("newrepo/docs/t.md"));
-    // child event followed the id (history preserved, not orphaned)
-    let ev: String = cat.conn.query_row("SELECT artifact_id FROM events WHERE id='e1'", [], |r| r.get(0)).unwrap();
-    assert_eq!(ev, new_id);
+    // parent moved, no orphan under old_id
+    let c: i64 = cat.conn.query_row("SELECT COUNT(*) FROM artifact WHERE id=?1", [&old_id], |r| r.get(0)).unwrap();
+    assert_eq!(c, 0, "no artifact orphan under old id");
+    // every child followed the id (history preserved) — assert NO child still references old_id:
+    for (table, col) in [("events","artifact_id"),("event_edges","dst_artifact_id"),
+                         ("artifact_augmentation","artifact_id"),("artifact_observation","artifact_id")] {
+        let n: i64 = cat.conn.query_row(&format!("SELECT COUNT(*) FROM {table} WHERE {col}=?1"), [&old_id], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "{table}.{col} still references old id");
+        let m: i64 = cat.conn.query_row(&format!("SELECT COUNT(*) FROM {table} WHERE {col}=?1"), [&new_id], |r| r.get(0)).unwrap();
+        assert!(m >= 1, "{table}.{col} did not follow to new id");
+    }
+    // artifact_link both endpoints
+    let ls: i64 = cat.conn.query_row("SELECT COUNT(*) FROM artifact_link WHERE src_id=?1 OR dst_id=?1", [&old_id], |r| r.get(0)).unwrap();
+    assert_eq!(ls, 0, "artifact_link still references old id");
+    // artifact_vec: no orphan under old_id (either migrated to new_id or removed for re-embed)
+    let vold: i64 = cat.conn.query_row("SELECT COUNT(*) FROM artifact_vec WHERE id=?1", [&old_id], |r| r.get(0)).unwrap();
+    assert_eq!(vold, 0, "artifact_vec orphan under old id (vec0 trigger only fires on DELETE, not UPDATE)");
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test rehome_rewrites_id_and_preserves_children`
+Run: `cargo test rehome_rewrites_id_and_preserves_all_children`
 Expected: FAIL — `plan_rehome`/`apply_rehome` undefined.
 
-- [ ] **Step 3: Implement** in `gc.rs`. **First enumerate the FK-child tables** from the base schema (grep `REFERENCES artifact(id)` in `src/librarian/catalog/mod.rs`) — expected set: `events.artifact_id`, `artifact_augmentation.artifact_id`, `artifact_link` (src+dst id columns — confirm names), `artifact_observation.artifact_id`, `artifact_vec.id`. `entry_cite` is keyed by `slug` (not id) — **unaffected** by an id rewrite. Update this list in code to match the actual schema.
+- [ ] **Step 3: Implement** in `gc.rs`:
 
 ```rust
 use std::path::Path;
@@ -709,10 +729,10 @@ fn rebase(old_abs: &str, old_root: &Path, new_root: &Path) -> Option<String> {
 }
 
 pub fn plan_rehome(conn: &Connection, old_root: &Path, new_root: &Path) -> Result<RehomePlan> {
-    let like = format!("{}/%", crate::util::fs::RepoPath::from_path(old_root));
+    let old_root_str = crate::util::fs::RepoPath::from_path(old_root).to_string();
+    let like = format!("{old_root_str}/%");
     let mut stmt = conn.prepare(
         "SELECT id, abs_path FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2 ESCAPE '\\'")?;
-    let old_root_str = crate::util::fs::RepoPath::from_path(old_root).to_string();
     let raw: Vec<(String, String)> = stmt
         .query_map(rusqlite::params![old_root_str, like], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
@@ -721,7 +741,7 @@ pub fn plan_rehome(conn: &Connection, old_root: &Path, new_root: &Path) -> Resul
     for (old_id, old_abs) in raw {
         let Some(new_abs) = rebase(&old_abs, old_root, new_root) else { continue };
         let new_id = crate::librarian::ids::artifact_id_from_abs(Path::new(&new_abs));
-        // collision: a row already exists at the new path/id (reindex minted it)
+        // collision: a row already exists at the new id/path (e.g. reindex minted it)
         let exists: i64 = conn.query_row(
             "SELECT COUNT(*) FROM artifact WHERE id = ?1 OR abs_path = ?2",
             rusqlite::params![new_id, new_abs], |r| r.get(0))?;
@@ -735,29 +755,34 @@ pub fn plan_rehome(conn: &Connection, old_root: &Path, new_root: &Path) -> Resul
 }
 
 /// Apply the plan in ONE transaction with deferred FK checks so parent+child
-/// id rewrites validate together at COMMIT (ON DELETE CASCADE does not cover
-/// UPDATE). Never deletes content.
+/// id rewrites validate together at COMMIT (the FKs are ON DELETE CASCADE
+/// only — they do NOT cover UPDATE). Never deletes content.
 pub fn apply_rehome(conn: &Connection, plan: &RehomePlan) -> Result<RehomeStats> {
     let mut stats = RehomeStats { skipped_collisions: plan.collisions.len(), ..Default::default() };
     conn.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
     let tx = conn.unchecked_transaction()?;
     for row in &plan.rows {
-        // children first (any order — checks deferred to COMMIT)
+        // FK children (order irrelevant — checks deferred to COMMIT):
         for (table, col) in [
             ("events", "artifact_id"),
+            ("event_edges", "dst_artifact_id"),
             ("artifact_augmentation", "artifact_id"),
             ("artifact_observation", "artifact_id"),
-            ("artifact_vec", "id"),
+            ("artifact_link", "src_id"),
+            ("artifact_link", "dst_id"),
         ] {
             tx.execute(
                 &format!("UPDATE {table} SET {col} = ?1 WHERE {col} = ?2"),
                 rusqlite::params![row.new_id, row.old_id],
             )?;
         }
-        // links: both endpoints (confirm actual column names against schema)
-        tx.execute("UPDATE artifact_link SET src = ?1 WHERE src = ?2", rusqlite::params![row.new_id, row.old_id])?;
-        tx.execute("UPDATE artifact_link SET dst = ?1 WHERE dst = ?2", rusqlite::params![row.new_id, row.old_id])?;
-        // parent
+        // artifact_vec (vec0 virtual table, no FK, trigger only on DELETE):
+        // migrate the embedding to the new id if present, else ensure no orphan.
+        // vec0 may not support UPDATE of the PK — if the straight UPDATE errors
+        // or leaves an orphan, delete-old + insert-new the embedding instead.
+        // VERIFY empirically which vec0 supports; the test asserts no old-id orphan.
+        migrate_vec_id(&tx, &row.old_id, &row.new_id)?;
+        // parent last:
         tx.execute("UPDATE artifact SET id = ?1, abs_path = ?2, missing_since = NULL WHERE id = ?3",
             rusqlite::params![row.new_id, row.new_abs, row.old_id])?;
         stats.artifact_rows += 1;
@@ -767,11 +792,13 @@ pub fn apply_rehome(conn: &Connection, plan: &RehomePlan) -> Result<RehomeStats>
 }
 ```
 
-> **Verify against schema before trusting the child list:** grep `REFERENCES artifact(id)` and `CREATE TABLE artifact_link` in `mod.rs`; fix table/column names (`src`/`dst` vs `src_id`/`dst_id`, presence of `artifact_observation`, whether `artifact_vec` is updatable directly or needs delete+reinsert via the vec0 trigger). Add per-table coverage to the test.
+Implement `migrate_vec_id(tx, old_id, new_id)` to handle the vec0 table correctly (determine whether `UPDATE artifact_vec SET id=?1 WHERE id=?2` works on vec0; if not, `SELECT embedding ... WHERE id=old`, `DELETE ... WHERE id=old`, `INSERT (id=new, embedding)`). If there is no vec row for `old_id`, it's a no-op. The test asserts no `artifact_vec` row remains under `old_id`.
+
+> **Guards note (used by Task 8):** `plan_rehome` only reads; the guards (`new_root` must exist, `old_root` must not, both absolute) live in Task 8's `validate_rehome_request`. If an active `worktree_registration` covers `old_root`, Task 8 should refuse (mirror `prune`'s worktree guard) — note this for Task 8.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test rehome_rewrites_id_and_preserves_children`
+Run: `cargo test rehome_rewrites_id_and_preserves_all_children`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -779,9 +806,10 @@ Expected: PASS
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
 git add src/librarian/catalog/gc.rs
-git commit -m "feat(catalog): rehome core — deferred-FK id-rewrite preserving children"
+git commit -m "feat(catalog): rehome core — deferred-FK id-rewrite preserving all children"
 ```
 
+---
 ---
 
 ## Task 8: doctor(fix="rehome") tool plumbing + guards
