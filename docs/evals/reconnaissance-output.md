@@ -386,8 +386,9 @@ opposed to *trigger firing*) is `unverified` until that row exists.
 - [x] Run protocol pinned (strong trace-scored + cheap elicitation smoke test)
 - [~] Baseline first run — **partial (5/14), contaminated** (2026-06-11); see Iteration log + Re-evaluation. A clean run is still owed.
 - [~] Score current SKILL.md — **4/14 clean: C4, C8, C10, C12 all PASS** (decontaminated re-run, 2026-06-11). C7 structurally un-decontaminatable (answer in SKILL.md exemplar); C5 deferred (lock hazard); 8 cases unrun incl. SKIP guards C13/C14.
-- [~] **MCP-live behavioral run (2026-07-18, prompt-tdd `anthropic-mcp` registry)** — first run with the **real codescout binary as a live MCP server**, skill via `--append-system-prompt`, plus an `--ablate` negative-control arm. **Directional ~12/15** after an outcome-based rubric refactor (the first run scored 2/15 as a measurement artifact — trace assertions checked for `mcp__codescout__*` calls in a plugin-free profile with no companion guard, so native-tool scouting false-failed 11/13). **C4 is the load-bearing positive: treatment PASS, ablate RED** — the skill demonstrably supplies the scout behavior. Whole run flagged **INVALID** by a judge JSON-parse bug (greedy regex on a self-correcting judge, `judge.py:353`), so the number is directional, not gate-grade. Harness fixes filed prompt-engineering-side (findings doc + G-11). See Iteration log + the MCP-live section below.
-- [ ] Score any SKILL.md rewrite candidate; gate on ≥12/14 AND zero MISS-case FAIL
+- [x] **MCP-live baseline — n=3, gate-trustworthy (2026-07-19).** After the harness judge-parse fix (prompt-engineering `49a0036`, finding C), three real subscription sweeps ran **0 INVALID / 30+ runs** — the first trustworthy MCP-live baseline. Two n=3 measurements agree the earlier ~12/15 was **noise-inflated** (raw treatment pass-count is not skill power): the `--ablate` cross-ref (`ce81b72`) found ~1/15 clean wins; the authoritative **`--paired`** rate-delta method (`3d0fa3e`) found **only C4 and C1 clear the Δ≥0.5 power margin (both +0.67)**, most other cases tautological/no-effect. The treatment arm swings hugely run-to-run (C4/C1 seen FAIL→3/3), which is *why* single-run headlines mislead (L-15). Net: `reconnaissance` shows **small, real power on a couple of cases**, far below the 12/15 impression. **NA/NB/C14 SKILL.md edits are NOT validated (≤+0.33, within n=3 noise).** Standard going forward: `--paired` power delta.
+- [~] **First MCP-live run (2026-07-18) — directional ~12/15, superseded.** Flagged INVALID by the judge-parse bug; kept as the epistemic trail. See the MCP-live section + the n=3 correction below.
+- [ ] Score any SKILL.md rewrite candidate; gate on ≥12/14 AND zero MISS-case FAIL — **measure with `--paired` rate-delta, not raw treatment pass-count** (n=3 lesson L-15).
 - [ ] Optional: expand HIT/SKIP coverage as new R-N entries land
 - [ ] **Channel-efficacy probe (Case 15)** — does an advertised `reconnaissance` memory rule get read + applied? Measures design `2026-06-11` Risk 1; scored separately from the C1–C14 scout matrix.
 ## Iteration log
@@ -398,7 +399,8 @@ _(Append one row per scoring run. First row must be the empirical baseline.)_
 |------|------------------|--------------|-----------------|-------|
 | 2026-06-11 | a90708c (current) | 5/5 scouted-before-acting (partial: 5 of 14) | 0 (1 MISS case in subset: C4) | **Contaminated — upper bound, low confidence.** Fresh general-purpose subagents; SKILL.md loaded by reading it; R-N ledger not injected; read-only + workspace-pinned. All 5 scouted the named seam before acting and caught the drift / correctly conditioned the answer. BUT each case's answer is documented in-tree (docs/trackers, docs/issues, docs/adrs, this eval) and was surfaced via grep/semantic_search, so the run can't isolate scout-discipline from doc-lookup. C10's drift has healed (fixed in current tree). Cases run: C4/R-19, C7/R-16, C8/R-21, C10/R-17, C12/R-26. C5 deferred (live lock-contention hazard). |
 | 2026-06-11 | a90708c (current) | 4/4 PASS — clean (C4, C8, C10, C12) | 0 (C4 is the MISS case in subset) | **Decontaminated re-run.** Throwaway worktrees with docs/ deleted (Case 4's repo-wide grep for the answer → 0 matches, verified); C8 @ cd370079 + C10 @ c99d4228 = pre-fix commits so the drift is LIVE in code, not healed. Fresh subagents, read-only, per-worktree workspace pin. All 4 scouted from SOURCE and caught the drift: C4 read sync.rs (SHA-256), no answer-doc reachable; C8 enumerated entry points, caught CLI bypass of write_index_state; C10 found the off-by-one at all 3 sites + brace-vs-dedent nuance; C12 derived the mux-detach orphan boundary from code WITHOUT the ADR (richer than the contaminated run). C7 dropped (answer lives in the SKILL.md exemplar — un-decontaminatable). C5 deferred. Signal now real for these 4; 8 cases + SKIP guards (C13/C14) still unrun clean. |
-| 2026-07-18 | (MCP-live, prompt-tdd) | ~12/15 directional (refactored run 11/15; C4 treatment PASS / ablate RED) | not scored per-MISS (rubric refactor dropped trace assertions) | **First MCP-live run — real tools + ablation control.** prompt-tdd `anthropic-mcp` registry runs the real codescout binary as a live MCP server; skill injected via `--append-system-prompt`; `--ablate` = negative control (skill removed). **First full run scored 2/15 — a measurement artifact:** the plugin-free profile has no companion guard, so agents scouted with native `Read`/`Bash`, but the trace assertions required `mcp__codescout__*` tool calls → 11/13 false-fails; the judge was also trace-blind (`RUBRIC_PROMPT` has no `{trace}` slot). **Fix:** refactored rubrics to outcome-based (dropped trace assertions; agent shows its work in output) → 11/15, directional ~12/15. **C4 is the load-bearing positive:** treatment PASS, ablate RED — removing the skill flips the outcome, so the skill supplies real scout power (not a doc-lookup artifact). **Whole run flagged INVALID** by a judge JSON-parse bug: a self-correcting judge emits two JSON objects, the greedy `re.search(r"\{.*\}")` at `judge.py:353` grabs first-`{`→last-`}`, `json.loads` raises → "unparseable judge verdict" → L-8 INVALID. So this row is **directional, not gate-grade**. Costs: first run $11.47; refactored $13.87; C4 de-risk $1.08+$0.79; ~30–36 min/run. Harness fixes filed prompt-engineering-side: `docs/findings/2026-07-18-reconnaissance-mcp-eval-findings.md` + backlog G-11. |
+| 2026-07-18 | (MCP-live, prompt-tdd) | ~12/15 directional (refactored run 11/15; C4 treatment PASS / ablate RED) | not scored per-MISS (rubric refactor dropped trace assertions) | **[SUPERSEDED by the 2026-07-19 n=3 row — the "C4 load-bearing" read was single-run noise.]** **First MCP-live run — real tools + ablation control.** prompt-tdd `anthropic-mcp` registry runs the real codescout binary as a live MCP server; skill injected via `--append-system-prompt`; `--ablate` = negative control (skill removed). **First full run scored 2/15 — a measurement artifact:** the plugin-free profile has no companion guard, so agents scouted with native `Read`/`Bash`, but the trace assertions required `mcp__codescout__*` tool calls → 11/13 false-fails; the judge was also trace-blind (`RUBRIC_PROMPT` has no `{trace}` slot). **Fix:** refactored rubrics to outcome-based (dropped trace assertions; agent shows its work in output) → 11/15, directional ~12/15. At the time C4 (treatment PASS / ablate RED) read as the load-bearing positive — the n=3 paired sweep later showed this was noise-dominated. **Whole run flagged INVALID** by a judge JSON-parse bug: a self-correcting judge emits two JSON objects, the greedy `re.search(r"\{.*\}")` at `judge.py:353` grabs first-`{`→last-`}`, `json.loads` raises → "unparseable judge verdict" → L-8 INVALID. So this row is **directional, not gate-grade**. Costs: first run $11.47; refactored $13.87; C4 de-risk $1.08+$0.79; ~30–36 min/run. Harness fixes filed prompt-engineering-side: `docs/findings/2026-07-18-reconnaissance-mcp-eval-findings.md` + backlog G-11. |
+| 2026-07-19 | (MCP-live n=3, prompt-tdd) | Treatment 10/15; **real power small** — `--paired`: only **C4, C1** clear Δ≥0.5 (+0.67 each); `--ablate` xref: ~1/15 clean | **0 INVALID / 30+ runs** | **First gate-trustworthy MCP-live baseline.** The harness judge-parse fix (finding C, prompt-engineering `49a0036`) landed → **0 INVALID across three real subscription sweeps** (`ce81b72`, `dbdb61f`, `3d0fa3e`), confirming the C fix holds. **Sobers the 2026-07-18 ~12/15:** raw treatment pass-count conflates base-model competence with skill power. Authoritative method is now **`--paired`** (per-scenario pass-rate delta ≥ 0.5; prompt-engineering `b9bb298`): only **C4 and C1** clear the margin (+0.67 each), most other cases tautological/no-effect. The treatment arm swings run-to-run (C4/C1 seen FAIL→3/3), so single-run PASS/RED verdicts were noise-dominated (**L-15**). The **NA/NB/C14 SKILL.md edits are NOT validated** (≤+0.33, within n=3 noise) — left uncommitted in claude-plugins. Judge score-vs-reasoning drift is a separate calibration issue (**L-16**), not the parse bug. Cost/time ≈ $27 / ~70 min per paired sweep. |
 ## Re-evaluation after baseline
 
 **First run (2026-06-11) — outcome: a methodology flaw surfaced, not a trustworthy score.** This mirrors the trigger eval's first-run lesson: the value was exposing a design defect, not the number.
@@ -477,3 +479,41 @@ gaps and their fixes are filed on the harness side:
 entry **G-11**. **Next:** land the harness fixes (judge last-object parse + trace-aware
 rubric + tool-forcing guard), then re-run treatment + `--ablate` at n≥3 for a
 gate-trustworthy MCP-live baseline.
+
+### Correction (2026-07-19) — the n=3 baseline sobers the ~12/15 headline
+
+**What changed.** The 2026-07-18 run above was flagged INVALID by a judge JSON-parse
+bug and reported a *directional* ~12/15 with C4 as the load-bearing positive. The
+prompt-engineering side then fixed the parse bug (finding C, `49a0036`) and re-ran
+properly. Three real subscription sweeps (`ce81b72`, `dbdb61f`, `3d0fa3e`) produced
+**0 INVALID across 30+ runs** — the parse fix holds, and this is the first
+gate-trustworthy MCP-live baseline. The trustworthy number is **much lower** than the
+headline implied.
+
+**The core error the fix exposed: treatment pass-count ≠ skill power.** A treatment PASS
+is confounded by base-model competence — a capable model scouts correctly with or without
+the skill on many cases. Isolating the skill's *contribution* requires the control arm, and
+at n=3 the control arm is as noisy as treatment (**L-15**). Two measurements make this
+concrete:
+
+- **`--ablate` cross-reference (`ce81b72`):** treatment 10/15, but "real power" (treatment
+  PASS ∧ control RED) collapses to ~1/15 clean, ~5/15 skill-targeted-but-unreliable, ~9/15
+  tautological.
+- **`--paired` rate-delta (`3d0fa3e`) — the method now standard:** runs both arms against the
+  *same* base model per scenario and scores power as `treatment_rate − control_rate ≥ 0.5`.
+  Only **C4 and C1** clear the margin (+0.67 each); NA/NB/C14 reach at most +0.33. Crucially,
+  pairing exposed that the treatment arm swings hugely run-to-run (C4/C1 seen FAIL→3/3) — the
+  earlier single-run "C4 PASS/RED = load-bearing" verdict was noise-dominated, not signal.
+
+**Net read on the skill.** `reconnaissance` has **small, real power on a couple of cases**,
+nowhere near the 12/15 impression. That is not a failure of the skill so much as a correction
+of the measurement: the eval now measures the right thing (paired power delta), and the honest
+answer is "modest, variance-heavy, needs higher n to pin per-case."
+
+**Consequence for skill iteration.** SKILL.md edits aimed at NA/NB/C14 exist (uncommitted in
+`claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`) but are **NOT validated**
+— best case +0.33, inside the n=3 noise band. They stay uncommitted pending a higher-n paired
+run on the contested subset. Do **not** commit skill edits on a single-run improvement again;
+gate on a paired delta that clears the margin at n≥3. (Separately, **L-16**: the judge's score
+field can contradict its own reasoning — a calibration issue to watch, distinct from the parse
+bug the C fix closed.)
