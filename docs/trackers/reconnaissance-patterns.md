@@ -64,6 +64,8 @@ skill).
 | R-38 | 2026-07-03 | miss | Re-derived a finding a concurrent session had already MEASURED because the existing audit-log wasn't scouted first — independently built a precision gate for the tracker-hygiene D1 gap, then found the plugins Hamsa ledger had already measured it (n=5, both tiers). The seam for a derive/record-a-finding task includes the KNOWLEDGE state (ledger entries on the subject), not just the code. | A-8/A-9 session (#22); plugins Hamsa ledger; kin R-19 |
 | R-39 | 2026-07-10 | hit | Adding a tool param/alias is additive-safe in codescout: every `*_schema_*` test is positive-presence (`props["x"].is_object()` / `contains_key`), none enumerate the exact prop set, and no `input_schema()` sets `additionalProperties:false` — so a new prop can't break a snapshot, and an unknown key flows through to `call()` (the very mechanism the alias fix relies on). | param-alias-ergonomics session (this session); 3038 lib passed / 0 failed; kin R-28/R-36 |
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
+| R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
+| R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -925,6 +927,38 @@ fields. Promote-when: a second re-derivation-of-prior-work miss → codescout me
 **Scout done:** ranked candidate frictions by error count, then — before writing any fix — read the current code for each. The `read_file` `json_path` quoted-key friction (`$["1.5"]`, `$["2.1.3"]`) had ~200 events, the LARGEST non-alias cluster. But `file_summary.rs::split_on_unbracketed_dot` (comment cites `Bug 2026-07-01-...dotted-object-keys-unreachable`) plus `parse_bracket`'s `strip_matching_quotes` branch already handle it — the friction was closed 2026-07-01. The telemetry spanned months and mixed pre- and post-fix commits.
 
 **Verdict:** hit — a count-only ranking would have sent me to "fix" an already-fixed bug. This is R-29's phantom one axis over: R-29 is cross-*project* mixing, R-40 is cross-*time* staleness — same commit-SHA-keyed DB, same root cause. The real target (`artifact` filter inversion, 22 events) was confirmed by a *live* re-repro; json_path was a ghost.
+
+## R-41 — A table-rebuild migration's `INSERT … SELECT` column list is a silent allow-list
+
+**Verdict:** miss → promoted (was a pending seam-class in SKILL.md Phase 1; Stage-2 is the confirming datapoint)
+
+**Observed:** 2026-07-17, entry-graph Stage-2 (v9 catalog migration adding `artifact.slug` + `entry_cite`). The implementer added the column; an Opus task review caught the drop.
+
+**Pattern:** Adding or changing a column/field is a seam whose far side is every LATER migration that rebuilds the same table (`CREATE table_new` / `INSERT … SELECT` / `DROP old` / `RENAME`). The rebuild's `INSERT … SELECT` column list is a silent ALLOW-LIST: any column it does not name is dropped when the rebuilt table is swapped in — no error, no failing test unless one asserts the column survives. The scout question is not "did I add the column?" but "does every column an earlier migration added still appear in every later rebuild's SELECT?"
+
+**What happened:** v9 added `artifact.slug`. An earlier migration, `migrate_v6.rs::drop_legacy_and_stamp`, rebuilds the `artifact` table via copy-and-rename; its `INSERT … SELECT` did not name `slug`, so a single open through v6 dropped the just-added column (and cascade-dropped `entry_cite`). The bug shipped into the branch; the Opus task-1 review caught it against the diff, not the implementer's own scout.
+
+**Counterfactual:** Untested, a v6-path open would silently degrade every entry-graph tracker to file-grain — slugs gone, cites cascade-dropped — with green tests, surfacing only when a downstream cite query returned empty.
+
+**Proposal:** promote from pending seam-class to a Phase-1 named seam. When a diff adds a column, `grep` the migrations dir for the table name and read every later rebuild's SELECT list; a migration-shape regression test (open through the rebuild, assert the new column's value survives) is the durable gate. Fixed 9aa8063f + `migration_v6_single_open_preserves_v9_entry_graph_shape`.
+
+**Evidence:** tracker-entry-graph Stage-2 (experiments); `src/librarian/catalog/migrate_v6.rs`; fix 9aa8063f; test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3 / R-28.
+
+## R-42 — A reader's None/absent branch that dead-ends silently drops every value the writer stored in that variant
+
+**Verdict:** miss → promoted (was a pending seam-class in SKILL.md Phase 1; Stage-2 is the confirming datapoint)
+
+**Observed:** 2026-07-17, entry-graph Stage-2 whole-branch review (write-time cites: the writer stores references keyed either by 16-hex id or by `<slug>:<local>`).
+
+**Pattern:** When a diff's writer produces a new value shape — an id-keyed reference, an optional field, a Some/None variant — read the writer AND every reader of that shape. The diagnostic question is whether each reader's absent-key / None branch actually RESOLVES the other shape, or dead-ends (returns empty, falls through) and so silently drops every value the writer stored in that variant. Confirm each reader handles BOTH present/Some and absent/None — not just the case the writer's own test constructs. Shared incidental preconditions between writer and reader tests (e.g. "the target always has a slug") mask the gap.
+
+**What happened:** `get(include_links)` surfaced a tracker's backlinks. Its outgoing/incoming-by-slug branches were gated on the target HAVING a slug; a slug-less target's incoming-by-id backlinks were silently hidden — the "no slug" branch dead-ended instead of falling back to id-keyed resolution. The writer's tests always constructed slug-bearing targets, so nothing failed. Caught in the final whole-branch review.
+
+**Counterfactual:** Untested, every backlink INTO a slug-less tracker would be invisible in `get` output — data present in the catalog, absent from the view, green tests throughout.
+
+**Proposal:** promote from pending seam-class to a Phase-1 named seam. For a new writer shape, `references()` its readers and check each variant branch resolves rather than dead-ends; add a reader test with the absent/None precondition the writer's tests don't construct. Fixed 70d16686 (incoming-by-id runs unconditionally; slug-gated branches are additive).
+
+**Evidence:** tracker-entry-graph Stage-2 (experiments); `src/librarian/tools/get.rs`; fix 70d16686; kin R-27 / R-21.
 
 **Generalization (extends R-29 / R-23):** usage.db is keyed by commit-SHA and accumulates across every project AND every commit the process ever served. A high error count is a *hypothesis about the current binary*, not a fact about it — reproduce a telemetry-surfaced friction against today's code (read the impl, or run the tool once) before fixing. Promote-when (2nd datapoint) → codescout memory `reconnaissance`.
 
