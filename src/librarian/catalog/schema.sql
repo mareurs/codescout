@@ -155,3 +155,12 @@ CREATE TABLE IF NOT EXISTS worktree_registration (
     status        TEXT NOT NULL DEFAULT 'active',
     closed_at     INTEGER
 );
+
+-- v10: catalog GC lifecycle key-value store (e.g. gc_grace_days). See
+-- src/librarian/catalog/gc.rs. Functionally inert here (also created by the
+-- v10 migration in mod.rs, both IF NOT EXISTS) — kept so schema.sql stays an
+-- authoritative fresh-DB reference.
+CREATE TABLE IF NOT EXISTS catalog_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);

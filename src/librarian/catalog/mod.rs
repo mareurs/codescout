@@ -11,6 +11,7 @@ pub mod entry_cite;
 pub mod event_edges;
 pub mod events;
 pub mod find;
+pub mod gc;
 pub mod graft;
 pub mod links;
 mod migrate_v6;
