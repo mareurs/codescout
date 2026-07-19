@@ -50,3 +50,12 @@ fix.
 - 2026-07-18 — opened; latent stripper gap surfaced (then side-stepped) by the
   catalog-hygiene make_server isolation. Not fixed here (out of scope — tree/
   server stripping, unrelated to catalog hygiene).
+- 2026-07-19 — fixed at `e68f43ae` (branch `experiments`). Implemented the
+  preferred direction: `strip_prefix_from_text` now also matches the bare root
+  (no trailing slash), gated by an explicit right-boundary check so it can't
+  over-strip a root that's a prefix of a longer, unrelated path (e.g.
+  `<root>-backup/foo`). Regression test
+  `call_tool_strips_bare_project_root_from_list_dir_output` writes a visible
+  top-level file first (the existing strip test's tempdir has none, so it
+  never reached this branch). Kept `open`->`fixed` in `docs/issues/`, not yet
+  archived — waits for the fix to ship to `master`.
