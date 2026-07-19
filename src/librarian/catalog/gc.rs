@@ -62,4 +62,24 @@ mod tests {
             now - 7 * 86_400_000
         );
     }
+
+    #[test]
+    fn set_meta_overwrites_existing_key() {
+        let cat = Catalog::open_in_memory().unwrap();
+        set_meta(&cat.conn, "k", "first").unwrap();
+        set_meta(&cat.conn, "k", "second").unwrap();
+        assert_eq!(
+            get_meta(&cat.conn, "k").unwrap(),
+            Some("second".to_string())
+        );
+    }
+
+    #[test]
+    fn grace_days_falls_back_on_invalid_override() {
+        let cat = Catalog::open_in_memory().unwrap();
+        set_meta(&cat.conn, "gc_grace_days", "-1").unwrap();
+        assert_eq!(grace_days(&cat.conn).unwrap(), DEFAULT_GRACE_DAYS);
+        set_meta(&cat.conn, "gc_grace_days", "not-a-number").unwrap();
+        assert_eq!(grace_days(&cat.conn).unwrap(), DEFAULT_GRACE_DAYS);
+    }
 }
