@@ -99,6 +99,45 @@ pub fn reconcile_missing_since(conn: &Connection, now_ms: i64) -> Result<Reconci
     Ok(stats)
 }
 
+/// 24h in ms — the default throttle interval for `reconcile_if_due`.
+pub const RECONCILE_INTERVAL_MS: i64 = 24 * 3_600_000;
+
+/// Run reconcile only if the last run was more than `min_interval_ms` ago.
+/// Records `last_reconcile_at` on run. Returns `None` when throttled.
+pub fn reconcile_if_due(
+    conn: &Connection,
+    now_ms: i64,
+    min_interval_ms: i64,
+) -> Result<Option<ReconcileStats>> {
+    let last = get_meta(conn, "last_reconcile_at")?
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(i64::MIN);
+    if now_ms.saturating_sub(last) < min_interval_ms {
+        return Ok(None);
+    }
+    let stats = reconcile_missing_since(conn, now_ms)?;
+    set_meta(conn, "last_reconcile_at", &now_ms.to_string())?;
+    Ok(Some(stats))
+}
+
+/// Best-effort, non-blocking, throttled reconcile for the librarian
+/// tool-call path (`LibrarianAdapter::call`). Uses a non-blocking
+/// `try_lock` — a busy catalog is skipped rather than waited on, so this
+/// can never stall a call. Any error from the reconcile itself (e.g. a
+/// broken catalog) is logged and swallowed: this must never break the
+/// librarian call it's piggybacking on.
+pub fn maybe_reconcile(
+    catalog: &std::sync::Arc<parking_lot::Mutex<crate::librarian::catalog::Catalog>>,
+    now_ms: i64,
+) {
+    let Some(cat) = catalog.try_lock() else {
+        return;
+    };
+    if let Err(e) = reconcile_if_due(&cat.conn, now_ms, RECONCILE_INTERVAL_MS) {
+        tracing::debug!("gc reconcile skipped: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +260,73 @@ mod tests {
             )
             .unwrap();
         assert_eq!(ms4, None);
+    }
+    #[test]
+    fn reconcile_if_due_respects_throttle() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        seed(&cat, "gone", "/nonexistent/z.md");
+        // first call runs
+        let a = reconcile_if_due(&cat.conn, 100_000, 1000).unwrap();
+        assert!(a.is_some());
+        // second call within interval is throttled
+        let b = reconcile_if_due(&cat.conn, 100_500, 1000).unwrap();
+        assert!(b.is_none());
+        // after interval, runs again
+        let c = reconcile_if_due(&cat.conn, 101_200, 1000).unwrap();
+        assert!(c.is_some());
+    }
+
+    #[test]
+    fn maybe_reconcile_stamps_and_throttles() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        seed(&cat, "gone", "/nonexistent/mr.md");
+        let catalog = std::sync::Arc::new(parking_lot::Mutex::new(cat));
+
+        // first call: due (no last_reconcile_at yet) -> stamps missing_since + records last_reconcile_at
+        maybe_reconcile(&catalog, 100_000);
+        {
+            let cat = catalog.lock();
+            let ms: Option<i64> = cat
+                .conn
+                .query_row(
+                    "SELECT missing_since FROM artifact WHERE id='gone'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(ms, Some(100_000));
+            assert_eq!(
+                get_meta(&cat.conn, "last_reconcile_at").unwrap(),
+                Some("100000".to_string())
+            );
+        }
+
+        // seed a second missing row, then call again well within the 24h
+        // interval -> throttled: neither the new row is touched nor
+        // last_reconcile_at is bumped.
+        {
+            let cat = catalog.lock();
+            seed(&cat, "gone2", "/nonexistent/mr2.md");
+        }
+        maybe_reconcile(&catalog, 100_500);
+        {
+            let cat = catalog.lock();
+            let ms2: Option<i64> = cat
+                .conn
+                .query_row(
+                    "SELECT missing_since FROM artifact WHERE id='gone2'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(ms2, None, "throttled call must not run reconcile");
+            assert_eq!(
+                get_meta(&cat.conn, "last_reconcile_at").unwrap(),
+                Some("100000".to_string()),
+                "last_reconcile_at must not move while throttled"
+            );
+        }
     }
 }

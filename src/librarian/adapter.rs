@@ -93,6 +93,17 @@ impl crate::tools::Tool for LibrarianAdapter {
                 inner.active_project().map(|p| p.root.clone())
             };
         let lib_ctx = self.derive_ctx(active_root.as_deref());
+        // Best-effort, throttled (24h) catalog GC reconcile — piggybacks on the
+        // first librarian call per session/interval rather than the literal
+        // `workspace(activate)` call, since the shared catalog handle only
+        // exists here (inside the librarian adapter), not on the core
+        // `ToolContext` that `ActivateProject`/`Workspace` receive. Uses a
+        // non-blocking try_lock and swallows all errors — see
+        // `gc::maybe_reconcile` for the full contract.
+        crate::librarian::catalog::gc::maybe_reconcile(
+            &lib_ctx.catalog,
+            chrono::Utc::now().timestamp_millis(),
+        );
         self.inner
             .call(&lib_ctx, input)
             .await
