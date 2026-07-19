@@ -892,6 +892,110 @@ pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
     false
 }
 
+const SIM_THRESHOLD: f64 = 0.5;
+const SECTION_LINE_CAP: usize = 400;
+const SECTION_BYTE_CAP: usize = 65_536;
+
+fn truncate_snippet(s: &str) -> String {
+    const MAX: usize = 200;
+    if s.chars().count() <= MAX {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(MAX).collect();
+        t.push('…');
+        t
+    }
+}
+
+/// Locate the closest line/window to `old_string` within `section`, classify
+/// the miss into a tier (whitespace-only / visible drift / no close match),
+/// and build a `RecoverableError` carrying a tier-adaptive hint plus
+/// `extra["scoped_miss_tier"]` for callers (Task 5) to route on.
+#[allow(dead_code)] // consumed by Task 5
+pub(crate) fn diagnose_scoped_miss(
+    section: &str,
+    old_string: &str,
+    heading: &str,
+) -> RecoverableError {
+    use serde_json::json;
+
+    let no_close = |extra_note: &str| {
+        RecoverableError::with_hint(
+            format!(
+                "old_string not found in section '{heading}'. The text must match exactly (whitespace-sensitive). {extra_note}"
+            ),
+            "old_string isn't in this section — verify the heading, or re-read the current section text and retry.",
+        )
+        .with_extra("scoped_miss_tier", json!("no_close"))
+    };
+
+    let lines: Vec<&str> = section.split('\n').collect();
+    if old_string.is_empty() || lines.len() > SECTION_LINE_CAP || section.len() > SECTION_BYTE_CAP {
+        return no_close("");
+    }
+
+    let old_lines: Vec<&str> = old_string.split('\n').collect();
+    let n = old_lines.len();
+    if n == 0 || n > lines.len() {
+        return no_close("");
+    }
+
+    let mut best_idx = 0usize;
+    let mut best_score = -1.0f64;
+    for start in 0..=(lines.len() - n) {
+        let window = lines[start..start + n].join("\n");
+        let s = similarity(&window, old_string);
+        if s > best_score {
+            best_score = s;
+            best_idx = start;
+        }
+    }
+    if best_score < SIM_THRESHOLD {
+        return no_close("");
+    }
+
+    let have_window = lines[best_idx..best_idx + n].join("\n");
+    let in_code = (best_idx..best_idx + n).any(|i| line_in_code_block(section, i));
+    let code_note = if in_code {
+        "\nnote: inside a code block — whitespace is significant; copy the bytes exactly."
+    } else {
+        ""
+    };
+
+    let all_ws = old_lines
+        .iter()
+        .zip(have_window.split('\n'))
+        .all(|(w, h)| w == &h || classify_whitespace_diff(w, h).is_some());
+
+    if all_ws {
+        let classes: Vec<String> = old_lines
+            .iter()
+            .zip(have_window.split('\n'))
+            .filter_map(|(w, h)| classify_whitespace_diff(w, h))
+            .collect();
+        RecoverableError::with_hint(
+            format!(
+                "old_string not found in section '{heading}'. Closest line differs only in whitespace/invisible characters: {cls}.\n  want: {w}\n  have: {h}{code_note}",
+                cls = classes.join("; "),
+                w = render_visible_whitespace(&truncate_snippet(old_string)),
+                h = render_visible_whitespace(&truncate_snippet(&have_window)),
+            ),
+            "Copy the exact bytes shown for `have` — the only difference is invisible whitespace.",
+        )
+        .with_extra("scoped_miss_tier", json!("whitespace_invisible"))
+    } else {
+        RecoverableError::with_hint(
+            format!(
+                "old_string not found in section '{heading}'. Closest text (did it change since you read it?):\n  want: {w}\n  have: {h}{code_note}",
+                w = truncate_snippet(old_string),
+                h = truncate_snippet(&have_window),
+            ),
+            "The text changed since you last read it — re-read this section for the current value, then retry with it.",
+        )
+        .with_extra("scoped_miss_tier", json!("visible_drift"))
+    }
+}
+
 pub struct EditMarkdown;
 
 #[async_trait::async_trait]

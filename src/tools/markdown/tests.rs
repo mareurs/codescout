@@ -2643,3 +2643,58 @@ fn line_in_code_block_detects_fence_and_indent() {
     assert!(!line_in_code_block(section, idx("more prose")));
     assert!(line_in_code_block(section, idx("    indented code")));
 }
+
+#[test]
+fn diagnose_visible_drift_shows_want_have_and_tier() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = "## State\n\n_Last refresh: `ddf8215`_\n";
+    let e = diagnose_scoped_miss(section, "_Last refresh: `8481bea`_", "## State");
+    let msg = e.to_string();
+    assert!(
+        msg.contains("8481bea") && msg.contains("ddf8215"),
+        "want/have shown: {msg}"
+    );
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("visible_drift")
+    );
+    assert!(
+        msg.to_lowercase().contains("re-read") || msg.to_lowercase().contains("changed"),
+        "tier-B hint: {msg}"
+    );
+}
+
+#[test]
+fn diagnose_whitespace_tier_classifies_and_flags_code() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = "## H\n```\nlet x =\u{00A0}1;\n```\n";
+    let e = diagnose_scoped_miss(section, "let x = 1;", "## H");
+    let msg = e.to_string();
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("whitespace_invisible")
+    );
+    assert!(
+        msg.contains("U+00A0") || msg.to_lowercase().contains("non-breaking"),
+        "classified: {msg}"
+    );
+    assert!(
+        msg.to_lowercase().contains("code"),
+        "code-block significance note: {msg}"
+    );
+}
+
+#[test]
+fn diagnose_no_close_nudges_heading() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = "## State\n\n_Last refresh: `ddf8215`_\n";
+    let e = diagnose_scoped_miss(section, "completely unrelated content xyz", "## State");
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("no_close")
+    );
+    assert!(
+        e.to_string().to_lowercase().contains("heading"),
+        "wrong-heading nudge: {e}"
+    );
+}
