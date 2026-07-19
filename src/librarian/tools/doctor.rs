@@ -139,6 +139,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
 
+    // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
+    // Reads happen while the lock is still held — kept minimal, then dropped
+    // before computing the summary below.
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let cutoff = crate::librarian::catalog::gc::visibility_cutoff_ms(&cat.conn, now_ms)?;
+    let hidden_rows = crate::librarian::catalog::gc::hidden_count(&cat.conn, cutoff)?;
+    let grace = crate::librarian::catalog::gc::grace_days(&cat.conn)?;
+
     // Drop the lock before computing the summary — keeps lock scope minimal.
     drop(cat);
 
@@ -147,11 +155,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         *by_check.entry(v.check.clone()).or_insert(0) += 1;
     }
 
+    let health_hint = if hidden_rows > 0 {
+        format!(
+            "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
+        )
+    } else {
+        String::new()
+    };
+
     Ok(json!({
         "violations": all_violations,
         "summary": {
             "total": all_violations.len(),
             "by_check": by_check,
+        },
+        "catalog_health": {
+            "hidden_rows": hidden_rows,
+            "move_candidates": 0, // filled by Task 9
+            "hint": health_hint,
         },
     }))
 }
@@ -932,6 +953,31 @@ mod tests {
         let r = scan_commits_git_root(&cat.conn).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].check, "backslash_in_git_root");
+    }
+
+    #[tokio::test]
+    async fn doctor_reports_catalog_health_hidden_rows() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "hidden", "/nonexistent/hidden/path.md");
+        cat.conn
+            .execute(
+                "UPDATE artifact SET missing_since = 1 WHERE id = 'hidden'",
+                [],
+            )
+            .unwrap();
+        #[cfg(unix)]
+        let live_path = "/tmp";
+        #[cfg(windows)]
+        let live_path = "C:/Windows";
+        seed_artifact(&cat, "live", live_path);
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(out["catalog_health"]["hidden_rows"].as_u64().unwrap() >= 1);
+        assert_eq!(
+            out["catalog_health"]["move_candidates"].as_u64().unwrap(),
+            0
+        );
     }
 
     #[test]
