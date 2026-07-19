@@ -601,4 +601,168 @@ mod tests {
         let rows = find_by_ids(&cat, &["h".to_string()]).unwrap();
         assert_eq!(rows.len(), 1);
     }
+    #[test]
+    fn count_matching_excludes_rows_missing_past_grace() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("live", "spec", "active")).unwrap();
+        artifact::upsert(&cat, &art("old", "spec", "active")).unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET missing_since = 100 WHERE id = 'old'",
+                [],
+            )
+            .unwrap();
+
+        let cutoff = 1000i64; // rows with missing_since <= 1000 are hidden
+        let n = count_matching(&cat, None, cutoff).unwrap();
+        assert_eq!(n, 1, "hidden row must not be counted");
+    }
+
+    #[test]
+    fn catalog_summary_excludes_hidden_rows() {
+        use crate::librarian::catalog::artifact::{upsert, ArtifactRow};
+        use crate::librarian::catalog::augmentation;
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let now_ts = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+
+        for id in ["live", "old"] {
+            upsert(
+                &cat,
+                &ArtifactRow {
+                    id: id.into(),
+                    abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
+                    kind: "tracker".into(),
+                    status: "draft".into(),
+                    title: None,
+                    owners: vec![],
+                    tags: vec![],
+                    topic: None,
+                    time_scope: None,
+                    source: None,
+                    created_at: now,
+                    updated_at: now,
+                    file_mtime: now,
+                    file_sha256: "".into(),
+                    confidence: 1.0,
+                },
+            )
+            .unwrap();
+        }
+        // "old" is missing past the grace cutoff AND augmented — both the
+        // by_kind/total counts and the augmented subquery must exclude it.
+        cat.conn
+            .execute(
+                "UPDATE artifact SET missing_since = 100 WHERE id = 'old'",
+                [],
+            )
+            .unwrap();
+        augmentation::upsert(
+            &cat,
+            &crate::librarian::catalog::augmentation::AugmentationRow {
+                artifact_id: "old".into(),
+                prompt: "track".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: now_ts.clone(),
+                updated_at: now_ts,
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+
+        let cutoff = 1000i64;
+        let s = catalog_summary(&cat, None, cutoff).unwrap();
+        assert_eq!(s.total, 1, "hidden row excluded from total");
+        assert_eq!(s.by_kind["tracker"], 1, "hidden row excluded from by_kind");
+        assert_eq!(
+            s.augmented, 0,
+            "hidden row excluded from the augmented subquery too"
+        );
+    }
+
+    #[test]
+    fn find_by_ids_filtered_excludes_hidden_rows() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("live", "spec", "active")).unwrap();
+        artifact::upsert(&cat, &art("old", "spec", "active")).unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET missing_since = 100 WHERE id = 'old'",
+                [],
+            )
+            .unwrap();
+
+        let cutoff = 1000i64;
+        let ids = vec!["live".to_string(), "old".to_string()];
+        let rows = find_by_ids_filtered(&cat, &ids, None, cutoff).unwrap();
+        let ids_out: Vec<_> = rows.iter().map(|r| r.id.clone()).collect();
+        assert!(ids_out.contains(&"live".to_string()));
+        assert!(
+            !ids_out.contains(&"old".to_string()),
+            "hidden row excluded from id-set lookup"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_find_excludes_hidden_rows() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("live", "spec", "active")).unwrap();
+        artifact::upsert(&cat, &art("old", "spec", "active")).unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET missing_since = 100 WHERE id = 'old'",
+                [],
+            )
+            .unwrap();
+
+        let store = InMemoryArtifactStore::default();
+        store.upsert("proj", "live", &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", "old", &[0.9, 0.1]).await.unwrap();
+
+        let cat = parking_lot::Mutex::new(cat);
+        let cutoff = 1000i64;
+        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, cutoff)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["live"],
+            "hidden row excluded from semantic search results"
+        );
+    }
+
+    #[test]
+    fn find_hides_row_at_exact_cutoff_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        // missing_since exactly equals cutoff. Predicate is `missing_since > cutoff`,
+        // so equality must NOT satisfy visibility → hidden. Guards a `>` → `>=` mutation.
+        cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256,missing_since) \
+            VALUES ('boundary','/x/b.md','tracker','active','b',0,9,0,'x', 1000)", []).unwrap();
+
+        let cutoff = 1000i64;
+        let opts = FindOpts {
+            filter: None,
+            limit: 100,
+            offset: 0,
+        };
+        let rows = find(&cat, &opts, cutoff).unwrap();
+        assert!(
+            !rows.iter().any(|r| r.id == "boundary"),
+            "missing_since == cutoff must be hidden (predicate is `> cutoff`, not `>=`)"
+        );
+    }
 }

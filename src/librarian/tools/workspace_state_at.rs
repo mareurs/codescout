@@ -132,14 +132,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let (total_in_scope, all_rows) = {
         let cat = ctx.catalog.lock();
-        let vis_cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
-            &cat.conn,
-            chrono::Utc::now().timestamp_millis(),
-        )?;
+        // Forensic bypass: this is a time-travel tool ("state as of T"), not a
+        // live search path. The hide-from-find visibility predicate is
+        // `missing_since > cutoff`; passing i64::MIN makes that true for every
+        // stamped row, so nothing is hidden. A row missing TODAY (per the
+        // real-clock `missing_since` column) must still surface in a
+        // HISTORICAL snapshot — same forensic-fidelity contract as
+        // `find_by_ids` (see its doc comment) and `get`/`doctor`.
         let total = crate::librarian::catalog::find::count_matching(
             &cat,
             scoped_filter.as_ref(),
-            vis_cutoff_ms,
+            i64::MIN,
         )?;
         let rows = crate::librarian::catalog::find::find(
             &cat,
@@ -148,7 +151,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 limit: MAX_ROWS,
                 offset: 0,
             },
-            vis_cutoff_ms,
+            i64::MIN,
         )?;
         (total, rows)
     };
@@ -436,6 +439,69 @@ mod tests {
         assert_ne!(
             entry3["latest_event_at_as_of"]["id"], latest_id_r1,
             "query at ts=200 must see the newer event@100 (proving the at-as-of query can flip)"
+        );
+    }
+    /// workspace_state_at is a forensic/time-travel tool and must BYPASS the
+    /// hide-from-find visibility predicate entirely (i64::MIN cutoff), unlike
+    /// production find()/count_matching() callers which pass the real
+    /// grace-period cutoff. A row missing as of NOW (real-clock
+    /// `missing_since`) must still appear in a HISTORICAL snapshot.
+    #[tokio::test]
+    async fn state_at_bypasses_hide_filter_for_missing_rows() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // Seed an artifact, then stamp it missing far in the past — well
+        // before any normal grace-period cutoff would place it.
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("hidden", 10)).unwrap();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET missing_since = ?1 WHERE id = ?2",
+                    rusqlite::params![100i64, "hidden"],
+                )
+                .unwrap();
+        }
+
+        // Sanity: confirm a normal (production) cutoff really would hide this
+        // row via find() — otherwise this test would not exercise the bypass.
+        {
+            let cat = ctx.catalog.lock();
+            let vis_cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
+                &cat.conn,
+                chrono::Utc::now().timestamp_millis(),
+            )
+            .unwrap();
+            assert!(
+                100i64 <= vis_cutoff_ms,
+                "test setup: missing_since must be <= a normal cutoff"
+            );
+            let rows = crate::librarian::catalog::find::find(
+                &cat,
+                &crate::librarian::catalog::find::FindOpts {
+                    filter: None,
+                    limit: 100,
+                    offset: 0,
+                },
+                vis_cutoff_ms,
+            )
+            .unwrap();
+            assert!(
+                !rows.iter().any(|r| r.id == "hidden"),
+                "sanity: normal find() should hide this row under a real cutoff"
+            );
+        }
+
+        let result = call(&ctx, json!({"timestamp": 999999, "scope": "all"}))
+            .await
+            .unwrap();
+
+        let arts = result["artifacts"].as_array().unwrap();
+        assert!(
+            arts.iter().any(|e| e["id"] == "hidden"),
+            "workspace_state_at must bypass the hide filter: a row missing today \
+             must still appear in a historical snapshot"
         );
     }
 }
