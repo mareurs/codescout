@@ -139,6 +139,125 @@ pub fn maybe_reconcile(
     }
 }
 
+/// A move candidate: the active repo's own commit history overlaps with a
+/// `git_root` recorded in the catalog that no longer exists on disk — i.e.
+/// "this repo looks like it used to live at `old_root`".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveCandidate {
+    pub old_root: String,
+    pub new_root: String,
+    pub shared_commits: usize,
+    pub artifact_rows: usize,
+}
+
+/// Detect "this repo was moved here" via commit-hash overlap with a
+/// now-gone catalog root.
+///
+/// MECHANISM NOTE (deviates from a naive `commits` self-join): `hash` is
+/// the table's PRIMARY KEY (`schema.sql`), so a single commit hash can
+/// only ever have ONE row / ONE `git_root` value in this table.
+/// `commits::upsert_many`'s `ON CONFLICT(hash) DO UPDATE` deliberately
+/// leaves `git_root` untouched (only the explicit, human-triggered
+/// `rehome_commits` may change it) — so a pre-move commit's row stays
+/// pinned to whatever (possibly now-dead) root first indexed it, forever,
+/// even after the active repo is reindexed at its new location. A join
+/// `commits c1 JOIN commits c2 ON c1.hash = c2.hash WHERE c1.git_root <>
+/// c2.git_root` can therefore never return a row — c1 and c2 are always
+/// the identical row for a matching hash (verified empirically: inserting
+/// a second row with an already-present hash raises `UNIQUE constraint
+/// failed: commits.hash`).
+///
+/// Detection instead re-derives the active repo's OWN reachable commit set
+/// straight from git (mirroring
+/// `librarian::tools::reindex::backfill_commits`'s revwalk) and checks
+/// which of those hashes the catalog already attributes to some OTHER
+/// (non-active) `git_root`.
+///
+/// A gone root is a candidate iff it (a) shares >=1 commit hash with the
+/// active repo's own git history, (b) is NOT itself present on disk, and
+/// (c) is the UNIQUE such gone root — if the active repo's history
+/// overlaps 2+ distinct gone roots, that is ambiguous and NO candidate is
+/// surfaced (per spec).
+///
+/// `file_sha256` cross-confirmation (spec) is DEFERRED — commit-hash
+/// overlap alone is treated as near-certain identity for now.
+pub fn detect_move_candidates(
+    conn: &Connection,
+    active_git_root: &str,
+) -> Result<Vec<MoveCandidate>> {
+    let repo = match git2::Repository::open(active_git_root) {
+        Ok(r) => r,
+        Err(_) => return Ok(Vec::new()), // not a (readable) git repo — no signal
+    };
+    let mut walk = repo.revwalk()?;
+    if walk.push_head().is_err() {
+        return Ok(Vec::new()); // unborn/empty HEAD — nothing to correlate
+    }
+    let hashes: Vec<String> = walk
+        .filter_map(|oid| oid.ok())
+        .map(|oid| oid.to_string())
+        .collect();
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // For each of the active repo's own commit hashes, which OTHER
+    // git_root (if any) does the catalog already attribute it to? Chunked
+    // IN() rides the `hash` primary-key index directly, rather than
+    // scanning every non-active row (`WHERE git_root <> ?1` alone can't
+    // use the `idx_commits_git_root` index for an inequality).
+    let active_owned = active_git_root.to_string();
+    let mut shared: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for chunk in hashes.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT git_root, COUNT(*) FROM commits WHERE hash IN ({placeholders}) AND git_root <> ? GROUP BY git_root"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut params: Vec<&dyn rusqlite::ToSql> =
+            chunk.iter().map(|h| h as &dyn rusqlite::ToSql).collect();
+        params.push(&active_owned);
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (root, count) = row?;
+            *shared.entry(root).or_insert(0) += count.max(0) as usize;
+        }
+    }
+
+    let mut out = Vec::new();
+    for (old_root, shared_commits) in shared {
+        if std::path::Path::new(&old_root).exists() {
+            continue; // only GONE roots are move candidates
+        }
+        // escape LIKE metachars in old_root (memory catalog-sql-hazards) —
+        // same escape_like_pattern helper plan_rehome uses.
+        let like = format!(
+            "{}/%",
+            crate::librarian::util::escape_like_pattern(&old_root)
+        );
+        let artifact_rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM artifact WHERE abs_path LIKE ?1 ESCAPE '\\'",
+            [like],
+            |r| r.get(0),
+        )?;
+        out.push(MoveCandidate {
+            old_root,
+            new_root: active_git_root.to_string(),
+            shared_commits,
+            artifact_rows: artifact_rows.max(0) as usize,
+        });
+    }
+
+    // Ambiguity guard: if the active root's commits map to 2+ distinct gone
+    // roots, do not surface any (fall back to explicit old_root/new_root).
+    if out.len() > 1 {
+        return Ok(Vec::new());
+    }
+    Ok(out)
+}
+
 /// One artifact's rename/move: old id/path → new id/path, derived from
 /// rebasing `abs_path` under `old_root` onto `new_root`.
 pub struct RehomeRow {
@@ -1007,5 +1126,119 @@ mod tests {
                 "last_reconcile_at must not move while throttled"
             );
         }
+    }
+
+    fn init_git_repo(dir: &Path) -> git2::Repository {
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test").unwrap();
+        config.set_str("user.email", "test@test.com").unwrap();
+        repo
+    }
+
+    fn commit_file(repo: &git2::Repository, path: &str, content: &str, msg: &str) -> git2::Oid {
+        let root = repo.workdir().unwrap();
+        let file_path = root.join(path);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file_path, content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(path)).unwrap();
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let sig = repo.signature().unwrap();
+        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
+            .unwrap()
+    }
+
+    fn insert_commit_row(cat: &Catalog, hash: &str, git_root: &str) {
+        cat.conn
+            .execute(
+                "INSERT INTO commits (hash, git_root, authored_at, subject, topo_order) \
+                 VALUES (?1, ?2, 0, 's', 0)",
+                rusqlite::params![hash, git_root],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn detect_move_by_shared_commit_hash() {
+        // The active repo is a REAL git repo on disk: detect_move_candidates
+        // opens it via git2 and walks its own reachable commit set — see the
+        // MECHANISM NOTE on detect_move_candidates for why a pure
+        // commits-table self-join (as a naive first draft would attempt)
+        // can never work: `hash` is that table's PRIMARY KEY, so two rows
+        // can never share a hash with different git_root values.
+        let dir = tempfile::tempdir().unwrap();
+        let new_root_path = dir.path().join("newrepo");
+        std::fs::create_dir_all(&new_root_path).unwrap();
+        let repo = init_git_repo(&new_root_path);
+        let h1 = commit_file(&repo, "a.txt", "hello", "init").to_string();
+        let new_root = crate::util::fs::RepoPath::from_path(&new_root_path).into_string();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        // old (gone) repo recorded the SAME hash under its own (now-dead) root.
+        insert_commit_row(&cat, &h1, "/gone/oldrepo");
+        // an unrelated gone repo shares no commit with the active repo's history.
+        insert_commit_row(&cat, "z9-unrelated-hash", "/gone/unrelated");
+
+        let cands = detect_move_candidates(&cat.conn, &new_root).unwrap();
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].old_root, "/gone/oldrepo");
+        assert_eq!(cands[0].new_root, new_root);
+        assert!(cands[0].shared_commits >= 1);
+    }
+
+    #[test]
+    fn detect_move_candidates_empty_when_ambiguous() {
+        // Two distinct gone roots each share a (different) commit hash with
+        // the active repo's own history -> ambiguous -> no candidate.
+        let dir = tempfile::tempdir().unwrap();
+        let new_root_path = dir.path().join("newrepo");
+        std::fs::create_dir_all(&new_root_path).unwrap();
+        let repo = init_git_repo(&new_root_path);
+        let h1 = commit_file(&repo, "a.txt", "hello", "init").to_string();
+        let h2 = commit_file(&repo, "b.txt", "world", "second").to_string();
+        let new_root = crate::util::fs::RepoPath::from_path(&new_root_path).into_string();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        insert_commit_row(&cat, &h1, "/gone/rootA");
+        insert_commit_row(&cat, &h2, "/gone/rootB");
+
+        let cands = detect_move_candidates(&cat.conn, &new_root).unwrap();
+        assert!(
+            cands.is_empty(),
+            "2+ distinct gone roots sharing commits with the active repo is ambiguous"
+        );
+    }
+
+    #[test]
+    fn detect_move_candidates_ignores_root_that_still_exists_on_disk() {
+        // A "gone" root that ISN'T actually gone (still on disk) must not
+        // surface as a move candidate, even if it shares a commit hash —
+        // mutation-testing the (b) on-disk filter in detect_move_candidates.
+        let dir = tempfile::tempdir().unwrap();
+        let new_root_path = dir.path().join("newrepo");
+        std::fs::create_dir_all(&new_root_path).unwrap();
+        let repo = init_git_repo(&new_root_path);
+        let h1 = commit_file(&repo, "a.txt", "hello", "init").to_string();
+        let new_root = crate::util::fs::RepoPath::from_path(&new_root_path).into_string();
+
+        let still_here = dir.path().join("still-here");
+        std::fs::create_dir_all(&still_here).unwrap();
+        let still_here_str = crate::util::fs::RepoPath::from_path(&still_here).into_string();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        insert_commit_row(&cat, &h1, &still_here_str);
+
+        let cands = detect_move_candidates(&cat.conn, &new_root).unwrap();
+        assert!(
+            cands.is_empty(),
+            "a root that still exists on disk is not a move candidate"
+        );
     }
 }

@@ -154,6 +154,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let hidden_rows = crate::librarian::catalog::gc::hidden_count(&cat.conn, cutoff)?;
     let grace = crate::librarian::catalog::gc::grace_days(&cat.conn)?;
 
+    // Move-candidate detection (Task 9): needs the ACTIVE repo's git root.
+    // The librarian ToolContext exposes it as `current_project.git_root`,
+    // populated per-call by `LibrarianAdapter::derive_ctx` from the host's
+    // currently-active project (see current_project.rs). No active project
+    // (e.g. a config-only caller, or an unresolvable path) means no
+    // candidates — same as Task 6's placeholder. Done while the lock is
+    // still held, since `detect_move_candidates` needs `&cat.conn`.
+    let candidates = match ctx.current_project.as_deref() {
+        Some(cp) => {
+            let active_git_root = crate::util::fs::RepoPath::from_path(&cp.git_root).into_string();
+            crate::librarian::catalog::gc::detect_move_candidates(&cat.conn, &active_git_root)?
+        }
+        None => Vec::new(),
+    };
+
     // Drop the lock before computing the summary — keeps lock scope minimal.
     drop(cat);
 
@@ -162,13 +177,38 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         *by_check.entry(v.check.clone()).or_insert(0) += 1;
     }
 
-    let health_hint = if hidden_rows > 0 {
-        format!(
+    let mut hint_parts: Vec<String> = Vec::new();
+    if hidden_rows > 0 {
+        hint_parts.push(format!(
             "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
-        )
-    } else {
-        String::new()
-    };
+        ));
+    }
+    if let Some(c) = candidates.first() {
+        hint_parts.push(format!(
+            "possible repo move detected ({} -> {}). Run doctor(fix=\"rehome\", old_root=\"{}\", new_root=\"{}\") to migrate.",
+            c.old_root, c.new_root, c.old_root, c.new_root
+        ));
+    }
+    let health_hint = hint_parts.join(" ");
+
+    let mut catalog_health = serde_json::Map::new();
+    catalog_health.insert("hidden_rows".to_string(), json!(hidden_rows));
+    catalog_health.insert("move_candidates".to_string(), json!(candidates.len()));
+    if !candidates.is_empty() {
+        let detail: Vec<Value> = candidates
+            .iter()
+            .map(|c| {
+                json!({
+                    "old_root": c.old_root,
+                    "new_root": c.new_root,
+                    "shared_commits": c.shared_commits,
+                    "artifact_rows": c.artifact_rows,
+                })
+            })
+            .collect();
+        catalog_health.insert("move_candidates_detail".to_string(), json!(detail));
+    }
+    catalog_health.insert("hint".to_string(), json!(health_hint));
 
     Ok(json!({
         "violations": all_violations,
@@ -176,11 +216,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "total": all_violations.len(),
             "by_check": by_check,
         },
-        "catalog_health": {
-            "hidden_rows": hidden_rows,
-            "move_candidates": 0, // filled by Task 9
-            "hint": health_hint,
-        },
+        "catalog_health": catalog_health,
     }))
 }
 
@@ -1071,6 +1107,62 @@ mod tests {
         assert_eq!(
             out["catalog_health"]["move_candidates"].as_u64().unwrap(),
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn doctor_surfaces_move_candidate_via_commit_hash_overlap() {
+        // The active project IS a real git repo: detect_move_candidates
+        // opens it via git2 to walk its own reachable commit set (see
+        // gc.rs's MECHANISM NOTE on detect_move_candidates for why a pure
+        // commits-table query can't answer this — `hash` is that table's
+        // PRIMARY KEY, so a naive self-join can never find an overlap).
+        let dir = tempfile::tempdir().unwrap();
+        let new_root_path = dir.path().join("newrepo");
+        std::fs::create_dir_all(&new_root_path).unwrap();
+        let repo = git2::Repository::init(&new_root_path).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test").unwrap();
+        config.set_str("user.email", "test@test.com").unwrap();
+        std::fs::write(new_root_path.join("a.txt"), "hello").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let h1 = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap()
+            .to_string();
+        let new_root = crate::util::fs::RepoPath::from_path(&new_root_path).into_string();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        // same hash, attributed to a now-dead root — the move signal.
+        seed_commit(&cat, &h1, "/gone/oldrepo");
+        let current_project =
+            std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+                abs_path: new_root_path.clone(),
+                git_root: new_root_path.clone(),
+                main_root: None,
+                umbrella: None,
+            });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(current_project)
+            .build();
+
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(out["catalog_health"]["move_candidates"].as_u64().unwrap() >= 1);
+        let detail = out["catalog_health"]["move_candidates_detail"]
+            .as_array()
+            .unwrap();
+        assert_eq!(detail[0]["old_root"], "/gone/oldrepo");
+        assert_eq!(detail[0]["new_root"], new_root);
+        assert!(
+            out["catalog_health"]["hint"]
+                .as_str()
+                .unwrap()
+                .contains("rehome"),
+            "hint must mention doctor(fix=\"rehome\", ...) when a candidate is found"
         );
     }
 
