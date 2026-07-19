@@ -1,5 +1,5 @@
 use super::{RecoverableError, ToolContext};
-use crate::librarian::catalog::augmentation;
+use crate::librarian::catalog::{artifact, augmentation};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -27,13 +27,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
     let mut cat = ctx.catalog.lock();
-    let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
-    if !a.cites.is_empty() && target != a.id {
-        return Err(RecoverableError::with_hint(
-            "append_entry: `cites` is not supported from a worktree checkout".to_string(),
-            "Entry-graph edges must key to the main tracker. Omit `cites`, or append from the main checkout.".to_string(),
-        ));
+    // Refuse cites-from-worktree BEFORE resolve_write_target can fork a shadow.
+    // The old ordering forked first and refused after, so a refused call still
+    // materialized an empty shadow row + augmentation + worktree_fork event +
+    // worktree_of link (2026-07-17 regression) — contradicting the "aborts the
+    // whole call / writes nothing" contract. This mirrors resolve_write_target's
+    // own `is_main_checkout_artifact` check to predict `target != a.id` without
+    // the forking side effect.
+    if !a.cites.is_empty() {
+        if let Some(cp) = ctx.current_project.as_deref() {
+            if let Some(row) = artifact::get(&cat, &a.id)? {
+                if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
+                    return Err(RecoverableError::with_hint(
+                        "append_entry: `cites` is not supported from a worktree checkout".to_string(),
+                        "Entry-graph edges must key to the main tracker. Omit `cites`, or append from the main checkout.".to_string(),
+                    ));
+                }
+            }
+        }
     }
+    let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
     let id = augmentation::append_entry(
         &mut cat,
         &target,
@@ -279,6 +292,44 @@ mod tests {
         assert_eq!(
             n, 0,
             "guard must refuse before any entry_cite row is written"
+        );
+        // 2026-07-17 regression: the refusal used to fire AFTER
+        // resolve_write_target had already forked and committed a shadow row
+        // for the worktree — the entry write is atomic, but the shadow fork
+        // wasn't gated on it. Assert the guard now refuses BEFORE any shadow
+        // materializes at all: exactly the one seeded main artifact, no
+        // worktree_fork event, no worktree_of lineage link.
+        let n_artifacts: i64 = c
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            n_artifacts, 1,
+            "guard must refuse before resolve_write_target forks a shadow artifact row"
+        );
+        let n_fork_events: i64 = c
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE kind = 'worktree_fork'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n_fork_events, 0,
+            "guard must refuse before resolve_write_target emits a worktree_fork event"
+        );
+        let n_lineage_links: i64 = c
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_link WHERE rel = 'worktree_of'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n_lineage_links, 0,
+            "guard must refuse before resolve_write_target inserts a worktree_of lineage link"
         );
     }
 }
