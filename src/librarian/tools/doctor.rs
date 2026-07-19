@@ -396,11 +396,11 @@ async fn run_fix(
                 }));
             }
             let stats = crate::librarian::catalog::gc::apply_rehome(&cat.conn, &plan)?;
-            crate::librarian::catalog::gc::rehome_commits(&cat.conn, &old, &new)?;
+            let commit_rows = crate::librarian::catalog::gc::rehome_commits(&cat.conn, &old, &new)?;
             Ok(json!({
                 "fix": "rehome", "mode": "applied",
                 "old_root": old.to_string_lossy(), "new_root": new.to_string_lossy(),
-                "migrated": { "artifact_rows": stats.artifact_rows, "commit_rows": plan.commit_rows,
+                "migrated": { "artifact_rows": stats.artifact_rows, "commit_rows": commit_rows,
                               "skipped_collisions": stats.skipped_collisions },
             }))
         }
@@ -1124,6 +1124,12 @@ mod tests {
             &cat.conn
         )
         .is_err());
+        // new_root is required
+        assert!(validate_rehome_request(Some("/gone/old"), None, &cat.conn).is_err());
+        // new_root must be absolute
+        assert!(
+            validate_rehome_request(Some("/gone/old"), Some("relative/new"), &cat.conn).is_err()
+        );
         // happy path: old gone, new exists
         assert!(validate_rehome_request(
             Some("/gone/old"),
