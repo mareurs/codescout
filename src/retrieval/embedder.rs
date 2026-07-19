@@ -458,7 +458,6 @@ pub trait DenseEmbedder: Send + Sync {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 }
 
-
 /// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
 /// Drops the sparse vector and surfaces only the dense one.
 pub struct HttpDenseEmbedder {
