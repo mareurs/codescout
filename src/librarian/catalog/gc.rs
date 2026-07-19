@@ -149,6 +149,7 @@ mod tests {
         let s = reconcile_missing_since(&cat.conn, 1000).unwrap();
         assert_eq!(s.newly_missing, 1);
         assert_eq!(s.cleared, 0);
+        assert_eq!(s.still_missing, 0);
         let ms: Option<i64> = cat
             .conn
             .query_row(
@@ -171,6 +172,7 @@ mod tests {
         // idempotent: second run with no fs change stamps nothing new
         let s2 = reconcile_missing_since(&cat.conn, 2000).unwrap();
         assert_eq!(s2.newly_missing, 0);
+        assert_eq!(s2.still_missing, 1);
         let ms3: Option<i64> = cat
             .conn
             .query_row(
@@ -182,7 +184,6 @@ mod tests {
         assert_eq!(ms3, Some(1000), "existing stamp is not overwritten");
 
         // file returns → cleared
-        std::fs::write("/tmp", "").ok(); // no-op guard
         let returned = dir.path().join("returned.md");
         cat.conn
             .execute(
@@ -193,6 +194,7 @@ mod tests {
         std::fs::write(&returned, "x").unwrap();
         let s3 = reconcile_missing_since(&cat.conn, 3000).unwrap();
         assert_eq!(s3.cleared, 1);
+        assert_eq!(s3.still_missing, 0);
         let ms4: Option<i64> = cat
             .conn
             .query_row(
