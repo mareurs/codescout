@@ -284,12 +284,13 @@ impl RecoverableError {
     }
 }
 
-/// Display renders only `message`. The structured `hint` and `recovery_steps`
-/// are intentionally omitted here so existing `to_string().contains(...)` test
-/// assertions stay stable. Production callers surface the full payload via
-/// `route_tool_error` (see `src/tools/mod.rs`), which emits `hint`/steps as
-/// dedicated JSON keys. If you need the hint programmatically, downcast to
-/// `RecoverableError` and call `.hint()` — do not parse it out of Display.
+/// Display renders `message`, followed by `" — {field}: {text}"` when
+/// `guidance` is `Some` — the hint IS included, not omitted. Existing
+/// `to_string().contains(...)` test assertions rely on this append; don't
+/// remove it without auditing them first. Production callers additionally
+/// surface the full structured payload via `route_tool_error` (see
+/// `src/tools/mod.rs`), which emits `hint`/steps as dedicated JSON keys — use
+/// `.hint()` when you need the hint value alone, without the message prefix.
 impl std::fmt::Display for RecoverableError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)?;
