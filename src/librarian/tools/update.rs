@@ -1316,10 +1316,13 @@ mod tests {
             }]}
         });
         let err = call(&ctx, args).await.unwrap_err();
-        let msg = err.to_string();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("recoverable");
+        let hint = rec.hint().unwrap_or("").to_lowercase();
         assert!(
-            msg.to_lowercase().contains("params"),
-            "augmented + visible-drift miss must nudge toward params: {msg}"
+            hint.contains("params"),
+            "augmented + visible-drift miss must nudge toward params: {hint:?}"
         );
     }
 
@@ -1349,10 +1352,46 @@ mod tests {
             }]}
         });
         let err = call(&ctx, args).await.unwrap_err();
-        let msg = err.to_string();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("recoverable");
+        let hint = rec.hint().unwrap_or("").to_lowercase();
         assert!(
-            !msg.to_lowercase().contains("params"),
-            "non-augmented miss must not carry the params nudge: {msg}"
+            !hint.contains("params"),
+            "non-augmented miss must not carry the params nudge: {hint:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn body_edits_whitespace_miss_on_augmented_does_not_nudge_params() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "docs/trackers/vt.md", false, None).await;
+        call(
+            &ctx,
+            serde_json::json!({ "id": id, "patch": { "body": "## State\n\nalpha beta gamma\n" }}),
+        )
+        .await
+        .unwrap();
+
+        // old_string matches the body line EXCEPT a doubled interior space -> whitespace_invisible tier.
+        let args = serde_json::json!({
+            "id": id,
+            "patch": { "body_edits": [{
+                "heading": "## State",
+                "action": "edit",
+                "old_string": "alpha  beta gamma",   // two spaces after alpha
+                "new_string": "whatever",
+            }]}
+        });
+        let err = call(&ctx, args).await.unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("recoverable");
+        let hint = rec.hint().unwrap_or("").to_lowercase();
+        assert!(
+            !hint.contains("params"),
+            "a whitespace-tier miss (even on an augmented artifact) must NOT nudge params: {hint:?}"
         );
     }
 

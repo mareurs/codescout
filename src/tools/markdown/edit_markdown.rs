@@ -883,12 +883,14 @@ pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String>
 }
 
 /// True iff `line_idx` (0-based into section.split('\n')) is inside a fenced
-/// ``` block or is an indented (≥4 leading spaces / a tab) code line. Whitespace
-/// there is significant — the caller warns the agent not to normalize it.
+/// ``` or ~~~ block or is an indented (≥4 leading spaces / a tab) code line.
+/// Whitespace there is significant — the caller warns the agent not to
+/// normalize it.
 pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
     let mut in_fence = false;
     for (i, line) in section.split('\n').enumerate() {
-        if line.trim_start().starts_with("```") {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
             if i == line_idx {
                 return true;
             }
@@ -908,6 +910,7 @@ pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
 const SIM_THRESHOLD: f64 = 0.5;
 const SECTION_LINE_CAP: usize = 400;
 const SECTION_BYTE_CAP: usize = 65_536;
+const OLD_STRING_CAP: usize = 8192;
 
 fn truncate_snippet(s: &str) -> String {
     const MAX: usize = 200;
@@ -942,7 +945,11 @@ pub(crate) fn diagnose_scoped_miss(
     };
 
     let lines: Vec<&str> = section.split('\n').collect();
-    if old_string.is_empty() || lines.len() > SECTION_LINE_CAP || section.len() > SECTION_BYTE_CAP {
+    if old_string.is_empty()
+        || old_string.len() > OLD_STRING_CAP
+        || lines.len() > SECTION_LINE_CAP
+        || section.len() > SECTION_BYTE_CAP
+    {
         return no_close("");
     }
 

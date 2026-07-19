@@ -751,9 +751,13 @@ fn scoped_edit_miss_surfaces_rich_diagnostic() {
         perform_scoped_edit(doc, "State", "_Last refresh: `8481bea`_", "x", false).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("ddf8215"), "shows current text: {msg}");
+    let rec = err
+        .downcast_ref::<crate::tools::core::types::RecoverableError>()
+        .expect("recoverable");
+    let hint = rec.hint().unwrap_or("").to_lowercase();
     assert!(
-        msg.to_lowercase().contains("re-read") || msg.to_lowercase().contains("changed"),
-        "carries tier-B hint, not the generic one: {msg}"
+        hint.contains("re-read") || hint.contains("changed"),
+        "carries tier-B hint, not the generic one: {hint:?}"
     );
 }
 
@@ -2658,6 +2662,17 @@ fn line_in_code_block_detects_fence_and_indent() {
 }
 
 #[test]
+fn line_in_code_block_detects_tilde_fence() {
+    use super::edit_markdown::line_in_code_block;
+    let section = "## H\nprose\n~~~\ncode line\n~~~\nmore prose\n";
+    let lines: Vec<&str> = section.split('\n').collect();
+    let idx = |t: &str| lines.iter().position(|l| *l == t).unwrap();
+    assert!(!line_in_code_block(section, idx("prose")));
+    assert!(line_in_code_block(section, idx("code line")));
+    assert!(!line_in_code_block(section, idx("more prose")));
+}
+
+#[test]
 fn diagnose_visible_drift_shows_want_have_and_tier() {
     use super::edit_markdown::diagnose_scoped_miss;
     let section = "## State\n\n_Last refresh: `ddf8215`_\n";
@@ -2671,9 +2686,10 @@ fn diagnose_visible_drift_shows_want_have_and_tier() {
         e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
         Some("visible_drift")
     );
+    let hint = e.hint().unwrap_or("").to_lowercase();
     assert!(
-        msg.to_lowercase().contains("re-read") || msg.to_lowercase().contains("changed"),
-        "tier-B hint: {msg}"
+        hint.contains("re-read") || hint.contains("changed"),
+        "tier-B hint: {hint:?}"
     );
 }
 
@@ -2694,6 +2710,18 @@ fn diagnose_whitespace_tier_classifies_and_flags_code() {
     assert!(
         msg.to_lowercase().contains("code"),
         "code-block significance note: {msg}"
+    );
+}
+
+#[test]
+fn diagnose_giant_old_string_bails_to_no_close_cheaply() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = "## H\nsome modest body line here\nanother line\n";
+    let giant = "x".repeat(20_000); // far above the cap
+    let e = diagnose_scoped_miss(section, &giant, "## H");
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("no_close")
     );
 }
 
