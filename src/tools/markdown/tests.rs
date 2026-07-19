@@ -745,6 +745,19 @@ fn scoped_edit_not_found() {
 }
 
 #[test]
+fn scoped_edit_miss_surfaces_rich_diagnostic() {
+    let doc = "## State\n\n_Last refresh: `ddf8215`_\n";
+    let err =
+        perform_scoped_edit(doc, "State", "_Last refresh: `8481bea`_", "x", false).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("ddf8215"), "shows current text: {msg}");
+    assert!(
+        msg.to_lowercase().contains("re-read") || msg.to_lowercase().contains("changed"),
+        "carries tier-B hint, not the generic one: {msg}"
+    );
+}
+
+#[test]
 fn scoped_edit_does_not_affect_other_sections() {
     let content = "# Title\n## A\nhello world\n## B\nhello world\n";
     let result = perform_scoped_edit(content, "## A", "hello", "goodbye", false).unwrap();

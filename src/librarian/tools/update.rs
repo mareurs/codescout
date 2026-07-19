@@ -148,8 +148,9 @@ fn apply_body_edits(working: &str, edits: &[Value]) -> Result<String> {
                 replace_all,
             )
             .map_err(|e| {
-                super::RecoverableError::with_hint(
-                    format!("body_edits[{i}]: {e}"),
+                crate::tools::markdown::edit_markdown::prefix_scoped_error(
+                    e,
+                    &format!("body_edits[{i}]: "),
                     "Check heading name and old_string content.",
                 )
             })?
@@ -251,7 +252,48 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 apply_frontmatter_patch(fm, patch);
             })?;
         }
-        apply_body_edits(&working, edits)?
+        apply_body_edits(&working, edits).map_err(|e| {
+            // Extract nudge inputs in a scoped block so the borrow of `e` ends
+            // before we either rebuild or return it.
+            let rebuilt = {
+                let is_augmented = crate::librarian::catalog::augmentation::get(&cat, &a.id)
+                    .ok()
+                    .flatten()
+                    .is_some();
+                if is_augmented {
+                    e.downcast_ref::<crate::tools::RecoverableError>().and_then(|rec| {
+                        if rec.extra.get("scoped_miss_tier").and_then(|v| v.as_str())
+                            == Some("visible_drift")
+                        {
+                            Some((
+                                rec.message.clone(),
+                                rec.hint().unwrap_or("").to_string(),
+                                (*rec.extra).clone(),
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                }
+            };
+            match rebuilt {
+                Some((msg, base_hint, extra)) => {
+                    let mut r = crate::tools::RecoverableError::with_hint(
+                        msg,
+                        format!(
+                            "{base_hint} This artifact is augmented — a drifted value usually means the body is a render of `params`; update patch={{params:{{…}}}} and re-render rather than hand-editing the rendered text."
+                        ),
+                    );
+                    for (k, v) in extra {
+                        r = r.with_extra(k, v);
+                    }
+                    r.into()
+                }
+                None => e,
+            }
+        })?
     } else {
         crate::librarian::frontmatter::update_in_place(&original, |fm| {
             apply_frontmatter_patch(fm, patch);
@@ -1244,6 +1286,74 @@ mod tests {
             "original body must survive"
         );
         assert!(content.contains("## Recent"), "siblings must survive");
+    }
+
+    #[tokio::test]
+    async fn body_edits_visible_drift_on_augmented_nudges_params() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "docs/trackers/vt.md", false, None).await;
+
+        // seed_with_augment writes a bare-literal body with no heading; give it
+        // one to scope the body_edit against.
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": { "body": "## State\n\n_Last refresh: `ddf8215`_\n" }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let args = serde_json::json!({
+            "id": id,
+            "patch": { "body_edits": [{
+                "heading": "## State",
+                "action": "edit",
+                "old_string": "_Last refresh: `8481bea`_",
+                "new_string": "whatever",
+            }]}
+        });
+        let err = call(&ctx, args).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.to_lowercase().contains("params"),
+            "augmented + visible-drift miss must nudge toward params: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn body_edits_visible_drift_on_non_augmented_does_not_nudge_params() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "plain.md",
+                "kind": "spec", "title": "T",
+                "body": "## State\n\n_Last refresh: `ddf8215`_\n",
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let args = serde_json::json!({
+            "id": id,
+            "patch": { "body_edits": [{
+                "heading": "## State",
+                "action": "edit",
+                "old_string": "_Last refresh: `8481bea`_",
+                "new_string": "whatever",
+            }]}
+        });
+        let err = call(&ctx, args).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.to_lowercase().contains("params"),
+            "non-augmented miss must not carry the params nudge: {msg}"
+        );
     }
 
     #[tokio::test]

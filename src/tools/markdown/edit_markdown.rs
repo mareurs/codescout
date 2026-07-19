@@ -577,8 +577,9 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
                 i,
             )
             .map_err(|e| {
-                RecoverableError::with_hint(
-                    format!("edits[{}]: {}", i, e),
+                prefix_scoped_error(
+                    e,
+                    &format!("edits[{i}]: "),
                     "Check heading name and old_string content.",
                 )
             })?
@@ -644,11 +645,7 @@ pub(crate) fn plan_scoped_edit(
     let section = &content[sec_start..sec_end];
 
     if !section.contains(old_string) {
-        return Err(anyhow::anyhow!(
-            "old_string not found in section '{}'. \
-             The text must match exactly (whitespace-sensitive).",
-            heading_query
-        ));
+        return Err(diagnose_scoped_miss(section, old_string, heading_query).into());
     }
 
     let mut edits = Vec::new();
@@ -683,6 +680,26 @@ pub(crate) fn plan_scoped_edit(
     }
 
     Ok(edits)
+}
+
+/// Prefix a scoped-edit error's message while PRESERVING a rich `RecoverableError`
+/// (its tier-adaptive hint + `extra`). Only `old_string` misses arrive as a
+/// downcastable `RecoverableError` (from `diagnose_scoped_miss`); a heading-not-found
+/// arrives as a plain `anyhow` and takes the generic `fallback_hint`.
+pub(crate) fn prefix_scoped_error(
+    e: anyhow::Error,
+    prefix: &str,
+    fallback_hint: &str,
+) -> anyhow::Error {
+    match e.downcast::<RecoverableError>() {
+        Ok(mut rec) => {
+            if !prefix.is_empty() {
+                rec.message = format!("{prefix}{}", rec.message);
+            }
+            rec.into()
+        }
+        Err(other) => RecoverableError::with_hint(format!("{prefix}{other}"), fallback_hint).into(),
+    }
 }
 
 /// Perform a heading-scoped string replacement within a markdown file.
@@ -789,7 +806,6 @@ pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result
 }
 /// Normalized Levenshtein similarity in [0.0, 1.0] (1.0 = identical). Used only
 /// to LOCATE the closest line for a miss diagnostic — never to alter bytes.
-#[allow(dead_code)] // consumed by Task 4's diagnose_scoped_miss
 pub(crate) fn similarity(a: &str, b: &str) -> f64 {
     strsim::normalized_levenshtein(a, b)
 }
@@ -803,7 +819,6 @@ fn visible_projection(s: &str) -> String {
         .collect()
 }
 
-#[allow(dead_code)] // consumed by Task 4's diagnose_scoped_miss
 pub(crate) fn render_visible_whitespace(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     for c in line.chars() {
@@ -828,7 +843,6 @@ fn leading_ws(s: &str) -> String {
 
 /// `Some(reason)` iff `want`/`have` have identical visible projections but differ
 /// byte-wise (Tier A). `None` when visible content differs (Tier B).
-#[allow(dead_code)] // consumed by Task 4's diagnose_scoped_miss
 pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String> {
     if want == have || visible_projection(want) != visible_projection(have) {
         return None;
@@ -871,7 +885,6 @@ pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String>
 /// True iff `line_idx` (0-based into section.split('\n')) is inside a fenced
 /// ``` block or is an indented (≥4 leading spaces / a tab) code line. Whitespace
 /// there is significant — the caller warns the agent not to normalize it.
-#[allow(dead_code)] // consumed by Task 4
 pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
     let mut in_fence = false;
     for (i, line) in section.split('\n').enumerate() {
@@ -911,7 +924,6 @@ fn truncate_snippet(s: &str) -> String {
 /// the miss into a tier (whitespace-only / visible drift / no close match),
 /// and build a `RecoverableError` carrying a tier-adaptive hint plus
 /// `extra["scoped_miss_tier"]` for callers (Task 5) to route on.
-#[allow(dead_code)] // consumed by Task 5
 pub(crate) fn diagnose_scoped_miss(
     section: &str,
     old_string: &str,
@@ -1200,9 +1212,7 @@ impl Tool for EditMarkdown {
                     new_string,
                     replace_all_val,
                 )
-                .map_err(|e| {
-                    RecoverableError::with_hint(e.to_string(), "Check heading name and old_string.")
-                })?
+                .map_err(|e| prefix_scoped_error(e, "", "Check heading name and old_string."))?
             } else {
                 let content = input["content"].as_str();
                 if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
