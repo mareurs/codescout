@@ -39,6 +39,7 @@ tests/fixtures/*/.codescout/
 # Runtime / session files
 .codescout/cc_session_id
 .codescout/guide_hints/
+.codescout/constitution-seen/
 .codescout/tantivy/
 .codescout/peer-audit.jsonl
 .codescout/usage.db.bak-*
