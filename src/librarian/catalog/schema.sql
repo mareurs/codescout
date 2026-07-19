@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS artifact (
   file_mtime    INTEGER NOT NULL,
   file_sha256   TEXT NOT NULL,
   confidence    REAL NOT NULL DEFAULT 1.0,
-  slug          TEXT
+  slug          TEXT,
+  missing_since INTEGER -- v10: catalog GC lifecycle (epoch-ms; NULL = present)
 );
 
 CREATE TABLE IF NOT EXISTS artifact_link (

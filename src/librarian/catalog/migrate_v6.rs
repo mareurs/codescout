@@ -190,12 +190,13 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
           file_mtime    INTEGER NOT NULL,
           file_sha256   TEXT NOT NULL,
           confidence    REAL NOT NULL DEFAULT 1.0,
-          slug          TEXT
+          slug          TEXT,
+          missing_since INTEGER
           );
           INSERT INTO artifact_new
           SELECT id, abs_path, kind, status, title, owners, tags, topic,
                  time_scope, source, created_at, updated_at, file_mtime,
-                 file_sha256, confidence, slug
+                 file_sha256, confidence, slug, missing_since
           FROM artifact;
 
           -- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.
@@ -446,7 +447,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
     }
 
     #[test]
@@ -461,7 +462,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
     }
     #[test]
     fn migration_v6_single_open_preserves_v9_entry_graph_shape() {

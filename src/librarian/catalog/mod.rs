@@ -212,6 +212,21 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
         "INSERT OR IGNORE INTO schema_version (version) VALUES (9)",
         [],
     )?;
+    // v10: catalog GC lifecycle — missing_since on artifact + catalog_meta kv.
+    if !column_exists(conn, "artifact", "missing_since")? {
+        conn.execute("ALTER TABLE artifact ADD COLUMN missing_since INTEGER", [])?;
+    }
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS catalog_meta (
+           key   TEXT PRIMARY KEY,
+           value TEXT
+         )",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (10)",
+        [],
+    )?;
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
     // drop_legacy_and_stamp is called separately by open_with_workspace after
     // backfill — NOT here, because backfill requires a workspace config and
@@ -481,7 +496,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
     }
 
     #[test]
@@ -516,8 +531,33 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
     }
+
+    #[test]
+    fn v10_adds_missing_since_and_catalog_meta() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        // missing_since column exists and defaults NULL
+        assert!(column_exists(&cat.conn, "artifact", "missing_since").unwrap());
+        // catalog_meta table exists and is writable
+        cat.conn
+            .execute("INSERT INTO catalog_meta(key, value) VALUES ('k','v')", [])
+            .unwrap();
+        let v: String = cat
+            .conn
+            .query_row("SELECT value FROM catalog_meta WHERE key='k'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(v, "v");
+        let ver: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(ver >= 10);
+    }
+
     #[test]
     fn widen_events_kind_check_migrates_pre_existing_catalog_and_preserves_data() {
         // Regression: a catalog created before the events.kind CHECK constraint
@@ -802,27 +842,28 @@ mod tests {
     fn parse_create_table_columns_extracts_artifact_columns() {
         let cols = parse_create_table_columns(SCHEMA_SQL, "artifact");
         assert_eq!(
-            cols,
-            vec![
-                "id",
-                "abs_path",
-                "kind",
-                "status",
-                "title",
-                "owners",
-                "tags",
-                "topic",
-                "time_scope",
-                "source",
-                "created_at",
-                "updated_at",
-                "file_mtime",
-                "file_sha256",
-                "confidence",
-                "slug",
-            ],
-            "parse_create_table_columns must return every artifact column schema.sql declares, in order"
-        );
+                cols,
+                vec![
+                    "id",
+                    "abs_path",
+                    "kind",
+                    "status",
+                    "title",
+                    "owners",
+                    "tags",
+                    "topic",
+                    "time_scope",
+                    "source",
+                    "created_at",
+                    "updated_at",
+                    "file_mtime",
+                    "file_sha256",
+                    "confidence",
+                    "slug",
+                    "missing_since",
+                ],
+                "parse_create_table_columns must return every artifact column schema.sql declares, in order"
+            );
     }
 
     #[test]
