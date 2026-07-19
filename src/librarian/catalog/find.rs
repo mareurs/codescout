@@ -10,17 +10,19 @@ pub struct FindOpts {
     pub offset: usize,
 }
 
-pub fn find(cat: &Catalog, opts: &FindOpts) -> Result<Vec<ArtifactRow>> {
+pub fn find(cat: &Catalog, opts: &FindOpts, cutoff_ms: i64) -> Result<Vec<ArtifactRow>> {
     let mut sql = String::from(
         "SELECT id, abs_path, kind, status, title, owners, tags,\
          topic, time_scope, source, created_at, updated_at, file_mtime,\
-         file_sha256, confidence FROM artifact",
+         file_sha256, confidence FROM artifact WHERE ",
     );
+    sql.push_str(&super::gc::visibility_sql(cutoff_ms));
     let mut params: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(f) = &opts.filter {
         let frag = compile(f)?;
-        sql.push_str(" WHERE ");
+        sql.push_str(" AND (");
         sql.push_str(&frag.sql);
+        sql.push(')');
         params.extend(frag.params);
     }
     sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
@@ -34,13 +36,15 @@ pub fn find(cat: &Catalog, opts: &FindOpts) -> Result<Vec<ArtifactRow>> {
 
 /// Count of artifacts matching `filter`. Used by listing tools to generate
 /// progressive-disclosure hints ("N more in repo, M more in workspace").
-pub fn count_matching(cat: &Catalog, filter: Option<&FilterNode>) -> Result<usize> {
-    let mut sql = String::from("SELECT COUNT(*) FROM artifact");
+pub fn count_matching(cat: &Catalog, filter: Option<&FilterNode>, cutoff_ms: i64) -> Result<usize> {
+    let mut sql = String::from("SELECT COUNT(*) FROM artifact WHERE ");
+    sql.push_str(&super::gc::visibility_sql(cutoff_ms));
     let mut params: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(f) = filter {
         let frag = compile(f)?;
-        sql.push_str(" WHERE ");
+        sql.push_str(" AND (");
         sql.push_str(&frag.sql);
+        sql.push(')');
         params.extend(frag.params);
     }
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -62,13 +66,18 @@ pub struct CatalogSummary {
 pub fn catalog_summary(
     cat: &Catalog,
     scoped_filter: Option<&FilterNode>,
+    cutoff_ms: i64,
 ) -> Result<CatalogSummary> {
+    let visibility = super::gc::visibility_sql(cutoff_ms);
     let (where_sql, params) = match scoped_filter {
         Some(f) => {
             let frag = compile(f)?;
-            (format!(" WHERE {}", frag.sql), frag.params)
+            (
+                format!(" WHERE {} AND ({})", visibility, frag.sql),
+                frag.params,
+            )
         }
-        None => (String::new(), Vec::new()),
+        None => (format!(" WHERE {}", visibility), Vec::new()),
     };
 
     let mut by_kind = std::collections::BTreeMap::new();
@@ -134,16 +143,49 @@ fn shift_param_indices(sql: &str, offset: usize) -> String {
     }
     out
 }
+
+/// Direct-id lookup, NO filter and NO visibility predicate applied. This is the
+/// forensic bypass: `artifact(action="get")`-style and `doctor`-style access to
+/// a row (including ones hidden by the grace-period visibility predicate) must
+/// go through here, never through `find`/`find_by_ids_filtered`.
+pub fn find_by_ids(cat: &Catalog, ids: &[String]) -> Result<Vec<ArtifactRow>> {
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let n = ids.len();
+    let placeholders: String = (1..=n)
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT id, abs_path, kind, status, title, owners, tags, \
+         topic, time_scope, source, created_at, updated_at, file_mtime, \
+         file_sha256, confidence FROM artifact \
+         WHERE id IN ({placeholders})",
+    );
+    let params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|id| rusqlite::types::Value::Text(id.clone()))
+        .collect();
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), row_from_sql)?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
+}
+
 /// Hydrate + filter a set of KNN candidate ids into artifact rows, preserving
 /// the candidate (KNN-distance) order. Applies the caller's filter AST as a
 /// post-filter and returns ALL matching rows (no pagination) — the caller
 /// decides retry/pagination. Empty `candidate_ids` → empty. Shared by both
 /// vector backends (sqlite-vec + Qdrant) so semantic results are identical
 /// regardless of where the KNN ran.
+///
+/// This IS a search path — the grace-period visibility predicate applies
+/// (`cutoff_ms`). For the unfiltered forensic bypass see `find_by_ids`.
 pub fn find_by_ids_filtered(
     cat: &Catalog,
     candidate_ids: &[String],
     filter: Option<&FilterNode>,
+    cutoff_ms: i64,
 ) -> Result<Vec<ArtifactRow>> {
     if candidate_ids.is_empty() {
         return Ok(vec![]);
@@ -165,7 +207,8 @@ pub fn find_by_ids_filtered(
         "SELECT id, abs_path, kind, status, title, owners, tags, \
          topic, time_scope, source, created_at, updated_at, file_mtime, \
          file_sha256, confidence FROM artifact \
-         WHERE id IN ({placeholders})",
+         WHERE id IN ({placeholders}) AND {}",
+        super::gc::visibility_sql(cutoff_ms),
     );
 
     let mut params: Vec<rusqlite::types::Value> = candidate_ids
@@ -198,6 +241,7 @@ pub fn find_by_ids_filtered(
 ///
 /// The catalog lock is held only for the synchronous hydrate/filter step and
 /// released before each `store.knn` await — never across an await.
+#[allow(clippy::too_many_arguments)]
 pub async fn semantic_find(
     store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
     catalog: &parking_lot::Mutex<Catalog>,
@@ -206,6 +250,7 @@ pub async fn semantic_find(
     filter: Option<&FilterNode>,
     limit: usize,
     offset: usize,
+    cutoff_ms: i64,
 ) -> Result<Vec<ArtifactRow>> {
     let target = limit + offset;
     let mut k = (target * 5).max(100);
@@ -219,7 +264,7 @@ pub async fn semantic_find(
 
         let all_rows = {
             let cat = catalog.lock();
-            find_by_ids_filtered(&cat, &candidate_ids, filter)?
+            find_by_ids_filtered(&cat, &candidate_ids, filter, cutoff_ms)?
         };
 
         // Enough results, or KNN exhausted → return the requested page.
@@ -236,6 +281,7 @@ pub async fn semantic_find(
 mod tests {
     use super::*;
     use crate::librarian::catalog::artifact::{self, ArtifactRow, TestArtifactRowBuilder};
+    use crate::librarian::catalog::gc;
     use serde_json::json;
 
     fn art(id: &str, kind: &str, status: &str) -> ArtifactRow {
@@ -261,6 +307,7 @@ mod tests {
                 limit: 10,
                 offset: 0,
             },
+            0,
         )
         .unwrap();
         assert_eq!(rows.len(), 1);
@@ -285,6 +332,7 @@ mod tests {
                 limit: 10,
                 offset: 0,
             },
+            0,
         )
         .unwrap();
         assert_eq!(rows.len(), 1);
@@ -306,7 +354,7 @@ mod tests {
         store.upsert("proj", "c", &[0.0, 1.0]).await.unwrap();
 
         let cat = parking_lot::Mutex::new(cat);
-        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0)
+        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, 0)
             .await
             .unwrap();
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
@@ -328,7 +376,7 @@ mod tests {
 
         let cat = parking_lot::Mutex::new(cat);
         let filter: FilterNode = serde_json::from_value(json!({"kind": {"eq": "spec"}})).unwrap();
-        let rows = semantic_find(&store, &cat, None, &[1.0, 0.0], Some(&filter), 10, 0)
+        let rows = semantic_find(&store, &cat, None, &[1.0, 0.0], Some(&filter), 10, 0, 0)
             .await
             .unwrap();
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
@@ -363,7 +411,7 @@ mod tests {
             )
             .unwrap();
         }
-        let s = catalog_summary(&cat, None).unwrap();
+        let s = catalog_summary(&cat, None, 0).unwrap();
         assert_eq!(s.total, 3);
         assert_eq!(s.by_kind["tracker"], 2);
         assert_eq!(s.by_kind["plan"], 1);
@@ -440,7 +488,7 @@ mod tests {
             },
         )
         .unwrap();
-        let s = catalog_summary(&cat, None).unwrap();
+        let s = catalog_summary(&cat, None, 0).unwrap();
         assert_eq!(s.total, 2);
         assert_eq!(s.augmented, 1);
     }
@@ -504,11 +552,53 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        let s = catalog_summary(&cat, Some(&f)).unwrap();
+        let s = catalog_summary(&cat, Some(&f), 0).unwrap();
         assert_eq!(s.total, 1);
         assert_eq!(
             s.augmented, 0,
             "augmented count must respect the scope filter"
         );
+    }
+
+    #[test]
+    fn find_hides_rows_missing_past_grace_and_shows_within_grace() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        // present row
+        cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256) \
+            VALUES ('live','/x/a.md','tracker','active','a',0,10,0,'x')", []).unwrap();
+        // missing long ago (before cutoff) → hidden
+        cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256,missing_since) \
+            VALUES ('old','/x/b.md','tracker','active','b',0,9,0,'x', 100)", []).unwrap();
+        // missing recently (within grace, after cutoff) → visible
+        cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256,missing_since) \
+            VALUES ('new','/x/c.md','tracker','active','c',0,8,0,'x', 5000)", []).unwrap();
+
+        let cutoff = 1000i64; // rows with missing_since <= 1000 are hidden
+        let opts = FindOpts {
+            filter: None,
+            limit: 100,
+            offset: 0,
+        };
+        let rows = find(&cat, &opts, cutoff).unwrap();
+        let ids: Vec<_> = rows.iter().map(|r| r.id.clone()).collect();
+        assert!(ids.contains(&"live".to_string()));
+        assert!(ids.contains(&"new".to_string()));
+        assert!(
+            !ids.contains(&"old".to_string()),
+            "old missing row is hidden"
+        );
+        assert_eq!(gc::hidden_count(&cat.conn, cutoff).unwrap(), 1);
+    }
+
+    #[test]
+    fn get_by_id_still_returns_hidden_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256,missing_since) \
+            VALUES ('h','/x/h.md','tracker','active','h',0,1,0,'x', 100)", []).unwrap();
+        // the direct-id path (used by artifact get) ignores visibility
+        let rows = find_by_ids(&cat, &["h".to_string()]).unwrap();
+        assert_eq!(rows.len(), 1);
     }
 }

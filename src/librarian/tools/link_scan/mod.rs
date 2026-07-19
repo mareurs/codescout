@@ -78,6 +78,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let cat = ctx.catalog.lock();
     let limit = args.limit.unwrap_or(MAX_ARTIFACTS_DEFAULT);
+    let cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
+        &cat.conn,
+        chrono::Utc::now().timestamp_millis(),
+    )?;
     // Overfetch limit+1 to signal when the artifact scan itself was capped
     // (silent-cap family).
     let mut rows = cat_find::find(
@@ -87,6 +91,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             limit: limit + 1,
             offset: 0,
         },
+        cutoff_ms,
     )?;
     let scan_truncated = rows.len() > limit;
     rows.truncate(limit);

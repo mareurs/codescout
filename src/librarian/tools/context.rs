@@ -63,6 +63,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // artifacts may match than were even considered.
     let mut candidates_capped = false;
 
+    let cutoff_ms = {
+        let cat = ctx.catalog.lock();
+        crate::librarian::catalog::gc::visibility_cutoff_ms(
+            &cat.conn,
+            chrono::Utc::now().timestamp_millis(),
+        )?
+    };
+
     let topic_vec: Option<Vec<f32>> =
         if let (Some(ref topic), Some(ref svc)) = (&a.topic, &ctx.embedding) {
             Some(svc.embedder.embed_query(topic).await?)
@@ -115,6 +123,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 scoped_filter.as_ref(),
                 51,
                 0,
+                cutoff_ms,
             )
             .await?;
             candidates_capped = rows.len() > 50;
@@ -194,6 +203,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     limit: 51,
                     offset: 0,
                 },
+                cutoff_ms,
             )?;
             candidates_capped = rows.len() > 50;
             rows.truncate(50);
@@ -239,6 +249,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     limit: 11,
                     offset: 0,
                 },
+                cutoff_ms,
             )?;
             candidates_capped = rows.len() > 10;
             rows.truncate(10);

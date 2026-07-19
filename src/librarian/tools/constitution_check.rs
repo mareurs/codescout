@@ -25,7 +25,11 @@ pub fn find_matching_rules(cat: &Catalog, path: &str) -> Result<Vec<MatchedRule>
         limit: 500,
         offset: 0,
     };
-    let trackers = find::find(cat, &opts)?;
+    let cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
+        &cat.conn,
+        chrono::Utc::now().timestamp_millis(),
+    )?;
+    let trackers = find::find(cat, &opts, cutoff_ms)?;
     let target = std::path::Path::new(path);
 
     let mut matches = Vec::new();
@@ -102,7 +106,11 @@ pub fn find_global_rules(cat: &Catalog) -> Result<Vec<MatchedRule>> {
         limit: 500,
         offset: 0,
     };
-    let trackers = find::find(cat, &opts)?;
+    let cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
+        &cat.conn,
+        chrono::Utc::now().timestamp_millis(),
+    )?;
+    let trackers = find::find(cat, &opts, cutoff_ms)?;
 
     let mut matches = Vec::new();
     for t in trackers {

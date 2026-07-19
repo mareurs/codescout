@@ -40,6 +40,23 @@ pub fn visibility_cutoff_ms(conn: &Connection, now_ms: i64) -> Result<i64> {
     Ok(now_ms - grace_days(conn)? * MS_PER_DAY)
 }
 
+/// The hide-from-find predicate. `cutoff_ms` is inlined (a server-computed
+/// i64 — no user input, no injection). A row is visible if it was never
+/// missing, or went missing within the grace window (missing_since > cutoff).
+pub fn visibility_sql(cutoff_ms: i64) -> String {
+    format!("(missing_since IS NULL OR missing_since > {cutoff_ms})")
+}
+
+/// Count of rows currently hidden (missing_since <= cutoff).
+pub fn hidden_count(conn: &Connection, cutoff_ms: i64) -> Result<usize> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM artifact WHERE missing_since IS NOT NULL AND missing_since <= ?1",
+        [cutoff_ms],
+        |r| r.get(0),
+    )?;
+    Ok(n.max(0) as usize)
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub struct ReconcileStats {
     pub newly_missing: usize,

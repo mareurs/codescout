@@ -132,7 +132,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let (total_in_scope, all_rows) = {
         let cat = ctx.catalog.lock();
-        let total = crate::librarian::catalog::find::count_matching(&cat, scoped_filter.as_ref())?;
+        let vis_cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
+            &cat.conn,
+            chrono::Utc::now().timestamp_millis(),
+        )?;
+        let total = crate::librarian::catalog::find::count_matching(
+            &cat,
+            scoped_filter.as_ref(),
+            vis_cutoff_ms,
+        )?;
         let rows = crate::librarian::catalog::find::find(
             &cat,
             &crate::librarian::catalog::find::FindOpts {
@@ -140,6 +148,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 limit: MAX_ROWS,
                 offset: 0,
             },
+            vis_cutoff_ms,
         )?;
         (total, rows)
     };

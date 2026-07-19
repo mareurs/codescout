@@ -369,6 +369,10 @@ fn gather_artifacts(
         .transpose()?;
     let limit = limit.unwrap_or(20);
     let cat = ctx.catalog.lock();
+    let cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
+        &cat.conn,
+        chrono::Utc::now().timestamp_millis(),
+    )?;
     // Overfetch limit+1 to detect truncation without a separate COUNT query.
     let rows = find(
         &cat,
@@ -377,6 +381,7 @@ fn gather_artifacts(
             limit: limit + 1,
             offset: 0,
         },
+        cutoff_ms,
     )?;
     let truncated = rows.len() > limit;
     let items: Vec<Value> = rows

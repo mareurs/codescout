@@ -121,6 +121,7 @@ fn build_hints(
     offset: usize,
     exclude_worktrees: &[String],
     deduped_main_ids: &[String],
+    cutoff_ms: i64,
 ) -> Result<Value> {
     let mut hints = serde_json::Map::new();
 
@@ -131,7 +132,15 @@ fn build_hints(
         );
     }
 
-    let here = count_for_scope(cat, base, ws, current, applied.scope, exclude_worktrees)?;
+    let here = count_for_scope(
+        cat,
+        base,
+        ws,
+        current,
+        applied.scope,
+        exclude_worktrees,
+        cutoff_ms,
+    )?;
     // Overlay dedup (see `call`) drops main twins whose shadow lives under
     // this worktree session's own root before `items` is built, but `here` is
     // a raw scope COUNT that still counts both the shadow and its main twin.
@@ -149,6 +158,7 @@ fn build_hints(
         applied.scope,
         exclude_worktrees,
         deduped_main_ids,
+        cutoff_ms,
     )?;
     let here = here.saturating_sub(deduped_here);
 
@@ -170,7 +180,15 @@ fn build_hints(
     }
 
     if !matches!(applied.scope, Scope::Repo | Scope::All) && current.is_some() {
-        let in_repo = count_for_scope(cat, base, ws, current, Scope::Repo, exclude_worktrees)?;
+        let in_repo = count_for_scope(
+            cat,
+            base,
+            ws,
+            current,
+            Scope::Repo,
+            exclude_worktrees,
+            cutoff_ms,
+        )?;
         let extra = in_repo.saturating_sub(here);
         if extra > 0 {
             hints.insert("more_in_repo".into(), json!(extra));
@@ -180,8 +198,15 @@ fn build_hints(
     if !matches!(applied.scope, Scope::Umbrella | Scope::All)
         && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
-        let in_umbrella =
-            count_for_scope(cat, base, ws, current, Scope::Umbrella, exclude_worktrees)?;
+        let in_umbrella = count_for_scope(
+            cat,
+            base,
+            ws,
+            current,
+            Scope::Umbrella,
+            exclude_worktrees,
+            cutoff_ms,
+        )?;
         let extra = in_umbrella.saturating_sub(here);
         if extra > 0 {
             hints.insert("more_in_umbrella".into(), json!(extra));
@@ -199,7 +224,15 @@ fn build_hints(
     if !matches!(applied.scope, Scope::All | Scope::Umbrella)
         && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
-        let in_workspace = count_for_scope(cat, base, ws, current, Scope::All, exclude_worktrees)?;
+        let in_workspace = count_for_scope(
+            cat,
+            base,
+            ws,
+            current,
+            Scope::All,
+            exclude_worktrees,
+            cutoff_ms,
+        )?;
         let extra = in_workspace.saturating_sub(here);
         if extra > 0 {
             hints.insert("more_in_workspace".into(), json!(extra));
@@ -215,6 +248,7 @@ fn build_hints(
             current,
             applied.scope,
             exclude_worktrees,
+            cutoff_ms,
         )?;
         let hidden = with_archived.saturating_sub(here);
         if hidden > 0 {
@@ -257,6 +291,7 @@ fn count_deduped_main_ids(
     scope: Scope,
     exclude_worktrees: &[String],
     deduped_main_ids: &[String],
+    cutoff_ms: i64,
 ) -> Result<usize> {
     if deduped_main_ids.is_empty() {
         return Ok(0);
@@ -274,9 +309,10 @@ fn count_deduped_main_ids(
         },
         None => id_filter,
     };
-    count_matching(cat, Some(&combined))
+    count_matching(cat, Some(&combined), cutoff_ms)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn count_for_scope(
     cat: &crate::librarian::catalog::Catalog,
     base: Option<&FilterNode>,
@@ -284,6 +320,7 @@ fn count_for_scope(
     current: Option<&crate::librarian::current_project::CurrentProject>,
     scope: Scope,
     exclude_worktrees: &[String],
+    cutoff_ms: i64,
 ) -> Result<usize> {
     if matches!(scope, Scope::Project | Scope::Repo) && current.is_none() {
         return Ok(0);
@@ -292,7 +329,7 @@ fn count_for_scope(
         return Ok(0);
     }
     let (filter, _) = apply_scope(base.cloned(), scope, ws, current, exclude_worktrees)?;
-    count_matching(cat, filter.as_ref())
+    count_matching(cat, filter.as_ref(), cutoff_ms)
 }
 
 fn strip_status_clause(node: FilterNode) -> FilterNode {
@@ -399,6 +436,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         && a.augmented.is_none();
     let limit = a.limit.min(MAX_LIMIT);
     let offset = a.offset.min(MAX_OFFSET);
+
+    // Grace-period visibility cutoff: rows missing (deleted/moved off-disk) at or
+    // before this cutoff are hidden from listing/search (but not from `get`/`doctor`).
+    // Computed once so every count/find/summary in this call agrees on one cutoff.
+    let cutoff_ms = {
+        let cat = ctx.catalog.lock();
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        crate::librarian::catalog::gc::visibility_cutoff_ms(&cat.conn, now_ms)?
+    };
 
     // Resolve semantic query → embedding vector (if requested and available).
     let semantic_vec: Option<Vec<f32>> = if let Some(ref query) = a.semantic {
@@ -555,6 +601,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 scoped_filter.as_ref(),
                 limit,
                 offset,
+                cutoff_ms,
             )
             .await?,
         )
@@ -566,7 +613,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let cat = ctx.catalog.lock();
 
         let catalog_value: Option<serde_json::Value> = if is_cold_call {
-            let summary = catalog_summary(&cat, scoped_filter.as_ref())?;
+            let summary = catalog_summary(&cat, scoped_filter.as_ref(), cutoff_ms)?;
             Some(serde_json::json!({
                 "total": summary.total,
                 "by_kind": summary.by_kind,
@@ -585,6 +632,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     limit,
                     offset,
                 },
+                cutoff_ms,
             )?,
         };
 
@@ -647,6 +695,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 offset,
                 &exclude_worktrees,
                 &deduped_main_ids,
+                cutoff_ms,
             )?
         };
 
