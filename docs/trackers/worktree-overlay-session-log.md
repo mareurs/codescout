@@ -27,8 +27,10 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-07-17 | med | plan-prose | mitigated | Design asserted a payload-bearing lineage edge; `LinkRow` has no payload field |
-| F-2 | 2026-07-17 | high | architectural | mitigated | Bare `graft` of a base-seeded shadow row would duplicate every pre-existing tracker entry |
+| F-1 | 2026-07-17 | med | plan-prose | fixed-verified | Design asserted a payload-bearing lineage edge; `LinkRow` has no payload field |
+| F-2 | 2026-07-17 | high | architectural | fixed-verified | Bare `graft` of a base-seeded shadow row would duplicate every pre-existing tracker entry |
+| F-3 | 2026-07-17 | high | plan-prose | fixed-verified | Plan named `resolve()` as the `main_root` site; the live per-call path is `adapter.rs::derive_ctx`, which was left `main_root: None` |
+| F-4 | 2026-07-17 | med | plan-prose | fixed-verified | Plan put read-only `refresh` in the fork-on-first-write gate; forking on a read freezes the worktree's overlay view of the artifact |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -153,7 +155,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — would have surfaced at plan time or as a compile error; ~1 plan revision / subagent retry.
 
-**Status:** mitigated — design amended before spec write; final storage choice (fork event vs registration columns) pinned at spec time.
+**Status:** fixed-verified — base cursor stored on the `worktree_fork` event (full `base_params` snapshot), shipped in Task 4 (commit 29582fc8) with a mutation-validated value-fidelity test (ac99ea9e).
 
 **Fix idea / Pointer:** Spec §1 (data model), this work stream.
 
@@ -175,7 +177,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** high — silent data corruption class: duplicated F-N/W-N/T-N entries in live trackers after the first merge, discovered only by later readers.
 
-**Status:** mitigated — design amended pre-spec (merge = delta-extraction wrapper over graft primitives, not bare graft).
+**Status:** fixed-verified — merge_worktree folds ONLY the delta (entries beyond the fork event's base) via graft::fold_entries; shipped Task 8 (365c2df8) with the named F-2 regression test `merge_folds_delta_without_duplicating_base_entries` (asserts no duplicate ids AND no duplicated content). Opus-verified correct.
 
 **Fix idea / Pointer:** Spec §4 (merge semantics) + a dedicated test: fork-seed → append both sides → merge → assert no duplicate ids AND no duplicated content.
 
@@ -198,6 +200,48 @@ Codified so the Index column means the same thing across sessions.
 **Promote-when:** A second pre-spec recon catches a false "existing machinery already does X" claim → promote to memory topic `reconnaissance` as: "before a spec cites existing machinery as 'already does X', read that symbol's contract + its tests this session (W-1, worktree-overlay)."
 
 **Status:** validated — two same-session data points.
+
+---
+## F-3 — Plan named `resolve()` as the `main_root` population site; the live per-tool-call path is a second builder that bypasses it
+
+**Observed:** 2026-07-17, Task 2 execution (SDD), implementer DONE_WITH_CONCERNS.
+
+**When:** Adding `main_root` to `CurrentProject` and making resolution populate it for worktree sessions.
+
+**Expected (plan):** `current_project::resolve()` is THE place that builds `CurrentProject`; populating `main_root` there + fixing struct literals covers the live path. Plan Task 2 named only `current_project.rs` `resolve()` (:28-37) and test/struct-literal sites.
+
+**Got (scouted reality):** `resolve()` runs once at boot (`build_tool_context_with`, mod.rs) to seed the boot ctx. The LIVE per-tool-call context is built by `src/librarian/adapter.rs::derive_ctx` (:134), which constructs `CurrentProject` independently every call — canonicalize + `lookup_git_root` + `resolve_umbrella` inline — and does NOT call `resolve()`. Following the plan's "fix every flagged struct literal with `main_root: None`" instruction, the implementer set `main_root: None` there. Result: `main_root` is `None` on every real MCP tool call; the entire overlay (all `main_root.is_some()` branches in Tasks 3–8) would be dead code in production, green tests notwithstanding (tests build `CurrentProject` literals directly and never exercise `derive_ctx`).
+
+**Probable cause:** Two parallel `CurrentProject` construction paths (`resolve()` for boot, `derive_ctx` for per-call) with already-drifted umbrella logic (`resolve()` uses `lookup_umbrella`; `derive_ctx` uses the project-local-aware `resolve_umbrella`). The plan's reconnaissance saw only `resolve()`.
+
+**Workaround:** Fix folded into Task 2: `derive_ctx` computes `main_root` via `is_linked_worktree`/`worktree_main_root` (mirroring the amended `resolve()`) and resolves umbrella against `main_root` when present. Added a `derive_ctx`-level test asserting `main_root` is populated for a linked-worktree active project. Did NOT collapse the two builders into one (umbrella-logic drift is out of scope; noted for a future refactor).
+
+**Severity:** high — silent feature-dead-in-prod: every overlay branch gated on `main_root.is_some()` would never fire on the live path, and no unit test would catch it (they bypass `derive_ctx`).
+
+**Status:** fixed-verified — `derive_ctx` populates `main_root` (commit 6861886a) with adapter-level tests exercising the live path; Opus review confirmed.
+
+**Fix idea / Pointer:** Task 2 fix commit. Follow-up: unify `resolve()` and `derive_ctx` construction (separate refactor); until then, ANY new `CurrentProject` field must be populated in BOTH.
+
+---
+## F-4 — Plan classified read-only `refresh` as a write; the gate would fork (and freeze) an artifact on a read
+
+**Observed:** 2026-07-17, Task 5 execution (SDD), implementer flagged it as a concern (DONE with concern).
+
+**When:** Wiring `resolve_write_target` into the mutating handlers. Plan Task 5 listed the Pattern-A (redirect/fork) set as `append_entry, update, event_create, augment, refresh, link`.
+
+**Expected (plan):** `refresh` is a write that should fork-on-first-write like the others.
+
+**Got (scouted reality):** `src/librarian/tools/refresh.rs::call` is READ-ONLY — it reads the augmentation, `gather_all`s sources, builds regeneration context, reads the current body, and returns a JSON payload for the agent to act on. It never upserts, writes a body, or calls `commit_refresh`; persistence happens later via a SEPARATE `update`/`artifact_augment` call. Routing it through `resolve_write_target` means a `refresh` on a main-root artifact from a worktree session eagerly FORKS a shadow (+ event + link + registration) for a read, and — worse — freezes the worktree's overlay view: subsequent reads see the frozen shadow instead of live main, violating the spec's “reads never redirect; only writes do” contract (design §read path).
+
+**Probable cause:** Plan authored from the intuition that “refresh mutates the tracker,” without reading `refresh.rs` — it actually regenerates *context* for the agent, not catalog state. Same class as F-3 (plan named a site without scouting its real behavior).
+
+**Workaround:** Remove `refresh` from the write gate (fix dispatched in Task 5). `refresh` stays id-literal — no fork, no auto-redirect — consistent with the spec's read model; an agent that wants the worktree's version passes the shadow id (surfaced by Task 6's overlay). Added a test asserting `refresh` from a worktree session does NOT create a shadow.
+
+**Severity:** med — silent overlay-view freeze on a read; would confuse worktree sessions (stale tracker views) and litter the catalog with delta-less shadows, but no data loss (empty-delta shadows are merge no-ops).
+
+**Status:** fixed-verified — `refresh` removed from the gate (commit d78a2ff3), RED→GREEN test `refresh_from_worktree_does_not_fork`; spec §write-path updated (Task 9, c2104e90). Deferred nuance: whether `refresh` should auto-redirect to an EXISTING shadow is a v2 read-side-resolver question; v1 stays id-literal per spec.
+
+**Fix idea / Pointer:** Task 5 fix commit; spec §5 write-gate set should drop `refresh` (Task 9 doc sync).
 
 ---
 ## Template for new entries

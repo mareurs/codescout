@@ -1,5 +1,24 @@
 # Worktree merge → catalog reconciliation
 
+> **UPDATE 2026-07-17 — a first-class overlay flow is built on `experiments`
+> (not yet on `master`).** The post-hoc reconciliation below is what's true on
+> `master` today and remains the LEGACY fallback for UNREGISTERED worktree rows.
+> On `experiments`, a worktree-overlay feature makes reconciliation write-time
+> instead of merge-time: worktree sessions read the main catalog via an overlay
+> and fork-on-first-write into shadow rows (recorded `worktree_of` link +
+> `worktree_fork` base-snapshot event + durable `worktree_registration` row that
+> survives `git worktree remove`); merge is `librarian(action="merge_worktree",
+> root=…, [dry_run]/[abandon])` — it folds ONLY the shadow's DELTA onto main
+> (never bare-grafts a seeded shadow), three-ways scalars (main wins on
+> conflict), renumbers colliding entry ids, and closes the registration. `doctor`
+> now flags registered rows as `pending_merge` (skipped by `reseat_worktree`) and
+> `prune_missing` refuses a root with an active registration. When this ships to
+> `master`, the overlay flow becomes primary and the steps below apply only to
+> pre-feature (unregistered) rows. Branch commits: 4450f20f..c2104e90. Design:
+> `docs/superpowers/specs/2026-07-17-worktree-overlay-design.md`; plan:
+> `docs/superpowers/plans/2026-07-17-worktree-overlay.md`; session log:
+> `docs/trackers/worktree-overlay-session-log.md` (F-1..F-4, W-1).
+
 When merging a git worktree branch that created/updated **librarian trackers**, the
 catalog needs explicit reconciliation — `git merge` moves file *content* but is blind
 to the catalog (`artifact id = sha256(abs_path)`; `append_entry` writes only
@@ -22,6 +41,8 @@ schema lacks `worktree_scoped_row` / the `fix` enum lacks `reseat_worktree`):**
 **Ordering is load-bearing: reconcile BEFORE `git worktree remove`.** Detection uses
 `is_linked_worktree` (reads the worktree `.git` pointer); once removed, the row is
 unrecognizable and becomes a missing-file orphan that `prune_missing` deletes.
+(NOTE: the overlay flow above removes this hazard — its `worktree_registration` row
+survives removal, so `merge_worktree` works from DB state alone.)
 
 **Do NOT improvise `reindex` + manual re-augment + `prune_missing`.** A RED-baseline
 agent that couldn't discover `graft`/`reseat` did exactly this — it silently DROPS the
