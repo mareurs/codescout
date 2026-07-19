@@ -129,10 +129,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .get("confirm")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        // `old_root` is the self-documenting name the move-candidate hint
+        // and validate_rehome_request's own error text both surface;
+        // `root` is accepted as a fallback for back-compat and remains
+        // the only name prune_missing/reseat_worktree callers use.
+        let old_root_arg = args
+            .get("old_root")
+            .and_then(Value::as_str)
+            .or_else(|| args.get("root").and_then(Value::as_str));
         return run_fix(
             ctx,
             fix,
-            args.get("root").and_then(Value::as_str),
+            old_root_arg,
             args.get("new_root").and_then(Value::as_str),
             confirm,
         )
@@ -1307,6 +1315,38 @@ mod tests {
             })
             .unwrap();
         assert_eq!(commit_root, new_root_str);
+    }
+
+    #[tokio::test]
+    async fn run_fix_rehome_via_surfaced_old_root_arg_dry_runs() {
+        // Regression test: the move-candidate hint (call()) and
+        // validate_rehome_request's own error text both instruct
+        // `doctor(fix="rehome", old_root=..., new_root=...)`. Invoke with
+        // that EXACT surfaced wording and assert a dry-run result — not a
+        // RecoverableError re-asserting a missing `old_root` param.
+        let new_dir = tempfile::tempdir().unwrap();
+        let new_root = new_dir.path().to_str().unwrap();
+        let old_root = "/nonexistent-rehome-root/old-root-arg-repo";
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "a1", &format!("{old_root}/docs/x.md"));
+        seed_commit(&cat, "c1", old_root);
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let dry = call(
+            &ctx,
+            json!({
+                "fix": "rehome",
+                "old_root": old_root,
+                "new_root": new_root,
+                "confirm": false,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(dry["mode"], "dry_run");
+        assert_eq!(dry["artifact_rows"], 1);
+        assert_eq!(dry["commit_rows"], 1);
     }
 
     #[tokio::test]
