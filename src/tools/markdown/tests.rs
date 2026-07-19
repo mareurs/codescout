@@ -2716,12 +2716,19 @@ fn diagnose_whitespace_tier_classifies_and_flags_code() {
 #[test]
 fn diagnose_giant_old_string_bails_to_no_close_cheaply() {
     use super::edit_markdown::diagnose_scoped_miss;
-    let section = "## H\nsome modest body line here\nanother line\n";
-    let giant = "x".repeat(20_000); // far above the cap
-    let e = diagnose_scoped_miss(section, &giant, "## H");
+    // Pins the I1 perf guard: a section line HIGHLY similar to an OVERSIZED
+    // old_string. Without the OLD_STRING_CAP guard the fuzzy pass scores ~1.0
+    // and classifies `visible_drift`; WITH the guard, an old_string longer than
+    // the cap short-circuits to `no_close` BEFORE the O(n²) pass. Deleting the
+    // guard flips this to `visible_drift` and fails the assert.
+    let body_line = "y".repeat(9000); // > OLD_STRING_CAP (8192)
+    let section = format!("## H\n{body_line}\n");
+    let old_string = format!("{}z", "y".repeat(8999)); // len 9000, ~0.9999 similar
+    let e = diagnose_scoped_miss(&section, &old_string, "## H");
     assert_eq!(
         e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
-        Some("no_close")
+        Some("no_close"),
+        "oversized old_string must short-circuit to no_close before the fuzzy pass"
     );
 }
 
