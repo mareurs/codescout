@@ -9,14 +9,15 @@ pub const DEFAULT_GRACE_DAYS: i64 = 14;
 const MS_PER_DAY: i64 = 86_400_000;
 
 pub fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>> {
-    let v = conn
-        .query_row(
-            "SELECT value FROM catalog_meta WHERE key = ?1",
-            [key],
-            |r| r.get::<_, String>(0),
-        )
-        .ok();
-    Ok(v)
+    match conn.query_row(
+        "SELECT value FROM catalog_meta WHERE key = ?1",
+        [key],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<()> {
