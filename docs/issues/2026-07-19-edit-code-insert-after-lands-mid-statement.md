@@ -82,16 +82,30 @@ branch `experiments`. Anchor symbol was a `#[test]`-attributed fn ending
 in a multi-line macro-call statement (`assert_eq!` spanning 3 lines).
 
 ## Root cause
-Unknown — see Hypotheses tried. The tool's own diagnostic names the
-mechanism at a high level (LSP gave a truncated range for the symbol;
-AST-based repair kicked in) but the *repaired* extent was still short of
-the true function end. Likely the AST repair walks to the end of some
-inner node (e.g. the last top-level statement's *macro invocation
-token*, not the enclosing block) rather than the full `fn` item's
-closing brace — consistent with the splice point landing exactly at
-`assert_eq!(` (a macro call node boundary) rather than after the
-statement's trailing `;` and the block's `}`.
+Confirmed via a minimal, controlled reproduction (see Tests added) —
+not a tree-sitter/AST end-line bug at all. `find_ast_end_line_in` /
+`editing_end_line_strict` correctly resolve the CHILD symbol's own end
+line from the AST in every case tested, including a multi-line macro
+call as the last statement.
 
+The actual defect is in `do_insert`'s parent-boundary safety clamp
+(`src/tools/symbol/edit_code.rs`, `do_insert`). After resolving the
+child's insert position via `editing_end_line_strict` (AST-repaired,
+correct), the code clamps that position against the ENCLOSING PARENT's
+`end_line` — but `parent` comes from `find_parent_symbol(&symbols, ...)`,
+where `symbols` is the raw, un-repaired LSP `document_symbols` list. The
+child's own end gets AST-repaired; the parent's never does.
+
+When the LSP under-reports the PARENT's own end_line (the same
+truncation class the whole repair mechanism exists to fix one level
+down — here, because the parent's last child ends in a multi-line macro
+call, confusing the LSP's own boundary computation for the *enclosing*
+module too), `parent_body_end_exclusive = parent.end_line + 1` becomes
+smaller than the correctly-resolved child insert position. The
+`.min(parent_body_end_exclusive)` clamp then silently drags the insert
+backward into the child's own body — landing wherever the parent's
+truncated end happened to fall, in the real occurrence squarely inside
+the child's `assert_eq!(...)` argument list.
 ## Evidence
 Tool response for the insert call (this session):
 ```
@@ -129,19 +143,28 @@ nested mid-statement).
    **Verdict:** deferred — best current lead.
 
 ## Fix
-Not yet attempted. Immediate workaround applied to unblock Task 2 (see
-Workarounds). No code fix proposed in this bug file yet — needs
-maintainer to trace the AST-repair path in the `edit_code` implementation
-(likely `src/tools/edit_code.rs` or the LSP mux repair helper) for the
-case where the anchor's last statement is a multi-line macro call.
-
+Applied in `da03f149` (branch `experiments`). `do_insert`'s parent clamp
+now resolves the parent's authoritative end via `editing_end_line(parent)`
+(the same AST-repair mechanism already used for the child) instead of
+trusting `parent.end_line` raw. `editing_end_line` is the lenient variant
+— it falls back to the raw LSP value when AST can't pin the parent down,
+so the clamp is never worse than before, only more accurate when AST can
+confirm a larger true end.
 ## Tests added
-N/A — this is a bug in the MCP tool itself (codescout's own `edit_code`),
-not in the `codescout` Rust library under edit; no Rust regression test
-applies. A regression test would live in codescout's own tool test suite
-(outside this task's scope) exercising `edit_code(insert, after)` against
-a `#[test] fn` anchor whose last statement is a multi-line macro call.
+- `src/tools/symbol/tests.rs::editing_end_line_strict_multiline_macro_last_statement`
+  — isolates the child-only AST end-line resolution for a `#[test]` fn
+  whose last statement is a multi-line `assert_eq!(...)` call. Passed even
+  before the fix, ruling out `find_ast_end_line_in` itself as the culprit
+  and narrowing the search to the insert-application path.
+- `tests/symbol_lsp.rs::insert_code_after_stale_parent_lsp_end_clamps_into_multiline_macro_body`
+  — the actual root-cause reproduction: mocks a truncated child end_line
+  AND a truncated parent (`mod tests`) end_line via `MockLspClient`, then
+  calls the real `EditCode` insert-after path. Failed before the fix
+  (new fn spliced inside the sibling's `assert_eq!` argument list,
+  reproducing the exact corruption shape from the original incident);
+  passes after `da03f149`.
 
+Full suite: 3368 passed, 0 failed (`cargo test`), `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 Re-run `symbols(path=...)` (or re-read the file) immediately after any
 `insert`/`position` edit whose response carries a `warning` field, and
@@ -150,13 +173,9 @@ was corrupted — do not trust `"status": "ok"` alone when a `warning` is
 present.
 
 ## Resume
-Isolate a minimal reproduction: a file with a single `#[test] fn` whose
-last statement is a multi-line macro call (e.g. `assert_eq!(\n a,\n b\n);`),
-then call `edit_code(insert, after)` targeting that fn and inspect whether
-the truncated-range warning + wrong AST-repair line reproduces outside
-`gc.rs`. If confirmed, trace the AST-repair line-resolution code path in
-the `edit_code` tool implementation.
-
+Fixed on `experiments` at `da03f149`. Per project convention, kept `open`
+(not `archived`) until this ships to `master` (`cargo rb` + `/mcp` live
+verify), then archive per `git branch --contains da03f149`.
 ## References
 - `src/librarian/catalog/gc.rs` (file affected)
 - Related bug (same tool, different failure mode — explicit refusal
