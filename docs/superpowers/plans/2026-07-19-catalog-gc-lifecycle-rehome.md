@@ -564,69 +564,78 @@ git commit -m "feat(activate): throttled best-effort catalog GC reconcile on wor
 
 ---
 
-## Task 6: Surface catalog health in workspace(action="status")
+## Task 6: Surface catalog health in librarian(action="doctor")
+
+> **Re-scoped 2026-07-19:** originally `workspace(action="status")`, but `ProjectStatus`/`ActivateProject` run on the catalog-less `src/tools/core/types.rs::ToolContext` (see Task 5). `doctor` is a librarian tool with native catalog access, is the catalog-health tool, computes fresh on demand, and co-locates with the move-candidate detection (Task 9). Surface `catalog_health` there.
 
 **Files:**
-- Modify: `src/tools/config/mod.rs` (the `status` branch of `Workspace.call`)
-- (Detection count wired in Task 9; here surface `hidden_rows` only, plus a `move_candidates: 0` placeholder key filled by Task 9.)
+- Modify: `src/librarian/tools/doctor.rs` (the read-only `call`, ~124-157 — the branch with no `fix`, which returns `{violations, summary}`).
 
 **Interfaces:**
-- Consumes: `gc::hidden_count`, `gc::visibility_cutoff_ms`.
-- Produces: a `catalog_health` object in the status response: `{ hidden_rows: usize, move_candidates: usize }`.
+- Consumes: `gc::hidden_count`, `gc::visibility_cutoff_ms`, `gc::grace_days`.
+- Produces: a `catalog_health` field in the read-only doctor response: `{ hidden_rows: usize, move_candidates: usize, hint: String }`. `move_candidates` is `0` here; Task 9 fills it.
 
-- [ ] **Step 1: Write the failing test** (in `src/tools/config/tests.rs`):
+- [ ] **Step 1: Write the failing test** (in `doctor.rs` `#[cfg(test)] mod tests`, mirroring `doctor_call_surfaces_seeded_drift`):
 
 ```rust
 #[tokio::test]
-async fn workspace_status_reports_hidden_rows() {
-    // ... activate a temp project (mirror existing status tests' setup) ...
-    // seed a long-missing row directly in its catalog, then:
-    let out = Workspace.call(json!({"action": "status"}), &ctx).await.unwrap();
-    let hidden = out["catalog_health"]["hidden_rows"].as_u64().unwrap();
-    assert!(hidden >= 1);
+async fn doctor_reports_catalog_health_hidden_rows() {
+    // Build a ToolContext with a catalog (mirror doctor_call_surfaces_seeded_drift's setup).
+    // Seed one row missing past grace (missing_since small) and one live row.
+    // e.g. via the test's catalog handle:
+    //   INSERT ... missing_since = 1   (hidden, since cutoff = now - 14d >> 1)
+    let out = super::call(&ctx, json!({})).await.unwrap();
+    assert!(out["catalog_health"]["hidden_rows"].as_u64().unwrap() >= 1);
+    assert_eq!(out["catalog_health"]["move_candidates"].as_u64().unwrap(), 0);
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test workspace_status_reports_hidden_rows`
-Expected: FAIL — no `catalog_health` key.
+Run: `cargo test doctor_reports_catalog_health_hidden_rows`
+Expected: FAIL — no `catalog_health` key in the doctor response.
 
-- [ ] **Step 3: Implement** in the `status` branch — compute the counts and add the block:
+- [ ] **Step 3: Implement** in the read-only branch of `doctor::call` (the path that builds the `{violations, summary}` JSON, after the scans, while the catalog lock is still held or re-acquire it). Compute the counts and add the block:
 
 ```rust
-let (hidden_rows, hint) = {
-    let cat = ctx.catalog.lock();
-    let now_ms = crate::util::time::now_ms();
-    let cutoff = crate::librarian::catalog::gc::visibility_cutoff_ms(&cat.conn, now_ms)?;
-    let h = crate::librarian::catalog::gc::hidden_count(&cat.conn, cutoff)?;
-    let hint = if h > 0 {
-        format!("{h} row(s) hidden as missing (>{}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", …) to migrate a moved repo.",
-            crate::librarian::catalog::gc::grace_days(&cat.conn)?)
-    } else { String::new() };
-    (h, hint)
+// after computing `by_check` / before the final Ok(json!({...})):
+let now_ms = chrono::Utc::now().timestamp_millis();
+let cutoff = crate::librarian::catalog::gc::visibility_cutoff_ms(&cat.conn, now_ms)?;
+let hidden_rows = crate::librarian::catalog::gc::hidden_count(&cat.conn, cutoff)?;
+let grace = crate::librarian::catalog::gc::grace_days(&cat.conn)?;
+let health_hint = if hidden_rows > 0 {
+    format!("{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo.")
+} else {
+    String::new()
 };
-// merge into the existing status JSON:
-status_json["catalog_health"] = json!({
-    "hidden_rows": hidden_rows,
-    "move_candidates": 0, // filled by Task 9
-    "hint": hint,
-});
+
+Ok(json!({
+    "violations": all_violations,
+    "summary": { "total": all_violations.len(), "by_check": by_check },
+    "catalog_health": {
+        "hidden_rows": hidden_rows,
+        "move_candidates": 0, // filled by Task 9
+        "hint": health_hint,
+    },
+}))
 ```
+
+> Note: the current `call` drops the catalog lock (`drop(cat)`) before computing the summary. Re-acquire (`let cat = ctx.catalog.lock();`) for the `hidden_count`/`grace_days` reads, or move these reads before the `drop`. Keep the lock scope minimal.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test workspace_status_reports_hidden_rows`
+Run: `cargo test doctor_reports_catalog_health_hidden_rows`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
-git add src/tools/config/mod.rs src/tools/config/tests.rs
-git commit -m "feat(status): catalog_health block — hidden-row count + prune/rehome hint"
+git add src/librarian/tools/doctor.rs
+git commit -m "feat(doctor): catalog_health block — hidden-row count + prune/rehome hint"
 ```
 
+---
 ---
 
 ## Task 7: Rehome core — transactional id-rewrite (gc.rs)
