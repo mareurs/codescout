@@ -794,6 +794,80 @@ pub(crate) fn similarity(a: &str, b: &str) -> f64 {
     strsim::normalized_levenshtein(a, b)
 }
 
+/// Strip whitespace + look-alike/invisible chars, leaving only "visible" glyphs.
+/// Two lines with equal visible projections but different bytes differ ONLY in
+/// whitespace/invisibles — the Tier A signal.
+fn visible_projection(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace() && *c != '\u{00A0}' && *c != '\u{200B}' && *c != '\u{FEFF}')
+        .collect()
+}
+
+#[allow(dead_code)] // consumed by Task 4's diagnose_scoped_miss
+pub(crate) fn render_visible_whitespace(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    for c in line.chars() {
+        match c {
+            ' ' => out.push('·'),
+            '\t' => out.push('→'),
+            '\r' => out.push_str("⟨CR⟩"),
+            '\u{00A0}' => out.push_str("⟨NBSP⟩"),
+            '\u{200B}' => out.push_str("⟨ZWSP⟩"),
+            '\u{FEFF}' => out.push_str("⟨BOM⟩"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn leading_ws(s: &str) -> String {
+    s.chars()
+        .take_while(|c| c.is_whitespace() || *c == '\u{00A0}')
+        .collect()
+}
+
+/// `Some(reason)` iff `want`/`have` have identical visible projections but differ
+/// byte-wise (Tier A). `None` when visible content differs (Tier B).
+#[allow(dead_code)] // consumed by Task 4's diagnose_scoped_miss
+pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String> {
+    if want == have || visible_projection(want) != visible_projection(have) {
+        return None;
+    }
+    let mut notes: Vec<String> = Vec::new();
+    if have.contains('\u{00A0}') || want.contains('\u{00A0}') {
+        notes.push("non-breaking space (U+00A0) present — looks like a normal space".into());
+    }
+    if have.contains('\u{200B}')
+        || want.contains('\u{200B}')
+        || have.contains('\u{FEFF}')
+        || want.contains('\u{FEFF}')
+    {
+        notes.push("zero-width / BOM character present (U+200B / U+FEFF)".into());
+    }
+    if have.contains('\r') != want.contains('\r') {
+        notes.push("line endings differ (a CR is present on one side: CRLF vs LF)".into());
+    }
+    let (wi, hi) = (leading_ws(want), leading_ws(have));
+    if wi != hi {
+        notes.push(format!(
+            "leading indentation differs — file: \"{}\", old_string: \"{}\"",
+            render_visible_whitespace(&hi),
+            render_visible_whitespace(&wi),
+        ));
+    }
+    let want_trail = want.len() - want.trim_end().len();
+    let have_trail = have.len() - have.trim_end().len();
+    if want_trail != have_trail {
+        notes.push(format!(
+            "trailing whitespace differs (file has {have_trail} trailing ws byte(s), old_string has {want_trail})"
+        ));
+    }
+    if notes.is_empty() {
+        notes.push("interior whitespace differs (tabs vs spaces / repeated spaces)".into());
+    }
+    Some(notes.join("; "))
+}
+
 pub struct EditMarkdown;
 
 #[async_trait::async_trait]

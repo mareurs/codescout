@@ -2600,3 +2600,34 @@ fn similarity_ranks_closeness() {
     );
     assert!(similarity("totally different", "xxxxxxxxxxxxx") < 0.4);
 }
+
+#[test]
+fn render_visible_whitespace_marks_invisibles() {
+    use super::edit_markdown::render_visible_whitespace;
+    assert_eq!(render_visible_whitespace("a b\tc"), "a·b→c");
+    assert_eq!(render_visible_whitespace("x\u{00A0}y"), "x⟨NBSP⟩y");
+    assert_eq!(render_visible_whitespace("trail "), "trail·");
+}
+
+#[test]
+fn classify_whitespace_diff_names_the_culprit() {
+    use super::edit_markdown::classify_whitespace_diff;
+    let c = classify_whitespace_diff("a b", "a\u{00A0}b").unwrap();
+    assert!(
+        c.to_lowercase().contains("non-breaking") || c.contains("U+00A0"),
+        "got: {c}"
+    );
+    let c = classify_whitespace_diff("    x", "\tx").unwrap();
+    assert!(
+        c.to_lowercase().contains("tab") || c.to_lowercase().contains("indent"),
+        "got: {c}"
+    );
+    let c = classify_whitespace_diff("done", "done ").unwrap();
+    assert!(c.to_lowercase().contains("trailing"), "got: {c}");
+    let c = classify_whitespace_diff("row", "row\r").unwrap();
+    assert!(
+        c.to_lowercase().contains("cr") || c.to_lowercase().contains("line ending"),
+        "got: {c}"
+    );
+    assert!(classify_whitespace_diff("v1.0", "v2.0").is_none());
+}
