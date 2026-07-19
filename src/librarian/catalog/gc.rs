@@ -3,7 +3,8 @@
 //! no scope-based deletion, no automatic deletion.
 
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
+use std::path::Path;
 
 pub const DEFAULT_GRACE_DAYS: i64 = 14;
 const MS_PER_DAY: i64 = 86_400_000;
@@ -138,6 +139,177 @@ pub fn maybe_reconcile(
     }
 }
 
+/// One artifact's rename/move: old id/path → new id/path, derived from
+/// rebasing `abs_path` under `old_root` onto `new_root`.
+pub struct RehomeRow {
+    pub old_id: String,
+    pub old_abs: String,
+    pub new_id: String,
+    pub new_abs: String,
+}
+
+/// Dry-run result of [`plan_rehome`]: rows safe to rewrite, paths that
+/// collided with an existing catalog row (skipped, not rewritten), and the
+/// count of `commits` rows anchored under `old_root` (informational only —
+/// `commits.git_root` is not id-keyed, so it isn't rewritten here).
+pub struct RehomePlan {
+    pub rows: Vec<RehomeRow>,
+    pub collisions: Vec<String>,
+    pub commit_rows: usize,
+}
+
+/// Outcome of [`apply_rehome`].
+#[derive(Debug, Default)]
+pub struct RehomeStats {
+    pub artifact_rows: usize,
+    pub commit_rows: usize,
+    pub skipped_collisions: usize,
+}
+
+/// Rebase an absolute path from under `old_root` onto `new_root`, preserving
+/// the relative tail. Returns `None` if `old_abs` is not actually under
+/// `old_root` (defensive — the caller's SQL scoping should already guarantee
+/// this).
+fn rebase(old_abs: &str, old_root: &Path, new_root: &Path) -> Option<String> {
+    let rel = Path::new(old_abs).strip_prefix(old_root).ok()?;
+    Some(crate::util::fs::RepoPath::from_path(&new_root.join(rel)).into_string())
+}
+
+/// Dry-run: derive the old-id → new-id/path mapping for every catalog row
+/// anchored at or under `old_root`, without writing anything. A row whose
+/// derived new id/path already exists in the catalog (e.g. a reindex under
+/// the new root already minted it) is reported as a collision and excluded
+/// from `rows` — the caller decides whether to skip or resolve it.
+pub fn plan_rehome(conn: &Connection, old_root: &Path, new_root: &Path) -> Result<RehomePlan> {
+    let old_root_str = crate::util::fs::RepoPath::from_path(old_root).into_string();
+    let escaped_root = crate::librarian::util::escape_like_pattern(&old_root_str);
+    let like = format!("{escaped_root}/%");
+    let mut stmt = conn.prepare(
+        "SELECT id, abs_path FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2 ESCAPE '\\'",
+    )?;
+    let raw: Vec<(String, String)> = stmt
+        .query_map(rusqlite::params![old_root_str, like], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+    drop(stmt);
+
+    let mut rows = Vec::new();
+    let mut collisions = Vec::new();
+    for (old_id, old_abs) in raw {
+        let Some(new_abs) = rebase(&old_abs, old_root, new_root) else {
+            continue;
+        };
+        let new_id = crate::librarian::ids::artifact_id_from_abs(Path::new(&new_abs));
+        // Collision: a row already exists at the new id/path (e.g. reindex
+        // under new_root already minted it before the rehome ran).
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM artifact WHERE id = ?1 OR abs_path = ?2",
+            rusqlite::params![new_id, new_abs],
+            |r| r.get(0),
+        )?;
+        if exists > 0 {
+            collisions.push(new_abs);
+            continue;
+        }
+        rows.push(RehomeRow {
+            old_id,
+            old_abs,
+            new_id,
+            new_abs,
+        });
+    }
+
+    let commit_rows: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM commits WHERE git_root = ?1 OR git_root LIKE ?2 ESCAPE '\\'",
+        rusqlite::params![old_root_str, like],
+        |r| r.get(0),
+    )?;
+    Ok(RehomePlan {
+        rows,
+        collisions,
+        commit_rows: commit_rows.max(0) as usize,
+    })
+}
+
+/// Migrate an `artifact_vec` embedding row from `old_id` to `new_id`.
+///
+/// `artifact_vec` is a `vec0` VIRTUAL table (see schema.sql) with no FK to
+/// `artifact` — only an `AFTER DELETE` trigger on `artifact` that cascades a
+/// DELETE, never an UPDATE, into `artifact_vec`. Rewriting `artifact.id` via
+/// UPDATE therefore does NOT move the vec row; it must be migrated here
+/// explicitly, or it becomes an orphan under the old id.
+///
+/// Empirically verified (throwaway probe, since removed): a direct
+/// `UPDATE artifact_vec SET id = ?1 WHERE id = ?2` is rejected outright by
+/// sqlite-vec with `SqliteFailure` / "UPDATEs on vec0 primary key values are
+/// not allowed." — not a silent no-op, a hard error. This matches the
+/// existing DELETE-then-INSERT idiom `src/librarian/indexer.rs::write_embeddings`
+/// already uses for the same table (there because vec0 also doesn't honor
+/// `INSERT OR REPLACE` conflict resolution on this column). A no-op if there
+/// is no embedding row for `old_id`.
+fn migrate_vec_id(tx: &rusqlite::Transaction<'_>, old_id: &str, new_id: &str) -> Result<()> {
+    let embedding: Option<Vec<u8>> = tx
+        .query_row(
+            "SELECT embedding FROM artifact_vec WHERE id = ?1",
+            [old_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(embedding) = embedding {
+        tx.execute("DELETE FROM artifact_vec WHERE id = ?1", [old_id])?;
+        tx.execute(
+            "INSERT INTO artifact_vec (id, embedding) VALUES (?1, ?2)",
+            rusqlite::params![new_id, embedding],
+        )?;
+    }
+    Ok(())
+}
+
+/// Apply the plan in ONE transaction with deferred FK checks, so the parent
+/// `artifact.id` rewrite and every FK-child rewrite validate together at
+/// COMMIT (the FKs are `ON DELETE CASCADE` only — they do not cover UPDATE,
+/// so without deferral each child UPDATE would transiently reference a
+/// not-yet-rewritten or already-rewritten parent id and could violate the FK
+/// mid-loop). Never deletes content; a hard error rolls back the whole
+/// batch atomically (no partial rehome).
+pub fn apply_rehome(conn: &Connection, plan: &RehomePlan) -> Result<RehomeStats> {
+    let mut stats = RehomeStats {
+        skipped_collisions: plan.collisions.len(),
+        commit_rows: plan.commit_rows,
+        ..Default::default()
+    };
+    conn.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
+    let tx = conn.unchecked_transaction()?;
+    for row in &plan.rows {
+        // FK children first (order among these is irrelevant — checks are
+        // deferred to COMMIT, not per-statement):
+        for (table, col) in [
+            ("events", "artifact_id"),
+            ("event_edges", "dst_artifact_id"),
+            ("artifact_augmentation", "artifact_id"),
+            ("artifact_observation", "artifact_id"),
+            ("artifact_link", "src_id"),
+            ("artifact_link", "dst_id"),
+        ] {
+            tx.execute(
+                &format!("UPDATE {table} SET {col} = ?1 WHERE {col} = ?2"),
+                rusqlite::params![row.new_id, row.old_id],
+            )?;
+        }
+        // artifact_vec: no FK, DELETE-trigger only — handled explicitly.
+        migrate_vec_id(&tx, &row.old_id, &row.new_id)?;
+        // Parent last.
+        tx.execute(
+            "UPDATE artifact SET id = ?1, abs_path = ?2, missing_since = NULL WHERE id = ?3",
+            rusqlite::params![row.new_id, row.new_abs, row.old_id],
+        )?;
+        stats.artifact_rows += 1;
+    }
+    tx.commit()?;
+    Ok(stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +363,289 @@ mod tests {
                     rusqlite::params![id, abs_path],
                 )
                 .unwrap();
+    }
+
+    #[test]
+    fn rehome_rewrites_id_and_preserves_all_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
+        let new_root = dir.path().join("newrepo");
+        std::fs::create_dir_all(new_root.join("docs")).unwrap();
+        std::fs::write(new_root.join("docs/t.md"), "x").unwrap();
+        let old_abs = "/oldrepo/docs/t.md";
+        let old_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(old_abs));
+        // a second, stable artifact to be the other endpoint of a link
+        seed(&cat, "other", "/oldrepo/docs/o.md");
+        cat.conn.execute("INSERT INTO artifact(id,abs_path,kind,status,title,created_at,updated_at,file_mtime,file_sha256) \
+            VALUES (?1,?2,'tracker','active','t',0,0,0,'')", rusqlite::params![old_id, old_abs]).unwrap();
+        // simulate: GC's reconcile already stamped this row missing (the
+        // file vanished from the old path before the rename/move landed);
+        // rehome must clear it since the file demonstrably exists again
+        // at new_abs.
+        cat.conn
+            .execute(
+                "UPDATE artifact SET missing_since = 12345 WHERE id=?1",
+                [&old_id],
+            )
+            .unwrap();
+        // one child in EACH table keyed by old_id:
+        cat.conn.execute("INSERT INTO events(id,artifact_id,kind,payload,created_at) VALUES ('e1',?1,'note','{}',0)", [&old_id]).unwrap();
+        cat.conn.execute("INSERT INTO event_edges(src_event_id,dst_artifact_id,rel) VALUES ('e1',?1,'mutates')", [&old_id]).unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_augmentation(artifact_id,prompt) VALUES (?1,'p')",
+                [&old_id],
+            )
+            .unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_observation(artifact_id,text,created_at) VALUES (?1,'obs',0)",
+                [&old_id],
+            )
+            .unwrap();
+        cat.conn.execute("INSERT INTO artifact_link(src_id,dst_id,rel,created_at) VALUES (?1,'other','implements',0)", [&old_id]).unwrap();
+        cat.conn.execute("INSERT INTO artifact_link(src_id,dst_id,rel,created_at) VALUES ('other',?1,'implements',0)", [&old_id]).unwrap();
+        // artifact_vec (vec0): embedding under old_id
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_vec(id,embedding) VALUES (?1, ?2)",
+                rusqlite::params![
+                    old_id,
+                    vec![0.0f32; 768]
+                        .iter()
+                        .flat_map(|f| f.to_le_bytes())
+                        .collect::<Vec<u8>>()
+                ],
+            )
+            .unwrap();
+
+        let plan = plan_rehome(&cat.conn, std::path::Path::new("/oldrepo"), &new_root).unwrap();
+        // "other" also lives under /oldrepo but its file is absent → it rebases too;
+        // for THIS test we only assert on the t.md row. (Either assert plan.rows has both, or narrow old_root.)
+        let new_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            &new_root.join("docs/t.md").to_string_lossy().into_owned(),
+        ));
+        apply_rehome(&cat.conn, &plan).unwrap();
+
+        // parent moved, no orphan under old_id
+        let c: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact WHERE id=?1",
+                [&old_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(c, 0, "no artifact orphan under old id");
+        // missing_since (set above to simulate a prior GC reconcile stamp)
+        // must clear on rehome — the file exists again at new_abs.
+        let missing_since: Option<i64> = cat
+            .conn
+            .query_row(
+                "SELECT missing_since FROM artifact WHERE id=?1",
+                [&new_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            missing_since, None,
+            "missing_since must clear on rehome, not carry over"
+        );
+        // every child followed the id (history preserved) — assert NO child still references old_id:
+        for (table, col) in [
+            ("events", "artifact_id"),
+            ("event_edges", "dst_artifact_id"),
+            ("artifact_augmentation", "artifact_id"),
+            ("artifact_observation", "artifact_id"),
+        ] {
+            let n: i64 = cat
+                .conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {col}=?1"),
+                    [&old_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 0, "{table}.{col} still references old id");
+            let m: i64 = cat
+                .conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {col}=?1"),
+                    [&new_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(m >= 1, "{table}.{col} did not follow to new id");
+        }
+        // artifact_link both endpoints
+        let ls: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_link WHERE src_id=?1 OR dst_id=?1",
+                [&old_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ls, 0, "artifact_link still references old id");
+        // artifact_vec: no orphan under old_id (either migrated to new_id or removed for re-embed)
+        let vold: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec WHERE id=?1",
+                [&old_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            vold, 0,
+            "artifact_vec orphan under old id (vec0 trigger only fires on DELETE, not UPDATE)"
+        );
+        // and the embedding actually migrated to new_id (not silently dropped)
+        let vnew: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_vec WHERE id=?1",
+                [&new_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(vnew, 1, "artifact_vec embedding did not migrate to new id");
+    }
+
+    #[test]
+    fn apply_rehome_rolls_back_atomically_on_mid_batch_failure() {
+        // Two rows in one plan: the first row's parent UPDATE would
+        // succeed on its own; the second row's parent UPDATE collides
+        // with a pre-existing abs_path (a UNIQUE constraint, checked
+        // immediately — not deferred like FKs) and must fail. The whole
+        // transaction must then roll back, including the already-applied
+        // first row, proving apply_rehome is atomic (no partial rehome).
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1", "/oldrepo/a.md");
+        seed(&cat, "c1", "/oldrepo/c.md");
+        seed(&cat, "existing", "/newrepo/b.md"); // occupies the path row c1 will collide into
+
+        let plan = RehomePlan {
+            rows: vec![
+                RehomeRow {
+                    old_id: "a1".to_string(),
+                    old_abs: "/oldrepo/a.md".to_string(),
+                    new_id: "a1-new".to_string(),
+                    new_abs: "/newrepo/a.md".to_string(),
+                },
+                RehomeRow {
+                    old_id: "c1".to_string(),
+                    old_abs: "/oldrepo/c.md".to_string(),
+                    new_id: "c1-new".to_string(),
+                    new_abs: "/newrepo/b.md".to_string(), // collides with "existing"
+                },
+            ],
+            collisions: vec![],
+            commit_rows: 0,
+        };
+
+        let result = apply_rehome(&cat.conn, &plan);
+        assert!(
+            result.is_err(),
+            "the abs_path collision on row 2 must surface as an error"
+        );
+
+        // Row 1 (a1) must NOT have been left rehomed — its own UPDATE
+        // ran and would have "succeeded" in isolation, but the batch's
+        // transaction must have rolled it back along with row 2.
+        let a1_old: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact WHERE id='a1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            a1_old, 1,
+            "a1 must still exist under its old id (rolled back)"
+        );
+        let a1_new: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact WHERE id='a1-new'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(a1_new, 0, "a1-new must not exist — the batch rolled back");
+
+        // Row 2 (c1) and the pre-existing collider are both untouched.
+        let c1_old: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact WHERE id='c1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            c1_old, 1,
+            "c1 must still exist under its old id (rolled back)"
+        );
+        let existing: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact WHERE id='existing' AND abs_path='/newrepo/b.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(existing, 1, "the pre-existing collider is untouched");
+    }
+
+    #[test]
+    fn plan_rehome_like_pattern_escapes_underscore_wildcard() {
+        // catalog-sql-hazards: an unescaped `_` in old_root would act as a
+        // LIKE single-char wildcard, sweeping up a sibling repo whose path
+        // merely differs by one character at that position. old_root
+        // itself contains a literal underscore to exercise this.
+        //
+        // `plan.rows`/`plan.collisions` turn out to be defended twice over:
+        // `rebase()` re-validates with `Path::strip_prefix`, an exact
+        // string/component match with no wildcard semantics, so a
+        // SQL-level false-positive candidate is silently dropped there
+        // regardless of whether the LIKE pattern was escaped. `commit_rows`
+        // has no such second check — it trusts the SQL COUNT directly — so
+        // that's where an unescaped `_`/`%` in old_root would actually leak
+        // into a wrong (inflated) answer. This test pins both.
+        let cat = Catalog::open_in_memory().unwrap();
+        let old_root = "/tmp/proj_x";
+        seed(&cat, "real", "/tmp/proj_x/docs/a.md"); // genuine match (literal underscore)
+        seed(&cat, "sibling", "/tmp/projYx/docs/b.md"); // differs at the `_` position
+        seed(&cat, "keep", "/tmp/unrelated.md");
+        cat.conn
+            .execute(
+                "INSERT INTO commits(hash, git_root) VALUES ('real-commit', '/tmp/proj_x')",
+                [],
+            )
+            .unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO commits(hash, git_root) VALUES ('sib-commit', '/tmp/projYx/sub')",
+                [],
+            )
+            .unwrap();
+
+        let new_root = std::path::PathBuf::from("/tmp/newhome");
+        let plan = plan_rehome(&cat.conn, std::path::Path::new(old_root), &new_root).unwrap();
+
+        let old_ids: Vec<&str> = plan.rows.iter().map(|r| r.old_id.as_str()).collect();
+        assert!(
+            old_ids.contains(&"real"),
+            "the genuine /tmp/proj_x/... row must be planned"
+        );
+        assert!(
+            !old_ids.contains(&"sibling"),
+            "rebase()'s exact strip_prefix must reject /tmp/projYx/... even as a raw SQL candidate"
+        );
+        assert!(
+            !old_ids.contains(&"keep"),
+            "unrelated row must not be planned"
+        );
+        assert_eq!(
+                    plan.commit_rows, 1,
+                    "commit_rows has no strip_prefix re-check — an unescaped `_` would wrongly count the sibling repo's commit too"
+                );
     }
 
     #[test]
