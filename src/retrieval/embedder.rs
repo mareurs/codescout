@@ -458,6 +458,28 @@ pub trait DenseEmbedder: Send + Sync {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 }
 
+
+/// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
+/// Drops the sparse vector and surfaces only the dense one.
+pub struct HttpDenseEmbedder {
+    inner: EmbedderHttp,
+}
+
+impl HttpDenseEmbedder {
+    pub fn new(inner: EmbedderHttp) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait::async_trait]
+impl DenseEmbedder for HttpDenseEmbedder {
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        // Dense-only: no sparse leg. Memory recall (and the lite stack) rank on
+        // the dense vector alone, so skip the sparse HTTP round-trip entirely.
+        self.inner.dense_query(text).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,26 +500,5 @@ mod tests {
             msg.to_lowercase().contains("connect"),
             "must flag a connect failure so the classifier can route it; got: {msg}"
         );
-    }
-}
-
-/// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
-/// Drops the sparse vector and surfaces only the dense one.
-pub struct HttpDenseEmbedder {
-    inner: EmbedderHttp,
-}
-
-impl HttpDenseEmbedder {
-    pub fn new(inner: EmbedderHttp) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait::async_trait]
-impl DenseEmbedder for HttpDenseEmbedder {
-    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        // Dense-only: no sparse leg. Memory recall (and the lite stack) rank on
-        // the dense vector alone, so skip the sparse HTTP round-trip entirely.
-        self.inner.dense_query(text).await
     }
 }
