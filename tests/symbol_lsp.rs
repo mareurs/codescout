@@ -1688,6 +1688,91 @@ async fn insert_code_after_repairs_truncated_end_in_nested_fn() {
     );
 }
 
+/// Regression (2026-07-19-edit-code-insert-after-lands-mid-statement): the
+/// AST-repair clamp only fixes the CHILD symbol's end line. The enclosing
+/// parent's `end_line` used by the `find_parent_symbol` clamp comes straight
+/// from the raw (un-repaired) LSP `symbols` list — if the LSP under-reports
+/// the parent's own end (plausible whenever its last child's own multi-line
+/// tail confuses the same LSP boundary logic), the correctly-repaired child
+/// insert position gets silently clamped BACKWARD into the child's own body.
+#[tokio::test]
+async fn insert_code_after_stale_parent_lsp_end_clamps_into_multiline_macro_body() {
+    // File layout (0-indexed):
+    //  0: "#[cfg(test)]"
+    //  1: "mod tests {"            ← parent; LSP under-reports its end at line 6
+    //  2: "    #[test]"
+    //  3: "    fn target_test() {" ← child start (correct)
+    //  4: "        let now = 1i64;"
+    //  5: "        assert_eq!("
+    //  6: "            now,"       ← LSP claims the PARENT mod already ends here
+    //  7: "            1i64"
+    //  8: "        );"
+    //  9: "    }"                 ← child's real end (AST-repaired end resolves here)
+    // 10: "}"                     ← parent's real end
+    let src = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn target_test() {\n        let now = 1i64;\n        assert_eq!(\n            now,\n            1i64\n        );\n    }\n}\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Child's own end_line is ALSO truncated (line 8, the `);` line, not the
+        // real closing `}` at line 9) — same LSP truncation pattern as the sibling
+        // regression test above. `editing_end_line_strict` repairs this correctly
+        // from the AST regardless of what's mocked here.
+        let inner = SymbolInfo {
+            name: "target_test".to_string(),
+            name_path: "tests/target_test".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 3,
+            end_line: 8,
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(3),
+            detail: None,
+        };
+        // Parent's end_line is truncated to line 6 — INSIDE the child's own
+        // assert_eq! argument list. This is the field the insert-after parent
+        // clamp trusts unrepaired.
+        let module = SymbolInfo {
+            name: "tests".to_string(),
+            name_path: "tests".to_string(),
+            kind: SymbolKind::Module,
+            file: file.clone(),
+            start_line: 1,
+            end_line: 6,
+            start_col: 0,
+            children: vec![inner],
+            range_start_line: None,
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![module])
+    })
+    .await;
+
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "tests/target_test",
+                "position": "after",
+                "action": "insert",
+                "body": "    #[test]\n    fn new_test() {}\n"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("insert must succeed (child end IS AST-resolvable)");
+    let _ = result;
+
+    let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    // The correctly-repaired child end (line 9) must win over the stale parent
+    // clamp (line 6) — the assert_eq! call must survive intact, and the new
+    // test must land after target_test's real closing brace, not inside it.
+    assert!(
+        content.contains("assert_eq!(\n            now,\n            1i64\n        );"),
+        "assert_eq! call must survive intact, not be split by the insert; got:\n{content}"
+    );
+}
+
 /// Regression for the strict-refuse path on `insert_code(position="after")`.
 ///
 /// Scenario: LSP reports a stale name (`a` instead of the AST's `alpha`) so

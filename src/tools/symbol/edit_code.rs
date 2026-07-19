@@ -855,7 +855,21 @@ impl EditCode {
             // Brace languages are unaffected: a child's strict-AST end is always
             // strictly below the parent closer, so insert_at0 never reaches this
             // bound.
-            let parent_body_end_exclusive = parent.end_line as usize + 1;
+            //
+            // `parent` comes from the raw LSP `symbols` list — never AST-repaired.
+            // Trusting `parent.end_line` as-is re-introduces the exact truncation
+            // this whole repair mechanism exists to fix, one level up: when the
+            // LSP under-reports the PARENT's own end (e.g. its last child's tail
+            // is a multi-line macro call, confusing the same LSP boundary logic
+            // that motivated the child-level repair), the clamp silently drags a
+            // correctly AST-resolved child insert position backward into the
+            // child's own body (2026-07-19 regression: insert landed inside a
+            // sibling's multi-line `assert_eq!` argument list). `editing_end_line`
+            // re-resolves the parent's end from the AST the same way the child's
+            // end already is, falling back to the raw LSP value only when AST
+            // can't pin the parent down — never worse than the prior behavior.
+            let parent_end = editing_end_line(parent);
+            let parent_body_end_exclusive = parent_end as usize + 1;
             insert_at0
                 .max(parent_body_start)
                 .min(parent_body_end_exclusive)

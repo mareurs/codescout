@@ -3169,6 +3169,51 @@ println!(\"{}\", x + y);
     );
 }
 
+/// Regression (2026-07-19-edit-code-insert-after-lands-mid-statement): AST end-line
+/// resolution must reach the function's REAL closing brace even when the last
+/// statement is a multi-line macro call, not stop at the macro invocation's own
+/// last line (which is what the truncated LSP range reports here).
+#[test]
+fn editing_end_line_strict_multiline_macro_last_statement() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.rs");
+    let source = "\
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn target_test() {
+        let now = 1i64;
+        assert_eq!(
+            now,
+            1i64
+        );
+    }
+}
+";
+    std::fs::write(&file, source).unwrap();
+
+    // LSP truncates to the assert_eq! call's own last line (`        );`, line 8),
+    // one short of the real closing brace (`    }`, line 9).
+    let sym = crate::lsp::SymbolInfo {
+        name: "target_test".to_string(),
+        name_path: "tests/target_test".to_string(),
+        kind: crate::lsp::SymbolKind::Function,
+        file: file.clone(),
+        start_line: 3,
+        end_line: 8, // WRONG — points to `);`, not closing `}` (line 9)
+        start_col: 4,
+        children: vec![],
+        range_start_line: Some(3),
+        detail: None,
+    };
+
+    let end = editing_end_line_strict(&sym).expect("AST must pinpoint target_test's end line");
+    assert_eq!(
+        end, 9,
+        "editing_end_line_strict must resolve to the real closing brace (line 9), got {end}"
+    );
+}
+
 /// BUG-051 regression: when the file has syntax errors (common mid-session),
 /// `editing_end_line` must still use AST rather than falling back to LSP's
 /// `end_line` — which often points to the last *statement*, not the closing `}`.
