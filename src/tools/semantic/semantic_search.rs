@@ -9,7 +9,13 @@ use serde_json::{json, Value};
 /// Patterns are checked in order of specificity: collection-missing first
 /// (most common after first-time setup), then dim-mismatch (model/index
 /// drift), then TEI errors (dense embedding service unhealthy), then
+/// embedder-connect (client-side: dense/sparse endpoint unreachable), then
 /// transport (stack went away), then a generic fallback.
+///
+/// The embedder-connect bucket must precede transport: a client-side connect
+/// failure's message carries reqwest's "Connection refused", which would
+/// otherwise be misrouted to the qdrant-oriented transport hint
+/// (docs/issues/2026-07-13-semantic-search-misleading-stack-error-on-missing-env.md).
 pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     if err_str.contains("doesn't exist")
         || err_str.contains("not found")
@@ -36,6 +42,19 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
          Restart: `./scripts/retrieval-stack.sh up`. \
          If persistent, inspect container memory limits + model file. \
          Workaround: fall back to `grep` / `symbols` for this query while TEI recovers."
+            .to_string()
+    } else if err_str.contains("embed connect failed")
+        || err_str.contains("openai send")
+        || err_str.contains("embed sparse")
+    {
+        // Client-side: the query could not be embedded because the embedder
+        // endpoint is unreachable/erroring. Distinct from a Qdrant fault —
+        // must NOT send the operator to qdrant logs (the 2026-07-13 bug).
+        "Query could not be embedded — the dense/sparse embedder is unreachable \
+         or returned an error. This is an embedder problem, NOT a Qdrant issue \
+         (don't check qdrant logs). Verify CODESCOUT_EMBEDDER_URL / \
+         CODESCOUT_SPARSE_EMBEDDER_URL point at the running embedder, then \
+         `./scripts/retrieval-stack.sh ps`."
             .to_string()
     } else if err_str.contains("Connection refused")
         || err_str.contains("transport error")
@@ -464,6 +483,39 @@ mod classify_search_error_tests {
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "must not hit generic fallback: {hint}"
+        );
+    }
+
+    #[test]
+    fn dense_connect_failure_routes_to_embedder_hint_not_qdrant() {
+        // Regression: a client-side connect failure (wrong CODESCOUT_EMBEDDER_URL
+        // or embedder down) used to fall through to the generic "check qdrant
+        // logs" fallback, sending operators to debug a healthy stack. See
+        // docs/issues/2026-07-13-semantic-search-misleading-stack-error-on-missing-env.md.
+        let err = "stack search failed: dense embed connect failed: \
+                   http://127.0.0.1:8081/v1/embeddings — the dense embedder is unreachable";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            hint.contains("CODESCOUT_EMBEDDER_URL"),
+            "hint must point at the embedder URL env var: {hint}"
+        );
+        // The regression marker is the generic fallback's qdrant directive; our
+        // hint may *mention* qdrant (to steer away from it), so match the precise
+        // fallback text rather than the bare substring "qdrant logs".
+        assert!(
+            !hint.contains("docker logs codescout-qdrant")
+                && !hint.contains("Stack reachable but query failed"),
+            "must NOT route a client-side connect failure to the qdrant-logs fallback: {hint}"
+        );
+    }
+
+    #[test]
+    fn openai_send_does_not_hit_generic_qdrant_fallback() {
+        let err = "stack search failed: dense openai send";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            !hint.contains("Stack reachable but query failed"),
+            "a dense send failure must route to the embedder bucket, not the generic fallback: {hint}"
         );
     }
 }

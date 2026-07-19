@@ -210,7 +210,22 @@ impl EmbedderHttp {
         let resp: OpenAiEmbedResp = req
             .send()
             .await
-            .context("dense openai send")?
+            .map_err(|e| {
+                // A connect/timeout failure is client-side: the embedder URL is
+                // wrong or the service is down. Lift the URL + a "connect" marker
+                // to the top-level message so `e.to_string()` (what the search
+                // layer's classifier sees) routes this to the embedder hint
+                // instead of the misleading "check qdrant logs" fallback.
+                if e.is_connect() || e.is_timeout() {
+                    anyhow!(
+                        "dense embed connect failed: {url} — the dense embedder is \
+                         unreachable (connect/timeout). Check CODESCOUT_EMBEDDER_URL and \
+                         that the embedder is running (`./scripts/retrieval-stack.sh ps`). ({e})"
+                    )
+                } else {
+                    anyhow::Error::new(e).context("dense openai send")
+                }
+            })?
             .error_for_status()
             .context("dense openai status")?
             .json()
@@ -441,6 +456,29 @@ impl EmbedderHttp {
 #[async_trait::async_trait]
 pub trait DenseEmbedder: Send + Sync {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A dense connect failure must name the target URL and flag "connect" so
+    /// the search-layer classifier routes it to the embedder hint (not qdrant).
+    /// Port 1 refuses connections instantly, keeping the test hermetic.
+    #[tokio::test]
+    async fn dense_connect_failure_names_url_and_flags_connect() {
+        let e = EmbedderHttp::with_config("http://127.0.0.1:1", "http://127.0.0.1:1", 768, "m", "");
+        let err = e.dense_query("hello").await.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("http://127.0.0.1:1"),
+            "connect error must name the target URL; got: {msg}"
+        );
+        assert!(
+            msg.to_lowercase().contains("connect"),
+            "must flag a connect failure so the classifier can route it; got: {msg}"
+        );
+    }
 }
 
 /// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
