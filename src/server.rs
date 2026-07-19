@@ -1584,21 +1584,53 @@ fn strip_project_root_from_result(
 /// A "path character" here means anything that could legitimately precede a
 /// path component: `/`, alphanumerics, `-`, `_`, `.`. Everything else (quotes,
 /// spaces, colons, brackets, newlines…) signals a value boundary.
+///
+/// Also strips the BARE root (no trailing slash) — the shape `format_list_dir`
+/// emits when the project root is the sole common prefix of a listing, which
+/// the slash-suffixed match below can never see at all. The bare form needs an
+/// explicit RIGHT-boundary check that the slash-suffixed form gets for free
+/// from its own trailing `/`: without it, `<root>` would also match the start
+/// of an unrelated longer path that merely shares it as a prefix, e.g.
+/// `<root>-backup/foo`.
 fn strip_prefix_from_text(text: &str, prefix: &str) -> String {
+    let bare = prefix.trim_end_matches('/');
+    if bare.is_empty() {
+        return text.to_string();
+    }
     let mut result = String::with_capacity(text.len());
     let mut last = 0;
-    for (pos, _) in text.match_indices(prefix) {
-        let is_value_boundary = pos == 0
+    for (pos, _) in text.match_indices(bare) {
+        // A longer slash-suffixed match earlier in the loop may have already
+        // consumed past this position (`bare` is a substring of `prefix`, so
+        // match_indices(bare) can report an occurrence that starts inside an
+        // already-stripped slash-suffixed match).
+        if pos < last {
+            continue;
+        }
+        let is_left_boundary = pos == 0
             || {
                 // SAFETY: pos is a byte offset from match_indices, so text[..pos] is valid UTF-8.
                 // next_back() returns the last char before the match.
                 let prev = text[..pos].chars().next_back();
                 !matches!(prev, Some(c) if c == '/' || c == '.' || c == '-' || c == '_' || c.is_ascii_alphanumeric())
             };
-        if is_value_boundary {
-            result.push_str(&text[last..pos]);
-            last = pos + prefix.len();
+        if !is_left_boundary {
+            continue;
         }
+        let match_len = if text[pos..].starts_with(prefix) {
+            prefix.len()
+        } else {
+            let after = pos + bare.len();
+            let next_is_path_char = text[after..].chars().next().is_some_and(|c| {
+                c == '/' || c == '.' || c == '-' || c == '_' || c.is_ascii_alphanumeric()
+            });
+            if next_is_path_char {
+                continue;
+            }
+            bare.len()
+        };
+        result.push_str(&text[last..pos]);
+        last = pos + match_len;
     }
     result.push_str(&text[last..]);
     result
@@ -2510,6 +2542,44 @@ mod tests {
         assert!(
             !text.contains(&root),
             "Expected absolute root to be stripped, but found it in output:\n{text}"
+        );
+    }
+    /// Regression (2026-07-18-tree-strip-bare-root-not-stripped): when the
+    /// listing's sole common prefix IS the project root, `format_list_dir`
+    /// displays it WITHOUT a trailing slash (`dir_display =
+    /// prefix.trim_end_matches('/')`) — a shape `call_tool_strips_project_root_
+    /// from_output` above never exercises because `make_server`'s tempdir has
+    /// no visible top-level entries (only the hidden `.codescout/`), so that
+    /// listing short-circuits to "(empty directory)" before the bare-root
+    /// prefix ever renders.
+    #[tokio::test]
+    async fn call_tool_strips_bare_project_root_from_list_dir_output() {
+        let (dir, server) = make_server().await;
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("visible.txt"), "hello").unwrap();
+
+        let req = CallToolRequestParams::new("tree")
+            .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("");
+
+        assert!(
+            text.contains("visible.txt"),
+            "listing must show the visible entry — the bare-root branch is not \
+             actually being exercised otherwise; got:\n{text}"
+        );
+        assert!(
+            !text.contains(&root),
+            "Expected absolute root to be stripped even in its bare (no trailing \
+             slash) form, but found it in output:\n{text}"
         );
     }
 
