@@ -7,12 +7,15 @@ Reconnaissance findings (grep collision, PATH, setActiveTools) live as F-1/F-2
 in `docs/trackers/pi-integration-session-log.md`.
 
 ## How it works
+
 pi-mcp-adapter connects codescout (`codescout start`, stdio, lazy) and promotes
-a hot-set of codescout tools to first-class Pi tools. The codescout-mode
-extension drops Pi's native `edit` and activates the codescout hot-set on every
-session (guarded so it no-ops when codescout isn't loaded), and appends a
-one-time hint when bash is used to search source. AGENTS.md documents the
-tool-map for the model.
+a hot-set of codescout tools to first-class `codescout_*` Pi tools (adapter
+default `toolPrefix: "server"` — see F-3). The codescout-mode extension drops
+Pi's native `edit`/`write` on session start (guarded so it no-ops when
+codescout isn't loaded), and hard-blocks native `read` (except images) and
+`bash` (except commands outside codescout's redundant read/search set, or
+carrying an explicit `# codescout-override` marker) via the `tool_call` hook.
+AGENTS.md documents the tool-map for the model.
 
 ## Prerequisites
 - Node >= 23.6 (`node -v`).
@@ -40,13 +43,17 @@ until the cache is populated).
 ## Files
 - `mcp.json` (gitignored, personal — create from `mcp.json.example`) -> `~/.pi/agent/mcp.json` — codescout server (absolute command) + directTools hot-set.
 - `mcp.json.example` — tracked template with placeholder API keys.
-- `codescout-mode.ts` -> `~/.pi/agent/extensions/` — curation + bash nudge.
+- `codescout-mode.ts` -> `~/.pi/agent/extensions/` — drops native edit/write, hard-blocks native read/bash via `tool_call`.
 - `AGENTS.md` -> `~/.pi/agent/AGENTS.md` — tool-map guidance.
 - `install.sh` — idempotent symlink installer (backs up any existing real AGENTS.md).
 
 ## Contingency: grep name collision
-Pi ships built-in tools (read, write, edit, bash, grep, find, ls), so codescout's
-`grep` is NOT in directTools (F-1) — reach it via the `mcp` proxy. To make it
-first-class instead, add `"settings": { "toolPrefix": "cs" }` to `mcp.json`
-(renames ALL codescout tools `cs_*`) and update the hot-set names in
-`codescout-mode.ts` accordingly.
+
+Resolved by F-3: pi-mcp-adapter's default `toolPrefix: "server"` means every
+codescout direct tool (including `grep`) registers as `codescout_<name>`, so
+there's no collision with Pi's built-in `grep`/`read`/`write`/`edit`/`bash`.
+`grep` is back in `directTools` and reachable directly as `codescout_grep`.
+Set `"settings": { "toolPrefix": "none" }` in `mcp.json` only if bare names are
+ever preferred — doing so would reintroduce the collision this section used to
+work around, and `codescout-mode.ts`'s tool-name constants would need updating
+to match.
