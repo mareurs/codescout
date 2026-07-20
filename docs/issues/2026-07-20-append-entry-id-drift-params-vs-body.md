@@ -1,7 +1,7 @@
 ---
 id: e000f27a6dd6c0a0
 kind: bug
-status: draft
+status: fixed
 title: 'BUG: append_entry assigns next monotonic ID from params only, colliding when body already has a newer entry (params/body ID drift)'
 tags:
 - append_entry
