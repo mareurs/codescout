@@ -49,6 +49,12 @@ struct UpdatePatch {
 struct Args {
     id: String,
     patch: UpdatePatch,
+    /// The tool schema advertises `status` as a top-level param for both
+    /// `create` and `update`. `create` honors it; this field exists so
+    /// `update` does too — `call()` lifts it into `patch.status` rather than
+    /// letting serde drop it silently. See the note there.
+    #[serde(default)]
+    status: Option<String>,
     /// When true, also call augmentation::commit_refresh after the update.
     #[serde(default)]
     commit_refresh: bool,
@@ -199,7 +205,40 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
 
-    let a: Args = serde_json::from_value(args)?;
+    let mut a: Args = serde_json::from_value(args)?;
+
+    // The schema advertises `status` as a top-level param for create AND
+    // update. update::Args used to declare no such field, so serde discarded
+    // it while the call still returned `updated: true` — a silent partial
+    // success that left bug files sitting at their old status after a
+    // supposedly-successful close (2026-07-20).
+    //
+    // Repair-and-Continue: one correct reading -> lift it and note the
+    // correction; two conflicting readings -> refuse, because a wrong guess on
+    // a write is unrecoverable.
+    let mut corrections: Vec<String> = Vec::new();
+    if let Some(top) = a.status.take() {
+        match &a.patch.status {
+            Some(p) if *p != top => {
+                return Err(super::RecoverableError::with_hint(
+                    format!(
+                        "artifact(action=\"update\"): conflicting status values — top-level `{top}` vs patch `{p}`"
+                    ),
+                    "Pass status once. The canonical form is patch={\"status\": \"...\"}.".to_string(),
+                ));
+            }
+            Some(_) => {}
+            None => {
+                a.patch.status = Some(top);
+                corrections.push(
+                    "lifted top-level `status` into `patch.status` — the canonical form is \
+                     patch={\"status\": \"...\"}"
+                        .to_string(),
+                );
+            }
+        }
+    }
+
     let a = {
         let mut cat = ctx.catalog.lock();
         let id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
@@ -416,6 +455,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(c) = committed {
         out["committed"] = json!(c);
     }
+    if !corrections.is_empty() {
+        out["corrections"] = json!(corrections);
+    }
     Ok(out)
 }
 
@@ -605,6 +647,139 @@ mod tests {
 
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.status, "archived");
+    }
+
+    /// Regression: docs/issues/2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md
+    /// The tool schema documents `create/update: set status` as a top-level
+    /// param. `create` honored it; `update` dropped it via serde while still
+    /// returning `updated: true` — a silent partial success.
+    #[tokio::test]
+    async fn update_lifts_top_level_status_into_the_patch() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc_tls.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let out = call(
+            &ctx,
+            serde_json::json!({"id": id, "status": "fixed", "patch": {"title": "T2"}}),
+        )
+        .await
+        .unwrap();
+
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "fixed", "top-level status must reach the row");
+        assert_eq!(row.title.as_deref(), Some("T2"), "patch must still apply");
+        assert!(
+            out["corrections"].is_array(),
+            "the lift should be advertised via a corrections note: {out}"
+        );
+    }
+
+    /// The frontmatter on disk must agree with the catalog row — the original
+    /// bug was caught only because both read `draft`, and a fix that updated
+    /// just the row would be a subtler version of the same defect.
+    #[tokio::test]
+    async fn update_top_level_status_reaches_the_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc_tlf.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "status": "fixed", "patch": {}}),
+        )
+        .await
+        .unwrap();
+
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        let on_disk = std::fs::read_to_string(&row.abs_path).unwrap();
+        assert!(
+            on_disk.contains("status: fixed"),
+            "frontmatter must agree with the row: {on_disk}"
+        );
+    }
+
+    /// Two readings that agree is not ambiguity — repair silently, no note.
+    #[tokio::test]
+    async fn update_top_level_status_agreeing_with_patch_is_not_flagged() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc_agree.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let out = call(
+            &ctx,
+            serde_json::json!({
+                "id": id, "status": "fixed", "patch": {"status": "fixed"}
+            }),
+        )
+        .await
+        .unwrap();
+
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "fixed");
+        assert!(out.get("corrections").is_none());
+    }
+
+    /// Two readings that conflict IS ambiguity — refuse rather than guess,
+    /// per the Repair-and-Continue convention. A wrong guess on a write is
+    /// unrecoverable.
+    #[tokio::test]
+    async fn update_conflicting_status_sources_are_refused() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc_conflict.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({
+                "id": id, "status": "fixed", "patch": {"status": "archived"}
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err
+            .downcast_ref::<super::super::RecoverableError>()
+            .is_some());
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_ne!(row.status, "fixed", "a refused call must not write");
+        assert_ne!(row.status, "archived", "a refused call must not write");
     }
 
     #[tokio::test]
