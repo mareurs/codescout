@@ -1,12 +1,14 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- doc-drift
+- error-handling
+closed: 2026-07-20
 opened: 2026-07-19
-closed:
-severity: low
 owner: marius
 related: []
-tags: [doc-drift, error-handling]
-kind: bug
+severity: low
 ---
 
 # BUG: `RecoverableError`'s `Display` doc comment claims it omits the hint; the code includes it

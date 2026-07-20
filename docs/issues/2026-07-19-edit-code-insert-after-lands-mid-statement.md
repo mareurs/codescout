@@ -1,12 +1,16 @@
 ---
-status: open
-opened: 2026-07-19
-closed:
-severity: high
-owner: marius
-related: ["fb33085544512c73"]
-tags: [edit_code, lsp, mcp-tooling]
 kind: bug
+status: fixed
+tags:
+- edit_code
+- lsp
+- mcp-tooling
+closed: 2026-07-20
+opened: 2026-07-19
+owner: marius
+related:
+- fb33085544512c73
+severity: high
 ---
 
 # BUG: edit_code insert/after on a `#[test] fn` anchor uses a wrong AST-repaired line, splicing new code mid-statement

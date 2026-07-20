@@ -202,9 +202,16 @@ wine-emulation-only artifacts (symbols glob-walk empty under wine, preflight/git
 markdown compact rendering, run_command quoting, head_sha, reindex commits-table) —
 green on real Windows MSVC, so not real bugs; they remain skip-listed. No further
 action unless a residual test starts failing on real Windows too (promote it to a real
-defect then). Minor follow-up still open: `cfg_attr(dead_code)` gating for the three
-unix-only fns in `src/lsp/manager.rs` that warn on the gnu test compile (harmless — the
-wine job has no `-D warnings`).
+defect then). The `cfg_attr(dead_code)` follow-up is CLOSED (2026-07-07) — see the Resolution
+section above; `src/lsp/manager.rs` now gates the unix-only helpers `#[cfg(unix)]`
+with `#[cfg_attr(windows, allow(dead_code))]` at :463. Nothing is outstanding.
+
+Verified 2026-07-20 (verify-open sweep): the `windows-gnu` job still exists at
+`.github/workflows/ci.yml:81-108`, still installs MinGW+wine, and carries NO
+`continue-on-error` — the gate is live, not disabled. The skip list is down to 9
+entries from the original 21, each citing this file at `ci.yml:106`. Status
+`mitigated` remains correct: the real defects were fixed, the residual skips are
+wine-emulation artifacts that pass on real Windows MSVC.
 ## References
 - CI runs: 28582988236 (first gnu run), 28039317667 (pre-session baseline)
 - docs/trackers/windows-platform-support.md — WIN-27

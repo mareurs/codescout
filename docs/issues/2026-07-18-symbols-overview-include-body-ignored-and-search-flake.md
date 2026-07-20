@@ -1,12 +1,18 @@
 ---
-status: partially-fixed
-opened: 2026-07-18
-closed:
-severity: medium
-owner: marius
-related: ["2026-06-11-symbols-search-include-docs-and-focus.md"]
-tags: [symbols, include_body, overview-mode, list_overview, parameter-ignored]
 kind: bug
+status: open
+tags:
+- symbols
+- include_body
+- overview-mode
+- list_overview
+- parameter-ignored
+closed: null
+opened: 2026-07-18
+owner: marius
+related:
+- '2026-06-11-symbols-search-include-docs-and-focus.md'
+severity: medium
 ---
 
 > **2026-07-19 update:** Bug A fixed — all three `list_overview.rs` branches now read

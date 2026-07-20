@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- worktree
+- append_entry
+- entry-graph
+closed: 2026-07-20
 opened: 2026-07-17
-closed:
-severity: low
 owner: marius
 related: []
-tags: [worktree, append_entry, entry-graph]
-kind: bug
+severity: low
 ---
 
 # BUG: append_entry cites-from-worktree refusal still materializes an empty shadow fork

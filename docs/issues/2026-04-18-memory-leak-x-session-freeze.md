@@ -1,13 +1,18 @@
 ---
-status: investigating
+kind: bug
+status: fixed
+tags:
+- memory-leak
+- oom
+- embeddings
+- ptmalloc2
+- phase-2
+closed: 2026-07-20
+last_observed: 2026-06-19
 opened: 2026-04-18
-severity: critical
 owner: marius
 related: []
-tags: ["memory-leak", "oom", "embeddings", "ptmalloc2", "phase-2"]
-last_observed: 2026-06-19
-kind: bug
-closed: ""
+severity: critical
 ---
 
 # BUG: codescout memory leak → OOM → X session freeze
@@ -27,6 +32,35 @@ no window manager. Appears as a hard freeze; only a reboot recovers it.
 
 ---
 
+
+## Resolution (2026-07-20) — SUPERSEDES all earlier status sections in this file
+
+**This file carried three contradictory status narratives** — a `Status: zombie`
+(2026-05-18), a `Wontfix` (2026-05-28), and the `Re-opened 2026-06-30` section below.
+The 2026-06-30 re-open is the one that mattered, and the work it called for has
+shipped. Read this section first; the older status verdicts are historical.
+
+**Confirmed root cause, now eliminated:** `sync_project` buffered the entire tree in
+`local: Vec<(CodePayload, String)>` — peak memory O(all_files). It now delegates to
+`stream_index` with a bounded `flush_batch` (default 256, tunable via
+`CODESCOUT_INDEX_FLUSH_BATCH`), so peak memory is O(batch) regardless of repo size
+(`src/retrieval/sync.rs:196-273`).
+
+**Regression guard:** `stream_index_flushes_in_bounded_batches`
+(`src/retrieval/sync.rs:402-433`) asserts no flush ever exceeds `flush_batch`.
+
+**Scope note — this was NOT the only path to the observed host OOM.** The verify-open
+sweep established that this bug and the kotlin-lsp heap bug
+(`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`) are *independent*
+allocation defects that produced the same symptom: this one was unbounded allocation
+in codescout's own Rust indexing path; that one is unbounded JVM heap-then-native
+growth in a spawned child. Fixing this does not protect against that. The absence of
+a containment boundary (`docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md`)
+remains open by deliberate design decision and is still worth having precisely
+because two independent leaks reached the same failure.
+
+**Not yet on `master`** — archive only after the fix ships there
+(`git branch --contains`).
 ## Re-opened 2026-06-30 — the June OOM fired this issue's re-open trigger
 
 The 2026-06-19 68 GB OOM (`docs/issues/2026-06-19-mcp-server-oom-68gb.md`) matches the Phase 1

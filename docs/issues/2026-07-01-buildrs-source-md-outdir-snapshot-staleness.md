@@ -1,20 +1,15 @@
 ---
-id: null
 kind: bug
-status: zombie
-title: null
-owners: []
+status: wontfix
 tags:
 - build.rs
 - prompt-surfaces
 - snapshot
 - incremental-build
 - false-pass
-topic: null
-time_scope: null
-closed: '2026-07-05'
-last_observed: '2026-07-01'
-opened: '2026-07-01'
+closed: 2026-07-20
+last_observed: 2026-07-01
+opened: 2026-07-01
 owner: marius
 related: []
 severity: low

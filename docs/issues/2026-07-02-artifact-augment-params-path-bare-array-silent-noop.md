@@ -1,12 +1,16 @@
 ---
-status: mitigated
+kind: bug
+status: fixed
+tags:
+- artifact_augment
+- librarian
+- params-path
+- silent-noop
+closed: 2026-07-20
 opened: 2026-07-02
-closed:
-severity: low
 owner: marius
 related: []
-tags: [artifact_augment, librarian, params-path, silent-noop]
-kind: bug
+severity: low
 ---
 
 # BUG: `artifact_augment(merge=true, params_path=...)` silently no-ops when the file's top-level JSON is a bare array instead of an object
@@ -83,18 +87,41 @@ preferable to a silent no-op.
    MCP-server-side implementation from this session).
 
 ## Fix
-Not implemented — no source-side fix attempted this session (out of scope
-for the delegated task; documenting for whoever owns the `artifact_augment`
-implementation). Suggested direction: either reject a non-object
-`params_path` payload with a `RecoverableError` naming the expected shape,
-or document the object-payload requirement explicitly in the tool's
-description (currently says "the params payload," which reads as "whatever
-JSON you want stored," not "must be a top-level object").
 
+Fixed 2026-07-20 in `a53e6634`.
+
+`src/librarian/tools/augment.rs` — after `params_path`'s JSON parse, the value is
+now checked with `is_object()`. A non-object payload returns a `RecoverableError`
+naming the actual shape (`array` / `string` / `number` / `boolean` / `null`) with a
+hint to wrap it under its `entry_collection` key. Recoverable rather than fatal so
+the caller can retry with a corrected file instead of the call being a hard failure.
+
+The root cause was a boundary gap, not a missing branch in `apply_merge_patch`: the
+tool schema's `"type": "object"` constrains only the INLINE `params` argument, and
+`params_path` reads a file that never passes through the schema. Validating at
+`params_path`'s own input boundary is the fix; `apply_merge_patch` stays strict
+(defense-in-depth, per `memory("conventions")` § Repair-and-Continue).
+
+Also corrected `apply_merge_patch`'s doc comment in
+`src/librarian/catalog/augmentation.rs`, which asserted *"Non-object patches are
+no-ops (the tool schema enforces object at the boundary)"* — the exact guarantee
+`params_path` did not honor. It now states that callers must reject non-objects at
+their own boundary and explains why the schema does not cover this path.
 ## Tests added
-N/A — no code fix in this session; this is an operational discovery
-against a live MCP tool, not a change to codescout's own source tree.
 
+`src/librarian/tools/augment.rs` — all three confirmed failing first, each with the
+telltale `called `Result::unwrap_err()` on an `Ok` value: String("ok")`, i.e. the
+silent-success symptom exactly as filed:
+
+- `params_path_bare_array_is_refused_not_silently_dropped` — the reported case;
+  asserts the error is recoverable AND names the shape, so the message stays useful.
+- `params_path_bare_array_is_refused_on_the_merge_path_too` — the merge path is
+  where the drop actually bit. Also asserts previously-stored params survive the
+  refusal untouched (a refused call must not disturb state).
+- `params_path_scalar_is_refused` — same class of mistake; guards against a fix
+  narrowed to arrays only.
+
+Full suite: 3402 passed, 43 ignored; `cargo fmt` + `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 Always wrap the intended array under its `entry_collection` key name
 (e.g. `{"issues": [...]}`) before passing `params_path`, even when only

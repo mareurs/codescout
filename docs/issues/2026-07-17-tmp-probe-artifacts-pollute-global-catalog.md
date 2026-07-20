@@ -1,12 +1,13 @@
 ---
 id: e973bdaec27f9fdb
 kind: bug
-status: open
+status: fixed
 title: 'BUG: /tmp probe/test runs write artifacts into the real shared global catalog — 28 dead /tmp rows, 3 still active+augmented trackers'
 tags:
 - catalog
 - test-isolation
 - librarian
+closed: 2026-07-20
 ---
 
 ## Summary

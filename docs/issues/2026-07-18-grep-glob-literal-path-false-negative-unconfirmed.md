@@ -1,22 +1,18 @@
 ---
-id: null
 kind: bug
-status: investigating
+status: zombie
 title: 'BUG: `grep`''s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test'
-owners: []
 tags:
 - grep
 - glob
 - override
 - false-negative
 - recurring
-topic: null
-time_scope: null
-last_observed: '2026-07-18'
-opened: '2026-07-18'
+last_observed: 2026-07-18
+opened: 2026-07-18
 owner: marius
 related: []
-reopened: '2026-07-18'
+reopened: 2026-07-18
 severity: medium
 ---
 

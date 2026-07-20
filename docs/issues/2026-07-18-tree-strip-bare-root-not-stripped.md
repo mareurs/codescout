@@ -1,8 +1,12 @@
 ---
 kind: bug
-status: open
-title: "BUG: strip_project_root omits the bare project root (no trailing slash) emitted by format_list_dir, leaking the absolute root in list_dir output"
-tags: [tree, path-stripping, server]
+status: fixed
+title: 'BUG: strip_project_root omits the bare project root (no trailing slash) emitted by format_list_dir, leaking the absolute root in list_dir output'
+tags:
+- tree
+- path-stripping
+- server
+closed: 2026-07-20
 ---
 
 ## Summary

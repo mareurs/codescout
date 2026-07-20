@@ -1,9 +1,6 @@
 ---
-id: null
 kind: bug
-status: mitigated
-title: null
-owners: []
+status: fixed
 tags:
 - librarian
 - catalog
@@ -13,9 +10,7 @@ tags:
 - data-loss-risk
 - prune_missing
 - git-ignore-interaction
-topic: null
-time_scope: null
-closed: null
+closed: 2026-07-20
 ---
 
 # BUG: `reindex` repeatedly reports success but `artifact(find)`/`artifact(get)` return empty/null for the whole project afterward
