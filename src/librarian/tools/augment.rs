@@ -291,6 +291,31 @@ impl Tool for ArtifactAugment {
             let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
                 RecoverableError::new(format!("params_path content is not valid JSON: {e}"))
             })?;
+            // The schema's `"type": "object"` constrains only the INLINE `params`
+            // argument — `params_path` bypasses that boundary entirely. Without
+            // this check a bare top-level array is valid JSON, reaches
+            // `apply_merge_patch`, misses its `(Object, Object)` arm, and is
+            // discarded while the call reports "ok".
+            // See docs/issues/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
+            if !parsed.is_object() {
+                let shape = match &parsed {
+                    Value::Array(_) => "array",
+                    Value::String(_) => "string",
+                    Value::Number(_) => "number",
+                    Value::Bool(_) => "boolean",
+                    Value::Null => "null",
+                    Value::Object(_) => unreachable!(),
+                };
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "params_path: top-level JSON must be an object, found {shape}"
+                    ),
+                    format!(
+                        "Wrap it under the key it belongs to, e.g. {{\"<entry_collection>\": <your {shape}>}}. \
+                         A bare {shape} cannot be merge-patched into params and would be silently discarded."
+                    ),
+                ));
+            }
             a.params = Some(parsed);
         }
 
@@ -1016,5 +1041,98 @@ mod tests {
             err.to_string().contains("not valid JSON"),
             "expected JSON parse error, got: {err}"
         );
+    }
+
+    /// Regression: docs/issues/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
+    /// A bare top-level array is valid JSON, so it slipped past the only two
+    /// guards (mutual exclusion + JSON validity) and reached
+    /// `apply_merge_patch`, whose `(Object, Object)` match arm silently fell
+    /// through — reporting success while discarding the entire payload.
+    /// The schema's `"type": "object"` constrains only the INLINE `params`
+    /// argument; `params_path` bypasses that boundary entirely.
+    #[tokio::test]
+    async fn params_path_bare_array_is_refused_not_silently_dropped() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-arr");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), r#"[{"id": "F-1"}, {"id": "F-2"}]"#).unwrap();
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-arr",
+                    "prompt": "p",
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "must be recoverable so the caller can retry with a wrapped object"
+        );
+        assert!(
+            err.to_string().contains("array"),
+            "the error must name the actual shape so the fix is obvious: {err}"
+        );
+    }
+
+    /// The merge path is where the silent drop actually bit — a bare array
+    /// under `merge=true` is the exact reproduction in the bug report.
+    #[tokio::test]
+    async fn params_path_bare_array_is_refused_on_the_merge_path_too() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-arr-merge");
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "pp-arr-merge", "prompt": "p", "params": {"keep": 1}}),
+            )
+            .await
+            .unwrap();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), r#"["a", "b"]"#).unwrap();
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-arr-merge",
+                    "merge": true,
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
+
+        // A refused call must not disturb what was already stored.
+        let cat = ctx.catalog.lock();
+        let row = crate::librarian::catalog::augmentation::get(&cat, "pp-arr-merge")
+            .unwrap()
+            .unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["keep"], 1);
+    }
+
+    /// Scalars are the same class of mistake and must not fall through either.
+    #[tokio::test]
+    async fn params_path_scalar_is_refused() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-scalar");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "42").unwrap();
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-scalar",
+                    "prompt": "p",
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
     }
 }

@@ -429,8 +429,14 @@ pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
 /// Shallow RFC 7396 merge-patch applied in place to `target`. `null` keys in the
 /// patch delete; non-null values overwrite the corresponding target key entirely.
 /// Nested objects are overwritten in full (not recursively merged). This is intentional —
-/// artifact params are expected to be flat key-value objects. Non-object patches are
-/// no-ops (the tool schema enforces object at the boundary).
+/// artifact params are expected to be flat key-value objects.
+///
+/// Non-object patches are silent no-ops. Callers MUST reject them at their own
+/// input boundary rather than relying on the tool schema: the schema's
+/// `"type": "object"` covers only the inline `params` argument, and
+/// `params_path` reads a file that never passes through it. That gap let a bare
+/// top-level array report success while discarding the whole payload
+/// (docs/issues/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md).
 pub fn apply_merge_patch(target: &mut Value, patch: &Value) {
     if let (Value::Object(t), Value::Object(p)) = (target, patch) {
         for (k, v) in p {
