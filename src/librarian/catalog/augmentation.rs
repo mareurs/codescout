@@ -172,6 +172,16 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
     Ok(true)
 }
 
+/// Result of a successful [`append_entry`].
+#[derive(Debug)]
+pub struct AppendOutcome {
+    /// The id assigned to the new entry.
+    pub id: String,
+    /// Set when the body claimed ids the params array does not carry — the
+    /// append itself succeeded, but the structured index is incomplete.
+    pub warning: Option<String>,
+}
+
 /// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
 /// `params.<entry_collection>`. Runs inside a single `IMMEDIATE` transaction
 /// so the read-max-write is safe under both intra-process and cross-process
@@ -183,7 +193,7 @@ pub fn append_entry(
     id_prefix: &str,
     mut entry: Value,
     cites: &[String],
-) -> Result<String> {
+) -> Result<AppendOutcome> {
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -221,7 +231,41 @@ pub fn append_entry(
         .flatten()
         .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(String::from))
         .collect();
-    let new_id = format!("{id_prefix}-{}", next_index(&existing_ids, id_prefix));
+    // The params array is NOT the only surface that claims ids. For the common
+    // tracker shape the markdown body (index table + `## PREFIX-N` sections) is
+    // the canonical human-readable surface, and the documented 3-step flow
+    // (body section -> index row -> append_entry) lets params legitimately lag
+    // the body when a session skips step 3. Folding the body's max in makes the
+    // reissue impossible instead of silent.
+    // See docs/issues/2026-07-20-append-entry-id-drift-params-vs-body.md
+    let abs_path: Option<String> = tx
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE id = ?1",
+            [artifact_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let body_max = abs_path
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|body| body_max_index(&body, id_prefix));
+
+    let params_next = next_index(&existing_ids, id_prefix);
+    let next = params_next.max(body_max.map_or(0, |m| m + 1));
+    let new_id = format!("{id_prefix}-{next}");
+
+    // Skipping the collision is only half the repair — params is still missing
+    // the rows the body already documents, and nothing else would ever say so.
+    let warning = body_max.filter(|m| m + 1 > params_next).map(|m| {
+        let params_max = match params_next {
+            1 => "none".to_string(),
+            n => format!("{id_prefix}-{}", n - 1),
+        };
+        format!(
+            "params lags body: the body already claims {id_prefix}-{m} but params' highest is \
+             {params_max}. Assigned {new_id} to avoid a collision — backfill the missing params \
+             rows from the body so the structured index matches."
+        )
+    });
 
     if let Some(obj) = entry.as_object_mut() {
         obj.insert("id".to_string(), json!(new_id));
@@ -270,7 +314,10 @@ pub fn append_entry(
         }
     }
     tx.commit()?;
-    Ok(new_id)
+    Ok(AppendOutcome {
+        id: new_id,
+        warning,
+    })
 }
 
 /// Resolve a user-supplied cite ref to a stable `entry_cite.dst_ref`.
@@ -347,6 +394,25 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
             ids.len()
         ))),
     }
+}
+
+/// Highest `<id_prefix>-N` index already claimed by an artifact's markdown body.
+///
+/// Only line-anchored occurrences count: a markdown heading (`## F-12`) or the
+/// leading cell of an index-table row (`| F-12 | ... |`), optionally wrapped in
+/// backticks/bold/link brackets. Those are exactly the two surfaces the
+/// documented 3-step tracker flow writes. Prose mentions are deliberately
+/// ignored — an aside like "planned F-999" must not blow a hole in the
+/// numbering, and over-allocating is only safe when the trigger is precise.
+pub(crate) fn body_max_index(body: &str, id_prefix: &str) -> Option<u64> {
+    let esc = regex::escape(id_prefix);
+    let re = regex::Regex::new(&format!(
+        r"(?m)^(?:#{{1,6}}[ \t]+|\|[ \t]*)[`*\[]*{esc}-(\d+)\b"
+    ))
+    .ok()?;
+    re.captures_iter(body)
+        .filter_map(|c| c[1].parse::<u64>().ok())
+        .max()
 }
 
 pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
@@ -800,7 +866,8 @@ mod tests {
             json!({"status": "fail"}),
             &[],
         )
-        .unwrap();
+        .unwrap()
+        .id;
 
         assert_eq!(id, "F-1");
         let row = get(&cat, "art1").unwrap().unwrap();
@@ -818,8 +885,105 @@ mod tests {
         a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-3"},{"id":"F-9"}]}"#.to_string();
         upsert(&cat, &a).unwrap();
 
-        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap();
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+            .unwrap()
+            .id;
         assert_eq!(id, "F-10");
+    }
+
+    #[test]
+    fn append_entry_skips_ids_already_claimed_by_the_body() {
+        // Regression: docs/issues/2026-07-20-append-entry-id-drift-params-vs-body.md
+        // The documented 3-step tracker flow (body section -> index row ->
+        // append_entry) lets params lag the body whenever a session skips step 3.
+        // Next-id must be max(params_max, body_max) + 1, not params_max + 1.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tracker.md");
+        std::fs::write(
+            &path,
+            "# Tracker\n\n| ID | Title |\n|----|-------|\n| F-33 | body-only entry |\n\n## F-33 — body-only entry\nprose\n",
+        )
+        .unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = path.clone();
+        art_upsert(&cat, &art).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-32"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+            .unwrap()
+            .id;
+        assert_eq!(id, "F-34");
+    }
+
+    #[test]
+    fn body_max_index_reads_headings_and_index_rows() {
+        let body =
+            "## F-3 — a\n\n| ID | x |\n| `F-7` | y |\n###### **F-5** z\n| [F-4](#f-4) | w |\n";
+        assert_eq!(body_max_index(body, "F"), Some(7));
+    }
+
+    #[test]
+    fn body_max_index_ignores_prose_mentions() {
+        // A speculative aside must not blow a hole in the numbering.
+        let body = "## F-3 — a\n\nWe should file F-999 for this later. See also F-500.\n";
+        assert_eq!(body_max_index(body, "F"), Some(3));
+    }
+
+    #[test]
+    fn body_max_index_respects_prefix_boundaries() {
+        // `F` must not match `FX-9`, and `F-12x` is not `F-12`.
+        let body = "## FX-900 — other tracker\n## F-12x — malformed\n## F-2 — real\n";
+        assert_eq!(body_max_index(body, "F"), Some(2));
+    }
+
+    #[test]
+    fn body_max_index_returns_none_when_body_claims_nothing() {
+        assert_eq!(body_max_index("# Tracker\n\nno entries yet\n", "F"), None);
+    }
+
+    #[test]
+    fn append_entry_ignores_body_when_params_is_ahead() {
+        // The body lagging params (the normal steady state mid-flow) must not
+        // pull the next id backwards.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tracker.md");
+        std::fs::write(&path, "## F-2 — stale body\n").unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = path.clone();
+        art_upsert(&cat, &art).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-9"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+            .unwrap()
+            .id;
+        assert_eq!(id, "F-10");
+    }
+
+    #[test]
+    fn append_entry_tolerates_a_body_missing_from_disk() {
+        // sample_art points at /test/r/<id>.md, which does not exist. A missing
+        // or unreadable file must degrade to params-only, never fail the append.
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-4"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let id = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[])
+            .unwrap()
+            .id;
+        assert_eq!(id, "F-5");
     }
 
     #[test]
@@ -934,7 +1098,8 @@ mod tests {
             json!({"paths": ["src/**/*.rs"], "rule": "R", "status": "active"}),
             &[],
         )
-        .unwrap();
+        .unwrap()
+        .id;
         assert_eq!(id, "C-1");
     }
 
@@ -957,7 +1122,8 @@ mod tests {
             json!({"paths": ["[invalid"], "status": "fail"}),
             &[],
         )
-        .unwrap();
+        .unwrap()
+        .id;
         assert_eq!(id, "F-1");
     }
 
@@ -1023,8 +1189,8 @@ mod tests {
             .unwrap()
         });
 
-        let id1 = h1.join().unwrap();
-        let id2 = h2.join().unwrap();
+        let id1 = h1.join().unwrap().id;
+        let id2 = h2.join().unwrap().id;
 
         assert_ne!(
             id1, id2,

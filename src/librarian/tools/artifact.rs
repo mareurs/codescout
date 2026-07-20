@@ -168,7 +168,7 @@ impl Tool for Artifact {
                 },
                 "id_prefix": {
                     "type": "string",
-                    "description": "append_entry: id prefix — the assigned id is `<id_prefix>-<next integer>`, computed from the live max across existing entries"
+                    "description": "append_entry: id prefix — the assigned id is `<id_prefix>-<next integer>`, computed from the live max across both existing params entries and ids the markdown body already claims (headings / index rows), so a body that ran ahead of params cannot be reissued. Response carries a `warning` when params lags the body."
                 },
                 "entry": {
                     "type": "object",

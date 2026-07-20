@@ -47,7 +47,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
     let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
-    let id = augmentation::append_entry(
+    let outcome = augmentation::append_entry(
         &mut cat,
         &target,
         &a.entry_collection,
@@ -55,7 +55,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         a.entry,
         &a.cites,
     )?;
-    Ok(json!({"id": id, "artifact_id": target}))
+    let mut out = json!({"id": outcome.id, "artifact_id": target});
+    if let Some(w) = outcome.warning {
+        out["warning"] = json!(w);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -133,6 +137,68 @@ mod tests {
         .unwrap();
 
         assert_eq!(result["id"], "F-1");
+    }
+
+    #[tokio::test]
+    async fn call_warns_when_params_lags_the_body() {
+        // Regression: docs/issues/2026-07-20-append-entry-id-drift-params-vs-body.md
+        // Skipping the colliding id is only half the repair — params is still
+        // missing the rows the body documents, so say so.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tracker.md");
+        std::fs::write(&path, "## F-8 — body-only entry\n").unwrap();
+
+        let ctx = mk_ctx();
+        seed(&ctx, "art1");
+        {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET abs_path = ?1 WHERE id = 'art1'",
+                    [path.to_str().unwrap()],
+                )
+                .unwrap();
+        }
+
+        let result = call(
+            &ctx,
+            json!({
+                "id": "art1",
+                "entry_collection": "failures",
+                "id_prefix": "F",
+                "entry": {"status": "fail"}
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id"], "F-9");
+        let warning = result["warning"].as_str().expect("expected a warning");
+        assert!(
+            warning.contains("F-8"),
+            "warning should name the body's max: {warning}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_omits_warning_when_params_is_current() {
+        let ctx = mk_ctx();
+        seed(&ctx, "art1");
+
+        let result = call(
+            &ctx,
+            json!({
+                "id": "art1",
+                "entry_collection": "failures",
+                "id_prefix": "F",
+                "entry": {"status": "fail"}
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id"], "F-1");
+        assert!(result.get("warning").is_none());
     }
 
     #[tokio::test]
