@@ -86,6 +86,9 @@ pub struct EmbedderHttp {
     /// remote embedder. Sent only on the dense (`/v1/embeddings`) leg.
     api_key: Option<String>,
     client: reqwest::Client,
+    /// Memoised sparse-server per-request cap. Resolved on first use because
+    /// `EmbedderHttp::new` is synchronous and the probe is async.
+    sparse_batch_cap: tokio::sync::OnceCell<usize>,
 }
 
 #[derive(Serialize)]
@@ -114,6 +117,33 @@ struct OpenAiEmbedItem {
 struct SparseEntry {
     index: u32,
     value: f32,
+}
+
+// Thread-local override for `CODESCOUT_EMBED_BATCH`, consulted only in
+// `#[cfg(test)]` builds. Test-only indirection so `resolve_batch_size`'s
+// `EnvGuard`-backed tests can inject an override without mutating real
+// process env: `#[tokio::test]`'s default current-thread runtime executes
+// an entire test body (assertions, `.await`s, and all) on exactly one OS
+// thread, so a thread-local is fully isolated per test function with zero
+// cross-test interference. Mutating the *real* environment instead raced
+// concurrently-running tests reading process env on other OS threads — the
+// identical, previously-fixed shape as bug a656f8cec220d347
+// (`docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`).
+// See `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+#[cfg(test)]
+thread_local! {
+    static TEST_ENV_BATCH_OVERRIDE: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(not(test))]
+fn embed_batch_env_override() -> Option<String> {
+    std::env::var("CODESCOUT_EMBED_BATCH").ok()
+}
+
+#[cfg(test)]
+fn embed_batch_env_override() -> Option<String> {
+    TEST_ENV_BATCH_OVERRIDE.with(|c| c.borrow().clone())
 }
 
 impl EmbedderHttp {
@@ -175,6 +205,7 @@ impl EmbedderHttp {
             dense_only: false,
             api_key: None,
             client: reqwest::Client::new(),
+            sparse_batch_cap: tokio::sync::OnceCell::new(),
         }
     }
     /// Set the bearer token for the dense endpoint. Builder-style; `new()` reads
@@ -409,6 +440,52 @@ impl EmbedderHttp {
         }
         Ok(out)
     }
+    /// Per-request input count for both legs.
+    ///
+    /// `CODESCOUT_EMBED_BATCH` → the sparse server's advertised
+    /// `max_client_batch_size` → 8. The 8 preserves the historical value for any
+    /// server that does not answer `/info`.
+    ///
+    /// Discovered rather than hardcoded on purpose: the previous `const BATCH = 8`
+    /// was justified by a comment citing a cap that only `sparse-amd` ever
+    /// imposed, and it silently survived that service's removal.
+    async fn resolve_batch_size(&self) -> usize {
+        const FALLBACK: usize = 8;
+        *self
+            .sparse_batch_cap
+            .get_or_init(|| async {
+                if let Some(n) = embed_batch_env_override()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|&n| n > 0)
+                {
+                    tracing::info!(batch = n, source = "env", "embed batch size");
+                    return n;
+                }
+                let url = format!("{}/info", self.sparse_base);
+                let discovered = async {
+                    let resp = self.client.get(&url).send().await.ok()?;
+                    if !resp.status().is_success() {
+                        return None;
+                    }
+                    let v: serde_json::Value = resp.json().await.ok()?;
+                    v.get("max_client_batch_size")?.as_u64().map(|n| n as usize)
+                }
+                .await
+                .filter(|&n| n > 0);
+
+                match discovered {
+                    Some(n) => {
+                        tracing::info!(batch = n, source = "info", "embed batch size");
+                        n
+                    }
+                    None => {
+                        tracing::info!(batch = FALLBACK, source = "fallback", "embed batch size");
+                        FALLBACK
+                    }
+                }
+            })
+            .await
+    }
 
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
         if self.dense_only {
@@ -436,10 +513,11 @@ impl EmbedderHttp {
             }
             return Ok(out);
         }
-        // The sparse (SPLADE/TEI) server caps client batches at 8
-        // (HTTP 422 "batch size N > maximum allowed batch size 8"), so keep
-        // both the dense and sparse legs at or below that limit.
-        let batch = 8; // replaced in Task 4
+        // The sparse (SPLADE/TEI) server caps client batches at a
+        // server-advertised limit (HTTP 422 "batch size N > maximum allowed
+        // batch size M" otherwise); discover it instead of hardcoding, so
+        // keep both the dense and sparse legs at or below that limit.
+        let batch = self.resolve_batch_size().await;
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(batch) {
             out.extend(self.embed_one_batch(chunk.to_vec()).await?);
@@ -809,5 +887,126 @@ mod tests {
         );
         dense_mock.assert_async().await;
         sparse_mock.assert_async().await;
+    }
+
+    /// RAII guard for the `CODESCOUT_EMBED_BATCH` override consulted by
+    /// `resolve_batch_size` via `embed_batch_env_override()`. Backed by the
+    /// `TEST_ENV_BATCH_OVERRIDE` thread-local rather than real process env:
+    /// mutating real env here raced concurrently-running tests reading
+    /// process env on other OS threads — the identical, previously-fixed
+    /// shape as bug a656f8cec220d347. See
+    /// docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md.
+    /// `key` is accepted only for call-site symmetry with the generic
+    /// EnvGuard shape used elsewhere (e.g. src/librarian/indexer.rs:1074);
+    /// this guard only ever targets `CODESCOUT_EMBED_BATCH`.
+    struct EnvGuard {
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(_key: &'static str, value: &str) -> Self {
+            let original =
+                TEST_ENV_BATCH_OVERRIDE.with(|c| c.borrow_mut().replace(value.to_string()));
+            Self { original }
+        }
+        fn unset(_key: &'static str) -> Self {
+            let original = TEST_ENV_BATCH_OVERRIDE.with(|c| c.borrow_mut().take());
+            Self { original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            TEST_ENV_BATCH_OVERRIDE.with(|c| *c.borrow_mut() = self.original.take());
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_size_discovered_from_info() {
+        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", "/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"max_client_batch_size":32,"max_input_length":512}"#)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        assert_eq!(e.resolve_batch_size().await, 32);
+    }
+
+    #[tokio::test]
+    async fn batch_size_falls_back_to_8_when_info_missing() {
+        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", "/info")
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        assert_eq!(
+            e.resolve_batch_size().await,
+            8,
+            "a non-TEI sparse server must keep today's behaviour"
+        );
+    }
+
+    #[tokio::test]
+    async fn env_override_wins_over_info() {
+        let _g = EnvGuard::set("CODESCOUT_EMBED_BATCH", "4");
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", "/info")
+            .with_status(200)
+            .with_body(r#"{"max_client_batch_size":32}"#)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        assert_eq!(e.resolve_batch_size().await, 4);
+    }
+
+    #[tokio::test]
+    async fn batch_size_is_memoised() {
+        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("GET", "/info")
+            .with_status(200)
+            .with_body(r#"{"max_client_batch_size":32}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        assert_eq!(e.resolve_batch_size().await, 32);
+        assert_eq!(e.resolve_batch_size().await, 32);
+        m.assert_async().await; // exactly one /info request
+    }
+
+    /// Discovery *failure* must be memoised too, not just success — otherwise a
+    /// `OnceCell` misuse that re-probes on every `embed_batch` call (e.g. storing
+    /// `Option<usize>` and re-running on `None`) would pass every other test here
+    /// while adding an HTTP round-trip per sub-batch in production against any
+    /// sparse server that never answers `/info`.
+    #[tokio::test]
+    async fn batch_size_failure_is_memoised() {
+        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
+        let mut server = mockito::Server::new_async().await;
+        let m = server
+            .mock("GET", "/info")
+            .with_status(404)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        assert_eq!(e.resolve_batch_size().await, 8);
+        assert_eq!(e.resolve_batch_size().await, 8);
+        m.assert_async().await; // exactly one /info request despite two calls
     }
 }
