@@ -131,11 +131,25 @@ struct SparseEntry {
     value: f32,
 }
 
-/// Concurrent in-flight sub-batches. 4 is where both legs saturated in the
-/// 2026-07-27 sweep (sparse 2.7 → 9.2 chunks/s; both regressed at 8). That sweep
-/// ran under contention from four concurrent indexers — re-measure on an idle
-/// card before treating 4 as final.
-const DEFAULT_INFLIGHT: usize = 4;
+/// Concurrent in-flight sub-batches. Default is 1 (sequential): the 2026-07-27
+/// idle-card sweep (`--force` re-index, 55,815 chunks) measured the sparse
+/// (SPLADE) leg as GPU-bound at ~4.4 chunks/s with `inference_time` alone
+/// running 6.6-12.1s per 32-input request, and flat at 20.5 / 20.9 / 20.7 /
+/// 20.7 chunks/s across concurrency 1 / 2 / 4 / 8 — client concurrency cannot
+/// move a GPU-bound ceiling. Raising `inflight` only adds
+/// `(inflight-1) x inference_time` of `queue_time` per request (measured
+/// 14.5-23.5s of a 23-33s total) and multiplies SPLADE's per-token
+/// `[tokens x 30522]` f16 vocab-projection tensor, which is what drove
+/// observed VRAM from 374 MiB idle to 2710 MiB under batch 32 x inflight 4.
+///
+/// The earlier `4` came from a sweep (sparse 2.7 -> 9.2 chunks/s) taken while
+/// four duplicate indexers were competing for the same GPU — concurrency was
+/// relieving *that* contention, not helping a single client; it was a
+/// measurement of the bug this project fixed elsewhere, not of this knob.
+///
+/// The machinery is deliberately kept for a faster sparse backend or a card
+/// with real headroom: raise via `CODESCOUT_EMBED_INFLIGHT` or this constant.
+const DEFAULT_INFLIGHT: usize = 1;
 
 /// Drive `embed_one` over `texts` in `batch`-sized sub-batches, at most `inflight`
 /// concurrently, reassembling results in **input order**.
@@ -1212,13 +1226,18 @@ mod tests {
     /// a number nobody reads. Pins two things with the same AtomicUsize
     /// active/max_active idiom used by `bfs_parallelizes_one_hop_within_level`
     /// (`src/tools/symbol/call_graph/traversal.rs`): (1) the bound itself —
-    /// default inflight caps concurrent sub-batches at `DEFAULT_INFLIGHT`, not
-    /// all 8 at once; (2) that `inflight_override` actually reaches
-    /// `resolve_inflight` — overriding to "1" must serialize every sub-batch.
-    /// A `resolve_inflight` that ignores `self.inflight_override` (returns
-    /// `DEFAULT_INFLIGHT` unconditionally) or that hardcodes `1` both pass
-    /// `embed_chunks_ordered`'s own ordering/error/empty-input tests untouched
-    /// — only this test catches them.
+    /// default inflight (now 1, per the idle-card sweep) serializes every
+    /// sub-batch, not runs all 8 at once; (2) that `inflight_override` actually
+    /// reaches `resolve_inflight` — overriding to "3" must raise observed
+    /// concurrency above the default. Using a value >1 for the override case
+    /// (rather than 1) is deliberate: with `DEFAULT_INFLIGHT = 1`, an override
+    /// of "1" would be indistinguishable from the default and
+    /// `fn resolve_inflight(&self) -> usize { 1 }` would pass both halves
+    /// silently. A `resolve_inflight` that ignores `self.inflight_override`
+    /// (returns `DEFAULT_INFLIGHT` unconditionally) or that hardcodes the old
+    /// default of `4` both pass `embed_chunks_ordered`'s own
+    /// ordering/error/empty-input tests untouched — only this test catches
+    /// them.
     #[tokio::test]
     async fn resolve_inflight_bound_is_enforced_and_overridable() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1261,14 +1280,14 @@ mod tests {
             EmbedderHttp::with_config("http://unused.invalid", "http://unused.invalid", 3, "m", "");
         assert_eq!(
             observed_max_concurrency(e.resolve_inflight()).await,
-            DEFAULT_INFLIGHT,
-            "default resolve_inflight() must cap concurrency at DEFAULT_INFLIGHT, not 8"
+            1,
+            "default resolve_inflight() must serialize sub-batches (DEFAULT_INFLIGHT = 1)"
         );
 
-        let e = e.with_inflight_override(Some("1".into()));
+        let e = e.with_inflight_override(Some("3".into()));
         assert_eq!(
             observed_max_concurrency(e.resolve_inflight()).await,
-            1,
+            3,
             "inflight_override must actually be read by resolve_inflight"
         );
     }
