@@ -1,0 +1,235 @@
+# Design — Embedder batch sizing + bounded request concurrency
+
+**Status:** design approved 2026-07-27 · branch `experiments`
+**Bugs:** [[2026-07-27-ast-chunker-no-minimum-chunk-size]] (same symptom — slow index —
+different cause; this spec addresses the throughput half, the chunk floor is deferred)
+**Related:** [[2026-07-27-indexer-walks-git-and-tool-state-dirs]],
+`docs/research/2026-05-06-retrieval-stack-benchmark.md`
+
+## Problem
+
+A full re-index of `backend-kotlin` (43,582 chunks) has been running for over 2.5 hours at
+roughly **5.8 chunks/sec**. The Phase 5.5 benchmark synced 21,115 points in 185 s — about
+**114 chunks/sec**. Some of that gap is hardware (the benchmark ran on a faster AMD card,
+and its `Sync (s)` column may exclude the sparse pass), but not a 20× factor.
+
+The cause is request framing, not model speed. `EmbedderHttp::embed_batch`
+(`src/retrieval/embedder.rs:328-440`) issues **8 inputs per HTTP request, one request at a
+time**:
+
+```rust
+// The sparse (SPLADE/TEI) server caps client batches at 8
+// (HTTP 422 "batch size N > maximum allowed batch size 8"), so keep
+// both the dense and sparse legs at or below that limit.
+const BATCH: usize = 8;
+for chunk in texts.chunks(BATCH) { ... }   // sequential await
+```
+
+**That comment is stale.** The running sparse server reports:
+
+```
+max_client_batch_size : 32
+max_input_length      : 512
+max_batch_tokens      : 16384      (32 × 512 — the cap is the token budget)
+max_concurrent_requests: 512
+```
+
+The only service that ever imposed 8 was `sparse-amd`, which set
+`--max-client-batch-size 8` explicitly. That service was deleted from
+`docker-compose.yml` on 2026-07-27. The GPU profile never had the cap, so the client has
+been running at a quarter of the server's per-request capacity, against a dense server
+provisioned `--parallel 16 --batch-size 4096 --ubatch-size 4096` that logs
+`all slots are idle` between requests.
+
+### Measurements
+
+Batch sweep against the live servers, 2026-07-27. **Taken while the index was running**, so
+absolute values are a pessimistic floor; the ordering and saturation points reproduced
+across repetitions.
+
+```
+sequential, one request at a time
+ batch    dense s  d chunks/s    sparse s  s chunks/s
+     8      0.222        36.0       7.913         1.0
+    16      1.515        10.6       8.178         2.0
+    32      2.030        15.8      11.300         2.8
+    64      3.124        20.5         HTTP 413 Payload Too Large
+   128      6.373        20.1         HTTP 413 Payload Too Large
+
+concurrency at batch 32
+  dense    conc=1 16.3/s   conc=2 32.0/s   conc=4 32.2/s   conc=8 28.2/s
+  sparse   conc=1  2.7/s   conc=2  8.7/s   conc=4  9.2/s   conc=8  9.2/s
+```
+
+Three conclusions:
+
+1. **SPLADE is the bottleneck**, 4–10× slower than dense at every batch size. Because
+   `embed_batch` already runs the two legs concurrently under `tokio::try_join!`, the
+   pipeline moves at sparse's pace — dense-side tuning buys nothing.
+2. **Sparse hard-caps at 32 per request.** TEI signals a `max_client_batch_size` violation
+   with `413`, not `422` as the stale comment says. The 64-input probe carried roughly 16 KB
+   against the server's `payload_limit: 2000000`, so the rejection is the batch cap, not a
+   byte-size limit.
+3. **Concurrency saturates at 4** on both legs; at 8 both regress.
+
+Non-monotonic dense readings (36/s at batch 8 vs 10.6/s at 16) are contention noise.
+
+## Scope
+
+**In scope**
+
+1. Lazy discovery of the sparse server's `max_client_batch_size` via `GET {sparse_base}/info`.
+2. Bounded, **order-preserving** concurrent issue of sub-batches inside
+   `EmbedderHttp::embed_batch`.
+3. Extraction of the existing loop body into a testable `embed_one_batch`.
+4. Env overrides `CODESCOUT_EMBED_BATCH` / `CODESCOUT_EMBED_INFLIGHT`.
+5. A clearer `413` error naming both the attempted size and the discovered cap.
+
+**Out of scope**
+
+- **The chunk floor / sibling merge.** Deferred deliberately: it changes embeddings and so
+  needs score re-validation against the retrieval benchmark, whereas this change does not.
+  Measure this first, then decide what the floor is still worth. Tracked in
+  [[2026-07-27-ast-chunker-no-minimum-chunk-size]].
+- **Raising TEI's `--max-client-batch-size`** (and `--max-batch-tokens` alongside it, since
+  the cap is `max_batch_tokens / max_input_length`) to lift the 32 ceiling. Possible later;
+  the sweep shows concurrency saturating before the per-request cap becomes binding.
+- **Moving SPLADE off this GPU**, or dropping sparse from the index path.
+- Any change to `stream_index`, `flush_pending`, `flush_batch`, the chunker, or the payload.
+
+**Decisions locked (2026-07-27)**
+
+- Concurrency lives **in `EmbedderHttp::embed_batch`**, not in `stream_index` — keeps the
+  `flush_batch=256` memory bound (a 68 GB OOM scar,
+  `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`) untouched, and benefits every
+  caller.
+- Batch size is **discovered from `/info`**, not hardcoded — hardcoding is what produced
+  this bug.
+- `CODESCOUT_EMBED_BATCH` **wins outright** over the discovered cap. It is an escape hatch
+  for a server whose `/info` lies or is absent; a wrong value surfaces as a clear `413`.
+- `inflight` default **4**, from the sweep's saturation point. Measured under contention —
+  re-validate on an idle card (see Verification).
+
+## Retrieval quality is unchanged by construction
+
+Same chunks, same texts, same models — therefore byte-identical vectors. llama-server
+mean-pooling and TEI SPLADE both embed each input independently of batch composition, and
+`--auto-truncate` applies per input at `max_input_length: 512`. Only request framing
+changes.
+
+This is the property that makes the change cheap to land: **no benchmark re-run is required
+to accept it**, unlike the deferred chunk floor. Verification is a timing exercise, not a
+quality exercise.
+
+## Mechanism
+
+### a. Lazy batch-cap discovery
+
+`EmbedderHttp::new` is **synchronous** (`src/retrieval/embedder.rs:120`), so an async probe
+cannot run in the constructor. Discovery is lazy via a new field:
+
+```rust
+sparse_batch_cap: tokio::sync::OnceCell<usize>,
+```
+
+Resolved on the first non-`dense_only` `embed_batch` call:
+
+```
+CODESCOUT_EMBED_BATCH  →  /info max_client_batch_size  →  8
+```
+
+The `8` fallback covers a non-TEI sparse server, a `/info` 404, a timeout, or a parse
+failure — preserving today's behaviour exactly in every case where discovery cannot answer.
+The effective value is logged once at `info`.
+
+For the `dense_only` path there is no sparse server to probe: use the env override if set,
+else a default of 32 (the sweep showed dense healthy through 128; 32 is deliberately
+conservative).
+
+### b. Bounded concurrent issue
+
+Extract the current loop body verbatim — the `try_join!` of dense and sparse, the
+empty-string omit-and-re-expand, the dim check, the retry loop — into:
+
+```rust
+async fn embed_one_batch(&self, inputs: &[&str]) -> Result<Vec<EmbedOutput>>
+```
+
+`embed_batch` becomes a driver:
+
+```rust
+futures::stream::iter(texts.chunks(batch).map(|c| self.embed_one_batch(c)))
+    .buffered(inflight)          // buffered, NOT buffer_unordered
+    .try_collect::<Vec<Vec<EmbedOutput>>>()
+    .await
+    .map(|v| v.concat())
+```
+
+`futures = "0.3"` is already a dependency (`Cargo.toml:148`).
+
+### c. The invariant that must not break
+
+`flush_pending` zips embeddings back onto payloads **positionally** — the test module notes
+*"length matches `texts` so the zip in `flush_pending` stays aligned."* Misordering attaches
+every vector to the wrong chunk: no error, no crash, a silently corrupt index that only
+shows up as degraded search.
+
+`buffered` preserves input order. `buffer_unordered` does not. This is the single
+highest-risk line in the change, and a length-only assertion passes under both.
+
+## Error handling
+
+- The retry loop (424/429/5xx, 8 attempts, exponential backoff capped at ~6.4 s) moves
+  inside `embed_one_batch` unchanged. Concurrency raises contention on the shared sparse
+  server, so it becomes more load-bearing, not less.
+- `413` remains non-retryable — correct, since it is permanent for a given batch size. Its
+  message gains the attempted size and the discovered cap, because with discovery in place a
+  `413` specifically means the cap is wrong.
+- `try_collect` short-circuits on the first error and drops in-flight requests. Failure
+  granularity is unchanged: the flush fails, the index errors.
+- Peak in-flight memory rises from 8 to `inflight × batch` = 128 chunks, roughly 400 KB of
+  f32 plus sparse pairs. The caller's `flush_batch=256` bound is untouched.
+
+## Testing
+
+1. **Order preservation** — the critical test. A mock embedder returns a vector encoding its
+   input's index; assert output order matches input order across several sub-batches with
+   `inflight > 1`. Must be written so it **fails under `buffer_unordered`** — otherwise it
+   is not testing the thing that can break.
+2. **Discovery** — `/info` returns 32 → batch 32; `/info` 404 → batch 8; `/info` times out →
+   batch 8; `CODESCOUT_EMBED_BATCH` set → wins over both. Uses the existing `EnvGuard`
+   pattern (`docs/conventions/test-env-isolation.md`).
+3. **Behaviour preservation** — empty-string omit-and-re-expand alignment, dim-mismatch
+   error, `dense_only` path, and the existing `src/retrieval/sync.rs` tests
+   (`stream_index_force_reembeds_all_present_chunks` and siblings) all still pass.
+4. **413 message** — asserts the error text contains both the attempted size and the cap.
+
+## Verification
+
+Timing, not quality (see "unchanged by construction" above).
+
+1. Re-run `batch_sweep.py` on an **idle** GPU, once the in-flight `backend-kotlin` index
+   completes, to get a clean ceiling and confirm `inflight = 4` is still the saturation
+   point rather than an artifact of contention.
+2. Time a full forced re-index of one fixed project before and after.
+3. Confirm `semantic_search` results are unchanged on a fixed query set — a cheap guard
+   against the ordering invariant breaking, complementing the unit test.
+
+The honest claim is "measure it". The sweep projects sparse ~1.0 → ~9.2 chunks/s under
+contention; the real multiple on an idle card is unknown until step 1 runs.
+
+## Follow-ups
+
+- Decide the chunk floor's fate once this is measured
+  ([[2026-07-27-ast-chunker-no-minimum-chunk-size]]).
+- `RawChunk.metadata` is documented as a *"searchable header prepended before embedding"*,
+  but `stream_index` discards it — every payload carries `ast_header: ""`
+  (`src/retrieval/sync.rs:157-158`, confirmed against live qdrant payloads). Either the
+  header is dead weight in the chunker or it is a missing retrieval signal. Out of scope
+  here; worth its own bug.
+- `src/retrieval/sync.rs:167` cites `docs/issues/2026-06-19-mcp-server-oom-68gb.md`, but that
+  bug was archived to `docs/issues/archive/`. A one-line doc-ref fix; noted here because the
+  same stale path would otherwise have been copied into this spec.
+- `LanguageSpec::inner_node_types` documents size-gated recursion (*"when a container node
+  is too large"*) while `nodes_to_chunks` recurses unconditionally. The doc is stale
+  relative to `aa6bff1d` (2026-04-21). Fix alongside the chunk floor.
