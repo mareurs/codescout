@@ -49,11 +49,18 @@ impl Drop for IndexLock {
 ///
 /// Hashed so any `project_id` — including one with path separators or spaces —
 /// maps to a safe, fixed-length filename.
+///
+/// Sited in the per-user runtime directory rather than bare `temp_dir()`: a
+/// predictable path in world-writable `/tmp` lets a local user pre-create it as a
+/// symlink (which `set_len(0)` below would then truncate) or simply hold the flock
+/// to wedge every index run. `per_user_runtime_dir()` handles both platforms —
+/// `0o700` dir on Unix, already-per-user `temp_dir()` on Windows.
 pub fn lock_path(project_id: &str) -> PathBuf {
     let mut h = Sha256::new();
     h.update(project_id.as_bytes());
     let digest = format!("{:x}", h.finalize());
-    std::env::temp_dir().join(format!("codescout-index-{}.lock", &digest[..16]))
+    crate::socket_discovery::per_user_runtime_dir()
+        .join(format!("codescout-index-{}.lock", &digest[..16]))
 }
 
 /// Acquire the exclusive index lock for `project_id`, or fail immediately.
@@ -150,12 +157,28 @@ mod tests {
     /// A leftover lock *file* must never block a new run. flock is released by the
     /// kernel on process death, so this passes with no recovery logic — the test
     /// exists so nobody adds PID-liveness checks "to be safe".
+    ///
+    /// The planted PID is our OWN, deliberately: a liveness check would pass if we
+    /// wrote a dead pid like 999999 (above `pid_max` on most Linux configs), so that
+    /// value would not actually pin the stated intent.
     #[test]
     fn preexisting_lock_file_does_not_block() {
         let pid = unique_project("stale");
         let path = lock_path(&pid);
-        std::fs::write(&path, "999999\n").expect("simulate a lock file left by a dead process");
-        acquire(&pid).expect("a stale lock file must not block acquisition");
+        std::fs::write(&path, format!("{}\n", std::process::id()))
+            .expect("simulate a lock file left by a dead process");
+        let lock = acquire(&pid).expect("a stale lock file must not block acquisition");
+
+        // The PID write must TRUNCATE, not overwrite in place. Without `set_len(0)`
+        // a shorter pid leaves the old tail behind (e.g. "42\n999\n"), and an
+        // operator inspecting the lock during an incident reads a bogus second line.
+        drop(lock);
+        let contents = std::fs::read_to_string(&path).expect("read lock file");
+        assert_eq!(
+            contents.trim(),
+            std::process::id().to_string(),
+            "lock file must contain exactly the holder's pid, with no stale tail"
+        );
     }
 
     #[test]
