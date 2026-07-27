@@ -285,12 +285,15 @@ impl crate::retrieval::client::RetrievalClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::retrieval::client::RetrievalClient;
     use crate::retrieval::code_store::CodeVectorStore;
+    use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    use crate::retrieval::embedder::{BatchEmbedder, EmbedOutput, SparseVector};
+    use crate::retrieval::embedder::{BatchEmbedder, EmbedOutput, EmbedderHttp, SparseVector};
     use crate::retrieval::payload::CodePayload;
+    use crate::retrieval::reranker::RerankerHttp;
     use crate::retrieval::search::Hit;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn chunk_id_normalizes_native_separators() {
@@ -632,5 +635,124 @@ mod tests {
             added2 > added,
             "empty patterns must index everything: {added2} vs {added}"
         );
+    }
+
+    /// A `CodeVectorStore` whose `ensure_collection` sleeps briefly before
+    /// returning. `sync_project` calls `ensure_collection` immediately after
+    /// acquiring the index lock (before any real indexing work), so this gives
+    /// a controllable window in which the lock is provably still held —
+    /// without needing real files, a real embedder, or a real Qdrant.
+    struct SlowEnsureStore;
+
+    #[async_trait::async_trait]
+    impl CodeVectorStore for SlowEnsureStore {
+        async fn ensure_collection(&self, _c: &str, _d: u64) -> Result<()> {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            Ok(())
+        }
+        async fn chunk_refs(&self, _c: &str, _p: &str) -> Result<Vec<ChunkRef>> {
+            Ok(vec![])
+        }
+        async fn upsert_chunks(
+            &self,
+            _c: &str,
+            _chunks: &[(CodePayload, EmbedOutput)],
+        ) -> Result<()> {
+            Ok(())
+        }
+        async fn delete_chunks(&self, _c: &str, _p: &str, _ids: &[String]) -> Result<()> {
+            Ok(())
+        }
+        #[allow(clippy::too_many_arguments)]
+        async fn query(
+            &self,
+            _c: &str,
+            _p: &str,
+            _dense: &[f32],
+            _sparse: &SparseVector,
+            _limit: usize,
+            _bm25: f32,
+            _disable_sparse: bool,
+            _excl: &[String],
+        ) -> Result<Vec<Hit>> {
+            Ok(vec![])
+        }
+        async fn project_index_stats(&self, _c: &str, _p: &str) -> Result<(usize, usize)> {
+            Ok((0, 0))
+        }
+    }
+
+    fn test_retrieval_client(store: impl CodeVectorStore + 'static) -> RetrievalClient {
+        RetrievalClient {
+            code_store: Arc::new(store),
+            embedder: EmbedderHttp::new("http://unused.invalid", "http://unused.invalid", 3),
+            reranker: RerankerHttp::new("http://unused.invalid"),
+            config: RetrievalConfig {
+                qdrant_url: "http://unused.invalid".into(),
+                embedder_url: "http://unused.invalid".into(),
+                sparse_embedder_url: "http://unused.invalid".into(),
+                reranker_url: "http://unused.invalid".into(),
+                model_dim: 3,
+                profile: "cpu".into(),
+                bm25_boost: 1.0,
+                disable_sparse: false,
+                collection_prefix: String::new(),
+            },
+            lite: false,
+        }
+    }
+
+    /// Regression guard for the index-lock wiring in `sync_project`
+    /// (`let _index_lock = crate::retrieval::index_lock::acquire(project_id)?;`
+    /// at the top of the function). Binding the acquired guard to `_` instead
+    /// of `_index_lock` compiles clean and passes every OTHER retrieval test,
+    /// but drops the guard immediately — releasing the flock right away
+    /// instead of holding it for the sync pass — which is exactly how the
+    /// concurrent-index duplication bug this branch fixes would return.
+    ///
+    /// A single "acquire first, then call sync_project once" test cannot
+    /// distinguish `_index_lock` from `_`: if the lock is already held
+    /// externally, `sync_project`'s own `acquire(project_id)?` fails
+    /// identically either way, since that failure happens at the
+    /// `try_lock_exclusive` call itself, before the binding pattern is even
+    /// reached. So instead this spawns `sync_project` (slowed down via
+    /// `SlowEnsureStore` so it is provably still in flight) and, from the
+    /// OUTSIDE, tries to acquire the same lock while it runs: that outside
+    /// acquire must fail iff `sync_project`'s guard is still alive at that
+    /// moment.
+    #[tokio::test]
+    async fn sync_project_holds_index_lock_for_its_full_duration() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_id = format!(
+            "test-sync-lock-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        );
+
+        let client = test_retrieval_client(SlowEnsureStore);
+        let opts = SyncOpts::default();
+        let pid = project_id.clone();
+        let root = dir.path().to_path_buf();
+        let handle = tokio::spawn(async move { client.sync_project(&pid, &root, opts).await });
+
+        // Give the spawned call time to acquire the lock and enter
+        // ensure_collection's 300ms sleep, but stay well inside that window.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let contended = crate::retrieval::index_lock::acquire(&project_id);
+        assert!(
+            contended.is_err(),
+            "sync_project's index-lock guard must still be held while the call is in flight"
+        );
+        let msg = format!("{:#}", contended.unwrap_err());
+        assert!(
+            msg.contains("already running"),
+            "error should surface lock-contention wording, got: {msg}"
+        );
+
+        handle
+            .await
+            .expect("spawned task must not panic")
+            .expect("sync_project should still succeed once it completes");
     }
 }

@@ -84,8 +84,10 @@ pub fn acquire(project_id: &str) -> Result<IndexLock> {
     file.try_lock_exclusive().with_context(|| {
         format!(
             "another codescout index is already running for project '{project_id}' \
-             (lock: {}). Wait for it to finish, or inspect with \
-             `pgrep -af 'codescout index'`.",
+             (lock file: {} — its first line is the holder's PID). The holder may be \
+             a CLI `codescout index` run OR an in-process background index (e.g. an \
+             MCP server's auto-index task) — check the PID, don't assume `pgrep -af \
+             'codescout index'` will show it.",
             path.display()
         )
     })?;
@@ -206,6 +208,25 @@ mod tests {
             lock_path("project-one"),
             lock_path("project-two"),
             "distinct project ids must map to distinct lock files"
+        );
+    }
+
+    /// The lock must not sit directly in the bare, world-writable temp dir: a
+    /// predictable path there lets a local user pre-create it as a symlink,
+    /// which `set_len(0)` in `acquire` would then truncate (or simply hold the
+    /// flock to wedge every index run). Holds for both `per_user_runtime_dir()`
+    /// arms on Unix — the `XDG_RUNTIME_DIR` path and the
+    /// `temp_dir()/codescout-{uid}` fallback — since both are namespaced away
+    /// from bare `temp_dir()`. Fails on a revert of `lock_path` to
+    /// `std::env::temp_dir()` directly.
+    #[test]
+    fn lock_path_is_not_sited_in_bare_temp_dir() {
+        let p = lock_path("some-project-for-siting-check");
+        assert_ne!(
+            p.parent(),
+            Some(std::env::temp_dir().as_path()),
+            "lock file must not sit directly in the bare temp dir, got parent {:?}",
+            p.parent()
         );
     }
 }

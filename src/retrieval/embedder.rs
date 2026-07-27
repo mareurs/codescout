@@ -495,17 +495,49 @@ impl EmbedderHttp {
             }
         })?;
 
+        // The dense leg must return exactly one embedding per input. A gateway
+        // that silently truncates an oversize request (rather than erroring)
+        // would otherwise let a short response through: `embed_chunks_ordered`
+        // flattens sub-batches, so a short one shifts every later sub-batch's
+        // outputs onto the wrong payload downstream in `flush_pending`'s
+        // positional zip, dropping the tail chunks with no error at all.
+        if dense_batch.len() != inputs.len() {
+            return Err(anyhow!(
+                "embed_batch dense response length mismatch: got {} embeddings for {} inputs \
+                 — the dense embedder may be silently truncating an oversize request instead \
+                 of erroring. Try a smaller CODESCOUT_EMBED_BATCH.",
+                dense_batch.len(),
+                inputs.len()
+            ));
+        }
+
+        // Re-expand sparse rows back onto their original (possibly-empty)
+        // positions. Exhausting `sparse_nonempty` while a non-empty input still
+        // needs a row is a server contract violation (fewer rows than
+        // requested), not the deliberate "this input was empty" case — that
+        // case is tracked positionally via `s.is_empty()`, never by iterator
+        // exhaustion. Substituting a silent empty vector here would let a
+        // chunk land in the index with no sparse vector, invisible to
+        // sparse/hybrid retrieval with no error raised anywhere.
         let mut sparse_nonempty = sparse_nonempty.into_iter();
-        let sparse_resp: Vec<Vec<SparseEntry>> = inputs
-            .iter()
-            .map(|s| {
-                if s.is_empty() {
-                    Vec::new()
-                } else {
-                    sparse_nonempty.next().unwrap_or_default()
+        let mut sparse_resp: Vec<Vec<SparseEntry>> = Vec::with_capacity(inputs.len());
+        for s in &inputs {
+            if s.is_empty() {
+                sparse_resp.push(Vec::new());
+            } else {
+                match sparse_nonempty.next() {
+                    Some(v) => sparse_resp.push(v),
+                    None => {
+                        return Err(anyhow!(
+                            "embed_batch sparse response exhausted: expected {} non-empty rows \
+                             for {} inputs, server returned fewer",
+                            nonempty.len(),
+                            inputs.len()
+                        ));
+                    }
                 }
-            })
-            .collect();
+            }
+        }
 
         for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_resp) {
             if dense.len() != self.expected_dim {
@@ -818,6 +850,85 @@ mod tests {
         sparse_mock.assert_async().await;
     }
 
+    /// A dense leg that returns fewer embeddings than inputs must fail loudly,
+    /// not silently zip-and-truncate. Pre-Stage-2 this `zip` existed too, but
+    /// batch size was 8; Stage 2 raised it to 32 (discovered from `/info`),
+    /// which is where a gateway that truncates an oversize request instead of
+    /// erroring starts to bite: `embed_chunks_ordered` flattens sub-batches, so
+    /// a short one shifts every later sub-batch's outputs onto the wrong
+    /// payload downstream in `flush_pending`'s positional zip.
+    #[tokio::test]
+    async fn embed_one_batch_errors_on_dense_arity_mismatch() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        // 2 inputs requested, only 1 embedding returned.
+        let _dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.0,0.0,0.0],"index":0}]}"#)
+            .create_async()
+            .await;
+        // Sparse leg is complete and correct, so only the dense check can be
+        // what trips this test.
+        let _sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body(r#"[[],[]]"#)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let chunk = vec!["a".to_string(), "b".to_string()];
+        let err = e.embed_one_batch(chunk).await.expect_err(
+            "dense returning 1 embedding for 2 inputs must error, not silently truncate",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains('1') && msg.contains('2'),
+            "error should name both the returned and expected counts, got: {msg}"
+        );
+    }
+
+    /// Sparse-row exhaustion (server returns fewer non-empty rows than
+    /// requested) must be an error, not a silent empty-vector substitution.
+    /// The deliberate empty-vector case is for inputs that WERE empty, tracked
+    /// positionally by `s.is_empty()` — a genuine exhaustion of
+    /// `sparse_nonempty` while a non-empty input remains is a server contract
+    /// violation. Silently substituting `[]` here would let a chunk land in
+    /// the index with no sparse vector, invisible to sparse/hybrid retrieval,
+    /// with no error raised anywhere.
+    #[tokio::test]
+    async fn embed_one_batch_errors_on_sparse_exhaustion() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let _dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(
+                r#"{"data":[{"embedding":[0.0,0.0,0.0],"index":0},{"embedding":[1.0,0.0,0.0],"index":1}]}"#,
+            )
+            .create_async()
+            .await;
+        // 2 non-empty inputs requested, only 1 sparse row returned.
+        let _sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body(r#"[[{"index":1,"value":0.5}]]"#)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let chunk = vec!["a".to_string(), "b".to_string()];
+        let err = e.embed_one_batch(chunk).await.expect_err(
+            "sparse returning 1 row for 2 non-empty inputs must error, not substitute an empty vector",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exhausted") || msg.contains("fewer"),
+            "error should describe the sparse-row shortfall, got: {msg}"
+        );
+    }
+
     /// The sparse retry loop must actually retry a retryable status (429) and
     /// converge on success — not just "eventually errors". Kept fast by
     /// stubbing only two failures before success instead of exhausting the
@@ -871,6 +982,68 @@ mod tests {
         fail_1.assert_async().await;
         fail_2.assert_async().await;
         success.assert_async().await;
+    }
+
+    /// Pins the exact 8-attempt retry cap boundary (`attempt >= 8` in the
+    /// sparse retry loop). This is the only thing standing between a sparse
+    /// server stuck returning a retryable status (TEI model-load loop, OOM
+    /// crashloop) and an unbounded retry — and since Stage 1, that loop now
+    /// runs while the per-project index lock is held for the whole
+    /// `sync_project` pass: unbounded retry there means the lock never
+    /// releases, wedging every subsequent index for that project.
+    ///
+    /// Ignored by default: reaching the exact 8th-attempt boundary means
+    /// walking the real backoff ladder (`100ms * 2^min(attempt,6)` for 7
+    /// retries: 200+400+800+1600+3200+6400+6400 ≈ 19s) before the 8th failure
+    /// trips the cap — too slow for the default unit run.
+    ///
+    /// Run explicitly with:
+    ///   cargo test --lib retrieval::embedder::tests::sparse_retry_cap_stops_at_exactly_8_attempts -- --ignored
+    ///
+    /// Mutation-verified: deleting the `attempt >= 8` half of the guard
+    /// (leaving only `if !retryable`) makes the loop retry past the 8th
+    /// failure — since the mock has nothing else to fall through to, it keeps
+    /// answering 500 forever, so the call never returns. Wrapped in an outer
+    /// `tokio::time::timeout` so that hang surfaces as a clean assertion
+    /// failure instead of wedging the test binary.
+    #[tokio::test]
+    #[ignore = "exercises the full 8-attempt backoff ladder (~19s); run with \
+                `cargo test ... sparse_retry_cap_stops_at_exactly_8_attempts -- --ignored`"]
+    async fn sparse_retry_cap_stops_at_exactly_8_attempts() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let _dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+            .create_async()
+            .await;
+        // Persistently retryable: every request gets 500. Under the correct
+        // 8-attempt cap, exactly 8 requests are sent (the 8th failure trips
+        // the cap instead of sleeping and retrying a 9th time).
+        let fail_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(500)
+            .expect(8)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            e.embed_one_batch(vec!["x".to_string()]),
+        )
+        .await
+        .expect(
+            "must not hang past the 8-attempt cap (~19s worst case) — a persistently \
+             retryable status must eventually fail, not retry forever",
+        );
+
+        assert!(
+            result.is_err(),
+            "a persistently-retryable sparse status must fail once the 8-attempt cap is reached"
+        );
+        fail_mock.assert_async().await; // exactly 8 requests — the cap, not fewer, not more
     }
 
     /// The `retryable` boolean must gate correctly in both directions: a
