@@ -212,18 +212,77 @@ highest-risk line in the change, and a length-only assertion passes under both.
 
 ## Verification
 
-Timing, not quality (see "unchanged by construction" above).
+**MEASURED 2026-07-27 on an idle card. The result contradicts this spec's premise: Stage 2
+delivered no throughput gain, and its concurrency setting is actively harmful on this hardware.
+Stage 1 (the index lock) was the entire win.**
 
-1. Re-run `batch_sweep.py` on an **idle** GPU, once the in-flight `backend-kotlin` index
-   completes, to get a clean ceiling and confirm `inflight = 4` is still the saturation
-   point rather than an artifact of contention.
-2. Time a full forced re-index of one fixed project before and after.
-3. Confirm `semantic_search` results are unchanged on a fixed query set — a cheap guard
-   against the ordering invariant breaking, complementing the unit test.
+### What the sparse server actually does with real chunks
 
-The honest claim is "measure it". The sweep projects sparse ~1.0 → ~9.2 chunks/s under
-contention; the real multiple on an idle card is unknown until step 1 runs.
+`--force` re-index of `backend-kotlin` (55,815 chunks), single process, new binary. The log
+confirms discovery works — `embed batch size batch=32 source="info"` — and 180 s of steady state:
 
+```
+dense   768 chunk-embeddings / 24 requests  = 32.0 chunks/request, 4.27 chunks/s
+sparse   25 requests × 32                   = 800 chunks,          4.44 chunks/s
+```
+
+Per-request sparse timings, the decisive evidence:
+
+```
+total_time 32.9s   queue_time 23.5s   inference_time  7.1s
+total_time 26.6s   queue_time 14.5s   inference_time 12.1s
+total_time 23.5s   queue_time 16.9s   inference_time  6.6s
+```
+
+`inference_time` of 6.6–12.1 s for 32 inputs **is** the SPLADE ceiling: ~2.7–4.8 chunks/s,
+GPU-bound. Batch size and client concurrency cannot move it — it is the same tokens through the
+same card.
+
+### Three corrections to this spec
+
+**1. The batch sweep in "Measurements" above was unrepresentative and its absolute numbers do not
+transfer.** It used a ~260-char / ~65-token sample and measured sparse at 20.6 chunks/s. Real
+corpus chunks cost 4–5× more, giving 4.4 chunks/s. Only the *ordering* conclusion survived —
+sparse is the bottleneck, dense is not. Repeating the sweep on an idle card confirmed the flatness
+that the contended run had hidden: sparse measured 20.5 / 20.8 / 20.6 chunks/s at batch 8 / 16 / 32,
+and 20.5 / 20.9 / 20.7 / 20.7 at concurrency 1 / 2 / 4 / 8. **Flat in both dimensions.**
+
+**2. Raising the batch 8 → 32 bought nothing measurable.** It cut HTTP requests 4× (24 rather than
+~96 per 180 s), which is negligible overhead against a 7–12 s inference. Not harmful; not a win.
+
+**3. `DEFAULT_INFLIGHT = 4` should be 1 (or 2). It has two costs and no benefit.**
+
+- **Latency:** `queue_time` is 14.5–23.5 s of each request's 23–33 s total ≈ `(inflight − 1) ×
+  inference_time`. TEI serialises on the GPU, so 4 in flight means 3 sit in a queue.
+- **VRAM:** SPLADE went from **374 MiB idle to 2710 MiB** — 7×. It projects every token to a
+  vocab-sized `[tokens × 30522]` f16 tensor, so peak memory scales with concurrent tokens; four
+  in-flight 32-input batches multiply it. Card total reached 3783 / 6144 MiB. Exactly the hazard
+  the deleted `sparse-amd` service documented ("TEI's default 16384 drives ~13.7 GiB on this
+  16 GiB card") and that this plan recorded as unexplained.
+
+The `4` came from the *contended* sweep, where it appeared to lift sparse from 2.7 to 9.2
+chunks/s. That was concurrency relieving contention between four competing indexers — not
+concurrency helping a single client. A measurement taken under the bug being fixed.
+
+### Where the real gain came from
+
+Before: ~5.8 chunks/s aggregate, split across **four** indexers each doing the same full pass ⇒
+roughly **1.45 chunks/s of useful progress**. After: **4.45 chunks/s**, single pass.
+
+**~3× improvement, entirely attributable to Stage 1's per-project lock.** The GPU was saturated
+in both cases; duplication was wasting three quarters of it.
+
+### What is still on the table
+
+At 4.45 chunks/s a full `--force` re-embed of 55,815 chunks projects to ~3.5 h. The deferred chunk
+floor is now the only remaining lever with real headroom: 34% of chunks span ≤5 lines and 12% are
+single lines (`docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md`). Removing that
+population would cut roughly an hour from a full pass, and unlike batching it is a genuine
+reduction in work rather than a re-framing of the same work.
+
+Retrieval quality was not re-checked, and does not need to be: vectors are byte-identical by
+construction (per-input embedding, per-input truncation), which is why this section is a timing
+exercise. That property held — the only change is request framing.
 ## Addendum — Stage 1: per-project index lock
 
 Added 2026-07-27 after discovering **four** concurrent `codescout index` processes on
