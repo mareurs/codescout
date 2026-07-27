@@ -272,11 +272,23 @@ pub fn acquire(project_id: &str) -> Result<IndexLock> {
         .open(&path)
         .with_context(|| format!("failed to open index lock file: {}", path.display()))?;
 
+    // Message revised by the final whole-branch review (2026-07-27). The original
+    // pointed the operator at `pgrep -af 'codescout index'`, which fits the four
+    // orphaned CLI runs this lock was designed against but NOT the two realistic
+    // in-process contenders: the agent's background library auto-index
+    // (src/agent/mod.rs:1577) racing a user `library(action='index')`, and a
+    // just-cancelled index task whose `AbortHandle::abort()` has not finished
+    // dropping. In both cases the holder is an MCP server's background task, so
+    // pgrep finds nothing — and the PID line written below, added for exactly this
+    // purpose, went unmentioned. Keep the "already running" substring: two tests
+    // assert on it.
     file.try_lock_exclusive().with_context(|| {
         format!(
             "another codescout index is already running for project '{project_id}' \
-             (lock: {}). Wait for it to finish, or inspect with \
-             `pgrep -af 'codescout index'`.",
+             (lock file: {} — its first line is the holder's PID). The holder may be \
+             a CLI `codescout index` run OR an in-process background index (e.g. an \
+             MCP server's auto-index task) — check the PID, don't assume \
+             `pgrep -af 'codescout index'` will show it.",
             path.display()
         )
     })?;
