@@ -159,6 +159,53 @@ A per-repo `usage.db` mining pass (backend-kotlin + codescout, 2026-07-01 → 20
 ### T-012 — `artifact(get, heading=)` required the full heading text, not a short id
 
 Same mining pass found 6 occurrences in backend-kotlin (`heading="SI-20"`, `headings=["SI-19","SI-20"]`, `headings=["## SI-22","## SI-1"]`, `heading="SI-29"`, `heading="## SI-33"`) plus 1 in codescout, spanning a week — every heading query style against a numbered-section tracker (`## SI-N — <long title>`) missed, `body_meta.heading_missing: true`, no error. `get.rs` used a bespoke exact-match-only matcher instead of the shared, already-tested `file_summary::resolve_section_range` 4-tier fuzzy cascade that backs `read_markdown`/`edit_markdown`'s documented "fuzzy matched" `heading=` param — a prompt-surface consistency gap, not a caller error. See `docs/issues/2026-07-09-artifact-get-heading-exact-match-only.md`.
+## run_command observations
+
+### T-013 — `cargo test 2>&1 | tail -25`, then grepping that 25-line buffer as proof of a clean 3400-test suite
+
+**Tool:** `run_command` · **Verdict:** wrong-tool (IL3 violation) · **Observed:** 2026-07-28,
+self-inflicted by the assistant while gating a commit.
+
+Ran `cargo test 2>&1 | tail -25` to "check the gate", then ran
+`grep -cE 'FAILED|panicked at' @bg_xxx` against the resulting buffer and got `0`. Reported the
+gate as green. The buffer held **25 lines**. The grep searched 25 lines of an ~18-binary,
+3400-test run and returned a confident zero.
+
+**Why this is worse than a plain IL3 violation.** The usual failure mode of piping to a trimmer
+is losing information you then notice is missing. Here the trimmed output *still looked like
+evidence*: a `test result: ok` line, a `Doc-tests` line, and a zero-match failure grep. Every
+signal a reader uses to conclude "suite is green" was present in the 25 surviving lines, and all
+of them were true — of 25 lines. The count of `test result: ok` was 2, which should have been the
+tell (the run has 18 binaries), and it was not noticed until a later check happened to print it.
+
+**What the server-side gate does and doesn't catch.** The IL3 enforcement blocked several
+*other* attempts in the same session — `find … | head -5`, `git show --stat | head -12`,
+`docker logs | tail` — with a clear message. It did not block this one, because the pipe was
+constructed inside a `run_command` whose left-hand side was `cargo test` **and** the whole thing
+was launched with `run_in_background: true`, so the string reaching the gate differed. Worth
+checking whether backgrounded commands bypass the IL3 check.
+
+**Correct pattern**, which the same session used successfully afterwards:
+
+```
+run_command("cargo test")                       # bare, full output buffered
+grep -cE 'test result: FAILED|panicked at' @bg_x # 0
+grep -E 'test result:' @bg_x | grep -v '0 failed' # empty = all clean
+grep -cE 'test result: ok' @bg_x                 # 18 = every binary reported
+grep -cE 'Doc-tests' @bg_x                       # 1 = run reached the end
+```
+
+The last two lines are the ones that matter and the trimmed version could not have produced
+them: **assert the expected number of binaries reported, and that the run reached its end.** A
+failure count of zero over an unknown denominator is not evidence.
+
+**Prompt gap.** The Iron Law states the rule ("run bare, query the buffer") and the anti-pattern
+list names the `cargo test 2>&1 | grep FAILED` shape specifically. What neither says is what a
+*sufficient* green-gate assertion looks like. A reader who internalises "don't pipe" can still
+write `grep -c FAILED @buffer` and stop there. Suggested addition to the
+progressive-disclosure guide's run_command section: when asserting a suite is clean, assert
+completeness (binary count, terminal marker), not just absence of failures.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
