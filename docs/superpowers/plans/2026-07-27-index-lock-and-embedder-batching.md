@@ -56,6 +56,10 @@
 
 1. **Not `.codescout/write.lock`.** That file is locked per write-tool call by `WriteGuard` (`src/agent/write_guard.rs`). An index holding it for hours would block every edit tool — strictly worse than the duplication being prevented. These are different locks protecting different things.
 2. **Keyed on `project_id`, not on `root`.** The contended resource is the `(collection, project_id)` pair in Qdrant. Library syncs (`src/tools/semantic/index.rs:133`, `src/agent/mod.rs:1587`) pass a library checkout as `root` with their own `project_id`; creating a `.codescout/` directory inside a third-party checkout would pollute it, which the codebase already avoids deliberately (see `SyncOpts::record_index_state`). **This deviates from the spec's `.codescout/index.lock`** — the spec did not consider the library-sync path.
+
+2b. **The lock file lives in `crate::socket_discovery::per_user_runtime_dir()`, NOT bare `std::env::temp_dir()`.** Revised 2026-07-27 after review. A predictable path in world-writable `/tmp` is exploitable two ways: a local user pre-creates the path as a symlink and `set_len(0)` truncates the victim's file, or they simply hold the flock and every index run reports "already running" while `pgrep` shows nothing. `per_user_runtime_dir()` is already cross-platform — `XDG_RUNTIME_DIR` else `/tmp/codescout-{uid}` at `0o700` on Unix, `std::env::temp_dir()` on Windows (already per-user there). codescout's mux and peer locks already use it (`src/lsp/mux/mod.rs:23-29`, `src/socket_discovery.rs:49-55`).
+
+   Two consequences to accept, not "fix": inside a directory we own at `0o700` an attacker cannot plant the symlink, so **no `mode(0o600)` and no `O_NOFOLLOW` are needed** — both would require `cfg(unix)` gating and a `libc` call for no gain. And cross-user exclusion is given up on Unix; that is the same trade codescout already accepted for its mux and peer locks, and bare `temp_dir()` never provided it on Windows anyway, so this makes the two platforms consistent rather than losing a property that was uniformly held.
 3. **Open without truncating, then truncate after acquiring.** `File::create` truncates immediately, which would erase the *current holder's* PID line before we even try to lock. `src/lsp/mux/process.rs:76` has this latent bug; do not copy it.
 4. **No stale-lock recovery.** `flock` is released by the kernel when a process dies. A leftover lock *file* is inert. Do not add PID-liveness checks — Task 1 Step 1 pins this with a test.
 
@@ -116,12 +120,28 @@ mod tests {
     /// A leftover lock *file* must never block a new run. flock is released by the
     /// kernel on process death, so this passes with no recovery logic — the test
     /// exists so nobody adds PID-liveness checks "to be safe".
+    ///
+    /// The planted PID is our OWN, deliberately: a liveness check would pass if we
+    /// wrote a dead pid like 999999 (above `pid_max` on most Linux configs), so that
+    /// value would not actually pin the stated intent.
     #[test]
     fn preexisting_lock_file_does_not_block() {
         let pid = unique_project("stale");
         let path = lock_path(&pid);
-        std::fs::write(&path, "999999\n").expect("simulate a lock file left by a dead process");
-        acquire(&pid).expect("a stale lock file must not block acquisition");
+        std::fs::write(&path, format!("{}\n", std::process::id()))
+            .expect("simulate a lock file left by a dead process");
+        let lock = acquire(&pid).expect("a stale lock file must not block acquisition");
+
+        // The PID write must TRUNCATE, not overwrite in place. Without `set_len(0)`
+        // a shorter pid leaves the old tail behind (e.g. "42\n999\n"), and an
+        // operator inspecting the lock during an incident reads a bogus second line.
+        drop(lock);
+        let contents = std::fs::read_to_string(&path).expect("read lock file");
+        assert_eq!(
+            contents.trim(),
+            std::process::id().to_string(),
+            "lock file must contain exactly the holder's pid, with no stale tail"
+        );
     }
 
     #[test]
@@ -185,8 +205,12 @@ use std::path::{Path, PathBuf};
 
 /// RAII handle for the per-project index lock.
 ///
+/// `#[derive(Debug)]` is required: the contention test calls `unwrap_err()` on
+/// `Result<IndexLock, _>`, and `Result::unwrap_err` needs `T: Debug`.
+///
 /// The `flock` is released on drop, and by the kernel if the process dies — so a
 /// leftover lock file is inert and needs no recovery logic.
+#[derive(Debug)]
 pub struct IndexLock {
     file: File,
     path: PathBuf,
@@ -210,11 +234,18 @@ impl Drop for IndexLock {
 ///
 /// Hashed so any `project_id` — including one with path separators or spaces —
 /// maps to a safe, fixed-length filename.
+///
+/// Sited in the per-user runtime directory rather than bare `temp_dir()`: a
+/// predictable path in world-writable `/tmp` lets a local user pre-create it as a
+/// symlink (which `set_len(0)` below would then truncate) or simply hold the flock
+/// to wedge every index run. `per_user_runtime_dir()` handles both platforms —
+/// `0o700` dir on Unix, already-per-user `temp_dir()` on Windows.
 pub fn lock_path(project_id: &str) -> PathBuf {
     let mut h = Sha256::new();
     h.update(project_id.as_bytes());
     let digest = format!("{:x}", h.finalize());
-    std::env::temp_dir().join(format!("codescout-index-{}.lock", &digest[..16]))
+    crate::socket_discovery::per_user_runtime_dir()
+        .join(format!("codescout-index-{}.lock", &digest[..16]))
 }
 
 /// Acquire the exclusive index lock for `project_id`, or fail immediately.
