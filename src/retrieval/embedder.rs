@@ -155,6 +155,21 @@ where
 {
     let batch = batch.max(1);
     let inflight = inflight.max(1);
+    // Eagerly `.collect()` the per-chunk futures into a `Vec<Fut>` before handing
+    // them to `stream::iter(...)`. Piping the lazy `Map<Chunks, _>` iterator
+    // straight into `stream::iter(...).buffered(...)` compiles here in isolation,
+    // but fails at the real call site in `embed_batch` (reached through
+    // `#[async_trait] BatchEmbedder::embed_batch_dyn`) with a rustc HRTB error:
+    // "implementation of `FnOnce` is not general enough" — a known limitation
+    // when a boxed-trait-object `Send` check has to reason through a generic
+    // function called with a closure that captures `&self`. This eager collect
+    // does NOT defeat the `inflight` bound: constructing an `async fn`'s future
+    // does not poll it, so none of these futures start running work until
+    // `buffered(inflight)` actually drives them — collecting first just gives
+    // rustc a concrete `Vec<Fut>::IntoIter` type instead of an anonymous lazily
+    // typed one, which resolves the spurious HRTB obligation. Verified: an
+    // `AtomicUsize` concurrency probe measures the same bounded max-concurrency
+    // with this form as with the lazy form.
     let futs: Vec<Fut> = texts.chunks(batch).map(|c| embed_one(c.to_vec())).collect();
     let nested: Vec<Vec<EmbedOutput>> = futures::stream::iter(futs)
         .buffered(inflight)
@@ -451,11 +466,12 @@ impl EmbedderHttp {
                 if !retryable || attempt >= 8 {
                     let body = resp.text().await.unwrap_or_default();
                     return Err(anyhow!(
-                        "embed_batch sparse status {} (inputs={}): {}. \
-                         If this is 413, the server's max_client_batch_size is \
+                        "embed_batch sparse status {} (inputs={}, nonempty={}): {}. \
+                         If this is 413 or 422, the server's max_client_batch_size is \
                          below the resolved batch size — set CODESCOUT_EMBED_BATCH \
                          to override discovery.",
                         status,
+                        inputs.len(),
                         nonempty.len(),
                         body.chars().take(200).collect::<String>()
                     ));
@@ -1190,5 +1206,116 @@ mod tests {
         .await
         .expect("empty input");
         assert!(out.is_empty());
+    }
+
+    /// `resolve_inflight` must actually bound real concurrency, not just return
+    /// a number nobody reads. Pins two things with the same AtomicUsize
+    /// active/max_active idiom used by `bfs_parallelizes_one_hop_within_level`
+    /// (`src/tools/symbol/call_graph/traversal.rs`): (1) the bound itself —
+    /// default inflight caps concurrent sub-batches at `DEFAULT_INFLIGHT`, not
+    /// all 8 at once; (2) that `inflight_override` actually reaches
+    /// `resolve_inflight` — overriding to "1" must serialize every sub-batch.
+    /// A `resolve_inflight` that ignores `self.inflight_override` (returns
+    /// `DEFAULT_INFLIGHT` unconditionally) or that hardcodes `1` both pass
+    /// `embed_chunks_ordered`'s own ordering/error/empty-input tests untouched
+    /// — only this test catches them.
+    #[tokio::test]
+    async fn resolve_inflight_bound_is_enforced_and_overridable() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        async fn observed_max_concurrency(inflight: usize) -> usize {
+            let texts: Vec<String> = (0..16).map(|i| format!("t{i}")).collect();
+            let active = Arc::new(AtomicUsize::new(0));
+            let max_active = Arc::new(AtomicUsize::new(0));
+            let a = active.clone();
+            let m = max_active.clone();
+            embed_chunks_ordered(&texts, 2, inflight, move |chunk: Vec<String>| {
+                let a = a.clone();
+                let m = m.clone();
+                async move {
+                    let cur = a.fetch_add(1, Ordering::SeqCst) + 1;
+                    m.fetch_max(cur, Ordering::SeqCst);
+                    for _ in 0..10 {
+                        tokio::task::yield_now().await;
+                    }
+                    a.fetch_sub(1, Ordering::SeqCst);
+                    Ok(chunk
+                        .iter()
+                        .map(|_| EmbedOutput {
+                            dense: vec![0.0],
+                            sparse: SparseVector {
+                                indices: vec![],
+                                values: vec![],
+                            },
+                        })
+                        .collect::<Vec<_>>())
+                }
+            })
+            .await
+            .expect("bounded embed");
+            max_active.load(Ordering::SeqCst)
+        }
+
+        let e =
+            EmbedderHttp::with_config("http://unused.invalid", "http://unused.invalid", 3, "m", "");
+        assert_eq!(
+            observed_max_concurrency(e.resolve_inflight()).await,
+            DEFAULT_INFLIGHT,
+            "default resolve_inflight() must cap concurrency at DEFAULT_INFLIGHT, not 8"
+        );
+
+        let e = e.with_inflight_override(Some("1".into()));
+        assert_eq!(
+            observed_max_concurrency(e.resolve_inflight()).await,
+            1,
+            "inflight_override must actually be read by resolve_inflight"
+        );
+    }
+
+    /// The `dense_only` branch must resolve its batch size from
+    /// `self.batch_override` (asserted via request count) and must never
+    /// contact a sparse server at all — the lite stack runs none, so a stray
+    /// sparse call is a hard production failure, not a soft one.
+    #[tokio::test]
+    async fn dense_only_batch_override_drives_batch_size_and_skips_sparse() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+
+        // Zero hits expected: dense_only must never issue a sparse request.
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let dense_body = serde_json::json!({
+            "data": (0..2u32)
+                .map(|i| serde_json::json!({"embedding": [i as f32, 0.0, 0.0], "index": i}))
+                .collect::<Vec<_>>()
+        })
+        .to_string();
+        // 6 texts at batch_override=2 -> 3 sub-batches -> 3 dense requests.
+        // A cross-wire reading `self.inflight_override` (unset here) instead of
+        // `self.batch_override` would fall back to DENSE_ONLY_BATCH=32 -> 1
+        // request, which `.expect(3)` catches.
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(dense_body)
+            .expect(3)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3)
+            .dense_only(true)
+            .with_batch_override(Some("2".into()));
+        let texts: Vec<String> = (0..6).map(|i| format!("t{i}")).collect();
+        let out = e.embed_batch(&texts).await.expect("dense_only embed_batch");
+
+        assert_eq!(out.len(), 6);
+        dense_mock.assert_async().await;
+        sparse_mock.assert_async().await;
     }
 }
