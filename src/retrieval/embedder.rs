@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use futures::stream::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,12 @@ pub struct EmbedderHttp {
     /// `with_config` defaults to `None`. Injectable via `with_batch_override` so
     /// tests never need to mutate real process env to exercise the override path.
     batch_override: Option<String>,
+    /// Escape-hatch override for the concurrent in-flight sub-batch cap
+    /// (`CODESCOUT_EMBED_INFLIGHT`). `new()` reads it from process env, exactly
+    /// like `api_key`/`EMBED_API_KEY` and `batch_override`/`CODESCOUT_EMBED_BATCH`;
+    /// `with_config` defaults to `None`. Injectable via `with_inflight_override` so
+    /// tests never need to mutate real process env to exercise the override path.
+    inflight_override: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -122,6 +129,38 @@ struct OpenAiEmbedItem {
 struct SparseEntry {
     index: u32,
     value: f32,
+}
+
+/// Concurrent in-flight sub-batches. 4 is where both legs saturated in the
+/// 2026-07-27 sweep (sparse 2.7 → 9.2 chunks/s; both regressed at 8). That sweep
+/// ran under contention from four concurrent indexers — re-measure on an idle
+/// card before treating 4 as final.
+const DEFAULT_INFLIGHT: usize = 4;
+
+/// Drive `embed_one` over `texts` in `batch`-sized sub-batches, at most `inflight`
+/// concurrently, reassembling results in **input order**.
+///
+/// Uses `buffered`, never `buffer_unordered`: `flush_pending`
+/// (`src/retrieval/sync.rs:75`) zips embeddings onto payloads positionally, so
+/// reordering here attaches every vector to the wrong chunk — silently.
+pub(crate) async fn embed_chunks_ordered<F, Fut>(
+    texts: &[String],
+    batch: usize,
+    inflight: usize,
+    embed_one: F,
+) -> Result<Vec<EmbedOutput>>
+where
+    F: Fn(Vec<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<EmbedOutput>>>,
+{
+    let batch = batch.max(1);
+    let inflight = inflight.max(1);
+    let futs: Vec<Fut> = texts.chunks(batch).map(|c| embed_one(c.to_vec())).collect();
+    let nested: Vec<Vec<EmbedOutput>> = futures::stream::iter(futs)
+        .buffered(inflight)
+        .try_collect()
+        .await?;
+    Ok(nested.into_iter().flatten().collect())
 }
 
 impl EmbedderHttp {
@@ -153,6 +192,11 @@ impl EmbedderHttp {
         // (not inside resolve_batch_size) so it's injectable data on the struct —
         // mirrors api_key/EMBED_API_KEY exactly. See with_batch_override.
         let batch_override = std::env::var("CODESCOUT_EMBED_BATCH").ok();
+        // CODESCOUT_EMBED_INFLIGHT: escape hatch for resolve_inflight, read here
+        // (not inside resolve_inflight) so it's injectable data on the struct —
+        // mirrors batch_override/CODESCOUT_EMBED_BATCH exactly. See
+        // with_inflight_override.
+        let inflight_override = std::env::var("CODESCOUT_EMBED_INFLIGHT").ok();
         Self::with_config(
             dense_base,
             sparse_base,
@@ -162,6 +206,7 @@ impl EmbedderHttp {
         )
         .api_key(api_key)
         .with_batch_override(batch_override)
+        .with_inflight_override(inflight_override)
     }
 
     /// Construct without reading process env vars.
@@ -190,6 +235,7 @@ impl EmbedderHttp {
             client: reqwest::Client::new(),
             sparse_batch_cap: tokio::sync::OnceCell::new(),
             batch_override: None,
+            inflight_override: None,
         }
     }
     /// Set the bearer token for the dense endpoint. Builder-style; `new()` reads
@@ -208,6 +254,15 @@ impl EmbedderHttp {
     /// superseded by this injected-field version on review).
     pub fn with_batch_override(mut self, batch_override: Option<String>) -> Self {
         self.batch_override = batch_override;
+        self
+    }
+
+    /// Inject the `CODESCOUT_EMBED_INFLIGHT` override directly. Builder-style;
+    /// `new()` reads it from process env, mirroring `with_batch_override`. Tests
+    /// use this to set (`Some("1".into())`) or explicitly clear (`None`) the
+    /// override without ever mutating real process env.
+    pub fn with_inflight_override(mut self, inflight_override: Option<String>) -> Self {
+        self.inflight_override = inflight_override;
         self
     }
 
@@ -396,7 +451,10 @@ impl EmbedderHttp {
                 if !retryable || attempt >= 8 {
                     let body = resp.text().await.unwrap_or_default();
                     return Err(anyhow!(
-                        "embed_batch sparse status {} (inputs={}): {}",
+                        "embed_batch sparse status {} (inputs={}): {}. \
+                         If this is 413, the server's max_client_batch_size is \
+                         below the resolved batch size — set CODESCOUT_EMBED_BATCH \
+                         to override discovery.",
                         status,
                         nonempty.len(),
                         body.chars().take(200).collect::<String>()
@@ -436,6 +494,30 @@ impl EmbedderHttp {
         }
         Ok(out)
     }
+
+    /// Dense-only sub-batch (lite stack: no sparse server contacted).
+    async fn embed_one_batch_dense(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
+        let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        let mut out = Vec::with_capacity(inputs.len());
+        for dense in self.dense_batch(&inputs).await? {
+            if dense.len() != self.expected_dim {
+                return Err(anyhow!(
+                    "embed dim mismatch: got {}, expected {}",
+                    dense.len(),
+                    self.expected_dim
+                ));
+            }
+            out.push(EmbedOutput {
+                dense,
+                sparse: SparseVector {
+                    indices: vec![],
+                    values: vec![],
+                },
+            });
+        }
+        Ok(out)
+    }
+
     /// Per-request input count for both legs.
     ///
     /// `CODESCOUT_EMBED_BATCH` → the sparse server's advertised
@@ -485,42 +567,52 @@ impl EmbedderHttp {
             .await
     }
 
+    /// Concurrent in-flight sub-batches for `embed_chunks_ordered`.
+    /// `CODESCOUT_EMBED_INFLIGHT` → `DEFAULT_INFLIGHT`.
+    fn resolve_inflight(&self) -> usize {
+        self.inflight_override
+            .as_deref()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(DEFAULT_INFLIGHT)
+    }
+
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
         if self.dense_only {
-            // Lite stack: dense vectors only — no sparse server contacted.
-            const DENSE_BATCH: usize = 8;
-            let mut out = Vec::with_capacity(texts.len());
-            for chunk in texts.chunks(DENSE_BATCH) {
-                let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
-                for dense in self.dense_batch(&inputs).await? {
-                    if dense.len() != self.expected_dim {
-                        return Err(anyhow!(
-                            "embed dim mismatch: got {}, expected {}",
-                            dense.len(),
-                            self.expected_dim
-                        ));
-                    }
-                    out.push(EmbedOutput {
-                        dense,
-                        sparse: SparseVector {
-                            indices: vec![],
-                            values: vec![],
-                        },
-                    });
-                }
-            }
-            return Ok(out);
+            // No sparse server to probe on this path: honour the injected override,
+            // else 32. llama-server advertises no per-request cap and the 2026-07-27
+            // sweep showed it healthy through 128, so 32 is deliberately conservative.
+            //
+            // Reads `self.batch_override` — the SAME field the hybrid path uses. Do NOT
+            // reintroduce a raw `std::env::var` read here. One variable with two sources
+            // is a divergence waiting to happen, and it re-opens the test-env race that
+            // docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+            // documents.
+            const DENSE_ONLY_BATCH: usize = 32;
+            let batch = self
+                .batch_override
+                .as_deref()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(DENSE_ONLY_BATCH);
+            return embed_chunks_ordered(
+                texts,
+                batch,
+                self.resolve_inflight(),
+                |chunk: Vec<String>| async move { self.embed_one_batch_dense(chunk).await },
+            )
+            .await;
         }
         // The sparse (SPLADE/TEI) server caps client batches at a
         // server-advertised limit (HTTP 422 "batch size N > maximum allowed
         // batch size M" otherwise); discover it instead of hardcoding, so
         // keep both the dense and sparse legs at or below that limit.
         let batch = self.resolve_batch_size().await;
-        let mut out = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(batch) {
-            out.extend(self.embed_one_batch(chunk.to_vec()).await?);
-        }
-        Ok(out)
+        let inflight = self.resolve_inflight();
+        embed_chunks_ordered(texts, batch, inflight, |chunk: Vec<String>| async move {
+            self.embed_one_batch(chunk).await
+        })
+        .await
     }
 }
 
@@ -1037,5 +1129,66 @@ mod tests {
         assert_eq!(out.len(), 12);
         dense_mock.assert_async().await;
         sparse_mock.assert_async().await; // exactly one /embed_sparse request — batch 32, not 8
+    }
+
+    /// Sub-batches must be reassembled in input order even when they COMPLETE out
+    /// of order. The closure sleeps longest for the first sub-batch, so under
+    /// `buffer_unordered` the results arrive reversed and this test fails.
+    #[tokio::test]
+    async fn embed_chunks_ordered_preserves_input_order() {
+        let texts: Vec<String> = (0..9).map(|i| format!("text-{i}")).collect();
+
+        let out = embed_chunks_ordered(&texts, 3, 3, |chunk: Vec<String>| {
+            async move {
+                // First sub-batch ("text-0") sleeps longest, last sleeps least.
+                let idx: u64 = chunk[0]
+                    .trim_start_matches("text-")
+                    .parse()
+                    .expect("numeric suffix");
+                tokio::time::sleep(std::time::Duration::from_millis(60 - idx * 5)).await;
+                Ok(chunk
+                    .iter()
+                    .map(|t| {
+                        let n: f32 = t.trim_start_matches("text-").parse().unwrap();
+                        EmbedOutput {
+                            dense: vec![n],
+                            sparse: SparseVector {
+                                indices: vec![],
+                                values: vec![],
+                            },
+                        }
+                    })
+                    .collect::<Vec<_>>())
+            }
+        })
+        .await
+        .expect("ordered embed");
+
+        let got: Vec<f32> = out.iter().map(|e| e.dense[0]).collect();
+        assert_eq!(
+            got,
+            (0..9).map(|i| i as f32).collect::<Vec<f32>>(),
+            "output order must match input order regardless of completion order"
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_chunks_ordered_propagates_error() {
+        let texts: Vec<String> = (0..4).map(|i| format!("t{i}")).collect();
+        let res = embed_chunks_ordered(&texts, 2, 2, |_c: Vec<String>| async {
+            Err::<Vec<EmbedOutput>, _>(anyhow!("boom"))
+        })
+        .await;
+        assert!(res.is_err(), "a failing sub-batch must fail the whole call");
+    }
+
+    #[tokio::test]
+    async fn embed_chunks_ordered_handles_empty_input() {
+        let out = embed_chunks_ordered(&[], 8, 4, |_c: Vec<String>| async {
+            Ok::<Vec<EmbedOutput>, anyhow::Error>(vec![])
+        })
+        .await
+        .expect("empty input");
+        assert!(out.is_empty());
     }
 }
