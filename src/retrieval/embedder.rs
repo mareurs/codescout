@@ -89,6 +89,11 @@ pub struct EmbedderHttp {
     /// Memoised sparse-server per-request cap. Resolved on first use because
     /// `EmbedderHttp::new` is synchronous and the probe is async.
     sparse_batch_cap: tokio::sync::OnceCell<usize>,
+    /// Escape-hatch override for the discovered batch size (`CODESCOUT_EMBED_BATCH`).
+    /// `new()` reads it from process env, exactly like `api_key`/`EMBED_API_KEY`;
+    /// `with_config` defaults to `None`. Injectable via `with_batch_override` so
+    /// tests never need to mutate real process env to exercise the override path.
+    batch_override: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -119,33 +124,6 @@ struct SparseEntry {
     value: f32,
 }
 
-// Thread-local override for `CODESCOUT_EMBED_BATCH`, consulted only in
-// `#[cfg(test)]` builds. Test-only indirection so `resolve_batch_size`'s
-// `EnvGuard`-backed tests can inject an override without mutating real
-// process env: `#[tokio::test]`'s default current-thread runtime executes
-// an entire test body (assertions, `.await`s, and all) on exactly one OS
-// thread, so a thread-local is fully isolated per test function with zero
-// cross-test interference. Mutating the *real* environment instead raced
-// concurrently-running tests reading process env on other OS threads — the
-// identical, previously-fixed shape as bug a656f8cec220d347
-// (`docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`).
-// See `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
-#[cfg(test)]
-thread_local! {
-    static TEST_ENV_BATCH_OVERRIDE: std::cell::RefCell<Option<String>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(not(test))]
-fn embed_batch_env_override() -> Option<String> {
-    std::env::var("CODESCOUT_EMBED_BATCH").ok()
-}
-
-#[cfg(test)]
-fn embed_batch_env_override() -> Option<String> {
-    TEST_ENV_BATCH_OVERRIDE.with(|c| c.borrow().clone())
-}
-
 impl EmbedderHttp {
     pub fn new(
         dense_base: impl Into<String>,
@@ -171,6 +149,10 @@ impl EmbedderHttp {
                     None
                 }
             });
+        // CODESCOUT_EMBED_BATCH: escape hatch for resolve_batch_size, read here
+        // (not inside resolve_batch_size) so it's injectable data on the struct —
+        // mirrors api_key/EMBED_API_KEY exactly. See with_batch_override.
+        let batch_override = std::env::var("CODESCOUT_EMBED_BATCH").ok();
         Self::with_config(
             dense_base,
             sparse_base,
@@ -179,6 +161,7 @@ impl EmbedderHttp {
             query_prefix,
         )
         .api_key(api_key)
+        .with_batch_override(batch_override)
     }
 
     /// Construct without reading process env vars.
@@ -206,12 +189,25 @@ impl EmbedderHttp {
             api_key: None,
             client: reqwest::Client::new(),
             sparse_batch_cap: tokio::sync::OnceCell::new(),
+            batch_override: None,
         }
     }
     /// Set the bearer token for the dense endpoint. Builder-style; `new()` reads
     /// it from `EMBED_API_KEY`. `None` sends no Authorization header.
     pub fn api_key(mut self, api_key: Option<String>) -> Self {
         self.api_key = api_key;
+        self
+    }
+
+    /// Inject the `CODESCOUT_EMBED_BATCH` override directly. Builder-style;
+    /// `new()` reads it from process env, mirroring `api_key`. Tests use this to
+    /// set (`Some("4".into())`) or explicitly clear (`None`) the override without
+    /// ever mutating real process env — see `resolve_batch_size` and
+    /// docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+    /// for why that matters (a prior thread-local-based version of this fix was
+    /// superseded by this injected-field version on review).
+    pub fn with_batch_override(mut self, batch_override: Option<String>) -> Self {
+        self.batch_override = batch_override;
         self
     }
 
@@ -454,7 +450,9 @@ impl EmbedderHttp {
         *self
             .sparse_batch_cap
             .get_or_init(|| async {
-                if let Some(n) = embed_batch_env_override()
+                if let Some(n) = self
+                    .batch_override
+                    .as_deref()
                     .and_then(|v| v.parse::<usize>().ok())
                     .filter(|&n| n > 0)
                 {
@@ -889,41 +887,8 @@ mod tests {
         sparse_mock.assert_async().await;
     }
 
-    /// RAII guard for the `CODESCOUT_EMBED_BATCH` override consulted by
-    /// `resolve_batch_size` via `embed_batch_env_override()`. Backed by the
-    /// `TEST_ENV_BATCH_OVERRIDE` thread-local rather than real process env:
-    /// mutating real env here raced concurrently-running tests reading
-    /// process env on other OS threads — the identical, previously-fixed
-    /// shape as bug a656f8cec220d347. See
-    /// docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md.
-    /// `key` is accepted only for call-site symmetry with the generic
-    /// EnvGuard shape used elsewhere (e.g. src/librarian/indexer.rs:1074);
-    /// this guard only ever targets `CODESCOUT_EMBED_BATCH`.
-    struct EnvGuard {
-        original: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn set(_key: &'static str, value: &str) -> Self {
-            let original =
-                TEST_ENV_BATCH_OVERRIDE.with(|c| c.borrow_mut().replace(value.to_string()));
-            Self { original }
-        }
-        fn unset(_key: &'static str) -> Self {
-            let original = TEST_ENV_BATCH_OVERRIDE.with(|c| c.borrow_mut().take());
-            Self { original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            TEST_ENV_BATCH_OVERRIDE.with(|c| *c.borrow_mut() = self.original.take());
-        }
-    }
-
     #[tokio::test]
     async fn batch_size_discovered_from_info() {
-        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
         let mut server = mockito::Server::new_async().await;
         let _m = server
             .mock("GET", "/info")
@@ -933,21 +898,30 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        let e =
+            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
         assert_eq!(e.resolve_batch_size().await, 32);
     }
 
+    /// The 404 body is a JSON envelope (not empty) so this test actually pins
+    /// the `if !resp.status().is_success() { return None; }` guard in
+    /// `resolve_batch_size` — deleting that guard would still parse
+    /// `max_client_batch_size` successfully and yield 32, not 8, so the test
+    /// would then fail. An empty 404 body would let a deleted guard hide
+    /// behind a JSON-parse failure instead, which does not discriminate it.
     #[tokio::test]
     async fn batch_size_falls_back_to_8_when_info_missing() {
-        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
         let mut server = mockito::Server::new_async().await;
         let _m = server
             .mock("GET", "/info")
             .with_status(404)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"max_client_batch_size":32}"#)
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        let e =
+            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
         assert_eq!(
             e.resolve_batch_size().await,
             8,
@@ -957,7 +931,6 @@ mod tests {
 
     #[tokio::test]
     async fn env_override_wins_over_info() {
-        let _g = EnvGuard::set("CODESCOUT_EMBED_BATCH", "4");
         let mut server = mockito::Server::new_async().await;
         let _m = server
             .mock("GET", "/info")
@@ -966,13 +939,13 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768)
+            .with_batch_override(Some("4".to_string()));
         assert_eq!(e.resolve_batch_size().await, 4);
     }
 
     #[tokio::test]
     async fn batch_size_is_memoised() {
-        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
         let mut server = mockito::Server::new_async().await;
         let m = server
             .mock("GET", "/info")
@@ -982,7 +955,8 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        let e =
+            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
         assert_eq!(e.resolve_batch_size().await, 32);
         assert_eq!(e.resolve_batch_size().await, 32);
         m.assert_async().await; // exactly one /info request
@@ -995,7 +969,6 @@ mod tests {
     /// sparse server that never answers `/info`.
     #[tokio::test]
     async fn batch_size_failure_is_memoised() {
-        let _g = EnvGuard::unset("CODESCOUT_EMBED_BATCH");
         let mut server = mockito::Server::new_async().await;
         let m = server
             .mock("GET", "/info")
@@ -1004,9 +977,65 @@ mod tests {
             .create_async()
             .await;
 
-        let e = EmbedderHttp::new("http://unused.invalid", server.url(), 768);
+        let e =
+            EmbedderHttp::new("http://unused.invalid", server.url(), 768).with_batch_override(None);
         assert_eq!(e.resolve_batch_size().await, 8);
         assert_eq!(e.resolve_batch_size().await, 8);
         m.assert_async().await; // exactly one /info request despite two calls
+    }
+
+    /// End-to-end regression through `embed_batch` itself (not
+    /// `resolve_batch_size` directly). The Task 3b hybrid tests above never
+    /// mock `/info`, so they resolve to the `8` fallback either way and cannot
+    /// catch a regression where `embed_batch` stops consulting the discovered
+    /// value (e.g. a future edit reverting `let batch = self.resolve_batch_size().await;`
+    /// back to a hardcoded `let batch = 8;`, or dropping it while rewriting
+    /// this into a pipelined call in Task 5). 12 texts at the discovered batch
+    /// (32) is one `/embed_sparse` request; at a hardcoded 8 it would be two —
+    /// so the `.expect(1)` below fails loudly on that regression instead of
+    /// silently staying green.
+    #[tokio::test]
+    async fn embed_batch_uses_discovered_batch_size_end_to_end() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+
+        let _info_mock = sparse_server
+            .mock("GET", "/info")
+            .with_status(200)
+            .with_body(r#"{"max_client_batch_size":32}"#)
+            .create_async()
+            .await;
+
+        let dense_body = serde_json::json!({
+            "data": (0..12u32)
+                .map(|i| serde_json::json!({"embedding": [i as f32, 0.0, 0.0], "index": i}))
+                .collect::<Vec<_>>()
+        })
+        .to_string();
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(dense_body)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let sparse_body = format!("[{}]", ["[]"; 12].join(","));
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body(sparse_body)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let e =
+            EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3).with_batch_override(None);
+        let texts: Vec<String> = (0..12).map(|i| format!("text-{i}")).collect();
+        let out = e.embed_batch(&texts).await.expect("embed_batch");
+
+        assert_eq!(out.len(), 12);
+        dense_mock.assert_async().await;
+        sparse_mock.assert_async().await; // exactly one /embed_sparse request — batch 32, not 8
     }
 }
