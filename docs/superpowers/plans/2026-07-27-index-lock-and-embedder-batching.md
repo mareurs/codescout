@@ -920,6 +920,13 @@ git commit -m "docs(specs): record measured throughput after batching change"
 
 **Deliberate deviation from the spec.** The spec specifies `.codescout/index.lock`; this plan uses a hashed filename in the temp dir, keyed on `project_id`. Reason: library syncs pass a third-party checkout as `root`, and creating `.codescout/` inside one contradicts the existing `record_index_state` policy of not polluting library checkouts. Recorded in Task 1's design notes and flagged at handoff.
 
-**Type consistency.** `embed_one_batch(&self, chunk: &[String]) -> Result<Vec<EmbedOutput>>` is defined in Task 3 and consumed with that exact signature in Task 5's closure. `resolve_batch_size(&self) -> usize` is defined in Task 4 and called in Task 5. `embed_chunks_ordered`'s `F: Fn(&[String]) -> Fut` matches `embed_one_batch`'s parameter type. `IndexLock` / `acquire` / `lock_path` are defined in Task 1 and used in Task 2.
+**Type consistency.** `embed_one_batch(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>>` is defined in Task 3 and consumed with that exact signature in Task 5's closure. `embed_one_batch_dense` has the same shape (Task 5). `resolve_batch_size(&self) -> usize` is defined in Task 4 and called in Task 5's hybrid path only — never on the `dense_only` path, which has no sparse server to probe. `embed_chunks_ordered`'s `F: Fn(Vec<String>) -> Fut` matches both workers' parameter type by value, which is what makes a single fixed `Fut` expressible. `IndexLock` / `acquire` / `lock_path` are defined in Task 1 and used in Task 2.
+
+**Corrected during pre-flight (2026-07-27).** The first draft specified
+`F: Fn(&[String]) -> Fut`, which cannot compile: the returned future borrows its input,
+so its lifetime varies per call while `Fut` is a single fixed type. Caught by the
+pre-flight scan, before any implementer was dispatched. The by-value signature is now
+pinned in both tasks with a "do not simplify this to a slice" note, because the slice
+form is the natural thing for a reviewer or a later implementer to suggest.
 
 **Known risk carried forward.** `DEFAULT_INFLIGHT = 4` comes from a sweep run under four-indexer contention. Task 6 Step 2 re-measures it. This is called out in the constant's own comment so it cannot be mistaken for a clean measurement.
