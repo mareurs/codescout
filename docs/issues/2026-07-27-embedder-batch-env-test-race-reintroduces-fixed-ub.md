@@ -108,22 +108,35 @@ paired with `#[test] #[serial_test::serial]` on its 3 callers (`write_embeddings
 
 ## Fix
 
-**`src/retrieval/embedder.rs` occurrence: FIXED (Task 4, this session).** Implemented fix direction 1 from the original write-up (inject the override, don't mutate real process env), specialized as follows since `resolve_batch_size(&self) -> usize` and the brief's 5 test bodies had to keep their exact shape:
+**`src/retrieval/embedder.rs` occurrence: FIXED (Task 4, round 2 — supersedes the round-1 fix below).**
 
-- Added a `#[cfg(test)]` thread-local `TEST_ENV_BATCH_OVERRIDE: RefCell<Option<String>>` plus a small `embed_batch_env_override()` free function, `#[cfg(not(test))]`-gated to `std::env::var("CODESCOUT_EMBED_BATCH").ok()` (production, unchanged behavior) and `#[cfg(test)]`-gated to read the thread-local (tests).
-- `resolve_batch_size` now calls `embed_batch_env_override()` instead of `std::env::var(...)` directly — zero change to its public signature or memoization behavior.
-- `EnvGuard::set`/`unset`/`Drop` (test-only scaffolding) now mutate the thread-local instead of real process env. The 5 test *bodies* (assertions, call shapes) are untouched — only `EnvGuard`'s internals changed.
+**Round 1 (superseded):** added a `#[cfg(test)]` thread-local `TEST_ENV_BATCH_OVERRIDE: RefCell<Option<String>>` plus a `#[cfg(not(test))]`/`#[cfg(test)]`-forked `embed_batch_env_override()` function, with `EnvGuard` backing onto the thread-local instead of real env. This did eliminate the race (verified 11/11 at default parallelism, 9 consecutive runs) but a task review caught a real defect in the approach: **the `#[cfg]` fork means no test ever executes the `#[cfg(not(test))]` arm at all.** Mutate the env-var *name* in that arm, or have it return `None` unconditionally, and every test still passes — `env_override_wins_over_info` only proved "if the override function returns `Some(\"4\")`, precedence is respected," never that the real `CODESCOUT_EMBED_BATCH` env var is actually read in a build that matters. It also diverged from `a656f8cec220d347`'s actual project-wide remedy, which is to make the value **data on a single code path**, not conditional compilation.
 
-Why this closes the race rather than coordinating it: all tests in this file use plain `#[tokio::test]` (current-thread flavor, confirmed via grep — none use `flavor = "multi_thread"`), so an entire test body runs on exactly one OS thread from start to finish. A thread-local is therefore fully isolated per test function with **zero** cross-test interference — no lock, no `#[serial]`, no coordination needed, matching the spirit of `a656f8cec220d347`'s actual fix ("delete the writes") rather than its rejected one ("unify serialization").
+**Round 2 (current): injected field, mirroring `api_key`/`EMBED_API_KEY` exactly** — the pattern already established ~40 lines above `resolve_batch_size` in this same file:
 
-Verification: `cargo test --lib retrieval::embedder` run 9 times consecutively at default parallelism post-fix — 11/11 passed every time (vs. 5/5 failing pre-fix). Full `cargo test` (all ~18 binaries) — 3420 passed, 0 failed, 43 ignored, run twice, clean both times.
+- Added `batch_override: Option<String>` to `EmbedderHttp`.
+- `new()` reads `std::env::var("CODESCOUT_EMBED_BATCH").ok()` and threads it through `.with_batch_override(...)`, exactly like `api_key` reads `EMBED_API_KEY` and threads through `.api_key(...)`.
+- `with_config` defaults `batch_override: None`.
+- New builder `with_batch_override(mut self, Option<String>) -> Self`.
+- `resolve_batch_size` reads `self.batch_override.as_deref()` — the **same code path** production and tests both exercise; no `#[cfg]` fork anywhere.
+- Deleted the `TEST_ENV_BATCH_OVERRIDE` thread-local, both `embed_batch_env_override` cfg arms, and `EnvGuard` entirely. `embedder.rs` still contributes zero `set_var`/`remove_var` to the default test build (round 1's actual win, preserved).
+- The five tests keep their exact assertions, dropping the RAII guard for direct injection, e.g. `EmbedderHttp::new(dense.url(), sparse.url(), 768).with_batch_override(Some("4".into()))`; tests needing no override pass `.with_batch_override(None)`.
 
-**`src/librarian/indexer.rs` occurrence: still OPEN.** Out of scope for Task 4 (different file, different task in the same SDD plan). Needs the same treatment — see Resume.
+Net effect: one code path exercised identically by tests and production, no env mutation anywhere (real or thread-local), and the `#[cfg(not(test))]`-only-arm gap is closed because there is no longer a `#[cfg]`-forked arm to have a gap in.
 
-Experiments-branch commit: `9223c533` (branch `experiments`). Master-side SHA to be recorded after cherry-pick per CLAUDE.md § "After cherry-pick".
+Verification (round 2): `cargo fmt`, `cargo clippy -- -D warnings`, `cargo clippy --all-targets -- -D warnings` all clean. `cargo test --lib retrieval::embedder` run 5× at default parallelism post-fix — 12/12 every time. Full `cargo test` (all ~18 binaries) run 3×, clean every time (3421 passed, 0 failed, 43 ignored — the +1 over round 1's 3420 is the new `embed_batch_uses_discovered_batch_size_end_to_end` test, see Tests added).
+
+**`src/librarian/indexer.rs` occurrence: still OPEN.** Out of scope for Task 4 (different file, different task in the same SDD plan). Needs the same treatment (injected field, not thread-local — indexer.rs's callers are sync `#[test]`, not `#[tokio::test]`, but the same "don't cfg-fork, inject data" principle applies) — see Resume.
+
+Experiments-branch commits: `9223c533` (round 1, superseded), `9a782a86` (round 2, current). Master-side SHA to be recorded after cherry-pick per CLAUDE.md § "After cherry-pick".
 ## Tests added
 
-No *new* test functions — the fix targets test **infrastructure** (`EnvGuard`'s backing store), not test coverage. The existing 5 tests (`batch_size_discovered_from_info`, `batch_size_falls_back_to_8_when_info_missing`, `env_override_wins_over_info`, `batch_size_is_memoised`, `batch_size_failure_is_memoised`, all in `src/retrieval/embedder.rs::tests`) are the regression signal: they now pass reliably under default parallel `cargo test` (9/9 consecutive clean runs), where before the fix they failed in 5/5 consecutive runs.
+**Round 1:** none new — the fix targeted test infrastructure (`EnvGuard`'s backing store), not coverage.
+
+**Round 2 (task review findings, both verified by deliberately breaking the code under test and confirming the test catches it):**
+
+- `embed_batch_uses_discovered_batch_size_end_to_end` (`src/retrieval/embedder.rs::tests`) — goes through `embed_batch` itself, not `resolve_batch_size` directly, closing the gap that all 5 direct `resolve_batch_size` tests plus the 5 Task-3b hybrid tests left open: none of them would fail if `embed_batch`'s `let batch = self.resolve_batch_size().await;` were reverted to a hardcoded `let batch = 8;` (the Task-3b hybrid tests never mock `/info`, so they resolve to 8 either way). This test mocks `/info` to 32 and sends 12 texts through `embed_batch`, asserting the sparse leg is hit exactly once (`.expect(1)` + `assert_async`) — at a hardcoded 8 it would be two requests. **Verified with teeth**: temporarily hardcoded `let batch = 8;`, re-ran — failed with `mockito` reporting 2 requests to `/v1/embeddings` against an `.expect(1)` mock (the dense mock's count assertion fired before the sparse one was even reached); restored the line, re-ran clean (12/12, including this test).
+- `batch_size_falls_back_to_8_when_info_missing` — its 404 mock now returns the JSON body `{"max_client_batch_size":32}` instead of an empty body, so it actually pins the `if !resp.status().is_success() { return None; }` guard rather than incidentally passing because an empty body fails JSON parsing regardless of the guard. **Verified with teeth**: temporarily deleted the status-check guard, re-ran this test alone — failed (`left: 32, right: 8`, i.e. it wrongly used the 404 response's body once the guard was gone); restored the guard, re-ran clean.
 ## Workarounds
 Run affected test modules with `-- --test-threads=1` (or `cargo test --lib retrieval::embedder -- --test-threads=1`) to get a deterministic pass. Not viable as a permanent CI setting (serializes the entire suite).
 
