@@ -5,6 +5,7 @@ pub mod code_store;
 pub mod config;
 pub mod drift;
 pub mod embedder;
+pub mod index_lock;
 pub mod index_state;
 pub mod memory;
 pub mod memory_payload;

@@ -1,0 +1,179 @@
+//! Per-project exclusive lock for the retrieval index pass.
+//!
+//! Without it, N concurrent `codescout index --project <same>` runs each execute
+//! the full `stream_index` pipeline against the same Qdrant collection and
+//! `project_id`, duplicating the entire embedding workload. Observed 2026-07-27
+//! with four simultaneous runs (3h24m / 2h02m / 1h08m / 1h05m), all orphaned to
+//! `systemd --user`. See docs/issues/2026-07-25-concurrent-index-no-project-lock.md
+//!
+//! Deliberately NOT `.codescout/write.lock`: that lock is taken per write-tool
+//! call by `crate::agent::write_guard::WriteGuard`. An index holding it for hours
+//! would block every edit tool for the duration.
+//!
+//! Keyed on `project_id` rather than on the filesystem root, and stored outside
+//! any repository: the contended resource is the `(collection, project_id)` pair
+//! in Qdrant, and library syncs pass a third-party checkout as `root` that must
+//! not gain a `.codescout/` directory.
+
+use anyhow::{Context, Result};
+use fs4::fs_std::FileExt;
+use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::path::{Path, PathBuf};
+
+/// RAII handle for the per-project index lock.
+///
+/// The `flock` is released on drop, and by the kernel if the process dies — so a
+/// leftover lock file is inert and needs no recovery logic.
+#[derive(Debug)]
+pub struct IndexLock {
+    file: File,
+    path: PathBuf,
+}
+
+impl IndexLock {
+    /// Filesystem path this lock occupies. For diagnostics and tests.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for IndexLock {
+    fn drop(&mut self) {
+        // Explicit unlock documents intent; closing the fd would also release it.
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
+/// Deterministic lock-file path for `project_id`.
+///
+/// Hashed so any `project_id` — including one with path separators or spaces —
+/// maps to a safe, fixed-length filename.
+pub fn lock_path(project_id: &str) -> PathBuf {
+    let mut h = Sha256::new();
+    h.update(project_id.as_bytes());
+    let digest = format!("{:x}", h.finalize());
+    std::env::temp_dir().join(format!("codescout-index-{}.lock", &digest[..16]))
+}
+
+/// Acquire the exclusive index lock for `project_id`, or fail immediately.
+///
+/// Fail-fast rather than queue. A queued second run would be nearly free — every
+/// `chunk_id` would already be present, so nothing re-embeds — but it would hide
+/// the duplication instead of surfacing it, which is how this bug went unnoticed
+/// for hours.
+pub fn acquire(project_id: &str) -> Result<IndexLock> {
+    let path = lock_path(project_id);
+
+    // create(true) + truncate(false): `File::create` truncates on open, which
+    // would erase the current holder's PID line before we even try to lock.
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("failed to open index lock file: {}", path.display()))?;
+
+    file.try_lock_exclusive().with_context(|| {
+        format!(
+            "another codescout index is already running for project '{project_id}' \
+             (lock: {}). Wait for it to finish, or inspect with \
+             `pgrep -af 'codescout index'`.",
+            path.display()
+        )
+    })?;
+
+    // PID for diagnostics, mirroring src/lsp/mux/process.rs:81. Only after the
+    // lock is held, so we never clobber another holder's record. Best-effort:
+    // a failed write must not fail an otherwise-valid lock.
+    use std::io::Write;
+    let _ = file.set_len(0);
+    let _ = writeln!(&file, "{}", std::process::id());
+
+    Ok(IndexLock { file, path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unique per test so concurrent `cargo test` threads never share a lock file.
+    fn unique_project(tag: &str) -> String {
+        format!(
+            "test-{}-{}-{:?}",
+            tag,
+            std::process::id(),
+            std::thread::current().id()
+        )
+    }
+
+    #[test]
+    fn acquire_succeeds_for_fresh_project() {
+        let pid = unique_project("fresh");
+        let lock = acquire(&pid).expect("first acquire must succeed");
+        assert!(lock.path().exists(), "lock file should exist on disk");
+    }
+
+    #[test]
+    fn second_acquire_fails_while_first_is_held() {
+        let pid = unique_project("contend");
+        let _first = acquire(&pid).expect("first acquire must succeed");
+        let second = acquire(&pid);
+        assert!(
+            second.is_err(),
+            "a second acquire for the same project_id must fail while the first is held"
+        );
+        let msg = format!("{:#}", second.unwrap_err());
+        assert!(
+            msg.contains("already running"),
+            "error must tell the operator what is happening, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn different_projects_do_not_contend() {
+        let a = unique_project("proj-a");
+        let b = unique_project("proj-b");
+        let _lock_a = acquire(&a).expect("project a");
+        let _lock_b = acquire(&b).expect("project b must not contend with a");
+    }
+
+    #[test]
+    fn lock_is_released_on_drop() {
+        let pid = unique_project("release");
+        {
+            let _held = acquire(&pid).expect("first acquire");
+        } // drop releases
+        acquire(&pid).expect("must be re-acquirable after the guard drops");
+    }
+
+    /// A leftover lock *file* must never block a new run. flock is released by the
+    /// kernel on process death, so this passes with no recovery logic — the test
+    /// exists so nobody adds PID-liveness checks "to be safe".
+    #[test]
+    fn preexisting_lock_file_does_not_block() {
+        let pid = unique_project("stale");
+        let path = lock_path(&pid);
+        std::fs::write(&path, "999999\n").expect("simulate a lock file left by a dead process");
+        acquire(&pid).expect("a stale lock file must not block acquisition");
+    }
+
+    #[test]
+    fn lock_path_is_deterministic_and_filename_safe() {
+        let a = lock_path("some/project:with weird*chars");
+        let b = lock_path("some/project:with weird*chars");
+        assert_eq!(a, b, "lock_path must be deterministic");
+
+        let name = a.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.'),
+            "filename must be safe regardless of project_id, got: {name}"
+        );
+        assert_ne!(
+            lock_path("project-one"),
+            lock_path("project-two"),
+            "distinct project ids must map to distinct lock files"
+        );
+    }
+}
