@@ -749,9 +749,20 @@ mod tests {
 
     /// `tokio::try_join!` must run the dense and sparse legs concurrently — a
     /// regression to sequential `.await`s produces byte-identical output
-    /// values, so only wall-clock timing catches it. Delays of 300ms/600ms
-    /// with a 900ms ceiling leave generous slack over `max(300,600)=600ms`
-    /// while staying comfortably under `sum=900ms`.
+    /// values, so only wall-clock timing catches it.
+    ///
+    /// Equal delays are deliberate, not arbitrary: the separation between the
+    /// concurrent and sequential cases is `sum` vs `max`, and that ratio
+    /// (`sum/max`) is maximized (2×) when both delays are equal. Unequal
+    /// delays throw headroom away — an earlier version used 300ms/600ms
+    /// (only a 1.5× ratio) and measured just 4-6ms of margin on the
+    /// sequential side (903.8-905.7ms against a 900ms ceiling) — a false
+    /// negative waiting to happen on any machine a few ms faster. With both
+    /// legs at 500ms and an 800ms ceiling, measured locally (5 runs each):
+    ///   concurrent ≈ 502.8-503.6ms  → ~296-297ms below the ceiling
+    ///   sequential ≈ 1004.8-1005.5ms → ~205ms above the ceiling
+    /// Do not "optimize" these back down to unequal/smaller delays — that
+    /// silently reintroduces the tight margin this comment exists to prevent.
     #[tokio::test]
     async fn dense_and_sparse_legs_run_concurrently() {
         let mut dense_server = mockito::Server::new_async().await;
@@ -760,7 +771,7 @@ mod tests {
             .mock("POST", "/v1/embeddings")
             .with_status(200)
             .with_chunked_body(|w| {
-                std::thread::sleep(std::time::Duration::from_millis(600));
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 w.write_all(br#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
             })
             .create_async()
@@ -769,7 +780,7 @@ mod tests {
             .mock("POST", "/embed_sparse")
             .with_status(200)
             .with_chunked_body(|w| {
-                std::thread::sleep(std::time::Duration::from_millis(300));
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 w.write_all(br#"[[{"index":1,"value":0.5}]]"#)
             })
             .create_async()
@@ -786,13 +797,13 @@ mod tests {
         assert_eq!(out[0].dense, vec![0.1_f32, 0.2, 0.3]);
         assert_eq!(out[0].sparse.indices, vec![1u32]);
         assert!(
-            elapsed < std::time::Duration::from_millis(900),
-            "legs should run concurrently (~max(300,600)=600ms), took {elapsed:?} — \
-                 a sequential-await regression would take ~900ms"
+            elapsed < std::time::Duration::from_millis(800),
+            "legs should run concurrently (~max(500,500)=500ms), took {elapsed:?} — \
+                 a sequential-await regression would take ~1000ms"
         );
         assert!(
-            elapsed >= std::time::Duration::from_millis(550),
-            "delays should have actually elapsed (~600ms), took {elapsed:?} — a \
+            elapsed >= std::time::Duration::from_millis(400),
+            "delays should have actually elapsed (~500ms), took {elapsed:?} — a \
                  near-zero time means the mock delay did not run and this test is not \
                  exercising anything"
         );
