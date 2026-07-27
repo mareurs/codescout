@@ -363,7 +363,7 @@ Closes docs/issues/2026-07-25-concurrent-index-no-project-lock.md"
 
 **Interfaces:**
 - Consumes: nothing from Stage 1.
-- Produces: `async fn EmbedderHttp::embed_one_batch(&self, chunk: &[String]) -> Result<Vec<EmbedOutput>>` — private to the impl. Embeds exactly one sub-batch: dense and sparse legs joined with `tokio::try_join!`, empty inputs omitted from the sparse request and re-expanded, dim validated. Task 5 calls this.
+- Produces: `async fn EmbedderHttp::embed_one_batch(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>>` — private to the impl. **Takes the sub-batch by value on purpose:** Task 5 drives it from a `futures` stream, and a returned future that borrows its input cannot be expressed with a single generic `Fut` type parameter. Owning the `Vec` means the future borrows only `&self`, whose lifetime is fixed for the whole call. The clone is one `Vec<String>` per sub-batch against an HTTP round-trip — immaterial. Embeds exactly one sub-batch: dense and sparse legs joined with `tokio::try_join!`, empty inputs omitted from the sparse request and re-expanded, dim validated. Task 5 calls this.
 
 This task changes **no behaviour**. It moves the body of the existing `for chunk in texts.chunks(BATCH)` loop into a method so Task 5 can drive it concurrently and so it can be tested in isolation.
 
@@ -376,7 +376,7 @@ Add to `impl EmbedderHttp`, taking the entire body of the existing hybrid loop v
     ///
     /// Split out of `embed_batch` so the sub-batches can be pipelined (see the
     /// `buffered` driver there) and so this unit is testable on its own.
-    async fn embed_one_batch(&self, chunk: &[String]) -> Result<Vec<EmbedOutput>> {
+    async fn embed_one_batch(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
         let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
         // ... body of the existing `for chunk in texts.chunks(BATCH)` loop,
         // unchanged, but pushing into a local `out` and returning it instead of
@@ -394,7 +394,7 @@ Then make `embed_batch`'s hybrid path call it:
         let batch = 8; // replaced in Task 4
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(batch) {
-            out.extend(self.embed_one_batch(chunk).await?);
+            out.extend(self.embed_one_batch(chunk.to_vec()).await?);
         }
         Ok(out)
 ```
@@ -636,7 +636,9 @@ hatch and 8 as the fallback for non-TEI servers."
 
 **Interfaces:**
 - Consumes: `embed_one_batch` (Task 3), `resolve_batch_size` (Task 4).
-- Produces: `pub(crate) async fn embed_chunks_ordered<F, Fut>(texts: &[String], batch: usize, inflight: usize, embed_one: F) -> Result<Vec<EmbedOutput>>` where `F: Fn(&[String]) -> Fut` and `Fut: std::future::Future<Output = Result<Vec<EmbedOutput>>>`. A free function in `src/retrieval/embedder.rs`.
+- Produces: `pub(crate) async fn embed_chunks_ordered<F, Fut>(texts: &[String], batch: usize, inflight: usize, embed_one: F) -> Result<Vec<EmbedOutput>>` where `F: Fn(Vec<String>) -> Fut` and `Fut: std::future::Future<Output = Result<Vec<EmbedOutput>>>`. A free function in `src/retrieval/embedder.rs`.
+
+  **The closure takes an owned `Vec<String>`, not `&[String]`.** With a single generic `Fut`, a future that borrows its input is inexpressible — the input lifetime varies per call while `Fut` is one fixed type. Owning the sub-batch keeps `&self` the only borrow. Do not "simplify" this to a slice; it will not compile.
 
 **Why a free function taking a closure, rather than inlining the stream in `embed_batch`:** the ordering property must be tested with sub-batches that *finish out of order*, and forcing that over HTTP is not deterministic. With this shape the test injects a closure that sleeps longest for the first sub-batch — guaranteeing out-of-order completion — and the test genuinely fails if `buffered` is changed to `buffer_unordered`. That is the whole point of the test.
 
@@ -654,8 +656,7 @@ Add to the tests module in `src/retrieval/embedder.rs`:
     async fn embed_chunks_ordered_preserves_input_order() {
         let texts: Vec<String> = (0..9).map(|i| format!("text-{i}")).collect();
 
-        let out = embed_chunks_ordered(&texts, 3, 3, |chunk: &[String]| {
-            let chunk: Vec<String> = chunk.to_vec();
+        let out = embed_chunks_ordered(&texts, 3, 3, |chunk: Vec<String>| {
             async move {
                 // First sub-batch ("text-0") sleeps longest, last sleeps least.
                 let idx: u64 = chunk[0]
@@ -689,7 +690,7 @@ Add to the tests module in `src/retrieval/embedder.rs`:
     #[tokio::test]
     async fn embed_chunks_ordered_propagates_error() {
         let texts: Vec<String> = (0..4).map(|i| format!("t{i}")).collect();
-        let res = embed_chunks_ordered(&texts, 2, 2, |_c: &[String]| async {
+        let res = embed_chunks_ordered(&texts, 2, 2, |_c: Vec<String>| async {
             Err::<Vec<EmbedOutput>, _>(anyhow!("boom"))
         })
         .await;
@@ -698,7 +699,7 @@ Add to the tests module in `src/retrieval/embedder.rs`:
 
     #[tokio::test]
     async fn embed_chunks_ordered_handles_empty_input() {
-        let out = embed_chunks_ordered(&[], 8, 4, |_c: &[String]| async {
+        let out = embed_chunks_ordered(&[], 8, 4, |_c: Vec<String>| async {
             Ok::<Vec<EmbedOutput>, anyhow::Error>(vec![])
         })
         .await
@@ -736,15 +737,16 @@ pub(crate) async fn embed_chunks_ordered<F, Fut>(
     embed_one: F,
 ) -> Result<Vec<EmbedOutput>>
 where
-    F: Fn(&[String]) -> Fut,
+    F: Fn(Vec<String>) -> Fut,
     Fut: std::future::Future<Output = Result<Vec<EmbedOutput>>>,
 {
     let batch = batch.max(1);
     let inflight = inflight.max(1);
-    let nested: Vec<Vec<EmbedOutput>> = futures::stream::iter(texts.chunks(batch).map(&embed_one))
-        .buffered(inflight)
-        .try_collect()
-        .await?;
+    let nested: Vec<Vec<EmbedOutput>> =
+        futures::stream::iter(texts.chunks(batch).map(|c| embed_one(c.to_vec())))
+            .buffered(inflight)
+            .try_collect()
+            .await?;
     Ok(nested.into_iter().flatten().collect())
 }
 ```
@@ -775,7 +777,51 @@ Replace the hybrid path of `embed_batch` (the sequential loop added in Task 3) w
         embed_chunks_ordered(texts, batch, inflight, |chunk| self.embed_one_batch(chunk)).await
 ```
 
-Also replace the `dense_only` path's `const DENSE_BATCH: usize = 8;` loop with the same driver, using a dense-only sub-batch closure. There is no sparse server to probe on that path, so use `resolve_batch_size` only if `CODESCOUT_EMBED_BATCH` is set, else 32 — llama-server has no advertised cap and the sweep showed it healthy through 128.
+Also convert the `dense_only` path. Extract its loop body into a sibling worker and
+drive it with the same function:
+
+```rust
+    /// Dense-only sub-batch (lite stack: no sparse server contacted).
+    async fn embed_one_batch_dense(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
+        let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        let mut out = Vec::with_capacity(inputs.len());
+        for dense in self.dense_batch(&inputs).await? {
+            if dense.len() != self.expected_dim {
+                return Err(anyhow!(
+                    "embed dim mismatch: got {}, expected {}",
+                    dense.len(),
+                    self.expected_dim
+                ));
+            }
+            out.push(EmbedOutput {
+                dense,
+                sparse: SparseVector { indices: vec![], values: vec![] },
+            });
+        }
+        Ok(out)
+    }
+```
+
+and in `embed_batch`'s `dense_only` branch:
+
+```rust
+            // No sparse server to probe on this path: honour an explicit override,
+            // else 32. llama-server advertises no per-request cap and the 2026-07-27
+            // sweep showed it healthy through 128, so 32 is deliberately conservative.
+            const DENSE_ONLY_BATCH: usize = 32;
+            let batch = std::env::var("CODESCOUT_EMBED_BATCH")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(DENSE_ONLY_BATCH);
+            return embed_chunks_ordered(texts, batch, resolve_inflight(), |chunk| {
+                self.embed_one_batch_dense(chunk)
+            })
+            .await;
+```
+
+Do **not** call `resolve_batch_size()` here — it probes `self.sparse_base`, which on the
+lite stack points at a server that does not exist.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
