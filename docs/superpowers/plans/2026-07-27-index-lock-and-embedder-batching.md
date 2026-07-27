@@ -467,6 +467,74 @@ concurrent driving and isolated testing."
 
 ---
 
+### Task 3b: Hybrid-path regression coverage (mockito harness)
+
+**Added 2026-07-27 after the Task 3 review.** Task 3 was a pure extraction whose equivalence
+rests entirely on faithful code movement — **no existing test exercises `embed_batch`'s hybrid
+dense+sparse path at all**, so the green suite proved nothing about it. Tasks 4 and 5 both
+modify that path further. This task builds the safety net first.
+
+**Files:**
+- Modify: `src/retrieval/embedder.rs` (test module only — **no production code changes**)
+
+**Interfaces:**
+- Consumes: `embed_one_batch(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>>` (Task 3).
+- Produces: a `mockito`-based test harness in `embedder.rs`'s test module that Tasks 4 and 5 reuse.
+
+`mockito = "1"` is already a dev-dependency (`Cargo.toml:241`). Construct the embedder under
+test with `EmbedderHttp::new(dense_server.url(), sparse_server.url(), 768)` — two separate
+`mockito::Server` instances, since the dense and sparse legs are different hosts. The dense leg
+posts to `/v1/embeddings` and expects `{"data":[{"embedding":[...]}]}`; the sparse leg posts to
+`/embed_sparse` and expects `[[{"index":u32,"value":f32}, ...], ...]` — one inner array per
+non-empty input.
+
+Each test below targets a mutation that a shallow "does it return something" test would miss.
+Write them so they fail against that mutation — verify at least #1 and #5 by temporarily
+applying the mutation, as in Task 1.
+
+- [ ] **Step 1: Mid-chunk empty-string alignment**
+
+Input `["a", "", "b", "", "c"]`. Give each non-empty input a **uniquely identifiable** sparse
+response (distinct `index`/`value` per input). Assert the specific sparse vector lands on the
+specific input position, and that positions 1 and 3 carry empty sparse vectors. Length-only
+assertions do not test this. Empties sandwiched between non-empties stress the re-expansion
+iterator far harder than leading/trailing empties.
+
+- [ ] **Step 2: All-empty chunk issues ZERO sparse requests**
+
+Input `["", "", ""]`. Assert the sparse mock's invocation count is **0** (`Mock::expect(0)` +
+`assert_async`). Accepting "the sparse response was `[]`" would still pass if the
+`nonempty.is_empty()` short-circuit were removed and an empty-array request went out — but the
+real sparse server answers HTTP 400 to that, aborting the whole batch.
+
+- [ ] **Step 3: Retry attempt cap is exactly 8**
+
+Mock a persistent `429`. Assert the sparse endpoint is hit exactly 8 times, then the call
+errors. "Eventually fails" would not catch an off-by-one on `attempt >= 8`. Keep the test fast
+by noting the backoff is `100ms * 2^min(attempt,6)`; if the full ladder is too slow, assert the
+count with a shorter cap via a dedicated test that stubs fewer attempts, and say so in the report.
+
+- [ ] **Step 4: Retryable vs non-retryable both exercised**
+
+One case with a retryable status (`424`/`429`/`5xx`) and one with a non-retryable client error
+(e.g. `400`) that must fail on the **first** attempt with no retry. This is what tests the
+`retryable` boolean in both directions.
+
+- [ ] **Step 5: The two legs really run concurrently**
+
+Give the dense and sparse mocks different artificial delays and assert wall-clock elapsed time
+tracks `max(delay)`, not `sum(delay)`. A regression from `tokio::try_join!` to two sequential
+`.await`s produces **byte-identical output values** — only a timing assertion catches it. Allow
+generous slack (e.g. delays of 300ms/600ms, assert elapsed < 900ms) so the test is not flaky
+under load.
+
+- [ ] **Step 6: Run the gate and commit**
+
+`cargo fmt && cargo clippy -- -D warnings && cargo test`, then commit `src/retrieval/embedder.rs`
+with an explicit pathspec.
+
+---
+
 ### Task 4: Lazy `/info` batch-cap discovery
 
 **Files:**
