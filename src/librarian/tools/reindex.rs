@@ -196,6 +196,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut total_unchanged = 0usize;
     let mut all_unknown_ids: Vec<String> = Vec::new();
     let mut backfill_errors: Vec<String> = Vec::new();
+    // Reported in the response envelope. Without it, `unchanged: N` renders
+    // identically whether N files legitimately needed no work or N files were
+    // skipped by mistake — which is exactly how the `reembed` no-op stayed
+    // invisible (docs/issues/2026-07-25-reindex-reembed-noop-without-force.md).
+    let mut total_embedded = 0usize;
 
     let want_embeddings = ctx.embedding.is_some();
 
@@ -230,6 +235,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             for (id, title, chunk_text) in &embed_queue {
                 let vec = svc.embed_artifact(title.as_deref(), chunk_text).await?;
                 store.upsert(&project_id, id, &vec).await?;
+                total_embedded += 1;
             }
         }
 
@@ -256,11 +262,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "updated": total_updated,
         "removed": total_removed,
         "unchanged": total_unchanged,
+        "embedded": total_embedded,
+        "embeddings_enabled": want_embeddings,
         "orphans_removed": orphan_removed,
         "unknown_count": unknown_count,
         "unknown_sample": sample,
         "backfill_error_count": backfill_errors.len(),
         "backfill_errors": backfill_errors,
+        // Name the ambiguous case out loud rather than leaving the caller to
+        // infer it from a bare `unchanged: N`.
+        "embed_note": if want_embeddings && total_embedded == 0 && total_unchanged > 0 {
+            format!(
+                "0 embedded, {total_unchanged} unchanged — nothing needed a new vector. \
+                 If you meant to backfill (embeddings newly enabled, or model/backend \
+                 changed), pass reembed=true."
+            )
+        } else {
+            format!("{total_embedded} embedded")
+        },
         "unknown_sample_note": if unknown_count > UNKNOWN_SAMPLE {
             format!("showing first {UNKNOWN_SAMPLE} of {unknown_count}; run CLI reindex for full list")
         } else {
@@ -295,6 +314,53 @@ mod tests {
             })
             .with_rules(rules)
             .build()
+    }
+
+    /// The response envelope must be able to express "embedded nothing".
+    ///
+    /// Before these fields existed, `unchanged: N` rendered identically whether
+    /// N files legitimately needed no work or N files were skipped by mistake —
+    /// which is how the `reembed` no-op stayed invisible through two apparently
+    /// clean reindexes (docs/issues/2026-07-25-reindex-reembed-noop-without-force.md).
+    ///
+    /// Covers the no-embedder branch only. Asserting a NON-zero `embedded`
+    /// needs a mock `EmbeddingService` + artifact store, and
+    /// `TestToolContextBuilder` has no `with_embedding` setter today; the
+    /// populated path is covered at the layer below by
+    /// `indexer::tests::index_repo_sync_force_embed_alone_requeues_without_force_rewalk`,
+    /// which asserts on the embed QUEUE rather than the envelope.
+    #[tokio::test]
+    async fn envelope_reports_embedding_state() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\nbody\n").unwrap();
+
+        let ctx = mk_ctx(
+            root.to_path_buf(),
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        );
+
+        let v = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(v["added"].as_u64().unwrap(), 1);
+        assert!(
+            !v["embeddings_enabled"].as_bool().unwrap(),
+            "no embedder configured in the test context"
+        );
+        assert_eq!(v["embedded"].as_u64().unwrap(), 0);
+        assert_eq!(
+            v["embed_note"].as_str().unwrap(),
+            "0 embedded",
+            "with embeddings disabled the note must not suggest reembed=true — \
+             passing it would change nothing"
+        );
+
+        // Second pass: nothing changed, so the row is `unchanged`. The note must
+        // still not nag about reembed, because no embedder is configured.
+        let v2 = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(v2["unchanged"].as_u64().unwrap(), 1);
+        assert_eq!(v2["embedded"].as_u64().unwrap(), 0);
+        assert_eq!(v2["embed_note"].as_str().unwrap(), "0 embedded");
     }
 
     #[tokio::test]

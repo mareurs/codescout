@@ -51,6 +51,29 @@ pub fn first_h1(body: &str) -> Option<String> {
     None
 }
 
+/// Build the embed-queue entry for `body`, or `None` when its first chunk is
+/// empty/whitespace-only.
+///
+/// Empty bodies are skipped deliberately: the embedder's own guard bails the
+/// WHOLE batch on a single empty input (see
+/// `docs/issues/archive/2026-05-17-reindex-embedding-dim-mismatch.md`), which
+/// would otherwise abort an entire bulk reindex/backfill run over one
+/// near-empty file.
+///
+/// Shared by both enqueue sites in [`index_repo_sync`] — the changed-content
+/// path and the forced-re-embed path through the unchanged-row early return.
+/// Keeping it in one place is what stops those two from drifting apart.
+fn embed_queue_item(id: &str, title: Option<String>, body: &str) -> Option<EmbedQueueItem> {
+    let first_chunk = codescout_embed::chunk_markdown(body, 512)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| body.to_string());
+    if first_chunk.trim().is_empty() {
+        return None;
+    }
+    Some((id.to_string(), title, first_chunk))
+}
+
 /// Synchronous part of indexing: walk files, upsert artifact rows, collect embedding queue.
 /// Returns `(report, embed_queue)` where `embed_queue` is a list of [`EmbedQueueItem`].
 ///
@@ -210,6 +233,24 @@ pub fn index_repo_sync(
             .unwrap_or(false);
 
         if !force_rewalk && content_unchanged && meta_unchanged {
+            // A forced re-embed must still queue the file even though the row
+            // itself needs no rewrite. `force_embed` is documented as being
+            // independent of `force_rewalk`, but this early return used to skip
+            // the embed branch below outright — which made
+            // `librarian(reindex, reembed=true)` a silent no-op on any
+            // already-indexed project: it reported `unchanged: N` with
+            // `backfill_error_count: 0` while sending the embedder nothing.
+            // See docs/issues/2026-07-25-reindex-reembed-noop-without-force.md.
+            //
+            // The row stays `unchanged` on purpose: nothing about it changed,
+            // only its vector needs recomputing. Falling through to the upsert
+            // path instead would rewrite every row and misreport them as
+            // `updated`.
+            if want_embeddings && force_embed {
+                if let Some(item) = embed_queue_item(&id, title, body) {
+                    embed_queue.push(item);
+                }
+            }
             seen_ids.push(id);
             report.unchanged += 1;
             continue;
@@ -241,18 +282,8 @@ pub fn index_repo_sync(
         // project). Re-classification alone, without either signal, does not
         // require recomputing the embedding.
         if want_embeddings && (!content_unchanged || force_embed) {
-            let chunks = codescout_embed::chunk_markdown(body, 512);
-            let first_chunk = chunks
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| body.to_string());
-            // Skip empty/whitespace-only bodies (frontmatter-only or blank
-            // files) — the embedder's own guard bails the WHOLE batch on a
-            // single empty input (see 2026-05-17-reindex-embedding-dim-mismatch.md),
-            // which would otherwise abort an entire bulk reindex/backfill run
-            // over one near-empty file.
-            if !first_chunk.trim().is_empty() {
-                embed_queue.push((id.clone(), title, first_chunk));
+            if let Some(item) = embed_queue_item(&id, title, body) {
+                embed_queue.push(item);
             }
         }
 
@@ -1213,6 +1244,62 @@ kind = "memory"
             1,
             "force_embed must queue unchanged content for re-embedding"
         );
+    }
+
+    #[test]
+    fn index_repo_sync_force_embed_alone_requeues_without_force_rewalk() {
+        // Regression: `force_embed` is documented as an INDEPENDENT lever —
+        // "the separate, explicit lever for 'queue this file for embedding even
+        // though its content hash is unchanged'". It was in fact reachable only
+        // when `force_rewalk` was also set, because the unchanged-row
+        // early-return `continue`d before the embed-queue branch ever ran.
+        //
+        // The sibling test above passes force_rewalk=true in every pass, so it
+        // proved force_embed works GIVEN force_rewalk and never covered the
+        // combination the `reindex(reembed=true)` tool call actually produces.
+        // See docs/issues/2026-07-25-reindex-reembed-noop-without-force.md.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\nbody\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+
+        // Already indexed, embeddings were not configured at the time.
+        let (r1, q1) = index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
+        assert_eq!(r1.added, 1);
+        assert!(q1.is_empty());
+
+        // force_embed=true, force_rewalk=FALSE — exactly what
+        // `librarian(reindex, reembed=true)` passes. The row itself genuinely
+        // needs no rewrite, so it must still be reported `unchanged`; the file
+        // must nevertheless be queued for embedding.
+        let (r2, q2) = index_repo_sync(&cat, &rules, root, &ignore, true, false, true).unwrap();
+        assert_eq!(
+            q2.len(),
+            1,
+            "force_embed alone must queue unchanged content — it is documented \
+             as independent of force_rewalk"
+        );
+        assert_eq!(
+            r2.unchanged, 1,
+            "a re-embed pass must not claim the row was updated — nothing about \
+             the row changed, only its vector needs recomputing"
+        );
+        assert_eq!(r2.updated, 0);
+
+        // Neither flag: still a true no-op, nothing queued.
+        let (r3, q3) = index_repo_sync(&cat, &rules, root, &ignore, true, false, false).unwrap();
+        assert!(
+            q3.is_empty(),
+            "no flags: unchanged content must not be re-queued"
+        );
+        assert_eq!(r3.unchanged, 1);
     }
 
     #[test]
