@@ -1,27 +1,31 @@
 name: codescout-retrieval
 
-# Three-profile retrieval stack: cpu / gpu / amd.
+# Single-profile retrieval stack: gpu (NVIDIA CUDA).
 #
-#   docker compose --profile cpu up -d     # CPU-only — any machine
-#   docker compose --profile gpu up -d     # NVIDIA CUDA
-#   docker compose --profile amd up -d     # AMD ROCm (RX 7xxx / MI series)
+#   docker compose --profile gpu up -d
 #
-# Dense embedder is llama-server (gguf) on all three profiles — CodeRankEmbed-Q4_K_M
-# scored highest on the legacy-natural bench (30/60) and runs ≤1GB VRAM.
-# Sparse is splade-pp via TEI. CPU profile uses TEI's CPU image; GPU profile uses
-# TEI's CUDA image; AMD profile builds TEI from source against rocm/pytorch:latest
-# (see docker/sparse-amd/Dockerfile) — HF does not publish a prebuilt TEI ROCm image.
-# Rerank is bge-reranker-base on CPU (smaller, ~250ms p95) and bge-reranker-v2-m3
-# on GPU/AMD profiles (full quality, ~80ms p95).
+# The cpu and amd profiles were removed 2026-07-27 — this repo targets one NVIDIA
+# host. Recover them from git history if another machine needs them:
+#   git log --oneline -- docker-compose.yml
+# The amd profile also depended on docker/sparse-amd/Dockerfile (TEI built from
+# source — HF publishes no prebuilt TEI ROCm image) and on .env.cpu / .env.amd.
+# Those files are left in place; delete them separately if they are also dead.
 #
-# First run: place CodeRankEmbed-Q4_K_M.gguf and (for gpu/amd profiles)
-# bge-reranker-v2-m3-Q4_K_M.gguf in ${CODESCOUT_MODEL_DIR:-./models}.
-# Pull them from:
-#   https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF (Q4_K_M ≈ 90MB)
-#   https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF (Q4_K_M ≈ 419MB)
+# Dense embedder is llama-server (gguf) — CodeRankEmbed-Q4_K_M scored highest on
+# the legacy-natural bench (30/60) and runs ≤1GB VRAM. Sparse is splade-pp via
+# TEI's CUDA image. Rerank is bge-reranker-v2-m3 Q4_K_M, also on llama-server.
+#
+# First run: place CodeRankEmbed-Q4_K_M.gguf and bge-reranker-v2-m3-Q4_K_M.gguf
+# in ${CODESCOUT_MODEL_DIR:-./models} — both are fetched/built by:
+#   ./scripts/fetch-models.sh --gpu
+# Sources:
+#   nomic-ai/CodeRankEmbed            — BUILT to gguf locally; no published GGUF
+#                                       repo exists (the old nomic-ai/…-GGUF 401s,
+#                                       see docs/issues/2026-07-25-coderankembed-gguf-source-404.md)
+#   gpustack/bge-reranker-v2-m3-GGUF  — plain download (Q4_K_M ≈ 419MB)
 #
 # Pinned image tags below are what we tested. Replace tags with sha256 digests
-# before treating any profile as production-stable.
+# before treating this profile as production-stable.
 
 services:
   qdrant:
@@ -45,44 +49,7 @@ services:
   # ------------------------------------------------------------------ DENSE
   # llama-server serving CodeRankEmbed Q4_K_M (137M params, dim 768).
   # The query prefix "Represent this query for searching relevant code: " is
-  # required — see CODESCOUT_QUERY_PREFIX in .env.{cpu,gpu}.
-  dense-cpu:
-    profiles: [cpu]
-    image: ghcr.io/ggml-org/llama.cpp:server@sha256:6b0a9b4fd7e3a9a55e959e5a74d47e11f8ccd4dfbc2556b7382a6516255dcc73
-    container_name: codescout-dense-cpu
-    restart: unless-stopped
-    command:
-      - --model
-      - /models/CodeRankEmbed-Q4_K_M.gguf
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --embedding
-      - --pooling
-      - mean
-      - --ctx-size
-      - "8192"
-      - --batch-size
-      - "4096"
-      - --ubatch-size
-      - "4096"
-      - --parallel
-      - "8"
-      - --threads
-      - "4"
-    ports:
-      - "127.0.0.1:48081:8080"
-    volumes:
-      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks: [retrieval_net]
-
+  # required — see CODESCOUT_QUERY_PREFIX in .env.gpu.
   dense-gpu:
     profiles: [gpu]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:a04923d31b4ca0d95bd772a4b80c9112f29121014df64d3d80a16a136ca19672
@@ -129,75 +96,28 @@ services:
               capabilities: [gpu]
     networks: [retrieval_net]
 
-  dense-amd:
-    profiles: [amd]
-    image: rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server
-    container_name: codescout-dense-amd
-    restart: unless-stopped
-    command:
-      - --model
-      - /models/CodeRankEmbed-Q4_K_M.gguf
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --embedding
-      - --pooling
-      - mean
-      - --ctx-size
-      - "65536"
-      - --batch-size
-      - "4096"
-      - --ubatch-size
-      - "4096"
-      - --parallel
-      - "16"
-      - --n-gpu-layers
-      - "999"
-      - --flash-attn
-      - "on"
-    ports:
-      - "127.0.0.1:48081:8080"
-    volumes:
-      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    group_add:
-      - video
-      - render
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    networks: [retrieval_net]
-
   # ------------------------------------------------------------------ SPARSE
-  # Splade_PP_en_v1 on TEI. Identical model across profiles; CPU latency
-  # ~80ms is acceptable for the suite.
-  sparse-cpu:
-    profiles: [cpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
-    container_name: codescout-sparse-cpu
-    restart: unless-stopped
-    command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
-    ports:
-      - "127.0.0.1:48084:80"
-    volumes:
-      - model_cache:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks: [retrieval_net]
-
+  # Splade_PP_en_v1 on TEI.
+  #
+  # VRAM note carried over from the deleted sparse-amd service: SPLADE projects
+  # every token to a vocab-sized ([tokens x 30522] f16) tensor, so peak memory
+  # scales with --max-batch-tokens. TEI's default of 16384 measured ~13.7 GiB on
+  # a 16 GiB card, which is why the amd service capped it at 2048. sparse-gpu has
+  # never carried that cap and has run stably at ~726 MiB on a 6 GiB card — the
+  # discrepancy is unexplained (different TEI backend build), so if this service
+  # ever OOMs at warmup, add `--max-batch-tokens 2048` first.
+  #
+  # TEI publishes ONE IMAGE PER CUDA COMPUTE CAPABILITY (unlike llama.cpp, whose
+  # single CUDA image ships ARCHS=500..1200 and so runs anywhere). A TEI digest
+  # pin is therefore a HARDWARE pin. `turing-1.8` targets CC 7.5 (GTX 16xx /
+  # RTX 20xx); `86-1.8` targets CC 8.6 (RTX 30xx / A10). Swap the tag AND the
+  # digest together when moving to a different card, and re-verify with
+  # `nvidia-smi --query-gpu=compute_cap --format=csv`. Turing builds are
+  # documented upstream as experimental (no flash-attention).
+  # Was 86-1.8@sha256:65f792e7… — see docs/issues/2026-07-25-compose-gpu-profile-ampere-only.md
   sparse-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8@sha256:65f792e790f976713a5d2ab2586d93d074203d1f0ec2045e87e60113fbd0e256
+    image: ghcr.io/huggingface/text-embeddings-inference:turing-1.8@sha256:bd102b08fbdb23fa2a0c747c8b2d154c521e3fce20441266c005ad7a101143a0
     container_name: codescout-sparse-gpu
     restart: unless-stopped
     command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
@@ -220,121 +140,31 @@ services:
               capabilities: [gpu]
     networks: [retrieval_net]
 
-  sparse-amd:
-    profiles: [amd]
-    # Built from docker/sparse-amd/Dockerfile because HuggingFace does not
-    # publish a prebuilt TEI ROCm image (only TGI has rocm tags). Build target
-    # is gfx1100 (RX 7000 / RDNA3); MI200/MI300 should also work via the same
-    # rocm/pytorch:latest base. First build takes ~15-20 min.
-    build:
-      context: ./docker/sparse-amd
-      dockerfile: Dockerfile
-      args:
-        TEI_REF: 1588129f932125a780ab97ccb300e7774b02d230
-        PYTORCH_ROCM_ARCH: gfx1101
-    image: codescout/sparse-amd:tei-1588129f93
-    container_name: codescout-sparse-amd
-    restart: unless-stopped
-    command:
-      - --model-id
-      - prithivida/Splade_PP_en_v1
-      - --pooling
-      - splade
-      - --dtype
-      - float16
-      - --auto-truncate
-      # Cap warmup/serving batch to bound VRAM. SPLADE projects every token to a
-      # vocab-sized ([tokens x 30522] f16) tensor, so peak memory scales with
-      # max-batch-tokens; TEI's default 16384 drives ~13.7 GiB on this 16 GiB
-      # card. 2048 still batches ~4 full-length (512-tok) docs per pass.
-      - --max-batch-tokens
-      - "2048"
-      - --max-client-batch-size
-      - "8"
-      - --hostname
-      - 0.0.0.0
-      - --port
-      - "80"
-    environment:
-      # PyTorch's caching allocator never returns freed blocks to the driver;
-      # expandable_segments lets ROCm reclaim fragmented reservations, trimming
-      # the reserved high-water-mark left over after warmup.
-      PYTORCH_HIP_ALLOC_CONF: expandable_segments:True
-    ports:
-      - "127.0.0.1:48084:80"
-    volumes:
-      - model_cache:/data
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    group_add:
-      # GIDs (not names) because the rocm/pytorch image's /etc/group doesn't
-      # include a `render` entry — docker's `group_add` resolves names against
-      # the image, not the host. 44 = video, 992 = render on this host (Ubuntu
-      # 24.04 systemd default). Run `getent group video render` to confirm
-      # GIDs on other hosts. Other amd services use names because their base
-      # images (rocm/llama.cpp) have the group entries.
-      - "44"
-      - "992"
-    shm_size: 8g
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 120s
-    networks: [retrieval_net]
-
   # ------------------------------------------------------------------ RERANK
-  # CPU: bge-reranker-base (smaller, ~280MB, ~250ms p95 — usable on CPU).
-  # GPU: bge-reranker-v2-m3 (568MB, ~80ms p95 — full quality).
-  reranker-cpu:
-    profiles: [cpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
-    container_name: codescout-reranker-cpu
-    restart: unless-stopped
-    command: ["--model-id", "BAAI/bge-reranker-base", "--dtype", "float32", "--auto-truncate"]
-    ports:
-      - "127.0.0.1:48083:80"
-    volumes:
-      - model_cache:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks: [retrieval_net]
-
+  # bge-reranker-v2-m3 Q4_K_M on llama-server (419MB, ~80ms p95).
+  #
+  # v2-m3 is XLM-RoBERTa-large and "568M" is its PARAMETER COUNT, not a byte size
+  # (an earlier revision of this comment said "568MB"). The fp32 safetensors are
+  # 2.12 GiB; TEI at --dtype float16 needs ~1.13 GiB of weights but still OOM'd a
+  # 6 GiB card during warmup, because the Candle path allocates a non-flash
+  # attention matrix sized by max_position_embeddings 8194. The Q4_K_M GGUF on
+  # llama-server serves the same model in ~0.5 GiB.
+  # See docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md
+  #
+  # Mirrors the (now deleted) reranker-amd service: same Q4_K_M GGUF on
+  # llama-server, CUDA image instead of ROCm. Note this service is deliberately
+  # NOT subject to the TEI compute-capability pin described above sparse-gpu —
+  # llama.cpp ships a single CUDA image built with ARCHS=500..1200, so this
+  # digest is portable across cards.
+  #
+  # Requires bge-reranker-v2-m3-Q4_K_M.gguf in ${CODESCOUT_MODEL_DIR:-./models}:
+  #   ./scripts/fetch-models.sh --gpu
+  # Client must speak llama-server's rerank shape — CODESCOUT_RERANKER_PROTOCOL
+  # is set to llama-server in .env.gpu (Protocol::Infinity in retrieval/reranker.rs).
   reranker-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8@sha256:65f792e790f976713a5d2ab2586d93d074203d1f0ec2045e87e60113fbd0e256
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:a04923d31b4ca0d95bd772a4b80c9112f29121014df64d3d80a16a136ca19672
     container_name: codescout-reranker-gpu
-    restart: unless-stopped
-    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16", "--auto-truncate"]
-    ports:
-      - "127.0.0.1:48083:80"
-    volumes:
-      - model_cache:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    networks: [retrieval_net]
-
-  reranker-amd:
-    profiles: [amd]
-    image: rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server
-    container_name: codescout-reranker-amd
     restart: unless-stopped
     command:
       - --model
@@ -362,18 +192,19 @@ services:
       - "127.0.0.1:48083:8080"
     volumes:
       - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    group_add:
-      - video
-      - render
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     networks: [retrieval_net]
 
 volumes:

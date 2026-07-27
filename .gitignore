@@ -51,3 +51,8 @@ tests/fixtures/*/.codescout/
 
 # Personal Pi MCP config — holds API keys; see contrib/pi/mcp.json.example
 /contrib/pi/mcp.json
+
+# Retrieval-stack model weights (GGUF + HF source), bind-mounted into the
+# dense/reranker containers via CODESCOUT_MODEL_DIR. Fetched or built locally —
+# see docs/manual/src/concepts/retrieval-stack.md. ~870 MB, never committed.
+/models/

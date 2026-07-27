@@ -39,12 +39,19 @@ docker compose --profile gpu up -d
 The dense embedder needs a GGUF model file. First-run setup:
 
 ```bash
-mkdir -p models
-cd models
-huggingface-cli download nomic-ai/CodeRankEmbed-GGUF \
-    CodeRankEmbed-Q4_K_M.gguf --local-dir .
-# Or: wget https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF/resolve/main/CodeRankEmbed-Q4_K_M.gguf
+./scripts/fetch-models.sh
 ```
+
+There is **no published GGUF repo** for CodeRankEmbed. `nomic-ai/CodeRankEmbed-GGUF`,
+which this page previously recommended, returns HTTP 401 and is absent from
+HuggingFace search (tracked in the repo at
+`docs/issues/2026-07-25-coderankembed-gguf-source-404.md`). The script instead builds the Q4_K_M quant from the official, ungated safetensors repo
+(`nomic-ai/CodeRankEmbed`, ~173k downloads) using `llama.cpp:full`, producing the
+same ~90 MB artifact. It is idempotent and honours `CODESCOUT_MODEL_DIR`.
+
+> **Run it before `docker compose up`.** If a container starts first while the
+> model directory is missing, Docker creates the bind-mount target as
+> `root:root` and every subsequent write fails with a permission error.
 
 If your `models/` directory is somewhere else, set `CODESCOUT_MODEL_DIR` before
 `docker compose up`.
@@ -87,11 +94,13 @@ docker compose --profile amd up -d
 **Required model files** in `${CODESCOUT_MODEL_DIR:-./models}`:
 
 ```bash
-huggingface-cli download nomic-ai/CodeRankEmbed-GGUF \
-    CodeRankEmbed-Q4_K_M.gguf --local-dir ./models      # ~90 MB
-huggingface-cli download gpustack/bge-reranker-v2-m3-GGUF \
-    bge-reranker-v2-m3-Q4_K_M.gguf --local-dir ./models # ~419 MB
+./scripts/fetch-models.sh --amd
 ```
+
+That builds the dense model (~90 MB) and downloads the reranker (~419 MB). The
+reranker *is* published as GGUF (`gpustack/bge-reranker-v2-m3-GGUF`, verified
+2026-07-25) so it is a plain download; only the dense model has to be built
+locally — see [Bring up the stack](#bring-up-the-stack) for why.
 
 The SPLADE model is pulled by the `sparse-amd` container at first launch
 into the `huggingface-cache` volume; no manual download needed.
