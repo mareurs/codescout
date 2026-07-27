@@ -522,11 +522,27 @@ One case with a retryable status (`424`/`429`/`5xx`) and one with a non-retryabl
 
 - [ ] **Step 5: The two legs really run concurrently**
 
-Give the dense and sparse mocks different artificial delays and assert wall-clock elapsed time
-tracks `max(delay)`, not `sum(delay)`. A regression from `tokio::try_join!` to two sequential
-`.await`s produces **byte-identical output values** — only a timing assertion catches it. Allow
-generous slack (e.g. delays of 300ms/600ms, assert elapsed < 900ms) so the test is not flaky
-under load.
+Give both mocks an artificial delay and assert wall-clock elapsed time tracks `max(delay)`, not
+`sum(delay)`. A regression from `tokio::try_join!` to two sequential `.await`s produces
+**byte-identical output values** — only a timing assertion catches it.
+
+**Use EQUAL delays: 500ms each, ceiling 800ms.** Revised 2026-07-27 after review. The first
+attempt used 300ms/600ms with a 900ms ceiling, and the reviewer measured the mutated path at
+903.8-905.7ms across five runs — only 4-6ms over the threshold, against 250ms of headroom on the
+pass side. That asymmetry is a false-negative waiting to happen: a slightly faster machine lands
+the regression under 900ms and the guard silently stops firing.
+
+Equal delays are the fix, not a wider ceiling. The separation the test depends on is `sum/max`,
+which is **maximised at 2× when the delays are equal**; 300/600 throws that away for 1.5×. At
+500/500:
+
+```
+concurrent  ≈ 500 + overhead(~80)  ≈  580ms   → 220ms below the 800ms ceiling
+sequential  ≈ 1000 + overhead(~5)  ≈ 1005ms   → 205ms above it
+```
+
+Symmetric, generous both ways, and *faster* than the original. Keep that arithmetic in a comment
+beside the delays so nobody later "optimises" them back down and reintroduces the tight margin.
 
 - [ ] **Step 6: Run the gate and commit**
 
