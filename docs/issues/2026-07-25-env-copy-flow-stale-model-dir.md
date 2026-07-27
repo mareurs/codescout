@@ -162,6 +162,66 @@ MCP servers read `.env.amd` through the symlink, not `.env`.
 `docs/superpowers/specs/2026-07-10-codescout-self-load-dotenv-design.md:99,106`
 (symlink flow, with the single-source-of-truth rationale).
 
+### 2026-07-28 — the symlink flow itself drifted (falsifies "drift-proof" above)
+
+Root cause §2 calls the `~/.config/codescout/.env` symlink *"drift-proof"* on the
+grounds that `.env.amd` stays the single source of truth. That holds only while
+the amd profile exists. It no longer does: `docker-compose.yml:5-11` records
+that the `cpu` and `amd` profiles were **deleted 2026-07-27**, leaving one
+NVIDIA `gpu` profile. The symlink was never re-pointed.
+
+Observed on this NVIDIA host (GTX 1660 Ti, gpu-profile containers running):
+
+```
+$ ls -la ~/.config/codescout/.env
+.env -> /home/marius/work/claude/codescout/.env.amd
+
+$ printenv CODESCOUT_RETRIEVAL_PROFILE   # from inside the codescout MCP server
+amd
+```
+
+The server reports profile `amd` while every running container comes from the
+`gpu` profile. **Benign today** — the two files' client wiring is identical
+apart from `CODESCOUT_RETRIEVAL_PROFILE`: both set the same QDRANT / EMBEDDER /
+SPARSE / RERANKER URLs, the same `CODESCOUT_MODEL_DIM=768`, and the same
+`CODESCOUT_RERANKER_PROTOCOL=llama-server`.
+
+The live hazard is the silent-edit one, and it bit this session. A config change
+intended for this host was first written to `.env.gpu` — the file a maintainer
+would naturally reach for on an NVIDIA box — and had **no effect**, because
+`load_startup_env` (`src/config/global.rs:118-124`) reads only
+`$CODESCOUT_ENV_FILE` or `<global_config_dir>/.env` and, per its own doc
+comment, *"never reads the current working directory — a user-scoped server must
+not absorb an arbitrary repo's `.env`."* The edit had to be duplicated into
+`.env.amd` before the server saw it.
+
+This generalises the bug rather than duplicating it: a symlink removes *copy*
+staleness but not *target* staleness. Re-pointing it is a manual step with no
+gate — exactly the property that made the copy flow lossy.
+
+**Addendum (same day, second session) — the profile mismatch is inert, not just
+benign.** `CODESCOUT_RETRIEVAL_PROFILE` is read into `RetrievalConfig.profile`
+(`src/retrieval/config.rs:9,44`) and then **never consumed**: a project-wide
+search for `.profile` returns only `src/util/path_security.rs` /
+`src/config/project.rs` (an unrelated `SecurityProfile`) and two assertions in
+`tests/retrieval_unit.rs`. So `printenv` reporting `amd` is the *only* way the
+value is ever observable — nothing downstream branches on it. The field is dead
+weight that exists to be misread, which arguably makes it worse than a live
+mismatch: it invites exactly the "the server thinks it is on AMD" inference
+without any behaviour to back it. Candidate fix alongside the symlink one:
+delete the field, or promote it to something that actually selects wiring.
+
+**A third layer, missing from §2 above.** The precedence chain is not
+`.env` → defaults but MCP `env` block in `<profile>/.claude.json` → the global
+dotenv → `RetrievalConfig::from_env` defaults, because
+`startup_env_assignments` filters to `!is_set(key)`. Two consequences worth
+recording: a key present in `.claude.json` can **never** be overridden by any
+file (deletion from the JSON is the only fix), and a key *absent* from
+`.claude.json` silently inherits `.env.amd` — which is how
+`CODESCOUT_DISABLE_SPARSE=1` reached all three profiles unnoticed and made
+every retrieval measurement on this host dense-only. Cross-ref
+`docs/trackers/retrieval-benchmark.md` § 2026-07-28.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** both `.env` and `.env.amd` carry the stale
@@ -222,6 +282,15 @@ docker inspect <container> --format '{{range .Mounts}}{{.Source}} -> {{.Destinat
 
 ## Resume
 
+**Added 2026-07-28 —** also re-point the stale symlink as part of this fix:
+`ln -sfn "$PWD/.env.gpu" ~/.config/codescout/.env`, then restart the MCP servers
+(`/mcp`) and confirm with `printenv CODESCOUT_RETRIEVAL_PROFILE` → `gpu` from
+inside a codescout `run_command`. Deliberately NOT done in the session that
+found it: it changes config for all three Claude Code profiles on this machine
+at once, so it wants to be a decision, not a side effect. Until it is done,
+`.env.amd` is the file the servers actually read — keep the two profile files in
+sync or the next edit to `.env.gpu` will be silently ignored the same way.
+
 Decide the split first: does repo-root `.env` hold secrets only, or secrets plus
 profile config? That answer determines whether the manual's step becomes a
 symlink instruction or an `--env-file` instruction. Then edit
@@ -241,4 +310,3 @@ is `./models` before starting anything.
 - `.env.amd:16,26,49,50` / `.env.gpu` — the correctly-maintained profiles
 - `docs/issues/2026-07-25-coderankembed-gguf-source-404.md` — why `.env.amd`
   changed today
-

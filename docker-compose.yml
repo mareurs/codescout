@@ -99,13 +99,32 @@ services:
   # ------------------------------------------------------------------ SPARSE
   # Splade_PP_en_v1 on TEI.
   #
+  # DISABLED 2026-07-28 — CODESCOUT_DISABLE_SPARSE=1 is set in .env.gpu/.env.amd,
+  # so codescout skips the sparse leg at both query and index time and this
+  # service is stopped. Left defined here for the re-enable path. Re-enabling
+  # needs `index(action="build", force=true)`: chunks indexed while it was off
+  # carry an empty sparse vector (Qdrant accepts them; they never match).
+  #
   # VRAM note carried over from the deleted sparse-amd service: SPLADE projects
   # every token to a vocab-sized ([tokens x 30522] f16) tensor, so peak memory
   # scales with --max-batch-tokens. TEI's default of 16384 measured ~13.7 GiB on
-  # a 16 GiB card, which is why the amd service capped it at 2048. sparse-gpu has
-  # never carried that cap and has run stably at ~726 MiB on a 6 GiB card — the
-  # discrepancy is unexplained (different TEI backend build), so if this service
-  # ever OOMs at warmup, add `--max-batch-tokens 2048` first.
+  # a 16 GiB card, which is why the amd service capped it at 2048.
+  #
+  # The "~726 MiB on a 6 GiB card, discrepancy unexplained" claim that stood here
+  # was wrong, and there is no discrepancy: 726 MiB was the IDLE footprint, being
+  # compared against the amd service's PEAK. Measured 2026-07-28 on the 1660 Ti,
+  # sampling every 3s: ~600 MiB between batches, 2934-3030 MiB mid-batch. That
+  # matches the arithmetic exactly — 16384 tokens x 30522 vocab x 2 bytes =
+  # 954 MiB per copy of the tensor, and Candle does not fuse relu/log1p/max, so
+  # 2-3 copies are live at once. src/retrieval/embedder.rs:134 had already
+  # recorded the real numbers (374 MiB idle -> 2710 MiB under batch 32 x
+  # inflight 4).
+  #
+  # So: if this service is ever re-enabled, add `--max-batch-tokens 2048` up
+  # front rather than waiting for an OOM. Caveat — TEI derives the client cap as
+  # max_batch_tokens / max_input_length, so /info would then advertise
+  # max_client_batch_size 4 instead of 32; codescout's discovery adapts with no
+  # code change, at the cost of 8x more round-trips.
   #
   # TEI publishes ONE IMAGE PER CUDA COMPUTE CAPABILITY (unlike llama.cpp, whose
   # single CUDA image ships ARCHS=500..1200 and so runs anywhere). A TEI digest
