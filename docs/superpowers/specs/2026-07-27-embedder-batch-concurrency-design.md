@@ -1,6 +1,7 @@
 # Design — Embedder batch sizing + bounded request concurrency
 
-**Status:** design approved 2026-07-27 · branch `experiments`
+**Status:** design approved 2026-07-27 · branch `experiments` · **two sequenced stages**
+(Stage 1 index lock, Stage 2 batch+concurrency) after the 2026-07-27 four-indexer discovery
 **Bugs:** [[2026-07-27-ast-chunker-no-minimum-chunk-size]] (same symptom — slow index —
 different cause; this spec addresses the throughput half, the chunk floor is deferred)
 **Related:** [[2026-07-27-indexer-walks-git-and-tool-state-dirs]],
@@ -76,7 +77,12 @@ Non-monotonic dense readings (36/s at batch 8 vs 10.6/s at 16) are contention no
 
 ## Scope
 
-**In scope**
+**In scope — Stage 1 (lands first, see the addendum at the end of this doc)**
+
+0. A per-project index lock so concurrent `codescout index` runs on one project refuse
+   instead of duplicating the entire embedding workload.
+
+**In scope — Stage 2**
 
 1. Lazy discovery of the sparse server's `max_client_batch_size` via `GET {sparse_base}/info`.
 2. Bounded, **order-preserving** concurrent issue of sub-batches inside
@@ -217,6 +223,62 @@ Timing, not quality (see "unchanged by construction" above).
 
 The honest claim is "measure it". The sweep projects sparse ~1.0 → ~9.2 chunks/s under
 contention; the real multiple on an idle card is unknown until step 1 runs.
+
+## Addendum — Stage 1: per-project index lock
+
+Added 2026-07-27 after discovering **four** concurrent `codescout index` processes on
+`backend-kotlin` (3h24m / 2h02m / 1h08m / 1h05m), all orphaned to `systemd --user`. See
+[[../../issues/2026-07-25-concurrent-index-no-project-lock]].
+
+This lands **before** the batching work for two reasons: duplication costs more than a 4x
+batch improvement recovers, and every throughput number in this spec was measured while
+four clients shared the servers, so a clean Stage 2 measurement is impossible until
+duplication is impossible.
+
+### Mechanism
+
+Follow the mux precedent (`src/lsp/mux/process.rs:75-79`) rather than the write-guard
+precedent:
+
+```rust
+let lock_file = std::fs::File::create(&index_lock_path)?;
+lock_file.try_lock_exclusive()
+    .context("another codescout index is already running for this project")?;
+writeln!(&lock_file, "{}", std::process::id())?;   // PID for diagnostics
+```
+
+Acquired in `RetrievalClient::sync_project` (`src/retrieval/sync.rs:196`) **before**
+`chunk_refs`, so the drift baseline is read under the lock. Released on drop / process exit.
+
+### Two decisions that matter
+
+**Use a dedicated `.codescout/index.lock`, NOT the existing `.codescout/write.lock`.**
+`write.lock` is taken per write-tool call by `WriteGuard` (`src/agent/write_guard.rs`). An
+index holding it for hours would block every edit tool for the whole run — strictly worse
+than the bug being fixed. The two locks protect different things and must stay separate.
+
+**Fail fast, do not queue.** `try_lock_exclusive` and exit with a clear message, rather than
+blocking until the other run finishes. A queued second run is nearly free (it would find
+every `chunk_id` already present and skip re-embedding), but it hides the duplication that
+caused this bug instead of surfacing it. On the MCP path, surface as `RecoverableError` so
+it renders as `isError: false`, per `get_guide("error-handling")`.
+
+### Testing
+
+1. Two `sync_project` calls against the same project root — second returns the
+   lock-held error, does not embed. Assert via a recording embedder that it saw zero calls.
+2. Different project roots do not contend.
+3. Lock is released after a successful run, and after a panic (RAII, not explicit unlock).
+4. A stale lock file left by a killed process does not block a new run — `flock` is released
+   by the kernel on process death, so this should pass without special handling; the test
+   pins that property so nobody "fixes" it by adding PID-liveness checks.
+
+### Verification
+
+`pgrep -af 'codescout index'` returns at most one process per project while a second
+invocation is attempted. This command is also the first diagnostic step for any future
+"indexing is slow" report — a per-process `ps -o etime -p <pid>` view hid the duplication
+for the entire investigation that produced this spec.
 
 ## Follow-ups
 
