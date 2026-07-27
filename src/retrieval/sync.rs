@@ -224,6 +224,15 @@ impl crate::retrieval::client::RetrievalClient {
             "retrieval sync starting"
         );
 
+        // Serialize index passes per project. MUST be acquired before the
+        // `chunk_refs` call below: that read establishes the drift baseline, and
+        // `stream_index` then mutates it. Two overlapping runs would each diff
+        // against a snapshot the other is invalidating.
+        //
+        // Bound to `_index_lock` (not `_`) so it lives until the end of this
+        // function — `let _ = ...` would drop it immediately and release the lock.
+        let _index_lock = crate::retrieval::index_lock::acquire(project_id)?;
+
         let started = std::time::Instant::now();
         let collection = self.config.collection("code_chunks");
         self.code_store
