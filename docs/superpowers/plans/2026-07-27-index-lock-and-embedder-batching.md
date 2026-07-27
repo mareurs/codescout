@@ -916,14 +916,28 @@ Add the inflight default next to it:
 /// card before treating 4 as final.
 const DEFAULT_INFLIGHT: usize = 4;
 
-fn resolve_inflight() -> usize {
-    std::env::var("CODESCOUT_EMBED_INFLIGHT")
-        .ok()
+fn resolve_inflight(&self) -> usize {
+    self.inflight_override
+        .as_deref()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|&n| n > 0)
         .unwrap_or(DEFAULT_INFLIGHT)
 }
 ```
+
+**`inflight_override: Option<String>` is an INJECTED FIELD, exactly like Task 4's
+`batch_override`** — populated in `new()` from `std::env::var("CODESCOUT_EMBED_INFLIGHT").ok()`,
+threaded through `with_config`, with a `with_inflight_override(...)` builder for tests. Revised
+2026-07-27: an earlier draft of this task read `std::env::var` directly inside
+`resolve_inflight()`, which would reintroduce for `CODESCOUT_EMBED_INFLIGHT` precisely the
+anti-pattern Task 4's fix round removed for `CODESCOUT_EMBED_BATCH` — a test wanting to control
+it would have to mutate process env, racing `cargo test`'s parallel threads (reproducible 5/5;
+see `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`, and
+`docs/issues/2026-07-27-test-env-isolation-doc-prescribes-rejected-remedy.md` for why the
+convention doc keeps re-specifying it).
+
+Follow `api_key` and `batch_override` in this same file. Two env-derived overrides on one struct
+should not use two different mechanisms.
 
 Replace the hybrid path of `embed_batch` (the sequential loop added in Task 3) with:
 
