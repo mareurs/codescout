@@ -508,4 +508,295 @@ mod tests {
             "must flag a connect failure so the classifier can route it; got: {msg}"
         );
     }
+    /// Mid-chunk empties must not shift sparse vectors onto the wrong dense
+    /// position — the re-expansion iterator has to skip exactly the empty
+    /// slots and nothing else. Each non-empty input gets a uniquely
+    /// identifiable sparse vector so a shifted alignment cannot be mistaken
+    /// for the right answer; a length-only assertion would miss this.
+    #[tokio::test]
+    async fn mid_chunk_empty_strings_keep_sparse_alignment() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(
+                r#"{"data":[
+                    {"embedding":[0.0,0.0,0.0],"index":0},
+                    {"embedding":[1.0,0.0,0.0],"index":1},
+                    {"embedding":[2.0,0.0,0.0],"index":2},
+                    {"embedding":[3.0,0.0,0.0],"index":3},
+                    {"embedding":[4.0,0.0,0.0],"index":4}
+                ]}"#,
+            )
+            .create_async()
+            .await;
+        // Three non-empty inputs ("a","b","c" at positions 0,2,4) each get a
+        // distinct index/value pair.
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body(
+                r#"[[{"index":10,"value":0.1}],[{"index":20,"value":0.2}],[{"index":30,"value":0.3}]]"#,
+            )
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let chunk = vec![
+            "a".to_string(),
+            "".to_string(),
+            "b".to_string(),
+            "".to_string(),
+            "c".to_string(),
+        ];
+        let out = e.embed_one_batch(chunk).await.expect("embed_one_batch");
+
+        assert_eq!(out.len(), 5);
+        assert_eq!(out[0].sparse.indices, vec![10u32]);
+        assert!((out[0].sparse.values[0] - 0.1_f32).abs() < 1e-6);
+        assert!(
+            out[1].sparse.indices.is_empty(),
+            "position 1 was an empty input"
+        );
+        assert!(out[1].sparse.values.is_empty());
+        assert_eq!(out[2].sparse.indices, vec![20u32]);
+        assert!((out[2].sparse.values[0] - 0.2_f32).abs() < 1e-6);
+        assert!(
+            out[3].sparse.indices.is_empty(),
+            "position 3 was an empty input"
+        );
+        assert!(out[3].sparse.values.is_empty());
+        assert_eq!(out[4].sparse.indices, vec![30u32]);
+        assert!((out[4].sparse.values[0] - 0.3_f32).abs() < 1e-6);
+        // Dense stays aligned to the original position too, not just sparse.
+        assert_eq!(out[0].dense, vec![0.0_f32, 0.0, 0.0]);
+        assert_eq!(out[2].dense, vec![2.0_f32, 0.0, 0.0]);
+        assert_eq!(out[4].dense, vec![4.0_f32, 0.0, 0.0]);
+
+        dense_mock.assert_async().await;
+        sparse_mock.assert_async().await;
+    }
+
+    /// An all-empty chunk must not send an empty-array sparse request — the
+    /// real SPLADE/TEI server answers HTTP 400 to `{"inputs": []}`, which
+    /// would abort the whole batch. This asserts zero sparse invocations,
+    /// which is stronger than merely accepting a `[]` sparse response.
+    #[tokio::test]
+    async fn all_empty_chunk_sends_zero_sparse_requests() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(
+                r#"{"data":[
+                    {"embedding":[0.0,0.0,0.0],"index":0},
+                    {"embedding":[0.0,0.0,0.0],"index":1},
+                    {"embedding":[0.0,0.0,0.0],"index":2}
+                ]}"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body("[]")
+            .expect(0)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let chunk = vec!["".to_string(), "".to_string(), "".to_string()];
+        let out = e.embed_one_batch(chunk).await.expect("embed_one_batch");
+
+        assert_eq!(out.len(), 3);
+        for o in &out {
+            assert!(o.sparse.indices.is_empty());
+            assert!(o.sparse.values.is_empty());
+        }
+        dense_mock.assert_async().await;
+        sparse_mock.assert_async().await;
+    }
+
+    /// The sparse retry loop must actually retry a retryable status (429) and
+    /// converge on success — not just "eventually errors". Kept fast by
+    /// stubbing only two failures before success instead of exhausting the
+    /// real 8-attempt cap (which would sleep through the full backoff ladder,
+    /// ~19s). mockito serves same-route mocks in creation order, advancing to
+    /// the next once the current one's `.expect(n)` hit count is satisfied,
+    /// so this stubs exactly "429, 429, success" as the first three requests.
+    ///
+    /// NOTE: this does NOT exercise the exact `attempt >= 8` cap boundary —
+    /// see the task report for why a fast unit test can't reach it without a
+    /// production change.
+    #[tokio::test]
+    async fn sparse_429_retries_then_succeeds_within_a_few_attempts() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+            .create_async()
+            .await;
+        let fail_1 = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(429)
+            .expect(1)
+            .create_async()
+            .await;
+        let fail_2 = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(429)
+            .expect(1)
+            .create_async()
+            .await;
+        let success = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body(r#"[[{"index":1,"value":0.5}]]"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let out = e
+            .embed_one_batch(vec!["x".to_string()])
+            .await
+            .expect("embed_one_batch should succeed after retries");
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].sparse.indices, vec![1u32]);
+        dense_mock.assert_async().await;
+        fail_1.assert_async().await;
+        fail_2.assert_async().await;
+        success.assert_async().await;
+    }
+
+    /// The `retryable` boolean must gate correctly in both directions: a
+    /// retryable 5xx retries and can still succeed, while a non-retryable
+    /// 400 must fail on the very first attempt with no retry at all. Uses 500
+    /// (the `is_server_error()` arm) rather than 429 (already covered by the
+    /// retry-cap test above) to spread branch coverage across the `||`.
+    #[tokio::test]
+    async fn sparse_retryable_and_non_retryable_status_both_exercised() {
+        // Retryable: 500 then success.
+        {
+            let mut dense_server = mockito::Server::new_async().await;
+            let mut sparse_server = mockito::Server::new_async().await;
+            dense_server
+                .mock("POST", "/v1/embeddings")
+                .with_status(200)
+                .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+                .create_async()
+                .await;
+            let fail = sparse_server
+                .mock("POST", "/embed_sparse")
+                .with_status(500)
+                .expect(1)
+                .create_async()
+                .await;
+            let success = sparse_server
+                .mock("POST", "/embed_sparse")
+                .with_status(200)
+                .with_body(r#"[[{"index":2,"value":0.7}]]"#)
+                .expect(1)
+                .create_async()
+                .await;
+
+            let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+            let out = e
+                .embed_one_batch(vec!["x".to_string()])
+                .await
+                .expect("500 should retry then succeed");
+            assert_eq!(out[0].sparse.indices, vec![2u32]);
+            fail.assert_async().await;
+            success.assert_async().await;
+        }
+
+        // Non-retryable: 400 must fail on the first attempt, no retry.
+        {
+            let mut dense_server = mockito::Server::new_async().await;
+            let mut sparse_server = mockito::Server::new_async().await;
+            dense_server
+                .mock("POST", "/v1/embeddings")
+                .with_status(200)
+                .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+                .create_async()
+                .await;
+            let bad_request = sparse_server
+                .mock("POST", "/embed_sparse")
+                .with_status(400)
+                .with_body("bad input")
+                .expect(1)
+                .create_async()
+                .await;
+
+            let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+            let err = e
+                .embed_one_batch(vec!["y".to_string()])
+                .await
+                .expect_err("400 must not be retried into success");
+            assert!(
+                err.to_string().contains("400"),
+                "error should surface the status: {err}"
+            );
+            bad_request.assert_async().await;
+        }
+    }
+
+    /// `tokio::try_join!` must run the dense and sparse legs concurrently — a
+    /// regression to sequential `.await`s produces byte-identical output
+    /// values, so only wall-clock timing catches it. Delays of 300ms/600ms
+    /// with a 900ms ceiling leave generous slack over `max(300,600)=600ms`
+    /// while staying comfortably under `sum=900ms`.
+    #[tokio::test]
+    async fn dense_and_sparse_legs_run_concurrently() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_chunked_body(|w| {
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                w.write_all(br#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+            })
+            .create_async()
+            .await;
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_chunked_body(|w| {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                w.write_all(br#"[[{"index":1,"value":0.5}]]"#)
+            })
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let start = std::time::Instant::now();
+        let out = e
+            .embed_one_batch(vec!["x".to_string()])
+            .await
+            .expect("embed_one_batch");
+        let elapsed = start.elapsed();
+
+        assert_eq!(out[0].dense, vec![0.1_f32, 0.2, 0.3]);
+        assert_eq!(out[0].sparse.indices, vec![1u32]);
+        assert!(
+            elapsed < std::time::Duration::from_millis(900),
+            "legs should run concurrently (~max(300,600)=600ms), took {elapsed:?} — \
+                 a sequential-await regression would take ~900ms"
+        );
+        assert!(
+            elapsed >= std::time::Duration::from_millis(550),
+            "delays should have actually elapsed (~600ms), took {elapsed:?} — a \
+                 near-zero time means the mock delay did not run and this test is not \
+                 exercising anything"
+        );
+        dense_mock.assert_async().await;
+        sparse_mock.assert_async().await;
+    }
 }
