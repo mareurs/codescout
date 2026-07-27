@@ -325,6 +325,91 @@ impl EmbedderHttp {
         })
     }
 
+    /// Embed exactly one sub-batch: dense and sparse legs concurrently.
+    ///
+    /// Split out of `embed_batch` so the sub-batches can be pipelined (see the
+    /// `buffered` driver there) and so this unit is testable on its own.
+    async fn embed_one_batch(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
+        let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        let sparse_url = format!("{}/embed_sparse", self.sparse_base);
+        let mut out = Vec::with_capacity(inputs.len());
+        // The sparse (SPLADE/TEI) server rejects empty strings with HTTP 400,
+        // which would abort the whole batch. An empty chunk has no terms, so
+        // omit it from the sparse request and re-expand to an empty vector at
+        // its original position to stay aligned with the dense response.
+        let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
+        let sparse_body = serde_json::json!({ "inputs": &nonempty });
+
+        let (dense_batch, sparse_nonempty) = tokio::try_join!(self.dense_batch(&inputs), async {
+            if nonempty.is_empty() {
+                return Ok(Vec::<Vec<SparseEntry>>::new());
+            }
+            let mut attempt: u32 = 0;
+            loop {
+                let resp = self
+                    .client
+                    .post(&sparse_url)
+                    .json(&sparse_body)
+                    .send()
+                    .await
+                    .context("embed_batch sparse send")?;
+                let status = resp.status();
+                if status.is_success() {
+                    return resp
+                        .json::<Vec<Vec<SparseEntry>>>()
+                        .await
+                        .context("embed_batch sparse json");
+                }
+                // The shared sparse server returns 424/429/5xx when momentarily
+                // overloaded by concurrent callers; retry those with backoff
+                // before surfacing a detailed error.
+                let code = status.as_u16();
+                let retryable = code == 424 || code == 429 || status.is_server_error();
+                attempt += 1;
+                if !retryable || attempt >= 8 {
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(anyhow!(
+                        "embed_batch sparse status {} (inputs={}): {}",
+                        status,
+                        nonempty.len(),
+                        body.chars().take(200).collect::<String>()
+                    ));
+                }
+                let backoff = std::time::Duration::from_millis(100u64 * (1u64 << attempt.min(6)));
+                tokio::time::sleep(backoff).await;
+            }
+        })?;
+
+        let mut sparse_nonempty = sparse_nonempty.into_iter();
+        let sparse_resp: Vec<Vec<SparseEntry>> = inputs
+            .iter()
+            .map(|s| {
+                if s.is_empty() {
+                    Vec::new()
+                } else {
+                    sparse_nonempty.next().unwrap_or_default()
+                }
+            })
+            .collect();
+
+        for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_resp) {
+            if dense.len() != self.expected_dim {
+                return Err(anyhow!(
+                    "embed dim mismatch: got {}, expected {}",
+                    dense.len(),
+                    self.expected_dim
+                ));
+            }
+            let (indices, values): (Vec<u32>, Vec<f32>) =
+                sparse_vec.into_iter().map(|e| (e.index, e.value)).unzip();
+            out.push(EmbedOutput {
+                dense,
+                sparse: SparseVector { indices, values },
+            });
+        }
+        Ok(out)
+    }
+
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
         if self.dense_only {
             // Lite stack: dense vectors only — no sparse server contacted.
@@ -354,87 +439,10 @@ impl EmbedderHttp {
         // The sparse (SPLADE/TEI) server caps client batches at 8
         // (HTTP 422 "batch size N > maximum allowed batch size 8"), so keep
         // both the dense and sparse legs at or below that limit.
-        const BATCH: usize = 8;
-        let sparse_url = format!("{}/embed_sparse", self.sparse_base);
+        let batch = 8; // replaced in Task 4
         let mut out = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(BATCH) {
-            let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
-            // The sparse (SPLADE/TEI) server rejects empty strings with HTTP 400,
-            // which would abort the whole batch. An empty chunk has no terms, so
-            // omit it from the sparse request and re-expand to an empty vector at
-            // its original position to stay aligned with the dense response.
-            let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
-            let sparse_body = serde_json::json!({ "inputs": &nonempty });
-
-            let (dense_batch, sparse_nonempty) =
-                tokio::try_join!(self.dense_batch(&inputs), async {
-                    if nonempty.is_empty() {
-                        return Ok(Vec::<Vec<SparseEntry>>::new());
-                    }
-                    let mut attempt: u32 = 0;
-                    loop {
-                        let resp = self
-                            .client
-                            .post(&sparse_url)
-                            .json(&sparse_body)
-                            .send()
-                            .await
-                            .context("embed_batch sparse send")?;
-                        let status = resp.status();
-                        if status.is_success() {
-                            return resp
-                                .json::<Vec<Vec<SparseEntry>>>()
-                                .await
-                                .context("embed_batch sparse json");
-                        }
-                        // The shared sparse server returns 424/429/5xx when momentarily
-                        // overloaded by concurrent callers; retry those with backoff
-                        // before surfacing a detailed error.
-                        let code = status.as_u16();
-                        let retryable = code == 424 || code == 429 || status.is_server_error();
-                        attempt += 1;
-                        if !retryable || attempt >= 8 {
-                            let body = resp.text().await.unwrap_or_default();
-                            return Err(anyhow!(
-                                "embed_batch sparse status {} (inputs={}): {}",
-                                status,
-                                nonempty.len(),
-                                body.chars().take(200).collect::<String>()
-                            ));
-                        }
-                        let backoff =
-                            std::time::Duration::from_millis(100u64 * (1u64 << attempt.min(6)));
-                        tokio::time::sleep(backoff).await;
-                    }
-                })?;
-
-            let mut sparse_nonempty = sparse_nonempty.into_iter();
-            let sparse_resp: Vec<Vec<SparseEntry>> = inputs
-                .iter()
-                .map(|s| {
-                    if s.is_empty() {
-                        Vec::new()
-                    } else {
-                        sparse_nonempty.next().unwrap_or_default()
-                    }
-                })
-                .collect();
-
-            for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_resp) {
-                if dense.len() != self.expected_dim {
-                    return Err(anyhow!(
-                        "embed dim mismatch: got {}, expected {}",
-                        dense.len(),
-                        self.expected_dim
-                    ));
-                }
-                let (indices, values): (Vec<u32>, Vec<f32>) =
-                    sparse_vec.into_iter().map(|e| (e.index, e.value)).unzip();
-                out.push(EmbedOutput {
-                    dense,
-                    sparse: SparseVector { indices, values },
-                });
-            }
+        for chunk in texts.chunks(batch) {
+            out.extend(self.embed_one_batch(chunk.to_vec()).await?);
         }
         Ok(out)
     }
