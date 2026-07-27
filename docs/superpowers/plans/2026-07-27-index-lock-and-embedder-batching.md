@@ -553,6 +553,32 @@ with an explicit pathspec.
 
 ### Task 4: Lazy `/info` batch-cap discovery
 
+> **REVISED 2026-07-27 after the Task 4 review — read this before Task 5.**
+>
+> The env override is an **injected field**, not a read of process env inside
+> `resolve_batch_size`:
+>
+> ```rust
+> batch_override: Option<String>,   // populated in `new()` from CODESCOUT_EMBED_BATCH
+> ```
+>
+> plus a `with_batch_override(...)` builder for tests. **This file already has exactly this
+> pattern 40 lines above** — `api_key` reads `EMBED_API_KEY` in `new()`, stores an
+> `Option<String>`, and is injectable. Follow it.
+>
+> Why not read env inside `resolve_batch_size`: doing so forced a `#[cfg(test)]` fork of the
+> reader, because `EnvGuard`-style env mutation races `cargo test`'s parallel threads
+> (reproducible 5/5 — see
+> `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`). A cfg fork
+> means test and production builds execute **different function bodies**, so no test exercises
+> the production env read: mutate the variable name in the `cfg(not(test))` arm and every test
+> still passes while the documented operator escape hatch silently does nothing. Injection keeps
+> one code path, and it matches the remedy bug `a656f8cec220d347` applied project-wide — that fix
+> drove `set_var`/`remove_var` in the default test build from 119 to 0, and its postmortem
+> explicitly records that `#[serial]` is NOT a viable alternative.
+>
+> The `OnceCell` stays: it memoises the `/info` probe, which is still async and still lazy.
+
 **Files:**
 - Modify: `src/retrieval/embedder.rs` (`EmbedderHttp` struct, `with_config`, new method)
 - Test: `src/retrieval/embedder.rs` inline tests, using `mockito`
@@ -935,12 +961,19 @@ drive it with the same function:
 and in `embed_batch`'s `dense_only` branch:
 
 ```rust
-            // No sparse server to probe on this path: honour an explicit override,
+            // No sparse server to probe on this path: honour the injected override,
             // else 32. llama-server advertises no per-request cap and the 2026-07-27
             // sweep showed it healthy through 128, so 32 is deliberately conservative.
+            //
+            // Reads `self.batch_override` — the SAME field the hybrid path uses. Do NOT
+            // reintroduce a raw `std::env::var` read here. One variable with two sources
+            // is a divergence waiting to happen, and it re-opens the test-env race that
+            // docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+            // documents.
             const DENSE_ONLY_BATCH: usize = 32;
-            let batch = std::env::var("CODESCOUT_EMBED_BATCH")
-                .ok()
+            let batch = self
+                .batch_override
+                .as_deref()
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|&n| n > 0)
                 .unwrap_or(DENSE_ONLY_BATCH);
@@ -952,6 +985,15 @@ and in `embed_batch`'s `dense_only` branch:
 
 Do **not** call `resolve_batch_size()` here — it probes `self.sparse_base`, which on the
 lite stack points at a server that does not exist.
+
+**Also required in this task** (carried from the Task 4 review, which found the gap):
+`embed_batch`'s use of the resolved batch size has no test teeth. All of Task 4's tests call
+`resolve_batch_size()` directly, and the Task 3b hybrid tests do not mock `/info`, so they
+resolve to 8 either way — meaning `let batch = self.resolve_batch_size().await;` can be mutated
+back to `let batch = 8;` with all 11 tests still green. Since this task rewrites that exact
+line into the `embed_chunks_ordered` call, add a test that pins it end-to-end: mock `/info` → 32
+plus both legs, call `embed_batch` with 12 texts, and assert **one** sparse request rather than
+two. Verify it fails if `batch` is hardcoded.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
