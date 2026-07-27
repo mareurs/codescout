@@ -154,25 +154,34 @@ mod tests {
         acquire(&pid).expect("must be re-acquirable after the guard drops");
     }
 
-    /// A leftover lock *file* must never block a new run. flock is released by the
-    /// kernel on process death, so this passes with no recovery logic — the test
-    /// exists so nobody adds PID-liveness checks "to be safe".
+    /// A leftover lock *file* must never block a new run, and the PID write must
+    /// TRUNCATE rather than overwrite in place.
     ///
-    /// The planted PID is our OWN, deliberately: a liveness check would pass if we
-    /// wrote a dead pid like 999999 (above `pid_max` on most Linux configs), so that
-    /// value would not actually pin the stated intent.
+    /// The planted content is shaped to kill two distinct mutations at once, which
+    /// requires both properties in one value:
+    ///   - it starts with our OWN live pid, so a PID-liveness check ("is the holder
+    ///     still alive? then refuse") would refuse and fail this test. Planting a
+    ///     dead pid like 999999 would NOT pin that — 999999 is above `pid_max` on
+    ///     most Linux configs and reads as dead anyway.
+    ///   - it is LONGER than what `acquire` writes, so deleting `set_len(0)` leaves a
+    ///     visible tail. Planting only our pid would NOT pin that either: `acquire`
+    ///     writes identical bytes at offset 0, making the truncate unobservable.
     #[test]
     fn preexisting_lock_file_does_not_block() {
         let pid = unique_project("stale");
         let path = lock_path(&pid);
-        std::fs::write(&path, format!("{}\n", std::process::id()))
-            .expect("simulate a lock file left by a dead process");
-        let lock = acquire(&pid).expect("a stale lock file must not block acquisition");
+        std::fs::write(
+            &path,
+            format!(
+                "{}\nstale-tail-that-must-be-truncated\n",
+                std::process::id()
+            ),
+        )
+        .expect("simulate a lock file left by a dead process");
 
-        // The PID write must TRUNCATE, not overwrite in place. Without `set_len(0)`
-        // a shorter pid leaves the old tail behind (e.g. "42\n999\n"), and an
-        // operator inspecting the lock during an incident reads a bogus second line.
+        let lock = acquire(&pid).expect("a stale lock file must not block acquisition");
         drop(lock);
+
         let contents = std::fs::read_to_string(&path).expect("read lock file");
         assert_eq!(
             contents.trim(),
