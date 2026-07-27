@@ -174,6 +174,81 @@ relative — known gap.
 
 ## History
 
+### 2026-07-28 — TEI→llama-server reranker swap costs ~13× p50; prefix rediscovered; scores are load-dependent
+
+Three findings, one of which **corrects a claim I made earlier in the session** and one of
+which is a rediscovery of the 2026-05-12 prefix result below.
+
+**Setup.** Fresh `bench_base_` collection: 24,923 chunks, 809 indexable files (486 md / 254 rs),
+indexed in 1239 s. `mode=full`, `--limit 10`, `boost=3.0`, **`CODESCOUT_DISABLE_SPARSE=1`**
+(set by a concurrent session for VRAM reasons). Binary `5d3142e0`.
+
+**1. The reranker's latency regressed ~13×, and it is my swap that did it — not the reranker.**
+
+| | 2026-05-12 champion | 2026-07-28 |
+|---|---|---|
+| reranker | `bge-v2-m3` via **TEI** `:48083` | same model as **Q4_K_M GGUF on llama-server** `:48083` |
+| p50 | ~141-157 ms (boost sweep rows) | **1994-2176 ms** |
+
+Same model, different server. The GGUF/llama-server swap was made 2026-07-27 to fix a CUDA OOM
+(`docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md`) — TEI at `--dtype float16` could not warm
+up on this 6 GiB card. That fix traded **VRAM for latency**, and the latency cost was never
+measured until now. Mechanism is unchanged in either server: `SearchOpts::new` sets
+`overfetch: limit * 2` and `search_in` reranks every candidate, so `limit=10` means 20
+cross-encoder passes per query — TEI batches those; llama-server appears not to.
+
+**This reframes `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`**, which
+I filed as "the reranker costs 42×". The correct statement is narrower and more useful: *the
+GGUF/llama-server reranker costs ~13× what the TEI one did.* Worth trying before abandoning
+reranking: a TEI reranker with `--max-batch-tokens` capped low enough to fit 6 GiB, or
+`bge-reranker-base` on TEI.
+
+**2. My reranker score A/B is NOT comparable to the 2026-05-12 row.** I measured 32/75 with
+rerank vs 35/75 without, and read that as "the reranker hurts". The recorded champion is
+`coderank Q4 + bge-v2-m3 (TEI) = 37/75`. Four config dimensions differ between the two runs —
+sparse (off vs on), boost (3.0 vs 5.0), mode (`full` vs `code`), and reranker server — so the
+comparison establishes nothing about the reranker's value. Do not cite the −3 as a reranker
+verdict.
+
+**3. Scores are load-dependent — my "zero variance" claim was conditional on a quiet box.**
+Four runs per arm on an idle machine gave *exactly* 32/32/32/32 and 35/35/35/35, and I concluded
+retrieval is deterministic. Re-running the same command while a background `codescout index` was
+saturating the GPU and writing to Qdrant produced **37 then 35 for the identical arm**. So:
+
+- determinism holds only with no concurrent index and no Qdrant write load
+- **any bench run must first assert `pgrep -af 'codescout index'` is empty**, and the harness
+  should arguably refuse to run otherwise
+- the p50 figures from loaded runs (4173-4845 ms) are contaminated and were discarded
+
+**4. Query prefix — rediscovery, consistent with 2026-05-12.** Measured 37 (no prefix) vs 32
+(with) on one pass, then 35 (no prefix) on a second, loaded pass. Direction matches the recorded
+−2 to −4 exactly; magnitude is at or above the top of that range and the loaded pass makes my
+number untrustworthy. **The finding that matters is not the magnitude but the location:** the
+live MCP server config at `/home/marius/.claude-sdd/.claude.json` →
+`mcpServers/codescout/env` *sets* `CODESCOUT_QUERY_PREFIX`, while `.env.gpu` deliberately
+comments it out with the "37, champion" note. The two config sources have drifted, and the live
+one carries the setting this tracker recorded as harmful 2.5 months ago.
+
+**Env drift found in the same config block** (all live, all stale):
+
+```
+CODESCOUT_QUERY_PREFIX  = "Represent this query..."   <- recorded harmful 2026-05-12
+CODESCOUT_RETRIEVAL_PROFILE = amd                     <- profile deleted from compose 2026-07-27
+CODESCOUT_RERANKER_PROTOCOL = infinity                <- .env.gpu says llama-server (both map to
+                                                         Protocol::Infinity, so harmless)
+(no CODESCOUT_DISABLE_SPARSE)                         <- .env.gpu sets it; live server does not
+```
+
+`.env.gpu` is a template that nothing sources for the MCP server. Editing it does not change the
+running system, and cannot: sourcing a file cannot unset a variable already exported into a
+process. Same class as `docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md`.
+
+**Open, for the next session.** Re-run the reranker A/B on a quiet box against a
+sparse-**enabled** collection at boost=5.0 / mode=code, so it is comparable to the 2026-05-12
+champion row, and include a TEI-hosted reranker arm to isolate server from model. Until then the
+only settled facts are the ~13× p50 regression and the config drift.
+
+
 ### 2026-05-12 — query prefix experiment (negative result) + extended boost sweep
 
 Added `CODESCOUT_QUERY_PREFIX` env to `EmbedderHttp::embed()` (query side only;

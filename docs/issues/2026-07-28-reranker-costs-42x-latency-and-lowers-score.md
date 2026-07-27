@@ -14,6 +14,17 @@ kind: bug
 
 ## Summary
 
+> **CORRECTED 2026-07-28 after reading `docs/trackers/retrieval-benchmark.md`.** This bug's
+> original framing — "the reranker costs 42× and lowers the score" — is wrong on both halves.
+> The tracker's 2026-05-12 history records the *same model* via **TEI** as the champion at
+> **37/75 with p50 ~150 ms**. Yesterday I replaced TEI with a Q4_K_M GGUF on llama-server to fix
+> a CUDA OOM; that swap is what cost the latency. Correct statement: **the GGUF/llama-server
+> reranker costs ~13× the p50 of the TEI one it replaced.** And the −3 score claim is void — my
+> arms differ from the champion row in four dimensions (sparse off, boost 3.0, mode=full,
+> different reranker server), so they establish nothing about the reranker's value. See the
+> 2026-07-28 entry in that tracker. Severity kept `high` for the latency; the score claim is
+> withdrawn.
+
 `bge-reranker-v2-m3` was brought up on the `gpu` profile on 2026-07-27 and wired in via
 `CODESCOUT_RERANKER_URL`, but its effect on retrieval was never measured. Measured now on the
 25-TC suite against the bench fixture: it makes queries **42× slower** (p50 51 ms → 2176 ms)
@@ -146,6 +157,21 @@ correctly, which is what that bug was about).
    latency (rerank 1994-2176 ms, no-rerank 51-61 ms — 33× to 42×). Nothing about this finding
    is noise-limited.
 
+
+3. **Hypothesis:** retrieval is deterministic, so the 4-run zero-variance score is solid.
+   **Test:** re-ran the identical arm while a background `codescout index` saturated the GPU and
+   wrote to Qdrant.
+   **Verdict:** **rejected — determinism is conditional on a quiet machine.** The same arm scored
+   37 then 35 under load, having scored an identical value four times in a row when idle. Any
+   future bench run must first confirm `pgrep -af 'codescout index'` is empty. The loaded-run p50
+   figures (4173-4845 ms) were discarded.
+
+4. **Hypothesis:** the reranker itself is too slow for this hardware.
+   **Test:** read `docs/trackers/retrieval-benchmark.md`'s 2026-05-12 history.
+   **Verdict:** **rejected.** The same model via TEI ran at p50 ~150 ms and was the recommended
+   champion at 37/75. The regression is the TEI→llama-server swap, not the reranker. Untried and
+   worth doing before abandoning reranking: TEI with `--max-batch-tokens` capped to fit 6 GiB, or
+   `bge-reranker-base` on TEI.
 ## Fix
 
 **Partially applied 2026-07-28: option 1 in `.env.gpu` only — this does NOT change the running
