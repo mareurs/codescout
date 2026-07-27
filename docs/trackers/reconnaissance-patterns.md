@@ -66,6 +66,8 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-44 | 2026-07-25 | hit | The write-side twin of R-43: before accepting a proposed `#[cfg]` gate on a `pub mod` declaration, enumerate the CONSUMER set (`grep <mod>::|use .*<mod>` at workspace root, `context_lines=2`) and check whether the config being gated OUT is the one the plan's own tests or invariants live in. Gating a module is a subtree delete; the declaration site cannot show its blast radius. | dependency-review session F-3 + W-2; `src/retrieval/mod.rs:3` + 14 ungated `RetrievalClient` consumers; kin R-43/R-5/R-17 |
+| R-43 | 2026-07-25 | miss | An attribute-binding claim (`#[cfg]`, `#[serde(...)]`, `#[tokio::test]`) can never be made from a grep hit: grep prints matching lines with line numbers but ELIDES the gap between them, and an attribute binds to the *next item* — usually not itself a match. Read the region before asserting the binding. | dependency-review session; `src/retrieval/mod.rs:1-17` (cfg at L1/L12 bound to `artifact`/`qdrant`, not `embedder` L7 / `reranker` L14); caught by `cargo check` (16× E0433); kin R-19/R-5/R-3 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -964,6 +966,88 @@ fields. Promote-when: a second re-derivation-of-prior-work miss → codescout me
 
 **Evidence:** `src/tools/file_summary/file_summary.rs` `split_on_unbracketed_dot` / `strip_matching_quotes`; live re-repro of the filter inversion (`unknown field \`contains\``). param-alias-ergonomics session.
 
+
+## R-43 — Miss: `#[cfg]` gating claimed from a grep hit; attributes bind positionally and grep hides the gap
+
+**Verdict:** miss (downstream gate — the compiler — caught it; narrows R-19, backstopped by R-5)
+
+**Observed:** 2026-07-25, dependency leanness review (`git2` question → full manifest audit). No scout was run before the claim was stated.
+
+**Pattern:** An attribute-binding claim — "this module is `#[cfg]`-gated", "this field is `#[serde(skip)]`", "this test is `#[tokio::test]`" — can never be made from a grep hit. `grep` prints matching lines with their line numbers but **elides the gap between them**; an attribute binds to the *next item*, which may be several lines away and is usually not itself a match. Read the region (`read_file(start_line, end_line)`) before asserting the binding.
+
+**What happened:** grep over `src/retrieval/mod.rs` for `^(mod|pub mod) (embedder|reranker)|cfg\(feature` returned `L1: #[cfg(feature = "server-stack")]`, `L7: pub mod embedder;`, `L12: #[cfg(feature = "server-stack")]`, `L14: pub mod reranker;`. Read as "both modules are gated" and stated to the user as fact. The file is an alphabetized `pub mod` list: L1's cfg binds to L2 `pub mod artifact;`, L12's to L13 `pub mod qdrant;`. `embedder` and `reranker` are **ungated**. Filtering for two patterns in one grep made the interleaving look like pairing.
+
+**Counterfactual:** The review's headline recommendation would have shipped as "make `reqwest` optional — one-line manifest change, saves 48 crates." That version does not compile: `embedder.rs` mixes reqwest-dependent types (`EmbedderHttp`, `HttpDenseEmbedder`) with the reqwest-free `EmbedOutput` / `SparseVector` / `BatchEmbedder` / `DenseEmbedder` surface that six other modules import, so the real change is a module split. It was caught only because the measurement loop happened to include `cargo check --no-default-features`, which returned 16× `E0433 unresolved module reqwest` in exactly those two files — i.e. R-5 ("compiler as scout") is what saved it, not the grep.
+
+**Proposal:** add to SKILL.md Phase 1 — *"Attribute-binding claims can never be made from a grep hit: grep elides the gap between matching lines, and an attribute binds to the next item. Read the region."* This narrows R-19 (assert checkable facts only after reading this session) to a specific high-frequency substrate class, and pairs with R-5 as the backstop when the read is skipped.
+
+**Evidence:** `src/retrieval/mod.rs:1-17`; `cargo check --no-default-features` → 16 errors confined to `src/retrieval/embedder.rs` + `src/retrieval/reranker.rs`; work-stream narrative in `docs/trackers/dependency-review-session-log.md` F-1 / W-1; kin R-19 / R-5 / R-3.
+## R-44 — Hit: a proposed `#[cfg]` gate needs its consumer set enumerated, not its declaration site read
+
+**Verdict:** hit (recon caught it pre-dispatch; no downstream gate was reached because no code was written) — write-side twin of R-43, backstopped by R-5
+
+**Observed:** 2026-07-25, pre-dispatch reconnaissance on Stage 1 of
+`docs/plans/2026-07-25-embedding-transport-consolidation.md`. Same work stream
+as R-43, one session later.
+
+**Pattern.** R-43 covers *reading* gating that already exists. This is the
+other direction: a plan task that says *"gate `pub mod X;` on feature F"* is
+proposing a **subtree delete** of X under `not(F)`. Its blast radius is X's
+transitive import set, which the declaration site cannot show and which the
+plan's own line citations will not mention. Two checks before accepting such a
+task:
+
+1. **Enumerate consumers.** `grep "<mod>::|use .*<mod>"` at *workspace root*
+   (per R-3) with `context_lines=2` — the context is what reveals whether each
+   consumer is itself gated, which a bare match cannot.
+2. **Ask which config is being gated out, and what lives there.** If the plan
+   also adds a test or asserts an invariant under `cfg(not(F))`, gating the
+   module on F deletes that test from the `not(F)` build — while `cfg(not(F))`
+   already excludes it from the `F` build. Net: it compiles in zero
+   configurations, `cargo test` stays green, and nothing reports the hole.
+
+**What happened.** Plan Task 1.3 read *"Gate `pub mod reranker;`
+(`src/retrieval/mod.rs:14`) and `pub mod client;` on `server-stack`."* The
+declaration-site citations were both correct — `mod.rs:3` and `:14` are indeed
+ungated. The gap was entirely on the consumer side: `RetrievalClient::from_env`
+has ~14 ungated call sites, two of them in *ungated sibling modules*
+(`src/retrieval/search.rs:3`, `src/retrieval/sync.rs:195`), and the plan's own
+load-bearing invariant proof requires `from_env` reachable under
+`not(server-stack)`. Task 1.0 — scheduled to land *first* — puts a
+`#[cfg(not(feature = "server-stack"))]` invariant test inside `client.rs`, so
+Task 1.3 would have made it uncompilable in both configurations.
+
+**Why this is the expensive class.** The 14 E0433 errors are loud and the
+compiler catches them (R-5). The dead test is **silent** — green suite, plan
+records the invariant as pinned, guard does not exist. No gate in the plan
+checks that a test compiles in the configuration it names. Recon is the only
+thing in the loop that looks at task ordering against cfg reachability.
+
+**Proposal.** Add to SKILL.md Phase 1 as a named seam class, alongside
+schema-migration ordering and writer-shape ↔ reader-surfacing:
+
+> **Seam class: conditional-compilation gate.** A task proposing `#[cfg]` on a
+> module/item declaration is a subtree delete. Enumerate the consumer set at
+> workspace root with context, and check whether the config being gated out is
+> where the plan's tests or invariants live — a test under `cfg(not(F))` inside
+> a module gated on `F` compiles in zero configurations and fails silently.
+
+**Routing note.** Craft-shaped for Rust generally, so SKILL.md is the
+destination rather than project memory. **No promotion yet — n=1.** R-43 is not
+a second datapoint for this rule: it is the read-side twin, a different
+imperative in the same family. Counting the two together would inflate a
+family-level pattern into a rule-level threshold. Hold the SKILL.md PR and the
+`reconnaissance` memory write until a second consumer-set case lands (hit or
+miss, any work stream); the ledger entry carries it at n=1.
+
+**Evidence:** `src/retrieval/mod.rs:3,14`; `src/retrieval/search.rs:3`;
+`src/retrieval/sync.rs:195`; `src/retrieval/client.rs:6,17,65-71`; 14
+`RetrievalClient::from_env` sites across `src/tools/{semantic,memory,config}`,
+`src/tools/onboarding.rs`, `src/agent/mod.rs`, `src/main.rs`,
+`src/dashboard/api/index.rs`; work-stream narrative in
+`docs/trackers/dependency-review-session-log.md` F-3 + W-2; kin R-43 (read-side
+twin), R-5 (compiler backstop that would NOT have caught the dead test), R-17
+(sibling-caller spot-check).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
