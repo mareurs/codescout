@@ -229,24 +229,44 @@ live MCP server config at `/home/marius/.claude-sdd/.claude.json` →
 comments it out with the "37, champion" note. The two config sources have drifted, and the live
 one carries the setting this tracker recorded as harmful 2.5 months ago.
 
-**Env drift found in the same config block** (all live, all stale):
+**Env drift in the live config — CORRECTED 2026-07-28 after reading the resolution code.** The
+first pass of this entry got two of four items wrong by inspecting only two of the **three**
+config layers. Precedence, from `src/config/global.rs:109-160`:
 
-```
-CODESCOUT_QUERY_PREFIX  = "Represent this query..."   <- recorded harmful 2026-05-12
-CODESCOUT_RETRIEVAL_PROFILE = amd                     <- profile deleted from compose 2026-07-27
-CODESCOUT_RERANKER_PROTOCOL = infinity                <- .env.gpu says llama-server (both map to
-                                                         Protocol::Infinity, so harmless)
-(no CODESCOUT_DISABLE_SPARSE)                         <- .env.gpu sets it; live server does not
-```
+1. **MCP `env` block** in `<profile>/.claude.json` — the real process environment. Always wins.
+2. **`$CODESCOUT_ENV_FILE`, else `<global_config_dir>/.env`** — `startup_env_assignments` filters
+   to `!is_set(key)`, so this layer fills *only* keys layer 1 left unset. On this host
+   `~/.config/codescout/.env` is a **symlink to `.env.amd`**.
+3. **Hardcoded defaults** in `RetrievalConfig::from_env`.
 
-`.env.gpu` is a template that nothing sources for the MCP server. Editing it does not change the
-running system, and cannot: sourcing a file cannot unset a variable already exported into a
-process. Same class as `docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md`.
+`load_startup_env` never reads the CWD by design — *"a user-scoped server must not absorb an
+arbitrary repo's `.env`"* — so **no repo-root `.env.*` is read at all**. `.env.gpu` is loaded by
+nothing; `.env.amd` is loaded only because it is symlinked into the global config dir.
+
+| var | verdict | detail |
+|---|---|---|
+| `CODESCOUT_QUERY_PREFIX` | **real — now fixed** | Set in `.claude-sdd` + `.claude-kat` MCP env, absent from `~/.claude`. Removed from both 2026-07-28; takes effect on MCP restart. Harmful *for our model specifically*: prefix is +3 on f16 but −4 on Q4_K_M, and we run `CodeRankEmbed-Q4_K_M.gguf`. |
+| `CODESCOUT_DISABLE_SPARSE` | **my claim was wrong** | I wrote "`.env.gpu` sets it; live server does not". It *is* set live: `.env.amd` carries `CODESCOUT_DISABLE_SPARSE=1` and layer 2 supplies it because no profile's MCP env defines it. Sparse has been **off** on all three live servers. |
+| `CODESCOUT_RETRIEVAL_PROFILE=amd` | **inert, not stale** | Read into `RetrievalConfig.profile` and then never consumed — a project-wide search for `.profile` finds only `src/util/path_security.rs` / `src/config/project.rs` (unrelated `SecurityProfile`) and two `tests/retrieval_unit.rs` assertions. A dead field, so the amd-vs-gpu mismatch has zero behavioural effect. |
+| `CODESCOUT_RERANKER_PROTOCOL=infinity` | **not drift** | `infinity`, `cohere`, `llama-server`, `llama_server`, `llamacpp` all map to `Protocol::Infinity` (`src/retrieval/reranker.rs:18-27`). `.claude-kat` sets none, but layer 2 supplies `llama-server` from `.env.amd`. All three profiles resolve to the same variant. |
+
+So **one** of the four was a real problem. `.env.gpu` being a template nothing sources still
+holds, and the reason is sharper than "sourcing cannot unset": the server never looks at the repo
+at all. That mechanism plus the symlink-target drift were **already filed** by a concurrent
+session in `docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md` § *"2026-07-28 — the symlink
+flow itself drifted"* — this is a rediscovery, not a second bug.
 
 **Open, for the next session.** Re-run the reranker A/B on a quiet box against a
 sparse-**enabled** collection at boost=5.0 / mode=code, so it is comparable to the 2026-05-12
 champion row, and include a TEI-hosted reranker arm to isolate server from model. Until then the
-only settled facts are the ~13× p50 regression and the config drift.
+only settled facts are the ~13× p50 regression and the config drift (whose prefix half is now
+fixed).
+
+**Comparability warning for every number in this entry.** Because `.env.amd` sets
+`CODESCOUT_DISABLE_SPARSE=1` and layer 2 feeds it to every profile, *all* of this session's
+measurements — the reranker A/B included — ran **dense-only**. The 2026-05-12 champion row
+(37/75, p50 ~150 ms) was dense+sparse+rerank. That is a fourth axis of non-comparability on top
+of boost, mode, and reranker host, and it is the one I was least aware of while measuring.
 
 
 ### 2026-05-12 — query prefix experiment (negative result) + extended boost sweep
