@@ -272,30 +272,30 @@ defect these tests pin, corrupting the fixture on the way in. That constraint li
 the release binary carries this fix.
 ## Workarounds
 
-**Status differs by literal form**, because the two halves of the fix reached the release
-binary at different times. The running MCP server executes `~/.cargo/bin/codescout` ->
-`target/release/codescout`, so only what a `cargo rb` has built is live.
+**None needed.** Both halves of the fix are in the release binary (`cargo rb` at 14:08:24,
+`/mcp` reconnect at 14:18:09) and both are live-verified end-to-end. A multi-line string
+literal in a body passed to `edit_code` keeps its value in every recognised form, whether
+or not the surrounding code needs shifting.
 
-| form | in release binary | workaround needed |
-|---|---|---|
-| `"\` continuation, `"""`, backtick, raw string | yes — built 13:51, live-verified | no |
-| plain `"` with a raw newline | not yet — needs `cargo rb` + `/mcp` | yes |
+The `\n`-escape workaround this file used to prescribe is retired. Two fixtures in
+`src/util/text.rs` are deliberately kept as real multi-line literals so that a regression
+corrupts its own test data rather than failing somewhere unrelated — see *Tests added*.
 
-Where a workaround is still needed: use `\n`-escaped single-line strings in any body
-passed to `edit_code`, or pass the body already indented to the target column so the
-early return fires.
-
-After the next release build, neither is needed for any form.
+Historical note, for anyone reading this file at an older commit: before `79cd1428` the
+workaround was `\n`-escaped single-line strings, or passing the body pre-indented to the
+target column so `reindent_to`'s early return fired.
 ## Resume
 
 Two loose ends, neither blocking:
 
-1. **Live-MCP confirmation: done for the first fix, outstanding for the follow-up.**
-   `79cd1428` is confirmed end-to-end — `cargo rb` at 13:51, `/mcp` reconnect, then an
-   `edit_code` replace carrying two genuine `"\`-continued multi-line literals, both of
-   which landed byte-perfect at column 0. The raw-newline widening is unit-level only
-   until the next `cargo rb` + `/mcp`; confirm it the same way, with a fixture using a
-   plain `"` and a raw newline.
+1. **Live-MCP confirmation: done, both halves.** `79cd1428` confirmed after the 13:51
+   build — an `edit_code` replace carrying two `"\`-continued multi-line literals, both
+   byte-perfect at column 0. `65440388` confirmed after the 14:08 build — the headline
+   fixture rewritten as a raw-newline multi-line literal, also byte-perfect. The second
+   case is the stronger one: seven consecutive lines of the submitted body sat inside the
+   outer literal, including two (`assert!(…);` and `    }";`) that read as ordinary code,
+   and all seven were preserved verbatim. An early close at either the escaped `\"` or the
+   `\";` two lines down would have reindented them and changed the fixture's value.
 2. **Master-side SHA still needs recording** after cherry-pick. The SHA below is an
    `experiments` SHA and orphans on rebase.
 

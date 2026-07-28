@@ -406,8 +406,20 @@ mod tests {
     fn reindent_to_leaves_multi_line_literal_contents_alone() {
         // The reported bug. The code lines already sit at the target column, but the
         // literal's interior is at column 0 — measuring the base over every line
-        // reported the whole block as dedented and shifted the string's *value* by 4.
-        let body = "    fn t() {\n        let content = \"\\\n# Gotchas\n\n## MCP Binary Symlink\n\";\n        assert!(content.starts_with('#'));\n    }";
+        // reported the whole block as dedented and shifted the string's value by 4.
+        //
+        // The fixture is a real multi-line literal held open by a raw newline, which is
+        // both the natural way to write one and the form the first cut of this fix did
+        // not cover. edit_code wrote it through its own reindent, so a regression in
+        // either half would corrupt this fixture rather than fail loudly elsewhere.
+        let body = "    fn t() {
+        let content = \"\\
+# Gotchas
+
+## MCP Binary Symlink
+\";
+        assert!(content.starts_with('#'));
+    }";
         assert_eq!(
             reindent_to(body, "    "),
             body,
