@@ -52,17 +52,201 @@ pub fn min_indent(block: &str) -> &str {
         .unwrap_or("")
 }
 
+/// What the literal scanner is in the middle of.
+enum Scan {
+    Code,
+    /// A `"`/`'` literal opened on the current line, not yet known to span lines.
+    Quoted(char),
+    /// A literal confirmed to run until `close` appears — however many lines that
+    /// takes. `escapes` is false only for raw strings, where `\` is data and must
+    /// not hide the closing token.
+    Spanning {
+        close: String,
+        escapes: bool,
+    },
+}
+
+/// A line-spanning literal opener at the start of `rest`: the bytes it consumes
+/// and the state it puts the scanner in.
+fn spanning_opener(rest: &str) -> Option<(usize, Scan)> {
+    for triple in ["\"\"\"", "'''"] {
+        if rest.starts_with(triple) {
+            return Some((
+                triple.len(),
+                Scan::Spanning {
+                    close: triple.to_string(),
+                    escapes: true,
+                },
+            ));
+        }
+    }
+    if rest.starts_with('`') {
+        return Some((
+            1,
+            Scan::Spanning {
+                close: "`".to_string(),
+                escapes: true,
+            },
+        ));
+    }
+    // Rust raw string: r"…", r#"…"#, br##"…"##. The close token carries the same
+    // number of hashes the opener used.
+    let after_prefix = rest.strip_prefix("br").or_else(|| rest.strip_prefix('r'))?;
+    let hashes = after_prefix.len() - after_prefix.trim_start_matches('#').len();
+    if !after_prefix[hashes..].starts_with('"') {
+        return None;
+    }
+    Some((
+        rest.len() - after_prefix.len() + hashes + 1,
+        Scan::Spanning {
+            close: format!("\"{}", "#".repeat(hashes)),
+            escapes: false,
+        },
+    ))
+}
+
+/// Advance the scanner across one line and report the state it ends in.
+fn scan_line(line: &str, entry: Scan) -> Scan {
+    let mut state = entry;
+    let mut i = 0;
+    while i < line.len() {
+        let rest = &line[i..];
+        let one_char = rest.chars().next().map_or(1, char::len_utf8);
+        // Width of a `\x` escape: the backslash plus whatever follows it, or just the
+        // backslash when it ends the line. Lazy because `rest[1..]` is only a valid
+        // boundary once the leading byte is known to be the one-byte `\`.
+        let escape = || 1 + rest[1..].chars().next().map_or(0, char::len_utf8);
+        match &state {
+            Scan::Spanning { close, escapes } => {
+                let escapes = *escapes;
+                let consumed = rest
+                    .strip_prefix(close.as_str())
+                    .map(|after| rest.len() - after.len());
+                match consumed {
+                    Some(n) => {
+                        i += n;
+                        state = Scan::Code;
+                    }
+                    None if escapes && rest.starts_with('\\') => i += escape(),
+                    None => i += one_char,
+                }
+            }
+            Scan::Quoted(quote) => {
+                let quote = *quote;
+                if rest.starts_with('\\') {
+                    // Skip the escape and what it escapes, so `\"` does not close.
+                    i += escape();
+                } else {
+                    if rest.starts_with(quote) {
+                        state = Scan::Code;
+                    }
+                    i += one_char;
+                }
+            }
+            Scan::Code => {
+                if rest.starts_with("//") {
+                    // Nothing in a line comment can open a literal. Bailing here is
+                    // what keeps markdown backticks in a doc comment from opening a
+                    // phantom line-spanning literal.
+                    break;
+                }
+                if let Some((consumed, opened)) = spanning_opener(rest) {
+                    i += consumed;
+                    state = opened;
+                } else if rest.starts_with('"') || rest.starts_with('\'') {
+                    state = Scan::Quoted(rest.chars().next().unwrap_or('"'));
+                    i += one_char;
+                } else {
+                    i += one_char;
+                }
+            }
+        }
+    }
+    match state {
+        // A trailing backslash is how a `"`/`'` literal reaches the next line. Once
+        // it has crossed one line boundary it is confirmed multi-line, and runs on
+        // until its closing quote rather than resetting at every end of line.
+        Scan::Quoted(quote) if line.ends_with('\\') => Scan::Spanning {
+            close: quote.to_string(),
+            escapes: true,
+        },
+        // Otherwise an unclosed `"`/`'` was a lifetime or an apostrophe in prose,
+        // not a literal — resetting bounds the misreading to its own line.
+        Scan::Quoted(_) => Scan::Code,
+        other => other,
+    }
+}
+
+/// Which lines of `block` begin inside a string literal opened on an earlier
+/// line — meaning that line's leading whitespace is part of the string's
+/// *value*, not code indentation. Reindenting such a line changes what the
+/// program says while leaving the surrounding code looking correctly formatted,
+/// and rustfmt's default `format_strings = false` will not undo it.
+///
+/// Deliberately a scanner, not a parser: the `reindent_*` helpers run on
+/// fragments in every language `edit_code` supports, so there is no tree to
+/// consult. Recognised line-spanning literals, each closed by the token that
+/// opened it:
+///
+/// - a `"`/`'` literal held open by a trailing `\` (Rust, C, shell)
+/// - a triple-quoted Python literal
+/// - a backtick literal (JS/TS templates, Go raw strings)
+/// - a Rust raw string, at any hash count
+///
+/// Where the scanner cannot tell, it errs toward calling a line code, because a
+/// mis-indented code line is a loud failure — compiler, formatter, review — and
+/// a mutated string literal is a silent one. The worst case is a line-spanning
+/// literal that never closes: it masks every line after the opener, so at most
+/// that one line is reindented and the rest comes back byte-for-byte.
+fn literal_continuation_mask(block: &str) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(block.split('\n').count());
+    let mut state = Scan::Code;
+    for line in block.split('\n') {
+        mask.push(!matches!(state, Scan::Code));
+        state = scan_line(line, state);
+    }
+    mask
+}
+
+/// [`min_indent`], blind to lines that are string-literal content. Their
+/// leading whitespace is not indentation, and letting it set the base is what
+/// defeats [`reindent_to`]'s no-op guard: a literal whose interior sits at
+/// column 0 makes an already-correctly-indented block look dedented, so every
+/// line shifts — including the literal that caused it.
+///
+/// The first line can never be a continuation, so the fallback to [`min_indent`]
+/// is reachable only for an empty or all-blank block, where both agree on `""`.
+fn min_indent_outside_literals<'a>(block: &'a str, mask: &[bool]) -> &'a str {
+    block
+        .split('\n')
+        .zip(mask.iter().copied())
+        .filter(|(line, masked)| !*masked && !line.trim().is_empty())
+        .map(|(line, _)| leading_ws(line))
+        .min_by_key(|ws| ws.len())
+        .unwrap_or_else(|| min_indent(block))
+}
+
 /// Re-base an indented block from `agent_base` to `file_base`, preserving the
 /// relative (inner) indentation of every line.
 ///
 /// For each non-blank line: strip the `agent_base` prefix if present and prepend
 /// `file_base`; for a ragged line that does not start with `agent_base`, fall
 /// back to `file_base` + the trimmed line. Blank lines are emitted empty.
+///
+/// Lines that are string-literal continuations are emitted **verbatim** — their
+/// leading whitespace is part of the string's value, so shifting it would edit
+/// the program's data while looking like a formatting change. See
+/// [`literal_continuation_mask`].
 pub fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> String {
+    let mask = literal_continuation_mask(new_string);
     let mut out = String::with_capacity(new_string.len());
     for (idx, line) in new_string.split('\n').enumerate() {
         if idx > 0 {
             out.push('\n');
+        }
+        if mask.get(idx).copied().unwrap_or(false) {
+            out.push_str(line);
+            continue;
         }
         if line.trim().is_empty() {
             continue;
@@ -80,11 +264,17 @@ pub fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> St
 
 /// Re-base a block so its least-indented line sits at `target_base`, preserving
 /// inner structure. Returns the block **unchanged** when it is already based at
-/// `target_base` — so correctly-indented input is never disturbed (which, in
-/// particular, keeps the transform off lines inside multi-line string literals
-/// in the common path).
+/// `target_base` — so correctly-indented input is never disturbed.
+///
+/// The base is measured over code lines only. Measuring it over every line lets
+/// a multi-line string literal whose interior sits at column 0 report the block
+/// as dedented, which defeats this no-op guard and shifts the literal's contents
+/// along with the code. [`reindent_block`] then leaves any literal continuation
+/// in place, so a block that genuinely does need shifting keeps its strings
+/// intact too.
 pub fn reindent_to(block: &str, target_base: &str) -> String {
-    let agent_base = min_indent(block);
+    let mask = literal_continuation_mask(block);
+    let agent_base = min_indent_outside_literals(block, &mask);
     if agent_base == target_base {
         return block.to_string();
     }
@@ -192,6 +382,115 @@ mod tests {
     fn reindent_to_preserves_blank_lines() {
         let body = "a\n\nb";
         assert_eq!(reindent_to(body, "  "), "  a\n\n  b");
+    }
+
+    // Every fixture below uses `\n`-escaped strings rather than multi-line literals.
+    // That is deliberate: a multi-line literal here would be re-indented by the very
+    // defect these tests pin, so writing one would corrupt the fixture on the way in.
+
+    #[test]
+    fn reindent_to_leaves_multi_line_literal_contents_alone() {
+        // The reported bug. The code lines already sit at the target column, but the
+        // literal's interior is at column 0 — measuring the base over every line
+        // reported the whole block as dedented and shifted the string's *value* by 4.
+        let body = "    fn t() {\n        let content = \"\\\n# Gotchas\n\n## MCP Binary Symlink\n\";\n        assert!(content.starts_with('#'));\n    }";
+        assert_eq!(
+            reindent_to(body, "    "),
+            body,
+            "a block whose code is already based at the target must come back byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn reindent_to_shifts_code_and_leaves_the_literal_where_it_was() {
+        // The case option 1 in the bug file would not have fixed: the code genuinely
+        // does need shifting, and the literal must sit out the shift.
+        let body = "fn t() {\n    let s = \"\\\nraw line\n\";\n}";
+        let out = reindent_to(body, "    ");
+        assert!(
+            out.starts_with("    fn t() {\n        let s ="),
+            "code lines shift: {out:?}"
+        );
+        assert!(
+            out.contains("\nraw line\n"),
+            "literal keeps its value: {out:?}"
+        );
+        assert!(
+            !out.contains("    raw line"),
+            "literal must not gain indentation: {out:?}"
+        );
+        assert!(
+            out.contains("\n\";\n"),
+            "the closing line is literal content too: {out:?}"
+        );
+    }
+
+    #[test]
+    fn literal_continuation_mask_covers_each_line_spanning_form() {
+        // Python triple-quote.
+        assert_eq!(
+            literal_continuation_mask("s = \"\"\"\nbody\n\"\"\"\nx = 1"),
+            vec![false, true, true, false]
+        );
+        // JS/TS template, Go raw string.
+        assert_eq!(
+            literal_continuation_mask("let t = `a\nb`;"),
+            vec![false, true]
+        );
+        // Rust raw string, hashed.
+        assert_eq!(
+            literal_continuation_mask("let r = r#\"\nline\n\"#;"),
+            vec![false, true, true]
+        );
+        // Backslash-continued literal: confirmed multi-line, so it runs to its
+        // closing quote instead of resetting at the next end of line.
+        assert_eq!(
+            literal_continuation_mask("let s = \"\\\none\ntwo\n\";"),
+            vec![false, true, true, true]
+        );
+    }
+
+    #[test]
+    fn literal_continuation_mask_does_not_latch_on_prose_quotes() {
+        // A lone lifetime tick leaves the scanner mid-quote at end of line. Latching
+        // there would mask the rest of the block and suppress every shift after it.
+        assert_eq!(
+            literal_continuation_mask("fn f<'a>(x: u8) {\n    body()\n}"),
+            vec![false, false, false]
+        );
+        // A line comment cannot open a literal — otherwise the odd backtick count in
+        // a markdown-flavoured doc comment would mask everything below it.
+        assert_eq!(
+            literal_continuation_mask("// see `a` and `b\n    body()"),
+            vec![false, false]
+        );
+    }
+
+    #[test]
+    fn literal_continuation_mask_honours_escapes_inside_a_continued_literal() {
+        // Without escape handling the `\"` would read as the closing quote, the mask
+        // would end early, and the literal's own closing line would get shifted.
+        assert_eq!(
+            literal_continuation_mask("let s = \"\\\nhe said \\\"hi\\\" today\n\";"),
+            vec![false, true, true]
+        );
+        // A raw string is the opposite: `\` is data there, so it must not hide `\"#`.
+        assert_eq!(
+            literal_continuation_mask("let r = r#\"\nc:\\path\n\"#;"),
+            vec![false, true, true]
+        );
+    }
+
+    #[test]
+    fn reindent_block_emits_literal_continuations_verbatim() {
+        // edit_file's whitespace-normalized-match repair calls this directly with its
+        // own bases. Its post-edit syntax check cannot catch a mutated literal, since
+        // the shifted result still parses.
+        let block = "    let s = \"\\\ncol 0\n\";";
+        assert_eq!(
+            reindent_block(block, "    ", "        "),
+            "        let s = \"\\\ncol 0\n\";"
+        );
     }
 
     #[test]

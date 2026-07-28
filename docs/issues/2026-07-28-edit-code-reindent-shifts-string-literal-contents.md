@@ -1,7 +1,7 @@
 ---
 id: b2473c4a0731aaf9
 kind: bug
-status: open
+status: fixed
 title: edit_code reindent shifts multi-line string-literal contents, and cargo fmt cannot undo it
 tags:
 - edit_code
@@ -165,53 +165,101 @@ rustfmt fix what it can".
 
 ## Fix
 
-Not implemented. Options, in preference order:
+Fixed on `experiments` — **option 2**, the literal-span-aware reindent, plus the guard
+repair option 1 described. Both, because they close different halves of the surface.
 
-1. **Compute `min_indent` over code lines only** — skip lines inside string literals
-   when determining `agent_base`. In the reported case the code lines are at 4/8, so
-   `agent_base` would be `"    "`, equal to `target_base`, and the existing early
-   return fires: body untouched. This repairs the guard rather than adding a new one,
-   and needs no new concept. Requires a cheap literal-span scan (track unescaped `"`
-   and `r#"`), not a full parse.
-2. **Reindent only lines outside literal spans.** Strictly more correct, and handles
-   the case where the code genuinely does need shifting *and* contains a literal —
-   which option 1 leaves broken (it would decline to shift at all).
-3. **Refuse and hint** when the body contains a multi-line literal and
-   `agent_base != target_base`, telling the caller to pass a pre-indented body. Cheap
-   and safe, but pushes work onto every caller.
+`src/util/text.rs` gains a small literal scanner:
 
-Option 1 fixes the observed bug; option 2 is the real fix. Note the sibling defects in
-`related` — `edit_code`'s lead/attribute region has produced two other silent-drop
-bugs, so this area warrants the more thorough option.
+- `literal_continuation_mask(block) -> Vec<bool>` marks lines that *begin* inside a
+  literal opened on an earlier line. Those lines' leading whitespace is string content,
+  not indentation. The opener line is never marked (its indent really is code), and the
+  closing line is (the bytes before its closing token are still string content) — so
+  interior, closer, and opener are each handled correctly by one rule.
+- `min_indent_outside_literals` measures the base over unmarked lines only. This is
+  option 1: in the reported case the code lines are at 4/8, so the base is `"    "`,
+  equals `target_base`, and `reindent_to`'s existing early return fires — the block comes
+  back byte-for-byte.
+- `reindent_block` emits marked lines **verbatim**. This is option 2, and it covers the
+  case option 1 alone cannot: a body whose code genuinely does need shifting *and* which
+  contains a literal. The code shifts, the literal does not.
 
+The scanner recognises every line-spanning literal form the supported languages use — a
+`"`/`'` literal held open by a trailing `\`, a triple-quoted Python literal, a backtick
+(JS/TS template, Go raw string), and a Rust raw string at any hash count — and tracks
+escapes in all but raw strings, where `\` is data and must not hide the closing token.
+
+Two decisions worth keeping:
+
+**The fix went into `reindent_block`, not into `reindent_to`'s base computation.** Caller
+enumeration turned up a second production entry point the report missed:
+`src/tools/edit_file/mod.rs:747` calls `reindent_block` directly, with bases taken from
+the first non-blank line rather than from `min_indent`, on the whitespace-normalized-match
+repair path. It shifts literals the same way, and its post-edit `has_syntax_errors` guard
+cannot catch it — a literal with four extra spaces still parses. Masking inside the
+shifter fixes both entry points; masking inside `reindent_to` would have fixed one.
+
+**Ambiguity resolves toward "this is code".** A `"`/`'` left unclosed at end of line
+resets to code rather than latching, so a lifetime (`&'a T`) or an apostrophe in prose
+cannot mask the rest of the block; a `//` line comment opens nothing, so the odd backtick
+count in a markdown-flavoured doc comment cannot either. The asymmetry is the reason: a
+mis-indented code line is a loud failure — compiler, formatter, review — and a mutated
+string literal is a silent one. The worst residual case is a line-spanning literal that
+never closes, which masks everything after the opener and so degrades to reindenting one
+line instead of corrupting a string.
 ## Tests added
 
-None yet — no fix. When fixed, the regression test must assert on the string's
-**value**, not on the file's formatting: insert a body containing a multi-line literal
-with column-0 interior lines into a nested symbol, then assert the resulting literal
-still contains `"\n# Heading"` and not `"\n    # Heading"`. A formatting-shaped
-assertion would pass while the value stayed corrupted.
+Six, in `src/util/text.rs`'s `tests` module. All value-shaped, as the original entry
+required — a formatting-shaped assertion would pass while the string stayed corrupted.
 
+- `reindent_to_leaves_multi_line_literal_contents_alone` — the headline regression: the
+  reported fixture, asserting the block returns **byte-for-byte** unchanged.
+- `reindent_to_shifts_code_and_leaves_the_literal_where_it_was` — the case option 1 alone
+  would not have fixed; asserts the code moved *and* that the literal did not gain
+  indentation.
+- `literal_continuation_mask_covers_each_line_spanning_form` — triple-quote, backtick,
+  hashed Rust raw string, and the backslash-continued literal running past one line end.
+- `literal_continuation_mask_does_not_latch_on_prose_quotes` — a lone lifetime tick and a
+  line comment with an odd backtick count must mask nothing.
+- `literal_continuation_mask_honours_escapes_inside_a_continued_literal` — `\"` must not
+  read as the closing quote; and the raw-string converse, where `\` must not hide `\"#`.
+- `reindent_block_emits_literal_continuations_verbatim` — pins the `edit_file` entry
+  point, which passes explicit bases.
+
+The four pre-existing `reindent_to` tests (dedent, no-op, shallower-target, blank-line)
+stay green untouched. Full gate: 18 binaries, 3445 passed, 0 failed, 44 ignored; clippy
+`--all-targets -D warnings` clean.
+
+Every fixture uses `\n`-escaped strings rather than multi-line literals, with a comment
+in the file saying why: a multi-line literal there would be re-indented by the very
+defect these tests pin, corrupting the fixture on the way in. That constraint lifts once
+the release binary carries this fix.
 ## Workarounds
 
-Use `\n`-escaped single-line strings rather than multi-line literals in any body passed
-to `edit_code`. That is what the affected test now does, with a comment pointing here
-so the next author does not "tidy" it back into a multi-line literal:
+**Still required until the release binary is rebuilt.** The running MCP server executes
+`~/.cargo/bin/codescout` -> `target/release/codescout`; this fix exists only in the debug
+build until `cargo rb` followed by an `/mcp` reconnect. Until then, keep using
+`\n`-escaped single-line strings in any body passed to `edit_code`, or pass the body
+already indented to the target column so the early return fires.
 
-```rust
-let content = "# Gotchas\n\nPreamble line.\n\n## MCP Binary Symlink\n\n…";
-```
-
-Alternatively pass the body already indented to the target column, so `min_indent`
-matches `target_base` and the early return fires.
-
+After the rebuild, neither workaround is needed: a multi-line literal in a submitted body
+keeps its value whether or not the surrounding code needs shifting.
 ## Resume
 
-Read `min_indent` in `src/util/text.rs` and add a literal-aware variant, then use it
-at `src/util/text.rs:87`. Verify with the value-shaped test described above, plus
-re-run `cargo test --lib util::text` (4 existing `reindent_to` tests must stay green —
-they cover the dedent, no-op, blank-line and shift cases).
+Two loose ends, neither blocking:
 
+1. **Live-MCP confirmation is outstanding.** Verified at unit level only. Confirming it
+   end-to-end means `cargo rb`, an `/mcp` reconnect, then an `edit_code` insert carrying
+   a genuine multi-line literal — assert the written literal still contains `"\n# "` and
+   not `"\n    # "`.
+2. **Master-side SHA still needs recording** after cherry-pick. The SHA below is an
+   `experiments` SHA and orphans on rebase.
+
+One finding from the fix is filed separately and is *not* closed by it:
+`docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`. The insert that
+added these very tests landed 4 columns too deep because `edit_code` samples the insert
+column through an unrepaired LSP line index. `cargo fmt` fully repaired it here only
+because the fixtures contain no multi-line literal — with one present, the two defects
+compound and the literal keeps the shift.
 ## References
 
 - `src/tools/symbol/edit_code.rs:814` — insert-path `reindent_to` call
@@ -221,4 +269,3 @@ they cover the dedent, no-op, blank-line and shift cases).
   that surfaced it, now written with escaped newlines
 - `src/memory/filter.rs` — `filter_sections_indented_heading_not_a_boundary`, the
   test proving the indented-heading rejection is intended behaviour
-
