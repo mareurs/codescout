@@ -79,6 +79,7 @@ time_scope: open-ended
 | F-31 | 2026-07-07 | med | self-friction | fixed-verified | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 | F-34 | 2026-07-28 | med | plan-prose | fixed-verified | My own bug file's "cheapest" fix option would have broken `filter_sections_nested_h4_included_in_body`; its "cannot break language-patterns.md" claim was exactly backwards, and it ignored H1 entirely |
+| F-35 | 2026-07-28 | low | self-friction | fixed-verified | Two doc comments I had just written made claims the code did not support (an unreachable fallback described as reachable; "reindents nothing" where the opener still shifts) — no gate can catch a doc comment that overstates a guarantee |
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
 
 ## Wins Index
@@ -109,6 +110,7 @@ time_scope: open-ended
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 | W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-27 | 2026-07-28 | med | Enumerate a shared helper's callers to decide WHERE a fix belongs, not just its blast radius | The bug file's own preferred fix sat in `reindent_to`; enumeration found `reindent_block`'s second production caller (`edit_file/mod.rs:747`) with the same defect, reachable without passing through `reindent_to`. That path guards writes with `has_syntax_errors`, which returns clean on a shifted literal — the bug would have stayed open behind a green gate, a closed bug file, and a passing syntax check | validated |
 | W-26 | 2026-07-28 | med | A failing NEW test with an innocent implementation: diagnose the fixture before touching the code | Suspecting `heading_at` would have meant loosening the heading predicate to trim leading whitespace — making the new test pass while breaking `filter_sections_indented_heading_not_a_boundary`, then "fixing" that older test and landing a real regression. Reading the file back exonerated the implementation in one step; the defect was in `edit_code` | validated |
 | W-25 | 2026-07-28 | med | Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place | Defensive branch: thread a dir param through `LspManager::get_or_start` -> `get_or_start_via_mux` -> `claim_mux_lock`, a test concern in a production signature plus 17 individual test opt-ins, versus the 3-line `cfg(test)` seam that fixed all 17 at once. Optimistic branch: ship and later find mux sockets silently undiscoverable. Also surfaced the `#[ignore]`d test at manager.rs:2350 fixing for free and the peer subsystem's identical latent exposure | validated |
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
@@ -2153,6 +2155,110 @@ of the three datapoints are already in this log (F-32, this entry).
 
 **Status:** validated — two datapoints in the same family, both `edit_code` write
 fidelity, both caught by reading the result rather than by the gate.
+## F-35 — My own doc comments made two claims the code did not support, and no test could catch either
+
+**Observed:** 2026-07-28, immediately after `cargo check --lib` passed on the
+`literal_continuation_mask` fix in `src/util/text.rs`. Re-reading what I had just
+written, before running the suite.
+
+**When:** Writing the doc comments for two new private helpers while implementing the
+fix for `2026-07-28-edit-code-reindent-shifts-string-literal-contents`.
+
+**Expected (what I wrote):**
+
+1. On `min_indent_outside_literals`: *"Falls back to the whole block when every non-blank
+   line is literal content."*
+2. On `literal_continuation_mask`: *"a line-spanning literal that never closes … masks
+   every line after it, which degrades to reindenting nothing and handing the block back
+   byte-for-byte."*
+
+**Got (traced reality):**
+
+1. Unreachable as stated. The mask is built by pushing the state *before* scanning each
+   line, and the scanner starts in `Scan::Code` — so index 0 is `false` unconditionally.
+   If line 0 is non-blank there is always at least one unmasked non-blank line, and the
+   `unwrap_or_else` fires only for an empty or all-blank block, where plain `min_indent`
+   returns `""` anyway.
+2. Wrong by one line, in the direction that matters. A never-closing literal masks lines
+   1..n but *not* the opener, so the base is measured from the opener and the opener is
+   the one line that still gets reindented. "Reindenting nothing" overstates the
+   guarantee.
+
+**Probable cause:** Both claims were written while reasoning forward from intent ("the
+fallback exists, so describe when it fires"; "masking everything means shifting nothing")
+rather than backward from the loop's first iteration. The mask's off-by-one at index 0 is
+exactly the kind of boundary that intent-first prose skips.
+
+**Workaround:** Rewrote both. (1) now states the fallback is reachable only for an
+empty/all-blank block and that both functions agree on `""` there. (2) now says at most
+the opening line is reindented.
+
+**Severity:** low — no behavioural defect; the code was right both times. It is logged
+because of what the detection channel was: the full gate is green either way, and
+`audit_doc_refs` lints markdown, not Rust doc comments. Nothing in the pre-commit gate
+can catch a doc comment that overstates a guarantee. The only detector is re-reading the
+claim against the loop, which is the same discipline the Iron Rule already names for
+user-facing claims — this entry extends it to comments, which outlive any answer.
+
+**Status:** fixed-verified — both comments corrected before the commit; landed in
+`79cd1428`.
+
+**Fix idea / Pointer:** `src/util/text.rs`, docs on `literal_continuation_mask` and
+`min_indent_outside_literals`. Second datapoint in a pattern worth watching: F-34 was a
+claim in my own *bug file* that the code contradicted; this is a claim in my own *code
+comment*. Both were caught by reading the artifact back against the substrate, neither by
+a gate.
+
+## W-27 — Enumerate a shared helper's callers before deciding where a fix belongs, not just to check blast radius
+
+**Observed:** 2026-07-28, scouting `src/util/text.rs` before implementing the
+reindent/literal fix. The bug file already prescribed a fix location; the scout was
+nominally just to confirm the shape.
+
+**Pattern:** When a bug report names a fix site inside a helper, run `references` /
+`grep` on **every** function in that helper's call chain — not to size the blast radius,
+but to ask *which link in the chain the defect actually lives on*. A report is written
+from the one call path its author walked; the enumeration shows the others.
+
+The bug file's option 1 and option 2 both located the fix in `reindent_to` — option 1 in
+its base computation, option 2 in the shift it delegates. Enumerating turned up the
+shape that decided it: `reindent_to` has 3 callers, all in `edit_code.rs`; but
+`reindent_block`, the function it delegates the shift to, has a **second production
+caller the report never mentions** — `src/tools/edit_file/mod.rs:747`, on the
+whitespace-normalized-match repair path, computing its bases from the first non-blank
+line instead of via `min_indent`. Same literal-shifting defect, reached without passing
+through `reindent_to` at all.
+
+So the mask went into `reindent_block`. Same size of change, twice the surface closed.
+
+**Counterfactual:** Implementing either option as written would have left
+`edit_file`'s repair path silently shifting literal contents. That path is *structurally
+unable* to notice: it guards its result with `crate::ast::has_syntax_errors` before
+writing, and a string literal with four extra spaces still parses — the guard returns
+clean on exactly the corruption it is positioned to catch. The bug would have stayed
+open behind a green gate, a closed bug file, and a passing syntax check, reachable only
+by a `edit_file` caller who happened to hit the normalized-match path with a multi-line
+literal in the replacement. Cost of the scout: one `grep`.
+
+**Confirming data points:**
+1. This session — `reindent_block`'s second caller relocated the fix and doubled its
+   coverage; the report's own preferred option would have missed it.
+2. R-45 (`reconnaissance-patterns`) — caller enumeration is blind to
+   discovery-by-directory-scan. Same tool, opposite lesson: enumeration is necessary but
+   its silence is not proof.
+
+**Impact:** med — one grep converts a half fix into a whole one, on a defect class whose
+defining property is that no gate detects it.
+
+**Promote-when:** A third case where enumerating a *delegate's* callers (not the named
+symbol's) relocates the fix. At 3 datapoints, promote to the reconnaissance skill as
+"scout the callers of every function in the chain the fix touches, not only the one the
+report names."
+
+**Status:** validated — fix landed at the relocated site in `79cd1428`, with
+`reindent_block_emits_literal_continuations_verbatim` pinning the `edit_file` entry point
+specifically.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

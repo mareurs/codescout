@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-47 | 2026-07-28 | hit | Enumerate the callers of every function in the chain a fix touches, not only the symbol the report names — the report walked one call path. `reindent_to`'s 3 callers were all `edit_code`, but its delegate `reindent_block` had a second production caller (`edit_file/mod.rs:747`) with the same defect, reached without passing through `reindent_to`. Relocating the fix one level down doubled the surface closed at the same size of change | bug-fix W-27; issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents (archived, `79cd1428`); kin R-17/R-31/R-44 |
 | R-46 | 2026-07-28 | hit | Choosing between candidate fixes needs the target's TEST module read, not just the target: the implementation shows what it does, only the tests show what may not change (a bug file's "cheapest, cannot break X" option was exactly inverted). Corpus census, not code, caught the companion H1 trap | bug-fix F-34 + W-26; kin R-19/R-44 |
 | R-45 | 2026-07-28 | hit | Relocating a file needs a discovery-by-scan grep; caller enumeration is blind to it (generalises R-44: `cfg` on a value → callers are the consumer set; `cfg` on a location → callers are half of it) | bug-fix F-33 + W-25 |
 | R-44 | 2026-07-25 | hit | The write-side twin of R-43: before accepting a proposed `#[cfg]` gate on a `pub mod` declaration, enumerate the CONSUMER set (`grep <mod>::|use .*<mod>` at workspace root, `context_lines=2`) and check whether the config being gated OUT is the one the plan's own tests or invariants live in. Gating a module is a subtree delete; the declaration site cannot show its blast radius. | dependency-review session F-3 + W-2; `src/retrieval/mod.rs:3` + 14 ungated `RetrievalClient` consumers; kin R-43/R-5/R-17 |
@@ -1141,6 +1142,60 @@ any language with a test suite — so the destination is `SKILL.md` Phase 1 as a
 *"choosing between candidate fixes: read the target's test module, not just the target
 — tests are where 'must not change' lives."*
 
+
+## R-47 — Hit: enumerate the delegate's callers too; the report walked one call path
+
+**Verdict:** hit.
+
+The bug file for the reindent/string-literal defect named its fix site twice — option 1
+in `reindent_to`'s base computation, option 2 in the shift `reindent_to` delegates. Both
+read as choices about *how thorough* to be. Enumerating the whole chain showed they were
+also a choice about *where*, and that both options were one level too high:
+
+- `reindent_to` — 3 callers, all in `src/tools/symbol/edit_code.rs`.
+- `reindent_block`, its delegate — the same 3 transitively, **plus**
+  `src/tools/edit_file/mod.rs:747`, which calls it directly with bases taken from the
+  first non-blank line rather than via `min_indent`, on the whitespace-normalized-match
+  repair path. Same literal-shifting defect, never touching `reindent_to`.
+- `min_indent` — exactly one production caller (`reindent_to`), which is what made it
+  safe to leave its public contract alone and add a sibling instead.
+
+Putting the literal mask in `reindent_block` — the function that performs the shift —
+fixed both entry points for the same size of change. Putting it in `reindent_to` would
+have fixed one.
+
+What makes this a recon lesson rather than a lucky catch: the missed path is *invisible
+to its own guard*. `edit_file` validates every write with
+`crate::ast::has_syntax_errors(&new_content, lang)` and refuses if the edit introduces
+errors — and a string literal with four extra spaces of interior indentation still
+parses. The one mechanism positioned to catch this returns clean on it. So the residue
+would have survived a green gate, a closed bug file, and a passing syntax check, with no
+surface left that could report it.
+
+The generalisable form: a bug report is written from the single call path its author
+walked. Scouting the named symbol confirms that path. Scouting the symbols it *delegates
+to* is what finds the paths the author never saw — and a defect in shared machinery lives
+on whichever link of the chain actually performs the offending operation, not on
+whichever link the reporter reached it through.
+
+Relation to kin entries: R-17 says spot-check a just-fixed shared helper's sibling
+callers before closing the bug class — R-47 moves that check *before* choosing the fix
+site, where it can still change the answer. R-31 follows a param one hop into callees;
+this follows the operation. R-44 enumerates a consumer set rather than reading a
+declaration site. R-45 is the counterweight: enumeration's silence is not proof, since
+it cannot see discovery-by-directory-scan.
+
+**Evidence:** `bug-fix-session-log.md` W-27. Shipped `79cd1428`; six new value-shaped
+tests including `reindent_block_emits_literal_continuations_verbatim`, which pins the
+`edit_file` entry point specifically so the second path cannot regress silently. Full
+gate 18 binaries / 3445 passed / 0 failed / 44 ignored, clippy clean. Bug (archived):
+`docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`.
+
+**Promote-when:** a second case where enumerating a *delegate's* callers (not the named
+symbol's) relocates the fix site. Craft-shaped — true of any language with shared
+helpers — so the destination is `SKILL.md` Phase 1: *"scout the callers of every
+function in the chain the fix touches, not only the one the report names; a defect in
+shared machinery lives on the link that performs the operation."*
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
