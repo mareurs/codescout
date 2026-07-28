@@ -46,10 +46,17 @@ Status field semantics:
   `closed:` stays empty at creation — fill in YYYY-MM-DD only when
   status flips to fixed/mitigated/wontfix.
 
-Archive trigger: move the file into docs/issues/archive/ AFTER the fix
-ships to master, not when status flips to fixed. Detect with:
+Archive trigger: move the file into docs/issues/archive/ once the fix is
+verified on experiments — gate green plus a regression test. Reaching
+master is NOT required; experiments is never deleted.
+When archiving an experiments-only fix the file must carry (a) the fix SHA
+labelled experiments, and (b) a Resume line saying the master-side SHA
+still needs recording after cherry-pick — an experiments SHA orphans on
+rebase, and nothing re-reads archive/ to repair it.
+Check where a SHA lives with:
   git branch --contains <fix-sha>
-If `master` is in the output, the fix is on master.
+Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")
+— never a bare git mv, which orphans the catalog row.
 
 Use `N/A` or `Unknown — under investigation` for sections that don't
 yet apply. `N/A` in `Tests added` requires justification — empty Tests

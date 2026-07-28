@@ -79,13 +79,24 @@ git push
 git checkout experiments
 git rebase master
 
-# 4. Migrate closed bug files whose fix shipped (run AFTER the cherry-pick lands on master)
+# 4. Reconcile bug-file SHAs to master (run AFTER the cherry-pick lands)
+#    Archiving itself does NOT happen here — a bug file is archived as soon as its
+#    fix is verified on experiments (see get_guide("tracker-conventions")).
+#    What is still owed at this point is the SHA swap, and archive/ is where it is
+#    easiest to forget:
 #    For each <fix-sha> just cherry-picked:
-#    - find docs/issues/<date>-<slug>.md whose Fix section cites <fix-sha>
-#    - confirm: git branch --contains <fix-sha>  → must show 'master'
-#    - if status is `fixed` / `mitigated` / `wontfix`: git mv it to docs/issues/archive/
+#    - find the bug file citing the experiments-side SHA — check BOTH
+#      docs/issues/ and docs/issues/archive/:
+#        grep -rl <experiments-sha> docs/issues/
+#    - replace it with the master-side SHA from the cherry-pick, and drop the
+#      "master-side SHA still to be recorded" line from its Resume section
+#    - confirm: git branch --contains <master-sha>  → must show 'master'
+#    - if the file is still in docs/issues/ and its status is fixed/mitigated/wontfix,
+#      archive it now via the catalog (NOT git mv — id = sha256(abs_path)):
+#        mcp call codescout artifact '{"action":"move","id":"<id>",
+#          "new_rel_path":"docs/issues/archive/<date>-<slug>.md"}'
 #    Skip files still `open` / `investigating` — they stay in docs/issues/ regardless.
-#    Commit the moves separately: docs: archive bug files for fixes shipped in <date>
+#    Commit separately: docs: reconcile bug-file SHAs to master for <date>
 
 # 5. (Optional, recommended after large refactors or batched-bug sessions)
 #    Verify doc refs still resolve — bug-file Resume sections cite paths that
@@ -102,9 +113,20 @@ git rebase master
 ```
 
 This is the default workflow for all completed work. The rebase step keeps `experiments`
-clean — git detects the cherry-pick and skips the duplicate commit automatically. Step 4
-keeps `docs/issues/` showing only bugs whose fix is unreleased — see `_TEMPLATE.md` rule
-*"Archive moves happen after the fix has shipped to master, not when status flips to fixed."*
+clean — git detects the cherry-pick and skips the duplicate commit automatically.
+
+Step 4 used to be the archive step, gated on `master`. It is not any more: a bug file is
+archived once its fix is **verified on `experiments`** (`_TEMPLATE.md` / `get_guide(
+"tracker-conventions")`), because `experiments` is never deleted and holding files back
+only grew a pile of `fixed`-but-unarchived bugs that no query surfaced anyway —
+`artifact(action="find", kind="bug", status="open")` filters on `status`, not on path.
+
+What step 4 owes instead is the **SHA swap**, and it is the one piece the earlier gate was
+silently providing: while archiving waited for `master`, every archived file necessarily
+carried a master SHA. Archiving earlier means files land in `archive/` holding an
+`experiments` SHA that the very next `git rebase master` orphans (see *After cherry-pick*
+below). Nothing re-reads `archive/`, so this step has to look there explicitly — hence the
+`grep -rl` across both directories rather than only `docs/issues/`.
 Step 5 is the drift-detection step — `audit_doc_refs` is the canonical lint for stale
 path / link / line references across all markdown surfaces.
 

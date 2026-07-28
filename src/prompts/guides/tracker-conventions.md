@@ -15,8 +15,8 @@ tracker file by raw path lookup — go through the catalog.
 One file per bug.
 
 - **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` while open;
-  `docs/issues/archive/` only **after** the fix has shipped to `master`
-  (verify with `git branch --contains <fix-sha>`).
+  `docs/issues/archive/` once the fix is **verified on `experiments`** —
+  reaching `master` is NOT required.
 - **Slug:** short kebab-case noun-phrase (3–6 words), e.g.
   `edit-code-insert-mid-function`.
 
@@ -51,10 +51,27 @@ status flips to `fixed` / `mitigated` / `wontfix`.
 **Capture discipline:** add the file the moment the bug is noticed —
 don't wait until task end.
 
-**Archive trigger:** move the file into `docs/issues/archive/` AFTER
-the fix ships to `master`, **not** when status flips to `fixed`. The
-file stays in `docs/issues/` while the fix lives only on a feature
-branch.
+**Archive trigger:** move the file into `docs/issues/archive/` once the fix is
+verified on `experiments` — gate green (`cargo fmt`, `cargo clippy -- -D warnings`,
+`cargo test`) and a regression test in place. Reaching `master` is **not** required:
+`experiments` is never deleted, so an unmerged fix is not at risk of being lost, and
+holding the file back only grows a pile of `fixed`-but-unarchived bugs that no query
+ever surfaces (`artifact(action="find", kind="bug", status="open")` filters on
+`status`, not on path).
+
+Two things the file MUST carry when archived experiments-only, because nothing
+re-reads `archive/`:
+
+- the fix SHA, **labelled `experiments`** — an `experiments` SHA orphans on rebase,
+  so an unlabelled SHA in `archive/` becomes an untraceable string;
+- a `## Resume` line stating that the **master-side** SHA still has to be recorded
+  after cherry-pick.
+
+Check where a SHA actually lives with `git branch --contains <fix-sha>`.
+
+Archive through the catalog — `artifact(action="move", id=…,
+new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
+sha256(abs_path)`, so a hand-move orphans the catalog row.
 
 ## Tracker artifacts (docs/trackers/)
 

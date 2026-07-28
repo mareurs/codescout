@@ -14,7 +14,7 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 Two behaviors are load-bearing and easy to skip:
 
 - **Capture on notice** — add the bug file the moment a bug is noticed (wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools), not at task end.
-- **Archive only after the fix ships to `master`** (`git branch --contains <fix-sha>`), not when status flips to `fixed`.
+- **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. When archiving an experiments-only fix, label the SHA `experiments` and keep a `## Resume` line saying the master-side SHA still needs recording after cherry-pick (an `experiments` SHA orphans on rebase). Archive via `artifact(action="move", …)`, never a bare `git mv`.
 
 **Open a bug file for ANY bug noticed during work** — including incidental bugs we won't fix and tool quirks/misbehaviors. *Not* for pure typos (commit message suffices) or feature ideas/refactors (→ `docs/trackers/` or `docs/plans/`). Don't append to retired surfaces (`docs/archive/old-trackers/*`) — open a new `docs/issues/<date>-<slug>.md`.
 ## Session Intelligence Trackers
