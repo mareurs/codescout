@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-46 | 2026-07-28 | hit | Choosing between candidate fixes needs the target's TEST module read, not just the target: the implementation shows what it does, only the tests show what may not change (a bug file's "cheapest, cannot break X" option was exactly inverted). Corpus census, not code, caught the companion H1 trap | bug-fix F-34 + W-26; kin R-19/R-44 |
 | R-45 | 2026-07-28 | hit | Relocating a file needs a discovery-by-scan grep; caller enumeration is blind to it (generalises R-44: `cfg` on a value → callers are the consumer set; `cfg` on a location → callers are half of it) | bug-fix F-33 + W-25 |
 | R-44 | 2026-07-25 | hit | The write-side twin of R-43: before accepting a proposed `#[cfg]` gate on a `pub mod` declaration, enumerate the CONSUMER set (`grep <mod>::|use .*<mod>` at workspace root, `context_lines=2`) and check whether the config being gated OUT is the one the plan's own tests or invariants live in. Gating a module is a subtree delete; the declaration site cannot show its blast radius. | dependency-review session F-3 + W-2; `src/retrieval/mod.rs:3` + 14 ungated `RetrievalClient` consumers; kin R-43/R-5/R-17 |
 | R-43 | 2026-07-25 | miss | An attribute-binding claim (`#[cfg]`, `#[serde(...)]`, `#[tokio::test]`) can never be made from a grep hit: grep prints matching lines with line numbers but ELIDES the gap between them, and an attribute binds to the *next item* — usually not itself a match. Read the region before asserting the binding. | dependency-review session; `src/retrieval/mod.rs:1-17` (cfg at L1/L12 bound to `artifact`/`qdrant`, not `embedder` L7 / `reranker` L14); caught by `cargo check` (16× E0433); kin R-19/R-5/R-3 |
@@ -1097,6 +1098,48 @@ failed, 3307 lib tests; index-lock leak 7→0 files per run, mux leak 18→1.
 collection name, cache key) where scan-vs-compute decides the design. Craft-shaped,
 not project-shaped — holds in any language with a shared runtime directory — so the
 destination is `SKILL.md` Phase 1 as a named seam class, not a project memory.
+
+## R-46 — Hit: a target's own test module encodes intent the implementation cannot reveal; read it before choosing between candidate fixes
+
+**Verdict:** hit.
+
+Implementing the memory section-filter fix, the bug file (written earlier the same
+session) offered "match any heading level" as its cheapest option and asserted it
+"cannot break `language-patterns.md`". Reading `filter_sections`'s **test module**
+killed it in one step: `filter_sections_nested_h4_included_in_body` exists to assert
+that `####` is *body* inside its `###` section, so promoting every level to a boundary
+breaks a deliberate behaviour — and `language-patterns.md`, the only memory with `###`
++ `####`, is precisely the file it would have damaged. The claim was inverted.
+
+The generalisable point: reading `filter_sections` itself shows *what* it does
+(`strip_prefix("### ")`) but not *which parts are load-bearing*. Only the tests
+distinguish incidental behaviour from contracted behaviour. A fix chosen from the
+implementation alone is a fix chosen without knowing what may not change.
+
+Second finding from the same scout, in the data rather than the tests: counting heading
+levels across all 21 memories showed 19 carry exactly one H1 as their title. Any
+"shallowest level wins" variant that includes H1 therefore makes the title the sole
+section and nests everything inside it — filtering would report a match and return the
+whole document. Silent, and worse than the bug being fixed. The corpus census, not the
+code, is what surfaced that.
+
+Relation to kin entries: R-19 says don't assert a checkable fact about a symbol without
+reading it this session. R-46 extends the target from the symbol to its **tests** — and
+specifically for the decision "which of N candidate fixes", where the reading needed is
+not of the code being changed but of the assertions constraining it. Also kin to R-44
+(enumerate the consumer set, not the declaration site): tests are a consumer set that
+caller-enumeration does not surface.
+
+**Evidence:** `bug-fix-session-log.md` F-34 (the inverted claim, with severity
+rationale) and W-26 (the fixture-vs-implementation diagnosis from the same fix).
+Shipped `d668927e`; 19/19 in `memory::filter`, full gate 3439 passed / 0 failed. Bug:
+`docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md`.
+
+**Promote-when:** a second case where a candidate fix is rejected by a pre-existing
+test that reading the implementation would not have surfaced. Craft-shaped — true of
+any language with a test suite — so the destination is `SKILL.md` Phase 1 as a bullet:
+*"choosing between candidate fixes: read the target's test module, not just the target
+— tests are where 'must not change' lives."*
 
 ## Template for new entries
 

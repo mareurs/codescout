@@ -78,6 +78,7 @@ time_scope: open-ended
 | F-30 | 2026-07-07 | high | release-pipeline | fixed-verified | Upstream commit `62457959` bundled a stray `try_build_runtime(lsp.clone())` arg + `mv.rs` test had a phantom `lsp:` field — both broke `cargo rb` |
 | F-31 | 2026-07-07 | med | self-friction | fixed-verified | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
+| F-34 | 2026-07-28 | med | plan-prose | fixed-verified | My own bug file's "cheapest" fix option would have broken `filter_sections_nested_h4_included_in_body`; its "cannot break language-patterns.md" claim was exactly backwards, and it ignored H1 entirely |
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
 
 ## Wins Index
@@ -108,6 +109,7 @@ time_scope: open-ended
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 | W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-26 | 2026-07-28 | med | A failing NEW test with an innocent implementation: diagnose the fixture before touching the code | Suspecting `heading_at` would have meant loosening the heading predicate to trim leading whitespace — making the new test pass while breaking `filter_sections_indented_heading_not_a_boundary`, then "fixing" that older test and landing a real regression. Reading the file back exonerated the implementation in one step; the defect was in `edit_code` | validated |
 | W-25 | 2026-07-28 | med | Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place | Defensive branch: thread a dir param through `LspManager::get_or_start` -> `get_or_start_via_mux` -> `claim_mux_lock`, a test concern in a production signature plus 17 individual test opt-ins, versus the 3-line `cfg(test)` seam that fixed all 17 at once. Optimistic branch: ship and later find mux sockets silently undiscoverable. Also surfaced the `#[ignore]`d test at manager.rs:2350 fixing for free and the peer subsystem's identical latent exposure | validated |
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 
@@ -2059,6 +2061,98 @@ project memory.
 
 **Status:** validated — single datapoint plus a same-shape precedent in W-6.
 Awaiting the third relocation case.
+## F-34 — My own bug file prescribed a fix that a pre-existing test would have broken
+
+**Observed:** 2026-07-28, implementing
+`docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md` — a bug I had
+filed myself earlier the same session.
+
+**When:** About to write the fix. The bug file's own Fix section listed, as option 1
+("cheapest, consistent with the sibling fix"): *"Match any heading level (`##`,
+`###`, `####`) and keep the existing case-insensitive comparison. Smallest change …
+and cannot break `language-patterns.md`."*
+
+**Expected (my own filed plan):** promoting every heading level to a section boundary
+is safe.
+
+**Got (scouted reality):** it breaks `filter_sections_nested_h4_included_in_body`
+(`src/memory/filter.rs`), which exists precisely to assert that `####` is part of its
+`###` section's **body**, not a sibling section. My "cannot break
+`language-patterns.md`" claim was exactly backwards — `language-patterns.md` is the
+one memory with `###` + `####`, so it is the file the naive fix would have damaged.
+
+A second, larger miss in the same plan: option 1 said nothing about H1. Counting the
+corpus showed 19 of 21 memories carry exactly one H1 as their title, so any
+"shallowest level wins" variant that includes H1 makes the title the sole block and
+nests every section inside it — filtering would *appear* to work while always
+returning the whole document. That is a worse failure than the bug being fixed,
+because it is silent.
+
+**Probable cause:** the bug file was written from the tool's error text plus a
+heading census of the *data*, without reading the function's own test module. Its Root
+cause section even admitted the mechanism was "inferred". A fix option proposed from
+inferred mechanism carries inferred safety, and I labelled it "cheapest" — which is
+the part that would have made a future session trust it.
+
+**Workaround:** discarded option 1. Shipped shallowest-level-among-H2..H6 with H1
+excluded, which satisfies both conventions and leaves all 13 pre-existing tests
+untouched. Rewrote the bug file's Fix section to record why option 1 was rejected, so
+the dead end is not re-walked.
+
+**Severity:** med — had I implemented my own filed plan without scouting, I would
+have shipped a green-looking change (`language-patterns.md`'s own filter tests would
+still pass on the `###` sections) that silently broke `####` nesting, plus an H1
+variant that returns whole documents while reporting a match.
+
+**Status:** fixed-verified — `d668927e`; 19/19 in `memory::filter`, full gate 3439
+passed / 0 failed.
+
+**Fix idea / Pointer:** generalised in R-46. A bug file's Fix section should be marked
+as unvalidated until someone has read the target's test module — "inferred mechanism"
+in Root cause should propagate a warning into Fix.
+
+## W-26 — A failing new test with an innocent implementation: diagnose the fixture before touching the code
+
+**Observed:** 2026-07-28, immediately after writing the headline regression test for
+the memory section-filter fix. `filter_sections_matches_h2_sectioned_memory` failed on
+`assert!(r.matched)`.
+
+**Pattern:** when a *newly written* test fails against code you just wrote, check
+whether the **fixture** is what you authored before concluding the implementation is
+wrong. Read the test back off disk and compare it to the argument you sent. The
+privileged clue is a test whose failure mode is *also* an explicitly tested intended
+behaviour elsewhere in the same module — here `filter_sections_indented_heading_not_a_boundary`
+asserts that an indented `### Fake` is body, and my fixture's headings had silently
+acquired four leading spaces.
+
+**Counterfactual:** the natural next move on "my `##` matching test fails" is to
+suspect `boundary_level` / `heading_at` and start loosening the heading predicate —
+e.g. trimming leading whitespace before matching. That change would have made the new
+test pass **and** broken `filter_sections_indented_heading_not_a_boundary`, at which
+point the obvious-looking move is to "fix" that older test too, landing a real
+regression (indented markdown inside a section body would start splitting sections).
+Instead, reading the file showed `    ## MCP Binary Symlink` and the implementation was
+exonerated in one step — and the actual defect turned out to be in `edit_code`, not in
+either the code or the test.
+
+**Confirming data points:**
+1. F-32 (2026-07-08) — `edit_code` rewrite of a test fn dropped a trailing assertion
+   line outside the read window. Same root family: `edit_code` silently altering what
+   you believe you wrote, detected only by reading the result back.
+2. This session — `edit_code`'s `reindent_to` shifted a multi-line string literal's
+   interior; filed as
+   `docs/issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`.
+
+**Impact:** med — saves one plausible-but-wrong loosening of a parser predicate plus
+the cascade of "fixing" the older test that would then fail.
+
+**Promote-when:** a third instance of an `edit_code` write silently differing from the
+submitted body. At 3 datapoints, promote to CLAUDE.md as *"after any `edit_code`
+write, read the affected region back before trusting a test result against it"* — two
+of the three datapoints are already in this log (F-32, this entry).
+
+**Status:** validated — two datapoints in the same family, both `edit_code` write
+fidelity, both caught by reading the result rather than by the gate.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
