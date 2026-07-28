@@ -2,7 +2,7 @@
 id: '1d2cc991f2ec2b1a'
 kind: bug
 status: open
-title: index_lock tests write lock files into the real per-user runtime dir and never clean up
+title: index_lock and lsp/mux tests write lock files into the real per-user runtime dir and never clean up
 tags:
 - retrieval
 - index-lock
@@ -103,6 +103,62 @@ The arithmetic confirms the mechanism: 45 distinct PIDs recorded across 203 file
 distinct *test binary invocations*, not 45 indexers.
 
 ## Evidence
+### MEASURED 2026-07-28 — controlled run, replaces the estimates above
+
+The first pass of this bug estimated "~6 files per run" from reading the test
+module. Measured instead: delete every lock file, run `cargo test` once, count.
+
+| | baseline | after one run | delta |
+|---|---|---|---|
+| `codescout-index-*.lock` | 0 | 7 | **+7** |
+| `codescout-rust-mux-*.lock` | 468 | 486 | **+18** |
+
+Gate on the same run: 3430 passed, 0 failed, 44 ignored, 18 binaries.
+
+**Index locks: 7, not 6.** All seven carry the same PID (3337647 — one lib test
+binary). Six come from `index_lock`'s own tests as described below; the seventh is
+`sync_project_holds_index_lock_for_its_full_duration` (`src/retrieval/sync.rs:736`),
+which drives `sync_project` and so hits the production `acquire` at
+`src/retrieval/sync.rs:234`. The estimate missed it because it scoped the count to
+one module. Confirmed that the fixed-id tests contribute nothing by hashing
+`some-project-for-siting-check`, `project-one` and `project-two` and matching none
+of the seven filenames — `lock_path` alone creates no file, only `acquire` does.
+
+**A second module leaks the same way: `lsp/mux`.** 16 of the 18 new mux locks were
+stamped inside a single second (02:52:36.236 to 02:52:36.743), three seconds after
+the index locks. That timing rules out the 13 ambient Claude sessions whose servers
+also create mux locks — ambient traffic does not land 16 files in one tick.
+`lock_path_for_workspace` (`src/lsp/mux/mod.rs:23-29`) resolves
+`per_user_runtime_dir()` internally exactly as `lock_path` does, and
+`claim_mux_lock` (`src/lsp/manager.rs:483`) creates the file. Keyed on
+`workspace_hash(workspace_root)`, so a test using a fresh `TempDir` as the workspace
+root mints a new filename every run.
+
+Two hypotheses for the mux producer were tested and rejected before the timing
+evidence settled it:
+
+1. `get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent`
+   (`src/lsp/manager.rs:2347`) does textbook-exactly the leaking thing —
+   `lock_path_for_workspace("rust", tempdir)` then `std::fs::write(&lock_path, b"")`,
+   which matches the observed 0-byte size. **Rejected:** it is `#[ignore]`d, so it
+   does not run in a default `cargo test`.
+2. `src/lsp/mux/coherence_rust.rs`, which calls `get_or_start("rust", &root,
+   Some(true))`. **Rejected as sufficient:** the module holds exactly one test
+   (`two_agents_coherent_after_edit`), which cannot account for 16 files.
+
+The actual producer is not yet pinned to a test name. Whoever fixes this should
+identify it by bisecting `cargo test <filter>` against the file count rather than by
+reading — two readings already failed.
+
+### Corollary worth preserving: absence of a lock file is evidence
+
+Because lock files are never unlinked, the *absence* of one proves no `sync_project`
+ran for that project since the directory was last cleared. That property was
+load-bearing in a live diagnostic on 2026-07-28: 900+ dense-embed requests were
+attributed to search/librarian traffic rather than indexing precisely because no
+index lock existed for the project in question. **A fix must preserve this** — a
+scratch directory for tests does; unlink-on-drop would destroy it. That is a second,
+independent reason to reject unlink-on-drop beyond the fd race in Hypothesis 3.
 
 ### Corrects an inference made during this investigation
 
@@ -204,4 +260,3 @@ existing two functions to them, and switch the five tests in that module to a
 - `src/retrieval/index_lock.rs:143-148` — the test calling `unique_project` twice
 - `src/socket_discovery.rs:17-29` — `per_user_runtime_dir` and its non-XDG fallback
 - `src/retrieval/sync.rs:234` — the production `acquire` call site
-
