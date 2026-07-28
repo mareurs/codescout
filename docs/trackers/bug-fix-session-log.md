@@ -76,7 +76,7 @@ time_scope: open-ended
 | F-28 | 2026-07-07 | low | plan-prose | wontfix-false-alarm | Inherited "stray lsp: field" claim in mv.rs was stale — ToolContext.lsp is now a legitimate field |
 | F-29 | 2026-07-07 | med | self-friction | fixed-verified | Pre-compaction estimate of `ArtifactRow` fixture duplication ("3-4 sites") undercounted reality by 5x — actual: 21 constructors, 20 files |
 | F-30 | 2026-07-07 | high | release-pipeline | fixed-verified | Upstream commit `62457959` bundled a stray `try_build_runtime(lsp.clone())` arg + `mv.rs` test had a phantom `lsp:` field — both broke `cargo rb` |
-| F-31 | 2026-07-07 | med | self-friction | open | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
+| F-31 | 2026-07-07 | med | self-friction | fixed-verified | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
 
@@ -1817,6 +1817,25 @@ live-LSP class I initially misattributed to).
 ---
 
 ## F-31 — Memory-tool bug blocked reading the documented Windows binary-lock workaround, forcing rediscovery from scratch
+
+> **VERIFY-OPEN 2026-07-28 → `fixed-verified` (with a caveat that became its own
+> bug).** The blocker is gone: `memory(action="list")` returns 21 topics (= the 21
+> `.md` files on disk), and the content this entry could not reach is readable at
+> `.codescout/memories/gotchas.md:25` (`## MCP Binary Symlink`). The underlying bug
+> `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
+> is now `zombie` — symptom gone, root cause never confirmed, no attributable fix
+> commit.
+>
+> **Caveat:** the *targeted* read still fails, for a different reason.
+> `memory(read, topic="gotchas", sections=["MCP Binary Symlink"])` errors with "this
+> memory has no ### sections to filter" because the `sections` filter matches `###`
+> only and 15 of 21 memories use `##` (87 headings). So the rediscovery cost this
+> entry describes is *reduced* — a full read now works — but not eliminated. Filed
+> as `docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md`.
+>
+> Not covered: the original report followed `workspace(activate)` on a FOREIGN
+> project. This pass ran on the home project, so the foreign-activate path the title
+> names is unverified.
 
 **Observed:** 2026-07-07, mid-session, `cargo rb` failed with `error: failed to remove file ...codescout.exe ... Access is denied (os error 5)` because 3 running `codescout.exe` MCP-server processes held the target binary open.
 

@@ -1,14 +1,14 @@
 ---
 id: '4e175b7087805b30'
 kind: bug
-status: open
+status: fixed
 title: docker-compose `gpu` profile pins Ampere-only TEI images (`86-1.8`) — unusable on Turing/CC 7.5 cards
 tags:
 - docker-compose
 - retrieval
 - gpu
 - portability
-closed: ''
+closed: 2026-07-28
 opened: 2026-07-25
 owner: marius
 related:
@@ -220,6 +220,26 @@ file. Budget a pull for the TEI fix on that basis too.
    the current pin might work unchanged.
 
 ## Fix
+**SHIPPED — confirmed by verify-open pass 2026-07-28.** The status sat at `open`
+after the fix landed; `docker-compose.yml` already carries it:
+
+- Line 139 pins
+  `ghcr.io/huggingface/text-embeddings-inference:turing-1.8@sha256:bd102b08fbdb23fa2a0c747c8b2d154c521e3fce20441266c005ad7a101143a0`
+  — CC 7.5, correct for this GTX 1660 Ti.
+- Line 136 records the swap in place: `Was 86-1.8@sha256:65f792e7…`, citing this bug
+  file.
+- Lines 129-136 generalise the lesson so the next maintainer does not repeat it: TEI
+  publishes **one image per CUDA compute capability**, so a TEI digest pin is a
+  HARDWARE pin, and both the tag and the digest must be swapped together. Contrast
+  llama.cpp, whose single CUDA image ships `ARCHS=500..1200` and runs anywhere —
+  which is why the dense and reranker services (lines 55, 185) are not
+  hardware-pinned at all.
+
+Only the sparse (TEI) service was ever exposed to this. It is currently stopped and
+`CODESCOUT_DISABLE_SPARSE=1` is set, so the pin is not exercised today — but it is
+now correct for when it is.
+
+Per CLAUDE.md the **master-side** SHA goes here after cherry-pick.
 
 **Implemented 2026-07-25 on branch `experiments`** (not yet cherry-picked to
 `master`; this file stays in `docs/issues/` until it is).

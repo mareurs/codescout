@@ -24,6 +24,30 @@ severity: medium
 # BUG: `symbols` overview mode silently ignores `include_body=true`; search mode occasionally 0-matches then succeeds on retry
 
 ## Summary
+> **SCOPE NARROWED 2026-07-28 by a verify-open pass — still open, but half as wide.**
+>
+> The `include_body` claim is now **file-vs-directory dependent**, and only the
+> directory case reproduces:
+>
+> | call | `include_body=true` honored? |
+> |---|---|
+> | `symbols(path="src/retrieval/index_lock.rs", include_body=true)` | **yes** — full bodies returned for all 8 symbols |
+> | `symbols(path="src/lsp/mux/coherence_rust.rs", include_body=true)` | **yes** — the whole 74-line test body returned |
+> | `symbols(path="src/peer", include_body=true)` | **no** — name/kind/line-range listing only, no bodies, no hint that the flag was dropped |
+>
+> So single-FILE overview honors the flag; DIRECTORY overview silently drops it.
+> Whether dropping it for a directory is a deliberate size guard is unresolved — if
+> it is, the defect is the *silence*, not the drop, and the fix is an overflow hint
+> naming the constraint (per `docs/PROGRESSIVE_DISCLOSURE.md`) rather than honoring
+> the flag. A directory of bodies would routinely blow the inline budget, so the hint
+> is probably the right fix; that should be decided before any code changes.
+>
+> The second half of this bug — "search mode occasionally 0-matches then succeeds on
+> retry" — is **not** addressed by this pass. It is intermittent by nature, so a
+> single non-reproduction proves nothing. Kin to
+> `docs/issues/2026-06-09-references-false-zero-stale-graph.md` (mitigated) and
+> `docs/issues/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`
+> (zombie) — all three are LSP/index staleness-window shapes and may share one root.
 
 Two distinct frictions hit while using `symbols` against a real project (Mercury MRP
 Automation, a sibling workspace project) during normal reconnaissance work, not a

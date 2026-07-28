@@ -1,17 +1,46 @@
 ---
-status: open
+kind: bug
+status: zombie
+tags:
+- memory
+- workspace
+- multi-project
+closed: null
+last_observed: 2026-07-07
 opened: 2026-07-07
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [memory, workspace, multi-project]
-kind: bug
+severity: medium
 ---
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
 
 ## Summary
+> **STATUS: zombie — not reproducible as of 2026-07-28.** A verify-open pass ran
+> `memory(action="list")` against this project: it returned **21 topics**, not 2
+> (`architecture`, `cargo-test-lib-skips-integration`, `catalog-sql-hazards`,
+> `claude-code-mcp-env`, `conventions`, `development-commands`, `domain-glossary`,
+> `fable-tuning`, `gotchas`, `infra/headroom-trial-and-langfuse`,
+> `kotlin-lsp-rogue-investigation`, `language-patterns`, `onboarding`,
+> `project-overview`, `reconnaissance`, three `research/*`, `system-prompt`,
+> `test-design-discipline`, `worktree-merge-catalog-reconciliation`). Nested
+> path-like topics resolve too, so the truncation is gone in both the flat and
+> nested cases.
+>
+> Kept open as `zombie` rather than `fixed` because **no root cause was ever
+> confirmed** and no fix commit is attributable — the symptom simply stopped. Per
+> CLAUDE.md's status vocabulary that is exactly what `zombie` means.
+>
+> **Re-open trigger:** any session where `memory(action="list")` returns materially
+> fewer topics than `.codescout/memories/` holds on disk, or where a topic readable
+> by path is absent from `list`. That asymmetry (list vs read) is the shape to watch
+> — it is what made the original report credible.
+>
+> Note the original report was filed after `workspace(activate)` on a FOREIGN
+> project. This verification ran on the home project with `post_compact=true`, so it
+> does not cover the activate-a-foreign-project path the title names. A future
+> verify pass should re-check after a foreign activate before this is downgraded
+> further.
 After `workspace(action="activate", path="codescout")` (from within a multi-project
 home-directory workspace), `workspace(activate)`/`workspace(status)` report the
 codescout project has 16 memory topics (`architecture`, `conventions`,

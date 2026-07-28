@@ -1,21 +1,21 @@
 ---
 id: '87a8cb14f9b1eb84'
 kind: bug
-status: open
+status: fixed
 title: Concurrent `codescout index` on one project has no mutual exclusion — duplicate runs double the embedding workload
 tags:
 - retrieval
 - indexing
 - concurrency
 - resource-exhaustion
-closed: ''
+closed: 2026-07-28
+last_observed: 2026-07-27
 opened: 2026-07-25
 owner: marius
 related:
 - docs/issues/2026-06-19-mcp-server-oom-68gb.md
 - docs/issues/2026-07-25-reindex-reembed-noop-without-force.md
 severity: high
-last_observed: 2026-07-27
 ---
 
 # BUG: Concurrent `codescout index` on one project has no mutual exclusion — duplicate runs double the embedding workload
@@ -237,34 +237,74 @@ duplication invalidates every latency measurement taken under it.
    Concurrency inflated *duration*, not coverage.
 ## Fix
 
-Plan, not yet implemented. Add a per-project advisory lock around the sync,
-mirroring `src/lsp/mux/process.rs`'s arbiter:
+**IMPLEMENTED** on `experiments` 2026-07-28 (`de9b1d34..50842163`, the index-lock +
+embedder-batching work stream), and verified live the same day. This section
+previously read "Plan, not yet implemented" — caught by a verify-open pass, which
+is the zombie-open failure mode CLAUDE.md's cadence exists for.
 
-1. Acquire `try_lock_exclusive()` on `.codescout/index.lock` (per project root)
-   at the top of `sync_project`, held for the whole call, released on drop.
-2. On contention return a `RecoverableError` naming the holding PID and
-   elapsed time — per `get_guide("error-handling")` this is a recoverable,
-   user-actionable condition, not an `anyhow::bail!`.
-3. Do **not** reuse `.codescout/write.lock` — different lifetime (an index runs
-   for minutes) and blocking edits for the duration of an index would be a
-   worse bug.
-4. Decide explicitly whether the CLI should wait or refuse. Refuse-with-hint is
-   the smaller change and matches the observed failure mode (the user wants to
-   know a run is already going, not to queue behind it silently).
+Shipped as `src/retrieval/index_lock.rs`, acquired at `src/retrieval/sync.rs:234`
+before the `chunk_refs` drift-baseline read (ordering is load-bearing: that read
+establishes the baseline `stream_index` then mutates, so two overlapping runs would
+each diff against a snapshot the other is invalidating).
 
-Consider also capping concurrent *distinct*-project indexes, since three
-projects against one CPU embedder saturated the host even without the
-duplicate. That is a separate change and should not be bundled.
+**Deviations from the plan above, both deliberate:**
 
+1. Plan said `.codescout/index.lock` per project root. Shipped keys on
+   `sha256(project_id)` in `per_user_runtime_dir()` instead. Two reasons: the
+   contended resource is the `(collection, project_id)` pair in Qdrant, not a
+   filesystem root; and library syncs pass a third-party checkout as `root`, which
+   must not gain a `.codescout/` directory.
+2. Plan items 3 and 4 hold as written — `write.lock` is deliberately not reused, and
+   the CLI refuses rather than queues.
+
+**Plan item 2 was NOT implemented, and remains a real gap.** Contention surfaces via
+`anyhow::Context` (`index_lock.rs`, `try_lock_exclusive().with_context(...)`), not
+`RecoverableError`. The message is actionable — it names the lock path, explains the
+first line is the holder's PID, and warns the holder may be an in-process background
+index rather than a CLI run — but it carries no structured `Guidance`, so the MCP
+layer renders it as a generic error. Per `get_guide("error-handling")` a
+user-actionable contention condition should be `RecoverableError`. Tracked in Resume
+below rather than silently marked done.
+
+**Live verification, 2026-07-28** — the original symptom was four concurrent runs on
+one project (3h24m / 2h02m / 1h08m / 1h05m, all orphaned to `systemd --user`).
+After the fix, two separate index runs were observed on this host, each holding
+exactly one lock and each completing alone: codescout at 18 minutes, MRV-poc at ~28
+minutes. Useful throughput went from ~1.45 chunks/s (5.8 split four ways) to 4.45
+— roughly 3x, entirely from eliminating the duplication.
+
+Per CLAUDE.md the **master-side** SHAs go here after cherry-pick; the
+`experiments`-side originals orphan on rebase and are deliberately not recorded.
 ## Tests added
 
-None yet. Regression test should assert that a second `sync_project` against a
-held lock returns the `RecoverableError` rather than proceeding — the mutation
-to guard against is dropping the lock acquisition and having both calls
-succeed. Use `EnvGuard` / `serial_test` per
-`docs/conventions/test-env-isolation.md`; the lock is filesystem state, so the
-test needs a temp project root.
+In `src/retrieval/index_lock.rs`:
 
+- `acquire_succeeds_for_fresh_project`
+- `second_acquire_fails_while_first_is_held` — the core mutual-exclusion assertion,
+  including that the error text carries the "already running" wording
+- `different_projects_do_not_contend`
+- `lock_is_released_on_drop`
+- `preexisting_lock_file_does_not_block` — planted content shaped to kill two
+  mutations at once: it starts with our own LIVE pid (so a PID-liveness check would
+  refuse and fail) and is LONGER than what `acquire` writes (so deleting
+  `set_len(0)` leaves a visible tail). A dead pid like 999999 pins neither — it is
+  above `pid_max` and reads as dead anyway.
+- `lock_path_is_deterministic_and_filename_safe`
+- `lock_path_is_not_sited_in_bare_temp_dir` — guards the symlink-preemption hazard
+- `acquire_in_does_not_touch_the_real_runtime_dir` (added 2026-07-28)
+
+In `src/retrieval/sync.rs`:
+
+- `sync_project_holds_index_lock_for_its_full_duration` — the guard that matters
+  most, and the one whose design took two attempts. A single "acquire externally,
+  then call `sync_project`, assert Err" test **cannot** distinguish `_index_lock`
+  from `_`: if the lock is already held, `sync_project`'s own `acquire` fails
+  identically under either binding, because the failure happens at
+  `try_lock_exclusive()` before the binding pattern is reached. So it spawns
+  `sync_project` against a `SlowEnsureStore` (provably still in flight) and probes
+  from OUTSIDE at 100ms; that probe must fail iff the guard is still alive. Mutating
+  the binding to `let _ =` passes 42/42 other tests with clippy clean, so this test
+  is the only thing standing between the fix and a silent regression.
 ## Workarounds
 
 Before launching an index, check for an existing one:
@@ -285,13 +325,14 @@ docker stop codescout-dense-cpu codescout-sparse-cpu codescout-reranker-cpu
 
 ## Resume
 
-Add the flock to `src/retrieval/sync.rs:196` (top of `sync_project`), modelled
-on `src/lsp/mux/process.rs:75-79`'s `try_lock_exclusive()` usage. Read
-`src/agent/write_guard.rs:43-78` first for the established
-timeout/poll shape and the inner-mutex → outer-flock ordering rule, then decide
-refuse-vs-wait. Confirm no caller depends on re-entrant `sync_project` by
-running `references(symbol="RetrievalClient/sync_project", path="src/retrieval/sync.rs")`.
+N/A for the reported bug — fixed and verified. Two follow-ups:
 
+1. **Plan item 2 outstanding:** convert the contention error from `anyhow::Context`
+   to `RecoverableError` with structured `Guidance`, per
+   `get_guide("error-handling")`. Low priority — the message is already actionable
+   — but it is the difference between a generic MCP error and a guided one.
+2. Archive this file only after the fix reaches `master`
+   (`git branch --contains <sha>`), not on this status flip.
 ## References
 
 - `src/retrieval/sync.rs:196-273` — `sync_project`, the unguarded path
