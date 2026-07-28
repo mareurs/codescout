@@ -79,6 +79,7 @@ time_scope: open-ended
 | F-31 | 2026-07-07 | med | self-friction | fixed-verified | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 | F-34 | 2026-07-28 | med | plan-prose | fixed-verified | My own bug file's "cheapest" fix option would have broken `filter_sections_nested_h4_included_in_body`; its "cannot break language-patterns.md" claim was exactly backwards, and it ignored H1 entirely |
+| F-36 | 2026-07-28 | med | self-friction | fixed-verified | The literal-scanner fix I had just shipped missed the commonest Rust multi-line-string form (plain `"` + raw newline); all six of its tests reused the bug report's `"\` shape, so the suite sampled one point of the class six times |
 | F-35 | 2026-07-28 | low | self-friction | fixed-verified | Two doc comments I had just written made claims the code did not support (an unreachable fallback described as reachable; "reindents nothing" where the opener still shifts) — no gate can catch a doc comment that overstates a guarantee |
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
 
@@ -110,6 +111,7 @@ time_scope: open-ended
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 | W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-28 | 2026-07-28 | med-high | Write the end-to-end verification fixture the way a user naturally would, not the way the bug report did — then trace the fix over it before running | Seven green tests, an archived bug file and a commit message claiming the literal class would all have shipped over a still-corrupting majority form. The next person to hit it would hit it as a new bug against a closed one, whose own evidence argued the mechanism was already understood | validated |
 | W-27 | 2026-07-28 | med | Enumerate a shared helper's callers to decide WHERE a fix belongs, not just its blast radius | The bug file's own preferred fix sat in `reindent_to`; enumeration found `reindent_block`'s second production caller (`edit_file/mod.rs:747`) with the same defect, reachable without passing through `reindent_to`. That path guards writes with `has_syntax_errors`, which returns clean on a shifted literal — the bug would have stayed open behind a green gate, a closed bug file, and a passing syntax check | validated |
 | W-26 | 2026-07-28 | med | A failing NEW test with an innocent implementation: diagnose the fixture before touching the code | Suspecting `heading_at` would have meant loosening the heading predicate to trim leading whitespace — making the new test pass while breaking `filter_sections_indented_heading_not_a_boundary`, then "fixing" that older test and landing a real regression. Reading the file back exonerated the implementation in one step; the defect was in `edit_code` | validated |
 | W-25 | 2026-07-28 | med | Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place | Defensive branch: thread a dir param through `LspManager::get_or_start` -> `get_or_start_via_mux` -> `claim_mux_lock`, a test concern in a production signature plus 17 individual test opt-ins, versus the 3-line `cfg(test)` seam that fixed all 17 at once. Optimistic branch: ship and later find mux sockets silently undiscoverable. Also surfaced the `#[ignore]`d test at manager.rs:2350 fixing for free and the peer subsystem's identical latent exposure | validated |
@@ -2258,6 +2260,102 @@ report names."
 **Status:** validated — fix landed at the relocated site in `79cd1428`, with
 `reindent_block_emits_literal_continuations_verbatim` pinning the `edit_file` entry point
 specifically.
+
+## F-36 — The fix I shipped covered the reported literal form, not the commonest one; six tests all reused the report's shape
+
+**Observed:** 2026-07-28, ~15 minutes after committing `79cd1428`, while designing the
+live end-to-end verification of that very commit.
+
+**When:** Post-`/mcp` reconnect, working out what `edit_code` call would prove the
+reindent/string-literal fix works against the release binary.
+
+**Expected (what I had shipped):** a literal scanner covering every line-spanning literal
+form the supported languages use — `"`/`'` held open by a trailing `\`, triple-quoted
+Python, backtick, Rust raw string at any hash count. The doc comment enumerated all four
+and the commit message claimed the class.
+
+**Got (traced reality):** a `"` literal spanning lines on a **raw newline**, no trailing
+`\`, was not covered. Rust permits raw newlines inside `"…"`, so
+`let content = "# Heading\n\n## Section\n";` written across real lines is valid — and is
+the commoner way to write a multi-line fixture. My end-of-line rule reset an unclosed `"`
+to code, on the reasoning that a stray quote is likelier than a literal. For `'` that
+reasoning is right (lifetimes, apostrophes); for `"` it is backwards, and `//` comments
+were already bailed out, which removes the main source of stray quotes.
+
+**Probable cause:** I built the scanner from the bug report's reproduction and then wrote
+six tests against it. The report used `"\`. Every test therefore used `"\`. The test suite
+had no way to catch the gap because the whole suite inherited one fixture shape — six
+tests, one sample. Passing six tests read as covering the class; it covered the sample.
+
+**Workaround:** none needed — widened the rule instead: an unclosed `"` at end of line is
+now a confirmed multi-line literal, `'` still resets, and the asymmetry is documented as
+deliberate with its reasoning. New test
+`literal_continuation_mask_covers_a_raw_newline_double_quoted_literal`.
+
+**Severity:** med — the shipped fix would have left the *majority* Rust fixture form
+silently corrupting, behind a green gate, seven passing tests, an archived bug file and a
+commit message claiming the class. Not high only because the window was 15 minutes and no
+other caller hit it.
+
+**Status:** fixed-verified — widened in the same session; gate 18 binaries / 3446 passed /
+0 failed. Live confirmation of the widening awaits the next `cargo rb` + `/mcp`; the
+original fix is already live-verified.
+
+**Fix idea / Pointer:** `src/util/text.rs`, `scan_line`'s end-of-line match. Third
+datapoint in the F-34 / F-35 family — a claim of mine that the substrate did not support,
+caught by reading rather than by a gate. The distinguishing feature here: the claim was
+in a *commit message and a doc comment enumerating a class*, and the enumeration was
+incomplete rather than wrong. Enumerations are the easiest kind of claim to overstate,
+because each item in the list is individually true.
+
+## W-28 — Writing the end-to-end verification found what seven unit tests could not
+
+**Observed:** 2026-07-28, immediately after the `/mcp` reconnect that made `79cd1428`
+live.
+
+**Pattern:** When a fix is verified end-to-end through the real tool, write the
+verification fixture **the way a user would naturally write it** — not the way the bug
+report wrote it, and not the way the unit tests write it. Then trace the fix over that
+fixture *before* running it. The natural form and the reported form are different samples
+of the defect class, and only the natural form tells you whether the fix generalises.
+
+Concretely: to prove `edit_code` no longer shifts a multi-line literal, I had to write one
+as a real multi-line literal. The natural way in Rust is a plain `"` with raw newlines.
+Tracing my own scanner over that fixture showed it resetting at the first line end — the
+gap in F-36. The six existing tests could not have found it: all six reused the report's
+`"\` shape, so the suite sampled one point of the class six times.
+
+**Counterfactual:** Without writing the live fixture, `79cd1428` ships as-is, with an
+archived bug file, a commit message claiming the literal class, and seven green tests. The
+commonest multi-line-string form in Rust keeps corrupting silently. The next person to hit
+it hits it as a *new* bug against a closed one — and the closed file's own evidence
+section would argue the mechanism was already understood and fixed, which is the worst
+possible starting position for a rediscovery. Cost of the discipline: writing the fixture
+the natural way instead of copying an existing one.
+
+Secondary win from the same pass: the fixture stayed in the test file rather than being
+thrown away, so `reindent_block_emits_literal_continuations_verbatim` now carries real
+multi-line literals. The verification is *retained* — if `edit_code` regresses, rewriting
+that test corrupts its own fixture and the assertion fails.
+
+**Confirming data points:**
+1. This session — the raw-newline gap, invisible to seven unit tests, found by writing one
+   live fixture.
+2. W-26 (same session) — a failing new test whose fixture, not implementation, was at
+   fault. Same underlying asymmetry: the fixture is as much under test as the code, and
+   reusing a known-good fixture shape hides whatever that shape does not exercise.
+
+**Impact:** med-high — catches the class of incomplete fix that a green suite actively
+camouflages, at the cost of authoring one fixture from scratch.
+
+**Promote-when:** a second case where an end-to-end verification fixture, written in the
+natural form rather than copied from the report, exposes a gap the unit tests shared. At 2
+datapoints, promote to the reconnaissance skill: *"verify through the real tool with a
+fixture written the natural way — a suite that inherits the report's fixture shape samples
+one point of the defect class, however many tests it has."*
+
+**Status:** validated — gap found, widened, and the fixture retained as a live regression
+probe.
 
 ## Template for new entries
 

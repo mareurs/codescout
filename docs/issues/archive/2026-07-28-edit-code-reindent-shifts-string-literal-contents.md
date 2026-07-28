@@ -206,9 +206,39 @@ mis-indented code line is a loud failure — compiler, formatter, review — and
 string literal is a silent one. The worst residual case is a line-spanning literal that
 never closes, which masks everything after the opener and so degrades to reindenting one
 line instead of corrupting a string.
+
+### Follow-up: the first fix covered the wrong multi-line form (widened in the same session)
+
+`79cd1428` recognised a `"` literal spanning lines only via a trailing `\` continuation —
+the form this report happened to use. An unclosed `"` at end of line reset the scanner to
+code, on the reasoning that a stray quote is likelier than a literal. **That reasoning is
+wrong for `"`.** Rust permits raw newlines inside `"…"`, so
+
+```rust
+let content = "# Heading
+
+## Section
+";
+```
+
+is both perfectly valid and the *commoner* way to write a multi-line fixture — and it was
+left unprotected. All six original tests reused this report's `"\` shape, so none of them
+could catch it.
+
+Widened: an unclosed `"` at end of line is now treated as a confirmed multi-line literal.
+`'` still resets, and the asymmetry is now deliberate rather than incidental — a lone `'`
+is overwhelmingly a lifetime (`&'a T`) or an apostrophe in prose, and no supported
+language spans lines with an unescaped `'…'`, whereas `//` comments already open nothing,
+so outside them an unclosed `"` is much likelier a literal than a typo.
+
+How it was found is the part worth keeping: not by a test, but by trying to *write* the
+end-to-end verification. Proving the fix live meant writing a multi-line literal the
+natural way, and tracing the scanner over that fixture showed it resetting at the first
+line end. A fix built from a report's reproduction inherits that reproduction's blind
+spots. Logged as F-36 / W-28 / R-48.
 ## Tests added
 
-Six, in `src/util/text.rs`'s `tests` module. All value-shaped, as the original entry
+Seven, in `src/util/text.rs`'s `tests` module — six with the fix, one with the follow-up. All value-shaped, as the original entry
 required — a formatting-shaped assertion would pass while the string stayed corrupted.
 
 - `reindent_to_leaves_multi_line_literal_contents_alone` — the headline regression: the
@@ -223,11 +253,18 @@ required — a formatting-shaped assertion would pass while the string stayed co
 - `literal_continuation_mask_honours_escapes_inside_a_continued_literal` — `\"` must not
   read as the closing quote; and the raw-string converse, where `\` must not hide `\"#`.
 - `reindent_block_emits_literal_continuations_verbatim` — pins the `edit_file` entry
-  point, which passes explicit bases.
+  point, which passes explicit bases. Its two fixtures are **real multi-line literals**,
+  not `\n`-escapes, and that is deliberate: `edit_code` wrote them through the very
+  reindent this module fixes, so they are the live end-to-end proof. A still-shifting
+  `edit_code` would have delivered `col 0` indented and failed the assertion rather than
+  passing quietly.
+- `literal_continuation_mask_covers_a_raw_newline_double_quoted_literal` (follow-up) — the
+  form no original test covered: a `"` literal spanning lines on a raw newline, with no
+  trailing `\`.
 
 The four pre-existing `reindent_to` tests (dedent, no-op, shallower-target, blank-line)
-stay green untouched. Full gate: 18 binaries, 3445 passed, 0 failed, 44 ignored; clippy
-`--all-targets -D warnings` clean.
+stay green untouched. Full gate after the follow-up: 18 binaries, 3446 passed, 0 failed, 44
+ignored; clippy `--all-targets -D warnings` clean.
 
 Every fixture uses `\n`-escaped strings rather than multi-line literals, with a comment
 in the file saying why: a multi-line literal there would be re-indented by the very
@@ -235,22 +272,30 @@ defect these tests pin, corrupting the fixture on the way in. That constraint li
 the release binary carries this fix.
 ## Workarounds
 
-**Still required until the release binary is rebuilt.** The running MCP server executes
-`~/.cargo/bin/codescout` -> `target/release/codescout`; this fix exists only in the debug
-build until `cargo rb` followed by an `/mcp` reconnect. Until then, keep using
-`\n`-escaped single-line strings in any body passed to `edit_code`, or pass the body
-already indented to the target column so the early return fires.
+**Status differs by literal form**, because the two halves of the fix reached the release
+binary at different times. The running MCP server executes `~/.cargo/bin/codescout` ->
+`target/release/codescout`, so only what a `cargo rb` has built is live.
 
-After the rebuild, neither workaround is needed: a multi-line literal in a submitted body
-keeps its value whether or not the surrounding code needs shifting.
+| form | in release binary | workaround needed |
+|---|---|---|
+| `"\` continuation, `"""`, backtick, raw string | yes — built 13:51, live-verified | no |
+| plain `"` with a raw newline | not yet — needs `cargo rb` + `/mcp` | yes |
+
+Where a workaround is still needed: use `\n`-escaped single-line strings in any body
+passed to `edit_code`, or pass the body already indented to the target column so the
+early return fires.
+
+After the next release build, neither is needed for any form.
 ## Resume
 
 Two loose ends, neither blocking:
 
-1. **Live-MCP confirmation is outstanding.** Verified at unit level only. Confirming it
-   end-to-end means `cargo rb`, an `/mcp` reconnect, then an `edit_code` insert carrying
-   a genuine multi-line literal — assert the written literal still contains `"\n# "` and
-   not `"\n    # "`.
+1. **Live-MCP confirmation: done for the first fix, outstanding for the follow-up.**
+   `79cd1428` is confirmed end-to-end — `cargo rb` at 13:51, `/mcp` reconnect, then an
+   `edit_code` replace carrying two genuine `"\`-continued multi-line literals, both of
+   which landed byte-perfect at column 0. The raw-newline widening is unit-level only
+   until the next `cargo rb` + `/mcp`; confirm it the same way, with a fixture using a
+   plain `"` and a raw newline.
 2. **Master-side SHA still needs recording** after cherry-pick. The SHA below is an
    `experiments` SHA and orphans on rebase.
 

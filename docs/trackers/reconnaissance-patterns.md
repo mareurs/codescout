@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-48 | 2026-07-28 | hit | A fix built from a bug report's reproduction inherits that reproduction's blind spots, and a test suite written against the same fixture inherits them too — seven tests all reused the report's `"\` shape and none could see that a plain `"` + raw newline (the commoner Rust form) was unprotected. Found by writing the end-to-end fixture the *natural* way and tracing the fix over it before running. For a syntax-level fix, enumerate the language's other syntaxes for the same construct before closing | bug-fix F-36 + W-28; issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents; kin R-26/R-27 (read ≠ verified), R-46 |
 | R-47 | 2026-07-28 | hit | Enumerate the callers of every function in the chain a fix touches, not only the symbol the report names — the report walked one call path. `reindent_to`'s 3 callers were all `edit_code`, but its delegate `reindent_block` had a second production caller (`edit_file/mod.rs:747`) with the same defect, reached without passing through `reindent_to`. Relocating the fix one level down doubled the surface closed at the same size of change | bug-fix W-27; issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents (archived, `79cd1428`); kin R-17/R-31/R-44 |
 | R-46 | 2026-07-28 | hit | Choosing between candidate fixes needs the target's TEST module read, not just the target: the implementation shows what it does, only the tests show what may not change (a bug file's "cheapest, cannot break X" option was exactly inverted). Corpus census, not code, caught the companion H1 trap | bug-fix F-34 + W-26; kin R-19/R-44 |
 | R-45 | 2026-07-28 | hit | Relocating a file needs a discovery-by-scan grep; caller enumeration is blind to it (generalises R-44: `cfg` on a value → callers are the consumer set; `cfg` on a location → callers are half of it) | bug-fix F-33 + W-25 |
@@ -1196,6 +1197,60 @@ symbol's) relocates the fix site. Craft-shaped — true of any language with sha
 helpers — so the destination is `SKILL.md` Phase 1: *"scout the callers of every
 function in the chain the fix touches, not only the one the report names; a defect in
 shared machinery lives on the link that performs the operation."*
+
+## R-48 — Hit: a fix built from the report's reproduction inherits its blind spots, and so does every test written against it
+
+**Verdict:** hit — though a near-miss: the gap survived commit, a green gate, seven tests
+and an archive, and was caught only at the live-verification step.
+
+The reindent/string-literal fix shipped in `79cd1428` recognised a `"` literal spanning
+lines via a trailing `\`, which is what the bug report's fixture used. It did **not**
+recognise a plain `"` with a raw newline — valid Rust, and the commoner way to write a
+multi-line fixture. Six tests accompanied the fix. All six reused the report's shape, so
+the suite sampled one point of the defect class six times and reported it as coverage.
+
+What caught it was writing the end-to-end verification. Proving the fix live meant writing
+a multi-line literal *the way one naturally writes one*, and tracing the scanner over that
+fixture showed it resetting at the first line end. The trace, not the run, was the
+detector — the failure would have been silent in the run too, since a corrupted fixture
+just changes what the test asserts about.
+
+Two generalisable rules, and they are separable:
+
+1. **For a syntax-level fix, enumerate the language's other syntaxes for the same
+   construct before closing.** Rust spells a multi-line string four ways — raw newline,
+   `\` continuation, `r"…"`, `r#"…"#`. The report used one. A fix whose doc comment
+   enumerates a class should have a test per item of the enumeration, sourced from the
+   language reference rather than from the report.
+2. **Write the end-to-end verification fixture in the natural form, not copied from the
+   report or the existing tests.** A suite that inherits one fixture shape cannot see past
+   it, and the count of passing tests is no evidence at all about the shapes it does not
+   contain.
+
+A note on why this class is dangerous rather than merely embarrassing: the incomplete fix
+is *camouflaged by its own artifacts*. A green gate, a closed bug file whose evidence
+section explains the mechanism correctly, and a commit message claiming the class all
+point away from the residue. A rediscovery arrives as a new bug filed against a closed one
+that appears already understood.
+
+Relation to kin entries: R-26/R-27 ("read ≠ verified") is the same shape one level down —
+there, reading code was mistaken for testing it; here, testing a sample was mistaken for
+covering a class. R-46 says the target's tests encode what may not change; R-48 is the
+converse warning — tests also encode what was never asked, and their silence is not
+coverage.
+
+**Evidence:** `bug-fix-session-log.md` F-36 (the gap, with severity rationale) and W-28
+(the fixture-authoring discipline that caught it, with counterfactual). Widened in the same
+session; gate 18 binaries / 3446 passed / 0 failed / 44 ignored, clippy clean. Bug
+(archived, with a follow-up section recording the widening):
+`docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`.
+
+**Promote-when:** a second case where an end-to-end fixture written in the natural form
+exposes a gap the unit tests shared. Craft-shaped — true of any language and any test
+suite — so the destination is `SKILL.md`, either as a Phase 4 bullet (verification is a
+scout, not just a check) or as a "When NOT to Use" counterweight: a green suite is not a
+scout, and the number of passing tests says nothing about the shapes absent from all of
+them.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

@@ -1,0 +1,155 @@
+---
+id: f3c9339e7e7a6822
+kind: bug
+status: open
+title: codescout MCP servers outlive their clients — 18 orphaned `start --debug` processes accumulated over 3 days
+tags:
+- mcp-server
+- lifecycle
+- resource-leak
+- gpu
+topic: process lifecycle
+---
+
+# BUG: codescout MCP servers outlive their clients
+
+## Summary
+
+`codescout start --debug` processes are not reaped when the Claude Code session that
+spawned them ends. 18 were live simultaneously, the oldest running 2 days 19 hours. They
+are individually cheap — ~20 threads and 15–24 fds each, 0.3 GiB RSS in total — so this
+is not a memory emergency. It matters for a different reason: each newly spawned server
+can trigger a session-start index refresh against the **shared GPU embedder**, so the
+spawn rate, not the resident set, is the cost.
+
+## Symptom (Effect)
+
+```
+$ pgrep -cf 'codescout start --debug'
+18
+```
+
+By start date:
+
+| day | processes |
+|---|---|
+| Sat Jul 25 | 4 |
+| Sun Jul 26 | 1 |
+| Mon Jul 27 | 2 |
+| Tue Jul 28 | 11 |
+
+Oldest: PID 5018, `Sat Jul 25 18:08:52`, elapsed `2-19:48:26`, RSS 2200 KB (largely paged
+out), 15 fds, 20 threads. Newest: PID 116918, `Tue Jul 28 13:53:41` — the live one, RSS
+29228 KB, 24 fds, 20 threads. Six of the 18 hold open TCP sockets.
+
+## Reproduction
+
+```
+git rev-parse HEAD    # ab15cd2f, branch experiments
+```
+
+1. Open a Claude Code session with codescout configured as an MCP server.
+2. End the session (or `/mcp` reconnect, which spawns a replacement).
+3. `pgrep -cf 'codescout start --debug'` — the count climbs and does not fall.
+
+Three concurrent Claude Code profiles on this host (`~/.claude`, `~/.claude-sdd`,
+`~/.claude-kat`) multiply the rate, which is why 11 accumulated in a single day.
+
+## Environment
+
+Linux, codescout `experiments` @ `ab15cd2f`. Servers launched as
+`/home/marius/.cargo/bin/codescout start --debug` by Claude Code's MCP client. GPU idle at
+measurement time (0 %, 771 MiB, two resident llama-servers).
+
+## Root cause
+
+Not investigated. The shape of the evidence points at the server not treating stdio EOF /
+client disconnect as a shutdown signal, so it parks instead of exiting. That is a
+hypothesis, not a finding — nothing in this entry traced the shutdown path.
+
+What *is* established: the accumulation is not an artifact of one bad session. The spread
+across four distinct days rules out a single crash-loop, and the 11-in-one-day figure
+matches roughly one orphan per session start rather than a rare race.
+
+## Evidence
+
+### Orphan status confirmed by env drift
+
+PID 3830582 (`11:27:56`) still carries `CODESCOUT_QUERY_PREFIX` in `/proc/<pid>/environ`,
+a setting removed from all three profiles' `.claude.json` earlier in this work. The live
+server PID 116918 (`13:53:41`) does not. An orphan therefore keeps serving a
+configuration that no config file on disk still describes — which is how it was noticed:
+sampling `pgrep … | tail -1` returned an orphan and made a completed config change look
+like it had failed.
+
+### The GPU connection is the spawn, not the residency
+
+This session's own `SessionStart` hook reported `INDEX: Refreshing in background (9
+commits behind HEAD)`, and a matching index lock appeared at 13:28:01 holding PID 28839
+with hash `ee26de4c61f6f20e` = `sha256("codescout")[..16]`. So a server start does kick
+off an embedder-backed index refresh. Eleven starts in one day is eleven such refreshes
+against a GPU embedder shared with every other project — the mechanism behind
+"GPU at 100% with no obvious cause", which was investigated three separate times today
+and had a different proximate cause each time.
+
+## Hypotheses tried
+
+1. **Hypothesis:** the high process count is stale `ps` output or includes the LSP mux.
+   **Test:** `ps -o pid=,lstart=,args= -C codescout`, filtered to `start --debug`; the mux
+   (`codescout mux --socket …`) is a separate argv and was excluded.
+   **Verdict:** rejected — 18 distinct `start --debug` processes, each with its own start
+   timestamp.
+2. **Hypothesis:** they are cheap enough to ignore entirely.
+   **Test:** summed RSS (0.3 GiB / 17 sampled), counted threads (20 each) and fds (15–24).
+   **Verdict:** partially confirmed for memory, rejected as a whole — the per-start index
+   refresh makes the cost GPU-side and invisible to a memory measurement.
+
+## Fix
+
+Not implemented, and the shutdown path is unread. Directions, cheapest first:
+
+1. **Exit on stdio EOF.** If the server is stdio-transport, a closed stdin is an
+   unambiguous client-gone signal and the smallest correct fix.
+2. **Idle timeout**, mirroring what the LSP mux already does — the mux in this same
+   process tree runs with `--idle-timeout 180`. Reusing that mechanism for the server
+   would be consistent with an established pattern in the codebase.
+3. **Suppress the session-start index refresh when another server already holds the
+   project's index lock.** This does not fix the leak but removes its GPU cost, and the
+   lock is already there to consult.
+
+Direction 1 or 2 fixes the leak; direction 3 fixes the part that is actually expensive,
+and the two are independent.
+
+## Tests added
+
+None — no fix. Whatever lands wants an assertion on the *exit*, not on a process count: a
+test that closes the client end and asserts the server process terminates within a bound.
+Counting processes would pass on a machine that happened to be clean.
+
+## Workarounds
+
+`pkill -f 'codescout start --debug'` reaps them, but it also kills the live server for
+every open session, so it needs every Claude Code window closed first. Individually:
+`kill <pid>` for each PID whose start time predates the current session.
+
+Until then, **never identify "the current server" with `pgrep … | tail -1`** — PID order
+is not start order, and the orphans are indistinguishable by name. Match on start time
+against the session's own start, or read `/proc/<pid>/environ` for a setting known to have
+changed.
+
+## Resume
+
+Read the `start` subcommand's shutdown path in `src/bin/` (or wherever `start --debug` is
+handled) and determine whether it watches stdin at all. Then compare against the mux's
+`--idle-timeout` implementation, which already solves the same problem one process over in
+the same tree.
+
+## References
+
+- `src/bin/` — `codescout start` entry point (shutdown path unread)
+- The LSP mux's `--idle-timeout 180`, visible in the argv of the sibling `codescout mux`
+  process — an existing solution to the same lifecycle question
+- `docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md` — filed in the
+  same session; unrelated mechanism, but both were surfaced by measuring rather than
+  trusting a first reading
+

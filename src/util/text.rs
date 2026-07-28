@@ -163,15 +163,18 @@ fn scan_line(line: &str, entry: Scan) -> Scan {
         }
     }
     match state {
-        // A trailing backslash is how a `"`/`'` literal reaches the next line. Once
-        // it has crossed one line boundary it is confirmed multi-line, and runs on
-        // until its closing quote rather than resetting at every end of line.
-        Scan::Quoted(quote) if line.ends_with('\\') => Scan::Spanning {
+        // A `"` still open at end of line has reached the next line one of two ways:
+        // a raw newline, which Rust permits inside `"…"` and which is the commonest
+        // multi-line fixture shape there, or a trailing `\` continuation. A `'` can
+        // only ever do the latter — no language spans lines with an unescaped `'…'`.
+        // Either way the literal is now *confirmed* multi-line, so it runs to its
+        // closing quote instead of resetting at every subsequent end of line.
+        Scan::Quoted(quote) if quote == '"' || line.ends_with('\\') => Scan::Spanning {
             close: quote.to_string(),
             escapes: true,
         },
-        // Otherwise an unclosed `"`/`'` was a lifetime or an apostrophe in prose,
-        // not a literal — resetting bounds the misreading to its own line.
+        // A lone `'` is a lifetime (`&'a T`) or an apostrophe in prose, not a literal.
+        // Resetting bounds the misreading to the line it appeared on.
         Scan::Quoted(_) => Scan::Code,
         other => other,
     }
@@ -188,16 +191,27 @@ fn scan_line(line: &str, entry: Scan) -> Scan {
 /// consult. Recognised line-spanning literals, each closed by the token that
 /// opened it:
 ///
-/// - a `"`/`'` literal held open by a trailing `\` (Rust, C, shell)
+/// - a `"` literal left open at end of line, whether by a raw newline (Rust
+///   permits those inside `"…"`) or a trailing `\` continuation
+/// - a `'` literal held open by a trailing `\` (C, shell)
 /// - a triple-quoted Python literal
 /// - a backtick literal (JS/TS templates, Go raw strings)
 /// - a Rust raw string, at any hash count
 ///
 /// Where the scanner cannot tell, it errs toward calling a line code, because a
 /// mis-indented code line is a loud failure — compiler, formatter, review — and
-/// a mutated string literal is a silent one. The worst case is a line-spanning
-/// literal that never closes: it masks every line after the opener, so at most
-/// that one line is reindented and the rest comes back byte-for-byte.
+/// a mutated string literal is a silent one. That is why a lone `'` resets at
+/// end of line rather than latching: a lifetime or an apostrophe in prose is far
+/// likelier than a `'…'` spanning lines, which no supported language allows
+/// unescaped. An unbalanced `"` is the opposite bet, and deliberately so — `//`
+/// comments open nothing, so outside them an unclosed `"` is much likelier a
+/// multi-line literal than a typo.
+///
+/// The worst case is a line-spanning literal that never closes: it masks every
+/// line after the opener, so at most that one line is reindented and the rest
+/// comes back byte-for-byte. Known blind spot: a `/* … */` block comment is not
+/// tracked, so an unbalanced `"` or an odd backtick count inside one lands in
+/// that worst case.
 fn literal_continuation_mask(block: &str) -> Vec<bool> {
     let mut mask = Vec::with_capacity(block.split('\n').count());
     let mut state = Scan::Code;
@@ -451,6 +465,25 @@ mod tests {
     }
 
     #[test]
+    fn literal_continuation_mask_covers_a_raw_newline_double_quoted_literal() {
+        // Rust permits a raw newline inside `"…"`, with no trailing `\`, and that is how
+        // a multi-line fixture is usually written — the commonest shape, and the one the
+        // original bug report did not use. Treating an unclosed `"` at end of line as
+        // prose would leave exactly this form unprotected.
+        assert_eq!(
+            literal_continuation_mask("let c = \"\n# Gotchas\n\n## Section\n\";"),
+            vec![false, true, true, true, true]
+        );
+        // The opener line is never masked (its indent is real code) and the closing line
+        // always is (the bytes before its quote are still string content).
+        let block = "    let c = \"\n# Gotchas\n\";";
+        assert_eq!(
+            reindent_to(block, "        "),
+            "        let c = \"\n# Gotchas\n\";"
+        );
+    }
+
+    #[test]
     fn literal_continuation_mask_does_not_latch_on_prose_quotes() {
         // A lone lifetime tick leaves the scanner mid-quote at end of line. Latching
         // there would mask the rest of the block and suppress every shift after it.
@@ -486,10 +519,19 @@ mod tests {
         // edit_file's whitespace-normalized-match repair calls this directly with its
         // own bases. Its post-edit syntax check cannot catch a mutated literal, since
         // the shifted result still parses.
-        let block = "    let s = \"\\\ncol 0\n\";";
+        //
+        // Both fixtures below are real multi-line literals rather than `\n`-escapes,
+        // and that is the point: edit_code wrote them through the very reindent this
+        // module fixes. If it still shifted literal interiors, `col 0` would have
+        // arrived indented and this assertion would fail rather than pass quietly.
+        let block = "    let s = \"\\
+col 0
+\";";
         assert_eq!(
             reindent_block(block, "    ", "        "),
-            "        let s = \"\\\ncol 0\n\";"
+            "        let s = \"\\
+col 0
+\";"
         );
     }
 
