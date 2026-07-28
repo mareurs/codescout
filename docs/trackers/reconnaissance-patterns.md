@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-49 | 2026-07-28 | hit | Re-scout your OWN bug file / plan before implementing it — an artifact written during the observation is a hypothesis that acquires the authority of a record the moment it is committed. When a root cause cites two functions, read the layer BETWEEN them: a chain's middle is where the guards live, and a mechanism inferred from its two ends will never mention them. Three failures of session-authored artifacts in one session (inverted fix option, overstated doc guarantee, unsupported root cause) | bug-fix F-37 + W-29, F-34/W-26, F-35; issues/2026-07-28-edit-code-target-base-from-stale-lsp-range (mitigated); kin R-32/R-46 |
 | R-48 | 2026-07-28 | hit | A fix built from a bug report's reproduction inherits that reproduction's blind spots, and a test suite written against the same fixture inherits them too — seven tests all reused the report's `"\` shape and none could see that a plain `"` + raw newline (the commoner Rust form) was unprotected. Found by writing the end-to-end fixture the *natural* way and tracing the fix over it before running. For a syntax-level fix, enumerate the language's other syntaxes for the same construct before closing | bug-fix F-36 + W-28; issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents; kin R-26/R-27 (read ≠ verified), R-46 |
 | R-47 | 2026-07-28 | hit | Enumerate the callers of every function in the chain a fix touches, not only the symbol the report names — the report walked one call path. `reindent_to`'s 3 callers were all `edit_code`, but its delegate `reindent_block` had a second production caller (`edit_file/mod.rs:747`) with the same defect, reached without passing through `reindent_to`. Relocating the fix one level down doubled the surface closed at the same size of change | bug-fix W-27; issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents (archived, `79cd1428`); kin R-17/R-31/R-44 |
 | R-46 | 2026-07-28 | hit | Choosing between candidate fixes needs the target's TEST module read, not just the target: the implementation shows what it does, only the tests show what may not change (a bug file's "cheapest, cannot break X" option was exactly inverted). Corpus census, not code, caught the companion H1 trap | bug-fix F-34 + W-26; kin R-19/R-44 |
@@ -1251,6 +1252,67 @@ suite — so the destination is `SKILL.md`, either as a Phase 4 bullet (verifica
 scout, not just a check) or as a "When NOT to Use" counterweight: a green suite is not a
 scout, and the number of passing tests says nothing about the shapes absent from all of
 them.
+
+## R-49 — Hit: your own bug file is a hypothesis; re-scout it before implementing its fix
+
+**Verdict:** hit.
+
+An hour after filing `2026-07-28-edit-code-target-base-from-stale-lsp-range.md`, scouting
+before implementing its prescribed fix showed the `## Root cause` section was not
+supported. The file cited two real things — `target_base = leading_ws(lines[…])` at the
+write site, and `editing_start_line` keying off `range_start_line` at the index's origin —
+and concluded "stale LSP index → wrong line sampled". Between those two functions sits
+`fetch_validated_symbol`, which runs `validate_symbol_position` first and *retries* on a
+stale `start_line`. The guard appears in neither cited function, so a mechanism inferred
+from the chain's two ends could not have mentioned it. Two further checks finished it off:
+every candidate value of `range_start_line` for that anchor sits at column 4, and a later
+insert in the same file with the same shape landed correctly.
+
+Two separable rules:
+
+1. **When a root cause names two functions, read the layer between them.** Guards,
+   validators, and retries live in the middle of a call chain precisely because neither
+   end is responsible for them. Reading both ends feels like following the data; it is
+   actually sampling the two points least likely to contain a guard.
+2. **Re-scout your own artifact on re-entry.** A bug file written while the surprise is
+   fresh is exactly right for *capture* and unreliable for *causation* — and the moment it
+   is committed, its `## Root cause` becomes what the next reader trusts instead of
+   re-deriving. Give it the skepticism you would give a stranger's.
+
+The payoff was not merely avoiding a wrong fix. The re-scout found a *different*,
+code-verified defect in the same neighbourhood: `editing_start_line` has a documented
+discard-the-walk-back path that returns `range_start_line` unchanged, which for a
+KDoc/Javadoc block leaves it on a ` * ` continuation line — one column deeper than the
+declaration. Sampling the base there re-bases every inserted body one space off, silently,
+with no relationship to LSP staleness at all. A fix justified by a *property of the code*
+replaced one justified by *a belief about an observation*, and the replacement was
+testable with four plain unit tests instead of an LSP harness.
+
+This is the third session-authored artifact to fail under later scrutiny in one sitting —
+R-46/F-34 (a bug file's cheapest fix option was exactly inverted), F-35 (two doc comments
+overstated guarantees the code did not give), and this. The common factor is not
+carelessness in any one of them: it is that all three were written *while doing the work
+they describe*, when the writer's model is at its most confident and least tested. The
+countermeasure is temporal, not attentional — re-read on re-entry, not harder on write.
+
+Relation to kin entries: R-32 says an off-the-cuff root-cause unification across a bug
+cluster is a hypothesis, not a finding — R-49 is the single-bug case, and adds that
+authorship is no exemption. R-46 is the same artifact failing in its *fix options* rather
+than its root cause. R-26/R-27 ("read ≠ verified") is the underlying shape.
+
+**Evidence:** `bug-fix-session-log.md` F-37 (the unsupported claim, with what survived it)
+and W-29 (the re-scout, with a three-part counterfactual). Bug entry downgraded to
+`mitigated` with `## Root cause` split into *Established* / *Not established*. Shipped:
+`anchor_indent` in `src/symbol/edit.rs`, used by both `do_insert` and `do_replace`, with
+four unit tests including one asserting **both** columns of the ` * `-continuation hazard.
+Gate 18 binaries / 3450 passed / 0 failed / 44 ignored, clippy clean.
+
+**Promote-when:** criterion already met — 2 datapoints against the same artifact (F-34,
+F-37) and 3 against session-authored artifacts generally. Craft-shaped, so the destination
+is `SKILL.md` Phase 1: *"re-entering your own bug file or plan to implement it counts as a
+seam — scout the root cause again; and when it cites two functions, read the layer between
+them."* Pairs naturally with the existing "plan code looks fictional" row in the
+composition table, which covers someone else's plan but not your own.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

@@ -103,6 +103,36 @@ pub fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize
     find_insert_before_line(lines, sym.start_line as usize)
 }
 
+/// The indentation column an edited body should be re-based onto, sampled at
+/// `anchor` — a line index into the file as it exists on disk.
+///
+/// Reading `leading_ws(lines[anchor])` directly is what this replaces, and it has
+/// two failure modes that are cheap to absorb here and invisible everywhere else:
+///
+/// - **A blank anchor invents a base.** `leading_ws` returns the *whole* line for a
+///   whitespace-only line (`leading_ws("   ") == "   "`), so sampling a blank yields
+///   an indentation no code in the file actually has.
+/// - **The anchor is not a trusted coordinate.** It originates in an LSP index and
+///   is applied to a freshly-read file. `validate_symbol_position` checks a symbol's
+///   `start_line`; nothing checks `range_start_line`, which is what
+///   [`editing_start_line`] keys off. Scanning forward for real content bounds what a
+///   wrong index can produce instead of trusting whatever byte sits at it.
+///
+/// The window is deliberately small: an indentation base is only meaningful in the
+/// immediate neighbourhood of the symbol. Past it, `""` is the honest answer — and
+/// `reindent_to` treats a `""` base as "already correct" for any column-0 body, which
+/// is the least destructive outcome available.
+pub fn anchor_indent(lines: &[&str], anchor: usize) -> String {
+    const WINDOW: usize = 4;
+    lines
+        .iter()
+        .skip(anchor)
+        .take(WINDOW)
+        .find(|l| !l.trim().is_empty())
+        .map(|l| crate::util::text::leading_ws(l).to_string())
+        .unwrap_or_default()
+}
+
 /// Resolve the authoritative end line for a symbol we are about to edit.
 ///
 /// Uses AST as the authoritative source for the symbol's end line when available.
@@ -766,5 +796,61 @@ mod tests {
         let post = [sym("foo"), sym("bar")];
         let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post));
         assert_eq!(verdict, CorruptionVerdict::Clean);
+    }
+
+    #[test]
+    fn anchor_indent_reads_the_anchor_line_when_it_has_content() {
+        let lines = vec!["fn top() {", "    #[test]", "        deep()", "}"];
+        assert_eq!(anchor_indent(&lines, 0), "");
+        assert_eq!(anchor_indent(&lines, 1), "    ");
+        assert_eq!(anchor_indent(&lines, 2), "        ");
+    }
+
+    #[test]
+    fn anchor_indent_skips_a_blank_anchor_instead_of_inventing_a_base() {
+        // `leading_ws` returns the WHOLE line for a whitespace-only line, so sampling a
+        // blank directly would hand back an indentation no code in the file has. The
+        // trailing whitespace here is the case that bites: it is invisible on screen.
+        let lines = vec!["      ", "", "    fn foo() {"];
+        assert_eq!(anchor_indent(&lines, 0), "    ");
+        assert_eq!(
+            crate::util::text::leading_ws(lines[0]),
+            "      ",
+            "sanity: this is what sampling the blank directly would have produced"
+        );
+    }
+
+    #[test]
+    fn anchor_indent_returns_empty_past_the_end_and_past_the_window() {
+        let lines = vec!["fn foo() {}"];
+        assert_eq!(anchor_indent(&lines, 5), "");
+        // A run of blanks longer than the window is not searched past: an indentation
+        // base is only meaningful near the symbol, and "" is the least destructive
+        // answer -- reindent_to treats it as already-correct for a column-0 body.
+        let sparse = vec!["", "", "", "", "", "        far()"];
+        assert_eq!(anchor_indent(&sparse, 0), "");
+    }
+
+    #[test]
+    fn anchor_indent_at_a_declaration_beats_a_block_comment_continuation() {
+        // The case that motivated sampling at the validated `start_line`. When
+        // `editing_start_line` discards its walk-back it returns `range_start_line`
+        // unchanged, which for a KDoc/Javadoc block sits on a ` * ` continuation line --
+        // one column deeper than the declaration it belongs to. Sampling there re-bases
+        // every inserted body one space off, silently.
+        let lines = vec![
+            "    /**",             // 0
+            "     * Description.", // 1 <- range_start_line in the BUG-027 shape
+            "     */",             // 2
+            "    fun foo() {",     // 3 <- start_line
+            "        body()",      // 4
+            "    }",               // 5
+        ];
+        assert_eq!(anchor_indent(&lines, 1), "     ", "five spaces: the hazard");
+        assert_eq!(
+            anchor_indent(&lines, 3),
+            "    ",
+            "four: the declaration's column"
+        );
     }
 }

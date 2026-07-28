@@ -1,7 +1,7 @@
 ---
 id: '9e649674c95cd7bd'
 kind: bug
-status: open
+status: mitigated
 title: edit_code derives the insert indentation from an unrepaired LSP line index, so a stale range silently picks the wrong column
 tags:
 - edit_code
@@ -81,6 +81,13 @@ the two preceding writes.
 
 ## Root cause
 
+**Downgraded 2026-07-28, later the same session: the mechanism below is NOT confirmed.**
+The original entry asserted "the LSP index is stale, so the wrong line is sampled" as a
+finding. Reading the layer between the two functions I had read does not support it. What
+is established and what is not, separated:
+
+### Established (read at the bytes)
+
 `src/tools/symbol/edit_code.rs:808-814`:
 
 ```rust
@@ -93,21 +100,43 @@ let target_base = lines
 let reindented = reindent_to(code, &target_base);
 ```
 
-`lines` is `content.lines()` from the disk read at `:802`. `editing_start_line`
-(`src/symbol/edit.rs:43-44`) opens with `if let Some(r) = sym.range_start_line` and
-indexes `lines[r]` — an LSP coordinate against on-disk content. Nothing reconciles the
-two. The `(sym, symbols, range_repair)` triple returned by `fetch_validated_symbol`
-carries the repair signal, and the insert path uses it for the *end* (`range_repair` is
-surfaced in the response and `editing_end_line_strict` comes from the AST), but
-`target_base` still reads through the unrepaired start.
+`lines` is `content.lines()` from the disk read at `:802`. The replace path does the same
+thing at `:683` with its own range start: `let target_base = leading_ws(lines[start])`.
 
-Two independent things go wrong together, which is why it is easy to misread as a
-reindent bug:
+`editing_start_line` (`src/symbol/edit.rs:43-44`) keys off **`sym.range_start_line`**.
+`validate_symbol_position` (`src/symbol/query.rs:292`) validates **`sym.start_line`** — a
+different field. It requires the symbol's name to appear on that line, or the line to be
+lead-in content (whitespace, brackets, comments, attributes) with the name in a small
+window below, and returns a `RecoverableError` so `fetch_validated_symbol` retries with a
+fresh `did_change`. `repair_symbol_range` (`:247`) only ever widens `end_line`; it never
+touches either start field.
 
-1. The index is stale, so the wrong line is sampled.
-2. The sampled line's indentation is applied silently — there is no check that the
-   submitted body's own base already matched the anchor's.
+So: **`range_start_line`, the field the indentation is sampled through, is validated by
+nothing and repaired by nothing.** That is a real gap, and it is sharper than what this
+file originally claimed.
 
+Also established, and independently a defect: `leading_ws` returns the *entire* line for a
+whitespace-only line (`leading_ws("   ") == "   "`, pinned by
+`util::text::tests::leading_ws_extracts_indent`). If the sampled line is blank-with-
+trailing-whitespace, `target_base` becomes that whitespace outright.
+
+### Not established
+
+Which line `range_start_line` actually pointed at, and therefore why the sampled
+indentation was 8 rather than 4. The anchor was `tests/reindent_to_preserves_blank_lines`,
+whose `#[test]` line and `fn` line — the two plausible values of `range_start_line` — are
+**both at column 4**. A truncated range that collapses to a selection range would put
+`range_start_line` on the identifier, also column 4. No candidate reading of the observed
+range produces 8, so "stale index sampled a body line" remains a guess.
+
+### What narrowed it
+
+A second `edit_code insert`, later in the same session, into the same file and the same
+`mod tests`, with a body likewise at column 4, on a `#[test]`-attributed anchor: it landed
+at column 4, correctly. The two calls differ in exactly one observable — the first
+reported a `range_repair`, the second did not. So the correlation with a truncated range
+survives; only the causal story about *which* line was sampled does not. A single
+non-reproducing instance is not a mechanism.
 ## Evidence
 
 ### The base, not the position
@@ -148,32 +177,66 @@ bugs would have compounded.
    **Verdict:** refined, not rejected — the anchor is right, but the *line index* used
    to sample its indentation is an LSP coordinate applied to disk content.
 
+
+3. **Hypothesis:** the stale index escaped detection because nothing validates it.
+   **Test:** read `fetch_validated_symbol` -> `validate_symbol_position` ->
+   `repair_symbol_range`.
+   **Verdict:** half-confirmed, and it moved the entry from "finding" to "open question".
+   `range_start_line` really is unvalidated and unrepaired — a genuine gap. But the guard
+   on `start_line` means a wholesale stale position would have been *caught and retried*,
+   and for this anchor every candidate value of `range_start_line` is at column 4 anyway.
+   The gap is real; it is not yet shown to be what happened here.
+4. **Hypothesis:** the shift is systematic for `edit_code insert` on a `#[test]` anchor.
+   **Test:** a later insert in the same file, same module, same anchor shape, body at
+   column 4.
+   **Verdict:** rejected — it landed at column 4. One instance, not a property. The one
+   observable that differed is the `range_repair` warning on the first call.
 ## Fix
 
-Not implemented. Options, in preference order:
+Two changes are justified by properties verified in the code, independently of the
+unconfirmed mechanism. Both make a wrong sample *harmless* rather than trying to make the
+sample right, which is the only defence that does not depend on knowing why it was wrong:
 
-1. **Sample the base from the AST-repaired range**, the same source the insert position
-   already trusts. `fetch_validated_symbol` returns the repair; use its start rather
-   than `sym.range_start_line` when one is present. Smallest change, and it makes the
-   two halves of the same call agree on one coordinate system.
-2. **Validate before re-basing.** If the submitted body's own `min_indent` is non-empty
-   and differs from the sampled `target_base`, the caller stated an intent that
-   disagrees with the sample — prefer the caller's, or refuse with a hint. This is the
-   defence that does not depend on getting the index right.
-3. **Reject a stale index outright**: require the sampled line to be plausible for the
-   anchor (its trimmed text should start with the symbol's name, a `#[`, `/`, or the
-   language's declaration keyword). A statement line is not a plausible anchor line.
+1. **Never take a base from a blank line.** `leading_ws` on a whitespace-only line returns
+   the whole line, so a sampled blank produces a base out of thin air. Sample the first
+   non-blank line at or below the anchor within a small window, falling back to `""`.
+   Provably correct, cannot change behaviour on well-formed input, and closes a hole that
+   exists whether or not it caused this report.
+2. **Prefer the validated field.** The column of a symbol is available from
+   `sym.start_line`, which `validate_symbol_position` guarantees on every fetch, rather
+   than from `range_start_line`, which nothing checks. `editing_start_line` exists to find
+   where the *editing range* begins so a replace carries its doc comment along — a
+   different question from "what column does this symbol sit at", and the two only
+   coincide because attributes and doc comments are conventionally indented with their
+   declaration.
 
-Option 1 alone leaves the failure available whenever the AST also has no opinion.
-Option 2 is the one that makes a wrong sample harmless, and is cheap.
+Deferred, pending a reproduction: any change that assumes the index was stale — rejecting
+an implausible anchor line, or threading the AST-repaired start into the base. Those are
+fixes for a mechanism this entry no longer claims.
 
+Original options 1 and 3, kept for the record: sample from the AST-repaired range; reject
+a sampled line that does not look like a declaration, attribute, or comment.
 ## Tests added
 
-None yet — no fix. A regression test wants a `SymbolInfo` whose `range_start_line`
-points at a statement line inside the anchor, and must assert that a body submitted at
-the anchor's own column is written **unchanged**. Asserting on the final column alone
-would pass for the wrong reason once `cargo fmt` runs.
+Four, on the new `anchor_indent` helper in `src/symbol/edit.rs`:
 
+- `anchor_indent_reads_the_anchor_line_when_it_has_content` — the ordinary path, at
+  columns 0 / 4 / 8.
+- `anchor_indent_skips_a_blank_anchor_instead_of_inventing_a_base` — the blank-sample
+  hazard, with a companion assertion pinning what the old code *would* have returned
+  (`leading_ws("      ") == "      "`), so the test states the defect rather than merely
+  avoiding it. The fixture uses trailing whitespace on purpose: it is invisible on screen.
+- `anchor_indent_returns_empty_past_the_end_and_past_the_window` — out-of-range anchor,
+  and a blank run longer than the window.
+- `anchor_indent_at_a_declaration_beats_a_block_comment_continuation` — the case that
+  motivated change 2, asserting **both** columns: `"     "` (five, the hazard) at the
+  continuation line and `"    "` (four) at the declaration.
+
+No regression test for the original report, deliberately: it has not been reproduced, and
+a test asserting a mechanism this file no longer claims would be a fiction with a green
+checkmark next to it.
+
+Gate: 18 binaries, clippy `--all-targets -D warnings` clean.
 ## Workarounds
 
 - Run `cargo fmt` after any `edit_code` insert. It fully repairs a uniform shift so long
@@ -187,12 +250,26 @@ would pass for the wrong reason once `cargo fmt` runs.
 
 ## Resume
 
-Read `fetch_validated_symbol` in `src/tools/symbol/edit_code.rs` to see what the
-`range_repair` value carries, then decide whether it exposes a usable repaired start
-line. Both the insert path (`:808`) and the replace path (`:683`) compute a
-`target_base`; check whether the replace path samples the same way before fixing only
-one.
+**Status: mitigated, not fixed.** The two verified hazards are closed; the reported
+symptom is unexplained and unreproduced.
 
+What shipped: `anchor_indent(lines, anchor)` in `src/symbol/edit.rs`, used by both
+`do_insert` (`edit_code.rs:820`) and `do_replace` (`:684`), sampling at the validated
+`sym.start_line`. It skips blank anchors and bounds a wrong index to a small window.
+
+The replace path's change is a no-op on its narrowed branch — that branch already walks
+forward past decorators to the declaration line, which is the same line `start_line`
+names. It differs only on the un-narrowed branch, which is the ` * ` continuation hazard.
+Checked rather than assumed.
+
+To close this properly, someone needs a reproduction of the original +4 shift. The one
+lead: it correlated with a `range_repair` warning, and a second insert into the same file
+and module without that warning landed correctly. If it recurs, capture `sym.start_line`,
+`sym.range_start_line`, `editing_start_line`'s return, and the sampled line's text in the
+same breath — that quartet settles it, and nothing short of it will.
+
+Also outstanding: master-side SHA after cherry-pick. The SHA here is an `experiments` SHA
+and orphans on rebase.
 ## References
 
 - `src/tools/symbol/edit_code.rs:808-814` — `sibling_line` / `target_base` / `reindent_to`

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::tools::{guard_worktree_write, require_str_param, RecoverableError, Tool, ToolContext};
-use crate::util::text::{leading_ws, reindent_to};
+use crate::util::text::reindent_to;
 
 use super::display::{
     format_insert_code, format_remove_symbol, format_rename_symbol, format_replace_symbol,
@@ -14,9 +14,9 @@ use crate::fs::{
     get_lsp_client, guard_not_markdown, require_path_param, resolve_write_path_for, uri_to_path,
 };
 use crate::symbol::edit::{
-    apply_text_edits, clamp_range_to_parent, collect_all_name_paths, editing_end_line,
-    editing_end_line_strict, editing_start_line, find_ast_name_path, find_parent_symbol,
-    text_sweep, write_lines, CorruptionVerdict,
+    anchor_indent, apply_text_edits, clamp_range_to_parent, collect_all_name_paths,
+    editing_end_line, editing_end_line_strict, editing_start_line, find_ast_name_path,
+    find_parent_symbol, text_sweep, write_lines, CorruptionVerdict,
 };
 use crate::symbol::query::{
     count_symbols_by_name_path, fetch_validated_symbol, find_unique_symbol_by_name_path,
@@ -679,7 +679,9 @@ impl EditCode {
         // indentation — a hard IndentationError in Python, mis-aligned code in
         // brace languages like Kotlin. `reindent_to` is a no-op when the body is
         // already based at the target, so correctly-indented input is untouched.
-        let target_base = leading_ws(lines[start]).to_string();
+        // See do_insert for why the column is sampled at the validated `start_line`
+        // rather than at the editing range's start.
+        let target_base = anchor_indent(&lines, sym.start_line as usize);
         let effective_body = reindent_to(&effective_body, &target_base);
 
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
@@ -805,12 +807,17 @@ impl EditCode {
         // inserting next to, so a sibling method/function lands at the right
         // column instead of wherever the caller happened to dedent it. No-op
         // when the code is already correctly based (e.g. top-level inserts).
-        let sibling_line = editing_start_line(&sym, &lines);
-        let target_base = lines
-            .get(sibling_line)
-            .map(|l| leading_ws(l))
-            .unwrap_or("")
-            .to_string();
+        //
+        // Sampled at `sym.start_line`, not at `editing_start_line`. Both name the
+        // same symbol, but only `start_line` is validated on every fetch (see
+        // `validate_symbol_position`); `editing_start_line` keys off
+        // `range_start_line`, which nothing checks, and its documented
+        // discard-the-walk-back path can leave it on a ` * ` block-comment
+        // continuation whose leading whitespace is one column deeper than the
+        // declaration it belongs to. The editing *range* still starts where
+        // `editing_start_line` says — that is a different question from what column
+        // this symbol sits at.
+        let target_base = anchor_indent(&lines, sym.start_line as usize);
         let reindented = reindent_to(code, &target_base);
         let code_lines: Vec<&str> = reindented.lines().collect();
         let insert_at0 = match position {

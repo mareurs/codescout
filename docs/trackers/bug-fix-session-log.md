@@ -79,6 +79,7 @@ time_scope: open-ended
 | F-31 | 2026-07-07 | med | self-friction | fixed-verified | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 | F-34 | 2026-07-28 | med | plan-prose | fixed-verified | My own bug file's "cheapest" fix option would have broken `filter_sections_nested_h4_included_in_body`; its "cannot break language-patterns.md" claim was exactly backwards, and it ignored H1 entirely |
+| F-37 | 2026-07-28 | med | self-friction | fixed-verified | Filed a bug file whose `## Root cause` asserted a mechanism the code does not support — read both ends of a call chain (`target_base` write site, `editing_start_line`'s field) and inferred the middle, missing the `validate_symbol_position` guard that sits between them |
 | F-36 | 2026-07-28 | med | self-friction | fixed-verified | The literal-scanner fix I had just shipped missed the commonest Rust multi-line-string form (plain `"` + raw newline); all six of its tests reused the bug report's `"\` shape, so the suite sampled one point of the class six times |
 | F-35 | 2026-07-28 | low | self-friction | fixed-verified | Two doc comments I had just written made claims the code did not support (an unreachable fallback described as reachable; "reindents nothing" where the opener still shifts) — no gate can catch a doc comment that overstates a guarantee |
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
@@ -111,6 +112,7 @@ time_scope: open-ended
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 | W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-29 | 2026-07-28 | high | Re-scout your own bug file's root cause before implementing its fix; when it cites two functions, read the layer between them | Would have shipped real work aimed at an unproven cause, closed the file with a misdirecting root-cause section, AND left the genuinely broken thing broken — the re-scout is what found `editing_start_line`'s discard-the-walk-back path sampling the column from a ` * ` comment continuation, one column deep, unrelated to LSP staleness | validated |
 | W-28 | 2026-07-28 | med-high | Write the end-to-end verification fixture the way a user naturally would, not the way the bug report did — then trace the fix over it before running | Seven green tests, an archived bug file and a commit message claiming the literal class would all have shipped over a still-corrupting majority form. The next person to hit it would hit it as a new bug against a closed one, whose own evidence argued the mechanism was already understood | validated |
 | W-27 | 2026-07-28 | med | Enumerate a shared helper's callers to decide WHERE a fix belongs, not just its blast radius | The bug file's own preferred fix sat in `reindent_to`; enumeration found `reindent_block`'s second production caller (`edit_file/mod.rs:747`) with the same defect, reachable without passing through `reindent_to`. That path guards writes with `has_syntax_errors`, which returns clean on a shifted literal — the bug would have stayed open behind a green gate, a closed bug file, and a passing syntax check | validated |
 | W-26 | 2026-07-28 | med | A failing NEW test with an innocent implementation: diagnose the fixture before touching the code | Suspecting `heading_at` would have meant loosening the heading predicate to trim leading whitespace — making the new test pass while breaking `filter_sections_indented_heading_not_a_boundary`, then "fixing" that older test and landing a real regression. Reading the file back exonerated the implementation in one step; the defect was in `edit_code` | validated |
@@ -2356,6 +2358,104 @@ one point of the defect class, however many tests it has."*
 
 **Status:** validated — gap found, widened, and the fixture retained as a live regression
 probe.
+
+## F-37 — I filed a root cause I had not verified: read both ends of a call chain, inferred the middle
+
+**Observed:** 2026-07-28, scouting `src/tools/symbol/edit_code.rs` before implementing the
+fix prescribed by my own bug file from earlier the same session.
+
+**When:** About to implement `docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`.
+
+**Expected (what the bug file asserted, as a finding):** `edit_code` computes the insert
+column as `leading_ws(lines[editing_start_line(&sym, &lines)])` — an LSP index applied to
+a freshly-read file — and when the LSP lags, the index selects a different line whose
+indentation silently becomes the base. The file stated this in a `## Root cause` section,
+with two code citations, as established.
+
+**Got (scouted reality):** the citations are right and the conclusion does not follow.
+Between the two functions I read sits `fetch_validated_symbol`, which calls
+`validate_symbol_position` **before** anything else and rejects a stale `start_line` — the
+name must appear on that line or just below — returning a `RecoverableError` so the fetch
+retries with a fresh `did_change`. A wholesale stale position is caught, not silently
+used. And for the anchor in question (`tests/reindent_to_preserves_blank_lines`), every
+candidate value of `range_start_line` — the `#[test]` line, the `fn` line, or a collapsed
+selection range on the identifier — sits at **column 4**. No reading of the observed range
+produces the column 8 that was actually applied.
+
+A second data point killed the "systematic" framing too: a later `edit_code insert` in the
+same file, same `mod tests`, same anchor shape, body likewise at column 4, landed at
+column 4. The two calls differ in one observable — the first reported a `range_repair`.
+
+**Probable cause:** I read the two ends of a call chain and inferred the middle. The write
+site (`target_base = leading_ws(lines[…])`) and the index's origin (`editing_start_line`
+keying off `range_start_line`) both say what they say; the guard that sits between them
+does not appear in either, and I did not go looking for it. The bug file was written
+immediately after the observation, while the surprise was fresh — which is right for
+capture and wrong for causation.
+
+**Workaround:** rewrote `## Root cause` as two sections, *Established* and *Not
+established*, and downgraded the entry to `mitigated`. What survived is sharper than the
+original claim: `range_start_line` really is validated by nothing and repaired by nothing,
+whereas `start_line` is validated on every fetch. Shipped the changes that stand on
+verified properties alone, and explicitly deferred anything that assumes the index was
+stale.
+
+**Severity:** med — no wrong code shipped, because the scout happened before
+implementation. But the file had already been committed (`3a9c5f26`) with a wrong
+mechanism stated as fact, and the fix I was about to write would have been justified by
+it. A bug file's `## Root cause` is what the next reader trusts instead of re-deriving.
+
+**Status:** fixed-verified — file corrected, entry downgraded to `mitigated`, hazards that
+*are* verified closed with four tests.
+
+**Fix idea / Pointer:** `docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`.
+Third instance this session of my own artifact failing under later scrutiny — F-34 (a
+bug file's fix option was inverted), F-35 (doc comments overstated a guarantee), F-37 (a
+root cause the code did not support). See R-49 for the pattern.
+
+## W-29 — Re-scout your own bug file before implementing its fix
+
+**Observed:** 2026-07-28, immediately before writing the fix for a bug file I had authored
+an hour earlier.
+
+**Pattern:** Treat your own bug file's `## Root cause` as a hypothesis on re-entry, and
+re-scout it with the same skepticism you would give a stranger's. Specifically: when a
+root cause cites two functions, **read the layer between them** — a call chain's middle is
+where the guards live, and a mechanism inferred from its two ends will not mention them.
+
+**Counterfactual:** Without the re-scout, the fix ships justified by a mechanism that does
+not hold. Three costs, and the third is the expensive one. (1) The chosen option would have
+been "thread the AST-repaired start into the base" — real work aimed at a cause not shown
+to exist. (2) The bug file would have been closed with its wrong story intact, so the next
+recurrence arrives as a new bug against a closed one whose root cause section confidently
+misdirects. (3) The genuinely broken thing would have stayed broken: the re-scout is what
+surfaced `editing_start_line`'s documented discard-the-walk-back path, which returns
+`range_start_line` unchanged and so samples the column from a ` * ` block-comment
+continuation — one column deeper than the declaration. That is a real, code-verified
+defect in Kotlin/Java/Javadoc-shaped files, it has no relationship to LSP staleness, and
+nothing in the original bug file pointed at it. Cost of the re-scout: two symbol reads.
+
+What made the difference concrete: the scout replaced a fix justified by *my belief about*
+an observation with a fix justified by *a property of the code*, and the second one is
+testable without an LSP. Four unit tests, no integration harness.
+
+**Confirming data points:**
+1. This session — root cause unsupported, and a different real defect found in its place.
+2. W-26 / F-34 (same session) — the same bug file's *fix options* were inverted, caught by
+   reading the target's test module. Same artifact, different section, same failure.
+
+**Impact:** high — prevents shipping a fix whose justification is fictional, and the fix
+that replaces it is better-grounded and cheaper to test. Two datapoints on one artifact
+suggest the bug-file-as-hypothesis framing generalises.
+
+**Promote-when:** already at 2 datapoints against the same artifact and 3 against
+session-authored artifacts generally (F-34, F-35, F-37). Promote now to the reconnaissance
+skill as a Phase 1 bullet: *"when re-entering your own bug file or plan to implement it,
+re-scout the root cause — an artifact written during the observation is a hypothesis that
+acquires the authority of a record the moment it is committed."*
+
+**Status:** validated — fix landed on verified grounds; the entry it came from is now
+`mitigated` with an honest not-reproduced note.
 
 ## Template for new entries
 
