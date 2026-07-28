@@ -152,13 +152,37 @@ reading — two readings already failed.
 
 ### Corollary worth preserving: absence of a lock file is evidence
 
-Because lock files are never unlinked, the *absence* of one proves no `sync_project`
-ran for that project since the directory was last cleared. That property was
-load-bearing in a live diagnostic on 2026-07-28: 900+ dense-embed requests were
-attributed to search/librarian traffic rather than indexing precisely because no
-index lock existed for the project in question. **A fix must preserve this** — a
-scratch directory for tests does; unlink-on-drop would destroy it. That is a second,
-independent reason to reject unlink-on-drop beyond the fd race in Hypothesis 3.
+Because lock files are never unlinked, the *presence* of one is durable proof that
+`sync_project` ran for that project since the directory was last cleared — and it
+names the project, since the filename is `sha256(project_id)[..16]`.
+
+This was load-bearing in a live diagnostic on 2026-07-28, but only on the second
+look, and the first look is the instructive part. 900+ flat dense-embed requests
+(~30/min for ~28 min) were initially attributed to search/librarian traffic rather
+than indexing, on the stated grounds that "no index lock exists for it". That was
+wrong. A lock file *did* exist: `codescout-index-c2f5622c4ae66298.lock`, created
+09:25:06, i.e. at the start of the traffic window, and
+`sha256("MRV-poc")[..16] == c2f5622c4ae66298` identifies the project exactly. The
+load was a ~28-minute index of `/home/marius/work/stefanini/southpole/MRV-poc`.
+
+The observation failed, not the reasoning. The check enumerated only holders passing
+`kill -0`; the indexer PID had exited seconds earlier, so a real, informative file
+printed nothing and was then excluded from a count reused further down. **A liveness
+filter is the wrong lens for a forensic artifact whose whole value is outliving its
+holder.** List the files first, resolve liveness second.
+
+A parallel mis-attribution in the same diagnostic: the busy process was identified by
+sorting all servers on cumulative CPU, which nominated a 12.9-hour-old server on an
+unrelated project. Cumulative CPU cannot isolate a 28-minute batch, and the actual
+indexer was a short-lived child that had already exited and so never appeared in the
+table at all.
+
+**A fix must preserve the durability** — a scratch directory for tests does;
+unlink-on-drop would destroy the one artifact that identified this run. That is a
+second, independent reason to reject unlink-on-drop beyond the fd race in
+Hypothesis 3. It also argues the opposite of what the noise suggests: the
+production files are worth *keeping*, and only the test-generated ones should stop
+being written — which is exactly what parameter injection achieves.
 
 ### Corrects an inference made during this investigation
 
