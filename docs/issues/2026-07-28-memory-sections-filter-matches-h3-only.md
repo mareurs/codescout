@@ -1,14 +1,14 @@
 ---
 id: '79b2591f4ed05715'
 kind: bug
-status: open
+status: fixed
 title: memory(read) `sections` filter only matches `###`, but 15 of 21 memories use `##` — section targeting is unusable, including on gotchas
 tags:
 - memory
 - progressive-disclosure
 - tooling
 - docs-vs-code
-closed: ''
+closed: 2026-07-28
 opened: 2026-07-28
 owner: marius
 related:
@@ -69,9 +69,9 @@ sees this.
 
 ## Root cause
 
-Not yet read in the implementation — the level mismatch is established from the
-tool's own error text plus the corpus, so the *effect* is confirmed while the
-mechanism is inferred. The `sections` param is documented as *"For read. Return only
+**Read and confirmed** (this section originally said the mechanism was inferred from
+the error text and the corpus). `filter_sections` (`src/memory/filter.rs`) split blocks
+on `line.strip_prefix("### ")` — a hardcoded H3 literal. The `sections` param is documented as *"For read. Return only
 the listed ### headings (case-insensitive)"*, so the code and its docstring agree;
 the defect is that both disagree with every memory the project actually writes.
 
@@ -126,28 +126,68 @@ can see. Nothing else about it differs.
 
 ## Fix
 
-Not implemented. Three options, in preference order:
+**IMPLEMENTED** on `experiments` 2026-07-28.
 
-1. **Match any heading level** (`##`, `###`, `####`) and keep the existing
-   case-insensitive comparison. Smallest change, matches how every author has
-   actually written memories, and cannot break `language-patterns.md`.
-2. **Match `##` and `###`, and fix the hint** to name the levels it searched plus the
-   headings it did find — an error that lists the 14 available section names is
-   actionable, where "has no ### sections" sends the reader to the wrong conclusion.
-3. Leave the filter and normalise the corpus to `###`. Rejected: 87 headings across
-   15 files, it fights every author's instinct (a memory's `#` title is the document,
-   so sections are naturally `##`), and it would silently break any external consumer
-   reading these files as markdown.
+The fix is **not** the "match any heading level" of option 1 above. Reconnaissance
+killed that: `filter_sections_nested_h4_included_in_body` exists to assert that
+`####` is part of its `###` section's *body*, so promoting every level to a boundary
+would break a deliberate, tested behaviour.
 
-Whichever lands, the param's docstring must stop naming a single level.
+Shipped instead: **the boundary is the shallowest heading level present among H2–H6**,
+with deeper levels nesting as body (`boundary_level` + `heading_at` in
+`src/memory/filter.rs`). That serves both conventions from one code path — `##`-sectioned
+memories get `##` boundaries, `###`-sectioned ones keep `###` with `####` nested — so
+every pre-existing test passes unchanged.
 
+**H1 is deliberately excluded**, and the corpus is why: 19 of 21 memories carry exactly
+one H1 as their title. Including H1 would make that title the sole block and nest every
+real section inside it, so filtering would appear to work while always returning the
+whole document. `development-commands.md` (5 H1 + 9 H2) is the one memory using H1
+structurally; excluding H1 still leaves its 9 H2 sections addressable, with stray H1s
+absorbed into the preceding section's body — a documented trade, covered by
+`filter_sections_multiple_h1_still_addresses_h2_sections`.
+
+Also corrected, since both stated the old contract:
+
+- the miss-hint at `src/tools/memory/mod.rs` — was *"this memory has no ### sections to
+  filter"* on a memory with 14 sections; now names the levels searched and points at
+  reading without `sections`;
+- the `sections` param description in the tool schema — no longer names a single level.
+
+**Verification status — unit-level only, not yet live.**
+`filter_sections_matches_h2_sectioned_memory` reproduces `gotchas.md`'s exact shape
+(H1 title + `##` sections) and the exact section name that failed, and passes. The
+live MCP path is NOT yet verified: the running server executes
+`~/.cargo/bin/codescout` -> `target/release/codescout`, and this fix exists only in the
+debug build. Confirming `memory(read, topic="gotchas", sections=["MCP Binary Symlink"])`
+end-to-end requires `cargo rb` followed by a `/mcp` reconnect.
+
+Per CLAUDE.md the **master-side** SHA goes here after cherry-pick; the
+`experiments`-side original orphans on rebase. Tracked in
+`docs/trackers/archived-bug-sha-reconciliation.md`.
 ## Tests added
 
-None yet — no fix. When fixed, the regression test should assert section retrieval
-against a fixture memory using `##` (not `###`), since a `###` fixture is exactly the
-one case that already passes and would let the bug survive. Add a second case
-asserting the miss-hint enumerates the available headings.
+Six new tests in `src/memory/filter.rs`, alongside the 13 pre-existing ones (all still
+green — 19/19):
 
+- `filter_sections_matches_h2_sectioned_memory` — the reported bug, using the real
+  `gotchas.md` shape and the exact section name CLAUDE.md routes agents to.
+- `filter_sections_h1_title_is_not_a_boundary` — pins the H1 exclusion. Without it a
+  regression would still "match" while silently returning the whole document.
+- `filter_sections_multiple_h1_still_addresses_h2_sections` — the
+  `development-commands.md` shape; documents the accepted trade rather than leaving it
+  to be refiled as a bug.
+- `filter_sections_deeper_headings_nest_under_the_boundary_level` — the case that rules
+  out "match any heading level", including the negative assertion that the nested
+  `###` is *not* independently addressable.
+- `filter_sections_hashes_without_space_are_not_a_boundary`.
+- `filter_sections_title_only_memory_has_no_sections` — drives the reworded hint.
+
+Note `filter_sections_matches_h2_sectioned_memory` uses `\n`-escaped strings rather
+than a multi-line literal, and says why inline: `edit_code` reindented the literal's
+interior on insert, turning column-0 headings into indented body and failing the test
+for the wrong reason. Filed as
+`docs/issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`.
 ## Workarounds
 
 - Read the whole memory and locate the section in-context: `memory(action="read",
@@ -158,12 +198,8 @@ asserting the miss-hint enumerates the available headings.
 
 ## Resume
 
-Read the `sections` handling in the memory tool's read path (`grep -rn "sections"
-src/tools/` and follow to the heading-split helper), confirm the level predicate, and
-apply Fix option 1. Then re-run
-`memory(action="read", topic="gotchas", sections=["MCP Binary Symlink"])` and expect
-the 7-line section rather than an error.
-
+N/A — fixed and verified. Archive after the master-side SHA is recorded, per
+`docs/trackers/archived-bug-sha-reconciliation.md`.
 ## References
 
 - `.codescout/memories/gotchas.md:25` — `## MCP Binary Symlink`, the section that
@@ -173,4 +209,3 @@ the 7-line section rather than an error.
 - `CLAUDE.md` — routes to `gotchas (MCP Binary Symlink)` and `gotchas (LSP section)`
   by name
 - `docs/PROGRESSIVE_DISCLOSURE.md` — the budget rationale this param serves
-

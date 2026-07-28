@@ -521,7 +521,9 @@ fn apply_sections_filter(
         let result = crate::memory::filter::filter_sections(&content, &section_refs);
         if !result.matched {
             let hint = if result.available.is_empty() {
-                "this memory has no ### sections to filter".to_string()
+                "this memory has no headings below the title to filter on \
+                 (searched levels ##..######) — read it without `sections`"
+                    .to_string()
             } else {
                 format!("available sections: {}", result.available.join(", "))
             };
@@ -627,7 +629,7 @@ impl Tool for Memory {
                 "sections": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "For read. Return only the listed ### headings (case-insensitive). E.g. [\"Rust\", \"TypeScript\"]. Omit to return full content."
+                    "description": "For read. Return only the listed sections (case-insensitive). Sections are the memory's shallowest heading level below the title — `##` in most memories, `###` in some; deeper headings come along as body. E.g. [\"Rust\", \"MCP Binary Symlink\"]. Omit to return full content."
                 },
                 "content": { "type": "string", "description": "For write or remember." },
                 "private": { "type": "boolean", "default": false, "description": "Use gitignored private store." },
