@@ -45,6 +45,18 @@ impl Drop for IndexLock {
     }
 }
 
+/// Deterministic lock-file path for `project_id`, sited in `dir`.
+///
+/// Split out of [`lock_path`] purely as a test seam: the tests below must not
+/// write into the real per-user runtime directory. Production has exactly one
+/// caller — [`lock_path`] — which passes `per_user_runtime_dir()`.
+pub fn lock_path_in(dir: &Path, project_id: &str) -> PathBuf {
+    let mut h = Sha256::new();
+    h.update(project_id.as_bytes());
+    let digest = format!("{:x}", h.finalize());
+    dir.join(format!("codescout-index-{}.lock", &digest[..16]))
+}
+
 /// Deterministic lock-file path for `project_id`.
 ///
 /// Hashed so any `project_id` — including one with path separators or spaces —
@@ -56,21 +68,15 @@ impl Drop for IndexLock {
 /// to wedge every index run. `per_user_runtime_dir()` handles both platforms —
 /// `0o700` dir on Unix, already-per-user `temp_dir()` on Windows.
 pub fn lock_path(project_id: &str) -> PathBuf {
-    let mut h = Sha256::new();
-    h.update(project_id.as_bytes());
-    let digest = format!("{:x}", h.finalize());
-    crate::socket_discovery::per_user_runtime_dir()
-        .join(format!("codescout-index-{}.lock", &digest[..16]))
+    lock_path_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
 }
 
-/// Acquire the exclusive index lock for `project_id`, or fail immediately.
+/// Acquire the exclusive index lock for `project_id` under `dir`, or fail
+/// immediately.
 ///
-/// Fail-fast rather than queue. A queued second run would be nearly free — every
-/// `chunk_id` would already be present, so nothing re-embeds — but it would hide
-/// the duplication instead of surfacing it, which is how this bug went unnoticed
-/// for hours.
-pub fn acquire(project_id: &str) -> Result<IndexLock> {
-    let path = lock_path(project_id);
+/// Test seam, mirroring [`lock_path_in`]. Production goes through [`acquire`].
+pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
+    let path = lock_path_in(dir, project_id);
 
     // create(true) + truncate(false): `File::create` truncates on open, which
     // would erase the current holder's PID line before we even try to lock.
@@ -102,32 +108,56 @@ pub fn acquire(project_id: &str) -> Result<IndexLock> {
     Ok(IndexLock { file, path })
 }
 
+/// Acquire the exclusive index lock for `project_id`, or fail immediately.
+///
+/// Fail-fast rather than queue. A queued second run would be nearly free — every
+/// `chunk_id` would already be present, so nothing re-embeds — but it would hide
+/// the duplication instead of surfacing it, which is how this bug went unnoticed
+/// for hours.
+///
+/// The lock file is deliberately never unlinked. Beyond the fd race that
+/// unlink-on-drop would open (a second `acquire` can hold an fd on an inode a
+/// third has already replaced, so both would believe they hold the lock), the
+/// leftover file is a durable forensic record: it names the project via
+/// `sha256(project_id)`, and its mtime dates the run. That is how a 28-minute
+/// index of an unrelated project was identified on 2026-07-28 after the process
+/// had already exited. See
+/// docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+pub fn acquire(project_id: &str) -> Result<IndexLock> {
+    acquire_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Unique per test so concurrent `cargo test` threads never share a lock file.
-    fn unique_project(tag: &str) -> String {
-        format!(
-            "test-{}-{}-{:?}",
-            tag,
-            std::process::id(),
-            std::thread::current().id()
-        )
+    /// Every test that actually creates a lock file goes through [`acquire_in`]
+    /// with a fresh scratch directory.
+    ///
+    /// The previous approach — production `acquire` plus a `project_id` carrying
+    /// the PID and thread id — isolated tests from each other but wrote into the
+    /// real per-user runtime directory, and a per-run-unique id meant a
+    /// per-run-unique filename, so nothing was ever reused or removed. Measured
+    /// 2026-07-28: 7 leaked files per `cargo test`, 203 accumulated. A scratch
+    /// dir gives strictly better isolation (a different directory, not merely a
+    /// different name), so the ids below can be plain literals.
+    /// See docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+    fn scratch() -> tempfile::TempDir {
+        tempfile::tempdir().expect("scratch dir for lock files")
     }
 
     #[test]
     fn acquire_succeeds_for_fresh_project() {
-        let pid = unique_project("fresh");
-        let lock = acquire(&pid).expect("first acquire must succeed");
+        let dir = scratch();
+        let lock = acquire_in(dir.path(), "fresh").expect("first acquire must succeed");
         assert!(lock.path().exists(), "lock file should exist on disk");
     }
 
     #[test]
     fn second_acquire_fails_while_first_is_held() {
-        let pid = unique_project("contend");
-        let _first = acquire(&pid).expect("first acquire must succeed");
-        let second = acquire(&pid);
+        let dir = scratch();
+        let _first = acquire_in(dir.path(), "contend").expect("first acquire must succeed");
+        let second = acquire_in(dir.path(), "contend");
         assert!(
             second.is_err(),
             "a second acquire for the same project_id must fail while the first is held"
@@ -141,19 +171,20 @@ mod tests {
 
     #[test]
     fn different_projects_do_not_contend() {
-        let a = unique_project("proj-a");
-        let b = unique_project("proj-b");
-        let _lock_a = acquire(&a).expect("project a");
-        let _lock_b = acquire(&b).expect("project b must not contend with a");
+        // Same directory on purpose: the isolation under test is the hashed
+        // filename, not the parent dir.
+        let dir = scratch();
+        let _lock_a = acquire_in(dir.path(), "proj-a").expect("project a");
+        let _lock_b = acquire_in(dir.path(), "proj-b").expect("project b must not contend with a");
     }
 
     #[test]
     fn lock_is_released_on_drop() {
-        let pid = unique_project("release");
+        let dir = scratch();
         {
-            let _held = acquire(&pid).expect("first acquire");
+            let _held = acquire_in(dir.path(), "release").expect("first acquire");
         } // drop releases
-        acquire(&pid).expect("must be re-acquirable after the guard drops");
+        acquire_in(dir.path(), "release").expect("must be re-acquirable after the guard drops");
     }
 
     /// A leftover lock *file* must never block a new run, and the PID write must
@@ -170,8 +201,8 @@ mod tests {
     ///     writes identical bytes at offset 0, making the truncate unobservable.
     #[test]
     fn preexisting_lock_file_does_not_block() {
-        let pid = unique_project("stale");
-        let path = lock_path(&pid);
+        let dir = scratch();
+        let path = lock_path_in(dir.path(), "stale");
         std::fs::write(
             &path,
             format!(
@@ -181,7 +212,8 @@ mod tests {
         )
         .expect("simulate a lock file left by a dead process");
 
-        let lock = acquire(&pid).expect("a stale lock file must not block acquisition");
+        let lock =
+            acquire_in(dir.path(), "stale").expect("a stale lock file must not block acquisition");
         drop(lock);
 
         let contents = std::fs::read_to_string(&path).expect("read lock file");
@@ -189,6 +221,37 @@ mod tests {
             contents.trim(),
             std::process::id().to_string(),
             "lock file must contain exactly the holder's pid, with no stale tail"
+        );
+    }
+
+    /// The seam itself is the regression guard. Asserting "the real runtime dir
+    /// gained no files" by counting would be flaky — a concurrent `cargo test`
+    /// process, or a genuine index run, can add one at any moment. Asserting that
+    /// THIS project's own path was never created is precise and stable.
+    ///
+    /// Fails if `acquire_in` is ever reverted to resolving the directory itself.
+    #[test]
+    fn acquire_in_does_not_touch_the_real_runtime_dir() {
+        let dir = scratch();
+        // Distinctive enough that no real project or other test collides with it.
+        let project_id = "index-lock-seam-guard-must-never-reach-the-runtime-dir";
+        let real = lock_path(project_id);
+        assert!(
+            !real.exists(),
+            "precondition: {} must not pre-exist",
+            real.display()
+        );
+
+        let lock = acquire_in(dir.path(), project_id).expect("acquire in scratch dir");
+        assert_eq!(
+            lock.path().parent(),
+            Some(dir.path()),
+            "the lock must be sited in the injected dir"
+        );
+        assert!(
+            !real.exists(),
+            "acquire_in must not create {} in the real runtime dir",
+            real.display()
         );
     }
 

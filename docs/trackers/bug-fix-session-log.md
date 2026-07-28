@@ -78,6 +78,7 @@ time_scope: open-ended
 | F-30 | 2026-07-07 | high | release-pipeline | fixed-verified | Upstream commit `62457959` bundled a stray `try_build_runtime(lsp.clone())` arg + `mv.rs` test had a phantom `lsp:` field — both broke `cargo rb` |
 | F-31 | 2026-07-07 | med | self-friction | open | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
+| F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
 
 ## Wins Index
 
@@ -107,6 +108,7 @@ time_scope: open-ended
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 | W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-25 | 2026-07-28 | med | Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place | Defensive branch: thread a dir param through `LspManager::get_or_start` -> `get_or_start_via_mux` -> `claim_mux_lock`, a test concern in a production signature plus 17 individual test opt-ins, versus the 3-line `cfg(test)` seam that fixed all 17 at once. Optimistic branch: ship and later find mux sockets silently undiscoverable. Also surfaced the `#[ignore]`d test at manager.rs:2350 fixing for free and the peer subsystem's identical latent exposure | validated |
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 
 ## Category conventions
@@ -1936,6 +1938,108 @@ live-LSP class I initially misattributed to).
 
 ---
 
+## F-33 — Relocated the mux lock dir before verifying nothing discovers those files by directory scan
+
+**Observed:** 2026-07-28, fixing the lock-file leak in `src/retrieval/index_lock.rs`
+and `src/lsp/mux/mod.rs`. Recon was invoked *after* both edits were written and
+`cargo clippy --all-targets -- -D warnings` was already green.
+
+**When:** Mid-fix. The `index_lock` half used parameter injection
+(`lock_path_in` / `acquire_in`), which is local and provably safe. The mux half
+changed where files *live* — `mux_dir()` returns a per-process scratch
+subdirectory under `cfg(test)` — and I wrote it on the unstated assumption that
+every consumer computes its exact path rather than discovering files by scanning
+the directory.
+
+**Expected (my assumption):** No code enumerates `per_user_runtime_dir()` looking
+for `codescout-*-mux-*.sock`.
+
+**Got (scouted reality):** The assumption held, but only checkable after the fact.
+`grep 'read_dir|glob'` across `src/**/*.rs` returns zero hits in any runtime-dir
+context, and all four production call sites of the mux path helpers
+(`src/lsp/manager.rs:831-832`, plus the `#[ignore]`d test at 2350-2351) go through
+the two functions changed. The peer subsystem is fully separate
+(`peer_*_for_workspace` in `src/socket_discovery.rs:43-56`, consumed by
+`src/peer/{launch,registry,server}.rs`) and untouched.
+
+One real residue: `src/socket_discovery.rs:64`'s test is named
+`peer_socket_differs_from_mux_and_shares_dir`, and the mux/peer shared-directory
+invariant its name implies is now FALSE in test builds. The body never asserted it
+— it only checks `peer.parent() == per_user_runtime_dir()` and that the *filename*
+lacks a `-mux-` infix — so the test passes and nothing will ever flag the
+divergence. The name misleads silently.
+
+**Probable cause:** Edit-then-scout inversion. `index_lock`'s seam was read this
+session, so it felt like the mux seam had been too; it had not. The mux change is
+also categorically different — it moves a *location* other code may depend on,
+rather than adding a parameter — and that difference is what should have triggered
+a blast-radius scout before the edit, not after.
+
+**Workaround:** Left the test name (it is cited as a copy-pasteable `cargo test`
+invocation at `docs/superpowers/plans/2026-06-01-peer-delegation-phase1.md:105`,
+so renaming breaks a doc reference) and added a comment at
+`src/socket_discovery.rs` recording that "shares_dir" refers to the peer socket
+sitting in the per-user dir, not to co-location with mux, plus why the name stays.
+
+**Severity:** low — a directory-scan consumer would have failed loudly in the
+verification run that was already queued, and no production scan exists, so the
+realistic cost was one failed 11s test run plus a redesign. The durable cost is the
+misleading test name, which no gate can catch.
+
+**Status:** fixed-verified — assumption confirmed by scout; name imprecision
+neutralised by comment; full suite green (18 binaries, 0 failed, 3307 lib tests).
+
+**Fix idea / Pointer:** `src/lsp/mux/mod.rs` `mux_dir()`; `src/socket_discovery.rs`
+test comment. Generalisable rule in W-25.
+
+## W-25 — Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place
+
+**Observed:** 2026-07-28, fixing the two-module lock-file leak
+(`docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md`).
+
+**Pattern:** When a fix changes *where* a file lives rather than *what* is in it,
+the blast radius is not the set of callers of the path helper — it is the set of
+code paths that locate the file *without* calling it. Two greps settle it:
+`read_dir|glob` over the source tree, and every caller of the path helper
+(`grep 'socket_path_for_workspace|lock_path_for_workspace'`). If the first is empty
+and the second is exhausted by the functions being changed, relocation is safe and
+the cheap `cfg(test)` redirect can stand.
+
+**Counterfactual:** Without this scout there were two bad branches. Defensive:
+reject `cfg(test)` and thread a directory parameter down through
+`LspManager::get_or_start` -> `get_or_start_via_mux` -> `claim_mux_lock`, putting a
+test-only concern in the LSP manager's public signature and requiring all 17
+leaking tests to opt in individually — versus the 3-line seam that actually shipped
+and fixed all 17 at once. Optimistic: ship the redirect and discover a scanner
+later, in a subsystem where mux sockets simply stop being found. The scout also
+surfaced two things the edit did not anticipate: the `#[ignore]`d wedged-mux test
+at `src/lsp/manager.rs:2350-2351` stops leaking for free, and the peer subsystem
+(`src/socket_discovery.rs:43-56`) shares the same real directory and the same
+latent exposure — no files on disk, so not leaking, but the third instance of this
+pattern if it is ever exercised.
+
+**Confirming data points:**
+1. F-33 (this session) — assumption verified only after the edit; held, but the
+   scout is what made it knowable, and it caught the misleading test name.
+2. W-6 (2026-05-24) — the read-side/write-side twin: normalizing writes without
+   scouting every read seam left six read-side boundaries broken, one
+   destructively. Same shape: a representation/location change whose blast radius
+   lives at the seams that *consume* the value, not the ones that produce it.
+
+**Impact:** med — saves one invasive-refactor-vs-cheap-seam misjudgement and one
+round of silent-discovery-breakage risk per relocation.
+
+**Promote-when:** A third relocation-shaped change (file path, socket path,
+collection name, cache key) where the scan-vs-compute question decides the design.
+At 3 datapoints, promote to the reconnaissance SKILL.md as a named seam class:
+*"Relocation seam — when a change moves where a thing lives, grep for
+discovery-by-scan before counting callers; a scan-based consumer is invisible to
+caller enumeration."* This is craft-shaped, not project-shaped (it holds for any
+language and any runtime directory), so the destination is the skill, not a
+project memory.
+
+**Status:** validated — single datapoint plus a same-shape precedent in W-6.
+Awaiting the third relocation case.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

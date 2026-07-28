@@ -1,7 +1,7 @@
 ---
 id: '1d2cc991f2ec2b1a'
 kind: bug
-status: open
+status: fixed
 title: index_lock and lsp/mux tests write lock files into the real per-user runtime dir and never clean up
 tags:
 - retrieval
@@ -226,44 +226,92 @@ indexer. An operator following the error message would chase a dead process.
 
 ## Fix
 
-Not implemented. Add a directory injection seam and point the tests at a `TempDir`:
+Shipped on `experiments` 2026-07-28. Two modules, two different correct seams —
+the distinguishing question is *who calls the path helper*.
 
-```rust
-pub fn lock_path_in(dir: &Path, project_id: &str) -> PathBuf { /* hash + join */ }
-pub fn lock_path(project_id: &str) -> PathBuf {
-    lock_path_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
-}
-pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> { /* ... */ }
-pub fn acquire(project_id: &str) -> Result<IndexLock> {
-    acquire_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
-}
-```
+**`src/retrieval/index_lock.rs` — parameter injection.** Added
+`lock_path_in(dir, project_id)` and `acquire_in(dir, project_id)`; `lock_path` and
+`acquire` delegate, passing `per_user_runtime_dir()`. The five leaking tests use a
+fresh `TempDir` via `acquire_in`. `unique_project` is deleted: with a scratch
+*directory* per test, isolation no longer depends on a per-run-unique *name*, so the
+ids are plain literals and there is nothing left to accumulate.
 
-**Do not fix this with an env-var override.** A `CODESCOUT_INDEX_LOCK_DIR` read via
-`std::env::set_var` in tests reintroduces the exact unsound pattern that bit this
-project twice in one session — see
-`docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md` and
-`docs/issues/2026-07-27-test-env-isolation-doc-prescribes-rejected-remedy.md`.
-Parameter injection is the pattern the codebase already uses for the embedder's
-test overrides; mirror that.
+**`src/retrieval/sync.rs` — the 7th file.** That test drives production
+`sync_project`, so no test-local seam reaches it. Added
+`SyncOpts::index_lock_dir: Option<PathBuf>` (`None` at every production call site,
+including `src/bin/sync_project.rs`). The load-bearing line became a `match`, still
+bound to `_index_lock`, so the `let _ =` mutation that
+`sync_project_holds_index_lock_for_its_full_duration` guards stays detectable. The
+test's lock dir is separate from its workspace root — otherwise the lock file lands
+inside the tree being indexed.
 
-With a `TempDir` the tests also no longer need `unique_project`'s PID/thread
-mangling for isolation — a per-test temp dir is the isolation — though keeping a
-readable tag is fine.
+**`src/lsp/mux/mod.rs` — a `cfg(test)` seam, deliberately not injection.** Here the
+callers that create the files are *production* code: 17 lib tests reach
+`claim_mux_lock` through `LspManager::get_or_start`. A parameter would put a test
+concern in the LSP manager's public signature and require all 17 tests to opt in
+individually. `mux_dir()` returns `per_user_mux_dir()` in production and a
+per-process scratch subdirectory *inside* it under `cfg(test)` — nested rather than
+in bare `temp_dir()` so the `0o700` protection still applies.
 
-Housekeeping for the existing 203 files: they live in tmpfs and vanish on logout, so
-no migration is needed. `rm /run/user/1000/codescout-index-*.lock` is safe while no
-indexer runs, and harmless even if one does (the holder keeps its fd; only the name
-disappears).
+**Plus a sweep, because relocation alone was only half a fix.** Each scratch dir
+still held 17 files, so total inodes per run were unchanged — only the shared
+directory got clean. `sweep_dead_test_mux_dirs` removes scratch dirs whose owning
+PID has exited, bounding the total to the number of *concurrently running* test
+processes. `pid_is_alive` uses `kill(pid, 0)` and treats `EPERM` as alive (the
+process exists but is not ours). Non-unix gets a no-op: no portable `kill(pid, 0)`,
+so keep the per-process dirs rather than risk removing a live one.
 
+That sweep is the only `read_dir` over the runtime directory in the tree — the very
+pattern a blast-radius scout greps for. It carries a comment saying so: the hit is
+*cleanup, not discovery* (it resolves nothing, no caller depends on what it finds),
+so a future relocation stays safe. See `docs/trackers/reconnaissance-patterns.md`
+R-45.
+
+**Measured, against a recorded baseline:**
+
+| | before | after |
+|---|---|---|
+| `codescout-index-*.lock` per run | +7 | **0** |
+| `codescout-rust-mux-*.lock` in the shared dir per run | +18 | **+1** |
+| scratch dirs | grew every run | **bounded at 1** |
+
+Gate: 18 binaries, 3433 passed, 0 failed, 44 ignored; `cargo clippy --all-targets
+-- -D warnings` clean.
+
+The residual +1 is the documented limit: `cfg(test)` covers unit tests only, and
+`tests/*.rs` link the lib built without it.
+
+Per CLAUDE.md the **master-side** SHAs go here after cherry-pick — the
+`experiments`-side originals orphan on rebase and are deliberately not recorded.
 ## Tests added
 
-None yet — no fix. When fixed, assert the seam rather than the leak: a test using
-`acquire_in(tempdir.path(), ...)` must create no file under
-`per_user_runtime_dir()`. That is the assertion a future refactor can actually
-violate; counting files in a shared directory would be flaky under concurrent
-`cargo test`.
+Three new tests, all asserting the **seam** rather than the symptom. Counting files
+in a shared directory would be flaky: a concurrent `cargo test`, or a genuine index
+run, can add one at any moment — which is exactly how the original diagnostic went
+wrong.
 
+- `acquire_in_does_not_touch_the_real_runtime_dir`
+  (`src/retrieval/index_lock.rs`) — asserts one specific path was never created and
+  that the lock is sited in the injected dir. Fails if `acquire_in` is ever reverted
+  to resolving the directory itself.
+- `socket_and_lock_share_a_parent_inside_the_per_user_dir`
+  (`src/lsp/mux/mod.rs`) — build-agnostic. The socket and lock MUST share a parent:
+  `get_or_start_via_mux` diagnoses "lock held but socket absent" as the wedged
+  state, and splitting them across directories breaks that diagnosis. Also pins the
+  dir inside `per_user_mux_dir()`, so re-siting to bare `temp_dir()` fails.
+- `test_builds_redirect_the_mux_dir_away_from_the_shared_one`
+  (`src/lsp/mux/mod.rs`) — asserts the redirect is actually active in the build where
+  it is supposed to be.
+
+The five rewritten `index_lock` tests keep their original assertions, including
+`preexisting_lock_file_does_not_block`'s two-mutation-killing planted content (live
+PID + a longer tail, which pins both the liveness-check and the missing-`set_len(0)`
+mutations).
+
+Not covered by a test: the sweep itself. Asserting "a dead PID's dir was removed"
+requires spawning and reaping a process whose PID then stays unreused, which is
+timing-dependent and flaky by construction. The `dirs` 2 -> 1 transition was
+verified by direct measurement instead, and is recorded in the table above.
 ## Workarounds
 
 `rm /run/user/1000/codescout-index-*.lock` between diagnostic sessions. To find the
@@ -272,11 +320,16 @@ this is fixed.
 
 ## Resume
 
-Add `lock_path_in` / `acquire_in` to `src/retrieval/index_lock.rs`, delegate the
-existing two functions to them, and switch the five tests in that module to a
-`tempfile::TempDir`. Then run `cargo test --lib index_lock` twice and confirm
-`ls /run/user/1000/codescout-index-*.lock | wc -l` is unchanged across both runs.
+N/A — fixed and verified. Two follow-ups, neither blocking:
 
+1. `peer_socket_path_for_workspace` / `peer_lock_path_for_workspace`
+   (`src/socket_discovery.rs:43-56`) resolve the same real directory with the same
+   latent exposure. Dormant only because no `codescout-peer-*` files exist on disk,
+   so it is not leaking today. If the peer path ever gets test coverage that drives
+   it, apply the same treatment. Logged as the third instance in
+   `docs/trackers/bug-fix-session-log.md` W-25.
+2. Archive this file only after the fix reaches `master`
+   (`git branch --contains <sha>`), per CLAUDE.md — not on this status flip.
 ## References
 
 - `src/retrieval/index_lock.rs` — `lock_path`, `acquire`, and the test module

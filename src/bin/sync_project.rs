@@ -23,6 +23,8 @@ async fn main() -> Result<()> {
         ignore_patterns: codescout::config::project::ProjectConfig::load_or_default(&root)
             .map(|c| c.ignored_paths.patterns)
             .unwrap_or_default(),
+        // Production: the lock is sited in the per-user runtime dir.
+        index_lock_dir: None,
     };
 
     eprintln!(

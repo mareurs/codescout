@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-45 | 2026-07-28 | hit | Relocating a file needs a discovery-by-scan grep; caller enumeration is blind to it (generalises R-44: `cfg` on a value → callers are the consumer set; `cfg` on a location → callers are half of it) | bug-fix F-33 + W-25 |
 | R-44 | 2026-07-25 | hit | The write-side twin of R-43: before accepting a proposed `#[cfg]` gate on a `pub mod` declaration, enumerate the CONSUMER set (`grep <mod>::|use .*<mod>` at workspace root, `context_lines=2`) and check whether the config being gated OUT is the one the plan's own tests or invariants live in. Gating a module is a subtree delete; the declaration site cannot show its blast radius. | dependency-review session F-3 + W-2; `src/retrieval/mod.rs:3` + 14 ungated `RetrievalClient` consumers; kin R-43/R-5/R-17 |
 | R-43 | 2026-07-25 | miss | An attribute-binding claim (`#[cfg]`, `#[serde(...)]`, `#[tokio::test]`) can never be made from a grep hit: grep prints matching lines with line numbers but ELIDES the gap between them, and an attribute binds to the *next item* — usually not itself a match. Read the region before asserting the binding. | dependency-review session; `src/retrieval/mod.rs:1-17` (cfg at L1/L12 bound to `artifact`/`qdrant`, not `embedder` L7 / `reranker` L14); caught by `cargo check` (16× E0433); kin R-19/R-5/R-3 |
 
@@ -1048,6 +1049,55 @@ miss, any work stream); the ledger entry carries it at n=1.
 `docs/trackers/dependency-review-session-log.md` F-3 + W-2; kin R-43 (read-side
 twin), R-5 (compiler backstop that would NOT have caught the dead test), R-17
 (sibling-caller spot-check).
+## R-45 — Hit: relocating a file needs a discovery-by-scan grep, which caller enumeration cannot substitute for
+
+**Verdict:** hit (ordering caveat — recon ran after the edit, before the gate).
+
+Fixing the two-module lock-file leak
+(`docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md`), the `lsp/mux`
+half changed *where* files live: `mux_dir()` returns a per-process scratch
+subdirectory of `per_user_runtime_dir()` under `cfg(test)`. Caller enumeration is
+the reflex for a signature change, and it was done — all four production sites of
+`socket_path_for_workspace` / `lock_path_for_workspace` resolve to
+`src/lsp/manager.rs:831-832` plus the `#[ignore]`d test at 2350-2351. But caller
+enumeration is structurally blind to the consumer that matters for a *relocation*:
+code that finds the file by scanning the directory never calls the path helper at
+all. A separate `read_dir|glob` grep over `src/**/*.rs` was required, and returned
+zero runtime-dir hits — which is what licensed the cheap 3-line seam over threading
+a directory parameter through `LspManager::get_or_start` and opting 17 tests in
+individually.
+
+Generalises R-44 ("a proposed `#[cfg]` gate needs its consumer set enumerated, not
+its declaration site read") by naming *which* consumer set: for a `cfg` gate on a
+**value**, callers are the consumer set; for a `cfg` gate on a **location**, callers
+are only half of it, and the invisible half is discovery-by-scan. Same shape as W-6
+(2026-05-24) one level up — a representation change whose blast radius sat at the
+read seams, not the write seams, and cost six broken boundaries including one
+destructive.
+
+The scout also produced two findings the edit had not anticipated: the `#[ignore]`d
+wedged-mux test stops leaking for free, and `peer_*_for_workspace`
+(`src/socket_discovery.rs:43-56`) shares the same real directory with the same
+latent exposure — dormant only because no `codescout-peer-*` files exist on disk.
+
+**Ordering caveat, recorded rather than smoothed over.** Recon was invoked after
+both edits were written and clippy was green. The assumption held, so nothing broke,
+but it was unverified at edit time. The tell that should have fired: the two halves
+of this fix are different seam classes — `index_lock`'s is a parameter addition
+(blast radius = callers, fully enumerable), the mux's is a relocation (blast radius
+includes non-callers). Treating them as one "same fix, same risk" unit is what
+deferred the scout.
+
+**Evidence:** `bug-fix-session-log.md` F-33 (ordering inversion + the misleading
+`peer_socket_differs_from_mux_and_shares_dir` name it left behind) and W-25 (the
+pattern, with both counterfactual branches costed). Verification: 18 binaries, 0
+failed, 3307 lib tests; index-lock leak 7→0 files per run, mux leak 18→1.
+
+**Promote-when:** a third relocation-shaped change (file path, socket path,
+collection name, cache key) where scan-vs-compute decides the design. Craft-shaped,
+not project-shaped — holds in any language with a shared runtime directory — so the
+destination is `SKILL.md` Phase 1 as a named seam class, not a project memory.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

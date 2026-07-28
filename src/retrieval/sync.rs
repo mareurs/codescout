@@ -16,6 +16,14 @@ pub struct SyncOpts {
     /// Glob/gitignore-style patterns to exclude from the index walk. Sourced from
     /// `config.ignored_paths.patterns`; an empty vec ignores nothing.
     pub ignore_patterns: Vec<String>,
+    /// Directory to site the per-project index lock in. `None` — every production
+    /// caller — resolves `per_user_runtime_dir()`.
+    ///
+    /// A test seam, and the only one available here: `sync_project` takes the lock
+    /// internally, so a test that drives it end-to-end otherwise writes into the
+    /// real runtime dir, and lock files are deliberately never unlinked. See
+    /// docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+    pub index_lock_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -231,7 +239,11 @@ impl crate::retrieval::client::RetrievalClient {
         //
         // Bound to `_index_lock` (not `_`) so it lives until the end of this
         // function — `let _ = ...` would drop it immediately and release the lock.
-        let _index_lock = crate::retrieval::index_lock::acquire(project_id)?;
+        // Guarded by `sync_project_holds_index_lock_for_its_full_duration`.
+        let _index_lock = match opts.index_lock_dir.as_deref() {
+            Some(dir) => crate::retrieval::index_lock::acquire_in(dir, project_id)?,
+            None => crate::retrieval::index_lock::acquire(project_id)?,
+        };
 
         let started = std::time::Instant::now();
         let collection = self.config.collection("code_chunks");
@@ -702,9 +714,9 @@ mod tests {
         }
     }
 
-    /// Regression guard for the index-lock wiring in `sync_project`
-    /// (`let _index_lock = crate::retrieval::index_lock::acquire(project_id)?;`
-    /// at the top of the function). Binding the acquired guard to `_` instead
+    /// Regression guard for the index-lock wiring in `sync_project` (the
+    /// `let _index_lock = ...acquire_in/acquire(project_id)?;` at the top of the
+    /// function). Binding the acquired guard to `_` instead
     /// of `_index_lock` compiles clean and passes every OTHER retrieval test,
     /// but drops the guard immediately — releasing the flock right away
     /// instead of holding it for the sync pass — which is exactly how the
@@ -723,14 +735,17 @@ mod tests {
     #[tokio::test]
     async fn sync_project_holds_index_lock_for_its_full_duration() {
         let dir = tempfile::tempdir().unwrap();
-        let project_id = format!(
-            "test-sync-lock-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        );
+        // A dir of its own, not `dir`: the lock must not land inside the tree
+        // being indexed. Also the reason `project_id` can be a plain literal —
+        // the scratch dir, not the id, is what isolates concurrent runs.
+        let lock_dir = tempfile::tempdir().unwrap();
+        let project_id = "test-sync-holds-index-lock".to_string();
 
         let client = test_retrieval_client(SlowEnsureStore);
-        let opts = SyncOpts::default();
+        let opts = SyncOpts {
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
         let pid = project_id.clone();
         let root = dir.path().to_path_buf();
         let handle = tokio::spawn(async move { client.sync_project(&pid, &root, opts).await });
@@ -739,7 +754,7 @@ mod tests {
         // ensure_collection's 300ms sleep, but stay well inside that window.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let contended = crate::retrieval::index_lock::acquire(&project_id);
+        let contended = crate::retrieval::index_lock::acquire_in(lock_dir.path(), &project_id);
         assert!(
             contended.is_err(),
             "sync_project's index-lock guard must still be held while the call is in flight"

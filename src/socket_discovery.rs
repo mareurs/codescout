@@ -60,6 +60,17 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    // "shares_dir" here means the PEER socket sits directly in
+    // `per_user_runtime_dir()` — it is not a claim that peer and mux are
+    // co-located. Since 2026-07-28 they are not: `lsp::mux::mux_dir()` redirects
+    // to a per-process scratch subdirectory under `cfg(test)` so unit tests stop
+    // leaking mux lock files into the shared runtime dir
+    // (docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md). The
+    // assertions below only ever concerned the peer path, so they still hold.
+    //
+    // Name kept despite the imprecision: it is cited as a copy-pasteable
+    // `cargo test` invocation in
+    // docs/superpowers/plans/2026-06-01-peer-delegation-phase1.md:105.
     #[test]
     fn peer_socket_differs_from_mux_and_shares_dir() {
         let root = Path::new("/home/u/projB");
