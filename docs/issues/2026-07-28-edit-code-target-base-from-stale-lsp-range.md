@@ -129,7 +129,8 @@ every line to column 4 and the result was correct. That is the tell for *this* b
 versus its sibling: a uniform shift with no multi-line literal present is fully
 recoverable by the formatter, and therefore invisible in the committed diff. Had the
 body contained a multi-line literal, the literal's interior would have kept the +4 (the
-`2026-07-28-edit-code-reindent-shifts-string-literal-contents` mechanism) and the two
+`docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`
+mechanism) and the two
 bugs would have compounded.
 
 ## Hypotheses tried
@@ -177,8 +178,9 @@ would pass for the wrong reason once `cargo fmt` runs.
 
 - Run `cargo fmt` after any `edit_code` insert. It fully repairs a uniform shift so long
   as the body contains no multi-line string literal.
-- Avoid multi-line string literals in submitted bodies (already required by
-  `2026-07-28-edit-code-reindent-shifts-string-literal-contents`) — that keeps this bug
+- Avoid multi-line string literals in submitted bodies (required by
+  `docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`
+  until its fix reaches the release binary) — that keeps this bug
   in the recoverable class instead of letting the two compound.
 - When a call returns a `range_repair` warning, treat the written column as unverified
   and read the region back.
@@ -196,10 +198,9 @@ one.
 - `src/tools/symbol/edit_code.rs:808-814` — `sibling_line` / `target_base` / `reindent_to`
 - `src/tools/symbol/edit_code.rs:802` — the disk read that `lines` comes from
 - `src/symbol/edit.rs:43-44` — `editing_start_line` indexing `lines[r]` from `sym.range_start_line`
-- `docs/issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md` — the
-  sibling defect this one compounds with
+- `docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md` —
+  the sibling defect this one compounds with, fixed in `79cd1428`
 - `docs/issues/archive/2026-07-19-edit-code-insert-after-lands-mid-statement.md` — same
   stale/repaired-range family, but the insert *position* rather than the column
 - `docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md` — earliest
   stale-LSP-range entry in this family
-

@@ -165,8 +165,8 @@ rustfmt fix what it can".
 
 ## Fix
 
-Fixed on `experiments` — **option 2**, the literal-span-aware reindent, plus the guard
-repair option 1 described. Both, because they close different halves of the surface.
+Applied in `79cd1428` (branch `experiments`) — **option 2**, the literal-span-aware
+reindent, plus the guard repair option 1 described. Both, because they close different halves of the surface.
 
 `src/util/text.rs` gains a small literal scanner:
 
