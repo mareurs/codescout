@@ -24,6 +24,40 @@ severity: medium
 # BUG: `symbols` overview mode silently ignores `include_body=true`; search mode occasionally 0-matches then succeeds on retry
 
 ## Summary
+> **RETRACTED 2026-07-28, later the same day — the narrowing below is WRONG, and
+> Bug A is closed.**
+>
+> `symbols(path=<dir>, include_body=true)` **does** honor the flag. Re-ran the exact
+> reproduction live against `src/peer`: **43 of 43 symbols carry a `body`**, doc
+> comments included. Three independent signals said so and the verify pass consulted
+> none of them — the 07-19 regression test
+> `symbols_overview_honors_explicit_include_body_true` asserts
+> `files[0].symbols[0].body` on the directory-scan branch specifically and has been
+> green throughout; all three `list_overview.rs` branches read
+> `optional_bool_param(&input, "include_body")` and thread it into `symbol_to_json`;
+> and the response's own `buffered_bytes` was **56 915** — 43 symbols of names and
+> line numbers are not 56 KB.
+>
+> What happened: the pass read the **compact summary** and took it for the result. The
+> summary is a ~2 KB line-oriented preview that cannot render a body at any size; the
+> full result sat in a `@tool_*` buffer named in the same response. This is the
+> anti-pattern `docs/PROGRESSIVE_DISCLOSURE.md` lists by name — *"Treating the summary
+> as authoritative. It's a preview, not the whole result"* — hit during the one
+> activity whose entire purpose is to avoid it.
+>
+> A real defect survives one layer over, and is now fixed: `Symbols::json_path_hint`
+> checked only the search-mode shape, so an overview carrying bodies advertised
+> `$.files`, indistinguishable from an overview carrying none. For a buffered result
+> that hint is the *only* signal in the envelope that `include_body=true` was honored.
+> See *Fix*.
+>
+> **Bug B — search-mode intermittent 0-matches — remains open and unconfirmed.** It is
+> the only reason this file is still open.
+>
+> The retracted text is kept verbatim below, unedited, for the record.
+>
+> ---
+>
 > **SCOPE NARROWED 2026-07-28 by a verify-open pass — still open, but half as wide.**
 >
 > The `include_body` claim is now **file-vs-directory dependent**, and only the
@@ -229,6 +263,29 @@ shortly after a `workspace(action="activate")` call in the same turn sequence.
    Rejected — verified the exact same string was used in both the failing and succeeding
    calls (copy-pasted from the earlier failing call for the retry).
 
+## Fix (2026-07-28): make a buffered envelope disclose that bodies are present
+
+Bug A needed no fix — it was fixed on 07-19 and the flag has been honored since. The
+defect the retraction exposed is one layer over, in disclosure rather than behaviour:
+nothing in a buffered response told the caller that bodies were included.
+
+`Symbols::json_path_hint` already pointed at `$.symbols[0].body` when a *search-mode*
+result carried one. Overview mode nests a level deeper (`files[].symbols[].body`), so the
+check fell through and the hint read `$.files`. Two responses that differ by 50 KB of
+bodies produced byte-identical envelopes: same shape of summary, same hint.
+
+Now it scans the `files` array for the first entry with a body and returns
+`$.files[<i>].symbols[0].body`. Scanning rather than checking `files[0]` matters in
+practice — a directory scan routinely leads with a `mod.rs` of bare re-exports, or a file
+the language detector skipped, and checking only the first entry reproduces the same false
+negative one index over.
+
+Deliberately *not* done: adding a body-present note to the compact summary. The summary is
+truncated to a hard cap, so a note appended there is exactly what disappears on the large
+results that most need it, and `format_compact` also feeds the non-buffered render where
+the claim would be wrong. The hint is not truncated and exists to answer "what do I read
+next", which is the question being answered.
+
 ## Fix
 
 **Bug A:** In `list_overview.rs`, replace all three occurrences of
@@ -247,6 +304,21 @@ generic, is to honor it.
 (N parallel `symbols(name=X)` calls immediately post-activation, repeated across several
 projects/runs) before a fix can be targeted. Recommend `status: open` rather than
 `investigating` until someone has bandwidth to build that harness.
+
+## Tests added (2026-07-28)
+
+Two in `src/tools/symbol/tests.rs`, both asserting the hint *string* rather than the
+presence of bodies — the bodies were never missing, the disclosure was:
+
+- `symbols_json_path_hint_points_at_a_body_in_both_response_shapes` — all four
+  combinations of {search, overview} × {body, no body}. The overview-with-body assertion
+  carries the reason in its failure message: pointing at `$.files` reads as "no bodies".
+- `symbols_json_path_hint_scans_past_leading_files_without_bodies` — a leading file with
+  an empty `symbols` array, asserting the hint reaches `$.files[1].symbols[0].body`.
+
+The 07-19 regression test `symbols_overview_honors_explicit_include_body_true` was left
+alone. It was correct, it covered the directory branch, and it was green the whole time —
+changing it would obscure that the test did its job and the reader did not.
 
 ## Tests added
 

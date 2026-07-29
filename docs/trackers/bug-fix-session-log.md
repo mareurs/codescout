@@ -79,6 +79,7 @@ time_scope: open-ended
 | F-31 | 2026-07-07 | med | self-friction | fixed-verified | Memory-tool project-scoping bug blocked reading the documented Windows binary-lock ("MCP Binary Symlink") gotcha mid-task, forcing rediscovery from scratch |
 | F-32 | 2026-07-08 | med | self-friction | fixed-verified | `edit_code` rewrite of a test fn dropped a trailing assertion line that sat just outside an earlier batch-read's line-range window |
 | F-34 | 2026-07-28 | med | plan-prose | fixed-verified | My own bug file's "cheapest" fix option would have broken `filter_sections_nested_h4_included_in_body`; its "cannot break language-patterns.md" claim was exactly backwards, and it ignored H1 entirely |
+| F-38 | 2026-07-28 | med-high | self-friction | fixed-verified | A verify-open pass read `symbols`' compact summary as the whole result and filed "directory overview silently drops include_body" — 43/43 symbols had bodies in the 56 KB buffer named in the same response; the fix it recommended was premised on their absence |
 | F-37 | 2026-07-28 | med | self-friction | fixed-verified | Filed a bug file whose `## Root cause` asserted a mechanism the code does not support — read both ends of a call chain (`target_base` write site, `editing_start_line`'s field) and inferred the middle, missing the `validate_symbol_position` guard that sits between them |
 | F-36 | 2026-07-28 | med | self-friction | fixed-verified | The literal-scanner fix I had just shipped missed the commonest Rust multi-line-string form (plain `"` + raw newline); all six of its tests reused the bug report's `"\` shape, so the suite sampled one point of the class six times |
 | F-35 | 2026-07-28 | low | self-friction | fixed-verified | Two doc comments I had just written made claims the code did not support (an unreachable fallback described as reachable; "reindents nothing" where the opener still shifts) — no gate can catch a doc comment that overstates a guarantee |
@@ -112,6 +113,7 @@ time_scope: open-ended
 | W-21 | 2026-07-07 | high | Grep the raw tracker file for the true max F-N/W-N before allocating a new ID — don't trust `artifact(get)`'s headings/body for large trackers | `artifact(get, full=false)`'s preview.headings for this tracker stopped at F-7 and `get(full=true)`'s body silently truncated at 499/1739 lines, both with no truncation flag; trusting either would have allocated "F-8"/"W-5", colliding with the 20 entries (F-8..F-27, W-5..W-20) actually in the file | validated |
 | W-22 | 2026-07-08 | high | Diff every converted file against its pre-edit body before running tests, not after — a green suite doesn't prove fixture fields transcribed correctly | `git diff` review caught 2 silent field-omission bugs (`refresh_stale.rs` missing `file_sha256`; `constitution_check.rs` missing both `abs_path` and `file_sha256`) in the `ArtifactRow` builder migration before any test ran or commit landed — neither field is asserted by the affected tests, so `cargo test` would have stayed green with wrong fixture data | validated |
 | W-23 | 2026-07-07 | high | Running full `cargo test --lib` after a single targeted fix, not just the touched test | 6 tests were still red after the ads_colon-only fix (2858/6); 1 of them was a REAL shipped production bug (SwitchAway hint mixing forward-slash + backslash paths in one sentence, `src/tools/config/mod.rs`), not test rot — narrow scoping would have shipped it untouched | validated |
+| W-30 | 2026-07-28 | high | Re-run a bug file's reproduction against the live tool before choosing between its fix options — and read the buffer, not the summary | Both offered options were premised on bodies being absent; implementing either would have documented in code that directory overviews cannot carry bodies, contradicting a green regression test. The re-run collapsed the decision to "no change needed" and exposed the real defect: json_path_hint checked only the search-mode shape, so 50 KB of bodies advertised `$.files` | validated |
 | W-29 | 2026-07-28 | high | Re-scout your own bug file's root cause before implementing its fix; when it cites two functions, read the layer between them | Would have shipped real work aimed at an unproven cause, closed the file with a misdirecting root-cause section, AND left the genuinely broken thing broken — the re-scout is what found `editing_start_line`'s discard-the-walk-back path sampling the column from a ` * ` comment continuation, one column deep, unrelated to LSP staleness | validated |
 | W-28 | 2026-07-28 | med-high | Write the end-to-end verification fixture the way a user naturally would, not the way the bug report did — then trace the fix over it before running | Seven green tests, an archived bug file and a commit message claiming the literal class would all have shipped over a still-corrupting majority form. The next person to hit it would hit it as a new bug against a closed one, whose own evidence argued the mechanism was already understood | validated |
 | W-27 | 2026-07-28 | med | Enumerate a shared helper's callers to decide WHERE a fix belongs, not just its blast radius | The bug file's own preferred fix sat in `reindent_to`; enumeration found `reindent_block`'s second production caller (`edit_file/mod.rs:747`) with the same defect, reachable without passing through `reindent_to`. That path guards writes with `has_syntax_errors`, which returns clean on a shifted literal — the bug would have stayed open behind a green gate, a closed bug file, and a passing syntax check | validated |
@@ -2456,6 +2458,105 @@ acquires the authority of a record the moment it is committed."*
 
 **Status:** validated — fix landed on verified grounds; the entry it came from is now
 `mitigated` with an honest not-reproduced note.
+
+## F-38 — A verify-open pass filed a false narrowing by reading a compact summary as the result
+
+**Observed:** 2026-07-28, re-running the reproduction in
+`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` before
+deciding between its two proposed fixes.
+
+**When:** Earlier the same day, a verify-open pass on that bug file had narrowed its scope
+and committed the narrowing.
+
+**Expected (what the verify pass recorded, as a table, as fact):**
+
+| call | `include_body=true` honored? |
+|---|---|
+| `symbols(path=<file>, include_body=true)` | yes |
+| `symbols(path="src/peer", include_body=true)` | **no** — no bodies, no hint the flag was dropped |
+
+**Got (re-run live):** 43 of 43 symbols carry a `body`, doc comments included. The flag is
+honored. The pass had read the **compact summary** — a ~2 KB line-oriented preview that
+cannot render a body at any size — and taken it for the whole result, while the full
+result sat in a `@tool_*` buffer named in the same response.
+
+**Probable cause:** the summary of a body-bearing overview and the summary of a body-less
+one are the same shape, and at the time so were their hints (see W-30). But three signals
+were available and none was consulted:
+
+1. `buffered_bytes: 56915` in the same response object. 43 symbols of names and line
+   numbers are not 56 KB.
+2. The `hint` field naming the buffer, which is what the envelope exists to say.
+3. `symbols_overview_honors_explicit_include_body_true`, a regression test added 07-19
+   that asserts `files[0].symbols[0].body` on the **directory-scan** branch specifically,
+   green the entire time.
+
+`docs/PROGRESSIVE_DISCLOSURE.md` lists this by name under Anti-patterns — *"Treating the
+summary as authoritative. It's a preview, not the whole result. Pull from the buffer before
+drawing conclusions."* Knowing the rule did not help; the summary reads as an answer.
+
+**Workaround:** retracted the narrowing in place, kept the wrong text verbatim under a
+retraction header, and closed Bug A. Bug B (search-mode intermittent 0-matches) is
+unaffected and is now the only reason the file is open.
+
+**Severity:** med-high — the wrong finding was committed, and it *pointed the fix in the
+opposite direction*. The file's own framing was "if the drop is a deliberate size guard,
+the defect is the silence, and the fix is an overflow hint rather than honoring the flag."
+Both branches of that sentence are premised on bodies being absent. Implementing either
+would have added machinery around a flag that already worked.
+
+**Status:** fixed-verified — retracted, Bug A closed, and the real adjacent defect fixed
+(W-30) with two tests.
+
+**Fix idea / Pointer:** fifth instance this session of one shape — concluding from a view
+that had silently excluded something. Lock files filtered by a liveness check, then the
+filtered list reused; `pgrep | tail -1` picking an orphan rather than the live server; a
+SHA census matching frontmatter `id:` values as commits; `ls | wc -l` counting
+`.anchors.toml` sidecars as memories; and this. See R-50 — *the view is not the set*.
+
+## W-30 — Re-run the reproduction against the live tool before choosing between a bug file's fix options
+
+**Observed:** 2026-07-28, deciding whether `symbols(path=<dir>, include_body=true)` should
+honor the flag or emit an overflow hint — the two options its bug file laid out.
+
+**Pattern:** When a bug file asks you to choose between fixes, **re-run its reproduction
+first**, and read the *buffer*, not the summary. A tool call is cheap, current, and
+authoritative in a way that both the file and the source read are not. Then let the byte
+count arbitrate: an envelope reporting `buffered_bytes` far larger than the summary could
+account for is telling you the summary is not the result.
+
+Here the re-run collapsed the whole question. Neither option was needed — the flag was
+already honored, 43/43 symbols with bodies — and both would have added machinery around
+working behaviour.
+
+**Counterfactual:** Without the re-run, the plausible path was: implement the overflow
+hint the file recommended, ship it, close the bug — and thereby *document in code* that
+directory overviews cannot carry bodies, which is false and which the 07-19 regression test
+directly contradicts. A future reader would then have a hint, a closed bug file, and a
+passing test making opposite claims, with the hint being the one they see at runtime.
+
+The re-run also produced the fix that was actually needed, which no amount of reading
+would have: with the real envelope in front of me, the missing signal was obvious.
+`Symbols::json_path_hint` checked only the search-mode shape, so an overview carrying 50 KB
+of bodies advertised `$.files` — byte-identical to one carrying none. For a buffered
+result that hint is the only body signal in the envelope. Fixed to scan `files` for the
+first entry with a body; two tests.
+
+**Confirming data points:**
+1. This session — re-running collapsed a two-option design decision into "no change
+   needed", and surfaced the real defect one layer over.
+2. W-29 (same session) — re-scouting a bug file's root cause before implementing found it
+   unsupported, and likewise turned up a different real defect nearby. Same shape: the
+   artifact was stale, the substrate was not.
+
+**Impact:** high — one tool call replaced a design decision, prevented shipping a hint
+asserting something false, and located the genuine defect.
+
+**Promote-when:** at 2 datapoints with W-29. Both say the same thing from different angles:
+**on re-entry, prefer the substrate over the artifact** — re-run the reproduction, re-scout
+the root cause. Promote jointly to the reconnaissance skill rather than separately.
+
+**Status:** validated.
 
 ## Template for new entries
 

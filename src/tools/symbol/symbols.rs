@@ -322,19 +322,37 @@ impl Tool for Symbols {
     }
 
     fn json_path_hint(&self, val: &Value) -> String {
-        let has_body = val["symbols"]
+        // Point at a body whenever one is present, in either response shape. The
+        // compact summary is line-oriented and cannot show a body at any size, so
+        // this hint is the only signal in the envelope that `include_body=true` was
+        // honored. Checking only the search-mode shape made a directory overview
+        // with bodies look identical to one without — a body-less preview read as a
+        // body-less result, and this was twice mistaken for the flag being dropped.
+        let search_body = val["symbols"]
             .as_array()
             .and_then(|a| a.first())
             .map(|s| s["body"].is_string())
             .unwrap_or(false);
-        if has_body {
+        if search_body {
             return "$.symbols[0].body".to_string();
+        }
+        if let Some(files) = val["files"].as_array() {
+            // Overview mode nests one level deeper, and an early file may legitimately
+            // have no symbols at all, so scan rather than checking only the first.
+            let with_body = files.iter().position(|f| {
+                f["symbols"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .map(|s| s["body"].is_string())
+                    .unwrap_or(false)
+            });
+            if let Some(i) = with_body {
+                return format!("$.files[{i}].symbols[0].body");
+            }
+            return "$.files".to_string();
         }
         if val["symbols"].is_array() {
             return "$.symbols".to_string();
-        }
-        if val["files"].is_array() {
-            return "$.files".to_string();
         }
         if val["subdirectories"].is_array() {
             return "$.subdirectories".to_string();

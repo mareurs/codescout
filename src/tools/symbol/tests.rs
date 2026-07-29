@@ -955,6 +955,47 @@ async fn symbols_overview_honors_explicit_include_body_true() {
     );
 }
 
+/// The compact summary is line-oriented and cannot render a body at any size, so for a
+/// buffered result this hint is the ONLY thing in the envelope saying `include_body=true`
+/// was honored. It used to check the search-mode shape alone, which made a directory
+/// overview *with* bodies indistinguishable from one without — the flag was twice reported
+/// as silently dropped when the bodies were sitting in the buffer all along, most recently
+/// by a verify-open pass on that very bug file.
+#[test]
+fn symbols_json_path_hint_points_at_a_body_in_both_response_shapes() {
+    let search_with_body = json!({"symbols": [{"name": "f", "body": "fn f() {}"}]});
+    assert_eq!(
+        Symbols.json_path_hint(&search_with_body),
+        "$.symbols[0].body"
+    );
+
+    let search_no_body = json!({"symbols": [{"name": "f"}]});
+    assert_eq!(Symbols.json_path_hint(&search_no_body), "$.symbols");
+
+    let overview_with_body =
+        json!({"files": [{"path": "a.rs", "symbols": [{"name": "f", "body": "fn f() {}"}]}]});
+    assert_eq!(
+        Symbols.json_path_hint(&overview_with_body),
+        "$.files[0].symbols[0].body",
+        "an overview carrying bodies must advertise one; pointing at $.files reads as 'no bodies'"
+    );
+
+    let overview_no_body = json!({"files": [{"path": "a.rs", "symbols": [{"name": "f"}]}]});
+    assert_eq!(Symbols.json_path_hint(&overview_no_body), "$.files");
+}
+
+/// A directory scan routinely leads with a `mod.rs` of bare re-exports or a file the
+/// language detector skipped. Checking only `files[0]` would report "nothing here" for a
+/// result that is mostly bodies — the same false negative, one index over.
+#[test]
+fn symbols_json_path_hint_scans_past_leading_files_without_bodies() {
+    let val = json!({"files": [
+        {"path": "mod.rs", "symbols": []},
+        {"path": "a.rs", "symbols": [{"name": "f", "body": "fn f() {}"}]}
+    ]});
+    assert_eq!(Symbols.json_path_hint(&val), "$.files[1].symbols[0].body");
+}
+
 #[tokio::test]
 async fn symbols_overview_small_tree_recurses_fully() {
     // When targeting a specific subdirectory with a small file count (≤ RECURSE_SMALL),

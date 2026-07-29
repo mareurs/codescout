@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-50 | 2026-07-28 | miss → rule | **The view is not the set.** Five distinct errors in one session share one shape: concluding from an enumeration that had silently excluded something. A liveness filter, then reusing the filtered list; `pgrep \| tail -1` picking an orphan not the live server; a SHA census matching frontmatter `id:` as commits; `ls \| wc -l` counting `.anchors.toml` sidecars as memories; a compact summary read as a whole result. Before concluding from a list, name what the view dropped — filter, cap, preview, or a pattern that matched the wrong tokens | bug-fix F-38 + W-30; also F-33/F-35 and the four corrections listed in-entry; kin R-10 (completeness scout), R-26/R-27 |
 | R-49 | 2026-07-28 | hit | Re-scout your OWN bug file / plan before implementing it — an artifact written during the observation is a hypothesis that acquires the authority of a record the moment it is committed. When a root cause cites two functions, read the layer BETWEEN them: a chain's middle is where the guards live, and a mechanism inferred from its two ends will never mention them. Three failures of session-authored artifacts in one session (inverted fix option, overstated doc guarantee, unsupported root cause) | bug-fix F-37 + W-29, F-34/W-26, F-35; issues/2026-07-28-edit-code-target-base-from-stale-lsp-range (mitigated); kin R-32/R-46 |
 | R-48 | 2026-07-28 | hit | A fix built from a bug report's reproduction inherits that reproduction's blind spots, and a test suite written against the same fixture inherits them too — seven tests all reused the report's `"\` shape and none could see that a plain `"` + raw newline (the commoner Rust form) was unprotected. Found by writing the end-to-end fixture the *natural* way and tracing the fix over it before running. For a syntax-level fix, enumerate the language's other syntaxes for the same construct before closing | bug-fix F-36 + W-28; issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents; kin R-26/R-27 (read ≠ verified), R-46 |
 | R-47 | 2026-07-28 | hit | Enumerate the callers of every function in the chain a fix touches, not only the symbol the report names — the report walked one call path. `reindent_to`'s 3 callers were all `edit_code`, but its delegate `reindent_block` had a second production caller (`edit_file/mod.rs:747`) with the same defect, reached without passing through `reindent_to`. Relocating the fix one level down doubled the surface closed at the same size of change | bug-fix W-27; issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents (archived, `79cd1428`); kin R-17/R-31/R-44 |
@@ -1313,6 +1314,65 @@ is `SKILL.md` Phase 1: *"re-entering your own bug file or plan to implement it c
 seam — scout the root cause again; and when it cites two functions, read the layer between
 them."* Pairs naturally with the existing "plan code looks fictional" row in the
 composition table, which covers someone else's plan but not your own.
+
+## R-50 — The view is not the set: five errors, one shape
+
+**Verdict:** miss → rule. Recon did not prevent these; they were caught downstream, each
+by a different accident. The value is in the shape they share.
+
+Five distinct wrong conclusions in a single session, each from a *view* of a set mistaken
+for the set:
+
+| what was read | what the view excluded | wrong conclusion |
+|---|---|---|
+| lock files filtered by a `kill -0` liveness check | a real lock whose process had just exited | "no lock ⇒ not indexing" |
+| `pgrep … \| tail -1` | PID order is not start order; 17 other servers | "the config change did not take effect" |
+| a SHA census matching 16-hex tokens | frontmatter `id:` values are also 16-hex | 80 experiments-only SHAs (really 49) |
+| `ls \| wc -l` on the memories dir | `.anchors.toml` sidecars, two subdirs | "33 files vs 21 topics — a 12-file gap" |
+| a tool's compact summary | ~54 KB of bodies in the buffer it named | "directory overview drops `include_body`" |
+
+Every one produced a *confident, specific, checkable* claim. None was a vague guess — which
+is the point: a filtered view yields precise wrong answers, and precision reads as rigour.
+Three of the five were committed before being caught.
+
+**The rule.** Before concluding from an enumeration, name what the view dropped. Four
+recurring droppers, in rough order of how often they bite:
+
+1. **A filter you applied** — and then reused the filtered output as if it were the source.
+   The `kill -0` case: the filter was correct, reusing its output as the population was not.
+2. **A cap or a truncation** — `head`, `tail`, `limit`, a preview, a hard byte budget. `tail
+   -1` of an unordered list is a random element, not "the newest".
+3. **A pattern matching more than you meant** — `[0-9a-f]{16}` matches commit SHAs *and*
+   artifact ids; `*` matches sidecars and directories. Validate a token's identity before
+   counting it (`git cat-file -e <tok>^{commit}`, `find -name '*.md'`).
+4. **A rendering layer** — a summary, a compact form, a display-time transform. The
+   codescout-specific instance: every buffered response reports `buffered_bytes` and names
+   an `@ref`; if the byte count exceeds what the summary could account for, the summary is
+   not the result. That number is the cheapest completeness check available and it is
+   already in the response.
+
+**Cheapest counters**, all one command: count the population two ways and compare;
+validate one sampled token's identity; read the buffer rather than the preview; sort by the
+key you actually mean rather than the one that is convenient.
+
+Relation to kin entries: R-10 is the ancestor — "buffered artifact body parsed for
+structured extraction without a completeness scout" — and R-50 generalises it from buffers
+to every view. R-26/R-27 ("read ≠ verified") is adjacent but distinct: there the failure is
+not checking at all; here it is checking a surface that answers a narrower question than
+the one asked, which is harder to notice precisely because a check *did* happen.
+
+**Evidence:** `bug-fix-session-log.md` F-38 + W-30 for the fifth row, which is the only one
+with a code fix attached (`Symbols::json_path_hint` now advertises a body in the overview
+shape, two tests). Rows 1–4 were corrected in `acd001fb`, this session's env-drift
+investigation, the archived-bug SHA census, and a near-miss caught before reporting.
+
+**Promote-when:** the count is the argument — five instances in one session is already past
+any reasonable threshold, and the four droppers above are craft-shaped (true of any shell,
+any tool, any language). Promote to `SKILL.md` Phase 1 as a scouting bullet: *"before
+concluding from an enumeration, name what the view dropped — a filter you applied, a cap, a
+pattern matching more than you meant, or a rendering layer. A filtered view yields precise
+wrong answers."* The codescout-specific corollary (check `buffered_bytes` before trusting a
+summary) is project-shaped and belongs in the `reconnaissance` memory instead.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
