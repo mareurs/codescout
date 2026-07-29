@@ -568,6 +568,84 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     None
 }
 
+/// Remove heredoc bodies from a command before IL3 inspects it.
+///
+/// IL3 analyses the command as text, and a heredoc body is part of that text —
+/// so a `git commit -F - <<'EOF' … EOF` whose *message* describes a piped
+/// command trips the gate on a pipe the shell never interprets. The body is
+/// data, not syntax; `<<'EOF'` is even single-quoted, so not so much as
+/// parameter expansion applies to it.
+///
+/// Both the body and its terminator line are dropped. `<<<` (here-string) takes
+/// no body and is left alone.
+fn strip_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
+    if !command.contains("<<") {
+        return std::borrow::Cow::Borrowed(command);
+    }
+    static HEREDOC_OPEN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = HEREDOC_OPEN.get_or_init(|| {
+        Regex::new(r#"<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))"#)
+            .expect("HEREDOC_OPEN regex compiles")
+    });
+
+    let mut out = String::with_capacity(command.len());
+    let mut awaiting: Option<String> = None;
+    for line in command.lines() {
+        if let Some(delim) = awaiting.as_deref() {
+            // A heredoc terminator is the delimiter alone on its line; `<<-` allows
+            // leading tabs, and trimming covers both forms.
+            if line.trim() == delim {
+                awaiting = None;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        // `<<<word` would otherwise match the opener pattern starting one byte in.
+        if !line.contains("<<<") {
+            if let Some(c) = re.captures(line) {
+                awaiting = c
+                    .get(1)
+                    .or_else(|| c.get(2))
+                    .or_else(|| c.get(3))
+                    .map(|m| m.as_str().to_string());
+            }
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// Split a command into independently-piped segments at top-level `;`, `&&`, `||`.
+///
+/// Without this, `a; b | head` is analysed as one pipeline whose left-hand side is
+/// `a; b` — so a chain that merely *starts* with an unbounded producer is blocked
+/// because some later, unrelated segment happens to pipe into a trimmer. A single
+/// `|` is a pipe and stays inside its segment; `||` is a boundary.
+fn pipeline_segments(command: &str) -> Vec<&str> {
+    let bytes = command.as_bytes();
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // `;`, `&&`, `||` separate commands. `2>&1` must not read as `&&`, and a
+        // lone `|` must not read as `||` — both are handled by the lookahead.
+        let width = match bytes[i] {
+            b';' => 1,
+            b'&' if bytes.get(i + 1) == Some(&b'&') => 2,
+            b'|' if bytes.get(i + 1) == Some(&b'|') => 2,
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        segments.push(&command[start..i]);
+        i += width;
+        start = i;
+    }
+    segments.push(&command[start..]);
+    segments
+}
+
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
 /// command's output to a **trimmer** that hides a subset of it
 /// (`tail`/`head`/`grep`/`less`/`sed`/`awk`/`cut`/`sort`/`uniq`/`tr`/`fmt`).
@@ -610,12 +688,39 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
 /// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
 /// Mirrors the regex in `codescout-companion/hooks/il3-deny-hook.sh`.
 pub fn detect_il3_violation(command: &str) -> Option<String> {
+    // Analyse shell *structure*, not the raw string: drop heredoc bodies (data, not
+    // syntax) and consider each `;`/`&&`/`||`-separated command on its own. Both
+    // were real false positives — a commit message describing a pipe, and a
+    // `;`-chain whose first word happened to be `git`.
+    let stripped = strip_heredoc_bodies(command);
+    let lead = pipeline_segments(&stripped)
+        .into_iter()
+        .find_map(il3_offending_lead)?
+        .trim()
+        .to_string();
+
+    Some(format!(
+        "IL3 violation — piped `{command}` to a log-trimmer. BLOCKED.\n\n\
+         The @cmd_* buffer system saves context tokens:\n  \
+         1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
+         2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
+                                                    (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
+         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
+         as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
+         Only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) piped to a\n\
+         trimmer (head, tail, grep, sort, ...) is blocked.\n\n\
+         Rerun the command bare and query the returned @cmd_* buffer."
+    ))
+}
+
+/// The offending left-hand side of a single command segment, if it violates IL3.
+fn il3_offending_lead(segment: &str) -> Option<&str> {
     static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let buf_re = IL3_BUFFER_REF.get_or_init(|| {
         Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("IL3_BUFFER_REF regex compiles")
     });
 
-    let mut stages = command.split('|');
+    let mut stages = segment.split('|');
     let pre_pipe = stages.next().unwrap_or("");
 
     // Cheap reject: nothing downstream TRIMS output → never IL3. Pure aggregators
@@ -633,19 +738,7 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
         return None;
     }
 
-    let lead = pre_pipe.trim();
-    Some(format!(
-        "IL3 violation — piped `{command}` to a log-trimmer. BLOCKED.\n\n\
-         The @cmd_* buffer system saves context tokens:\n  \
-         1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
-         2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
-                                                    (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
-         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
-         as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
-         Only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) piped to a\n\
-         trimmer (head, tail, grep, sort, ...) is blocked.\n\n\
-         Rerun the command bare and query the returned @cmd_* buffer."
-    ))
+    Some(pre_pipe)
 }
 
 /// Does this single pipe stage TRIM output (truncate / filter / transform), as
@@ -2111,6 +2204,67 @@ mod tests {
     fn il3_friction_repro_allowed() {
         let cmd = r#"grep -oE "\"cwd\":\"[^\"]*\"" @cmd_3b8e6cc5 | sort -u"#;
         assert!(detect_il3_violation(cmd).is_none());
+    }
+
+    #[test]
+    fn il3_allows_a_pipe_that_only_appears_inside_a_heredoc_body() {
+        // The real block: a commit message DESCRIBING a piping mistake tripped the
+        // gate. The heredoc is single-quoted, so the shell does not even expand it —
+        // the `| tail -1` below is prose.
+        let cmd = r#"git commit -F - <<'EOF'
+Five errors this session, one shape: pgrep | tail -1 picked an orphan, and
+ls | wc -l counted sidecars.
+EOF"#;
+        assert!(
+            detect_il3_violation(cmd).is_none(),
+            "a pipe inside a heredoc body is data, not syntax"
+        );
+    }
+
+    #[test]
+    fn il3_still_blocks_a_real_pipe_on_the_line_that_opens_a_heredoc() {
+        // Stripping bodies must not blind the gate to the command itself. Only the
+        // body and its terminator are dropped; the opener line stays.
+        let cmd = "cargo test | grep FAILED <<'EOF'\nnot a pipe here\nEOF";
+        assert!(detect_il3_violation(cmd).is_some());
+    }
+
+    #[test]
+    fn il3_treats_a_here_string_as_having_no_body() {
+        // `<<<` takes no body, so nothing after it may be swallowed as one.
+        let cmd = "cargo test <<< word\ncargo build | grep warning";
+        assert!(
+            detect_il3_violation(cmd).is_some(),
+            "the second line's pipe must still be seen"
+        );
+    }
+
+    #[test]
+    fn il3_analyses_each_semicolon_separated_command_on_its_own() {
+        // The second real block. Flat splitting made the left-hand side of the first
+        // pipe read as `git status --short; ls docs/*.md`, i.e. "starts with git", so
+        // an unrelated later segment supplied the trimmer. Neither is piped to the
+        // other, and the only piping segment here has a bounded LHS.
+        let cmd = "git status --short; ls docs/issues/*.md | wc -l";
+        assert!(detect_il3_violation(cmd).is_none());
+
+        // A violation in a LATER segment is still caught — the split must not become
+        // a way to smuggle one past the gate.
+        let blocked = detect_il3_violation("ls src; cargo test | grep FAILED")
+            .expect("a real violation in a later segment must still block");
+        assert!(
+            blocked.contains("cargo test"),
+            "the hint must name the offending segment, not the whole chain: {blocked}"
+        );
+    }
+
+    #[test]
+    fn il3_segment_split_does_not_confuse_redirection_or_a_lone_pipe() {
+        // `2>&1` must not read as the `&&` separator...
+        assert!(detect_il3_violation("cargo test 2>&1 | grep FAILED").is_some());
+        // ...and `||` is a separator while a single `|` is a pipe.
+        assert!(detect_il3_violation("false || cargo test | grep FAILED").is_some());
+        assert!(detect_il3_violation("cargo build && ls | head -3").is_none());
     }
 
     #[test]
