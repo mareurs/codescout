@@ -183,12 +183,25 @@ file lands — no manual restart needed.
 
 ## Resume
 
-`N/A` — fixed.
+`N/A` — fixed and shipped.
 
-Remaining follow-up is bookkeeping only: the change is uncommitted on
-`experiments`. Archive this file to `docs/issues/archive/` only after the fix
-ships to `master` (`git branch --contains <sha>`), per CLAUDE.md — not on this
-status flip.
+This section previously said the change was "uncommitted on `experiments`" and
+that the file should be archived "only after the fix ships to `master`". Both
+statements are stale, and the second reflects the older CLAUDE.md archive rule:
+
+- **Committed** as **`4036bb9a`** *feat(retrieval): consolidate the stack on one
+  GPU profile, add model fetching* (carries `scripts/fetch-models.sh` and the
+  `retrieval-stack.md` / `.env.amd` rewrites), with follow-up **`6f13c171`**
+  *docs(env): document the three-layer config precedence, warn on the dead
+  template*.
+- **Archive rule changed.** Current CLAUDE.md archives once the fix is verified
+  on `experiments`; reaching `master` is no longer required. This file is
+  correctly archived already.
+
+Both SHAs are **`experiments`**-only (`git merge-base --is-ancestor 4036bb9a
+master` → false). Per CLAUDE.md the master-side SHA still needs recording here
+after cherry-pick — an `experiments` SHA orphans on rebase. That is the only
+outstanding item.
 ## References
 
 - [reindex reembed no-op without force](2026-07-25-reindex-reembed-noop-without-force.md)

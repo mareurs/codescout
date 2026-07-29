@@ -283,24 +283,54 @@ embedder until idle rather than re-issuing the command.
 
 ## Resume
 
-Fixed and unit-verified. One verification step remains and needs a human:
+**Live-MCP verification COMPLETE (2026-07-29).** The step this section previously
+listed as outstanding has now been run; nothing here is pending except the
+master-side SHA.
 
-**Live-MCP re-verification is NOT yet done.** The fix is proven by the RED→GREEN
-regression test and the full suite, but the running MCP server is still the old
-binary. To confirm end-to-end, rebuild and reconnect, then re-run the exact call
-that failed:
+Shipped as **`c3512dc2`** *fix(librarian): requeue embeddings when reembed is
+passed without force* — on **`experiments`** only (`git merge-base --is-ancestor
+c3512dc2 master` → false). Per CLAUDE.md, the master-side SHA still needs
+recording here after cherry-pick; an `experiments` SHA orphans on rebase.
 
+### Verification evidence
+
+Release binary rebuilt (`cargo rb`) and reconnected. The exact call that failed:
+`librarian(action="reindex", scope="project", reembed=true)` — `force` omitted,
+nothing changed on disk:
+
+```json
+{
+  "added": 0, "updated": 0, "removed": 0,
+  "unchanged": 893,
+  "embedded": 891,
+  "embeddings_enabled": true,
+  "embed_note": "891 embedded"
+}
 ```
-cargo rb          # release build for the live MCP binary (NOT cargo build --release)
-/mcp              # reconnect
-librarian(action="reindex", scope="project", reembed=true)
-```
 
-Expect `embedded: N` non-zero with `force` omitted, and embed traffic at the
-server (`docker logs --since 2m codescout-dense-cpu | grep -c "POST /v1/embeddings"`).
+Before the fix the same call returned instantly with `unchanged: N`,
+`backfill_error_count: 0`, and **zero** requests at the embedding server.
 
-Then: archive to `docs/issues/archive/` only after the fix ships to `master`
-(`git branch --contains <sha>`), per CLAUDE.md — not on this status flip.
+Two confirmations beyond the headline number:
+
+- **893 unchanged vs 891 embedded.** The 2-file gap is the empty-body skip —
+  `embed_queue_item` returns `None` for whitespace-only first chunks. That guard
+  (from `2026-05-17-reindex-embedding-dim-mismatch.md`, re-landed as `2b1a348e`)
+  survived extraction into the shared helper, which is what extracting it was
+  meant to protect.
+- **Rows stayed `unchanged`, not `updated`.** The deliberate choice held under
+  real data: the re-embed pass recomputed 891 vectors without rewriting 893
+  catalog rows or misreporting them as modified.
+
+### Operational note for the next person
+
+This call exceeds the default `tool_timeout_secs = 60` on a project this size
+(893 artifacts, CPU embedder) — it was run with the value temporarily raised to
+600 and then restored. **A timeout here is not a failure:** the work continues
+server-side, but the response envelope is lost, so `embedded: N` never reaches
+the caller. Anyone re-verifying should raise the timeout rather than conclude
+from a timeout that the call did nothing — which is the same
+misread-the-signal trap as the original bug.
 ## References
 
 - [Dependency review session log](../trackers/dependency-review-session-log.md)
