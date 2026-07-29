@@ -198,7 +198,22 @@ for the wrong reason. Filed as
 
 ## Resume
 
-N/A — fixed and verified. Archive after the master-side SHA is recorded, per
+Fixed, and now **live-verified** — the earlier note that the running server still
+carried the old behaviour no longer applies. Release binary rebuilt, `/mcp`
+reconnected, and the call this bug says was impossible now works:
+
+```
+memory(action="read", topic="gotchas", sections=["MCP Binary Symlink"])
+→ ## MCP Binary Symlink
+  `~/.cargo/bin/codescout` is a symlink → `target/release/codescout`. …
+```
+
+`gotchas` is `##`-sectioned, so before the fix this returned the "no `###`
+sections to filter" miss hint — which is exactly what made the CLAUDE.md
+routing in *Evidence* unreachable.
+
+One item carried forward: the **master-side SHA** after cherry-pick. The SHA on
+this file is an `experiments` SHA and orphans on rebase — tracked in
 `docs/trackers/archived-bug-sha-reconciliation.md`.
 ## References
 

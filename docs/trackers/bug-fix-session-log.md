@@ -1861,7 +1861,25 @@ live-LSP class I initially misattributed to).
 
 **Severity:** med — no incorrect fix shipped, but real risk: an autonomous `Stop-Process -Force` against a live session's own server process, made without the benefit of prior documented guidance on whether that's the sanctioned procedure.
 
-**Status:** open — root bug (memory-tool project-scoping) is filed but not yet fixed; this entry documents the downstream cost of that bug biting mid-task.
+**Status:** fixed-verified (2026-07-29 verify-open pass) — was `open` in the body while
+the index row already read `fixed-verified`; the two are now aligned, and the body was the
+stale side.
+
+The premise no longer holds, and it is directly testable rather than inferred: this entry
+says the memory tool blocked reading the `MCP Binary Symlink` gotcha. That exact call now
+works —
+`memory(action="read", topic="gotchas", sections=["MCP Binary Symlink"])` returns the
+section. Note that it works for a reason unrelated to this entry's root bug: the
+`sections` filter was itself broken (`###`-only against a `##`-sectioned memory) and was
+fixed and live-verified this session
+(`docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md`).
+
+The root bug this entry blamed —
+`docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
+is now `zombie`, i.e. not reproducible on retest, so "filed but not yet fixed" was stale
+in both of its clauses. Two independent things had to be re-checked to retire one entry,
+which is the usual shape: a friction's stated cause and its observed cost decay on
+different clocks.
 
 **Fix idea / Pointer:** Fix `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`, then re-verify this specific recovery path against the (currently unreadable) `gotchas` memory's actual documented procedure to confirm today's improvised workaround matches or diverges from it.
 

@@ -264,14 +264,20 @@ not at startup.
 
 ## Resume
 
-Service-side work is done and verified. Two items remain, neither blocking:
+Service-side work is done and verified. One item remains, not blocking:
 
-1. **codescout's own `semantic_search` has not been exercised through the new
-   reranker.** The MCP server process predates the `.env.gpu` change, so its
-   `Protocol::from_env` still read the old (absent) value at startup. Restart
-   the MCP server, run any `semantic_search`, and confirm no `rerank status` /
-   `rerank json` error surfaces.
-2. **Cherry-pick to master** and record the master-side SHA here.
+1. ~~codescout's own `semantic_search` has not been exercised through the new
+   reranker.~~ **Done 2026-07-29.** MCP server restarted at 20:38 (well after the
+   `.env.gpu` change, so `Protocol::from_env` read the new value at startup);
+   `semantic_search` returned ranked results with no `rerank status` / `rerank
+   json` error. Archiving on that basis.
+2. **Cherry-pick to master** and record the master-side SHA here. The SHA on this
+   file is an `experiments` SHA and orphans on rebase.
+
+Note for whoever picks this up: the reranker being *functional* is what this entry
+tracks, and it is. Whether it should be enabled at all is a separate open question
+— see `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`,
+which measures it as strictly worse on both latency and score for the dense path.
 
 Separately: open a follow-up for the wedged-mid-download failure mode
 (hypothesis 3) affecting every TEI service that resolves a model from

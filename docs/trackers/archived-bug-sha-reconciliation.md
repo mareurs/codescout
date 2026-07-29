@@ -72,6 +72,9 @@ then test it with `git branch --contains`. Three known noise sources:
 
 ## Queue — 49 files across 44 distinct SHAs
 
+> Four more files were archived after this census was taken — see *Added after the census*
+> below. Total outstanding is 53 files, not 49.
+
 | experiments SHA | files | archived bug file(s) |
 |---|---:|---|
 | `06946ae3` | 1 | `2026-07-06-constitution-rule-malformed-glob-silent-fail-open.md` |
@@ -118,6 +121,28 @@ then test it with `git branch --contains`. Three known noise sources:
 | `e68f43ae` | 1 | `2026-07-18-tree-strip-bare-root-not-stripped.md` |
 | `edb44a9b` | 1 | `2026-07-07-list-overview-remaining-display-path-separator-sites.md` |
 | `ef45b6e` | 1 | `2026-04-18-memory-leak-x-session-freeze.md` |
+
+## Added after the census — 4 files (2026-07-29)
+
+The census above is a point-in-time snapshot of the 135-file batch archive. These were
+archived *later*, under the same gate, so they carry the same debt and are listed
+separately rather than folded in — otherwise the "135 archived files" count stops being
+true of the thing it counts.
+
+Work them exactly like the queue rows above.
+
+| experiments SHA | files | archived bug file(s) |
+|---|---:|---|
+| `3fbfbe2a` | 1 | `2026-06-14-librarian-artifact-index-port-to-qdrant.md` |
+| `79cd1428`, `65440388`, `af3be4ab` | 1 | `2026-07-28-edit-code-reindent-shifts-string-literal-contents.md` — **three** SHAs: the fix, the raw-newline widening, and the live-verification fixture. All three must land or the file's own claims outrun the code. |
+| `d668927e` | 1 | `2026-07-28-memory-sections-filter-matches-h3-only.md` |
+
+And one for the no-SHA bucket below:
+
+- `2026-07-27-reranker-gpu-tei-cuda-oom.md` — compose/`.env.gpu`/`fetch-models.sh` change
+  with no Rust surface. Its `## Fix` names the changed files and records a live round-trip
+  with measured VRAM, but never names a commit, so there is nothing to reconcile until
+  someone identifies the commit that carried those file changes.
 
 ## No validating commit SHA in body — 41 files
 
@@ -174,4 +199,3 @@ an absent SHA cannot orphan.
 - `docs/RELEASE.md` § *Standard Ship Sequence* step 4 — the consumer of this queue
 - `docs/RELEASE.md` § *After cherry-pick: cite the master SHA* — why orphaning happens
 - `get_guide("tracker-conventions")` § *Bug files* — the current archive rule
-
