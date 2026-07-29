@@ -4,6 +4,20 @@ use std::path::Path;
 
 use crate::util::fs::to_forward_slash;
 
+/// Directories the code index never walks, regardless of `.gitignore` or
+/// user-supplied ignore patterns.
+///
+/// These hold *tool state derived from the project*, not project content, so
+/// embedding them makes the corpus self-referential: `semantic_search` starts
+/// returning codescout's own memories and catalog rows as if they were source.
+/// `.git` additionally carries every historical blob, which no search should see.
+///
+/// Deliberately not listed: `.claude`, `.serena`, `.buddy`. Those can hold real
+/// project documentation — skills, command definitions, prompts — that a caller
+/// may legitimately want indexed. They belong in per-project `ignore_patterns`,
+/// which is a decision, not a default.
+pub(crate) const ALWAYS_SKIP_DIRS: &[&str] = &[".git", ".codescout"];
+
 #[derive(Debug, Clone, Default)]
 pub struct SyncOpts {
     pub languages: Option<Vec<String>>,
@@ -85,6 +99,15 @@ async fn flush_pending(
     Ok(n)
 }
 
+/// Whether a walk entry is tool state the code index must never descend into.
+///
+/// Directory-only by design: a *file* named `.git` is a worktree pointer and a
+/// file named `.codescout` is just a file — neither is a state tree, and neither
+/// should be skipped on the strength of its name alone.
+pub(crate) fn is_always_skipped(name: &str, is_dir: bool) -> bool {
+    is_dir && ALWAYS_SKIP_DIRS.contains(&name)
+}
+
 /// Walk `root`, diff against `server` chunk refs, and embed+upsert changed chunks
 /// in bounded batches so peak memory is O(flush_batch), not O(all_files).
 ///
@@ -119,9 +142,20 @@ async fn stream_index(
 
     let ignore_matcher = crate::embed::build_ignore_matcher(root, ignore_patterns);
     for entry in ignore::WalkBuilder::new(root)
-        .hidden(false) // index tracked dotfiles; gitignore handles exclusions
+        // Index tracked dotfiles (`.github/`, `.cargo/config.toml`), which means
+        // turning off the crate's hidden-entry filter -- and that filter is what
+        // normally keeps `.git/` out of a walk. `.gitignore` does not cover it:
+        // git has no reason to ignore its own directory. So the denylist below is
+        // load-bearing, not belt-and-braces.
+        .hidden(false)
         .filter_entry(move |e| {
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if e.file_name()
+                .to_str()
+                .is_some_and(|n| is_always_skipped(n, is_dir))
+            {
+                return false;
+            }
             !ignore_matcher.matched(e.path(), is_dir).is_ignore()
         })
         .build()
@@ -306,6 +340,30 @@ mod tests {
     use crate::retrieval::reranker::RerankerHttp;
     use crate::retrieval::search::Hit;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn always_skipped_covers_git_and_codescout_state_only_as_directories() {
+        // `.hidden(false)` on the walker is what lets tracked dotfiles in, and it is
+        // also what lets `.git/` in — `.gitignore` never lists it, so nothing else
+        // stops the walk. This denylist is the only thing that does.
+        assert!(is_always_skipped(".git", true));
+        assert!(is_always_skipped(".codescout", true));
+
+        // A FILE named `.git` is a worktree pointer, not a state tree. Skipping it by
+        // name would be a different, and wrong, decision.
+        assert!(!is_always_skipped(".git", false));
+        assert!(!is_always_skipped(".codescout", false));
+
+        // Deliberately absent: agent dirs that can hold real project documentation.
+        // They belong in per-project `ignore_patterns` — a decision, not a default.
+        assert!(!is_always_skipped(".claude", true));
+        assert!(!is_always_skipped(".serena", true));
+        assert!(!is_always_skipped(".github", true));
+
+        // Whole-name match, not a prefix: a real directory must survive.
+        assert!(!is_always_skipped(".gitlab-ci", true));
+        assert!(!is_always_skipped("src", true));
+    }
 
     #[test]
     fn chunk_id_normalizes_native_separators() {

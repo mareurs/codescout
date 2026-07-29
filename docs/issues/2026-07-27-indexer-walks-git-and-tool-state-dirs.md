@@ -1,13 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- indexer
+- retrieval
+- ignore
+- gitignore
+closed: null
 opened: 2026-07-27
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md
-tags: [indexer, retrieval, ignore, gitignore]
-kind: bug
+- docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md
+severity: medium
 ---
 
 # BUG: indexer walks `.git/`, `.codescout/`, `.claude/`, `.serena/` — tool state is indexed as project content
@@ -127,35 +131,46 @@ hidden-filter change rather than to gitignore parsing.
 
 ## Fix
 
-Add a built-in denylist to the `filter_entry` closure, independent of user
-patterns. At minimum `.git`; strongly suggested also `.codescout`, and
-configurable coverage for other agent state dirs (`.claude`, `.serena`,
-`.buddy`). `.git` should be unconditional — there is no case for indexing it.
+Fixed on `experiments`, taking the sketch this section proposed and its judgement call.
 
-Sketch:
+`src/retrieval/sync.rs` gains a denylist consulted before the user-pattern matcher, so it
+holds regardless of `.gitignore` or per-project `ignore_patterns`:
 
 ```rust
-const ALWAYS_SKIP_DIRS: &[&str] = &[".git", ".codescout"];
-// in filter_entry, before the matcher:
-if is_dir && e.file_name().to_str().is_some_and(|n| ALWAYS_SKIP_DIRS.contains(&n)) {
-    return false;
+pub(crate) const ALWAYS_SKIP_DIRS: &[&str] = &[".git", ".codescout"];
+
+pub(crate) fn is_always_skipped(name: &str, is_dir: bool) -> bool {
+    is_dir && ALWAYS_SKIP_DIRS.contains(&name)
 }
 ```
 
-Whether `.claude` / `.serena` should be skipped by default or left to
-`ignore_patterns` is a judgement call — they can contain genuinely useful
-project documentation (skills, command definitions), unlike `.git`.
+**Directory-only**, which the sketch did not specify and which matters: a *file* named
+`.git` is a worktree pointer, not a state tree. Skipping by bare name would be a different
+and wrong decision.
 
-Note this is cosmetic relative to total index cost (~2% of chunks); the
-re-embed-duration problem is tracked separately in
-`docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md`.
+**The judgement call, decided as the entry recommended:** `.claude`, `.serena`, and
+`.buddy` are deliberately absent. They can hold genuine project documentation — skills,
+command definitions, prompts — so excluding them is a per-project decision belonging in
+`ignore_patterns`, not a default. `.git` and `.codescout` have no such case: both are tool
+state *derived from* the project, so indexing them makes the corpus self-referential and
+`semantic_search` starts returning codescout's own memories as if they were source.
 
+The `.hidden(false)` comment was also rewritten. It read "gitignore handles exclusions",
+which is the belief that caused this — it now says why the denylist is load-bearing rather
+than belt-and-braces.
 ## Tests added
 
-None yet. A regression test should assert that a fixture tree containing
-`.git/foo.md` and `.codescout/memories/bar.md` produces zero chunks for those
-paths.
+One, `always_skipped_covers_git_and_codescout_state_only_as_directories` in
+`src/retrieval/sync.rs`. The walk itself needs a live Qdrant, so the skip decision was
+extracted into `is_always_skipped` to make it assertable on its own — the same move that
+put `skip_lead_region` and `anchor_indent` outside their LSP-dependent callers.
 
+It asserts all four quadrants rather than just the happy path: the two names skipped as
+directories, the same two *not* skipped as files, the three agent dirs deliberately left
+in, and that matching is whole-name rather than prefix (`.gitlab-ci` survives). A mutation
+dropping the `is_dir` conjunction, or switching `contains` to a `starts_with`, fails.
+
+Full gate: 18 binaries, 3458 passed, 0 failed, 44 ignored; clippy clean.
 ## Workarounds
 
 Add the directories to the project's `ignore_patterns` (`.codescout/project.toml`)
@@ -163,11 +178,18 @@ so `build_ignore_matcher` excludes them.
 
 ## Resume
 
-Add `ALWAYS_SKIP_DIRS` to `src/retrieval/sync.rs:113` and a fixture test in the
-`sync.rs` test module. Then re-index one project and re-run the aggregation
-under "Reproduction" to confirm dot-directories are gone. Decide separately
-whether `.claude` stays indexed.
+Fixed and unit-verified. Two follow-ons, neither blocking:
 
+1. **The effect is not retroactive.** Chunks already embedded from `.git/` and
+   `.codescout/` stay in the collection until those files are re-walked and reconciled;
+   nothing prunes them on the strength of a new denylist. A full reindex clears them — and
+   that cost is the reason to read
+   `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` first, which is what makes
+   a full re-embed expensive.
+2. **Master-side SHA** after cherry-pick.
+
+The entry's own framing still holds: this is ~2% of chunks, so it is a search-quality fix
+rather than a cost fix. The cost problem is the chunker entry above.
 ## References
 
 - `src/retrieval/sync.rs:113-119` — the walker and its `.hidden(false)`

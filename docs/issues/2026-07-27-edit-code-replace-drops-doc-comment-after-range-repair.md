@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- edit_code
+- lsp
+- tooling
+- data-loss
+- self-inflicted
+closed: null
 opened: 2026-07-27
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [edit_code, lsp, tooling, data-loss, self-inflicted]
-kind: bug
+severity: medium
 ---
 
 # BUG: `edit_code` structural `replace` silently dropped a symbol's doc comment after an AST range repair
@@ -58,15 +63,58 @@ suggests LSP staleness in this file's editing flow is a known live condition.
 
 ## Root cause
 
-Unknown — under investigation. Hypothesis, in mechanism language: when the LSP returns a
-truncated range, the AST-repair path recomputes the symbol's span from the tree-sitter node.
-A tree-sitter `function_item` node does **not** include preceding `///` line comments (they
-are siblings, not children), so a repair that widens the range to include them — or a
-preserve-heuristic that reads the doc comment relative to the *LSP* range and then applies it
-to the *repaired* range — would delete the comment without re-emitting it. That is
-speculation from the observed behaviour and the tool's own warning text; the actual repair
-code has not been read.
+**Found 2026-07-29. The hypothesis this section carried was wrong**, and is kept below
+because its wrongness is instructive.
 
+### What it actually is
+
+`src/tools/symbol/edit_code.rs`, the `replace` path. `editing_start_line` deliberately
+walks *back* past preceding doc comments and attributes, so that a `new_body` containing
+doc-comment + signature replaces them cleanly instead of duplicating them (BUG-031). To
+avoid dropping documentation when the caller passes a body that omits decorators, the code
+then narrows `start` forward again — but only under one all-or-nothing test:
+
+```rust
+let body_leads_with_decorator = new_body.lines().find(|l| !l.trim().is_empty())
+    .map(|l| { let t = l.trim_start();
+        t.starts_with("///") || t.starts_with("//!") || t.starts_with("//")
+            || t.starts_with("#[")  || t.starts_with("/**") || t.starts_with("/*")
+            || t.starts_with('@') })
+    .unwrap_or(false);
+let start_narrowed = if !body_leads_with_decorator { /* walk forward */ } else { start };
+```
+
+One question, two independent classes of trivia. A body leading with **`#[test]`** answers
+"yes, I lead with a decorator", so no narrowing happens at all — the file's `///` lines stay
+inside the replaced range and the body, which contains only the attribute, never re-emits
+them. The documentation is gone. A body leading with a plain **`//`** comment does the same
+thing, and that one is worse, because a plain comment is not a lead region in any
+meaningful sense.
+
+So the trigger is *"the new body leads with a decorator of a different class than the one
+in the file"*, and it needs no LSP involvement whatsoever.
+
+### Why the original hypothesis was wrong
+
+It read: *"the AST-repair path recomputes the symbol's span … a repair that widens the
+range to include \[doc comments\] would delete the comment."* `repair_symbol_range`
+(`src/symbol/query.rs:247`) mutates exactly one field:
+
+```rust
+if ast_end <= sym.end_line { return None; }
+sym.end_line = ast_end;
+```
+
+It only ever widens the **end**. It cannot reach a preceding doc comment. The
+`range_repair` warning in the report was **correlated, not causal** — the same call
+happened to hit a truncated range.
+
+That is the second time in two days a `range_repair` warning was read as the cause of a
+nearby symptom; see
+`docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`, whose root cause
+was downgraded for the same reason. A warning that fires on the same call is evidence of
+timing, not of mechanism. The file's own honesty about this — *"That is speculation … the
+actual repair code has not been read"* — is what made the correction cheap.
 ## Evidence
 
 ### Implementer's contemporaneous note (final fix wave, 2026-07-27)
@@ -99,28 +147,54 @@ shipped code.
 
 ## Fix
 
-Not started. Two directions, cheapest first:
+Fixed on `experiments`. The narrowing is now **two class-scoped phases** instead of one
+all-or-nothing gate, because the lead region holds two independent classes and a single
+forward pointer cannot preserve them with a single question.
 
-1. **Make the loss loud.** When the AST-repair path fires, compare the replaced region's
-   leading trivia against the emitted text and refuse (or warn explicitly) if a `///` /
-   `//!` / `/** */` block would be dropped. A tool that silently discards documentation is
-   worse than one that errors.
-2. **Fix the range.** Ensure the repaired range starts *after* any preceding comment trivia
-   (matching what the preserve heuristic assumes), rather than absorbing it.
+New helper `skip_lead_region(lines, start, end, class)` in `src/symbol/edit.rs`, with
+`LeadClass::{Docs, All}`. It is the old walk, generalised over which line kinds count as
+skippable, and it lives beside `anchor_indent` for the same reason — out of the
+LSP-dependent path, so it is unit-testable without a harness.
 
-Filed per CLAUDE.md § Bug Tracking: *"Open a bug file for ANY bug noticed during work —
-including incidental bugs we won't fix and tool quirks/misbehaviors."* The implementer
-declined to file it on the grounds that committed content was unaffected; that reasoning
-covers *this* edit, but the tool will do the same thing on the next documented symbol whose
-range needs repair, and the next agent may not re-read the file.
+The replace path now runs:
 
+1. **Docs** — if the body supplies no documentation of its own (`///`, `//!`, `/**`,
+   `/*`), skip forward past the file's doc-comment lines so they survive. This phase is
+   the fix: the old form never reached it when the body led with an attribute.
+2. **All** — if the body supplies no lead region at all, continue past attributes too.
+   Unchanged behaviour, and it composes: for a body that leads with code, phase 1 then
+   phase 2 skip exactly the prefix the single old pass did.
+
+Note what is deliberately *not* fixed: a body that leads with `///` but omits an attribute
+the file carries still loses that attribute. A single forward `start` pointer cannot keep
+later trivia while replacing earlier trivia, and that direction already has an explicit
+channel (the `attributes` param, U-19/U-21) plus a wontfix entry
+(`archive/2026-05-18-edit-code-replace-misses-outer-attrs.md`). Widening the fix to cover
+it would mean splicing rather than range-replacing, which is a different change.
+
+A plain `//` comment now counts as supplying *no* documentation, so a body opening with
+`// TODO` preserves the file's `///` block and lands beneath it — lossless, where before it
+overwrote.
 ## Tests added
 
-None yet. A regression test belongs next to
-`replace_symbol_retries_on_stale_lsp_positions_until_fresh` (the existing stale-LSP guard in
-the `edit_code` suite): replace a documented symbol under a forced truncated-range condition
-and assert the doc comment survives.
+Five, on `skip_lead_region` in `src/symbol/edit.rs`. They pin the logic the replace path
+now delegates to; the path itself needs a live LSP, which the suite does not stand up.
 
+- `skip_lead_region_docs_stops_at_the_first_attribute` — **the regression.** Asserts
+  `Docs` stops at `#[test]` (so the attribute stays replaceable) while `All` continues to
+  the declaration. Both numbers asserted, so a mutation collapsing the two classes fails.
+- `skip_lead_region_follows_a_multi_line_attribute_to_its_closing_bracket` — a wrapped
+  `#[derive(…)]`, whose continuation lines look like ordinary code to a line-wise test.
+- `skip_lead_region_treats_block_comments_and_plain_comments_as_docs` — `/** */` bodies
+  and plain `//`.
+- `skip_lead_region_is_a_noop_when_the_first_line_is_already_code`.
+- `skip_lead_region_respects_the_end_bound_and_a_short_slice` — including an `end` past
+  the slice, which must not panic.
+
+Full gate: 18 binaries, 3458 passed, 0 failed, 44 ignored; clippy
+`--all-targets -D warnings` clean. The BUG-031 / BUG-037 / U-19 / U-21 tests that guard
+this exact lead-region behaviour are untouched and green — which is the evidence that the
+split is behaviour-preserving everywhere except the case it fixes.
 ## Workarounds
 
 **Re-read any documented symbol after an `edit_code replace`, especially when the tool
@@ -131,13 +205,15 @@ it cannot touch the surrounding comment.
 
 ## Resume
 
-Reduce to a minimal reproduction first: find a symbol whose LSP `full_range` comes back
-truncated (try editing a documented function, then immediately `edit_code replace` it again
-so the LSP view is stale) and confirm the doc comment drops. Then read the AST-repair path
-that emits the "repaired from the AST" warning and check how it computes the replaced span
-relative to leading comment trivia. Decide between the two fix directions once the mechanism
-is confirmed rather than hypothesised.
+Two items, neither blocking:
 
+1. **Live confirmation.** Verified at unit level. Confirming end-to-end means `cargo rb`,
+   an `/mcp` reconnect, then `edit_code(action="replace")` on a documented function with a
+   body that leads with `#[test]` — assert the `///` block is still above it afterwards.
+   Convenient target: `skip_lead_region_docs_stops_at_the_first_attribute` is itself a
+   `///`-documented `#[test]`, so it is the fixture and the subject at once.
+2. **Master-side SHA** after cherry-pick; the SHA here is an `experiments` SHA and orphans
+   on rebase.
 ## References
 
 - `.superpowers/sdd/2026-07-27-index-lock-and-embedder-batching/final-fix-wave-report.md` —

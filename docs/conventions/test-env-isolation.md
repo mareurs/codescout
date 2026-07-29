@@ -30,45 +30,65 @@ mandatory locks deadlocked routinely.
 
 ## The rule
 
-A test helper that constructs an Agent (or any object that reads
-config from process-global env) MUST do at least one of:
+A test helper that constructs an Agent (or any object that reads config
+from process-global env) MUST resolve that config **before** the object
+is built, and take it as an argument.
 
-A. **Accept env values as explicit arguments.** The helper's signature
-   names what it depends on; tests pass per-test values; no env
-   mutation. Strongest isolation, often impractical when the helper
-   wraps existing constructors that hard-code env reads.
+A. **Accept env values as explicit arguments — this is the rule.** The
+   helper's signature names what it depends on; tests pass per-test
+   values; no env mutation happens at all, so there is nothing to race.
+   Where an existing constructor hard-codes env reads, add a `from_env()`
+   wrapper that does the reading once at the edge and hand the resulting
+   struct inward. `LibrarianEnv::from_env` and `ServerEnv::from_env` are
+   that shape.
 
-B. **Return an `EnvGuard` (RAII) that the test holds for its full
-   lifetime.** The helper sets env per-test, restores on drop. Combine
-   with `#[serial_test::serial]` on every test that calls the helper —
-   the EnvGuard alone is not sufficient under concurrent execution
-   because `std::env::set_var` is process-global, so two parallel
-   tests both setting and unsetting LIBRARIAN_DB will race regardless
-   of guard discipline. The `#[serial]` lock pins one test's
-   set→use→drop cycle to complete before the next starts.
+B. ~~Return an `EnvGuard` (RAII) plus `#[serial_test::serial]`.~~
+   **NOT VIABLE.** `a656f8cec220d347` established this empirically and
+   fixed the class project-wide. `#[serial]` coordinates only among
+   *annotated* tests: it takes a lock that non-annotated tests never ask
+   for, so any untagged test elsewhere in the suite that reads or writes
+   the same var still races, and `std::env::set_var` is process-global
+   with no way to scope it. The guard restores faithfully and the race
+   happens anyway. Do not reintroduce this pattern; do not "copy the
+   EnvGuard pattern locally" into a new module.
 
 C. **Document a `#[serial]` requirement on the helper's docstring.**
-   Acceptable when the helper does not itself set env (so it inherits
-   whatever the caller / suite set up), but the resulting object's
-   behavior depends on env. Caller-driven; weaker than B.
+   Weaker than A and subject to the same limitation as B — it narrows the
+   window rather than closing it. Acceptable only when the helper does not
+   itself set env and the object's behaviour merely *depends* on ambient
+   env, and only as a stopgap with a link to the work that will remove it.
 
+Since Rust 2024, `std::env::set_var` is `unsafe` precisely because of
+this: it mutates process-global state that other threads may be reading.
+The compiler now says out loud what B tried to work around.
 ## Established exemplars
 
-Both modules in this repo carry their own local `EnvGuard` struct.
-The shape is identical; the duplication is intentional (test-only
-helpers stay local to each module — promoting to a shared helper
-crate would tangle the dependency graph for marginal LOC savings):
+Resolve env at the edge, pass the result inward. Both live examples
+follow the same shape — a plain struct of resolved values plus a
+`from_env()` that is the *only* thing touching the environment:
 
 | Helper | Location | Pattern |
 |---|---|---|
-| `EnvGuard` | `src/librarian/mod.rs::tests` | RAII set→restore; used with `#[serial]` |
-| `EnvGuard` | `src/server.rs::guide_hint_tests` | Same shape; same use |
+| `LibrarianEnv::from_env` | `src/librarian/mod.rs` | struct of resolved values; env read once, at the edge |
+| `ServerEnv::from_env` | `src/server.rs` | same shape, same boundary |
+| `EmbedderHttp` `api_key` | `src/retrieval/embedder.rs` | reads `EMBED_API_KEY` in `new()`, stores `Option<String>`; a test injects the value directly |
 
-When a future test module hits the same shape, copy the EnvGuard pattern
-locally rather than building a shared crate. The cost of two more lines
-of duplication is lower than the cost of a generic test-utilities crate
-that everyone has to learn.
+Tests construct the struct literally with per-test values and never call
+`from_env()`, so they need no guard, no `#[serial]`, and no cleanup — and
+they can run in parallel, which the B pattern explicitly could not.
 
+**The two `EnvGuard` exemplars this section used to list are gone.** They
+lived in `src/librarian/mod.rs::tests` and `src/server.rs::guide_hint_tests`;
+`a656f8cec220d347` removed them along with the rest of the class. If you
+arrived here from an older link expecting to copy one, that is the bug this
+rewrite closes.
+
+Two `EnvGuard` uses remain in the tree, and neither is a counter-example:
+
+- `src/agent/mod.rs` — server-stack gated, exempt.
+- `src/librarian/indexer.rs` — a known outstanding instance, tracked in
+  `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+  It is debt, not a pattern to copy.
 ## Diagnostic shape
 
 The race is detectable in production CI as one of:
@@ -84,27 +104,27 @@ The race is detectable in production CI as one of:
   rather than fail.
 
 If you see this shape, suspect missing isolation in the test's helper
-chain. The fix is option B above; document it locally and link back to
-this convention from the helper's docstring.
+chain. The fix is option A: find what the helper reads from env, resolve
+it at the call site, and pass it in. Reaching for a guard plus `#[serial]`
+recreates the bug — see option B.
 
 ## Known gaps (open)
 
-The `#[serial]` + `EnvGuard` discipline established by U-20's fix is
-robust **within** a single test module but does NOT coordinate
-**across** modules. A non-`#[serial]` test in module X that touches
-LIBRARIAN_DB or LIBRARIAN_CWD without an EnvGuard can race with an
-in-flight Agent construction in module Y's `#[serial]` block. Observed
-once on Linux during the U-23 verification session
-(`server::guide_hint_tests::artifact_event_after_artifact_no_hint`
-flaked under full `cargo test --lib`, passed cleanly on isolated
-retry). Class-level fix deferred — likely options:
+**Closed 2026-07-27 by `a656f8cec220d347`.** The deferred option 2 —
+"move resolution off process-global env and onto explicit arguments" —
+shipped, and it is now the rule above rather than a proposal.
 
-1. Annotate every env-mutating test in the codebase with `#[serial]`
-   (find them via `grep "set_var(.*LIBRARIAN" tests/ src/`), even when
-   they don't construct an Agent. Costs CI time (more serialization)
-   for diagnostic stability.
-2. Move the librarian DB / workspace resolution off of process-global
-   env and onto explicit arguments threaded through `Agent::new`.
-   Larger refactor, removes the foot-gun at the source.
+The gap this section described was real and is worth keeping as the reason
+the rule is shaped the way it is: `#[serial]` + `EnvGuard` was robust
+*within* a module and did not coordinate *across* modules, so a
+non-annotated test in module X racing an in-flight construction in module
+Y's `#[serial]` block was always possible. That is not a hole in the
+discipline — it is what the discipline could never cover, because
+`#[serial]` only ever locks against tests that opt in.
 
-The U-N tracker entry for U-20 carries the deferred status.
+Measured effect of the fix: `set_var` / `remove_env` occurrences in the
+default `cargo test` build went **119 → 0**.
+
+Remaining, and tracked rather than deferred:
+`src/librarian/indexer.rs` still carries an `EnvGuard`
+(`docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`).

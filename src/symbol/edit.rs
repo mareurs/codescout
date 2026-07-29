@@ -133,6 +133,79 @@ pub fn anchor_indent(lines: &[&str], anchor: usize) -> String {
         .unwrap_or_default()
 }
 
+/// Which kinds of leading trivia a lead-region walk may step over.
+///
+/// The region above a symbol holds two independent classes, and a `replace` can
+/// legitimately want to preserve one while overwriting the other:
+///
+/// - **documentation** — `///`, `//!`, plain `//`, and `/* … */` blocks
+/// - **attributes** — `#[…]` and `@…` annotations
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LeadClass {
+    /// Comment trivia only. Stops at the first attribute.
+    Docs,
+    /// Comment trivia and attributes alike.
+    All,
+}
+
+/// Walk forward from `start` over leading-trivia lines of the kinds in `class`,
+/// returning the first line index that is not such a line (or `end`).
+///
+/// Multi-line attributes are followed to their closing bracket, so a
+/// `#[derive(\n    Debug,\n)]` spanning three lines is stepped over as a unit
+/// rather than breaking on its continuation lines — those look like ordinary
+/// code to a line-wise test.
+pub fn skip_lead_region(lines: &[&str], start: usize, end: usize, class: LeadClass) -> usize {
+    let mut s = start;
+    let mut pending_open_brackets: usize = 0;
+    while s < end {
+        let Some(line) = lines.get(s) else { break };
+        let trimmed = line.trim();
+        if pending_open_brackets > 0 {
+            for ch in trimmed.chars() {
+                match ch {
+                    '(' | '[' => pending_open_brackets += 1,
+                    ')' | ']' => pending_open_brackets = pending_open_brackets.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            s += 1;
+            continue;
+        }
+        let is_doc = trimmed.starts_with("///")
+            || trimmed.starts_with("//!")
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/**")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("* ")
+            || trimmed == "*"
+            || trimmed == "*/";
+        let is_attr = trimmed.starts_with('@') || trimmed.starts_with("#[");
+        let skippable = match class {
+            LeadClass::Docs => is_doc,
+            LeadClass::All => is_doc || is_attr,
+        };
+        if !skippable {
+            break;
+        }
+        if trimmed.starts_with("#[") {
+            let mut depth: isize = 0;
+            for ch in trimmed.chars() {
+                match ch {
+                    '(' | '[' => depth += 1,
+                    ')' | ']' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if depth > 0 {
+                pending_open_brackets = depth as usize;
+            }
+        }
+        s += 1;
+    }
+    s
+}
+
 /// Resolve the authoritative end line for a symbol we are about to edit.
 ///
 /// Uses AST as the authoritative source for the symbol's end line when available.
@@ -852,5 +925,73 @@ mod tests {
             "    ",
             "four: the declaration's column"
         );
+    }
+
+    /// The defect this split exists for: a `replace` body leading with `#[test]` used to
+    /// be treated as owning the whole lead region, so the file's `///` lines sat inside
+    /// the replaced range and were never re-emitted. Documentation vanished silently.
+    #[test]
+    fn skip_lead_region_docs_stops_at_the_first_attribute() {
+        let lines = vec![
+            "    /// Does the thing.", // 0
+            "    /// Second line.",    // 1
+            "    #[test]",             // 2
+            "    fn foo() {",          // 3
+            "    }",                   // 4
+        ];
+        assert_eq!(
+            skip_lead_region(&lines, 0, 5, LeadClass::Docs),
+            2,
+            "Docs must stop at `#[test]` so the attribute stays inside the replaced range"
+        );
+        assert_eq!(
+            skip_lead_region(&lines, 0, 5, LeadClass::All),
+            3,
+            "All continues past the attribute to the declaration"
+        );
+    }
+
+    #[test]
+    fn skip_lead_region_follows_a_multi_line_attribute_to_its_closing_bracket() {
+        // The continuation lines of a wrapped attribute look like ordinary code to a
+        // line-wise test; without bracket tracking the walk stops on `Debug,`.
+        let lines = vec![
+            "#[derive(",  // 0
+            "    Debug,", // 1
+            "    Clone,", // 2
+            ")]",         // 3
+            "struct S;",  // 4
+        ];
+        assert_eq!(skip_lead_region(&lines, 0, 5, LeadClass::All), 4);
+        // Docs mode never enters the attribute at all, so it stops at line 0.
+        assert_eq!(skip_lead_region(&lines, 0, 5, LeadClass::Docs), 0);
+    }
+
+    #[test]
+    fn skip_lead_region_treats_block_comments_and_plain_comments_as_docs() {
+        let lines = vec![
+            "/**",             // 0
+            " * Javadoc-ish.", // 1
+            " */",             // 2
+            "// plain note",   // 3
+            "fun foo() {",     // 4
+        ];
+        assert_eq!(skip_lead_region(&lines, 0, 5, LeadClass::Docs), 4);
+    }
+
+    #[test]
+    fn skip_lead_region_is_a_noop_when_the_first_line_is_already_code() {
+        let lines = vec!["fn foo() {", "    body()", "}"];
+        assert_eq!(skip_lead_region(&lines, 0, 3, LeadClass::All), 0);
+        assert_eq!(skip_lead_region(&lines, 0, 3, LeadClass::Docs), 0);
+    }
+
+    #[test]
+    fn skip_lead_region_respects_the_end_bound_and_a_short_slice() {
+        let lines = vec!["/// doc", "/// more", "fn foo() {}"];
+        // `end` clamps the walk even though line 1 is still trivia.
+        assert_eq!(skip_lead_region(&lines, 0, 1, LeadClass::Docs), 1);
+        // An `end` past the slice must not panic.
+        assert_eq!(skip_lead_region(&lines, 0, 99, LeadClass::Docs), 2);
     }
 }

@@ -16,7 +16,7 @@ use crate::fs::{
 use crate::symbol::edit::{
     anchor_indent, apply_text_edits, clamp_range_to_parent, collect_all_name_paths,
     editing_end_line, editing_end_line_strict, editing_start_line, find_ast_name_path,
-    find_parent_symbol, text_sweep, write_lines, CorruptionVerdict,
+    find_parent_symbol, skip_lead_region, text_sweep, write_lines, CorruptionVerdict, LeadClass,
 };
 use crate::symbol::query::{
     count_symbols_by_name_path, fetch_validated_symbol, find_unique_symbol_by_name_path,
@@ -592,71 +592,54 @@ impl EditCode {
             // comment. Detect this: if new_body does NOT lead with a decorator,
             // narrow `start` forward past any leading decorator/attribute lines in
             // the captured range so they are preserved.
-            let body_leads_with_decorator = new_body
+            //
+            // Asking that as ONE all-or-nothing question silently dropped doc
+            // comments: a body leading with `#[test]` (or even a plain `//`) was
+            // treated as owning the entire lead region, so the file's `///` lines
+            // fell inside the replaced range and were never re-emitted. The lead
+            // region holds two independent classes -- documentation and attributes
+            // -- so each is preserved unless the body supplies its own of that
+            // class. See docs/issues/ for the doc-comment-drop report.
+            let body_lead = new_body
                 .lines()
                 .find(|l| !l.trim().is_empty())
-                .map(|l| {
-                    let t = l.trim_start();
-                    t.starts_with("///")
-                        || t.starts_with("//!")
-                        || t.starts_with("//")
-                        || t.starts_with("#[")
-                        || t.starts_with("/**")
-                        || t.starts_with("/*")
-                        || t.starts_with('@')
-                })
-                .unwrap_or(false);
+                .map(|l| l.trim_start());
+            let body_supplies_docs = body_lead.is_some_and(|t| {
+                t.starts_with("///")
+                    || t.starts_with("//!")
+                    || t.starts_with("/**")
+                    || t.starts_with("/*")
+            });
+            let body_leads_with_decorator = body_lead.is_some_and(|t| {
+                t.starts_with("///")
+                    || t.starts_with("//!")
+                    || t.starts_with("//")
+                    || t.starts_with("#[")
+                    || t.starts_with("/**")
+                    || t.starts_with("/*")
+                    || t.starts_with('@')
+            });
 
-            let start_narrowed = if !body_leads_with_decorator {
-                // Walk forward from `start` skipping decorator lines.
+            let start_narrowed = {
                 let mut s = start;
-                let mut pending_open_brackets: usize = 0;
-                while s < end {
-                    let trimmed = lines[s].trim();
-                    if pending_open_brackets > 0 {
-                        for ch in trimmed.chars() {
-                            match ch {
-                                '(' | '[' => pending_open_brackets += 1,
-                                ')' | ']' => {
-                                    pending_open_brackets = pending_open_brackets.saturating_sub(1)
-                                }
-                                _ => {}
-                            }
-                        }
-                        s += 1;
-                        continue;
-                    }
-                    let is_decorator = trimmed.starts_with("///")
-                        || trimmed.starts_with("//!")
-                        || trimmed.starts_with("//")
-                        || trimmed.starts_with("/**")
-                        || trimmed.starts_with("/*")
-                        || trimmed.starts_with("* ")
-                        || trimmed == "*"
-                        || trimmed == "*/"
-                        || trimmed.starts_with('@')
-                        || trimmed.starts_with("#[");
-                    if !is_decorator {
-                        break;
-                    }
-                    if trimmed.starts_with("#[") {
-                        let mut depth: isize = 0;
-                        for ch in trimmed.chars() {
-                            match ch {
-                                '(' | '[' => depth += 1,
-                                ')' | ']' => depth -= 1,
-                                _ => {}
-                            }
-                        }
-                        if depth > 0 {
-                            pending_open_brackets = depth as usize;
-                        }
-                    }
-                    s += 1;
+                // Phase 1 -- documentation. Skipped past whenever the body brings
+                // none of its own, including when the body leads with an attribute.
+                // This is the phase the old single-question form never reached.
+                if !body_supplies_docs {
+                    s = skip_lead_region(&lines, s, end, LeadClass::Docs);
+                }
+                // Phase 2 -- attributes as well, but only when the body supplies no
+                // lead region at all. A body opening with `#[...]` is stating its
+                // own attributes, so the file's are its to replace. (Preserving
+                // attributes past a body that DOES lead with a decorator is a
+                // separate, accepted limitation -- the explicit `attributes` param
+                // is the channel for it, and
+                // archive/2026-05-18-edit-code-replace-misses-outer-attrs.md is
+                // wontfix.)
+                if !body_leads_with_decorator {
+                    s = skip_lead_region(&lines, s, end, LeadClass::All);
                 }
                 s
-            } else {
-                start
             };
             (start_narrowed, new_body.to_string())
         };
