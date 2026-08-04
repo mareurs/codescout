@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-53 | 2026-08-04 | miss → rule | **A corpus's composition is a seam — census it by producing tool before you measure it, and when you stratify by a magnitude, ask what makes things big.** One tool contributed 59.8% of all tool-result bytes as base64 image data that `json.dumps` had stringified into the text denominator; it also defined the top band of a size-stratified sample (11/13 sessions), so the magnitude axis was a producer axis in disguise. Invisible to thirteen rounds of internal checks — contamination moved numerator and denominator together. Caught only when the corpus owner said the traffic was not representative | provenance-probe F-13 + W-9; PV-61; PV-62 |
 | R-52 | 2026-08-04 | miss → rule | **An artifact's ownership is the union of its inputs' ownership — choose the output location from the input set, never from where the code lives.** Sibling to R-51, not an amendment: R-51's failure produces wrong NUMBERS, this one produces MISPLACED DATA, and R-51's exclusion-at-entry fix leaves the artifact in the wrong place. A pipeline reading N corpora writes outside all N. Caught at staging: a probe in `codescout/scratch/` held ~14MB of symbol vocabularies from 8 repos including client work, and `semantic_search` was returning them — the retrieval consequence R-51's framing does not reach | provenance-probe F-2; PV-60; staging check 2026-08-04 |
 | R-51 | 2026-08-03 (escalated 08-04) | miss → rule, promote-ready | **An instrument that writes into the corpus it measures.** New seam class: output-path ↔ measurement-domain overlap. A probe wrote its own artifacts (`sessions.json`, `vocab/*.json`) into the repo whose symbol vocabulary it was building; DF inflated 6.2× (35,496 → 221,214) with no error raised, caught only by an incidental before/after ratio check. Not scoutable statically — the overlap is created by *running* the pipeline. Complement of R-50: R-50 = name what the view dropped, R-51 = name what the view wrongly admitted | provenance-probe F-2 (fixed-verified); F-3 same log is the R-50-shaped twin |
 | R-50 | 2026-07-28 | miss → rule | **The view is not the set.** Five distinct errors in one session share one shape: concluding from an enumeration that had silently excluded something. A liveness filter, then reusing the filtered list; `pgrep \| tail -1` picking an orphan not the live server; a SHA census matching frontmatter `id:` as commits; `ls \| wc -l` counting `.anchors.toml` sidecars as memories; a compact summary read as a whole result. Before concluding from a list, name what the view dropped — filter, cap, preview, or a pattern that matched the wrong tokens | bug-fix F-38 + W-30; also F-33/F-35 and the four corrections listed in-entry; kin R-10 (completeness scout), R-26/R-27 |
@@ -1518,6 +1519,82 @@ stronger version of the same fix.
 
 **Verdict:** miss → rule, **applied**. Second datapoint for the R-51 family and
 the first to separate misplaced-data from wrong-numbers.
+## R-53 — A corpus's composition is a seam; census it by producer before measuring
+
+**Class:** input-validity — the analysed corpus vs. the corpus you believe you
+have. Sibling to R-50 (*the view is not the set*) and R-51 (*an instrument that
+writes into the corpus it measures*). R-50 is about what an enumeration silently
+**dropped**; R-51 about what a corpus wrongly **admitted** through your own
+writing; R-53 is about what the corpus **contained all along that is not the kind
+of thing you are counting**.
+
+**The seam.** Every metric in a measurement programme depends on the shape of the
+corpus, and the corpus is exactly the thing nobody reads this session — it is too
+big to read, which is why it is being measured. That is the definition of a seam:
+your next action depends on the current shape of something you have not read.
+Scout it the same way you would scout a struct before editing it.
+
+**Miss (2026-08-04, provenance probe, round 14).** Thirteen rounds of analysis ran
+over a Langfuse corpus in which `chrome-devtools__take_screenshot` contributed
+**59.8% of all tool-result bytes** — 71 calls, 22.04 MB, of which 71/71 payloads
+were >90% base64 (median 100.0% of the payload inside one contiguous base64 run,
+median whitespace 0.00%) and 37/71 were truncated at the flattener's 400 KB cap.
+The pipeline called `flatten(tool_result['content'])`, i.e. `json.dumps`, so an
+image content block became a giant text string and entered the token accounting.
+
+Two consequences, and the second is the one that generalises furthest:
+
+1. **Wrong denominator.** Base64 contains zero codebase-specific tokens by
+   construction, so it inflated every share figure and depressed every utilisation
+   figure *at the same time*. No individual number looked wrong. Reconciliation
+   checks passed — they reconcile a numerator against a denominator that were
+   contaminated together.
+2. **Confounded sampling frame.** The sample was stratified into five bands by
+   total context size, and base64 is what *made* those sessions large. Browser
+   sessions by band: S 0/10, M 0/13, L 0/14, XL 1/14, **XXL 11/13**; browser share
+   of tool bytes 0% / 0% / 0% / 19.9% / **81.2%**. So every "as context grows, X"
+   finding from rounds 8–13 was reading a **producer** axis wearing a
+   **magnitude** label. On clean sessions the trend inverts: utilisation goes
+   19.0% → 35.7% → 32.8% → 31.5% across S–XL, then 6.2% at n=**2**. The decay was
+   the top band, and the top band was one tool.
+
+**Cost.** Reversed the programme's sole remaining build decision. The intervention
+(a PostToolUse hook on `mcp__.*` triggering at 32 KB) had been justified by "137
+calls carrying 61.1% of information-bearing tokens"; after exclusion, **zero**
+non-browser MCP calls in the entire corpus reach 32 KB. Trigger population empty,
+not merely smaller.
+
+**The scout, and it is cheap.** Before any metric, print one table: per producing
+tool — call count, total bytes, share of bytes, count above your threshold of
+interest, and number of distinct sessions. Roughly fifty lines of code, ten
+minutes. Read it with two questions:
+
+- *Does any single producer exceed ~20% of the bytes?* If yes, that is a validity
+  question before it is a distribution feature. Ask what those bytes **are** —
+  character-class statistics are enough (base64 runs, whitespace fraction) and
+  require reading no content, which also keeps the check privacy-safe.
+- *Is that producer concentrated in one stratum?* If yes, your stratification
+  variable is partly that producer, and every trend along the axis is suspect.
+
+**Why no internal check found it.** Thirteen rounds included null models, domain
+matching, byte-total reconciliation, and sustained adversarial review by an
+independent session that reversed four conclusions. All of them operate *inside*
+the frame the corpus defines. Corpus-composition errors are outside it by
+construction. The person who can see them is whoever knows the provenance of the
+inputs — here, the owner, whose entire contribution was one sentence saying the
+browser traffic was not normal flow. Pair this rule with that habit: when someone
+with provenance knowledge makes an offhand representativeness claim, census first
+and argue after (session-log W-9).
+
+**Kin.** R-50 (the view is not the set) — same family, different position: R-50
+guards the *listing*, R-53 guards the *substrate*. F-10 in the same probe found a
+classifier's catch-all default read as a category; R-53 is that error one level
+down, in the data rather than in the labels. PV-25 (pin the unit before the
+threshold) is the metric-side twin — R-53 is the corpus-side one, and this
+programme did the first carefully and never did the second.
+
+---
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

@@ -41,6 +41,7 @@ topic: provenance-measurement
 | F-10 | 2026-08-04 | high | measurement-hygiene | fixed-verified | A classifier's catch-all default was read as a category for eight rounds |
 | F-11 | 2026-08-04 | med | self-friction | fixed-verified | Declared index eviction successful on one mid-flight query; a second refuted it |
 | F-12 | 2026-08-04 | med | self-friction | fixed-verified | Marked R-52 settled while 19MB still sat in the repo — rule written, not applied |
+| F-13 | 2026-08-04 | high | measurement-hygiene | fixed-verified | 60% of the corpus was base64 image data; nine rounds of analysis ran on top of it |
 
 ## Wins Index
 
@@ -54,6 +55,7 @@ topic: provenance-measurement
 | W-6 | 2026-08-04 | high | Settle a suspected confound with a null model, not an argument | Both sides had plausible stories; the null distribution decided it in one run | validated |
 | W-7 | 2026-08-04 | high | Sustained adversarial review by an independent session | Four of my conclusions reversed; none was caught by my own checks | validated |
 | W-8 | 2026-08-04 | high | Prefer the design-time form of a check over its empirical twin | Three of five rules answerable before any data; two would have saved whole rounds | validated |
+| W-9 | 2026-08-04 | high | Treat a domain owner's "that's not normal traffic" as a corpus-validity test, not a preference | One sentence killed the last buildable item; no internal check had questioned the corpus composition in 13 rounds | validated |
 
 ---
 
@@ -853,6 +855,112 @@ lines and a subsequent measurement cites them as having caught something. At tha
 point promote to the template's own documentation rather than the session log.
 
 **Status:** validated
+
+---
+
+## F-13 — 60% of the corpus was base64 image data; nine rounds ran on top of it
+
+**Observed:** 2026-08-04, round 14, after the project owner said the
+browser-automation MCP was "not part of the normal flow" and asked for it to be
+excluded.
+
+**When:** Thirteen rounds into the measurement programme, with the sole surviving
+intervention (PV-29) written up as SHIP THIS and its trigger derived from the
+per-call payload-size distribution.
+
+**Expected:** Excluding one noisy tool would shift the numbers somewhat and leave
+the conclusion standing.
+
+**Got:** `chrome-devtools__take_screenshot` was **59.8% of all tool-result bytes**
+in the Langfuse corpus — 71 calls, 22.04 MB. A character-class census of all 71
+payloads: 71/71 are >90% base64, median fraction inside a contiguous ≥200-char
+base64 run **100.0%**, median whitespace **0.00%**, and 37/71 truncated at
+`flatten()`'s 400,000-byte cap, so 22.04 MB is a floor. `flatten()` is
+`json.dumps(x)[:400_000]`, so an image content block was stringified and counted
+as text. Excluding it, PV-29's trigger fell from 137 calls / 61.1% of
+information-bearing tokens to 63 calls / 24.9%, with **zero** non-browser MCP
+calls remaining above 32 KB. The hook matches `mcp__.*`. Its trigger population is
+empty.
+
+**Probable cause:** Two compounding defects, neither of which any round checked.
+
+1. *Unit of the corpus.* The pipeline validated its **metric's** unit carefully
+   (F-4, PV-25 — source vs. line vs. identifier) and never validated its
+   **corpus's** unit. Bytes were assumed to be text. Base64 holds zero
+   codebase-specific tokens by construction, so it inflated every share
+   denominator and depressed every utilisation figure simultaneously — pushing in
+   both directions at once, which is why no single number looked absurd.
+2. *Sampling frame.* The Langfuse bands were stratified by total context size, and
+   base64 is what **made** those sessions large. Browser-bearing sessions by band:
+   S 0/10, M 0/13, L 0/14, XL 1/14, **XXL 11/13**. Every "as context grows, X"
+   conclusion from rounds 8–13 was reading a producer axis wearing a magnitude
+   label. On clean sessions utilisation reads S 19.0%, M 35.7%, L 32.8%, XL 31.5%,
+   XXL 6.2% (n=**2**) — rising then flat, not decaying.
+
+**Workaround:** Rounds `round14_names.py` (census by producing tool),
+`round14_probe.py` (character-class classification), `round14.py` (metrics with
+exclusion), `round14_bands.py` (band axis on clean sessions),
+`round14_transcripts.py` (contamination census on the transcript corpus).
+Transcript corpus is only 7.73% affected across 12 of 2,557 sessions, so
+transcript-derived results (M2, M3, M5, rounds 1–7) stand.
+
+**Severity:** high — reversed the programme's only remaining build decision and
+invalidated the band axis underpinning six rounds.
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** PV-61, PV-62, PV-63, PV-64; R-53. The transferable rule
+has two halves, and the second is the one this session lacked. *Census a corpus by
+producing tool before measuring it* — a single-tool share above ~20% is a
+validity question, not a distribution feature. And *when you stratify by a
+magnitude, ask what makes things big in that corpus* — a stratification variable
+caused by one producer is a producer axis in disguise. Kin to F-10: that entry
+found a **label** covering a category that was not one; this finds a **corpus**
+containing bytes that were not what they were counted as. Both were invisible to
+every internal consistency check and both were caught from outside.
+
+---
+
+## W-9 — A domain owner's "that's not normal traffic" is a corpus-validity test
+
+**Practice:** When the person who generated the data says a component of it is
+not representative, treat the statement as a hypothesis about **corpus validity**
+and test it against the data — not as a stylistic preference to be accommodated,
+and not as a request to re-cut the same numbers.
+
+**Observed:** 2026-08-04, round 14. The instruction was one sentence: the
+browser-automation MCP is not part of the normal flow, take it out. It was framed
+as cleaning up an outlier.
+
+**Counterfactual:** Thirteen rounds had run, including an adversarial review by an
+independent session that reversed four conclusions (W-7). None of them questioned
+what the corpus was **made of**. Every check was internal — consistency between
+figures, null models, domain matching, reconciliation of byte totals — and all of
+them are satisfiable by a corpus that is 60% base64, because the contamination
+moved numerator and denominator together. Without the challenge, PV-29 ships: a
+PostToolUse hook on `mcp__.*` with a 32 KB trigger, deployed against a population
+of zero qualifying calls, justified by a document citing 61.1%.
+
+**Why it worked:** The owner has knowledge the corpus cannot contain — which
+sessions were real work and which were a browser-driving experiment. That is
+outside the measurement frame by construction; no internal check reaches it. The
+statement was also cheap to test: one census by producing tool, ten minutes.
+
+**Generalisation:** Adversarial review catches reasoning errors; it does not catch
+corpus errors, because reviewer and analyst share the same data. Corpus errors are
+caught by whoever knows the provenance of the inputs. When such a person makes an
+offhand claim about representativeness, it outranks any internal check — census
+first, argue after. Note the failure mode this specific phrasing invites: "it
+skews the statistics" sounds like a request to drop an outlier, and dropping an
+outlier is a small operation. The correct response was to ask what the bytes
+actually **were**, which turned a re-cut into a defect finding.
+
+**Status:** validated
+
+**Promote-when:** A second instance of an owner-supplied representativeness claim
+overturning an internally-consistent result. On the second, promote to the
+measurement-plan template as a pre-registration line: *name who knows the
+provenance of this corpus, and ask them what is in it before measuring.*
 
 ---
 
