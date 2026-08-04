@@ -37,6 +37,10 @@ topic: provenance-measurement
 | F-6 | 2026-08-03 | med | codescout-tool | open | `create_file` default refusal discards the whole content payload on first attempt |
 | F-7 | 2026-08-04 | med | measurement-hygiene | fixed-verified | Langfuse query filtered on the TRACE name against the OBSERVATIONS table — silent zero across all 5 bands |
 | F-8 | 2026-08-04 | high | measurement-hygiene | fixed-verified | Reported a tunable gate at 2.15× lift; it was miss-accumulation. Caught by external review, not by me |
+| F-9 | 2026-08-04 | high | measurement-hygiene | fixed-verified | Two automated verdict lines printed the OPPOSITE of the numbers directly above them |
+| F-10 | 2026-08-04 | high | measurement-hygiene | fixed-verified | A classifier's catch-all default was read as a category for eight rounds |
+| F-11 | 2026-08-04 | med | self-friction | fixed-verified | Declared index eviction successful on one mid-flight query; a second refuted it |
+| F-12 | 2026-08-04 | med | self-friction | fixed-verified | Marked R-52 settled while 19MB still sat in the repo — rule written, not applied |
 
 ## Wins Index
 
@@ -48,6 +52,8 @@ topic: provenance-measurement
 | W-4 | 2026-08-04 | high | Compare regimes WITHIN one instrument, never across two | Cross-instrument comparison would have read a reader difference as a 5× utilisation collapse | validated |
 | W-5 | 2026-08-04 | high | Check trigger/target circularity before reporting classifier precision | Would have recommended a gate whose 100% precision was tautological | validated |
 | W-6 | 2026-08-04 | high | Settle a suspected confound with a null model, not an argument | Both sides had plausible stories; the null distribution decided it in one run | validated |
+| W-7 | 2026-08-04 | high | Sustained adversarial review by an independent session | Four of my conclusions reversed; none was caught by my own checks | validated |
+| W-8 | 2026-08-04 | high | Prefer the design-time form of a check over its empirical twin | Three of five rules answerable before any data; two would have saved whole rounds | validated |
 
 ---
 
@@ -621,6 +627,230 @@ buildable set.
 is mechanical. At 2 datapoints, promote to codescout memory `reconnaissance` as:
 "when two plausible mechanisms could produce an effect, simulate the null under
 one of them rather than arguing — it is usually one run."
+
+**Status:** validated
+
+---
+
+## F-9 — Two automated verdict lines printed the opposite of their own data
+
+**Observed:** 2026-08-04, rounds 9 and 11 of the provenance measurement.
+
+**When:** Reading pipeline output and reporting it onward to a review session.
+
+**Expected:** A `verdict` line computed from the numbers in the same run agrees
+with them.
+
+**Got:** Twice, it did not. Round 9's redundancy test keyed its verdict on a
+RATIO (top band 2.2% vs mid 1.1% = 2.1×) and printed "REDUNDANCY — top-band shell
+output is largely repeated content" when the absolute level refuted it: 97.8% of
+those bytes were novel lines. Round 11's single-law test used `spread < range`
+(45.9% < 51.7%) and printed "ONE LAW" when a 45.9-point within-bin spread against
+a 51.7-point across-bin range is not evidence of one law at all.
+
+**Probable cause:** A verdict line arrives pre-formatted and adjacent to correct
+numbers, which is exactly the position that discourages checking it. The
+underlying arithmetic was right both times; only the summary was wrong.
+
+**Workaround:** Caught by reading the numbers rather than the verdict, both times
+before the claim propagated. Generalised as PV-56 with the fix: make verdict
+lines state their own test inline — `ONE LAW (spread 45.9% < range 51.7%)` — which
+converts a report back into a checkable claim.
+
+**Severity:** high — both were one step from being reported as findings, and a
+verdict line is a *report of a draw that already happened*, so a reader has
+nothing left to settle it against.
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** PV-56. Distinct from the population-error family: PV-44's
+class is wrong inputs to sound arithmetic; this is sound inputs to a wrong
+summary.
+
+---
+
+## F-10 — A classifier's catch-all default was read as a category for eight rounds
+
+**Observed:** 2026-08-04, round 10, while chasing an unrelated discrepancy.
+
+**When:** Shell byte totals from the redundancy pass failed to reconcile with the
+share table — 0.7 MB measured against a 77.6% share of ~3.5 MB contexts.
+
+**Expected:** The `tool_output` bucket contains shell/command output.
+
+**Got:** `tool_source_type()` ends with `return "tool_output"`, so every
+unrecognised tool joined a bucket whose NAME implied shell. In the largest
+sessions that bucket was 95.6% browser-automation MCP output and 3.2% shell.
+Every per-source-type figure reported for `tool_output` across rounds 1–8 was
+therefore mislabelled, and the round-8 headline ("shell output is the mechanism
+driving saturation") reversed entirely: shell share peaks mid-range and FALLS in
+the top band.
+
+**Probable cause:** A fallback branch sharing a name with a real category. The
+label did analytical work the classifier never authorised.
+
+**Workaround:** Split the bucket three ways (shell / mcp_other / unknown) and
+re-ran every band. Recorded as PV-44 with the rule: a fallback branch must never
+share a name with a real category — name defaults `other_untyped` so a large
+share there reads as an unanswered question rather than a finding. Second half
+added on review: any classifier used in measurement must REPORT its unclassified
+fraction, the way a survey reports non-response.
+
+**Severity:** high — propagated into a stated conclusion and a design
+recommendation before being caught.
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** PV-44. Fourth member of the family that cost this work
+most (PV-30, F-5, PV-38, PV-44) — in every case the measurement was sound and the
+population or label was wrong, and NONE was caught by inspection.
+
+---
+
+## F-11 — Declared index eviction successful on one mid-flight query
+
+**Observed:** 2026-08-04, verifying remediation of the scratch/ retrieval
+exposure.
+
+**When:** After triggering a forced reindex, checking whether probe content had
+left the semantic index.
+
+**Expected:** A probe-specific query returning only `src/` means the eviction
+worked.
+
+**Got:** It did return only `src/` — and I said so. A second probe-specific query
+immediately returned `scratch/provenance-probe/*.py` again. The index was still
+mid-rebuild; ranking shifts while chunks re-embed, so a single clean query proves
+nothing. `indexing.status` was still `running` at the time, and `file_count` was
+still 1383.
+
+**Probable cause:** Treated one sample as the state of a system that was
+visibly in flux — the status field said `running` and I read the search result
+instead.
+
+**Workaround:** Waited for `indexing.status == done` (`files_deleted: 594`,
+file_count 1383 → 1346) and re-verified. Correction stated plainly in the same
+turn.
+
+**Severity:** med — a false all-clear on a data-exposure check, retracted within
+the turn.
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** Recorded in PV-60. Do not read an index as clean until
+`indexing.status == done`; a mid-flight query is a sample of a moving target.
+
+---
+
+## F-12 — Marked R-52 settled while the artifact was still in the repo
+
+**Observed:** 2026-08-04, after the review session pointed out that gitignore
+closes the commit path only.
+
+**When:** Having filed R-52 ("a pipeline reading N corpora writes outside all N")
+and committed it, with the probe's 19 MB still sitting in `codescout/scratch/`.
+
+**Expected:** Recording the structural rule and gitignoring the directory closed
+the issue.
+
+**Got:** It closed the COMMIT path and the INDEX path. It left the artifact
+reachable by `git add -f`, by backup or sync of the working tree, and by any
+tooling that does not consult `.gitignore`. The rule had been written and not
+applied, and the tracker said settled.
+
+**Probable cause:** Recording a rule feels like discharging it. The gitignore was
+a containment measure and contains only the paths it is consulted on.
+
+**Workaround:** Relocated the artifacts to `~/.local/share/provenance-probe`,
+outside all eight input repositories; verified every input repo clean and the
+repo tree clean. Gitignore retained as defence-in-depth.
+
+**Severity:** med — no exposure beyond a private working tree, but the ledger
+asserted a closure that had not happened.
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** R-52, now marked *applied* rather than settled. The
+general form: an exclusion rule contains only the paths it is consulted on;
+relocation removes the artifact from every path at once — which is why the
+structural fix sits one level above the procedural one rather than being a
+stronger version of it.
+
+---
+
+## W-7 — Sustained adversarial review by an independent session
+
+**Observed:** 2026-08-04, across thirteen rounds of the provenance measurement.
+
+**Pattern:** Every result was written up for a second session that could not run
+the queries, only read the numbers and reason about the method. That session
+challenged specific claims with named mechanisms and a proposed test attached,
+rather than asking for reassurance.
+
+**Counterfactual:** Four of my conclusions were reversed, and **none was caught
+by my own checks**: the Tier-1 gate at 2.15× lift (miss-accumulation, F-8); the
+shell-output mechanism (a catch-all bucket, F-10); the atomic floor as
+irreducible (convergent naming); and PV-7's "structured retrieval is ~3× more
+efficient" (a domain mismatch detectable with no data at all). Two of the four
+were claims I had made *while correcting the reviewer*, which is the worst place
+to be wrong. Without the review, a non-working gate and a mislabelled
+intervention would both have gone onto a roadmap.
+
+**Confirming data points:**
+1. Four reversals across thirteen rounds, each traced to a specific challenged
+   claim and settled by a measurement the reviewer proposed.
+2. The reviewer's own hypotheses ran ~1-in-3 (redundancy refuted, single-law
+   refuted, composition confirmed) — so the value was not in being right but in
+   framing cheap, settleable bets.
+3. The final query — file_read split by path class — closed the programme by
+   *eliminating* the surviving finding rather than confirming it.
+
+**Impact:** high — it is the difference between a measurement phase and a
+self-confirming one, which the brief named as the failure mode to guard against.
+
+**Promote-when:** A second multi-round measurement in this repo runs with an
+independent adversarial reader and the reversal rate is materially above what
+self-review produced. At 2 datapoints, promote to CLAUDE.md as: "for exploratory
+measurement, write every round up for a reader who cannot run the queries."
+
+**Status:** validated
+
+---
+
+## W-8 — Prefer the design-time form of a check over its empirical twin
+
+**Observed:** 2026-08-04, in the closing rounds, once three checks turned out to
+have cheaper prior forms.
+
+**Pattern:** Several checks that were run empirically have a version answerable
+from the *definition* of the artifact, before any data exists. Ask the definition
+question first; keep the empirical version for cases that pass it.
+
+**Counterfactual:** Three of the programme's five transferable rules are
+design-time (PV-25 unit-per-metric, PV-53 what-can-this-not-see, PV-58
+shared-domain), and two of them would have saved whole rounds:
+
+1. **PV-53 asked of M3 at the outset** yields PV-30 for free — a confabulated
+   symbol resolves nowhere, so `invented` cannot enter the numerator. That was
+   discovered in round 1 by hand-labelling instead.
+2. **PV-58 asked of PV-7 at the outset** yields the refutation for free —
+   `symbol_lookup` can only return repo source, `file_read` can return anything,
+   so the comparison was a specialist against a generalist over the generalist's
+   whole caseload. That took thirteen rounds and a path-class split to find.
+3. **R-52 asked before the probe was written** yields the output location for
+   free — a pipeline reading eight repos writes outside all eight. That was
+   caught at staging, three commits later.
+
+**Confirming data points:** three independent instances in one week, each where
+the empirical version was run and the definitional version would have been
+instant.
+
+**Impact:** high — PV-55 turns two of them into two lines of a measurement-plan
+template at zero cost.
+
+**Promote-when:** The measurement-plan template gains the three pre-registration
+lines and a subsequent measurement cites them as having caught something. At that
+point promote to the template's own documentation rather than the session log.
 
 **Status:** validated
 

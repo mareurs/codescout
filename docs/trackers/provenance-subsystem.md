@@ -14,6 +14,53 @@ topic: provenance-attribution
 
 # Provenance Subsystem — Programme Tracker (PV-N)
 
+## STATE AS OF 2026-08-04 — read this first
+
+**The measurement programme is CLOSED.** Thirteen rounds, 2,997 transcripts plus
+64 Langfuse-reconstructed sessions. Do not re-open a metric without reading its
+PV entry first — several were measured, reversed, and re-measured, and the entry
+holds the final reading.
+
+**Verdicts, final:**
+
+| | outcome |
+|---|---|
+| Tier 4 (clustering) | **KILLED** — M2's pre-registered condition fired cleanly (PV-3) |
+| Tier 1 (the gate) | **CLOSED AS A CLASS** — measured as opportunity, not signal (PV-26) |
+| Confabulation detection | **DESCOPED** — addressable floor is 0.20% of references (PV-12) |
+| Stale-drift (M6) | **weak NO**, repo-gated and self-administered (PV-24) |
+| Retrieval granularity | **REFUTED** — was a domain mismatch, not an effect (PV-7, PV-57) |
+
+**The one thing left to build:** PV-29. A PostToolUse hook matching `mcp__.*`
+writes oversized payloads to codescout's existing `@tool_*` buffer and returns a
+summary + handle via `updatedToolOutput`. Trigger on per-call size (≥ 32 KB = 137
+calls carrying 61.1% of information-bearing tokens). **Buffer, never truncate** —
+the rationale is load-bearing, see PV-52/PV-54. Constraint: PV-59 forbids capping
+repo-source reads, which are the best-utilised category in the corpus.
+
+**If you are tempted to re-run something,** check these first — each was a
+conclusion that got reversed, and the reversal is the current state:
+PV-7 (refuted), PV-26 (reversed), PV-42 (reversed), PV-36 (corrected),
+PV-28 (settled), PV-32 (amended).
+
+**Artifacts.** The probe pipeline lives at `~/.local/share/provenance-probe` —
+**outside this repo, deliberately** (R-52). It holds ~19 MB of symbol
+vocabularies extracted from eight repositories including client work; it must
+never be moved back inside any input repo, and `/scratch/` is gitignored as
+defence-in-depth. Every figure cited in this ledger is inline in its PV entry, so
+the trackers are self-contained — the pipeline is for rebuilding, not for reading
+the results.
+
+**Sibling trackers.** `docs/trackers/provenance-probe-session-log.md` (F-1..12 /
+W-1..8) for per-session frictions and wins; `docs/trackers/reconnaissance-patterns.md`
+R-51 and R-52 for the instrument/corpus lessons; `docs/trackers/codescout-usage-frictions.md`
+U-29 for the payload-discarding-guard pattern.
+
+**Cross-session context.** The design counterpart lives in a claude.ai project
+("AI thoughts") that cannot read this repo. The paste-able export is
+`HANDOFF.md` in the artifact directory; regenerate it from this ledger rather
+than the reverse — this tracker is the source of record.
+
 > **Phase: MEASUREMENT. Nothing ships.** Explicit decision: measure before
 > building, and do not design for other users yet. This does not reach anyone
 > else until we know what is worth building.

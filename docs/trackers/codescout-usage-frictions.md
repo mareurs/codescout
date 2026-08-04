@@ -1147,3 +1147,52 @@ post_process surface). Bug file:
 **Severity:** med — observability blind spot plus recurring retry-cost; no data loss.
 
 **Status:** open. No hookify rule proposed — the fix is observability (`err_family` tagging), not a deny/warn gate.
+
+
+### U-29 — Guards that reject AFTER accepting the payload cost a full re-transmission (×3 in one session)
+
+**When:** 2026-08-04, provenance-measurement session (13 rounds, heavy file
+authoring). Three instances of the same shape, two tools.
+
+**Iron Law / pattern:** Not an Iron Law violation — every guard fired correctly.
+The friction is that the guard's cost scales with the size of the content it
+rejects, because validation happens after the argument payload is already in the
+request.
+
+**Tool called / instances:**
+1. `create_file` → `file already exists` on a ~6 KB whole-file rewrite of a Python
+   module. Correct refusal, good hint (`pass overwrite: true`), but the composed
+   payload is discarded and complying costs a second full transmission. ~6k
+   tokens.
+2. `create_file` → `outside the project root` for a commit-message file in the
+   job tmp dir. Returns `@ack_*`; re-invoking with the handle requires re-sending
+   the entire content.
+3. `create_file` → same, for a script written to the relocated artifact
+   directory. Again a full re-send.
+
+**Should have called / fix:** The agent-side fix is anticipation (pass
+`overwrite: true` when the path may exist; write scratch inside the project or
+ack first), and it is genuinely partial — existence and scope are not always
+known ahead of the call.
+
+The codescout-side fix is the one that generalises: on a rejection that the
+caller can resolve by re-invoking, **buffer the submitted content server-side and
+return a handle**, so the retry references it instead of re-sending. The `@ack_*`
+pattern already does exactly this for the *approval token* — it just does not
+carry the payload. Extending it would make the guard's cost constant rather than
+proportional to content size, and the machinery is the same output-buffer system
+that already backs `@cmd_*` / `@tool_*` / `@file_*`.
+
+**Whistle delivered:** yes — this entry. Also logged as F-6 in
+`docs/trackers/provenance-probe-session-log.md` (instance 1, before the pattern
+was visible as a class).
+
+**Recurrence:** 3 in a single session, all in file-authoring work. Expect it to
+track how much whole-file writing a session does rather than being uniform.
+
+**Severity:** med — pure token cost, no correctness impact, but it recurs for
+every large rewrite and the cost is highest exactly when the content is most
+expensive to have composed.
+
+**Status:** open. No hookify rule proposed — a hook cannot see the payload cost;
+the fix belongs in the tool's rejection path.
