@@ -1502,8 +1502,22 @@ descriptions: paths parameterised, output outside every input repo, input set
 downstream of an output location nobody chose deliberately — fixing the location
 fixes most of them by construction.
 
-**Verdict:** miss → rule. Second datapoint for the R-51 family and the first to
-separate misplaced-data from wrong-numbers.
+**Rule applied, not merely recorded (2026-08-04).** The gitignore closed the
+COMMIT path and the INDEX path but left ~19 MB on disk inside the repo — still
+reachable by `git add -f`, by backup/sync of the working tree, and by any tooling
+that does not consult `.gitignore`. Per this rule the artifacts were relocated to
+`~/.local/share/provenance-probe`, outside all eight input repositories.
+Verified: every input repo clean of probe residue, repo working tree clean, new
+location outside every input tree. The `/scratch/` gitignore stays as
+defence-in-depth for the next probe that gets the location wrong.
+
+Note the ordering this exposes: an exclusion rule is a *containment* measure and
+contains only the paths it is consulted on. Relocation removes the artifact from
+every path at once, which is why the structural fix is one level up rather than a
+stronger version of the same fix.
+
+**Verdict:** miss → rule, **applied**. Second datapoint for the R-51 family and
+the first to separate misplaced-data from wrong-numbers.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
