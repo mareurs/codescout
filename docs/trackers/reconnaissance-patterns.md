@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-52 | 2026-08-04 | miss → rule | **An artifact's ownership is the union of its inputs' ownership — choose the output location from the input set, never from where the code lives.** Sibling to R-51, not an amendment: R-51's failure produces wrong NUMBERS, this one produces MISPLACED DATA, and R-51's exclusion-at-entry fix leaves the artifact in the wrong place. A pipeline reading N corpora writes outside all N. Caught at staging: a probe in `codescout/scratch/` held ~14MB of symbol vocabularies from 8 repos including client work, and `semantic_search` was returning them — the retrieval consequence R-51's framing does not reach | provenance-probe F-2; PV-60; staging check 2026-08-04 |
 | R-51 | 2026-08-03 (escalated 08-04) | miss → rule, promote-ready | **An instrument that writes into the corpus it measures.** New seam class: output-path ↔ measurement-domain overlap. A probe wrote its own artifacts (`sessions.json`, `vocab/*.json`) into the repo whose symbol vocabulary it was building; DF inflated 6.2× (35,496 → 221,214) with no error raised, caught only by an incidental before/after ratio check. Not scoutable statically — the overlap is created by *running* the pipeline. Complement of R-50: R-50 = name what the view dropped, R-51 = name what the view wrongly admitted | provenance-probe F-2 (fixed-verified); F-3 same log is the R-50-shaped twin |
 | R-50 | 2026-07-28 | miss → rule | **The view is not the set.** Five distinct errors in one session share one shape: concluding from an enumeration that had silently excluded something. A liveness filter, then reusing the filtered list; `pgrep \| tail -1` picking an orphan not the live server; a SHA census matching frontmatter `id:` as commits; `ls \| wc -l` counting `.anchors.toml` sidecars as memories; a compact summary read as a whole result. Before concluding from a list, name what the view dropped — filter, cap, preview, or a pattern that matched the wrong tokens | bug-fix F-38 + W-30; also F-33/F-35 and the four corrections listed in-entry; kin R-10 (completeness scout), R-26/R-27 |
 | R-49 | 2026-07-28 | hit | Re-scout your OWN bug file / plan before implementing it — an artifact written during the observation is a hypothesis that acquires the authority of a record the moment it is committed. When a root cause cites two functions, read the layer BETWEEN them: a chain's middle is where the guards live, and a mechanism inferred from its two ends will never mention them. Three failures of session-authored artifacts in one session (inverted fix option, overstated doc guarantee, unsupported root cause) | bug-fix F-37 + W-29, F-34/W-26, F-35; issues/2026-07-28-edit-code-target-base-from-stale-lsp-range (mitigated); kin R-32/R-46 |
@@ -1445,6 +1446,64 @@ accidental; PV-27 by-design). The SKILL.md Phase-1 bullet above should now say
 that the check applies both to where output *happens* to land and to whether the
 system's own emissions re-enter its input — the second is invisible to a
 directory-exclusion check and needs an explicit provenance-of-provenance rule.
+
+---
+
+## R-52 — An artifact's ownership is the union of its inputs' ownership
+
+**Date:** 2026-08-04 · **Verdict:** miss → rule · **Kin:** R-51 (sibling, not amendment)
+
+**Why a sibling and not an amendment to R-51.** The two failures are different and
+fixing the first does nothing about the second. R-51's failure produces **wrong
+numbers** — a pipeline reads its own output and the measurement is contaminated.
+This one produces **misplaced data** — the artifact sits somewhere it should never
+have been, and the numbers can be perfectly correct while it does.
+
+**R-51's fix treats the symptom.** "Assert the exclusion at pipeline entry and log
+the excluded count" makes the measurement correct while leaving the artifact in
+the wrong place. The structural fix is one level up, and it makes the exclusion
+unnecessary as a side effect: **a pipeline reading N corpora writes outside all
+N.** An exclusion rule is what you need when the output path was chosen from
+where the *code* lives rather than from what the code *reads*.
+
+**The rule, in operational form — decidable before the pipeline exists:**
+
+> An artifact's ownership is the **union of its inputs' ownership**. Choose the
+> output location from the **input set**, never from where the code lives.
+
+**What happened.** The provenance probe lived in `codescout/scratch/` because
+that is where the session was running. It reads eight repositories, several of
+them client work, and writes symbol vocabularies (~14 MB), path fragments and
+prompt excerpts derived from all of them. By the rule above its output belongs to
+eight owners and therefore to none of them — it should have been written outside
+every input repo from the start. Staging caught it before anything was committed;
+`/scratch/` is now gitignored with the reason recorded.
+
+**The retrieval consequence, which R-51's framing does not reach.** F-2 fixed the
+*measurement* consequence (the probe's own walker indexing its output). The
+*retrieval* consequence went unchecked for thirteen rounds: codescout indexes the
+project through a separate pipeline with its own exclusion rules, so
+`semantic_search` over this repo returned client identifiers from `scratch/` to
+any session working here — confirmed empirically, all six results for a probe-
+specific query came from `scratch/provenance-probe/*.py`. That is the one route
+where the data reaches a context **without a decision behind it**. Note codescout
+behaved correctly: its indexer respects `.gitignore`, and `scratch/` was not
+ignored. The defect was the output location, not the indexer.
+
+**Third instance in a week of the same design-time move** — with R-53's
+(PV-53's) "what can this metric not see?" and PV-58's "can these two things share
+a domain?", all three are answerable from the *definition* of the artifact,
+before any inspection of it. Reaching for the empirical version instead (measure
+the mix; scan the output files) is what delayed all three.
+
+**Corollary for the rebuild.** When the probe is rebuilt from its method
+descriptions: paths parameterised, output outside every input repo, input set
+**declared** rather than walked. The 42 hardcoded client paths in the scripts are
+downstream of an output location nobody chose deliberately — fixing the location
+fixes most of them by construction.
+
+**Verdict:** miss → rule. Second datapoint for the R-51 family and the first to
+separate misplaced-data from wrong-numbers.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
