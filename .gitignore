@@ -68,3 +68,9 @@ tests/fixtures/*/.codescout/
 # dense/reranker containers via CODESCOUT_MODEL_DIR. Fetched or built locally —
 # see docs/manual/src/concepts/retrieval-stack.md. ~870 MB, never committed.
 /models/
+
+# Local codescout search index + per-project caches (regenerated on activate)
+/.codescout/code-index.db
+/.codescout/projects/
+/target-release-new/
+/.vscode/
