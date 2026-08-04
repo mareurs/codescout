@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-51 | 2026-08-03 (escalated 08-04) | miss → rule, promote-ready | **An instrument that writes into the corpus it measures.** New seam class: output-path ↔ measurement-domain overlap. A probe wrote its own artifacts (`sessions.json`, `vocab/*.json`) into the repo whose symbol vocabulary it was building; DF inflated 6.2× (35,496 → 221,214) with no error raised, caught only by an incidental before/after ratio check. Not scoutable statically — the overlap is created by *running* the pipeline. Complement of R-50: R-50 = name what the view dropped, R-51 = name what the view wrongly admitted | provenance-probe F-2 (fixed-verified); F-3 same log is the R-50-shaped twin |
 | R-50 | 2026-07-28 | miss → rule | **The view is not the set.** Five distinct errors in one session share one shape: concluding from an enumeration that had silently excluded something. A liveness filter, then reusing the filtered list; `pgrep \| tail -1` picking an orphan not the live server; a SHA census matching frontmatter `id:` as commits; `ls \| wc -l` counting `.anchors.toml` sidecars as memories; a compact summary read as a whole result. Before concluding from a list, name what the view dropped — filter, cap, preview, or a pattern that matched the wrong tokens | bug-fix F-38 + W-30; also F-33/F-35 and the four corrections listed in-entry; kin R-10 (completeness scout), R-26/R-27 |
 | R-49 | 2026-07-28 | hit | Re-scout your OWN bug file / plan before implementing it — an artifact written during the observation is a hypothesis that acquires the authority of a record the moment it is committed. When a root cause cites two functions, read the layer BETWEEN them: a chain's middle is where the guards live, and a mechanism inferred from its two ends will never mention them. Three failures of session-authored artifacts in one session (inverted fix option, overstated doc guarantee, unsupported root cause) | bug-fix F-37 + W-29, F-34/W-26, F-35; issues/2026-07-28-edit-code-target-base-from-stale-lsp-range (mitigated); kin R-32/R-46 |
 | R-48 | 2026-07-28 | hit | A fix built from a bug report's reproduction inherits that reproduction's blind spots, and a test suite written against the same fixture inherits them too — seven tests all reused the report's `"\` shape and none could see that a plain `"` + raw newline (the commoner Rust form) was unprotected. Found by writing the end-to-end fixture the *natural* way and tracing the fix over it before running. For a syntax-level fix, enumerate the language's other syntaxes for the same construct before closing | bug-fix F-36 + W-28; issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents; kin R-26/R-27 (read ≠ verified), R-46 |
@@ -1373,6 +1374,77 @@ concluding from an enumeration, name what the view dropped — a filter you appl
 pattern matching more than you meant, or a rendering layer. A filtered view yields precise
 wrong answers."* The codescout-specific corollary (check `buffered_bytes` before trusting a
 summary) is project-shaped and belongs in the `reconnaissance` memory instead.
+
+---
+
+## R-51 — Miss: an instrument that writes into the corpus it measures
+
+**Date:** 2026-08-03 · **Verdict:** miss → rule · **Kin:** R-50 (complement), R-10 (completeness scout)
+
+**Seam class (new): output-path ↔ measurement-domain overlap.** When an
+analysis writes its artifacts *inside* the corpus it reads, the instrument
+becomes part of its own subject. Nothing errors; the numbers simply start
+describing the measurement.
+
+**What happened.** The provenance probe (`scratch/provenance-probe/`) builds a
+per-repo symbol vocabulary by walking every source file under each repo root.
+Its own outputs — `sessions.json` (3.4 MB of session metadata), `vocab/*.json`,
+`raw_results.json` — are written into `scratch/` **inside the codescout repo**,
+and the walker's `SKIP_DIRS` covered build artifacts (`target`, `node_modules`,
+`.venv`) but not the probe. codescout's document-frequency vocabulary inflated
+35,496 → **221,214** distinct identifiers (6.2×) while `n_files` moved 1374 →
+1383. Every downstream metric (M1/M2/M3/M5) is computed against that vocabulary.
+
+**Why recon missed it.** The output directory did not exist when the walker was
+written, so at the moment the seam could have been scouted there was nothing on
+disk to scout. The overlap is created *by running the pipeline*, not by its
+static shape — which is why a read-the-code scout would not have found it either.
+It was caught only because an unrelated before/after sanity comparison made an
+implausible ratio visible. No deliberate check was responsible.
+
+**Relation to R-50.** R-50 says *name what the view dropped* — a filter, a cap, a
+preview. This is its complement: **name what the view wrongly admitted.** Both
+fail the same way (a conclusion drawn from a set whose membership was never
+stated), from opposite directions. R-50 covers under-inclusion; R-51 covers
+over-inclusion by self-reference.
+
+**Proposal (SKILL.md Phase 1 bullet, if a second datapoint lands):**
+
+> **Seam class: output-path ↔ measurement-domain overlap.** Before the first run
+> of any pipeline that reads a corpus and writes artifacts, state where its
+> output lands relative to what it reads. If the output path is inside the read
+> path, assert the exclusion in the walker and log the excluded-path count on
+> every run — a self-contaminating corpus produces no error, only wrong numbers,
+> and the contamination grows with each run. Applies to indexers, vocabulary
+> builders, corpus statistics, embedding jobs, and any `docs/`-writing analysis
+> whose corpus includes `docs/`.
+
+**Evidence:** `provenance-probe` session log F-2 (fixed-verified; vocabularies
+rebuilt, DF back to 35,329 baseline, all 80-session results produced post-fix).
+Secondary: F-3 in the same log is an R-50-shaped instance from the same session
+(a pooled 3.0% compaction rate hiding 100% compaction in the largest sessions),
+which is why the two rules are filed as complements rather than merged.
+
+**Escalation 2026-08-04 — this is not a one-off.** Design review on the
+provenance programme established that the seam is *permanent and by design* for
+the system this probe was measuring, not an accident of where the scratch
+directory happened to live. A provenance sidecar consumes the session tool-call
+log and writes attribution records plus `Derived-From:` commit trailers; those
+records then enter subsequent sessions' context and subsequent commits' history.
+The instrument would sit inside its own corpus permanently. Second-order
+corollary: a staleness check reading git history must not treat its OWN trailers
+as derived-from evidence, or the system becomes self-confirming.
+
+That is the second datapoint, and it is stronger than the first — the first was
+a pipeline that accidentally read its own output, the second is an architecture
+that necessarily does. Recorded as PV-27 in
+`docs/trackers/provenance-subsystem.md`.
+
+**Verdict:** miss → rule, **promote-ready**. Two datapoints (probe F-2
+accidental; PV-27 by-design). The SKILL.md Phase-1 bullet above should now say
+that the check applies both to where output *happens* to land and to whether the
+system's own emissions re-enter its input — the second is invisible to a
+directory-exclusion check and needs an explicit provenance-of-provenance rule.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

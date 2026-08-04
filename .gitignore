@@ -52,6 +52,13 @@ tests/fixtures/*/.codescout/
 # Personal Pi MCP config — holds API keys; see contrib/pi/mcp.json.example
 /contrib/pi/mcp.json
 
+# Scratch/working directories. NEVER commit: probe pipelines extract symbol
+# vocabularies and path/prompt fragments from OTHER repositories (including
+# client work), so the working tree carries identifiers that must not land in
+# this repo's history. Durable findings belong in docs/trackers/, which are
+# privacy-scrubbed by construction.
+/scratch/
+
 # Retrieval-stack model weights (GGUF + HF source), bind-mounted into the
 # dense/reranker containers via CODESCOUT_MODEL_DIR. Fetched or built locally —
 # see docs/manual/src/concepts/retrieval-stack.md. ~870 MB, never committed.
