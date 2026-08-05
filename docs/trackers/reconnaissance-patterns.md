@@ -66,6 +66,7 @@ skill).
 | R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
+| R-54 | 2026-08-05 | miss → rule | **Before counting rows, ask what one row IS and whether two rows can contain the same underlying event — and never let "zero observed" become "empty" without stating n.** A corpus of 63,574 rows was 444 sessions: each row was one request re-sending the whole conversation (143 per session, 165× double-count). A 64-row sample was 34 effective sessions; a top band of 13 rows was 6. Nesting is invisible downstream because the duplicated content is genuinely present in both rows. Sibling of R-53: that one guards what the corpus is MADE OF, this one guards what a ROW MEANS | provenance-probe F-14 + W-10; PV-65; PV-66 |
 | R-53 | 2026-08-04 | miss → rule | **A corpus's composition is a seam — census it by producing tool before you measure it, and when you stratify by a magnitude, ask what makes things big.** One tool contributed 59.8% of all tool-result bytes as base64 image data that `json.dumps` had stringified into the text denominator; it also defined the top band of a size-stratified sample (11/13 sessions), so the magnitude axis was a producer axis in disguise. Invisible to thirteen rounds of internal checks — contamination moved numerator and denominator together. Caught only when the corpus owner said the traffic was not representative | provenance-probe F-13 + W-9; PV-61; PV-62 |
 | R-52 | 2026-08-04 | miss → rule | **An artifact's ownership is the union of its inputs' ownership — choose the output location from the input set, never from where the code lives.** Sibling to R-51, not an amendment: R-51's failure produces wrong NUMBERS, this one produces MISPLACED DATA, and R-51's exclusion-at-entry fix leaves the artifact in the wrong place. A pipeline reading N corpora writes outside all N. Caught at staging: a probe in `codescout/scratch/` held ~14MB of symbol vocabularies from 8 repos including client work, and `semantic_search` was returning them — the retrieval consequence R-51's framing does not reach | provenance-probe F-2; PV-60; staging check 2026-08-04 |
 | R-51 | 2026-08-03 (escalated 08-04) | miss → rule, promote-ready | **An instrument that writes into the corpus it measures.** New seam class: output-path ↔ measurement-domain overlap. A probe wrote its own artifacts (`sessions.json`, `vocab/*.json`) into the repo whose symbol vocabulary it was building; DF inflated 6.2× (35,496 → 221,214) with no error raised, caught only by an incidental before/after ratio check. Not scoutable statically — the overlap is created by *running* the pipeline. Complement of R-50: R-50 = name what the view dropped, R-51 = name what the view wrongly admitted | provenance-probe F-2 (fixed-verified); F-3 same log is the R-50-shaped twin |
@@ -1592,6 +1593,68 @@ classifier's catch-all default read as a category; R-53 is that error one level
 down, in the data rather than in the labels. PV-25 (pin the unit before the
 threshold) is the metric-side twin — R-53 is the corpus-side one, and this
 programme did the first carefully and never did the second.
+
+---
+
+## R-54 — A row is not an observation until you have checked the unit and the nesting
+
+**Class:** input-validity, sampling-frame layer. Third in the family: R-50 guards
+the **listing** (what did the view drop), R-53 guards the **substrate** (what is
+the corpus made of), R-54 guards the **row** (what does one record mean, and are
+two records independent).
+
+**The seam.** Between a table's row count and the number of *things* you are
+studying sits a mapping nobody reads: rows-per-thing, and whether rows overlap in
+content. It is a seam because every downstream statistic depends on it and it is
+never visible in the statistic itself — a mean over nested rows is a perfectly
+well-formed mean.
+
+**Miss (2026-08-05, provenance probe, round 15).** The Langfuse arm treated
+`observations` rows as sessions. They are **requests**. Because each request
+re-sends the whole conversation, the corpus averaged **143 rows per session**, and
+summing row lengths double-counted content **165×** (34.8 GB summed vs 0.21 GB of
+distinct final contexts). Consequences, all invisible to internal checks:
+
+- **Effective n collapsed.** 64 sampled rows = **34 distinct sessions**. The top
+  band's 13 rows = **6 sessions**; its 11 screenshot-bearing rows = **4
+  conversations**. The de-duplication in place was `if L in seen_len` — distinct
+  *byte length* — which cannot dedup at session grain, because different turns of
+  one conversation naturally differ in length. It looked like a dedup and was not
+  one.
+- **A stratification axis meant something else.** Rows were banded by size, but a
+  session *traverses* every band as it grows, so the bands were
+  **conversation-depth** strata wearing size labels. Sampling the top band meant
+  sampling late turns of long conversations.
+- **An absence claim over-generalised.** "Zero non-browser MCP calls ≥32 KB" was
+  true of 34 sessions and reported as *the trigger population is empty*. At full
+  population it is **2 calls / 0.11% of tool bytes**. The recommendation held; the
+  claim did not.
+
+**Cost.** A headline reported and committed one day was falsified the next, and
+every pooled magnitude from six prior rounds had to be superseded.
+
+**The scout, and it is three queries.** Before any statistic:
+
+1. `count(*)` vs `uniqExact(<thing_id>)` — rows per thing. If the ratio is not
+   ~1, your rows are not observations.
+2. `sum(len)` vs `sum(max(len) per thing)` — the double-count factor. A large
+   ratio means rows nest, and every sum is inflated.
+3. After sampling, `uniqExact(<thing_id>)` **on the sample** — the effective n.
+   Report this number, not the row count.
+
+Then one discipline in prose: **an absence claim carries its denominator.** Write
+"zero in 34 sessions", never "empty". The qualified form invites the question that
+finds the defect; the unqualified form silently promotes a sample statement to a
+population statement, and nothing downstream can catch the promotion.
+
+**Why no internal check found it.** Nesting duplicates *real* content — the bytes
+are genuinely in both rows — so reconciliation, byte totals, and null models all
+pass. Adversarial review shares the analyst's frame and cannot see it either. The
+person who can is whoever knows how much work the data represents. Here it took
+one sentence from the corpus owner: *we should have more than 64 sessions, much
+more.* Pair with R-53 and session-log W-9/W-10: **show the owner the corpus census
+and the sampling frame before you show anyone the findings.** Both reversals in
+this probe lived in those two artifacts, and both were readable in under a minute.
 
 ---
 

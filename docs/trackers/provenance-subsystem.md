@@ -16,19 +16,26 @@ topic: provenance-attribution
 
 ## STATE AS OF 2026-08-04 — read this first
 
-**The measurement programme is CLOSED, and as of round 14 it yields NOTHING to build.**
-Fourteen rounds, 2,997 transcripts plus 64 Langfuse-reconstructed sessions. Do not
-re-open a metric without reading its PV entry first — several were measured,
-reversed, and re-measured, and the entry holds the final reading.
+**The measurement programme is CLOSED, and it yields NOTHING to build.**
+Fifteen rounds. 2,997 transcripts, plus the **full** Langfuse population — 444
+sessions (63,574 requests, 2026-06-19 to 2026-07-22). Do not re-open a metric
+without reading its PV entry: several were measured, reversed, and re-measured,
+and the entry holds the final reading.
 
-> **ROUND 14 CHANGED THE ANSWER. Read PV-61 before anything else.**
-> One tool — chrome-devtools `take_screenshot` — contributed **59.8% of all
-> tool-result bytes** in the Langfuse corpus as base64 image data (71 calls,
-> 22.04 MB; 71/71 payloads >90% base64; 37/71 truncated at `flatten()`'s 400 KB
-> cap, so that is a floor). `flatten()` is `json.dumps`, so an image content block
-> was stringified and counted as text. Base64 holds zero codebase-specific tokens
-> by construction, so it inflated every share denominator and depressed every
-> utilisation figure at once. Nine rounds of analysis ran on top of it.
+> **ROUNDS 14 AND 15 EACH CHANGED THE ANSWER. Read PV-61, PV-65, PV-66 first.**
+>
+> **Round 14** found the corpus contained the wrong *kind* of bytes.
+> `flatten()` is `json.dumps`, so chrome-devtools screenshot payloads were
+> stringified and counted as text. Base64 holds zero codebase-specific tokens by
+> construction, so it inflated every share denominator and depressed every
+> utilisation figure at once.
+>
+> **Round 15** found the sample was drawn in the wrong *unit*. A Langfuse
+> observation is one **request**, and each request re-sends the whole
+> conversation — 143 requests per session, a **165×** double-count if you sum
+> lengths. The 64 sampled requests map to **34 distinct sessions**; the top
+> band's 13 to **6**. The five size bands were **conversation-depth** strata
+> wearing size labels.
 
 **Verdicts, final:**
 
@@ -38,70 +45,75 @@ reversed, and re-measured, and the entry holds the final reading.
 | Tier 1 (the gate) | **CLOSED AS A CLASS** — measured as opportunity, not signal (PV-26) |
 | Confabulation detection | **DESCOPED** — addressable floor is 0.20% of references (PV-12) |
 | Stale-drift (M6) | **weak NO**, repo-gated and self-administered (PV-24) |
-| Retrieval granularity | **REFUTED** — was a domain mismatch, not an effect (PV-7, PV-57) |
-| PV-29 (the buffering hook) | **KILLED round 14** — trigger population is empty (PV-29, PV-61) |
+| Retrieval granularity | **REFUTED** — a domain mismatch, not an effect (PV-7, PV-57) |
+| PV-29 (the buffering hook) | **KILLED** — 2 qualifying calls in 444 sessions (PV-29, PV-66) |
 
-**There is nothing left to build (PV-63).** PV-29 was the sole survivor. Its
-trigger was per-call size ≥32 KB = 137 calls carrying 61.1% of information-bearing
-tokens. Excluding browser data: **63 calls / 24.9%**, and the composition above
-32 KB becomes file_read 44.4%, system_prompt 39.5%, user_prompt 16.0% — **mcp_other
-0.0%**. The hook matches `mcp__.*`; after exclusion there are **zero** non-browser
-MCP calls ≥32 KB in the corpus. The only tool results left above 32 KB are 16
-native `Read` calls, which PV-59 forbids capping. Not weakened — empty.
+**There is nothing left to build (PV-63).** PV-29 was the sole survivor. A
+PostToolUse hook matching `mcp__.*` at 32 KB, chrome-devtools excluded, would
+intercept **2 calls / 0.07 MB / 0.11%** of the corpus's 62.5 MB of tool-result
+bytes. Round 14 said "zero, empty" from a 34-session sample; that was an
+overreach, corrected in PV-29. Complete ≥32 KB inventory: `take_screenshot`
+57 calls / 17.00 MB, native `Read` 53 / 6.90 MB, WebFetch 3, Skill 1,
+TaskOutput 3, chrome snapshot+eval 3, `execute_sql` 1, `research` 1. The largest
+non-browser producer is native `Read` at median 151 KB — protected by PV-59.
 
-**Two corpus-level defects that outrank any single metric:**
+**Population figures — quote these, not the round 8–14 ones (PV-66):**
 
-- **PV-61** — the corpus contained 60% non-text bytes. Census a corpus by
-  producing tool *before* measuring it; drop image blocks before flattening.
-- **PV-62** — the Langfuse bands were stratified by context size, and base64
-  *makes* context large: browser sessions were 11/13 of the top band and 1/14 of
-  XL, 0 in S/M/L. "As context grows, X" was operationally "as browser content
-  grows, X". On clean sessions utilisation reads S 19.0%, M 35.7%, L 32.8%,
-  XL 31.5%, XXL 6.2% (n=**2**) — rising then flat, **not** decaying.
+| | round 8–14 (34 sessions) | round 15 (444 sessions) |
+|---|---|---|
+| screenshot share of bytes | 59.8% | **~10%** |
+| sessions taking screenshots | 18.8% | **2.9%** (13 of 444) |
+| pooled M1, browser excluded | 29.1% | **32.3%** |
+| ≥32 KB after exclusion | 63 calls / 24.9% | **141 calls / 21.2%** |
+| PV-29 trigger population | "empty" | **2 calls** |
 
-**What still stands.** Transcript-derived work is only 7.73% contaminated (12 of
-2,557 sessions), so M2, M3, M5 and rounds 1–7 hold. M1 survives its kill line
-(pooled 15.2% → **29.1%** after exclusion, against a >60% threshold) but the
-addressable waste shrinks 59% and what remains sits in categories that are either
-protected (repo source, PV-59) or unpriceable by this metric (prompts, PV-53).
-codescout's own buffer is confirmed healthy by absence — **no** `mcp__codescout__*`
-call anywhere in the corpus reached 32 KB (PV-64).
+**What held at 4× the n.** M1's >60% kill condition does not fire. The ≥32 KB
+residual is protected or unbufferable: file_read 40.2%, user_prompt 34.3%,
+system_prompt 25.0%, mcp_other 0.6%. No `mcp__codescout__*` call reaches 32 KB
+anywhere in 444 sessions — codescout's own buffer is confirmed healthy by absence
+(PV-64).
 
-**If you are tempted to re-run something,** check these first — each was a
-conclusion that got reversed, and the reversal is the current state:
-PV-7 (refuted), PV-26 (reversed), PV-42 (reversed **twice** — labelling, then
-sampling), PV-36 (corrected), PV-28 (settled), PV-32 (amended), PV-2 (corrected
-round 14), PV-29 (**killed** round 14), PV-48 (superseded round 14).
+**What reversed and stayed reversed.** Utilisation **rises** with session size:
+S 4.9% (n=8), M 21.5% (n=13), L 34.4% (n=32), XL 35.2% (n=75), XXL 13.8% (n=6).
+The "context decays as it grows" premise behind the whole context-economy strand
+is not merely unsupported — it is backwards over the range where n is real.
 
-**Artifacts.** The probe pipeline lives at `~/.local/share/provenance-probe` —
+**Coverage limit on every M1 figure ever quoted (PV-67).** Utilisation is
+computable for **134 of 444** sessions; the other 310 have no detectable repo, so
+the symbol vocabulary — and therefore the classifier — is undefined. The gap is
+not random: measurable/total by band is S 8/304, M 13/15, L 32/36, XL 75/79,
+XXL 6/10. Every M1 number describes **coding sessions in eight indexed
+repositories**, skewed large. Say that, not "sessions".
+
+**If you are tempted to re-run something,** each of these is a conclusion that got
+reversed, and the reversal is the current state: PV-7 (refuted), PV-26
+(reversed), PV-42 (reversed **twice** — labelling, then sampling), PV-36
+(corrected), PV-28 (settled), PV-32 (amended), PV-2 (corrected r14), PV-29
+(killed r14, **figure corrected r15**), PV-48 (superseded r14), PV-61 (magnitude
+corrected r15), PV-62 (deepened r15).
+
+**Artifacts.** The pipeline lives at `~/.local/share/provenance-probe` —
 **outside this repo, deliberately** (R-52). It holds ~19 MB of symbol
-vocabularies extracted from eight repositories including client work; it must
-never be moved back inside any input repo, and `/scratch/` is gitignored as
-defence-in-depth. Round 14 scripts are `round14_names.py`, `round14_probe.py`,
-`round14.py`, `round14_bands.py`, `round14_transcripts.py`. Every figure cited in
-this ledger is inline in its PV entry, so the trackers are self-contained — the
-pipeline is for rebuilding, not for reading the results.
+vocabularies from eight repositories including client work; never move it back
+inside an input repo. `/scratch/` is gitignored as defence-in-depth. Round 14:
+`round14_names.py`, `round14_probe.py`, `round14.py`, `round14_bands.py`,
+`round14_transcripts.py`. Round 15: `round15_fetch.py`, `round15.py`,
+`round15_trigger.py`. The session-level payload cache is `/tmp/lf_sessions`
+(444 files, 210 MB) — regenerate with `round15_fetch.py`, it is not durable.
+Every figure cited here is inline in its PV entry; the pipeline is for
+rebuilding, not for reading results.
 
-**Sibling trackers.** `docs/trackers/provenance-probe-session-log.md` (F-1..13 /
-W-1..8) for per-session frictions and wins; `docs/trackers/reconnaissance-patterns.md`
-R-51, R-52 and R-53 for the instrument/corpus lessons; `docs/trackers/codescout-usage-frictions.md`
-U-29 for the payload-discarding-guard pattern.
+**Sibling trackers.** `docs/trackers/provenance-probe-session-log.md`
+(F-1..14 / W-1..10); `docs/trackers/reconnaissance-patterns.md` R-51, R-52, R-53;
+`docs/trackers/codescout-usage-frictions.md` U-29.
 
 **Cross-session context.** The design counterpart lives in a claude.ai project
-("AI thoughts") that cannot read this repo. The paste-able export is
-`HANDOFF.md` in the artifact directory; regenerate it from this ledger rather
-than the reverse — this tracker is the source of record. **It is stale as of
-round 14** and still says SHIP PV-29.
+("AI thoughts") that cannot read this repo. `HANDOFF.md` in the artifact
+directory is the paste-able export — **stale since round 14**; regenerate it from
+this ledger, never the reverse.
 
-> **Phase: MEASUREMENT. Nothing ships.** Explicit decision: measure before
-> building, and do not design for other users yet. This does not reach anyone
-> else until we know what is worth building. Round 14's answer is: not this.
->
-> **Scope of this tracker.** Standing design decisions, hazards that must not be
-> rediscovered, measurement verdicts against pre-registered kill conditions, open
-> decisions, and the backlog of future work. The PV-N table (live, in params) is
-> the index; the sections below are the reasoning that must survive between
-> sessions.
+> **Phase: MEASUREMENT. Nothing ships.** Measure before building; do not design
+> for other users yet. Round 15's answer is still: not this.
 
 ---
 ---

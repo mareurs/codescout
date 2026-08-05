@@ -42,6 +42,7 @@ topic: provenance-measurement
 | F-11 | 2026-08-04 | med | self-friction | fixed-verified | Declared index eviction successful on one mid-flight query; a second refuted it |
 | F-12 | 2026-08-04 | med | self-friction | fixed-verified | Marked R-52 settled while 19MB still sat in the repo — rule written, not applied |
 | F-13 | 2026-08-04 | high | measurement-hygiene | fixed-verified | 60% of the corpus was base64 image data; nine rounds of analysis ran on top of it |
+| F-14 | 2026-08-05 | high | measurement-hygiene | fixed-verified | Called a population "empty" from a 34-session sample read as if it were the corpus |
 
 ## Wins Index
 
@@ -56,6 +57,7 @@ topic: provenance-measurement
 | W-7 | 2026-08-04 | high | Sustained adversarial review by an independent session | Four of my conclusions reversed; none was caught by my own checks | validated |
 | W-8 | 2026-08-04 | high | Prefer the design-time form of a check over its empirical twin | Three of five rules answerable before any data; two would have saved whole rounds | validated |
 | W-9 | 2026-08-04 | high | Treat a domain owner's "that's not normal traffic" as a corpus-validity test, not a preference | One sentence killed the last buildable item; no internal check had questioned the corpus composition in 13 rounds | validated |
+| W-10 | 2026-08-05 | high | Treat a scale intuition ("we should have much more than that") as a sampling-design audit | Second owner challenge in two days; found 0.1% sampling, 34 effective sessions, and a 165× double-count that no figure had exposed | validated |
 
 ---
 
@@ -961,6 +963,124 @@ actually **were**, which turned a re-cut into a defect finding.
 overturning an internally-consistent result. On the second, promote to the
 measurement-plan template as a pre-registration line: *name who knows the
 provenance of this corpus, and ask them what is in it before measuring.*
+
+---
+
+## F-14 — Called a population "empty" from a 34-session sample read as the corpus
+
+**Observed:** 2026-08-05, round 15, after the project owner said "we should have
+more than 64 sessions, much more."
+
+**When:** One day after round 14, whose headline finding I had just committed and
+reported: that excluding browser-automation data left **zero** non-browser MCP
+calls at or above 32 KB, so PV-29's trigger population was *empty*.
+
+**Expected:** The 64-observation Langfuse sample was a deliberate stratified
+design (5 bands × 14), thin but sound.
+
+**Got:** Three compounding defects, none of which any of fifteen rounds had
+surfaced.
+
+1. **Scale.** Langfuse holds 63,574 `name='llm'` observations across **444
+   distinct sessions**. We used 64 — **0.1%**.
+2. **Pseudo-replication.** Those 64 observations map to **34 distinct sessions**;
+   the top band's 13 to **6**, and its 11 screenshot-bearing observations to
+   **4 conversations**. Observations from one session are *nested prefixes* of
+   each other, so the same content was counted repeatedly and treated as
+   independent — the sampled screenshots summed to 70 image instances but only
+   ~25 distinct images. The dedup was `if L in seen_len`: distinct **byte
+   length**, which dedups nothing at session grain, since different turns of one
+   conversation naturally have different lengths.
+3. **Equal-n weighting.** 14 targeted per band regardless of band population, so a
+   567-member band pooled at the same weight as a 17,003-member one — a **22×**
+   over-weight by count. Every pooled figure in rounds 8–14 inherits it.
+
+**The correction that matters.** At full population the trigger population is not
+empty: it is **2 calls** — one `mcp__edu-planner-db__execute_sql` at 36 KB and one
+`mcp__researcher__research` at 34 KB — totalling **0.07 MB of 62.5 MB = 0.11%**.
+The recommendation is unchanged and better supported. The absolute claim was
+false.
+
+**Probable cause:** I inherited the sampling frame rather than scouting it.
+Round 14 audited what the corpus was *made of* (F-13) and never asked what a
+**row** was. A Langfuse observation is one *request*; each request re-sends the
+whole conversation; averaged over the corpus that is **143 requests per session
+and a 165× double-count** if you sum lengths. So the five "size bands" were
+**conversation-depth** strata wearing size labels — sampling the top band meant
+sampling late turns of long conversations, and screenshots at ~347 KB median are
+precisely what pushes a conversation there. The confound and the pseudo-
+replication were the same fact seen twice.
+
+The deeper error is a phrasing habit: *zero in my sample* became *empty* with no
+qualifier. An absence claim needs its denominator attached or it silently
+upgrades itself from a sample statement to a population statement.
+
+**Workaround:** Re-drew at session grain — one observation per session, the
+longest, which is the full conversation at its final turn. 444 sessions, 0.21 GB,
+no sampling, no double-counting, no nesting. `round15_fetch.py`, `round15.py`,
+`round15_trigger.py`.
+
+**Severity:** high — falsified a headline claim reported and committed the
+previous day, and invalidated the pooled magnitudes of rounds 8–14.
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** PV-65, PV-66, PV-67; R-54. Two rules. *Before counting
+rows, ask what one row IS and whether two rows can contain the same underlying
+event* — nesting is invisible to every downstream check because the duplicated
+content is genuinely present in both. And *never let "zero observed" become
+"empty" without stating n* — the sentence should have read "zero in 34 sessions",
+which invites exactly the question the owner then asked.
+
+Note what round 14 got RIGHT and what round 15 preserved: the direction (exclude
+browser data), the structural argument (the ≥32 KB residual is file_read plus
+prompts — 99.5% at population), and PV-64 (no codescout tool reaches 32 KB), which
+survived the sample-to-population transition unchanged because it is an absence
+claim over thousands of calls rather than a share of a contaminated denominator.
+The magnitudes were wrong; the reasoning was not.
+
+---
+
+## W-10 — A scale intuition is a sampling-design audit
+
+**Practice:** When the person who generated the data reacts to the *size* of your
+corpus — "that seems like far too few" — treat it as a hypothesis about the
+**sampling frame** and audit the frame end to end: population size, effective n
+after de-duplication, what one row represents, and how strata were weighted.
+
+**Observed:** 2026-08-05, round 15. The trigger was one sentence: *we should have
+more than 64 sessions, much more.* No specific defect was named — only a mismatch
+between a number and the owner's sense of how much work had been done.
+
+**Counterfactual:** The published state, committed the previous day, said PV-29's
+trigger population was empty and that browser data was 60% of the corpus. Both
+figures came from 34 sessions. Without the challenge, the ledger's closing
+position would have rested on a 0.1% sample with 165× internal duplication, and
+an absence claim over 34 conversations would stand as a statement about the
+corpus. The true numbers are ~10% and 2 calls.
+
+**Why it worked:** Sample-size intuitions are cheap for an owner to form and
+expensive for an analyst to form — the owner knows how much work exists; the
+analyst only knows what the query returned. This is the same asymmetry as W-9
+(what the corpus is made of) applied one level up (how much of it we looked at).
+Both are outside the measurement frame by construction, which is why fifteen
+rounds of internal checks and one adversarial review never reached either.
+
+**Generalisation:** Two owner challenges in two days each overturned a headline,
+and neither pointed at a number — one questioned *what the data was*, the other
+*how much of it we used*. Together they define the class: **frame questions**, the
+ones an insider cannot ask because the frame is what they are reasoning inside.
+Budget for them explicitly. Before publishing any measurement, show the owner the
+corpus census and the sampling frame, not the findings — those two artifacts are
+where both reversals lived, and both were readable in under a minute.
+
+**Status:** validated
+
+**Promote-when:** Now, jointly with W-9 — two independent instances is the bar
+this log set. Promote to the measurement-plan template as a pre-registration
+block: *state the population, the effective n after de-duplication, what one row
+represents, and the stratum weights; review with whoever owns the data before
+measuring.*
 
 ---
 
