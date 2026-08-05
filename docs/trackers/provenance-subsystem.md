@@ -109,8 +109,13 @@ rebuilding, not for reading results.
 
 **Cross-session context.** The design counterpart lives in a claude.ai project
 ("AI thoughts") that cannot read this repo. `HANDOFF.md` in the artifact
-directory is the paste-able export — **stale since round 14**; regenerate it from
-this ledger, never the reverse.
+directory is the paste-able export — **regenerated 2026-08-05, current through
+round 15** (266 lines / 12 KB, down from 1,564 / 112 KB). Regenerate it from this
+ledger, never the reverse. Privacy contract: aggregates and category labels only,
+and it carries **no repo names, tool identifiers, paths, or session UUIDs** — the
+client-project names that appear in raw figures (repo mix, the two 32 KB MCP
+calls) are replaced with neutral labels. Re-run that scrub check on every
+regeneration; several PV entries cite identifiers that must not travel.
 
 > **Phase: MEASUREMENT. Nothing ships.** Measure before building; do not design
 > for other users yet. Round 15's answer is still: not this.
