@@ -671,6 +671,7 @@ Ranked by what to do first.
 | F-6 | 2026-08-06 | med | measurement | mitigated | The 50-finding cap mis-sized the backlog plan by ~5× — third instance of a capped view corrupting a number the gate acts on |
 | F-7 | 2026-08-06 | med | measurement | fixed-verified | Quoted a run-level CI `status` as per-job evidence — wrote "not a single job starting" into this log while ten jobs had already passed |
 | F-8 | 2026-08-06 | med | process | fixed-verified | Diagnosed queued CI from run metadata for 70 minutes; GitHub had declared an Actions **major outage** two hours before the first affected run |
+| F-9 | 2026-08-07 | med | measurement | fixed-verified | A `--profile minimal` toolchain install produced 12 test failures that read as a compiler regression; the cause was a missing `rust-analyzer` component |
 
 ## Wins Index
 
@@ -682,6 +683,7 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-9 | 2026-08-07 | high | When CI is unavailable and its toolchain floats, install CI's *resolved* toolchain side-by-side and run the gate through it | Local `stable` was 1.95.0 while CI's `@stable` had moved to 1.97.1; clippy 1.97 rejects two `assert!` borrows that 1.95 accepts, so the Clippy job was going to fail on the first run created after the outage | validated |
 | W-5 | 2026-08-06 | high | Invoke the tool under test; verify the binary is newer than its sources | Reading it had missed all five: a SIGABRT, a path escape resolving `/etc/passwd:12` as Resolved, a false premise about which half of the corpus was scanned, an unused field that already was the fix, and mdBook link semantics | validated |
 
 ---
@@ -1198,6 +1200,80 @@ curl -s https://www.githubstatus.com/api/v2/summary.json
 
 Pairs with F-7: both are the same failure at different depths — reaching for the reading that
 is available rather than the one that is authoritative.
+
+## W-9 — Running CI's own toolchain locally, during an outage, caught a red-CI-in-waiting
+
+**Observed:** 2026-08-06/07, while GitHub Actions was in a declared major outage and no runs
+were being created for this repo. Two of the fifteen jobs — `Clippy` and
+`Test (ubuntu-latest / default)` — had never executed on any commit carrying the round-6
+code.
+
+**Pattern:** When CI is unavailable *and* its toolchain floats, install the version CI's
+`@stable` currently resolves to as a side-by-side rustup toolchain and run the gate through
+`cargo +<version>`. The default toolchain stays untouched, so the cost is a download and
+nothing else — no risk to the dev environment, and it needs no CI at all.
+
+**Counterfactual:** local `stable` is **1.95.0**; `dtolnay/rust-toolchain@stable` now resolves
+to **1.97.1**, and there is no `rust-toolchain.toml` to hold them together. Clippy 1.97 flags
+`clippy::useless_borrows_in_formatting` at two sites in `src/tools/markdown/tests.rs` that
+1.95 accepts, and the workflow gates on `-D warnings`. So the `Clippy` job was going to fail
+on the first run GitHub created after the outage — on a branch whose promotion is blocked on
+15/15, after a full day of work whose entire purpose was getting that gate green. Worse, it
+would have arrived amid the `cancelled`/`failure` noise the outage was already producing, so
+the first reading would plausibly have been "outage artefact" rather than "real lint error" —
+the misread F-7 and F-8 both already made once today.
+
+**Confirming data points:**
+1. F-5 predicted exactly this class — its text names "clippy 1.95 vs 1.97" — and now has its
+   first *observed* instance rather than a hypothesis. The mitigation F-5 lacked is this
+   pattern.
+2. The fix is two characters. Finding it through CI would have cost a full 15-job round trip
+   plus a tip-moving commit, at a moment when runs were not being created at all.
+
+**Impact:** high — converts F-5 from an unmitigated structural gap into one with a known,
+cheap workaround, and it is the only form of CI substitution available during an outage.
+
+**Promote-when:** a second CI-only failure is caught this way. At two datapoints, promote to
+`docs/RELEASE.md`'s gate as an explicit step — run the gate on whatever `@stable` resolves to,
+not merely on the local default — or resolve the standing pin-vs-float decision by pinning
+`rust-toolchain.toml`, which removes the divergence by construction rather than papering over
+it.
+
+**Status:** validated.
+
+## F-9 — A minimal-profile toolchain install produced 12 test failures that read as a compiler regression
+
+**Observed:** 2026-08-07, immediately after installing 1.97.1 to run CI's gate locally (W-9).
+
+**When:** the first `cargo +1.97.1 test` run.
+
+**Expected:** either a clean run, or failures attributable to the compiler change.
+
+**Got:** 12 failures, every one in `lsp::manager` or `tools::symbol`, each panicking with
+`rust-analyzer is unreachable. The rustup shim is on PATH but the component is not installed`.
+The toolchain had been installed `--profile minimal --component clippy,rustfmt`, so it carries
+no `rust-analyzer`, while the shim already on PATH resolves against whichever toolchain is
+active. Adding the component made the run clean at 3505 passed / 0 failed.
+
+**Probable cause:** the install command was written for the two components *the gate* needed
+and ignored what *the suite* needs. Note the failure mode is a third state — **shim present,
+component absent** — distinct from "not installed at all", and it arises only because another
+toolchain created the shim.
+
+**Severity:** med — no code was wrong, but for several minutes the evidence read as "CI's
+toolchain breaks 12 tests on the branch we are trying to promote", which is precisely the
+shape that triggers a wrong revert. The tell was the clustering: 12 failures confined to the
+two rust-analyzer-dependent modules is an environment shape, not a compiler change. Reading
+the panic text beat inferring from the count.
+
+**Status:** fixed-verified — `rustup component add rust-analyzer --toolchain 1.97.1`, then
+3505 / 0.
+
+**Fix idea / Pointer:** when installing a toolchain to reproduce CI, install the components
+the *suite* needs, not just the gate's: `--component clippy,rustfmt,rust-analyzer`. Better,
+pin `rust-toolchain.toml` with an explicit `components` list so CI and local get the same set
+by construction — the same fix W-9's promote-when proposes, and the same standing pin-vs-float
+decision.
 
 ## Template for new entries
 
