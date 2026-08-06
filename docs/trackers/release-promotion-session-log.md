@@ -670,6 +670,7 @@ Ranked by what to do first.
 | F-5 | 2026-08-06 | high | process | open | Local gate structurally cannot predict CI — clippy 1.95 vs 1.97, separator bugs invisible on Linux, `--all-features` unusable |
 | F-6 | 2026-08-06 | med | measurement | mitigated | The 50-finding cap mis-sized the backlog plan by ~5× — third instance of a capped view corrupting a number the gate acts on |
 | F-7 | 2026-08-06 | med | measurement | fixed-verified | Quoted a run-level CI `status` as per-job evidence — wrote "not a single job starting" into this log while ten jobs had already passed |
+| F-8 | 2026-08-06 | med | process | fixed-verified | Diagnosed queued CI from run metadata for 70 minutes; GitHub had declared an Actions **major outage** two hours before the first affected run |
 
 ## Wins Index
 
@@ -1148,6 +1149,55 @@ tally command is pinned there so the shortcut is not available next time.
 
 **Fix idea / Pointer:** For any CI claim, the unit of evidence is the **job**, never the run.
 A run-level status answers "is this run finished", never "did anything run".
+
+## F-8 — Seventy minutes diagnosing a CI outage from run metadata, without reading the provider's status page
+
+**Observed:** 2026-08-06, 17:15–18:30Z.
+
+**When:** Five, then six runs sat `queued`. I inferred the mechanism from `gh` output twice:
+first "no job ever started" (F-7 — false), then "arrival-order contention: our own six
+pushes are starving the tip".
+
+**Expected:** The queue behaviour was ours to reason about from run and job metadata.
+
+**Got:** `githubstatus.com` had carried **`Actions: major_outage`** since **15:22:49Z — two
+hours before the first affected run**, and before any of my reasoning. The incident text
+describes exactly what we observed: *"Workflow runs are still failing or delayed in starting,
+and some queued jobs may time out."* That single fact accounts for every symptom: jobs
+cancelled at `steps=0` (queued jobs timing out), HTTP 500 then 502 on three cancel attempts
+against one run, and **no run created at all** for `a53f1760` thirteen minutes after the push
+was confirmed on `origin/experiments`.
+
+**Consequence — a retraction.** The arrival-order-contention mechanism is withdrawn.
+Cancelling three superseded runs to "free ~45 job slots" was harmless (all three were
+docs-only commits contained in the tip) but it did not buy what it claimed, because runners
+were not being allocated at all. Queue depth was never the binding constraint. The
+falsification test stated alongside that claim was answered by external evidence rather than
+by the observation it proposed — which is the cheaper way, and was available the whole time.
+
+**Probable cause:** Three rounds of internal inference were run and one authoritative external
+check was not. The status page is cheaper than any single `gh` call made during those seventy
+minutes, and it outranks all of them: an open provider incident reframes every downstream
+observation, so it belongs *first*, not last.
+
+**Severity:** med — no code was harmed and nothing shipped wrong, but the cost was ~70 minutes
+of misdirected diagnosis, one false claim committed to this log (F-7), one retracted
+mechanism, and three cancellations justified by a cause that was not operative.
+
+**Status:** fixed-verified — the outage is confirmed as the cause. The `concurrency` block
+added in `a53f1760` stands on its own merits (it is correct and still wanted) but **cannot be
+validated until Actions recovers**, since supersession only demonstrates itself on the next
+push that lands while a run is live.
+
+**Fix idea / Pointer:** Before diagnosing ANY CI symptom — queued, cancelled, missing run,
+API 5xx — read the provider's status page first. One call, and it is authoritative:
+
+```
+curl -s https://www.githubstatus.com/api/v2/summary.json
+```
+
+Pairs with F-7: both are the same failure at different depths — reaching for the reading that
+is available rather than the one that is authoritative.
 
 ## Template for new entries
 

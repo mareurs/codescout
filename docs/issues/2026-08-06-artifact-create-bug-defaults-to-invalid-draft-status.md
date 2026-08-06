@@ -102,6 +102,21 @@ whole legitimate state.
 - Two live examples on `experiments` today, one per half: a `draft` bug (default) and an
   `investigating` bug (query).
 
+### Fresh reproduction 2026-08-06 ~18:35Z — the fix is committed but not live
+
+Filing `docs/issues/2026-08-06-audit-doc-refs-gitignore-cap-ignores-the-index.md` through
+`artifact(action="create", kind="bug")` with **no** `status` param produced `status: draft`
+again — at `a53f1760`, which is downstream of the fix commit `e58ad463`. The source carries
+the fix; the **running MCP binary does not**, because it was never rebuilt (`cargo rb`) and
+reconnected after that commit. The new bug had to be corrected with an explicit
+`artifact(action="update", patch={status:"open"})`, and until that correction it was invisible
+to the canonical open-bug query — this bug reproducing itself during the filing of another.
+
+Consequence for this bug's own verification: the regression test passes under `cargo test`,
+but the live tool surface still misbehaves. **Do not archive on the strength of the test
+alone** — the archive gate is behaviour verified through the live MCP path, and this
+reproduction is evidence that is not yet true.
+
 ## Hypotheses tried
 
 None — the reproduction is deterministic and the cause is a defaulting decision, so
@@ -181,6 +196,11 @@ with the `in` filter above rather than `status="open"`.
    constraint, and compare against the `status="open"` result. Any bug in the first set
    and not the second is either terminal-and-unarchived or invisible-and-live, and the
    two are worth telling apart.
+
+**Added 2026-08-06 ~18:35Z:** before archiving, rebuild with `cargo rb`, reconnect the MCP
+session, then create a throwaway bug via `artifact(create, kind="bug")` with no `status` and
+confirm it returns `open`. Until that passes the fix is source-only — see the fresh
+reproduction under Evidence.
 
 ## References
 
