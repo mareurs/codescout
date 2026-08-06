@@ -1,17 +1,59 @@
 ---
-status: open
+kind: bug
+status: wontfix
+tags:
+- windows
+- ci
+- cross-compile
+- mingw
+- undiagnosed
+closed: 2026-08-06
 opened: 2026-08-06
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [windows, ci, cross-compile, mingw, undiagnosed]
-kind: bug
+severity: medium
 ---
 
 # BUG: `Windows-gnu cross (MinGW + wine)` CI job is red and has not been diagnosed
 
 ## Summary
+
+> **CLOSED 2026-08-06 as a DUPLICATE of
+> `docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md` (WIN-28).**
+> Status `wontfix` in the duplicate sense — there is nothing separate to fix here.
+>
+> The hypothesis this file recorded ("probably WIN-28 wearing a second hat, i.e. failures
+> outside WIN-27's 12-test wine skip-list") is **confirmed**. Run `31092134665` on
+> `99695a10`: the failing-test set of `Windows-gnu cross (MinGW + wine)` (job 92585395679)
+> and of `Test (windows-latest / default)` (job 92585395727) are **identical — the same
+> nine tests, byte for byte**:
+>
+> ```
+> librarian::tools::doctor::tests::prune_missing_batch_confirm_prunes_dead_roots_only
+> librarian::tools::doctor::tests::prune_missing_batch_dry_run_excludes_worktree_covered_root_from_totals
+> librarian::tools::doctor::tests::prune_missing_batch_dry_run_lists_dead_roots_without_deleting
+> librarian::tools::doctor::tests::run_fix_rehome_dry_run_then_confirm_migrates_rows
+> librarian::tools::doctor::tests::run_fix_rehome_errors_when_no_rows_under_old_root
+> librarian::tools::doctor::tests::run_fix_rehome_via_surfaced_old_root_arg_dry_runs
+> librarian::tools::doctor::tests::validate_rehome_gates
+> librarian::util::tests::like_escape_idiom_is_not_inlined_outside_helper
+> retrieval::index_lock::tests::lock_path_is_not_sited_in_bare_temp_dir
+> ```
+>
+> Method (the recipe this file itself specified, now executed): dump both jobs with
+> `gh run view 31092134665 --log-failed --job <id>`, strip ANSI, extract `... FAILED`
+> names, `sort -u`, diff. Zero difference.
+>
+> So there is no MinGW/wine-specific defect: the cross job simply runs the same suite and
+> trips the same nine platform assumptions. It will go green when WIN-28 does, and needs no
+> independent diagnosis — which is what this file was opened to obtain.
+>
+> **What it did contribute:** it forced the comparison that turned four red CI cells into
+> one bug. Before this, `Windows-gnu cross` was the only red cell with no known cause, and
+> its presence made the Windows failures look like two independent problems.
+>
+> Reopen only if the two sets ever diverge — i.e. the cross job fails a test that
+> `windows-latest` passes. The diff recipe above is the check.
 
 The `windows-gnu` CI job fails on `experiments`. Unlike the other red jobs from
 the same run it was **not investigated** — this file exists so a known-failing

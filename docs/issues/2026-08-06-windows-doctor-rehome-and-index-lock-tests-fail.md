@@ -67,6 +67,80 @@ cargo test retrieval::index_lock
 
 ## Root cause
 
+**2026-08-06 — UNBLOCKED. All nine panic messages obtained from CI logs (run `31092134665`,
+job 92585395727), so no Windows runner was needed after all.** `gh run view --log-failed`
+carries the full test stdout. The nine fall into **three** root causes, not nine:
+
+### Cluster A — POSIX-shaped absolute paths in fixtures are not absolute on Windows (4 tests)
+
+```
+doctor.rs:1235  validate_rehome_gates
+  assertion failed: validate_rehome_request(Some("/gone/old"), Some(live.to_str().unwrap()), &cat.conn).is_ok()
+doctor.rs:1262  run_fix_rehome_dry_run_then_confirm_migrates_rows
+  called `Result::unwrap()` on an `Err` value: old_root and new_root must both be absolute paths
+doctor.rs:1347  run_fix_rehome_via_surfaced_old_root_arg_dry_runs
+  called `Result::unwrap()` on an `Err` value: old_root and new_root must both be absolute paths
+doctor.rs:1368  run_fix_rehome_errors_when_no_rows_under_old_root
+  assertion failed: err.to_string().contains("no catalog rows found")
+```
+
+`Path::is_absolute()` on Windows requires a drive or UNC prefix, so the hardcoded
+`"/gone/old"` fixture is **relative** there and `validate_rehome_request`'s absolute-path
+gate rejects it before the test's actual subject runs. The fourth test is the same cause
+wearing a different mask: it asserts on the *wrong* error string because the call failed at
+the path gate rather than at the row lookup it meant to exercise.
+
+**Test-side defect, not a product defect.** The gate is behaving correctly; the fixture is
+POSIX-only.
+
+### Cluster B — the same POSIX fixture shape, one layer on (3 tests)
+
+```
+doctor.rs:1516  prune_missing_batch_dry_run_lists_dead_roots_without_deleting        left 0, right 1
+doctor.rs:1554  prune_missing_batch_dry_run_excludes_worktree_covered_root_from_totals
+  "per-root counts are still shown even for a covered root"                          left 0, right 1
+doctor.rs:1581  prune_missing_batch_confirm_prunes_dead_roots_only                   left 0, right 1
+```
+
+All three expect to find exactly one dead root and find zero. Consistent with the same
+cause — a POSIX-shaped root that matches no catalog row on Windows, where stored paths look
+like `D:\a\codescout\...`. **Not yet proven**: the panic gives only the count, not the
+prefix that was matched. Confirm by logging the root under test before asserting, or by
+running the fixture with a `\\`-prefixed root.
+
+### Cluster C — two separator-normalisation guards (2 tests)
+
+```
+librarian/util.rs:109  like_escape_idiom_is_not_inlined_outside_helper
+   left: ["D:\a\codescout\codescout/src\librarian\util.rs (1)"]
+  right: ["D:\a\codescout\codescout/src/librarian/util.rs (1)"]
+```
+
+A **mixed-separator** string: the repo root is joined with `/` and the relative part with
+OS separators. The expected value normalises the relative part to forward slashes; the
+actual does not. Test-side — the guard's reporting path needs `RepoPath`/forward-slash
+normalisation before comparison.
+
+```
+retrieval/index_lock.rs:288  lock_path_is_not_sited_in_bare_temp_dir
+  assertion `left != right` failed: lock file must not sit directly in the bare temp dir,
+  got parent Some("C:\Users\RUNNER~1\AppData\Local\Temp")
+   left: Some("C:\Users\RUNNER~1\AppData\Local\Temp")
+  right: Some("C:\Users\RUNNER~1\AppData\Local\Temp\")
+```
+
+Read this one carefully before acting. `assert_ne!` **failed**, meaning the two compared
+equal — and they do, as `Path` values, because component iteration ignores a trailing
+separator even though the `Debug` strings differ by one. So on Windows the lock file's
+parent really is the bare temp dir, which is exactly what this assertion exists to forbid.
+
+**This is the one cluster that may be a genuine product finding rather than a fixture
+shape**, and the panic alone does not settle which: either `index_lock` sites the lock
+directly in `%TEMP%` on Windows (product bug — the guard is right), or the fixture hands it
+a temp path whose trailing separator collapses the intended subdirectory (test bug). Read
+`src/retrieval/index_lock.rs` around the path construction before choosing; do **not**
+relax the assertion to make it pass.
+
 Unknown — under investigation. Three candidate groups, each with a different
 likely mechanism:
 
