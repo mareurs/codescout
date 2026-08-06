@@ -47,7 +47,16 @@ left"* is closed (both taken), and its CI table is extended below.
 | 31109795037 | `382c3344` | 15/15 |
 | 31122588792 | `e58ad463` | **queued** |
 | 31122862704 | `fcb6598f` | **queued** |
-| — | `1f20de99` | not yet queued at writing |
+| — | `1f20de99` | **queued** |
+| — | `e2cf177d` | **queued** |
+
+**The queue was stalled, not the code.** Four runs sat `queued` with none reaching
+`in_progress` for 30+ minutes — a 30-minute watcher expired without a single job starting.
+GitHub's hosted runners were backed up. So a `queued` row here means *never ran*, not *ran
+and hung*, and the four green rows above plus a clean local gate (fmt, clippy `-D warnings`,
+3504 tests, audit `EXIT=0`) are the current evidence. Re-query before drawing any
+conclusion; if they are still queued, that is a GitHub capacity condition to wait out, not
+something to debug.
 
 **Do not report a verdict for the last two from this document — GitHub's runners were
 backed up and neither had started.** `gh run list --branch experiments --limit 2`.
