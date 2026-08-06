@@ -531,6 +531,102 @@ fn build_metadata_header(
     Some(parts.join(" :: "))
 }
 
+/// Floor for a standalone chunk, in characters.
+///
+/// [`AST_CHUNK_TARGET`] is a *ceiling*; without a matching floor, inner-node
+/// decomposition emits one embedding per declaration however small it is. A
+/// one-line Kotlin enum member becomes its own vector: almost no retrievable
+/// signal, a full embed round-trip, and a stored vector each. Measured on a real
+/// Kotlin corpus, 5,133 of 43,582 chunks were single lines and 14,926 were ≤5
+/// lines.
+///
+/// 250 chars sits well below the 3000-char target, so it only ever coalesces
+/// declarations that were never going to carry a useful embedding on their own,
+/// and leaves ordinary methods untouched.
+pub const AST_CHUNK_MIN: usize = 250;
+
+/// Coalesce runs of consecutive undersized *declaration* chunks into single chunks.
+///
+/// Only *adjacent and contiguous* chunks merge — the next chunk must begin on the
+/// line after the previous one ends. That is what makes the reconstruction exact:
+/// each chunk's content is `lines[start-1..end].join("\n")`, so joining two
+/// contiguous ones with a newline reproduces `lines[first_start-1..last_end]`
+/// byte for byte, with no re-slicing and no assumption about how gaps were
+/// emitted upstream.
+///
+/// A run of one is left alone — merging needs a neighbour, and a lone small chunk
+/// keeps its own symbol metadata. Merged chunks take container-level metadata
+/// (`file :: Container`), since no single symbol name describes the group; the
+/// declarations' own names are still in the content, so name search is unaffected.
+///
+/// **Gap chunks never join a run.** `nodes_to_chunks` emits a gap chunk for any
+/// non-blank text between declarations and tags it with the bare file path — the
+/// only chunk shape that does so, which is how they are recognised here. Two such
+/// gaps bracket every decomposed container: the recursion re-derives gaps against
+/// the whole file, so the first inner node yields a leading gap covering
+/// everything before it, and the container's closing brace yields a trailing one.
+/// Letting either into a run swallowed the declarations' own metadata — a
+/// single-method `impl` collapsed into one whole-file chunk labelled
+/// `file :: impl Foo`, dropping `fn build` from the embedded header entirely.
+/// A gap therefore flushes the current run and passes through verbatim.
+fn coalesce_small_chunks(
+    chunks: Vec<RawChunk>,
+    min_size: usize,
+    max_size: usize,
+    merged_metadata: Option<String>,
+    gap_metadata: &str,
+) -> Vec<RawChunk> {
+    let mut out: Vec<RawChunk> = Vec::with_capacity(chunks.len());
+    let mut run: Vec<RawChunk> = Vec::new();
+
+    // Emit the accumulated run: merged when it has 2+ members, verbatim otherwise.
+    fn flush(run: &mut Vec<RawChunk>, out: &mut Vec<RawChunk>, metadata: &Option<String>) {
+        if run.len() < 2 {
+            out.append(run);
+            return;
+        }
+        let start_line = run[0].start_line;
+        let end_line = run[run.len() - 1].end_line;
+        let content = run
+            .iter()
+            .map(|c| c.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        run.clear();
+        out.push(RawChunk {
+            content,
+            start_line,
+            end_line,
+            metadata: metadata.clone(),
+        });
+    }
+
+    for chunk in chunks {
+        let is_gap = chunk.metadata.as_deref() == Some(gap_metadata);
+        let small = !is_gap && chunk.content.len() < min_size;
+        let contiguous = run
+            .last()
+            .is_none_or(|prev| chunk.start_line == prev.end_line + 1);
+        let running_len: usize = run.iter().map(|c| c.content.len() + 1).sum();
+        let fits = running_len + chunk.content.len() <= max_size;
+
+        if small && contiguous && fits {
+            run.push(chunk);
+            continue;
+        }
+        flush(&mut run, &mut out, &merged_metadata);
+        if small {
+            // Started a fresh run: it was undersized but could not join the previous
+            // one (a gap in the lines, or the merge would have blown the ceiling).
+            run.push(chunk);
+        } else {
+            out.push(chunk);
+        }
+    }
+    flush(&mut run, &mut out, &merged_metadata);
+    out
+}
+
 /// Converts AST nodes to RawChunks, handling gaps and doc expansion.
 ///
 /// When a node can be decomposed into inner declarations (methods, constructors,
@@ -657,7 +753,19 @@ fn nodes_to_chunks(
                 file_path,
                 &inner_container,
             );
-            chunks.extend(inner_chunks);
+            // Apply the floor here rather than inside the recursion: this is the
+            // only path that decomposes regardless of size, so it is the only one
+            // that can produce a run of one-line chunks. Container-level metadata
+            // for anything merged — no single symbol name describes the group.
+            let inner_refs: Vec<&str> = inner_container.iter().map(|s| s.as_str()).collect();
+            let merged_metadata = build_metadata_header(file_path, &inner_refs, None, None, None);
+            chunks.extend(coalesce_small_chunks(
+                inner_chunks,
+                AST_CHUNK_MIN,
+                chunk_size,
+                merged_metadata,
+                file_path,
+            ));
         } else if content.len() <= chunk_size {
             // Single symbol chunk — fits in one chunk, no inner structure.
             let metadata = build_metadata_header(
@@ -2089,6 +2197,154 @@ impl Foo {
         assert!(
             !meta.contains("Compute the answer"),
             "doc body leaked into inner-method signature: {meta}"
+        );
+    }
+
+    fn rc(content: &str, start_line: usize, end_line: usize, meta: &str) -> RawChunk {
+        RawChunk {
+            content: content.to_string(),
+            start_line,
+            end_line,
+            metadata: Some(meta.to_string()),
+        }
+    }
+
+    #[test]
+    fn coalesce_merges_contiguous_small_declarations() {
+        let chunks = vec![
+            rc("    A,", 2, 2, "f.rs :: enum E :: A"),
+            rc("    B,", 3, 3, "f.rs :: enum E :: B"),
+            rc("    C,", 4, 4, "f.rs :: enum E :: C"),
+        ];
+        let out = coalesce_small_chunks(chunks, 250, 3000, Some("f.rs :: enum E".into()), "f.rs");
+        assert_eq!(out.len(), 1, "three tiny members should merge: {out:#?}");
+        // The load-bearing invariant: merged content is byte-identical to joining
+        // the covered source lines, so the line span and the content never drift.
+        assert_eq!(out[0].content, "    A,\n    B,\n    C,");
+        assert_eq!(out[0].start_line, 2);
+        assert_eq!(out[0].end_line, 4);
+        assert_eq!(out[0].metadata.as_deref(), Some("f.rs :: enum E"));
+    }
+
+    #[test]
+    fn coalesce_leaves_a_lone_small_declaration_alone() {
+        let chunks = vec![rc("    A,", 2, 2, "f.rs :: enum E :: A")];
+        let out = coalesce_small_chunks(chunks, 250, 3000, Some("f.rs :: enum E".into()), "f.rs");
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].metadata.as_deref(),
+            Some("f.rs :: enum E :: A"),
+            "a run of one keeps its own symbol metadata"
+        );
+    }
+
+    #[test]
+    fn coalesce_never_merges_a_gap_chunk() {
+        // Every decomposed container is bracketed by gap chunks: a leading one
+        // covering everything before the first inner node, and the closing brace.
+        // Absorbing either swallows the declaration's own metadata header.
+        let chunks = vec![
+            rc("impl Foo {", 1, 1, "f.rs"),
+            rc("    fn a(&self) {}", 2, 2, "f.rs :: impl Foo :: fn a"),
+            rc("}", 3, 3, "f.rs"),
+        ];
+        let out = coalesce_small_chunks(chunks, 250, 3000, Some("f.rs :: impl Foo".into()), "f.rs");
+        assert_eq!(out.len(), 3, "gap chunks must not be absorbed: {out:#?}");
+        assert_eq!(
+            out[1].metadata.as_deref(),
+            Some("f.rs :: impl Foo :: fn a"),
+            "the declaration must keep its own symbol metadata"
+        );
+    }
+
+    #[test]
+    fn coalesce_stops_a_run_at_the_size_ceiling() {
+        let body = "x".repeat(40);
+        let chunks = vec![
+            rc(&body, 1, 1, "f.rs :: s :: a"),
+            rc(&body, 2, 2, "f.rs :: s :: b"),
+            rc(&body, 3, 3, "f.rs :: s :: c"),
+        ];
+        // Ceiling 100 admits two (40 + 1 + 40 = 81) but not three (81 + 1 + 40 = 122).
+        let out = coalesce_small_chunks(chunks, 250, 100, Some("f.rs :: s".into()), "f.rs");
+        assert_eq!(out.len(), 2, "the ceiling should split the run: {out:#?}");
+        assert_eq!(out[0].end_line, 2);
+        assert_eq!(out[1].start_line, 3);
+    }
+
+    #[test]
+    fn coalesce_breaks_a_run_on_a_line_gap() {
+        let chunks = vec![
+            rc("    A,", 2, 2, "f.rs :: enum E :: A"),
+            rc("    C,", 9, 9, "f.rs :: enum E :: C"),
+        ];
+        let out = coalesce_small_chunks(chunks, 250, 3000, Some("f.rs :: enum E".into()), "f.rs");
+        assert_eq!(
+            out.len(),
+            2,
+            "non-contiguous chunks must not merge — joining them would not \
+             reproduce the source lines: {out:#?}"
+        );
+    }
+
+    #[test]
+    fn tiny_inner_declarations_coalesce_end_to_end() {
+        use std::path::Path;
+        // Each method is far below AST_CHUNK_MIN; without the floor every one
+        // becomes its own embedding vector.
+        let src = r#"
+impl Tiny {
+    fn a(&self) {
+        ()
+    }
+    fn b(&self) {
+        ()
+    }
+    fn c(&self) {
+        ()
+    }
+}
+"#;
+        let chunks = split_file(src, "rust", Path::new("src/tiny.rs"), 4000);
+        let merged = chunks
+            .iter()
+            .find(|c| c.content.contains("fn a") && c.content.contains("fn c"))
+            .unwrap_or_else(|| panic!("tiny methods should share one chunk: {chunks:#?}"));
+        assert_eq!(
+            merged.metadata.as_deref(),
+            Some("src/tiny.rs :: impl Tiny"),
+            "merged runs carry container-level metadata"
+        );
+    }
+
+    #[test]
+    fn single_method_impl_keeps_per_symbol_metadata() {
+        use std::path::Path;
+        // Regression guard: coalescing once absorbed the bracketing gap chunks
+        // into the lone method's run, emitting one whole-file chunk labelled
+        // `file :: impl Solo` with `fn only` in no metadata header at all.
+        let src = r#"
+impl Solo {
+    pub fn only(&self) {
+        ()
+    }
+}
+"#;
+        let chunks = split_file(src, "rust", Path::new("src/solo.rs"), 4000);
+        let m = chunks
+            .iter()
+            .find(|c| c.content.contains("pub fn only"))
+            .unwrap_or_else(|| panic!("method chunk missing: {chunks:#?}"));
+        let meta = m.metadata.as_deref().expect("metadata present");
+        assert!(
+            meta.contains("only"),
+            "symbol name lost from header: {meta}"
+        );
+        assert!(
+            m.end_line - m.start_line < 5,
+            "method chunk swallowed the whole file: lines {}-{}",
+            m.start_line,
+            m.end_line
         );
     }
 }
