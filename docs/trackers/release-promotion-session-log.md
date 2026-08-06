@@ -25,6 +25,51 @@ tags:
 
 ## Resume — round 2, written 2026-08-06 for session compaction
 
+> **CI IS NOW 14/15 GREEN.** Run `31098286970` on `cd643d58` — baseline was 4 green / 11 red
+> (`30852803569`, 2026-08-03, on code 21 commits stale).
+>
+> | Green (14) | Red (1) |
+> |---|---|
+> | Format, Clippy, Tool Docs Sync, MSRV (1.88) | `Audit Doc Refs` |
+> | ubuntu × default / no-features / local-embed | |
+> | macos × default / no-features / local-embed | |
+> | **windows × default / no-features / local-embed** | |
+> | **Windows-gnu cross (MinGW + wine)** | |
+>
+> `Test (windows-latest / default)`: **3283 passed, 0 failed.**
+>
+> **WIN-28 fixed and archived.** Nine failures, three root causes, **zero product defects** —
+> two assertions were failing against *correct* implementations and the rest were fixtures
+> encoding POSIX-only path shapes. Fixing the product to satisfy cluster A would have relaxed
+> `derive_dead_roots`' absolute-path guard, whose absence makes a prune `WHERE` match every
+> row. Full account in
+> `docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`.
+>
+> **WIN-29 confirmed a duplicate, empirically.** It was closed on an inference (identical
+> failing-test sets) and has now gone green from the same nine fixture fixes, with no
+> MinGW/wine-specific change. That is the prediction the duplicate hypothesis made.
+>
+> **The one remaining red is `Audit Doc Refs`**, and it is NOT undiagnosed. Measured population
+> after the extractor fixes and the `docs/lessons/**` exclusion: >50 findings, ~42 of them
+> illustrative paths inside `docs/manual/src/concepts/**` (`src/services/auth.rs`, `src/foo.rs`,
+> `.worktrees/my-feature`, `docs/trackers/my-tracker.md`). Three sub-classes needing three
+> different mechanisms — see
+> `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`:
+>
+> 1. **Fictional example paths** — need an author-supplied marker; nothing syntactic separates
+>    "illustrative" from "stale".
+> 2. **Gitignored runtime state** (`.worktrees/*` ×8, `.codescout/embeddings.db` ×3) — a
+>    gitignore-aware severity cap handles these with no markers and no prose edits.
+> 3. **Genuine drift** (~8), including citations to the six bug files archived earlier today.
+>
+> **Do NOT blanket-exclude `docs/manual/src/concepts/**`.** The manual also cites real codescout
+> paths, and that is precisely where doc drift hurts readers most. Mechanism choice is an open
+> decision, deliberately not taken unilaterally on a user-facing lint.
+>
+> Also unresolved and unrelated: no `rust-toolchain.toml` + `dtolnay/rust-toolchain@stable`
+> means CI re-resolves `stable` every run and can acquire lints with zero commits (that is how
+> Clippy went red on 1.97 against unchanged code). Pin vs float is a policy call.
+
 > **SUPERSEDED in part, 2026-08-06 — item 1 ("push, then re-read CI") is DONE.** Pushed
 > `d7988aca..99695a10` (22 commits) to `origin/experiments`. CI now runs on current HEAD
 > for the first time since 2026-08-03; every verdict before this described code 21

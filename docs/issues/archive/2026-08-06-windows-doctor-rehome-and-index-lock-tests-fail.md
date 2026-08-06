@@ -1,12 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- windows
+- librarian
+- catalog
+- doctor
+- retrieval
+- ci
+closed: 2026-08-06
 opened: 2026-08-06
-closed:
-severity: high
 owner: marius
 related: []
-tags: [windows, librarian, catalog, doctor, retrieval, ci]
-kind: bug
+severity: high
 ---
 
 # BUG: nine tests fail on windows-latest — catalog rehome/prune, like_escape guard, index lock
@@ -187,6 +193,71 @@ None yet — filed on discovery during merge preparation.
 
 ## Fix
 
+**FIXED AND VERIFIED IN CI 2026-08-06 (experiments, `cd643d58`).** Run `31098286970`:
+`Test (windows-latest / default)` **3283 passed, 0 failed**, plus `windows-latest/no-features`,
+`windows-latest/local-embed` and `Windows-gnu cross (MinGW + wine)` all green. 14 of 15 jobs
+green; the only red left is `Audit Doc Refs`, tracked separately in
+`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
+
+**Not one of the nine was a product defect.** Two were assertions failing against *correct*
+implementations; the rest were fixtures encoding POSIX-only path shapes. Fixing the product to
+satisfy them would have been actively harmful — see cluster A.
+
+### Cluster A + B — POSIX-shaped absolute literals (7 tests)
+
+Added a `dead_root(tag)` helper in the doctor test module: `std::env::temp_dir()` supplies a
+real absolute prefix on every OS, a unique suffix keeps the path missing, and its parent
+exists so the derived dead root lands on the suffix rather than climbing further.
+`RepoPath`-normalised so it concatenates with the forward-slash `abs_path` shape the catalog
+stores.
+
+`derive_dead_roots`' `if !path.is_absolute() { continue; }` guard was left alone deliberately.
+It is protected by its own test (`derive_dead_roots_skips_non_absolute_paths`) because without
+it the ancestor climb bottoms out at an empty `PathBuf` whose prune `WHERE` matches **every**
+absolute row. Relaxing it to accept `/gone/old` on Windows would have converted a red test into
+a data-loss bug.
+
+`count_dead_root_counts_rows_under_root` keeps its POSIX literals on purpose — it calls
+`count_dead_root` directly with an explicit root, so it is pure LIKE string matching that never
+reaches the `is_absolute()` guard, and its assertions are about prefix-sibling semantics rather
+than paths on disk.
+
+### Cluster C — separators (2 tests)
+
+`like_escape_idiom_is_not_inlined_outside_helper`: both sides of the comparison now go through
+`normalize_rel_path`, which already lived in that file. `CARGO_MANIFEST_DIR` is OS-shaped and
+walkdir appends OS separators to it, so the actual hit was mixed
+(`...codescout/src\librarian\util.rs`) against a forward-slash expectation.
+
+`lock_path_is_not_sited_in_bare_temp_dir`: **the product was right.** The threat is `/tmp` being
+world-writable; on Windows `temp_dir()` is `%LOCALAPPDATA%\Temp`, already inside the user's
+profile, so `per_user_runtime_dir()`'s `#[cfg(not(unix))]` arm returns it unchanged by design and
+`lock_path`'s doc comment says so. Scoped `#[cfg(unix)]` rather than relaxed, and paired with a
+new platform-independent `lock_path_is_sited_in_the_per_user_runtime_dir` so Windows keeps
+coverage of the siting invariant.
+
+### Two more that only CI could surface
+
+- `prune_missing_batch_dry_run_excludes_worktree_covered_root_from_totals` needed **two** passes.
+  First the seed: `covered_root.join("x.md").to_string_lossy()` yields backslashes on Windows
+  while `count_dead_root` builds its LIKE prefix through `RepoPath`, so the fixture seeded a
+  shape the catalog never contains. Normalising the seed then moved the mismatch downstream into
+  the test's own `find`, which compared the (now forward-slash) row `root` against a
+  backslash-rendered `covered_root`. Both sides now go through `RepoPath`.
+- `lsp::client::tests::workspace_symbols_returns_project_symbols` was **timing, not logic** — it
+  passed on run `31092134665` and failed on `31094160241`. Its own comment already recorded GHA
+  Windows as I/O-slow with a 15 s budget; that is still not enough there (cold `cargo metadata`,
+  no warm target cache) while ubuntu and macOS pass. Windows now gets 4× (60 s); the loop exits
+  early on success so the ceiling is free when indexing is fast. Widened rather than skipped, so
+  Windows keeps `workspace/symbol` coverage.
+
+**On Linux every one of these spellings coincides, so no local run could have caught them** —
+3488 tests passed locally before each push. They were only ever observable in CI.
+
+Experiments-branch SHAs: `0326a016` (clusters A/B/C), `2784131a` (seed normalisation + LSP
+budget), `cd643d58` (dry-run row comparison). Master-side SHAs still need recording after
+cherry-pick per CLAUDE.md § "After cherry-pick".
+
 Not implemented. Needs the per-test panic output from a Windows run first;
 guessing at path normalization without it risks "fixing" the tests rather than
 the code.
@@ -205,35 +276,20 @@ a deliberate coverage reduction that should be recorded, not a silent one.
 
 ## Resume
 
-**2026-08-06 — reproduced on current HEAD; the run to read is `31091169757`** (commit
-`99695a10`, branch `experiments`). This is the first CI run against a non-stale tree since
-2026-08-03, so it is the first trustworthy evidence for this bug — earlier runs described
-code 21 commits behind.
+N/A — fixed and verified in CI on `experiments`.
 
-All three Windows cells fail: `Test (windows-latest / default)`,
-`Test (windows-latest / no-features)`, `Test (windows-latest / local-embed)`. That the
-failure is feature-independent is itself information: it points at the platform-behaviour
-failures catalogued here rather than at feature-gate rot, which is what the other six
-previously-red cells turned out to be (all now green).
-
-Fetch the panic output with:
+One technique worth keeping, because it was needed to diagnose this and will be needed again:
+`gh run view --log-failed` refuses per-job logs until the **whole** run finishes, and a stalled
+sibling job (`Windows-gnu cross` sat 41+ minutes on "Install MinGW + wine" and was ultimately
+cancelled by the next push) blocks that indefinitely. The REST endpoint serves one job's log
+regardless of run state:
 
 ```bash
-gh run view 31091169757 --log-failed \
-  --job $(gh run view 31091169757 --json jobs \
-            -q '.jobs[] | select(.name=="Test (windows-latest / default)") | .databaseId')
+gh api --allow-escape-sequences \
+  "/repos/mareurs/codescout/actions/jobs/<job_id>/logs"
 ```
 
-Still blocked on a Windows runner for interactive work, but the logs alone should give the
-nine panic messages, which is enough to start.
-
-Get the panic output: re-run CI on the current `experiments` HEAD (11 commits
-newer than run 30852803569 — some of these may already be fixed), then open the
-`Test (windows-latest / default)` job log and capture the assertion message for
-each of the 9. Group by mechanism using the three candidates under *Root cause*,
-then fix per group. Start with `validate_rehome_gates`, which is the narrowest
-and most likely to reveal the shared path-comparison assumption.
-
+`--allow-escape-sequences` is required or `gh` refuses the ANSI-bearing body.
 ## References
 
 - `src/librarian/tools/doctor.rs` — the rehome / prune_missing modes and tests
