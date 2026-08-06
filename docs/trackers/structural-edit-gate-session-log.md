@@ -144,7 +144,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Expected (my initial recommendation):** Keep the flag as a parameter of the consolidated chokepoint — "preserves a deployment knob a deployment may want (force-symbol-tools as policy)."
 
-**Got (scouted reality):** The flag has no distinct purpose. (1) `guard_structural_rewrite` (always-on guard at `edit_file/mod.rs:429` batch + `:583` single) blocks the *identical* set of structural edits regardless of the flag — proven by `batch_edit_blocks_new_symbol_introduction_via_new_string` (default config, blocks) vs `edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools` (flag on, same block). (2) Commit `fbd8bbdc` narrowed the flag to structural-only, making it coextensive with that guard. (3) The flag is set `true` only in this repo's `.codescout/project.toml` for dogfooding — a purpose the always-on guard already serves. (4) Its only remaining distinct effects are a *worse* error message (the generic "blocked for structural edits" that preempts the rich "which indices were safe / single-line is allowed" guidance) and an earlier return — plus a documented deadlock failure mode (`docs/issues/2026-06-13-rust-lsp-mux-spawn-fail-deadlocks-source-editing.md`).
+**Got (scouted reality):** The flag has no distinct purpose. (1) `guard_structural_rewrite` (always-on guard at `edit_file/mod.rs:429` batch + `:583` single) blocks the *identical* set of structural edits regardless of the flag — proven by `batch_edit_blocks_new_symbol_introduction_via_new_string` (default config, blocks) vs `edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools` (flag on, same block). (2) Commit `fbd8bbdc` narrowed the flag to structural-only, making it coextensive with that guard. (3) The flag is set `true` only in this repo's `.codescout/project.toml` for dogfooding — a purpose the always-on guard already serves. (4) Its only remaining distinct effects are a *worse* error message (the generic "blocked for structural edits" that preempts the rich "which indices were safe / single-line is allowed" guidance) and an earlier return — plus a documented deadlock failure mode (`docs/issues/archive/2026-06-13-rust-lsp-mux-spawn-fail-deadlocks-source-editing.md`).
 
 **Probable cause:** `fbd8bbdc` made the flag-gate diff-aware by reusing `guard_structural_rewrite` — the same predicate the always-on guard uses — leaving two enforcement entry points sharing one predicate and diverging only in message. The redundancy was born in the fix.
 
@@ -152,9 +152,9 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — would have shipped a "keep the knob" design that preserves the exact moat-weakening message that caused the original native-Edit escape, leaving the divergent-surface defect half-fixed.
 
-**Status:** fixed-verified — Commits 1 (retire flag) + 2 (single-line escape-hatch hint) landed on `experiments`; fmt + clippy `-D warnings` + full lib green (2813). Captured as `docs/issues/2026-06-27-edit-file-generic-structural-message-preempts-rich-guidance.md`. Archive after the fix reaches `master`.
+**Status:** fixed-verified — Commits 1 (retire flag) + 2 (single-line escape-hatch hint) landed on `experiments`; fmt + clippy `-D warnings` + full lib green (2813). Captured as `docs/issues/archive/2026-06-27-edit-file-generic-structural-message-preempts-rich-guidance.md`. Archive after the fix reaches `master`.
 
-**Fix idea / Pointer:** Pending consolidation plan (this work stream). Sub-findings to route: the generic-message-preempts-rich-message defect → open a new `docs/issues/` bug; the deadlock interaction → `docs/issues/2026-06-13-rust-lsp-mux-spawn-fail-deadlocks-source-editing.md`.
+**Fix idea / Pointer:** Pending consolidation plan (this work stream). Sub-findings to route: the generic-message-preempts-rich-message defect → open a new `docs/issues/` bug; the deadlock interaction → `docs/issues/archive/2026-06-13-rust-lsp-mux-spawn-fail-deadlocks-source-editing.md`.
 
 ---
 

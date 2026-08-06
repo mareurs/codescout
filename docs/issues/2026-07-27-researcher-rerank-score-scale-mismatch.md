@@ -5,7 +5,7 @@ closed:
 severity: medium
 owner: marius
 related:
-  - docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md
+  - docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
 tags: [researcher, rerank, calibration, cross-repo]
 kind: bug
 ---
@@ -179,4 +179,4 @@ sample. Then decide between the two tuning options under "Fix".
 - `researcher/src/config.rs:157-176` — weights and threshold defaults
 - `researcher/src/researcher/pipeline.rs:438-460` — soft-failure path
 - `researcher/infra/docker-compose.yml` — `tei-rerank`, the previous backend
-- `docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md` — why :48083 exists
+- `docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md` — why :48083 exists

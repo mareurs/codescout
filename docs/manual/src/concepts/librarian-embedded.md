@@ -86,6 +86,10 @@ Read tools surface a `scope` block + `hints` (`more_in_repo`,
 
 ## Per-project classifier overrides
 
+<!-- audit-doc-refs:ignore — this section lists classifier *patterns*, not citations.
+     A pattern is configuration; it matches files that may or may not exist, and
+     docs/ARCHITECTURE.md is deliberately one of the latter. -->
+
 Drop a `<project>/.codescout/librarian.toml` to declare classification
 rules for that project's paths without touching the global
 `~/.config/librarian/workspace.toml`. Schema matches the global file's

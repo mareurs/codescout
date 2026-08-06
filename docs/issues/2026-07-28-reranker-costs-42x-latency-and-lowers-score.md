@@ -5,7 +5,7 @@ closed:
 severity: high
 owner: marius
 related:
-  - docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md
+  - docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
 tags: [retrieval, reranker, latency, benchmark, measured]
 kind: bug
 ---
@@ -130,7 +130,7 @@ as the variable.
 
 The `.env.gpu` change that made this the default, and the compose work that brought the
 reranker up, are in commit `4036bb9a`; the OOM investigation that preceded it is
-`docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md` (status `fixed` — the reranker *runs*
+`docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md` (status `fixed` — the reranker *runs*
 correctly, which is what that bug was about).
 
 ## Hypotheses tried
@@ -197,7 +197,7 @@ So the **live configuration is dense + sparse + rerank**, while the measurements
 not measured. `PROTOCOL=infinity` vs `llama-server` is harmless — `Protocol::from_env` maps both
 to `Protocol::Infinity` — but it is direct evidence that the two env sources drifted
 independently, which is the same class as
-`docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md`.
+`docs/issues/archive/2026-07-25-env-copy-flow-stale-model-dir.md`.
 
 **Nothing about the running system changed as a result of this bug file.** Making it take effect
 requires restarting the MCP servers (`/mcp`), which is already an outstanding item for unrelated
@@ -299,6 +299,6 @@ a corpus effect and was actually the sparse leg being disabled).
 - `scripts/run-tc-benchmark.sh`, `scripts/run-tc-benchmark.py` — the 25-TC harness
 - `docs/research/2026-05-06-retrieval-stack-benchmark.md` — Phase 5.5/6; records p50 169 ms
   without a reranker, and the explicit "re-test before committing to it for default" note
-- `docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md` — getting the reranker to run at all
+- `docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md` — getting the reranker to run at all
 - `docs/manual/src/concepts/retrieval-stack.md` — carries the incorrect "~80ms p95" claim
 - commit `4036bb9a` — made the reranker the `gpu`-profile default

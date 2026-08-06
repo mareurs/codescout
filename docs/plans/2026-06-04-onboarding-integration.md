@@ -29,7 +29,7 @@ sometimes wrong — project context:
 - Per-project `languages` + `primary_language` are derived from the root **manifest
   type**, not file content. A Python repo with a root `package.json` (kept for tooling)
   is labeled `javascript` and Python vanishes. → **issue `e7454c40`**
-  (`docs/issues/2026-06-03-project-languages-from-manifest-not-files.md`).
+  (`docs/issues/archive/2026-06-03-project-languages-from-manifest-not-files.md`).
 - `language-patterns` memory content is **hardcoded-generic** per language
   (`src/prompts/builders.rs:8-131`), not grounded in the project's real lint/type/test
   conventions — so it must be rewritten by hand to be useful (the generic Python block
@@ -126,7 +126,7 @@ boundary. WS4 is independent / optional.
   later `onboarding(force=true)` that re-writes the generic baseline.
 
 ## References
-- Issue: `docs/issues/2026-06-03-project-languages-from-manifest-not-files.md` (`e7454c40`)
+- Issue: `docs/issues/archive/2026-06-03-project-languages-from-manifest-not-files.md` (`e7454c40`)
 - `src/tools/onboarding.rs` (`perform_full_onboarding`, :201, :838-844, :900, :1184, ONBOARDING_VERSION :27)
 - `src/prompts/builders.rs:8-131` (`language_patterns`), :135 (`build_language_patterns_memory`)
 - `src/workspace.rs:29-216` (`discover_projects`)

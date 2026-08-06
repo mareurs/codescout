@@ -976,7 +976,7 @@ Both claims are wrong:
    (`let should_strip = tool_name != "run_command";`). The exemption
    exists precisely because `run_command`'s output is raw shell stdout
    where stripping would corrupt path literals (see
-   `docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md`).
+   `docs/issues/archive/2026-05-21-run-command-strips-project-root-from-path-literals.md`).
 
 **Why it slipped through:** the docstring was written under an older
 mental model when both observations may have been partially true.
@@ -1072,7 +1072,7 @@ to be recorded after cherry-pick).
 **Related:** [[U-23]] (the per-call cadence this entry partially
 relaxes), [[U-24]] (the docstring-vs-runtime follow-up on the same
 post_process surface). Bug file:
-`docs/issues/2026-05-28-path-annotation-spam.md`.
+`docs/issues/archive/2026-05-28-path-annotation-spam.md`.
 
 ### U-26 — `artifact(update, patch={body_edits})` action grammar undocumented; `edit` vs `replace` found only via 3 sequential errors
 

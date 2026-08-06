@@ -4,8 +4,8 @@ created: 2026-06-30
 owner: marius
 topic: default-ignore-globs
 related:
-  - docs/issues/2026-06-19-mcp-server-oom-68gb.md
-  - docs/issues/2026-06-02-preflight-sync-walker-divergence.md
+  - docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md
+  - docs/issues/archive/2026-06-02-preflight-sync-walker-divergence.md
   - docs/trackers/index-scope-default-ignores.md
 ---
 
@@ -139,4 +139,4 @@ next pass.
 - `src/tools/semantic/index.rs` — pass patterns to preflight + `SyncOpts`.
 - `src/agent/mod.rs` — pass patterns in `maybe_auto_index_library`.
 - `src/bin/sync_project.rs` — load project `ignored_paths` (or defaults).
-- `docs/issues/2026-06-19-mcp-server-oom-68gb.md` — mitigation note fix.
+- `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md` — mitigation note fix.

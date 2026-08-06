@@ -155,7 +155,7 @@ not reimplement them:
 - **F-5 / F-7** surface-marker (`<!-- @surface -->`) preservation guard on
   `replace` (breaks `build.rs` slice extraction if dropped).
 - `replace_heading` same-level-heading replacement (see
-  `docs/issues/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md`).
+  `docs/issues/archive/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md`).
 - `compute_section_end` fenced-code-block awareness (headings inside ``` ``` are
   not section boundaries; unbalanced fences degrade gracefully).
 - Heading-fusion guards (`ensure_trailing_newline`) on `insert_after` / `replace`.

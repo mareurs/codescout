@@ -9,7 +9,7 @@ created_at: 2026-04-21
 # experiments → master Promotion Plan
 
 265 commits ahead of master as of 2026-04-21. Plan executes in dependency order.
-Cross-reference: `docs/trackers/experiments-to-master.md` for readiness rationale.
+Cross-reference: `docs/trackers/archive/experiments-to-master.md` for readiness rationale.
 
 ## Rules
 
@@ -230,4 +230,4 @@ These clusters stay on `experiments` until intentionally graduated. Check off wh
 - [ ] Run full release cycle from `master` (bump version, tag, publish, push)
 - [ ] Rebase `experiments` on new `master` tag
 - [ ] Drop now-superseded original commits from `experiments` (`git rebase -i master`)
-- [ ] Update `docs/trackers/experiments-to-master.md` — mark promoted clusters
+- [ ] Update `docs/trackers/archive/experiments-to-master.md` — mark promoted clusters

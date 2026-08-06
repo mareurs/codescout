@@ -40,7 +40,7 @@ The ONLY real gap is **Axis 3 — control policy**: every write is hand-authored
   Conclusion: this isn't "add a memory system" — it's adding the missing connective tissue between surfaces codescout already has, leaving the generative trigger in the host's hands.
 
 ## Side effect
-Surfaced the `HIDDEN_STATUSES` split-brain bug → docs/issues/2026-05-25-hidden-statuses-context-missing-retired.md (find.rs has "retired", context.rs doesn't).
+Surfaced the `HIDDEN_STATUSES` split-brain bug → docs/issues/archive/2026-05-25-hidden-statuses-context-missing-retired.md (find.rs has "retired", context.rs doesn't).
 
 ## Sources
 - github.com/Tencent/TencentDB-Agent-Memory

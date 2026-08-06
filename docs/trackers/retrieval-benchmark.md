@@ -191,7 +191,7 @@ indexed in 1239 s. `mode=full`, `--limit 10`, `boost=3.0`, **`CODESCOUT_DISABLE_
 | p50 | ~141-157 ms (boost sweep rows) | **1994-2176 ms** |
 
 Same model, different server. The GGUF/llama-server swap was made 2026-07-27 to fix a CUDA OOM
-(`docs/issues/2026-07-27-reranker-gpu-tei-cuda-oom.md`) — TEI at `--dtype float16` could not warm
+(`docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md`) — TEI at `--dtype float16` could not warm
 up on this 6 GiB card. That fix traded **VRAM for latency**, and the latency cost was never
 measured until now. Mechanism is unchanged in either server: `SearchOpts::new` sets
 `overfetch: limit * 2` and `search_in` reranks every candidate, so `limit=10` means 20
@@ -253,7 +253,7 @@ nothing; `.env.amd` is loaded only because it is symlinked into the global confi
 So **one** of the four was a real problem. `.env.gpu` being a template nothing sources still
 holds, and the reason is sharper than "sourcing cannot unset": the server never looks at the repo
 at all. That mechanism plus the symlink-target drift were **already filed** by a concurrent
-session in `docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md` § *"2026-07-28 — the symlink
+session in `docs/issues/archive/2026-07-25-env-copy-flow-stale-model-dir.md` § *"2026-07-28 — the symlink
 flow itself drifted"* — this is a rediscovery, not a second bug.
 
 **Open, for the next session.** Re-run the reranker A/B on a quiet box against a

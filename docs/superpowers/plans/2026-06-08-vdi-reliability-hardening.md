@@ -161,7 +161,7 @@ async fn background_command_with_quotes_captures_output() {
     // Regression: the background path used .arg() → MSVC-CRT quote mangling →
     // a quoted -c argument dropped Python into its stdin-blocked REPL.
     // Real harness (verified via reconnaissance — see F-1 in
-    // docs/trackers/vdi-reliability-session-log.md): project_ctx() returns
+    // docs/trackers/archive/vdi-reliability-session-log.md): project_ctx() returns
     // (TempDir, ToolContext); drive the tool via RunCommand.call(json!(...), &ctx),
     // NOT run_command_inner. Requires `py` on PATH (true on this VDI).
     let (_dir, ctx) = project_ctx().await;
@@ -494,7 +494,7 @@ git commit -m "docs(prompts): drop ambiguous shell find suggestion (Git Unix fin
 **Files:**
 - Modify: `src/lsp/client.rs` (spawn site, ~line 367 per the bug doc)
 - Reference: `src/platform/windows.rs::lsp_binary_name`, `src/lsp/servers/mod.rs`
-- Closes: `docs/issues/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`
+- Closes: `docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`
 
 - [ ] **Step 1: Verify abs-path resolution is wired through the spawn**
 
@@ -515,10 +515,10 @@ Expected: clean; existing LSP tests pass.
 
 - [ ] **Step 5: Close the bug file + commit**
 
-Update `docs/issues/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md` status → `fixed`, then:
+Update `docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md` status → `fixed`, then:
 
 ```bash
-git add src/lsp/client.rs docs/issues/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md
+git add src/lsp/client.rs docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md
 git commit -m "fix(lsp): resolve binary via abs-path probe + bounded spawn timeout (Windows/EDR)"
 ```
 
@@ -528,7 +528,7 @@ git commit -m "fix(lsp): resolve binary via abs-path probe + bounded spawn timeo
 
 **Files:**
 - Modify: `docs/manual/src/configuration/project-toml.md` (or troubleshooting)
-- Modify: `docs/issues/2026-06-08-windows-run-command-child-process-hang.md` (Resume/follow-ups)
+- Modify: `docs/issues/archive/2026-06-08-windows-run-command-child-process-hang.md` (Resume/follow-ups)
 
 - [ ] **Step 1: Document `tool_timeout_secs` for EDR-slowed VDIs**
 

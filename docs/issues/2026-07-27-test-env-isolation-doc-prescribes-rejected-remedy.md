@@ -10,7 +10,7 @@ closed: null
 opened: 2026-07-27
 owner: marius
 related:
-- docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+- docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
 severity: high
 ---
 
@@ -35,7 +35,7 @@ Two concrete recurrences on 2026-07-27, both traceable to this doc:
    `2026-07-27-index-lock-and-embedder-batching` plan specified an env-mutating `EnvGuard`
    and cited `src/librarian/indexer.rs:1074` as the pattern to mirror. Result: a
    reproducible test race, 5/5 default-parallel `cargo test` runs failing. Documented in
-   `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+   `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
 2. **`src/librarian/indexer.rs:1070-1183`** — an uncommitted sibling change in the same
    working tree independently reintroduced the same shape (raw `set_var`/`remove_var` on
    `LIBRARIAN_ARTIFACT_VEC_MIGRATE`, plus `#[serial]` on its callers). Still open.
@@ -145,7 +145,7 @@ first rather than taken from this file:
 5. **Both surviving `EnvGuard` uses named**, so neither reads as a counter-example:
    `src/agent/mod.rs` (server-stack gated, exempt) and `src/librarian/indexer.rs` (known
    debt, tracked in
-   `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`).
+   `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`).
 
 One addition beyond the spec: since Rust 2024 `std::env::set_var` is `unsafe`, for exactly
 this reason. The doc now says so — the compiler states out loud what option B tried to work
@@ -175,7 +175,7 @@ Fixed. Two follow-ons:
 
 1. **The one real remaining instance**, `src/librarian/indexer.rs`, is unchanged and still
    tracked in
-   `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md` — open by
+   `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md` — open by
    explicit ruling ("commit as-is, bugs track it"), not by oversight. The doc now names it
    as debt so it cannot be mistaken for a sanctioned pattern, which was this entry's actual
    risk.
@@ -188,7 +188,7 @@ not to.
 ## References
 
 - `docs/conventions/test-env-isolation.md` — the doc itself
-- `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md` — the
+- `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md` — the
   `embedder.rs` recurrence and its fix
 - `a656f8cec220d347` — the bug whose remedy the doc contradicts
 - `src/retrieval/embedder.rs` — `api_key`, the in-repo worked example of option A

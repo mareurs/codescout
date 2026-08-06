@@ -109,7 +109,7 @@ What it bought us:
 1751 tests green and clippy clean between every commit. Phase 1b shrank
 `src/tools/symbol/mod.rs` from 6793 → 28 lines by extracting `path_helpers.rs`,
 `symbol_query.rs`, `edit_helpers.rs`, and relocating the test block to `tests.rs`.
-See `docs/plans/2026-04-23-codescout-refactoring-plan-phase-1b.md` for details.
+See `docs/plans/archive/2026-04-23-codescout-refactoring-plan-phase-1b.md` for details.
 
 | # | Commit | Tool | Helpers bumped to `pub(super)` |
 |---|--------|------|--------------------------------|
@@ -450,7 +450,7 @@ Step 1 alone is enough. Step 2 is a Phase 8 candidate if needed.
 
 ### Phase 7b — `src/tools/` file splits (DONE)
 
-**Status:** ✅ DONE (2026-05-02). Tracked in `docs/trackers/tools-mod-refactor-2026-05.md`.
+**Status:** ✅ DONE (2026-05-02). Tracked in `docs/trackers/archive/tools-mod-refactor-2026-05.md`.
 
 Three mechanical splits, done B→C→A:
 - **B** — `file_summary.rs` tests extracted to `file_summary/tests.rs` (directory module pattern)

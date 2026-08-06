@@ -140,7 +140,7 @@ Codified 2026-07-07 (fable-tuning T-11) from what A-1..A-14 actually validated. 
 
 **Re-run (fixed rubric, runs:3, 2026-07-02).** Confirmed the direction: reader-first PASSES the suite; writer-first FAILS only on VERIFY-BEFORE-ACTING (3/3 runs); OBEYS passes both (no injection effect). Two independent methods (manual capture + prompt-tdd harness) now agree. Status: **supported for no-table trackers** (modest N, single judge haiku); the deployment_state null still stands (its render_template table pre-answers). Net move: keep the reader-first Step 2 teaching, ideally scoped to "matters most when there is no render_template table."
 
-**Cross-refs:** brainstorm recon this session (G1–G3 writer-first cluster; G4 30-line `[LIVE]` truncation; G5 — `artifact(get)` augmentation projection omits `entry_collection` / `render_template` / `append_mode` / `history_cap` / `params_schema`, broader than `docs/issues/2026-07-02-artifact-get-omits-entry-collection.md` which records `entry_collection` only). This log entry was created reader-first as a partial exemplar of its own recommended move.
+**Cross-refs:** brainstorm recon this session (G1–G3 writer-first cluster; G4 30-line `[LIVE]` truncation; G5 — `artifact(get)` augmentation projection omits `entry_collection` / `render_template` / `append_mode` / `history_cap` / `params_schema`, broader than `docs/issues/archive/2026-07-02-artifact-get-omits-entry-collection.md` which records `entry_collection` only). This log entry was created reader-first as a partial exemplar of its own recommended move.
 
 ## A-4 — persona-as-authority for codescout: adherence untestable at ceiling; stamp-keyed trust sentence earns nothing; the real failure is blanket-distrust
 

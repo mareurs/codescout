@@ -5,8 +5,8 @@ closed:
 severity: high
 owner: marius
 related:
-  - docs/issues/2026-06-19-mcp-server-oom-68gb.md
-  - docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md
+  - docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md
+  - docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md
 tags:
   - memory
   - oom
@@ -267,7 +267,7 @@ Capture C — pid 955632, spawned 04:52:45 (13 min after Capture B was killed)
    On `experiments`; **not yet on master**.
 3. **DONE — the `watch_memory` doc comment** was rewritten to describe the new
    kill actuation and its env knobs (it is no longer "log-only").
-4. **Blast-radius cap (moved out).** The cgroup `MemoryMax`/`MemorySwapMax=0` blast-radius cap is now tracked in `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md`. The sibling 68 GiB OOM bug was fixed and archived to `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`.
+4. **Blast-radius cap (moved out).** The cgroup `MemoryMax`/`MemorySwapMax=0` blast-radius cap is now tracked in `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md`. The sibling 68 GiB OOM bug was fixed and archived to `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`.
 **Update (2026-06-21).** Fix 1 is **committed** as `3adb66e7` `fix(lsp): cap kotlin-lsp JVM heap with -Xmx2g` on `experiments` (code + the `kotlin_caps_jvm_heap` regression test), and **live-verified**: after `cargo rb` + `/mcp`, the codescout-repo kotlin-lsp JVM (PID 4100626, carrying our `-Xmx2g`) reports `jcmd … VM.flags` → `-XX:MaxHeapSize=2147483648` (exactly 2 GiB). Per the §Root cause correction, this is the *reliable* cap (the distribution's vmoptions `-Xmx2048m` is not dependably applied to our instances). **Still TODO:** Fix 2 (`watch_memory` actuation) remains the real defense for *native* (off-heap) growth, which `-Xmx` does not bound — the capped JVM's RSS is 4.16 GiB = 2 GiB heap + ~2 GiB native.
 ## Tests added
 
@@ -350,13 +350,13 @@ Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified twice more**
 1. **Ship to master** — cherry-pick `3adb66e7` (+ this doc's corrections) to `master`, rebase `experiments`, then flip status to `fixed` / set `closed:`. Given the 2026-07-08 findings, holding `status: fixed` until Fix 2 lands is correct — Fix 1 alone does not resolve the host-OOM risk this bug is titled for. **Gated:** the full `cargo test` on `experiments` currently has one *orthogonal* failure (`replace_symbol_surfaces_stale_error_after_max_retries`, an F-18/F-23-class kotlin-lsp range issue unrelated to this fix — see session-log F-26); resolve or explicitly accept that before the protected-branch cherry-pick.
 2. **Fix 2 — DONE on `experiments` (2026-07-10).** `watch_memory` now kills the LSP process group on a threshold cross (absolute rss+swap ceiling 24 GiB, or host `MemAvailable` < 15 GiB while the process is ≥ 8 GiB), via the shared `kill_process_group` helper. Env-tunable (`CODESCOUT_LSP_KILL_RSS_CEIL_MB`, `CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB`, `CODESCOUT_LSP_MEM_KILL_DISABLE`). Tests: `classify_memory_*` threshold table + `read_mem_available_kb_smoke`; killpg mechanics stay covered by `process_group_reaping_tests`. **Known limitation:** a mem-kill is a *mid-life* kill and does **not** count toward the LSP circuit breaker (`src/lsp/manager.rs` counts only startup failures), so a kill→respawn→grow→kill *slow* loop is possible (period ≈ cold-start + minutes of native growth) — bounded (host survives) but unthrottled. Follow-up: a per-workspace last-mem-kill timestamp in `LspManager` applying backoff before respawn. **Still needs:** cherry-pick to master (gated on the orthogonal F-26 failure per item 1) + live `/mcp` verification.
 3. **Add `-XX:NativeMemoryTracking=summary`** to the mux's `JAVA_TOOL_OPTIONS` so the next occurrence can be diagnosed with an exact native-memory category breakdown (RocksDB vs JNI direct buffers vs JIT code cache) instead of inferring from the heap/RSS gap.
-4. Cross-ref the cgroup blast-radius cap — now tracked in `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md` (the sibling 68 GiB OOM bug is fixed + archived).
+4. Cross-ref the cgroup blast-radius cap — now tracked in `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md` (the sibling 68 GiB OOM bug is fixed + archived).
 5. **Bump kotlin-lsp to `262.8190.0`** (see Upstream status) — picks up upstream #213's workspace-cache fix. Cheap, low-risk, independent of Fix 2/3.
 6. **Investigate content-root scoping** for the codescout-repo kotlin-lsp launch (restrict indexing to `tests/fixtures/kotlin-library` instead of the full monorepo `--cwd`) — per upstream #203 (open, unfixed, no maintainer response), scoping config may not be honored; verify empirically before relying on it as a fix.
 ## References
 - Launch env builder: `src/lsp/servers/mod.rs:85-106`
 - Memory watcher (log-only) + fictional-cap comment: `src/lsp/mux/process.rs:751-786`, comment at `:752`
 - `-Xmx2g` fixture string (not production): `src/lsp/mux/process.rs:837`
-- Sibling OOM (Rust-side): `docs/issues/2026-06-19-mcp-server-oom-68gb.md`
-- Prior kotlin-lsp unbounded-disk bug (fixed): `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`
+- Sibling OOM (Rust-side): `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`
+- Prior kotlin-lsp unbounded-disk bug (fixed): `docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`
 - Investigated from host `ripper`, 2026-06-19 ~17:10–17:35 EEST.

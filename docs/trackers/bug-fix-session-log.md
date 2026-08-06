@@ -384,7 +384,7 @@ turn before any subagent dispatch. Awaiting promotion criterion.
 
 **Severity:** med — data loss within session, fully recovered, but easy to miss without verify-after-edit.
 
-**Status:** fixed-via-bug-tracker (Option A shipped this session); see `docs/issues/2026-05-18-edit-markdown-replace-clobber.md` (status: fixed, closed 2026-05-18).
+**Status:** fixed-via-bug-tracker (Option A shipped this session); see `docs/issues/archive/2026-05-18-edit-markdown-replace-clobber.md` (status: fixed, closed 2026-05-18).
 
 **Fix idea / Pointer:** Option A shipped — destructive-scope warning added to `long_docs()` and per-variant action descriptions in the schema for `EditMarkdown` in `src/tools/markdown/edit_markdown.rs`. Top-level `description()` stays under the 300-char budget (caught by `server::tests::tool_descriptions_stay_under_budget` on first attempt). Option B (force flag + size threshold) deferred until Option A is observed to be insufficient — bug-tracker entry retains the Option B sketch and three regression tests it would need.
 
@@ -446,7 +446,7 @@ HEAD was actively bounced between `experiments` and parallel-session commit SHAs
 ## W-4 — Pre-fix recon caught wontfix bug (BUG-037 was already shipped)
 
 **Observed:** 2026-05-18, about to implement
-`docs/issues/2026-05-18-edit-code-replace-misses-outer-attrs.md`.
+`docs/issues/archive/2026-05-18-edit-code-replace-misses-outer-attrs.md`.
 
 **Pattern:** Before writing code to "fix" a behavior reported as buggy
 by a prior subagent's escape-hatch fallback (e.g. `python3 re.sub`),
@@ -537,7 +537,7 @@ Promote to CLAUDE.md as a permanent rule:
 ## F-7 — `references` undercounts vs `call_graph`; root is live-incomplete-LSP vs persistent edge-cache, NOT position
 
 **Observed:** 2026-05-21, debugging the references-undercount bug
-(`docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`). Live
+(`docs/issues/archive/2026-05-21-references-undercounts-vs-call-graph.md`). Live
 `references(symbol="format_read_file", path="src/tools/read_file.rs")` returned 3;
 `call_graph(direction="callers")` returned 17; `grep` ground-truth = 17 call sites
 in `src/tools/edit_file/tests.rs`.
@@ -824,7 +824,7 @@ matrix is the verification).
 and `call_graph` work as designed. The remediation is **behavioural**: read
 the warning, follow its instruction. Consider promoting this to CLAUDE.md
 under a "Tool warning discipline" section if a third datapoint lands.
-References: F-7 (root mechanism), `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+References: F-7 (root mechanism), `docs/issues/archive/2026-05-21-references-undercounts-vs-call-graph.md`.
 ## W-5 — Test against semantics, not representation: deserialize before asserting on cross-platform output
 
 **Observed:** 2026-05-24, during Windows CI rehab session — round-2 commit (98907430) shipped 14/16 fixes cleanly but two of them broke on the actual Windows runner despite passing locally on Linux.
@@ -1099,7 +1099,7 @@ bug class."
 ---
 ## F-15 — Bug-file `project=`→`project_id=` fix plan misses a build-breaking 3rd test assertion + cites a non-existent fixture
 
-**Observed:** 2026-06-09, scouting the only open bug (`docs/issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`) before editing `src/prompts/builders.rs`.
+**Observed:** 2026-06-09, scouting the only open bug (`docs/issues/archive/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`) before editing `src/prompts/builders.rs`.
 
 **When:** Pre-edit recon of the `project=` → `project_id=` fix across `build_per_project_prompt` / `build_synthesis_prompt` and their tests.
 
@@ -1119,7 +1119,7 @@ bug class."
 
 **Status:** fixed-verified — shipped 2026-06-09 (experiments `890da4d6`); the 3rd assertion at `tests.rs:257` and all blast-radius hits corrected, no version bump. Reconciled.
 
-**Fix idea / Pointer:** `docs/issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`; this session.
+**Fix idea / Pointer:** `docs/issues/archive/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`; this session.
 
 ---
 
@@ -1172,13 +1172,13 @@ bug class."
 
 **Probable cause:** The prior session inferred causation from transcript adjacency — an `edit_code` call was *interrupted by the user*, then narrated as "crashes the LSP" — without checking per-call `outcome` in usage.db. Correlation-in-transcript ≠ causation.
 
-**Workaround:** `kill 2699281 2699279` freed the lock; a fresh `intellij-server` (PID 3029079) started and `fuser`-confirmed it holds the lock — Kotlin LSP recovered. Codescout-side defects filed in `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`.
+**Workaround:** `kill 2699281 2699279` freed the lock; a fresh `intellij-server` (PID 3029079) started and `fuser`-confirmed it holds the lock — Kotlin LSP recovered. Codescout-side defects filed in `docs/issues/archive/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`.
 
 **Severity:** high — accepting the claim would have sent the session hunting/patching `edit_code` + the AST extractor (neither broken) and normalized the `create_file` workaround, while the actual fix (kill the lock holder) was never attempted, leaving the user's Kotlin LSP dead indefinitely. Wrong-target-fix risk.
 
 **Status:** fixed-verified — misdiagnosis corrected, root cause confirmed via `fuser`/process state, environment recovered + verified live, bug filed.
 
-**Fix idea / Pointer:** `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:456` (flock-only liveness), `:485` (stderr→null), `:318` (direct-LSP fallback collision).
+**Fix idea / Pointer:** `docs/issues/archive/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:456` (flock-only liveness), `:485` (stderr→null), `:318` (direct-LSP fallback collision).
 
 ## W-12 — Re-derive an inherited "tool X breaks Y" claim from usage.db outcomes before acting on it
 
@@ -1213,7 +1213,7 @@ bug class."
 
 **Severity:** med — three core LSP-nav tools silently fail under the documented per-request `workspace=` pin (the safe-concurrency mechanism). Workaround: absolute path.
 
-**Status:** promoted-to-bug-tracker — `docs/issues/2026-06-11-lsp-tools-ignore-workspace-pin-path.md` (open; 4-site swap + 3 per-tool regression tests planned).
+**Status:** promoted-to-bug-tracker — `docs/issues/archive/2026-06-11-lsp-tools-ignore-workspace-pin-path.md` (open; 4-site swap + 3 per-tool regression tests planned).
 
 **Fix idea / Pointer:** swap to `resolve_read_path_for` at the 4 sites; mirror `read_file_honors_workspace_override_pin`.
 
@@ -1365,7 +1365,7 @@ bug class."
 
 ## F-22 — Bug-file's "offset/limit never parsed" claim missed `OutputGuard::from_input`; telemetry then resolved the fix to dispatch-layer option (a)
 
-**Observed:** 2026-06-14, pre-fix reconnaissance for `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`. Scouting the seam before implementing the documented fix.
+**Observed:** 2026-06-14, pre-fix reconnaissance for `docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`. Scouting the seam before implementing the documented fix.
 
 **When:** Verifying the bug file's Defect 1 / E-1 evidence ("`offset` and `limit` are not schema parameters and are never parsed") in order to choose between Fix A option (a) (schema + line-semantics mapping) and option (b) (path-local `RecoverableError`).
 
@@ -1383,7 +1383,7 @@ bug class."
 
 **Resolution (telemetry, 2026-06-14):** usage.db across the 4 projects showed **191** offset/limit calls, **100% native-Read line-nav intent** (30 buffer silent-`success` + 161 real-file). This *inverted* the tentative option-(b) lean above: making offset/limit WORK as line aliases serves all 191; rejecting serves only 30 and leaves the 161 real-file cases. Implemented as dispatch-layer normalization in `ReadFile::call` (`normalize_line_nav_aliases` before the buffer fork) — covers both paths and structurally avoids the OutputGuard collision (range params route to `read_with_line_range`, never `read_full_file`'s guard). `cargo fmt`/`clippy`/`test` green (2733 lib tests); bug file updated; prompt surfaces reviewed (no change, no ONBOARDING_VERSION bump). Side-finding: `pika_observations` had 0 entries for this 30-occurrence bug because it keys on errors not silent-`success` — follow-up task filed.
 
-**Fix idea / Pointer:** `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; recon R-31.
+**Fix idea / Pointer:** `docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; recon R-31.
 
 ---
 ## W-16 — Recon caught title-derived triage imprecisions before they became a fix-priority recommendation
@@ -1446,7 +1446,7 @@ re-do backtick normalization (already shipped 2026-05-29), never touching the li
 **Status:** fixed-verified — root cause fixed in `find_ast_end_line_in`
 (`name_path`-first, no line gate); regression test
 `find_ast_end_line_in_bridges_annotation_line_gap`; full bug file at
-`docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md`.
+`docs/issues/archive/2026-06-16-kotlin-edit-code-annotation-line-gap.md`.
 
 **Fix idea / Pointer:** `src/symbol/query.rs` `find_ast_end_line_in` / `collect_by_name`,
 this session. Follow-up candidate: differentiate the three `None` causes in the
@@ -1679,7 +1679,7 @@ live-LSP class I initially misattributed to).
 `tests/symbol_lsp.rs:824` the test. This session.
 ## W-18 — Pre-implementation recon confirmed a parser-grammar fix plan is safe + named the regression tests a naive fix would break
 
-**Observed:** 2026-07-01, right after filing `docs/issues/2026-07-01-read-file-jsonpath-dotted-object-keys-unreachable.md` (read_file json_path can't reach dotted object keys), before touching its Fix plan. Seam: `parse_json_path_segments` / `parse_bracket` in `src/tools/file_summary/file_summary.rs`.
+**Observed:** 2026-07-01, right after filing `docs/issues/archive/2026-07-01-read-file-jsonpath-dotted-object-keys-unreachable.md` (read_file json_path can't reach dotted object keys), before touching its Fix plan. Seam: `parse_json_path_segments` / `parse_bracket` in `src/tools/file_summary/file_summary.rs`.
 
 **Pattern:** Before implementing a filed bug's Fix plan that changes a *parser's accepted grammar*, scout three things beyond the target function body: (a) callers via `references`, (b) the data model it feeds (`Segment` enum + the `resolve_json_segment` apply arm), and (c) every existing test that pins the *current* rejection behavior. Enumerate the old-grammar tests first so the fix is written to keep each green.
 
@@ -1700,7 +1700,7 @@ live-LSP class I initially misattributed to).
 ---
 ## W-19 — Pre-fix recon on context() starvation bug found a locked-in "always include first" test — scoped the fix to anchor mode only
 
-**Observed:** 2026-07-05, resuming `docs/issues/2026-07-05-context-anchor-starves-neighbors.md` (residual #2 from the tracker cross-linking arc). Seam: the packing loop in `src/librarian/tools/context.rs::call` (the section after `candidate_ids`/`sorted_ids` construction).
+**Observed:** 2026-07-05, resuming `docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md` (residual #2 from the tracker cross-linking arc). Seam: the packing loop in `src/librarian/tools/context.rs::call` (the section after `candidate_ids`/`sorted_ids` construction).
 
 **Pattern:** Before fixing a "budget exhausted by the first item" bug in a shared packing/inclusion loop, grep the loop's own test module for existing tests whose *assertion* depends on the current behavior — not just tests that exercise the same function. A loop shared by multiple call modes (anchor / topic / goal-tracker) may have a test encoding the "buggy-looking" behavior as intentional for a *different* mode.
 
@@ -1753,7 +1753,7 @@ live-LSP class I initially misattributed to).
 
 **Probable cause:** Unknown — the pasted summary is a self-report from a prior session/context that either ran against a different checkout, was interrupted before the file-creation call landed, or narrated the action without actually executing it.
 
-**Workaround:** Independently re-derived root cause from the actual failing test (`src/tools/symbol/tests.rs:5008`) and the real source (`src/tools/symbol/list_overview.rs:268,295,310`) — matched the prior summary's diagnosis — then created `docs/issues/2026-07-07-windows-glob-overview-path-separator-test-mismatch.md` for real, status `fixed`. Did NOT fabricate the second (memory-tool) bug file — flagged it back to the user since there is no first-hand evidence to write from.
+**Workaround:** Independently re-derived root cause from the actual failing test (`src/tools/symbol/tests.rs:5008`) and the real source (`src/tools/symbol/list_overview.rs:268,295,310`) — matched the prior summary's diagnosis — then created `docs/issues/archive/2026-07-07-windows-glob-overview-path-separator-test-mismatch.md` for real, status `fixed`. Did NOT fabricate the second (memory-tool) bug file — flagged it back to the user since there is no first-hand evidence to write from.
 
 **Severity:** med — no wasted implementation effort (the claimed root cause was independently re-verified against source before being trusted), but taking "already logged" at face value would have left both bugs permanently untracked while everyone believed they were tracked.
 
@@ -1764,13 +1764,13 @@ live-LSP class I initially misattributed to).
 ---
 ## F-28 — Inherited "stray lsp: field" claim in mv.rs was stale; ToolContext.lsp is now a legitimate field
 
-**Observed:** 2026-07-07, applying an externally-supplied debugging finding for the doctor.rs `check_ads_colon` verbatim-prefix bug (see `docs/issues/2026-07-07-doctor-ads-colon-verbatim-prefix-false-positive.md`).
+**Observed:** 2026-07-07, applying an externally-supplied debugging finding for the doctor.rs `check_ads_colon` verbatim-prefix bug (see `docs/issues/archive/2026-07-07-doctor-ads-colon-verbatim-prefix-false-positive.md`).
 
 **When:** Before touching `src/librarian/tools/mv.rs`, scouting the finding's "bonus find" claim that a stray `lsp:` field in `mv.rs`'s test `mk_ctx` referenced a field "that never existed on ToolContext" and had been removed.
 
 **Expected:** Per the inherited report, `ToolContext` (`src/librarian/tools/mod.rs`) has no `lsp` field; the `lsp: crate::lsp::MockLspProvider::with_client(...)` line in `mv.rs`'s `mk_ctx` test helper is a leftover from an abandoned "thread lsp into librarian" attempt and a compile error.
 
-**Got:** `ToolContext` at `src/librarian/tools/mod.rs:97-100` now has a legitimate `pub lsp: Arc<dyn crate::lsp::LspProvider>` field, deliberately threaded in at construction and documented with a comment citing `docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md`. `mv.rs:136`'s `lsp: ...` assignment is a correct, compiling use of that field, not a stray leftover — confirmed via `symbols(include_body=true)` and a full `cargo test --lib` (2954 passed, 0 failed).
+**Got:** `ToolContext` at `src/librarian/tools/mod.rs:97-100` now has a legitimate `pub lsp: Arc<dyn crate::lsp::LspProvider>` field, deliberately threaded in at construction and documented with a comment citing `docs/issues/archive/2026-07-05-audit-doc-refs-lsp-stubbed-off.md`. `mv.rs:136`'s `lsp: ...` assignment is a correct, compiling use of that field, not a stray leftover — confirmed via `symbols(include_body=true)` and a full `cargo test --lib` (2954 passed, 0 failed).
 
 **Probable cause:** The report describes an earlier state of the codebase, before `lsp` was legitimately added to librarian's `ToolContext` as part of the audit_doc_refs LSP-stubbed-off fix — same shape of drift as F-2/F-15/F-24 (inherited reports going stale as sibling work lands on the same branch).
 
@@ -1790,13 +1790,13 @@ live-LSP class I initially misattributed to).
 
 **Pattern:** Before allocating a new tracker ID, `grep(pattern="^## (F|W)-\\d+ —", path="docs/trackers/<file>.md")` against the raw file rather than trusting `artifact(get)`'s `preview.headings` or `get(full=true)`'s `body` field.
 
-**Counterfactual:** `artifact(get, id="2dd9d90bc83f9f49", full=false)`'s `preview.headings` listed F-1..F-7 as the last entries (despite `preview.line_count: 1739` being correct), and `artifact(get, full=true)`'s `body` field silently truncated at 499 lines / ~46794 bytes — with no truncation flag in either response — landing mid-way through F-6/F-7, well short of the tracker's real F-27/W-20. Trusting either would have allocated new entries as "F-8"/"W-5", directly colliding with the 20 entries (F-8..F-27, W-5..W-20) already in the file. `librarian(action="reindex", scope="project")` (reported `updated: 10`) did not move the truncation point on a re-fetch, ruling out catalog staleness — filed as `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md`.
+**Counterfactual:** `artifact(get, id="2dd9d90bc83f9f49", full=false)`'s `preview.headings` listed F-1..F-7 as the last entries (despite `preview.line_count: 1739` being correct), and `artifact(get, full=true)`'s `body` field silently truncated at 499 lines / ~46794 bytes — with no truncation flag in either response — landing mid-way through F-6/F-7, well short of the tracker's real F-27/W-20. Trusting either would have allocated new entries as "F-8"/"W-5", directly colliding with the 20 entries (F-8..F-27, W-5..W-20) already in the file. `librarian(action="reindex", scope="project")` (reported `updated: 10`) did not move the truncation point on a re-fetch, ruling out catalog staleness — filed as `docs/issues/archive/2026-07-07-artifact-get-full-body-silent-truncation.md`.
 
 **Confirming data points:** 1) This session — the reconnaissance-skill invocation prompted a raw-file grep before append, which caught the true F-27/W-20 ceiling before any write landed. 2) No second datapoint yet — first observation of this failure mode.
 
 **Impact:** high — an ID collision in a session-log tracker corrupts the Index/body correspondence that makes every prior F-N/W-N citation resolvable; the failure is silent (no error, just a plausible-looking duplicate ID) and would surface only when a future reader noticed two different bodies claiming the same ID.
 
-**Promote-when:** A second large tracker (>500 lines / >~47KB body) exhibits the same `get`/preview truncation without a flag — at that point, escalate `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md`'s priority and promote this grep-first practice into `get_guide("tracker-conventions")`.
+**Promote-when:** A second large tracker (>500 lines / >~47KB body) exhibits the same `get`/preview truncation without a flag — at that point, escalate `docs/issues/archive/2026-07-07-artifact-get-full-body-silent-truncation.md`'s priority and promote this grep-first practice into `get_guide("tracker-conventions")`.
 
 **Update 2026-07-10 (half fixed — practice still holds):** The counterfactual had two independent failures; one is now fixed. (1) `artifact(get, full=true)`'s *silent body truncation* is closed — the buffered response now surfaces a loud `"artifact body TRUNCATED — N of M lines are in $.body …"` summary (commit `97a36905`, `LibrarianAdapter::format_compact`); bug files `2026-07-07-artifact-get-full-body-silent-truncation.md` and `2026-07-09-artifact-get-full-true-body-silent-truncation.md` are both marked `fixed`. (2) `preview.headings` stopping early (F-7 here) while `preview.line_count` stays correct is **NOT** fixed and still reproduces (verified 2026-07-10 — every `get` on this tracker returned headings ending at F-7 with `line_count: 1841`). So grep-first remains the safe ID-allocation practice, now motivated by (2) alone. The Promote-when's body-path half can no longer recur; the `preview.headings` half stands as a separate, still-open defect.
 
@@ -1820,9 +1820,9 @@ live-LSP class I initially misattributed to).
 
 **Severity:** high — blocked the release build entirely; would have blocked ANY session rebuilding on `experiments` at that commit, not just this one.
 
-**Status:** fixed-verified — `cargo rb` compiles clean at commit `0a1d8736` (server.rs fix) + part of `3149384b` (mv.rs fix); logged as `docs/issues/2026-07-07-upstream-try-build-runtime-stray-arg-compile-break.md`.
+**Status:** fixed-verified — `cargo rb` compiles clean at commit `0a1d8736` (server.rs fix) + part of `3149384b` (mv.rs fix); logged as `docs/issues/archive/2026-07-07-upstream-try-build-runtime-stray-arg-compile-break.md`.
 
-**Fix idea / Pointer:** `docs/issues/2026-07-07-upstream-try-build-runtime-stray-arg-compile-break.md`; before assuming a rebuild failure is local/environmental, `git log -p -S "<literal call text>"` on the specific broken call site to check whether the break shipped upstream.
+**Fix idea / Pointer:** `docs/issues/archive/2026-07-07-upstream-try-build-runtime-stray-arg-compile-break.md`; before assuming a rebuild failure is local/environmental, `git log -p -S "<literal call text>"` on the specific broken call site to check whether the break shipped upstream.
 
 ---
 
@@ -1841,7 +1841,7 @@ live-LSP class I initially misattributed to).
 > memory has no ### sections to filter" because the `sections` filter matches `###`
 > only and 15 of 21 memories use `##` (87 headings). So the rediscovery cost this
 > entry describes is *reduced* — a full read now works — but not eliminated. Filed
-> as `docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md`.
+> as `docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md`.
 >
 > Not covered: the original report followed `workspace(activate)` on a FOREIGN
 > project. This pass ran on the home project, so the foreign-activate path the title
@@ -2042,7 +2042,7 @@ test comment. Generalisable rule in W-25.
 ## W-25 — Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place
 
 **Observed:** 2026-07-28, fixing the two-module lock-file leak
-(`docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md`).
+(`docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md`).
 
 **Pattern:** When a fix changes *where* a file lives rather than *what* is in it,
 the blast radius is not the set of callers of the path helper — it is the set of
@@ -2090,7 +2090,7 @@ Awaiting the third relocation case.
 ## F-34 — My own bug file prescribed a fix that a pre-existing test would have broken
 
 **Observed:** 2026-07-28, implementing
-`docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md` — a bug I had
+`docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md` — a bug I had
 filed myself earlier the same session.
 
 **When:** About to write the fix. The bug file's own Fix section listed, as option 1
@@ -2167,7 +2167,7 @@ either the code or the test.
    you believe you wrote, detected only by reading the result back.
 2. This session — `edit_code`'s `reindent_to` shifted a multi-line string literal's
    interior; filed as
-   `docs/issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`.
+   `docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md`.
 
 **Impact:** med — saves one plausible-but-wrong loosening of a parser predicate plus
 the cascade of "fixing" the older test that would then fail.

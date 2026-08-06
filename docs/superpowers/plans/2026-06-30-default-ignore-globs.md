@@ -318,10 +318,10 @@ git commit -m "feat(embed): check_index_scope honours ignore_patterns (lockstep 
 ### Task 5: Incidental doc fixes + full gate
 
 **Files:**
-- Modify: `docs/issues/2026-06-19-mcp-server-oom-68gb.md` (mitigation note)
+- Modify: `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md` (mitigation note)
 - Modify: `docs/trackers/index-scope-default-ignores.md` (mark the wiring done; note librarian bare-name inconsistency remains)
 
-- [ ] **Step 1: Correct the OOM issue mitigation note.** In `docs/issues/2026-06-19-mcp-server-oom-68gb.md`, the "per-project mitigation" / "immediate user-side mitigation" referencing `[ignored_paths]` must note it was ineffective for the **code** index until this change; now it works. Use `edit_markdown` (action="edit").
+- [ ] **Step 1: Correct the OOM issue mitigation note.** In `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`, the "per-project mitigation" / "immediate user-side mitigation" referencing `[ignored_paths]` must note it was ineffective for the **code** index until this change; now it works. Use `edit_markdown` (action="edit").
 
 - [ ] **Step 2: Update the tracker.** In `docs/trackers/index-scope-default-ignores.md`, mark "wire existing config into the code index" as DONE (link this plan), keep "expand defaults" + "librarian shares the list but keeps a plain-globset matcher (bare names don't match nested there)" as open follow-ups.
 
@@ -333,7 +333,7 @@ Expected: clean; all tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/issues/2026-06-19-mcp-server-oom-68gb.md docs/trackers/index-scope-default-ignores.md
+git add docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md docs/trackers/index-scope-default-ignores.md
 git commit -m "docs: ignored_paths now honoured by the code index (OOM follow-up)" \
   -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```

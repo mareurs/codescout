@@ -298,6 +298,9 @@ Re-hash the path anchors for a topic to clear a staleness warning without rewrit
 
 ### Storage layout
 
+<!-- audit-doc-refs:ignore — illustrates the on-disk layout memory() writes at
+     runtime. The example topic file exists only once a reader has written it. -->
+
 Memories are stored as plain Markdown files in `.codescout/memories/` inside the project root. Each topic maps directly to a file path:
 
 - `"architecture"` → `.codescout/memories/architecture.md`

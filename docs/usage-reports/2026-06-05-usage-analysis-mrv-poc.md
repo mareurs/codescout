@@ -44,7 +44,7 @@ and repair edits were spent, but no error counter moved.
 `assert`, orphaning that assert at the bottom of the new method's body.
 
 ### Root cause — RESOLVED (distinct from the archived bug)
-**Filed + fixed this session:** `docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md`.
+**Filed + fixed this session:** `docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md`.
 
 The initial guess (Python AST end-line walk under-extends) was **wrong** — probes proved the
 extractor is robust (correct `end_line` for clean files, f-strings, and files with syntax errors in
@@ -155,7 +155,7 @@ instead of running bare + querying the buffer), not a tooling defect.
 
 ## Next steps (recommended)
 
-1. ✅ **DONE — bug filed + fixed:** `docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md`.
+1. ✅ **DONE — bug filed + fixed:** `docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md`.
    Fix in `src/tools/symbol/edit_code.rs` (`parent.end_line + 1`) across **all three** actions —
    `do_insert`, `do_remove`, `do_replace`; regression tests `insert_/replace_/remove_last_python_method_*`.
    Release binary rebuilt (effective on next `/mcp` restart). **Ship:** cherry-pick `edit_code.rs` +

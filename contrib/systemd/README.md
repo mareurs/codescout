@@ -3,7 +3,7 @@
 Sample, **opt-in** deployment hardening. Nothing here is installed or activated by
 codescout — copy it in yourself if you want it.
 
-Tracks `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md`.
+Tracks `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md`.
 
 ## What problem this solves
 

@@ -3,13 +3,13 @@ status: open
 opened: 2026-06-30
 owner: marius
 tags: ["indexing", "config", "memory", "ux"]
-related: ["docs/issues/2026-06-19-mcp-server-oom-68gb.md", "docs/issues/2026-04-18-memory-leak-x-session-freeze.md"]
+related: ["docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md", "docs/issues/archive/2026-04-18-memory-leak-x-session-freeze.md"]
 ---
 
 # Tracker: indexing scope — default-ignore globs (deferred)
 
 ## Why this exists
-Deferred follow-up from the 68 GB OOM (`docs/issues/2026-06-19-mcp-server-oom-68gb.md`). The
+Deferred follow-up from the 68 GB OOM (`docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`). The
 streaming `sync_project` fix makes indexing OOM-safe (O(batch) peak) and the background preflight
 gate skips oversized roots — but at the time neither *excluded* dependency/artifact trees by default
 (now wired — see **Status**). A large
@@ -22,7 +22,7 @@ fix (that ships under the OOM issue).
 **Wiring is done** (see **Status**). The remaining decision is whether to **expand** the default set
 beyond the current bare dir names. Touch points that must stay in lockstep (the guard estimate and
 the actual walk previously diverged, now unified via `build_ignore_matcher` — see
-`docs/issues/2026-06-02-preflight-sync-walker-divergence.md`):
+`docs/issues/archive/2026-06-02-preflight-sync-walker-divergence.md`):
 - `RetrievalClient::sync_project` (`src/retrieval/sync.rs`) — the actual walk.
 - `check_index_scope` (`src/embed/preflight.rs`) — the preflight size estimate.
 - `lang_for_ext` (`src/embed/mod.rs`) — the extension allowlist (single source of truth).
@@ -48,7 +48,7 @@ Open questions:
 `sync_project` and `check_index_scope` now honour `[ignored_paths]` via a shared
 `build_ignore_matcher` (gitignore semantics; defaults exclude `.venv`/`node_modules`/`target`/etc.).
 
-**Default set EXPANDED (2026-07-13, under `docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md` item 3).**
+**Default set EXPANDED (2026-07-13, under `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md` item 3).**
 `default_ignored_patterns()` went from 10 → 25 entries. Added: `venv`, `site-packages`,
 `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`, `.next`, `.nuxt`, `.svelte-kit`,
 `.turbo`, `.parcel-cache`, `.gradle`, `.terraform`, `.dart_tool`, `.stack-work`, `.direnv`, `.idea`.

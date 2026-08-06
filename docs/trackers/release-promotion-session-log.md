@@ -372,14 +372,14 @@ Ranked by what to do first.
    (three behaviour-gated tests). Expected to clear: `Clippy`, `Tool Docs Sync`, and the
    four non-Windows `no-features` / `local-embed` cells. Expected to stay red: the three
    Windows cells, `Audit Doc Refs`, and possibly `windows-gnu`.
-2. **`docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`**
+2. **`docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`**
    (open, high; WIN-28). Nine tests fail on `windows-latest`, all in code this cohort
    added — 7 catalog `rehome`/`prune_missing`, the `like_escape` idiom guard, the index
    lock. Linux and macOS pass the same config, so path semantics not logic. **Blocked on
    a Windows runner**: the per-test panic output was never captured, and guessing at path
    normalisation risks fixing the tests rather than the code. Its Resume names
    `validate_rehome_gates` as the narrowest starting point.
-3. **`docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`**
+3. **`docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`**
    (open, high). The `audit-doc-refs` job is a hard gate (`--fail-on high`, no
    `continue-on-error`) and all 18 high-severity findings are **extractor false
    positives**: `Type/method` (codescout's own `name_path` syntax, 8 of 18), GitHub
@@ -389,12 +389,12 @@ Ranked by what to do first.
    so in the workflow comment, which currently claims all hi-sev findings are reconciled.
    Cross-references the earlier `2026-07-28-audit-doc-refs-json-pointer-false-positive.md`,
    which has priority.
-4. **`docs/issues/2026-08-06-windows-gnu-cross-job-red-undiagnosed.md`** (open, medium;
+4. **`docs/issues/archive/2026-08-06-windows-gnu-cross-job-red-undiagnosed.md`** (open, medium;
    WIN-29). Undiagnosed by choice. Leading hypothesis after a ledger query: WIN-28's nine
    failures are not in `scripts/build-windows.sh`'s wine skip-list, so this is likely
    item 2 wearing a second hat — confirm before fixing twice, and `graft` it into WIN-28's
    file if so.
-5. **`docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`** (open,
+5. **`docs/issues/archive/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`** (open,
    medium). Pre-existing, not a regression, does not block the merge. The inner-node
    recursion re-derives gaps against the whole file with `prev_end` reset to 0, emitting a
    chunk that duplicates every line before the container. Fix plan is in the file; it
@@ -485,7 +485,7 @@ Ranked by what to do first.
 
 **Fix idea / Pointer:** Candidate for a U-N entry in `docs/trackers/codescout-usage-frictions.md` if this recurs on a second file/session — any doc describing `codescout-companion` internals will likely trip the same false positive. Promote once a second datapoint lands.
 
-**Promote-when criterion FIRED 2026-08-06 (second datapoint).** Same tool, same class: the extractor classifies non-local tokens as local file paths and the severity policy bands them `high` regardless of classification confidence. New tokens observed: `Type/method` (codescout's own `name_path` symbol syntax), GitHub `org/repo` slugs, and ellipsis-elided external paths (`…/rocks/v492/LOCK`). All 18 high-severity findings on `experiments` are false positives of this class, and the `audit-doc-refs` CI job is **red** on them with no `continue-on-error`. Promoted past a U-N entry straight to the bug ledger, which is the better destination: `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` (which itself cross-references the earlier `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`). Status moved to `promoted-to-bug-tracker`.
+**Promote-when criterion FIRED 2026-08-06 (second datapoint).** Same tool, same class: the extractor classifies non-local tokens as local file paths and the severity policy bands them `high` regardless of classification confidence. New tokens observed: `Type/method` (codescout's own `name_path` symbol syntax), GitHub `org/repo` slugs, and ellipsis-elided external paths (`…/rocks/v492/LOCK`). All 18 high-severity findings on `experiments` are false positives of this class, and the `audit-doc-refs` CI job is **red** on them with no `continue-on-error`. Promoted past a U-N entry straight to the bug ledger, which is the better destination: `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` (which itself cross-references the earlier `docs/issues/archive/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`). Status moved to `promoted-to-bug-tracker`.
 
 ---
 
@@ -502,7 +502,7 @@ Ranked by what to do first.
 1. *"Any of these should be validated against the retrieval benchmark (`docs/research/2026-05-06-retrieval-stack-benchmark.md`) before landing — smaller chunks were chosen deliberately for precision, so a floor trades recall sharpness for cost and **must be measured, not assumed**."* No benchmark was run.
 2. An explicit sequencing decision in its Resume: *"the throughput work lands first because it leaves vectors byte-identical and needs no score re-validation, whereas this change does."* That ordering was jumped.
 
-Second consequence, same root cause: I filed `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` as new when `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md` already held the same extractor + severity-policy root cause.
+Second consequence, same root cause: I filed `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` as new when `docs/issues/archive/2026-07-28-audit-doc-refs-json-pointer-false-positive.md` already held the same extractor + severity-policy root cause.
 
 **Probable cause:** the `project-activation-bootstrap` guide was **auto-injected into the first tool response of the session** and states, verbatim: *"Bug or regression work: `artifact(action=\"find\", kind=\"bug\", status=\"open\")` — the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery KNOWN and cite the ledger path."* The guidance was present, positioned at Phase 0, and still missed. The reason is the trigger shape: the rule fires on **task category** ("bug or regression work"), and I had classified the session as *documentation + merge prep*. A category-triggered rule cannot fire for someone who has categorised their task differently — and "am I doing bug work?" is exactly the question a merge-prep framing answers "no" to, right up until it edits a file that has an open bug against it.
 
@@ -548,7 +548,7 @@ The two most consequential defects were invisible to the local three by construc
 
 The existing guidance covers the *external* case: this skill's Phase 1 says *"For tools / external APIs: read the actual response shape, not docs"*, and `get_guide("project-activation-bootstrap")` Phase 2 says *"A claim about how a TOOL behaves needs the call run once and the real output read."* Both are framed around tools and APIs. The extension this datapoint supports: the rule matters **more**, not less, for an internal pure function, because the source being right there makes deriving the answer feel authoritative.
 
-**Counterfactual:** I had already reasoned from `nodes_to_chunks` that the coalesce run was padded by the container's **trailing `}`** gap chunk. The dump showed the run was padded by a **leading** gap spanning lines 1-8 — a full duplicate of every line before the container, emitted because the recursion re-derives gaps against the whole file with `prev_end` reset to 0. I had not predicted that shape. Reasoning alone would have produced a plausible fix for the metadata loss and **missed the duplication entirely**; it is now its own bug file, `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`. The dump also handed me the exact `metadata` strings (`src/mystore.rs :: impl MyStore ::     pub fn build(&self)`, note the preserved leading whitespace) that 7 new tests assert on, instead of guessed ones.
+**Counterfactual:** I had already reasoned from `nodes_to_chunks` that the coalesce run was padded by the container's **trailing `}`** gap chunk. The dump showed the run was padded by a **leading** gap spanning lines 1-8 — a full duplicate of every line before the container, emitted because the recursion re-derives gaps against the whole file with `prev_end` reset to 0. I had not predicted that shape. Reasoning alone would have produced a plausible fix for the metadata loss and **missed the duplication entirely**; it is now its own bug file, `docs/issues/archive/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`. The dump also handed me the exact `metadata` strings (`src/mystore.rs :: impl MyStore ::     pub fn build(&self)`, note the preserved leading whitespace) that 7 new tests assert on, instead of guessed ones.
 
 **Confirming data points:**
 1. This session — 2 tool calls (insert dump test, run with `--nocapture`) surfaced one regression mechanism, one unrelated pre-existing bug, and the exact assertion strings for 7 tests.

@@ -1,6 +1,8 @@
 # Roadmap
 
-See the detailed implementation plan: [`plans/2026-02-25-v1-implementation-plan.md`](plans/2026-02-25-v1-implementation-plan.md)
+The v1 implementation plan this used to link to no longer exists under that name
+anywhere in history — v1 shipped and the plan was deleted rather than archived. The
+surviving design records live under `docs/superpowers/plans/`.
 
 ## Quick Status
 
@@ -45,6 +47,10 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 - **LSP idle TTL eviction** — per-language configurable timeouts (Kotlin 2h, others 30min), transparent shutdown and restart
 
 ## What's Next
+
+<!-- audit-doc-refs:ignore — a roadmap names modules, files and tests that do not
+     exist yet; that is what makes it a roadmap. Anything here that has since shipped
+     should be moved out of this section rather than silenced. -->
 
 **Guidance / prompt-surface work stream (2026-07-03, eval-backed).** Findings synthesis:
 [`docs/research/2026-07-03-mcp-guidance-findings.md`](research/2026-07-03-mcp-guidance-findings.md);
@@ -103,7 +109,7 @@ cargo test --features local-embed --no-default-features
 A `cargo xtask gate` (or a `[alias]` entry in `.cargo/config.toml`) plus a one-line
 CLAUDE.md change pointing at it. The two non-default `cargo test` runs are the whole
 value — they are what the host-OS default build cannot see. Note this does NOT cover
-the Windows-only failures (`docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`),
+the Windows-only failures (`docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`),
 which need a real Windows runner. Full gate definition and the ancestry check now live
 in [`docs/RELEASE.md`](RELEASE.md) § *Large-Cohort Promotion*; friction write-up is F-3
 in `docs/trackers/release-promotion-session-log.md`.
@@ -121,7 +127,7 @@ considered. Fix reserves half of `char_cap` for neighbors and truncates the anch
 section when it exceeds that reserve, scoped to anchor-mode only (topic-search behavior
 untouched). New test `anchor_neighbors_are_not_starved_by_oversized_anchor`; full gate
 green (3033 tests, clippy clean). Bug file closed:
-`docs/issues/2026-07-05-context-anchor-starves-neighbors.md`.
+`docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md`.
 **Residual (2) DONE (2026-07-05, experiments-only):** dangling/ambiguous triage pass —
 while triaging, found and fixed a second real bug:
 `src/librarian/tools/link_scan/extract.rs` enabled pulldown_cmark's
@@ -132,7 +138,7 @@ and never registered as a link-scan `Definition`. Fixed by skipping frontmatter 
 explicit byte-offset guard (reusing `frontmatter::parse`'s delimiter logic) instead of
 pulldown_cmark's own heuristic. New test
 `bare_dash_separator_between_entries_is_not_mistaken_for_yaml_metadata`; bug file
-`docs/issues/2026-07-05-link-scan-yaml-metadata-block-swallows-headings.md` (fixed). Live
+`docs/issues/archive/2026-07-05-link-scan-yaml-metadata-block-swallows-headings.md` (fixed). Live
 re-scan post-fix: dangling 366→332, ambiguous 232→213, +16 previously-invisible edges added,
 8 stale edges pruned, idempotent fixpoint reconfirmed (438 edges). Triage of what remains:
 **ambiguous** (213) is overwhelmingly the expected, pre-validated consequence of F-N/W-N
@@ -172,7 +178,9 @@ Implemented features have been moved to [`FEATURES.md`](FEATURES.md).
 Leverage the MCP elicitation spec (Claude Code 2.1.76, March 2026) for interactive user input:
 stdin prompts and PostCompact hook integration.
 
-> Reference: [`docs/TODO-mcp-elicitation.md`](../TODO-mcp-elicitation.md)
+> Reference: the docs/TODO-mcp-elicitation.md note this pointed at was deleted, not
+> moved; nothing in history carries that name today. (Left un-code-spanned on purpose —
+> naming a nonexistent path inside backticks is itself a finding.)
 
 **Implemented:**
 
@@ -264,6 +272,9 @@ Background filesystem watcher for near-realtime index updates. **Depends on** In
 
 ### Glossary & Documentation Management (Hash-Based Change Tracking)
 
+<!-- audit-doc-refs:ignore — unbuilt feature: the module and store paths it names
+     are the proposed layout, not the current one. -->
+
 Maintain project glossaries and documentation that stay in sync with the codebase via content-hash change detection.
 
 **Motivation:** LLM-generated documentation (onboarding summaries, architecture glossaries, API docs) goes stale the moment the underlying code changes. Manual upkeep is unsustainable. By tracking file content hashes, codescout can detect *which* documented files changed, compute targeted diffs, and trigger glossary/documentation updates — keeping project knowledge accurate without full re-indexing.
@@ -314,6 +325,9 @@ CREATE TABLE doc_sources (
 ---
 
 ### Bidirectional Code ↔ Tracker Linking
+
+<!-- audit-doc-refs:ignore — unbuilt feature; src/foo.rs here is the stand-in file an
+     agent would be exploring, not a file in this repo. -->
 
 Surface relevant trackers/bugs/plans when an agent explores code, and surface referenced
 code locations when an agent reads a tracker — in both directions, automatically, without
@@ -385,8 +399,8 @@ Allow the agent to interact with long-running processes — REPLs, debuggers, an
 
 **Scope:** REPLs, debuggers, confirmation flows. Full-screen TUI apps (vim, less) are explicitly out of scope — no PTY allocation.
 
-**Design doc:** [`plans/2026-03-01-interactive-sessions-design.md`](plans/2026-03-01-interactive-sessions-design.md)
-**Implementation plan:** [`plans/2026-03-01-interactive-sessions-plan.md`](plans/2026-03-01-interactive-sessions-plan.md)
+**Design doc:** [`docs/superpowers/plans/2026-03-01-interactive-sessions-design.md`](superpowers/plans/2026-03-01-interactive-sessions-design.md)
+**Implementation plan:** [`docs/superpowers/plans/2026-03-01-interactive-sessions-plan.md`](superpowers/plans/2026-03-01-interactive-sessions-plan.md)
 
 ---
 
@@ -462,7 +476,11 @@ across sessions until OS reboot clears `/tmp`.
 - Periodic sweep: `glob /tmp/codescout-*-kotlin-lsp`, skip dirs whose PID is alive
 - Do nothing — `/tmp` is self-cleaning and dirs are negligible
 
-**Context:** See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`
+**Context:** the Kotlin concurrent-instance bug file this cited was pruned as a duplicate
+in `c6184884`, after the fix landed in `dc44ac3d` (per-instance system-path, circuit
+breaker, diagnostics). The canonical account is now codescout memory `gotchas` § LSP; the
+one still-open Kotlin bug is
+`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
 
 ### Dangerous-Command Audit Log
 
@@ -505,7 +523,7 @@ and is straightforward to inspect.
   drill-down to the buffered output if the cmd_id is still alive.
 
 **Context:** see `is_dangerous_command` and the `acknowledge_risk` flow in
-`src/tools/run_command.rs`; companion plugin's `pre-tool-guard.sh` already
+`src/tools/run_command/`; companion plugin's `pre-tool-guard.sh` already
 funnels every Bash call through `run_command`, so the audit hook covers all
 agent shell activity.
 
@@ -514,7 +532,7 @@ agent shell activity.
 **Priority:** Low | **Effort:** Medium
 
 `librarian(action="audit_doc_refs")` declares the generic `scope` param in
-its schema, but as of `docs/issues/2026-07-05-audit-doc-refs-scope-param-ignored.md`
+its schema, but as of `docs/issues/archive/2026-07-05-audit-doc-refs-scope-param-ignored.md`
 it only ever scans the active project — any other `scope` value is now
 rejected with a `RecoverableError` ("audit_doc_refs is project-scoped in
 v1") rather than silently ignored.
@@ -572,7 +590,8 @@ patterns feed Tool Usage Patterns (`f2ecdd76a6189efb`).
 ---
 ## Contributor Skills
 
-Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. See [`plans/2026-02-26-contributor-skills-design.md`](plans/2026-02-26-contributor-skills-design.md) for the full design.
+Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. The design doc this referenced (2026-02-26-contributor-skills-design.md) is not in the
+tree under that name; the skills themselves are the surviving record.
 
 | Skill | Purpose | Status |
 |---|---|---|

@@ -32,6 +32,9 @@ something small that is not naturally symbol-scoped.
 ---
 ## `create_file`
 
+<!-- audit-doc-refs:ignore — src/util/helpers.rs is the example path this tool's
+     arguments are demonstrated with, in both bare and ./-prefixed form. -->
+
 **Purpose:** Create a new file, or completely overwrite an existing one, with the supplied content. Parent directories are created automatically.
 
 **Parameters:**

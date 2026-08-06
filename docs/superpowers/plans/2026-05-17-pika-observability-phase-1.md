@@ -44,7 +44,7 @@
 | Path | Purpose |
 |---|---|
 | `docs/superpowers/plans/2026-05-17-pika-observability-phase-1.md` | This plan |
-| `docs/trackers/pika-phase-1-validation.md` | Phase 1 smoke-test result + acceptance-criteria checklist |
+| `docs/trackers/archive/pika-phase-1-validation.md` | Phase 1 smoke-test result + acceptance-criteria checklist |
 
 ---
 
@@ -945,7 +945,7 @@ The counts may be **non-zero** — that's diagnostic data, not failure. If `IL3`
 
 - [ ] **Step 3: Record the smoke result in the codescout tracker**
 
-Create `docs/trackers/pika-phase-1-validation.md`:
+Create `docs/trackers/archive/pika-phase-1-validation.md`:
 
 ```markdown
 # Pika Phase 1 — Validation Results
@@ -983,10 +983,10 @@ spec § Rollout for the Phase 2 plan trigger.
 
 ```bash
 cd ~/work/claude/code-explorer
-git status -s | grep "docs/trackers/pika-phase-1-validation.md"
-# Should show: ?? docs/trackers/pika-phase-1-validation.md
+git status -s | grep "docs/trackers/archive/pika-phase-1-validation.md"
+# Should show: ?? docs/trackers/archive/pika-phase-1-validation.md
 
-git add docs/trackers/pika-phase-1-validation.md docs/superpowers/plans/2026-05-17-pika-observability-phase-1.md
+git add docs/trackers/archive/pika-phase-1-validation.md docs/superpowers/plans/2026-05-17-pika-observability-phase-1.md
 git commit -m "docs(pika): Phase 1 plan + validation results"
 git log --oneline -3
 ```

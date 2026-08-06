@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-28
 - **Status:** draft (design approved in brainstorm; awaiting spec review)
-- **Work-stream log:** `docs/trackers/metadata-filtering-session-log.md` (F-1, F-2)
+- **Work-stream log:** `docs/trackers/archive/metadata-filtering-session-log.md` (F-1, F-2)
 - **Author:** Marius + Claude (Codescout Pika POV)
 
 ---

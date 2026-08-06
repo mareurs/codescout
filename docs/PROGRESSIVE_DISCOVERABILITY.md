@@ -330,11 +330,15 @@ When adding a tool that returns variable-length data:
 | File | Role |
 |------|------|
 | `src/tools/output.rs` | `OutputGuard`, `OverflowInfo`, `cap_items`, `cap_files`, `overflow_json` |
-| `src/tools/symbol.rs` | `collect_matching`, `build_by_file`, `matches_kind_filter` |
-| `src/prompts/server_instructions.md` | LLM-facing tool guidance (sent at connection time) |
-| `docs/plans/2026-02-25-progressive-disclosure-design.md` | Original two-mode design |
-| `docs/plans/2026-02-28-progressive-discoverability-design.md` | Extended design for symbol tools |
-| `docs/plans/2026-02-28-progressive-discoverability-impl.md` | Implementation plan |
+| `src/symbol/query.rs` | `collect_matching`, `matches_kind_filter` |
+| `src/tools/symbol/symbols.rs` | `build_by_file` |
+| `src/prompts/source.md` | LLM-facing tool guidance (sent at connection time); sliced into the `server_instructions` and `onboarding_prompt` surfaces |
+| `docs/superpowers/plans/2026-02-28-progressive-discoverability-design.md` | Extended design for symbol tools |
+| `docs/superpowers/plans/2026-02-28-progressive-discoverability-impl.md` | Implementation plan |
+
+The original two-mode design doc (`2026-02-25-progressive-disclosure-design.md`) was
+deleted in `f3647929`, not moved — there is no successor to point at. The two plans above
+carry the design that survived.
 
 ---
 

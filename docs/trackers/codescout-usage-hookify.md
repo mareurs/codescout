@@ -31,7 +31,7 @@ MCP `run_command` output instead of using the `@cmd_*` buffer system.
   retroactively deleted 2026-05-17 — see U-1 *Post-cleanup note*).
 - **Smoke-scan observational** — 3090 historical pipe-shaped `run_command`
   calls in `.codescout/usage.db` across the whole project, recorded in
-  `docs/trackers/pika-phase-1-validation.md`. This is observational
+  `docs/trackers/archive/pika-phase-1-validation.md`. This is observational
   (no per-call judgment), not verdict-bearing. Used only as
   cross-session shape confirmation, not as the sole basis for promotion.
 

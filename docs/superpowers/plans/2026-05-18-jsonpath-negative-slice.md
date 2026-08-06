@@ -9,7 +9,7 @@
 **Tech Stack:** Rust, `serde_json::Value`, `std::borrow::Cow`, project's `RecoverableError`.
 
 **Spec:** `docs/superpowers/specs/2026-05-18-jsonpath-negative-slice-design.md`
-**Bug:** `docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md`
+**Bug:** `docs/issues/archive/2026-05-17-read-file-jsonpath-negative-slice.md`
 
 ---
 
@@ -633,7 +633,7 @@ git commit -m "refactor(file_summary): cut over to typed Segment grammar
 - Delete stringly-typed parse_json_path_segments + resolve_json_segment
 - Rename v2 implementations to canonical names
 - Rewrite extract_json_path to thread Cow<'a, Value>
-- Closes docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md"
+- Closes docs/issues/archive/2026-05-17-read-file-jsonpath-negative-slice.md"
 ```
 
 ---
@@ -685,11 +685,11 @@ Expected: error message contains `"out of bounds"` and `"length"`.
 - [ ] **Step 7: Mark the bug fixed**
 
 ```bash
-# Edit docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md frontmatter:
+# Edit docs/issues/archive/2026-05-17-read-file-jsonpath-negative-slice.md frontmatter:
 #   status: open  →  status: fixed
 #   closed:       →  closed: 2026-05-18
 # Cite the cutover commit SHA in the Fix section.
-git add docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md
+git add docs/issues/archive/2026-05-17-read-file-jsonpath-negative-slice.md
 git commit -m "docs(issues): close jsonpath-negative-slice — shipped on experiments"
 ```
 

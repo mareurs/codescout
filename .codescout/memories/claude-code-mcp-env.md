@@ -28,7 +28,7 @@ fresh start). The file fallback covers any gap. Verify with a fresh `claude`
 session + `printenv` in an MCP `run_command`.
 
 First consumer: the get_guide re-injection fix,
-`docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
+`docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
 Refs: anthropics/claude-code #25642 (closed dup of the env-var request),
 #41836 (HTTP-transport session id — still open, distinct from this stdio env var).
 

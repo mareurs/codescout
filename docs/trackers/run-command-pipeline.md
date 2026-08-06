@@ -136,7 +136,7 @@ in `src/util/path_security.rs` is called from `RunCommand::call` before
 covering only Claude Code; codescout itself rejects the shape for all MCP
 clients (Claude Code, Copilot, Gemini, …). The "two modules always change
 together" signal pointed at this fix correctly. See
-`docs/issues/2026-05-18-il3-pipe-violation-subagent.md` (fixed).
+`docs/issues/archive/2026-05-18-il3-pipe-violation-subagent.md` (fixed).
 
 ## Tracker updates
 

@@ -9,7 +9,7 @@
 **Tech Stack:** Rust, rusqlite (SQLite), serde_json, async-trait, tokio (tests). MCP server.
 
 **Spec:** `docs/superpowers/specs/2026-05-28-filterable-trackers-design.md`
-**Session log:** `docs/trackers/metadata-filtering-session-log.md` (F-1, F-2)
+**Session log:** `docs/trackers/archive/metadata-filtering-session-log.md` (F-1, F-2)
 
 ---
 

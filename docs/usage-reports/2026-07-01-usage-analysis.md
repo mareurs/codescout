@@ -37,7 +37,7 @@ Projects scanned: 3 · Total calls: **15,759** · Combined error rate: **~7.7%**
    `benchmarks/section-audit/uat_criteria_by_section.json` (top-level keys `1.1`…`2.1.5`),
    drove **278 errors / 461 calls (60% failure)** ≈ **23% of all project errors**.
    `$.2.1.5`, `$["2.1.5"]`, `$['2.1.5']` all fail; the key is unaddressable.
-   → Filed **`docs/issues/2026-07-01-read-file-jsonpath-dotted-object-keys-unreachable.md`** (severity high).
+   → Filed **`docs/issues/archive/2026-07-01-read-file-jsonpath-dotted-object-keys-unreachable.md`** (severity high).
 2. **[MRV-poc] IL3 `run_command` guard hits: 265** — `il3_shell_on_source` (143) +
    `il3_pipe_to_trimmer` (122). Model habitually reaches for native shell
    grep/sed/cat on source and pipes unbounded output to head/tail/grep.

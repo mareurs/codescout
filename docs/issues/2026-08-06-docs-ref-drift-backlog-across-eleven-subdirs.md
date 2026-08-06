@@ -35,8 +35,8 @@ Representative sample from the ordered window — each is a distinct drift shape
 |---|---|---|
 | `src/server.rs::from_parts` (×5) | `symbol_missing` | symbol renamed or removed; docs still cite it |
 | `refresh.rs::call` (×2) | `file_missing` | bare basename + symbol; the file moved |
-| `docs/issues/2026-05-18-il3-pipe-violation-subagent.md` | `missing` | archived to `docs/issues/archive/` |
-| `docs/issues/2026-06-14-librarian-artifact-index-port-to-qdrant.md` | `missing` | archived; cited from more than one doc |
+| `docs/issues/archive/2026-05-18-il3-pipe-violation-subagent.md` | `missing` | archived to `docs/issues/archive/` |
+| `docs/issues/archive/2026-06-14-librarian-artifact-index-port-to-qdrant.md` | `missing` | archived; cited from more than one doc |
 | `docs/findings/2026-07-18-reconnaissance-mcp-eval-findings.md` | `missing` | `docs/findings/` does not exist |
 | `docs/trackers/mrv-chat-watch/` | `missing` | tracker directory gone |
 | `.claude/codescout-companion.json` | `missing` | config file path changed |
@@ -82,7 +82,7 @@ renamed without grepping the docs, directories retired while docs still name the
 The reason it reads as a surprise is that it was **never visible**. Two layers hid it:
 
 1. `audit_doc_refs`'s extractor produced enough false positives that the signal was
-   indistinguishable from noise (`docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`).
+   indistinguishable from noise (`docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`).
 2. The 50-finding cap truncated in scan order, so the gate reported failure while
    showing only resolved refs
    (`docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`).
@@ -99,7 +99,7 @@ genuine before editing, which is what establishes that the rest are worth the sa
 treatment rather than more lint-tuning:
 
 - `docs/adrs/2026-07-20-artifact-vec-shared-catalog-boundary.md` cited
-  `docs/issues/2026-06-14-librarian-artifact-index-port-to-qdrant.md`; `ls` confirmed
+  `docs/issues/archive/2026-06-14-librarian-artifact-index-port-to-qdrant.md`; `ls` confirmed
   the file lives at `docs/issues/archive/…`. Fixed by correcting the path.
 - `CLAUDE.md` cited `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`.
   `git log --all --follow` showed it added in `dc44ac3d` and **pruned** in
@@ -408,7 +408,7 @@ fenced block there are no backticks to remove, because the extractor walks block
 too.
 ## References
 
-- `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` — extractor precision (fixed).
+- `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` — extractor precision (fixed).
 - `docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md` — the cap that hid this (fixed).
 - `docs/RELEASE.md` § Large-Cohort Promotion (Fast-Forward) — why this does not block the merge.
 - CLAUDE.md § verify-open cadence — the fix-then-forget root cause shared with the other two bookkeeping surfaces.

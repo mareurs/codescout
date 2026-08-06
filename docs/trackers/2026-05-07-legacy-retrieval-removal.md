@@ -67,7 +67,7 @@ the 2026-05-13 memory-port design landed and closed most items below.
   + sqlite-vec escape hatch; `find_semantic` split into `find_by_ids_filtered` +
   the async `semantic_find` coordinator; write/read paths route through the store.
   `sqlite-vec` retained (**L-11 stays wontfix**). Bug
-  `docs/issues/2026-06-14-librarian-artifact-index-port-to-qdrant.md` → fixed.
+  `docs/issues/archive/2026-06-14-librarian-artifact-index-port-to-qdrant.md` → fixed.
   Suite 2874 passed, clippy clean. (Update the SHA to master-side on cherry-pick.)
 
 - **2026-06-15** — **L-08 corrected · L-11 wontfix · L-16 reframed** (user decision). (1) L-08: the 2026-06-14 "fusion/schema graduated" call was half-wrong — `schema::SearchResult` is live (kept); `fusion::rrf_fuse`/`BM25Result` were **test-only** and are now **deleted** (`src/embed/fusion.rs` removed; suite green). Caught by a `references` call-graph scout the proximity-based audit missed (recon **R-33**). (2) **L-11 → wontfix:** `sqlite-vec` is **retained** as the daemon-free local-vector-search backend for low-end / locked-down systems (e.g. the `vdi-windows` worktree — no Qdrant daemon). The dep-drop "binary diet" goal is abandoned. (3) **L-16 reframed:** still port `artifact_vec` → Qdrant, but for one-vector-model *consistency*, not a dep drop; keep `sqlite-vec` + the `SemanticMemoryStore` trait as the local-backend seam.

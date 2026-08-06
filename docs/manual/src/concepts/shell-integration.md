@@ -43,6 +43,9 @@ rather than accidentally.
 
 ### Source File Access Blocking
 
+<!-- audit-doc-refs:ignore — the table pairs a blocked shell command with its
+     redirect. Both sides are commands the reader types, against their own files. -->
+
 `cat`, `grep`, `head`, `tail`, `sed`, and `awk` used directly on source files
 (`.rs`, `.py`, `.ts`, `.go`, `.java`, `.kt`, etc.) are blocked at the tool
 level. The error message suggests the appropriate codescout equivalent:

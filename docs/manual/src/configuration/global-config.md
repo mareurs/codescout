@@ -1,11 +1,16 @@
 
 # Global Config
 
+<!-- audit-doc-refs:ignore — names config files the reader creates. A clean checkout
+     has no .codescout/config.toml, and that is the normal state, not drift. -->
+
 A two-layer configuration system that merges a user-level global config with
 the per-project `.codescout/config.toml`, so workspace-wide defaults can be
 set once without touching every project.
 
 ## File locations
+
+<!-- audit-doc-refs:ignore — same reason: user-created config paths. -->
 
 | Layer | Path |
 |-------|------|

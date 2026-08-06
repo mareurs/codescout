@@ -88,7 +88,7 @@ skill).
 **Verdict:** hit
 
 **Observed:** 2026-05-19, MCP prompt channel redesign work stream
-(`docs/trackers/mcp-prompt-redesign-session-log.md` F-1, W-1).
+(`docs/trackers/archive/mcp-prompt-redesign-session-log.md` F-1, W-1).
 
 **Pattern:** Before rewriting a content file (`source.md`, embedded
 templates, etc.) that backs a static constant via `include_str!`,
@@ -218,7 +218,7 @@ expansion.
 **Verdict:** proposal
 
 **Source:** R-4 + W-2 in
-`docs/trackers/mcp-prompt-redesign-session-log.md`.
+`docs/trackers/archive/mcp-prompt-redesign-session-log.md`.
 
 **Proposal:** `SKILL.md § Phase 1 — Scout` currently lists grep,
 `symbols`, and `references` as the scout's tools. Add a fourth:
@@ -413,7 +413,7 @@ mis-predicts V2/session-state behavior. Currently 1/2.
 **Verdict:** miss → proposal
 
 **Observed:** 2026-05-29, metadata-filtering work stream
-(`docs/trackers/metadata-filtering-session-log.md` F-4 + W-1).
+(`docs/trackers/archive/metadata-filtering-session-log.md` F-4 + W-1).
 
 **Pattern that failed:** Retrofitting `codescout-usage-frictions` to be
 `entry_filter`-searchable required parsing the tracker's body into a structured
@@ -477,8 +477,8 @@ constant the doc names (`GRADLE_USER_HOME`, `system-path`) and confirm the isola
 matches the doc's stated granularity. Doc adjectives ("isolated", "per-instance") are
 assertions to verify against the keying expression, not facts.
 
-**Evidence (bug trackers):** `docs/issues/2026-05-30-shared-server-global-active-project-race.md`,
-`docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`.
+**Evidence (bug trackers):** `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`,
+`docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`.
 
 **Promote-when:** A second scout catches a doc "isolation/per-X" adjective contradicted by a
 shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
@@ -538,7 +538,7 @@ shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
 
 **Verdict:** hit (caught doc-vs-filesystem gap pre-implementation)
 
-**Observed:** 2026-06-03, systematic-debug pass on the kotlin-lsp unbounded-disk bug (`docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`). About to evaluate fix candidate #2 — "on idle-timeout, remove *that workspace's* analyzer dir" — which presumes codescout can address the analyzer dir from its own `ws_hash`.
+**Observed:** 2026-06-03, systematic-debug pass on the kotlin-lsp unbounded-disk bug (`docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`). About to evaluate fix candidate #2 — "on idle-timeout, remove *that workspace's* analyzer dir" — which presumes codescout can address the analyzer dir from its own `ws_hash`.
 
 **Scout (reality):** Listed the live `--system-path` dirs vs `~/.config/JetBrains/analyzer/workspaces/*`. codescout's `ws_hash` (`src/socket_discovery.rs:10`, `DefaultHasher` → `{:016x}`) is **16 hex chars**; the analyzer dirs are **32 hex chars** (128-bit, IntelliJ path-hash). None of the 3 live system-path hashes (`c85ec91bdbfd1aee`, `26a9e85d58931839`, `7e868829c00fa9b2`) appear among the 8 analyzer dirs.
 
@@ -550,7 +550,7 @@ shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
 
 **Status:** open — single datapoint; gap caught + bug doc corrected this session.
 
-**Source:** `src/socket_discovery.rs:10`; `~/.config/JetBrains/analyzer/workspaces/` live listing; bug `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
+**Source:** `src/socket_discovery.rs:10`; `~/.config/JetBrains/analyzer/workspaces/` live listing; bug `docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
 
 ---
 ## R-16 — Pre-dispatch scout of the plan's OWN splice code caught a double-newline bug before dispatch
@@ -615,7 +615,7 @@ closing the bug class."
 **Status:** open — single datapoint for the sibling-caller pattern.
 
 **Source:** `src/tools/symbol/edit_code.rs` (`do_insert`/`do_remove`/`do_replace`);
-`docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md`; W-9 in
+`docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md`; W-9 in
 `docs/trackers/bug-fix-session-log.md`.
 
 ---
@@ -733,7 +733,7 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Status:** open — single strong datapoint (scout + live repro both load-bearing). Same-session sibling: scouting `apply_body_edits` + `edit_markdown` validation before the U-26 fix (got the action grammar right pre-edit).
 
-**Source:** `src/tools/symbol/references.rs` (`References/call`), `src/lsp/client.rs` (`references`), `src/tools/symbol/call_graph/mod.rs` (Phase B); bug `docs/issues/2026-06-09-references-false-zero-stale-graph.md`; commit `ddc7e3f1`. Kin: R-21.
+**Source:** `src/tools/symbol/references.rs` (`References/call`), `src/lsp/client.rs` (`references`), `src/tools/symbol/call_graph/mod.rs` (Phase B); bug `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md`; commit `ddc7e3f1`. Kin: R-21.
 ## R-23 — Re-derive an inherited diagnosis from telemetry (hit); verify a shared single-holder-resource recovery by reading state, not by calling from a 2nd client (miss)
 
 **Verdict:** hit, then miss — the diagnostic scout was load-bearing and correct; the *recovery-verification* scout was self-defeating and caused a real regression.
@@ -752,7 +752,7 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Status:** open — single strong datapoint; both the hit (diagnosis flip) and the miss (self-inflicted regression) are load-bearing and live-confirmed.
 
-**Source:** `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:432-539` (`get_or_start_via_mux`), `:456` (flock-only liveness), `:485` (stderr→null); bug-fix session-log F-16 + W-12. Kin: R-15 (external-tool on-disk state), R-21, R-22.
+**Source:** `docs/issues/archive/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:432-539` (`get_or_start_via_mux`), `:456` (flock-only liveness), `:485` (stderr→null); bug-fix session-log F-16 + W-12. Kin: R-15 (external-tool on-disk state), R-21, R-22.
 
 ## R-24 — Scout the resource-key derivation before designing a concurrency test; path-keyed hashing makes worktrees a safe fan-out fixture
 
@@ -797,7 +797,7 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Proposal:** Bake a `project_sha`/path-prefix filter into the Pika + Dzo survey queries so the contamination is excluded at the source, not caught per-symbol. Promote-when: a second cross-project phantom surfaces in a flight-recorder survey.
 
-**Evidence:** `docs/trackers/dzo-legibility-session-log.md` F-1 + W-1.
+**Evidence:** `docs/trackers/archive/dzo-legibility-session-log.md` F-1 + W-1.
 
 ## R-31 — A bug-file's "never parsed" claim, evidenced by a file-scoped grep, missed a parser one call-hop away
 
@@ -813,7 +813,7 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Proposal:** none new — reinforces R-3 (grep workspace root, not the file) and R-26 (read callee bodies before narrating "confirmed"). Datapoint toward making "follow the param into callees" an explicit Phase-1 step whenever a claim is about whether a param is *read* (vs. *used*).
 
-**Evidence:** bug-fix F-22; `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; `src/tools/output.rs:89-112`; `src/tools/read_file.rs:555-664` (`read_full_file` builds the guard).
+**Evidence:** bug-fix F-22; `docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; `src/tools/output.rs:89-112`; `src/tools/read_file.rs:555-664` (`read_full_file` builds the guard).
 ## R-33 — Dead-vs-live is a per-symbol call-graph fact, not a file-proximity fact
 
 **Date:** 2026-06-15 · **Verdict:** hit
@@ -874,7 +874,7 @@ line to a tool's *self-diagnosis*: the error string is the least-trustworthy wit
 when a cheaper read already disagrees with it.
 
 **Verdict:** hit. Cited as W-17 / F-23 in `docs/trackers/bug-fix-session-log.md`; root
-cause + fix in `docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md`.
+cause + fix in `docs/issues/archive/2026-06-16-kotlin-edit-code-annotation-line-gap.md`.
 Promote-when: a 3rd instance where a tool diagnostic misdirects and an empirical dump
 of the internal call corrects it → distill into codescout memory `reconnaissance`.
 
@@ -1066,7 +1066,7 @@ twin), R-5 (compiler backstop that would NOT have caught the dead test), R-17
 **Verdict:** hit (ordering caveat — recon ran after the edit, before the gate).
 
 Fixing the two-module lock-file leak
-(`docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md`), the `lsp/mux`
+(`docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md`), the `lsp/mux`
 half changed *where* files live: `mux_dir()` returns a per-process scratch
 subdirectory of `per_user_runtime_dir()` under `cfg(test)`. Caller enumeration is
 the reflex for a signature change, and it was done — all four production sites of
@@ -1144,7 +1144,7 @@ caller-enumeration does not surface.
 **Evidence:** `bug-fix-session-log.md` F-34 (the inverted claim, with severity
 rationale) and W-26 (the fixture-vs-implementation diagnosis from the same fix).
 Shipped `d668927e`; 19/19 in `memory::filter`, full gate 3439 passed / 0 failed. Bug:
-`docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md`.
+`docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md`.
 
 **Promote-when:** a second case where a candidate fix is rejected by a pre-existing
 test that reading the implementation would not have surfaced. Craft-shaped — true of

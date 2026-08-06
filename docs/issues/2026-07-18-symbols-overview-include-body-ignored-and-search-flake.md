@@ -88,7 +88,7 @@ severity: medium
 > The second half of this bug — "search mode occasionally 0-matches then succeeds on
 > retry" — is **not** addressed by this pass. It is intermittent by nature, so a
 > single non-reproduction proves nothing. Kin to
-> `docs/issues/2026-06-09-references-false-zero-stale-graph.md` (mitigated) and
+> `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` (mitigated) and
 > `docs/issues/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`
 > (zombie) — all three are LSP/index staleness-window shapes and may share one root.
 

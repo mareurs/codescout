@@ -1,13 +1,13 @@
 # Plan — Per-Request Workspace Pinning (regime 3 real fix)
 
 **Status:** draft · **Opened:** 2026-05-30 · **Owner:** marius
-**Fixes:** `docs/issues/2026-05-30-shared-server-global-active-project-race.md` (root cause)
+**Fixes:** `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md` (root cause)
 **Supersedes mitigation:** the `concurrent_activation_warning` guard (`Agent::note_activation`) only *surfaces* the race; this plan *removes* it.
 
 ## Decision (ADR)
 
 *Revised 2026-05-30 (R1) after architecture-snow-lion review. **Re-revised 2026-05-30 (R2)** after a
-pre-implementation scout (F-1 in `docs/trackers/concurrency-fix-session-log.md`) found the registry
+pre-implementation scout (F-1 in `docs/trackers/archive/concurrency-fix-session-log.md`) found the registry
 granularity was one abstraction layer too low.*
 
 **Decision:** Resolve the target workspace **per request**, and make the unit of concurrent residence
@@ -505,7 +505,7 @@ external Qdrant stack — unrelated).
 >   the pinned root; default + `workspace(status)` confirmed the active project unchanged).
 >
 > **Remaining before ship:** summon Docs Lotus Frog (pre-merge rule) → Standard Ship Sequence (4a+5)
-> → flip bug `docs/issues/2026-05-30-shared-server-global-active-project-race.md` `mitigated`→`fixed`
+> → flip bug `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md` `mitigated`→`fixed`
 > (regime-3 correctness scope). **Phase 4b stays DEFERRED** (resume kit below); this plan stays
 > **active** (do NOT archive) while 4b is open.
 ### Then Phase 5
@@ -516,7 +516,7 @@ onboarding); **remove** `concurrent_activation_warning` for pinned flows; resolv
 
 ### Ship (when complete)
 Standard Ship Sequence (CLAUDE.md); **summon Docs Lotus Frog before merging to `master`**; update F-1
-SHA citations to master-side after cherry-pick. Bug: `docs/issues/2026-05-30-shared-server-global-active-project-race.md`.
+SHA citations to master-side after cherry-pick. Bug: `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`.
 
 ## Phase 4 — Lock-Ordering Proof (the gate)
 

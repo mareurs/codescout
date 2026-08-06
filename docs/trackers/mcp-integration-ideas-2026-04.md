@@ -13,7 +13,7 @@ tags:
 Landscape captured after a deep read of the Claude Code source at
 `/home/marius/work/claude/claude-code` (commit of 2026-04-13). Items #1–#3 are
 being implemented under
-[`docs/plans/2026-04-13-mcp-token-budget-design.md`](../plans/2026-04-13-mcp-token-budget-design.md).
+[`docs/plans/archive/2026-04-13-mcp-token-budget-design.md`](../plans/2026-04-13-mcp-token-budget-design.md).
 This file tracks the rest — explore if/when they become relevant.
 
 ## How these were sourced

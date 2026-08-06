@@ -17,6 +17,10 @@ Only inside code-spans (`` `…` ``), fenced blocks (` ``` `), and link targets
 
 ## Reference kinds
 
+<!-- audit-doc-refs:ignore — the Example column shows one specimen ref per kind. They
+     are illustrations of syntax, not citations; the audit was reporting its own
+     documentation as drift. -->
+
 | ref_kind | Pattern | Example |
 |---|---|---|
 | `file_path` | extension-bearing path, no `:` | `` `src/mrv/chat_app.py` `` |

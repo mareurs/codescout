@@ -611,10 +611,10 @@ git commit -m "docs(edit_file): document whitespace-normalized recovery in tool 
 
 - [ ] `cargo fmt && cargo clippy -- -D warnings && cargo test` all clean.
 - [ ] Manual MCP check: `cargo build --release`, restart via `/mcp`, run an `edit_file` with a deliberately under-indented multi-line `old_string` against a real Kotlin file in a sibling project; confirm it lands with the `applied_via` note and correct indentation.
-- [ ] Update `docs/issues/2026-06-04-edit-file-old-string-miss-no-closest-match.md`: Fix section → cite the master-side SHA(s) after cherry-pick; flip status to `fixed` once shipped + verified; archive per the Standard Ship Sequence.
+- [ ] Update `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md`: Fix section → cite the master-side SHA(s) after cherry-pick; flip status to `fixed` once shipped + verified; archive per the Standard Ship Sequence.
 
 ## Notes / deferred
 
 - **Batch path** (`edit[]`, `edit_file/mod.rs:335`) is out of scope for this plan — separate follow-up.
 - **tab/space-width re-indentation** edge: v1 treats indentation as opaque prefix strings (the `strip_prefix(agent_base)` path). If a real mixed-tab/space datapoint surfaces, add a width-aware variant + test then.
-- The sibling `read_markdown` JSON-vs-text asymmetry (`docs/issues/2026-06-04-read-markdown-heading-miss-emits-json.md`) is the same bug class; consider folding its fix into the same shipping batch.
+- The sibling `read_markdown` JSON-vs-text asymmetry (`docs/issues/archive/2026-06-04-read-markdown-heading-miss-emits-json.md`) is the same bug class; consider folding its fix into the same shipping batch.

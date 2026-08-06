@@ -245,7 +245,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## Out of scope (deliberate, YAGNI)
 
-- **Rust changes** — `list_stale` kind-filtering, doctor scheduling, catalog GC: not needed for Stage 1; D10 detection uses git dates + filename match at skill level. Catalog GC is tracked separately in `docs/issues/2026-07-17-catalog-dead-rows-no-gc.md`.
+- **Rust changes** — `list_stale` kind-filtering, doctor scheduling, catalog GC: not needed for Stage 1; D10 detection uses git dates + filename match at skill level. Catalog GC is tracked separately in `docs/issues/archive/2026-07-17-catalog-dead-rows-no-gc.md`.
 - **Running the first sweep** — interactive by design (every finding human-gated); do it in a live session after this plan lands: `/codescout-companion:tracker-hygiene`.
 - **Plugin version bump / release** of claude-plugins — its own release flow owns that.
 - **Stage 2** (entry-grain IDs, `cites` at write time) — separate plan once Stage 1's first sweep produces data.

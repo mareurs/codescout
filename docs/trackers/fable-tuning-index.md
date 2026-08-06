@@ -54,7 +54,7 @@ Links findings / tasks / research for the Fable tuning work stream.
 
 ### 2026-07-10 — ecosystem tracker sync
 
-Swept every tracker the work stream touched across the 4 repos and brought each current with the final 2026-07-07 outcomes: `lf.py mismatches` one-command fallback check (llm-proxy:`b72d0f6`; first run 0 mismatches / 300 traces) recorded in Research + T-9/T-12 notes; base-arm-first → prompt-hamsa **Heuristic 12** (claude-plugins:`5202cca`) cross-referenced from § Protocol and T-2/T-11 notes. Late capture-on-notice: filed `docs/issues/2026-07-10-edit-code-impl-method-selection-range-refusal.md` (edit_code suspicious-range on impl methods, noticed 2026-07-07 in llm-proxy). Noted: `codescout-ecosystem` umbrella is declared globally but the live MCP binary predates the feature — `scope="umbrella"` errors until the next `cargo rb` + `/mcp`.
+Swept every tracker the work stream touched across the 4 repos and brought each current with the final 2026-07-07 outcomes: `lf.py mismatches` one-command fallback check (llm-proxy:`b72d0f6`; first run 0 mismatches / 300 traces) recorded in Research + T-9/T-12 notes; base-arm-first → prompt-hamsa **Heuristic 12** (claude-plugins:`5202cca`) cross-referenced from § Protocol and T-2/T-11 notes. Late capture-on-notice: filed `docs/issues/archive/2026-07-10-edit-code-impl-method-selection-range-refusal.md` (edit_code suspicious-range on impl methods, noticed 2026-07-07 in llm-proxy). Noted: `codescout-ecosystem` umbrella is declared globally but the live MCP binary predates the feature — `scope="umbrella"` errors until the next `cargo rb` + `/mcp`.
 
 ### 2026-07-10 — standing watch + self-reflection lane
 

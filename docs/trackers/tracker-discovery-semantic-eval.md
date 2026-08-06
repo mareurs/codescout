@@ -49,8 +49,8 @@ use cases:
 
 Caveats found: `find` results are **recency-ordered, not relevance-ordered** (broad keywords
 flood a limit-capped list); scope auto-widens to `repo`; umbrella one param away. Two bugs filed:
-`docs/issues/2026-07-10-librarian-context-silent-empty-no-embedder.md` and
-`docs/issues/2026-07-10-librarian-semantic-no-like-fallback-doc-drift.md`.
+`docs/issues/archive/2026-07-10-librarian-context-silent-empty-no-embedder.md` and
+`docs/issues/archive/2026-07-10-librarian-semantic-no-like-fallback-doc-drift.md`.
 
 ## The measurement to run (embedder UP)
 

@@ -4,8 +4,8 @@
 - **Status:** approved (design)
 - **Branch:** experiments
 - **Fixes / relates to:**
-  - `docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md` (bug #3)
-  - `docs/issues/2026-07-17-catalog-dead-rows-no-gc.md` (bug #2 — cleanup half only; lifecycle deferred)
+  - `docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md` (bug #3)
+  - `docs/issues/archive/2026-07-17-catalog-dead-rows-no-gc.md` (bug #2 — cleanup half only; lifecycle deferred)
 
 ## Problem
 

@@ -103,7 +103,7 @@ Requires understanding the relationship between two concepts.
 - **Expected files:**
   - `src/usage/db.rs`
   - `src/usage/mod.rs`
-  - `docs/plans/2026-04-02-usage-traceability-design.md`
+  - `docs/plans/archive/2026-04-02-usage-traceability-design.md`
 
 #### TC-07: Algorithm + domain
 - **Query:** `section boundary detection in markdown editing`

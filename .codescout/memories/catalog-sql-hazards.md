@@ -31,5 +31,5 @@ idiom: `src/librarian/filter.rs:230-236`
 (`.replace('\\',"\\\\").replace('%',"\\%").replace('_',"\\_")` + `LIKE ? ESCAPE '\\'`).
 Fixed twice now (commit `4b922ac4` worktree `covering()`; Stage-2 `resolve_cite_ref`). The
 idiom is duplicated in ~5 inline sites with no shared helper →
-`docs/issues/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md` (plan: extract
+`docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md` (plan: extract
 `escape_like_pattern` + a grep `#[test]` asserting every `LIKE` literal pairs with `ESCAPE`).

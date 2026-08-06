@@ -197,7 +197,7 @@ let target = chunk_size.min(AST_CHUNK_TARGET);
 >
 > Candidate 3 (container-header / leading-gap overlap) turned out to be a distinct,
 > pre-existing defect and is now tracked on its own:
-> `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`. The
+> `docs/issues/archive/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`. The
 > coalescing change closed only the half where merging *swallowed* that gap and lost
 > the declaration's metadata header; the duplication itself is untouched.
 >

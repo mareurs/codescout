@@ -15,7 +15,7 @@ child/grandchild (git, every Python interpreter launch) never returned, because
 the Windows branch used `cmd /C` + `.arg()` (MSVC-CRT quoting mangled embedded
 quotes) + `.output()` (waits on stdout pipe EOF, which a grandchild inheriting
 the pipe handle holds open forever). That specific bug is **fixed**
-(`docs/issues/2026-06-08-windows-run-command-child-process-hang.md`,
+(`docs/issues/archive/2026-06-08-windows-run-command-child-process-hang.md`,
 commit `2d0de46e`) for the **foreground** `run_command` path.
 
 This spec hardens the **remaining** process-spawn surfaces so the whole tool —
@@ -38,7 +38,7 @@ What still breaks or is at risk (this spec's scope):
 | A | `run_command` **background** path uses `.arg()` (no raw_arg / stdin-null / capture-wait) | `src/tools/run_command/inner.rs::spawn_background_command` |
 | B | `taskkill`/`tasklist` shell out via PATH `.output()` — EDR can hang/slow them; PATH-hijack risk | `src/platform/windows.rs::terminate_process`, `process_alive` |
 | C | `find` resolves to Git's **Unix** `find` (shadows cmd's); cmd-syntax → runaway `/c` traversal → effective hang | hit live this session |
-| D | LSP spawn on Windows: abs-path resolution + bounded spawn/init timeout | open bug `docs/issues/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`; cold-start budget already exists in `src/lsp/client.rs` |
+| D | LSP spawn on Windows: abs-path resolution + bounded spawn/init timeout | open bug `docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`; cold-start budget already exists in `src/lsp/client.rs` |
 | E | Default 30s `run_command` timeout may be too tight under EDR-slowed spawns | cross-cutting |
 
 ## Non-goals (deferred to follow-on specs)
@@ -117,7 +117,7 @@ transitively; add `[target.'cfg(windows)'.dependencies] windows-sys`).
 
 - Verify `lsp_binary_name`'s `.exe`/`.cmd`/`.bat` PATH probing is wired through
   the spawn in `src/lsp/client.rs`; close
-  `docs/issues/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`.
+  `docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`.
 - Wrap the LSP spawn + `initialize` handshake in a bounded timeout so an
   EDR-stalled server falls back to the existing tree-sitter path instead of
   blocking. LSP stdio stays piped (JSON-RPC needs it) — unchanged.
@@ -177,8 +177,8 @@ CI can't exercise them.
 
 ## References
 
-- Fix that prompted this: `docs/issues/2026-06-08-windows-run-command-child-process-hang.md` (commit `2d0de46e`)
-- Open LSP bug: `docs/issues/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`
+- Fix that prompted this: `docs/issues/archive/2026-06-08-windows-run-command-child-process-hang.md` (commit `2d0de46e`)
+- Open LSP bug: `docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`
 - Foreground impl: `src/tools/run_command/inner.rs` (`#[cfg(windows)]` branch)
 - Shell abstraction: `src/platform/windows.rs`, `src/platform/unix.rs` (`shell_command`)
 - Process control: `src/platform/windows.rs` (`terminate_process`, `process_alive`)

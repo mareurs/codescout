@@ -348,7 +348,7 @@ for the entire investigation that produced this spec.
   (`src/retrieval/sync.rs:157-158`, confirmed against live qdrant payloads). Either the
   header is dead weight in the chunker or it is a missing retrieval signal. Out of scope
   here; worth its own bug.
-- `src/retrieval/sync.rs:167` cites `docs/issues/2026-06-19-mcp-server-oom-68gb.md`, but that
+- `src/retrieval/sync.rs:167` cites `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`, but that
   bug was archived to `docs/issues/archive/`. A one-line doc-ref fix; noted here because the
   same stale path would otherwise have been copied into this spec.
 - `LanguageSpec::inner_node_types` documents size-gated recursion (*"when a container node

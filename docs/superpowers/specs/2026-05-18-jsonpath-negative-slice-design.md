@@ -1,6 +1,6 @@
 # `json_path` negative index + slice support
 
-**Status:** design • **Date:** 2026-05-18 • **Bug:** [`docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md`](../../issues/2026-05-17-read-file-jsonpath-negative-slice.md)
+**Status:** design • **Date:** 2026-05-18 • **Bug:** [`docs/issues/archive/2026-05-17-read-file-jsonpath-negative-slice.md`](../../issues/2026-05-17-read-file-jsonpath-negative-slice.md)
 
 ## Summary
 
@@ -223,7 +223,7 @@ None at design time. All grammar / lifetime / error / test decisions are locked 
 
 ## References
 
-- Bug: `docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md`
-- Related closed bug: `docs/issues/2026-05-09-read-file-json-path-array-elements.md`
+- Bug: `docs/issues/archive/2026-05-17-read-file-jsonpath-negative-slice.md`
+- Related closed bug: `docs/issues/archive/2026-05-09-read-file-json-path-array-elements.md`
 - Brainstorm session: Pika scan in `cc_session_id=42874b1a-1ef5-44ce-ad64-4eb5b84cf93f`, surfaced as `pika_observations.id=58` with `bug_id` set.
 - Existing code: `src/tools/file_summary/file_summary.rs` — `extract_json_path` (line 419), `parse_json_path_segments` (line 470), `resolve_json_segment` (line 497).

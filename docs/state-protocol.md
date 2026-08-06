@@ -44,6 +44,10 @@ reader is documented and migrated.
 
 ## `.codescout/` — per-project, codescout-managed
 
+<!-- audit-doc-refs:ignore — this document is a contract across three repos
+     (codescout, codescout-companion, buddy) and describes runtime state. Its paths
+     are deliberately not all resolvable from this checkout. -->
+
 Primary writer: codescout server. Resides at `<project_root>/.codescout/`.
 
 | Path | Writer | Readers | Purpose / Schema |
@@ -127,6 +131,8 @@ namespace. Codescout-companion does not touch this directory.
 
 ## `~/.claude/buddy/` — global, buddy-managed (mirrored to `~/.claude-sdd/buddy/`)
 
+<!-- audit-doc-refs:ignore — buddy-owned paths; buddy is a sibling repo. -->
+
 | Path | Writer | Readers | Purpose / Schema |
 |---|---|---|---|
 | `identity.json` | buddy statusline (`bones.py::roll_form`) | buddy statusline | JSON `{user_id, form, label, eyes_for_mood}`. Form binding deterministic via FNV-1a + mulberry32 from user-id. |
@@ -172,6 +178,10 @@ When a schema change is unavoidable:
    read→write→read across the version boundary.
 
 ## Integration test discipline
+
+<!-- audit-doc-refs:ignore — the test files named here live in the buddy and
+     codescout-companion repos (Python and bash), which is why a Rust checkout
+     cannot resolve them. -->
 
 Each component should carry a `state_contract` test that round-trips its read+write
 surface against fixtures matching this document:

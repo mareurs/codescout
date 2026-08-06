@@ -101,6 +101,10 @@ The intended workflow has three steps:
 
 ### Example
 
+<!-- audit-doc-refs:ignore — the walkthrough follows a fictional codebase
+     (src/services/auth.rs, verify_token) so the narrative stays readable. Those
+     paths are deliberately not this repo's. -->
+
 You want to understand the authentication logic in a service layer.
 
 **Step 1 — get the map:**

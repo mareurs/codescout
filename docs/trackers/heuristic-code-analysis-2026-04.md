@@ -13,7 +13,7 @@ tags:
 
 **Status:** deferred — brainstormed 2026-04-19, not yet scoped
 **Owner:** TBD
-**Related:** `docs/trackers/embedding-chunk-size-2026-04.md`
+**Related:** `docs/trackers/archive/embedding-chunk-size-2026-04.md`
 
 ## Motivation
 

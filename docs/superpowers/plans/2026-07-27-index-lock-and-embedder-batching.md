@@ -9,7 +9,7 @@
 **Tech Stack:** Rust, tokio, `fs4 0.12` (advisory file locks), `futures 0.3` (`stream::buffered`), `reqwest 0.13`, `sha2`. Tests: `mockito 1`, `tempfile 3`, `#[tokio::test]`.
 
 **Spec:** `docs/superpowers/specs/2026-07-27-embedder-batch-concurrency-design.md`
-**Bugs:** `docs/issues/2026-07-25-concurrent-index-no-project-lock.md` (Stage 1), `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` (context only — not fixed here)
+**Bugs:** `docs/issues/archive/2026-07-25-concurrent-index-no-project-lock.md` (Stage 1), `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` (context only — not fixed here)
 
 ## Global Constraints
 
@@ -192,7 +192,7 @@ Insert above the `#[cfg(test)] mod tests` block in `src/retrieval/index_lock.rs`
 //! the full `stream_index` pipeline against the same Qdrant collection and
 //! `project_id`, duplicating the entire embedding workload. Observed 2026-07-27
 //! with four simultaneous runs (3h24m / 2h02m / 1h08m / 1h05m), all orphaned to
-//! `systemd --user`. See docs/issues/2026-07-25-concurrent-index-no-project-lock.md
+//! `systemd --user`. See docs/issues/archive/2026-07-25-concurrent-index-no-project-lock.md
 //!
 //! Deliberately NOT `.codescout/write.lock`: that lock is taken per write-tool
 //! call by `crate::agent::write_guard::WriteGuard`. An index holding it for hours
@@ -339,7 +339,7 @@ write-tool call and would block every edit tool for a multi-hour index.
 Fail-fast rather than queue: a queued run would be nearly free but
 would hide the duplication that motivated this.
 
-Refs docs/issues/2026-07-25-concurrent-index-no-project-lock.md"
+Refs docs/issues/archive/2026-07-25-concurrent-index-no-project-lock.md"
 ```
 
 ---
@@ -407,7 +407,7 @@ sync_project now acquires the per-project index lock before reading the
 drift baseline, so overlapping runs cannot each diff against a snapshot
 the other invalidates. Covers all five call sites.
 
-Closes docs/issues/2026-07-25-concurrent-index-no-project-lock.md"
+Closes docs/issues/archive/2026-07-25-concurrent-index-no-project-lock.md"
 ```
 
 ---
@@ -581,7 +581,7 @@ with an explicit pathspec.
 > Why not read env inside `resolve_batch_size`: doing so forced a `#[cfg(test)]` fork of the
 > reader, because `EnvGuard`-style env mutation races `cargo test`'s parallel threads
 > (reproducible 5/5 — see
-> `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`). A cfg fork
+> `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`). A cfg fork
 > means test and production builds execute **different function bodies**, so no test exercises
 > the production env read: mutate the variable name in the `cfg(not(test))` arm and every test
 > still passes while the documented operator escape hatch silently does nothing. Injection keeps
@@ -944,7 +944,7 @@ threaded through `with_config`, with a `with_inflight_override(...)` builder for
 `resolve_inflight()`, which would reintroduce for `CODESCOUT_EMBED_INFLIGHT` precisely the
 anti-pattern Task 4's fix round removed for `CODESCOUT_EMBED_BATCH` — a test wanting to control
 it would have to mutate process env, racing `cargo test`'s parallel threads (reproducible 5/5;
-see `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`, and
+see `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`, and
 `docs/issues/2026-07-27-test-env-isolation-doc-prescribes-rejected-remedy.md` for why the
 convention doc keeps re-specifying it).
 
@@ -994,7 +994,7 @@ and in `embed_batch`'s `dense_only` branch:
             // Reads `self.batch_override` — the SAME field the hybrid path uses. Do NOT
             // reintroduce a raw `std::env::var` read here. One variable with two sources
             // is a divergence waiting to happen, and it re-opens the test-env race that
-            // docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+            // docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
             // documents.
             const DENSE_ONLY_BATCH: usize = 32;
             let batch = self

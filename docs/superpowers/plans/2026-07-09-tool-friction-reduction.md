@@ -394,7 +394,7 @@ workspace(action="activate", path="/home/marius/work/claude/claude-plugins", rea
 
 (`read_only=false` is required here — claude-plugins is a foreign project this
 session, and codescout's foreign-activation default is `read_only=true`; see
-F-1 in `docs/trackers/tool-friction-reduction-session-log.md`.)
+F-1 in `docs/trackers/archive/tool-friction-reduction-session-log.md`.)
 
 - [ ] **Step 2: Add the new SQL anchor**
 

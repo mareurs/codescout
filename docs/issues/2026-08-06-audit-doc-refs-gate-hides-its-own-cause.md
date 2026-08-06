@@ -19,7 +19,7 @@ majority of refs resolve, the 50 shown are almost always `resolved`/`low` — so
 `--fail-on high` run reports failure with no visible cause. This also silently
 corrupted the measurement in a sibling bug: the "18 high-severity findings"
 recorded in
-`docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` was the
+`docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` was the
 count *within the truncated window*, not the real population.
 
 ## Symptom (Effect)
@@ -90,7 +90,7 @@ the JSON output as the only surface.
 
 ### Downstream measurement error
 
-`docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` tabulates
+`docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` tabulates
 "The 18 findings, all `verdict: "missing"`, `severity: "high"`" across three ADRs.
 After fixing every one of those 18 classes (verified: each named `raw_ref` now
 resolves or reports `med`/`inferred_path`), the gate still exited 1. A

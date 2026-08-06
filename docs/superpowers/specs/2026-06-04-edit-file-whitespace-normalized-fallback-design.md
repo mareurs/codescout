@@ -3,7 +3,7 @@
 **Status:** design / awaiting review
 **Date:** 2026-06-04
 **Author:** Marius (with Architecture Snow Lion)
-**Related bug:** `docs/issues/2026-06-04-edit-file-old-string-miss-no-closest-match.md`
+**Related bug:** `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md`
 **Touches:** `src/tools/edit_file/mod.rs` (`perform_edit`, `:453-539`)
 
 ---
@@ -197,7 +197,7 @@ from whitespace-only misses and returns a verify note. Expected to be a
 
 ## References
 
-- `docs/issues/2026-06-04-edit-file-old-string-miss-no-closest-match.md` — bug + evidence;
+- `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md` — bug + evidence;
   its Fix section should point here.
 - `src/tools/edit_file/mod.rs:453-539` (`perform_edit`); `:479-484` (the `match_count == 0`
   branch this design fills); post-write `has_syntax_errors` check.

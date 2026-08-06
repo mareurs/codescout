@@ -13,7 +13,7 @@ dig: raw SQL over `.codescout/usage.db`, fighting an `overflowed` column that is
 structurally always `0`, reverse-engineering truncation from `output_json LIKE
 '%truncat%'`, and manually existence-checking targets because the recorder is
 cross-project contaminated (a mirela `CalendarService` phantom surfaced in a
-codescout survey — see `docs/trackers/dzo-legibility-session-log.md` F-1, and
+codescout survey — see `docs/trackers/archive/dzo-legibility-session-log.md` F-1, and
 `docs/trackers/reconnaissance-patterns.md` R-29).
 
 We want: (1) honest logging that makes friction queryable, and (2) a probe assigned
@@ -309,7 +309,7 @@ projection: the lens (codescout) decides which properties matter — naming ampl
 
 ## References
 
-- `docs/trackers/dzo-legibility-session-log.md` — F-1 (usage.db contamination), W-1.
+- `docs/trackers/archive/dzo-legibility-session-log.md` — F-1 (usage.db contamination), W-1.
 - `docs/trackers/reconnaissance-patterns.md` — R-29 (verify flight-recorder targets exist in-repo).
 - `docs/architecture/augmented-artifacts.md` — body/params/render_template, the `merge=false` foot-gun.
 - `docs/superpowers/specs/2026-05-17-pika-observability-design.md` — `pika_observations` schema + "write on ask".

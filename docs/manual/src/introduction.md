@@ -66,6 +66,8 @@ Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin,
 C/C++, C#, Ruby.
 ### Semantic Search (2 tools)
 
+<!-- audit-doc-refs:ignore — src/auth.rs is an example argument, not a file here. -->
+
 Sometimes you know the concept but not the name. Semantic search finds code by
 meaning using embeddings, not keywords.
 

@@ -1311,9 +1311,9 @@ mcp__codescout__artifact(action="get", id=<id from this list>, full=true)
 Goal sources:
 - goal_01: `docs/TODO-phase6-provider-lifts.md` (id: c54ad4ece0a71aed)
 - goal_02: `docs/trackers/retrieval-benchmark.md` (id: 8e09ca67f463027e)
-- goal_03: `docs/trackers/tools-mod-refactor-2026-05.md` (id: ccd1cda1b4135fff)
+- goal_03: `docs/trackers/archive/tools-mod-refactor-2026-05.md` (id: ccd1cda1b4135fff)
 - goal_04: `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`
-- goal_05: `docs/trackers/agent-memory-research-2026-04.md` (id: 7c910f78bf28796c)
+- goal_05: `docs/trackers/archive/agent-memory-research-2026-04.md` (id: 7c910f78bf28796c)
 
 If any of these no longer exist or aren't appropriate "done"-line work, swap with another goal from the project's recent history.
 

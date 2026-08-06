@@ -123,7 +123,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 //! Prevention guard: refuse artifact writes that would land a temp-dir-rooted
 //! artifact in the real/shared (file-backed, outside-temp) catalog — the vector
 //! that polluted the global catalog with /tmp probe rows.
-//! See docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
+//! See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
 
 use std::path::Path;
 
@@ -319,7 +319,7 @@ Expected: FAIL — without the guard, `create` succeeds and `expect_err` panics.
 Insert:
 ```rust
     // Prevention: refuse writing a temp-dir-rooted artifact into the real shared
-    // catalog. See docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
+    // catalog. See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
     super::temp_write_guard::guard_temp_workspace_write(&base_dir, &ctx.catalog.lock().conn)?;
 
 ```
@@ -726,4 +726,4 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ## Post-implementation (NOT part of the coding tasks)
 
 - **Gated real-catalog cleanup:** after all tasks land + full `cargo rb` + `/mcp` reconnect, run `librarian(action="doctor", fix="prune_missing")` (dry-run) against the REAL catalog, present the dead roots + counts to the user, and apply with `confirm=true` only on explicit approval.
-- **Bug bookkeeping:** flip `docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md` to `fixed` (prevention shipped; cleanup executed). Update `docs/issues/2026-07-17-catalog-dead-rows-no-gc.md` — cleanup half done; note the ongoing-GC-lifecycle remainder stays open, deferred to a follow-up spec.
+- **Bug bookkeeping:** flip `docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md` to `fixed` (prevention shipped; cleanup executed). Update `docs/issues/archive/2026-07-17-catalog-dead-rows-no-gc.md` — cleanup half done; note the ongoing-GC-lifecycle remainder stays open, deferred to a follow-up spec.

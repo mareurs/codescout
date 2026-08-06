@@ -6,7 +6,7 @@ configurations reachable via `scripts/run-tc-benchmark.sh` — the full hybrid s
 sqlite-vec dense-only backend intended for constrained/VDI deployments. The headline
 result — lite scoring higher than hybrid — is real in the numbers the harness emitted,
 but a confirmed harness bug (documented below and in
-`docs/issues/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md`) silently
+`docs/issues/archive/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md`) silently
 zeroes out any test case whose `semantic_search` response is large enough to be
 buffered. That bug hits the hybrid and no-sparse arms far harder than the lite arm, so
 the raw A-vs-C delta below is a **lower bound**, not a clean quality comparison. Read
@@ -71,7 +71,7 @@ JSON-encoded (`{"content": ..., "shown_lines": [...], "complete": ...}`); in rea
 `json.loads()` failure is silently swallowed (`scripts/run-tc-benchmark.py:320-323,
 332-335`) and coerced to `top10_files: []` with **zero** warning output — the same
 shape a genuine zero-hit query would produce. Full writeup, evidence, and fix plan:
-`docs/issues/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md`.
+`docs/issues/archive/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md`.
 
 This bug fires whenever a `semantic_search` response crosses codescout's ~10 KB
 inline-buffering threshold (`MAX_INLINE_TOKENS` = 2,500 tokens,
@@ -110,7 +110,7 @@ confirmed benchmark-harness bug (not a retrieval-quality defect) suppresses scor
 for any TC whose top-10 result content crosses ~10 KB, and it suppresses hybrid's
 score far more often (17/25 TCs) than lite's (1/25 TCs). The true quality gap between
 hybrid and lite is unknown until the harness is fixed
-(`docs/issues/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md` — Fix
+(`docs/issues/archive/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md` — Fix
 section) and all three arms are re-run. What the data does support without caveat:
 lite's per-query latency (72ms p50) is roughly an order of magnitude or more faster
 than both Qdrant-backed arms, and lite's own score (31/75, only 1 TC affected by the
@@ -179,7 +179,7 @@ claimed to have fixed exactly this class of issue).
    with no warning. Confirmed to have affected 17/25 hybrid TCs and 8/25 no-sparse
    TCs; confirmed via direct reproduction (TC-07 and TC-08) and via a line-for-line
    replay of the harness's own pagination loop against a live buffer. Full
-   writeup: `docs/issues/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md`.
+   writeup: `docs/issues/archive/2026-07-02-tc-benchmark-harness-swallows-buffered-results.md`.
    Not fixed in this session (out of scope for Task 10 — docs-only deliverable).
 
 2. **Dangling `.worktrees/bench` gitlink.** `.worktrees/bench/.git` points at

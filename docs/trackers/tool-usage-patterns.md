@@ -154,11 +154,11 @@ Started with `edit_code` correctly for service file structural changes (calls 39
 
 ### T-011 — `artifact(get, start_line, end_line)` off-by-one via an invisible blank separator
 
-A per-repo `usage.db` mining pass (backend-kotlin + codescout, 2026-07-01 → 2026-07-09) surfaced 7 occurrences of the same downstream signature: `read_file(json_path="$.body")` on an `artifact(get)` result buffer returning `"0 lines"`. Root cause: `artifact(get, start_line=1, end_line=1)` addressed the blank separator line between the frontmatter's closing `---` and the body content — not the first visible content line — because `frontmatter::parse()`'s remainder was assigned to `parsed_body` verbatim, unshifted. Not a caller mistake — the tool's own 1-indexing silently pointed one line too early for every line-oriented consumer (full, slice, heading). See `docs/issues/2026-07-09-artifact-get-line-slice-blank-separator-offset.md` for the full root-cause trace (including two rejected hypotheses) and fix.
+A per-repo `usage.db` mining pass (backend-kotlin + codescout, 2026-07-01 → 2026-07-09) surfaced 7 occurrences of the same downstream signature: `read_file(json_path="$.body")` on an `artifact(get)` result buffer returning `"0 lines"`. Root cause: `artifact(get, start_line=1, end_line=1)` addressed the blank separator line between the frontmatter's closing `---` and the body content — not the first visible content line — because `frontmatter::parse()`'s remainder was assigned to `parsed_body` verbatim, unshifted. Not a caller mistake — the tool's own 1-indexing silently pointed one line too early for every line-oriented consumer (full, slice, heading). See `docs/issues/archive/2026-07-09-artifact-get-line-slice-blank-separator-offset.md` for the full root-cause trace (including two rejected hypotheses) and fix.
 
 ### T-012 — `artifact(get, heading=)` required the full heading text, not a short id
 
-Same mining pass found 6 occurrences in backend-kotlin (`heading="SI-20"`, `headings=["SI-19","SI-20"]`, `headings=["## SI-22","## SI-1"]`, `heading="SI-29"`, `heading="## SI-33"`) plus 1 in codescout, spanning a week — every heading query style against a numbered-section tracker (`## SI-N — <long title>`) missed, `body_meta.heading_missing: true`, no error. `get.rs` used a bespoke exact-match-only matcher instead of the shared, already-tested `file_summary::resolve_section_range` 4-tier fuzzy cascade that backs `read_markdown`/`edit_markdown`'s documented "fuzzy matched" `heading=` param — a prompt-surface consistency gap, not a caller error. See `docs/issues/2026-07-09-artifact-get-heading-exact-match-only.md`.
+Same mining pass found 6 occurrences in backend-kotlin (`heading="SI-20"`, `headings=["SI-19","SI-20"]`, `headings=["## SI-22","## SI-1"]`, `heading="SI-29"`, `heading="## SI-33"`) plus 1 in codescout, spanning a week — every heading query style against a numbered-section tracker (`## SI-N — <long title>`) missed, `body_meta.heading_missing: true`, no error. `get.rs` used a bespoke exact-match-only matcher instead of the shared, already-tested `file_summary::resolve_section_range` 4-tier fuzzy cascade that backs `read_markdown`/`edit_markdown`'s documented "fuzzy matched" `heading=` param — a prompt-surface consistency gap, not a caller error. See `docs/issues/archive/2026-07-09-artifact-get-heading-exact-match-only.md`.
 
 ### T-14 — The ledger query that was never made: `artifact(find, kind="bug")` before editing a file
 
@@ -180,7 +180,7 @@ unrelated verify-open pass.
   precondition (*"validated against the retrieval benchmark … must be measured, not
   assumed"*) and a sequencing decision (throughput work first, being vector-identical).
   Both were violated.
-- `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`, whose root
+- `docs/issues/archive/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`, whose root
   cause a newly-filed bug duplicated.
 
 **Why the existing guidance did not fire — the transferable part.** The rule exists and
@@ -263,7 +263,7 @@ padded by the container's trailing `}` gap. The dump showed the padding was a **
 gap spanning lines 1-8 — the entire file prefix before the container, emitted because the
 recursion re-derives gaps against the whole `source` with `prev_end` reset to 0. That shape
 was not predicted, and it is a second, pre-existing defect (now
-`docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`).
+`docs/issues/archive/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`).
 
 It also produced the exact assertion strings — `src/mystore.rs :: impl MyStore ::     pub fn build(&self)`,
 leading whitespace intact — that seven new tests now pin. Guessed strings would have
