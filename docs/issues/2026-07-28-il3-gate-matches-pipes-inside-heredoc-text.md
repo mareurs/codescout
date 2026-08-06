@@ -180,5 +180,5 @@ file originally listed. If a third false positive turns up from quoting, that is
 trigger to do it.
 ## References
 
-- `docs/PROGRESSIVE_DISCLOSURE.md` — the IL3 rule this guard enforces, and why it exists
+- `docs/PROGRESSIVE_DISCOVERABILITY.md` — the IL3 rule this guard enforces, and why it exists
 - `src/util/text.rs` — `literal_continuation_mask`, a scanner of the shape option 2 needs

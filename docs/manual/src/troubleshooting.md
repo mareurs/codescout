@@ -78,7 +78,7 @@ cargo install --path . --no-default-features --features remote-embed
 ```
 
 Then start Ollama and configure codescout to use it — see
-[Ollama setup](../configuration/embedding-backends.md#ollama-default).
+[Ollama setup](configuration/embedding-backends.md#ollama-default).
 
 ---
 
@@ -263,7 +263,7 @@ cargo install --path . --features local-embed
 
 > **Tip:** For a free, local setup without building from source, use
 > [Ollama](https://ollama.com/) with the default `remote-embed` binary.
-> See [Embedding Backends](../configuration/embedding-backends.md#ollama-default).
+> See [Embedding Backends](configuration/embedding-backends.md#ollama-default).
 
 ---
 

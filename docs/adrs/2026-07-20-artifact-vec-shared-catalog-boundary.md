@@ -134,7 +134,7 @@ but the change itself is unwritten and unverified.
 
 ## References
 
-- `docs/issues/2026-06-14-librarian-artifact-index-port-to-qdrant.md` — the
+- `docs/issues/archive/2026-06-14-librarian-artifact-index-port-to-qdrant.md` — the
   Qdrant port that deliberately retained `sqlite-vec` as a permanent escape
   hatch (L-11 wontfix), fixed in `3fbfbe2a`. This ADR's migration path only
   matters for that retained backend.

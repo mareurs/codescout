@@ -50,7 +50,7 @@ severity: medium
 > What happened: the pass read the **compact summary** and took it for the result. The
 > summary is a ~2 KB line-oriented preview that cannot render a body at any size; the
 > full result sat in a `@tool_*` buffer named in the same response. This is the
-> anti-pattern `docs/PROGRESSIVE_DISCLOSURE.md` lists by name — *"Treating the summary
+> anti-pattern `docs/PROGRESSIVE_DISCOVERABILITY.md` lists by name — *"Treating the summary
 > as authoritative. It's a preview, not the whole result"* — hit during the one
 > activity whose entire purpose is to avoid it.
 >
@@ -81,7 +81,7 @@ severity: medium
 > So single-FILE overview honors the flag; DIRECTORY overview silently drops it.
 > Whether dropping it for a directory is a deliberate size guard is unresolved — if
 > it is, the defect is the *silence*, not the drop, and the fix is an overflow hint
-> naming the constraint (per `docs/PROGRESSIVE_DISCLOSURE.md`) rather than honoring
+> naming the constraint (per `docs/PROGRESSIVE_DISCOVERABILITY.md`) rather than honoring
 > the flag. A directory of bodies would routinely blow the inline budget, so the hint
 > is probably the right fix; that should be decided before any code changes.
 >

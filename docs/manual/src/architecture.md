@@ -88,7 +88,7 @@ When the LLM calls a tool, here is what happens:
 
 ### Agent
 
-**Source:** `src/agent.rs`
+**Source:** `src/agent/mod.rs`
 
 The Agent manages the active project state. It holds:
 

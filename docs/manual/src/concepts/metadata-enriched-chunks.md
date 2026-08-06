@@ -1,7 +1,7 @@
 # Metadata-Enriched Chunks
 Every code chunk stored in the semantic index now carries a short searchable header prepended to its embedding input. Headers encode file path, container context, and symbol name:
 
-    src/embed/index.rs :: impl IndexStore :: fn build_index(force: bool)
+    src/embed/ast_chunker.rs :: fn coalesce_small_chunks :: fn flush(run: &mut Vec<RawChunk>, …)
 
 This information was previously invisible to the embedding model — chunks were embedded as raw code bodies with no location context. Multi-concept keyword queries (the dominant query shape in real usage) now match on file path, container, and symbol name in addition to body content, giving them more surface area to match on.
 

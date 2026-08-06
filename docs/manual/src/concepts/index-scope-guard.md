@@ -51,5 +51,5 @@ Currently, the suspicious-path list is fixed — it is not configurable.
 
 An agent that calls `workspace(action: activate, path: "~")` followed by `index(action: build)` would
 otherwise walk the entire home directory, ingest every file, and cause severe
-RAM spikes or OOM (see `docs/issues/memory-leak-x-session-freeze.md`). The
+RAM spikes or OOM (see `docs/issues/archive/2026-04-18-memory-leak-x-session-freeze.md`). The
 scope guard makes that path impossible without a human in the loop.

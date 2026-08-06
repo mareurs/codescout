@@ -2509,7 +2509,7 @@ were available and none was consulted:
    that asserts `files[0].symbols[0].body` on the **directory-scan** branch specifically,
    green the entire time.
 
-`docs/PROGRESSIVE_DISCLOSURE.md` lists this by name under Anti-patterns — *"Treating the
+`docs/PROGRESSIVE_DISCOVERABILITY.md` lists this by name under Anti-patterns — *"Treating the
 summary as authoritative. It's a preview, not the whole result. Pull from the buffer before
 drawing conclusions."* Knowing the rule did not help; the summary reads as an answer.
 

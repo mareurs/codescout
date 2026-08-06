@@ -144,4 +144,7 @@ triage by adding rules or frontmatter.
 
 - Spec: `docs/superpowers/specs/2026-04-19-librarian-mcp-design.md`
 - Plan: `docs/superpowers/plans/2026-04-19-librarian-mcp.md`
-- Credits: `crates/librarian-mcp/CREDITS.md`
+- Credits: there is no longer a `CREDITS.md`. It was removed in `d48bf992`
+  (`refactor(librarian)!: dissolve crates/librarian-mcp into src/librarian/`),
+  the same commit that folded the standalone crate into this binary — see
+  `README.md` and `CHANGELOG.md` for the surviving attribution.

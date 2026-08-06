@@ -1,4 +1,12 @@
 # File-Diversity Re-Rank for `semantic_search`
+> ⚠ **Not currently active.** The cap is implemented and unit-tested as
+> `apply_file_diversity_cap` in `src/tools/semantic/semantic_search.rs`, but that
+> function carries `#[allow(dead_code)]` and is not wired into the live search
+> path — the retrieval stack returns chunks ranked by Qdrant plus the reranker,
+> with no per-file cap. Re-wiring is tracked as L-15 in
+> `docs/trackers/2026-05-07-legacy-retrieval-removal.md`. Read what follows as a
+> design record and a benchmark rationale, not as behaviour you can observe
+> today.
 `semantic_search` applies a per-file cap to its results before returning them,
 so a single highly-relevant file cannot saturate the top-K and crowd out
 sibling files that the query is also about.
@@ -33,14 +41,14 @@ that legitimately owns multiple top-K-worthy chunks still gets up to
 
 ## Default
 
-`MAX_CHUNKS_PER_FILE = 3`, hard-coded in `src/tools/semantic.rs`. Chosen to
-preserve multi-hit files (TC-18 keeps both `markdown.rs` hits) while
-preventing single-file saturation (TC-13's `manager.rs` is limited to 3 of
-10 slots).
+There is no `MAX_CHUNKS_PER_FILE` constant in the tree — the name appears only in
+this page and in the design plan that proposed it. `apply_file_diversity_cap`
+takes the cap as a parameter, and its tests exercise `3` (the intended default),
+`1`, and `0`, where `0` disables the cap entirely.
 
-Set to `0` in the constant to disable (useful for A/B comparison against the
-pre-cap behaviour).
-
+`3` was chosen to preserve multi-hit files (TC-18 keeps both `markdown.rs` hits)
+while preventing single-file saturation (TC-13's `manager.rs` is limited to 3 of
+10 slots). Whoever re-wires the cap decides where that constant comes to live.
 ## When it helps
 
 - Multi-concept queries that should surface more than one file.
@@ -60,4 +68,4 @@ pre-cap behaviour).
 - `docs/research/2026-04-03-embedding-model-benchmark.md` — benchmark rubric
   this feature was tuned against.
 - `crates/codescout-embed/` — upstream retrieval pipeline (no changes;
-  cap runs entirely in `src/tools/semantic.rs`).
+  cap lives entirely in `src/tools/semantic/semantic_search.rs`).

@@ -223,4 +223,4 @@ this file is an `experiments` SHA and orphans on rebase — tracked in
   works
 - `CLAUDE.md` — routes to `gotchas (MCP Binary Symlink)` and `gotchas (LSP section)`
   by name
-- `docs/PROGRESSIVE_DISCLOSURE.md` — the budget rationale this param serves
+- `docs/PROGRESSIVE_DISCOVERABILITY.md` — the budget rationale this param serves

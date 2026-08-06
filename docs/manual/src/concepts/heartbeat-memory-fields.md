@@ -19,8 +19,9 @@ heartbeat instance=6719 uptime_secs=30 active_projects=1 lsp_servers=[]
 
 Useful when correlating long-running instance behaviour against per-project
 tool call history (`~/.codescout/usage.db` and `<project>/.codescout/usage.db`).
-The use case driving this addition is the open OOM investigation in
-`docs/issues/memory-leak-x-session-freeze.md`: the kernel's OOM dump only
+The use case driving this addition was the OOM investigation in
+`docs/issues/archive/2026-04-18-memory-leak-x-session-freeze.md` (closed
+2026-07-20): the kernel's OOM dump only
 captures the moment of death; the heartbeat captures the trajectory.
 
 ## Platform notes

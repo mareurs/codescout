@@ -25,4 +25,4 @@ info, git history — through a standard MCP interface. Three choices drive the 
 These choices are informed by research on compound error in multi-agent systems —
 research and empirical evidence confirm failure rates of 41–87% in production multi-agent pipelines.
 
-[Read the analysis →](../../../research/multi-agent-context-loss.md)
+[Read the analysis →](../../research/multi-agent-context-loss.md)

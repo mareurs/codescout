@@ -45,7 +45,7 @@ The dense embedder needs a GGUF model file. First-run setup:
 There is **no published GGUF repo** for CodeRankEmbed. `nomic-ai/CodeRankEmbed-GGUF`,
 which this page previously recommended, returns HTTP 401 and is absent from
 HuggingFace search (tracked in the repo at
-`docs/issues/2026-07-25-coderankembed-gguf-source-404.md`). The script instead builds the Q4_K_M quant from the official, ungated safetensors repo
+`docs/issues/archive/2026-07-25-coderankembed-gguf-source-404.md`). The script instead builds the Q4_K_M quant from the official, ungated safetensors repo
 (`nomic-ai/CodeRankEmbed`, ~173k downloads) using `llama.cpp:full`, producing the
 same ~90 MB artifact. It is idempotent and honours `CODESCOUT_MODEL_DIR`.
 
@@ -138,7 +138,7 @@ docker compose --env-file .env.amd --profile amd up -d
 
 - A copy has no link to its source, so editing `.env.amd` leaves `.env` silently
   stale. That pinned a nonexistent `CODESCOUT_MODEL_DIR` in the repo-root `.env`
-  with no signal — `docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md`.
+  with no signal — `docs/issues/archive/2026-07-25-env-copy-flow-stale-model-dir.md`.
 - Repo-root `.env` also holds secrets (`CARGO_REGISTRY_TOKEN`) that the profile
   files deliberately do not carry, so a copy **destroys** them. Keep `.env` for
   secrets only and let profile config come from `.env.amd` / `.env.gpu`.

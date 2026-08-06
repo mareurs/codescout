@@ -28,7 +28,6 @@ before deciding which symbol to read.
 ```json
 { "tool": "symbols", "arguments": { "path": "src/services/auth.rs" } }
 ```
-```
 
 **`references(name_path, path)`** — find every location
 that references a specific symbol. Use this when you know the symbol and want
@@ -39,7 +38,6 @@ to trace all its callers or usages.
   "tool": "references",
   "arguments": { "name_path": "AuthService/verify_token", "path": "src/services/auth.rs" }
 }
-```
 ```
 
 Once you have located the symbol you want, switch to Focused mode to read its

@@ -92,7 +92,7 @@ P7 returned no JSON (subagent hung on wasm compile). N = 9.
   over-engineered before this data.
 - Two adjacent failures surfaced:
   - **IL3 pipe-violation** in P1, P6 (separate concern — see
-    `docs/issues/2026-05-18-il3-pipe-violation-subagent.md`).
+    `docs/issues/archive/2026-05-18-il3-pipe-violation-subagent.md`).
   - **Plugin Monitor competing with run_in_background** in P3 — both
     legitimate; documenting the choice may help, but the deeper signal is
     surface overlap.

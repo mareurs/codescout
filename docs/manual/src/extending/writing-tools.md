@@ -9,7 +9,7 @@ server. The same pattern applies to every tool in the codebase.
 ## Step 1: Create the tool struct
 
 Each tool is a unit struct. Create a new file or add to an existing tool module
-(e.g. `src/tools/file.rs` for file-related tools):
+(e.g. `src/tools/read_file.rs` for file-related tools):
 
 ```rust
 pub struct WordCount;

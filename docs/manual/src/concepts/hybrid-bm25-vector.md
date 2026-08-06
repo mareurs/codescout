@@ -32,7 +32,7 @@ search with sparse SPLADE keyword search, fused via Reciprocal Rank Fusion
   `lib:NAME` project_id namespace.
 - If the retrieval stack is unreachable, `semantic_search` returns a
   structured error with stack-inspection hints (see
-  `src/tools/semantic/search.rs` error classification).
+  `src/tools/semantic/semantic_search.rs` error classification).
 
 ## Configuration
 

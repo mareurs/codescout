@@ -174,8 +174,9 @@ Nothing refuses this — the opt-in flag is what you passed to make it legal, an
 the shrink guard is satisfied because the file grew. The surviving signal is
 `replaced_subsections` in the response and the event payload. The safe shape for
 "add a sibling" is `insert_after` targeting the last existing child heading, which
-never re-emits content it isn't changing. Filed as
-`docs/issues/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
+never re-emits content it isn't changing. Filed and fixed in `45669701`, which added the `replaced_subsections` reporting;
+the bug file is archived at
+`docs/issues/archive/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
 
 The `artifact(get, heading=)` shape *returns* a section, but
 `patch={body}` *replaces* the entire body with whatever string is passed.

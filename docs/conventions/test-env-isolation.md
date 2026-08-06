@@ -83,12 +83,16 @@ lived in `src/librarian/mod.rs::tests` and `src/server.rs::guide_hint_tests`;
 arrived here from an older link expecting to copy one, that is the bug this
 rewrite closes.
 
-Two `EnvGuard` uses remain in the tree, and neither is a counter-example:
+One `EnvGuard` use remains in the tree, and it is not a counter-example:
 
 - `src/agent/mod.rs` — server-stack gated, exempt.
-- `src/librarian/indexer.rs` — a known outstanding instance, tracked in
-  `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
-  It is debt, not a pattern to copy.
+
+The `src/librarian/indexer.rs` instance this section used to list as outstanding
+debt is gone. It was added in `109c1ead` and removed in `45669701`, which split
+the env read out into `write_embeddings_with` (taking `allow_dim_migration` as a
+parameter) plus a pure `migrate_opt_in` predicate — so those tests now set no
+environment at all. That is the shape to copy when you meet an `EnvGuard`: push
+the env read up to the caller and unit-test the decision as a pure function.
 ## Diagnostic shape
 
 The race is detectable in production CI as one of:
@@ -125,6 +129,8 @@ discipline — it is what the discipline could never cover, because
 Measured effect of the fix: `set_var` / `remove_env` occurrences in the
 default `cargo test` build went **119 → 0**.
 
-Remaining, and tracked rather than deferred:
-`src/librarian/indexer.rs` still carries an `EnvGuard`
-(`docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`).
+Nothing remains in this class. The last outstanding instance —
+`src/librarian/indexer.rs`'s `EnvGuard` — was removed in `45669701`, and the bug
+that tracked it is archived at
+`docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+The structural `#[serial]` limitation described above is permanent, not debt.
