@@ -1648,6 +1648,10 @@ mod tests {
         let ws_path = codescout_dir.join("librarian-workspace.toml");
         std::fs::write(&ws_path, "").unwrap();
 
+        // `ServerEnv::librarian` only exists with the `librarian` feature on;
+        // without the gate this helper fails to compile under
+        // `--no-default-features` / `--features local-embed`.
+        #[cfg(feature = "librarian")]
         let env = ServerEnv {
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
@@ -1656,6 +1660,8 @@ mod tests {
             },
             ..Default::default()
         };
+        #[cfg(not(feature = "librarian"))]
+        let env = ServerEnv::default();
 
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let lsp = LspManager::new_arc();

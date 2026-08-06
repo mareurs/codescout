@@ -112,6 +112,7 @@
   - [Semantic Search](tools/semantic-search.md)
     - [File-Diversity Re-Rank](tools/semantic-search-diversity.md)
   - [Library Navigation](tools/library-navigation.md)
+  - [`peer`](tools/peer.md)
   - [Git](tools/git.md)
   - [AST Analysis](tools/ast.md)
   - [Memory](tools/memory.md)

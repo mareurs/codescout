@@ -1,3 +1,8 @@
+// The whole corpus exercises `codescout::librarian`, which is gated behind the
+// `librarian` feature. Without this the file fails to compile under
+// `--no-default-features` / `--features local-embed` (CI's other two configs).
+#![cfg(feature = "librarian")]
+
 //! Tier-2 corpus for `librarian(action="link_scan")` — end-to-end over an
 //! in-memory catalog + tempdir artifact files.
 //!
