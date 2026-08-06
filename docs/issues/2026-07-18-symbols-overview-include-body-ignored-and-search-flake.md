@@ -309,10 +309,98 @@ the alternative fix is to reject/ignore-with-a-visible-hint rather than silently
 data — but the more likely intended behavior, given the parameter is caller-visible and
 generic, is to honor it.
 
-**Bug B:** Not proposed — root cause unconfirmed. Needs a controlled, scripted reproduction
-(N parallel `symbols(name=X)` calls immediately post-activation, repeated across several
-projects/runs) before a fix can be targeted. Recommend `status: open` rather than
-`investigating` until someone has bandwidth to build that harness.
+**Bug B:** Still not proposed — but **narrowed substantially by reading the search path**
+(2026-08-06), without needing the harness first.
+
+### Three silent-degradation paths, all confirmed in code
+
+`search_project_symbols` (`src/tools/symbol/symbols.rs`) wraps each language in an 8 s
+`PER_LANG_BUDGET`. Every failure mode yields *an empty vector that is indistinguishable
+from "no matches"*:
+
+1. **Budget exceeded** → `Ok(Vec::new())`, with the only signal a `tracing::warn!`. That
+   goes to the log, not to the response, so the agent cannot see it.
+2. **`get_or_start` error** → the `?` makes the task return `Err`, and the collector
+   `let Ok(Ok(symbols)) = task_result else { continue };` skips it silently.
+3. **Join error** → same `continue`.
+
+### The author already named the mechanism
+
+The comment above that budget says it outright:
+
+> Per-language hard timeout: a pathological LSP state (**silent workspace/symbol on a
+> still-indexing server**, init retry loop on a server that keeps crashing) must not hang
+> the whole tool call past the MCP 60 s ceiling. On timeout we yield an empty result for
+> that language; the tree-sitter fallback below still runs if every language produces
+> nothing.
+
+"Silent workspace/symbol on a still-indexing server" is exactly the observed symptom: a
+freshly-started server answers `workspace/symbol` with `[]` — a *valid* response meaning
+"nothing indexed yet" — and a retry after indexing completes succeeds.
+
+### The one thing that does NOT yet add up, and it is the next question
+
+There **is** a tree-sitter fallback, gated on the aggregate being empty. If it runs
+whenever total matches are zero, a 0-match on an existing symbol in a parseable file
+should have been covered by it. So either the fallback's gate is narrower than that
+comment implies, or the flake arises when **one language returns matches while another
+degrades** — a non-empty aggregate that suppresses the fallback while still being wrong.
+
+**Answered, same session — and it rules the LSP-warming story OUT.** The gate is
+`if matches.is_empty()`, where `matches` holds only symbols that already passed the
+name/kind/in-root/in-walk filters. So the fallback runs whenever *the final answer would
+be zero*, regardless of which languages degraded or how many raw symbols came back. The
+partial-success hypothesis is dead too: non-matching LSP results do not populate `matches`
+and therefore do not suppress the fallback.
+
+That is load-bearing, because it means **a 0-match result implies tree-sitter also found
+nothing** — and tree-sitter does not touch the LSP. No amount of "the server was still
+indexing" explains it.
+
+### The hypothesis that does fit, and it is a different bug class
+
+Both paths key off the same `root`, resolved once at
+`src/tools/symbol/symbols.rs:225` via
+`ctx.agent.require_project_root_for(ctx.workspace_override.as_deref())`. If that root is
+not yet the intended project at the moment of the call — the symptom is specifically
+*"immediately post-activation"* — then the LSP is queried against one tree and the
+tree-sitter walker walks the same wrong tree, and **both legitimately return nothing**. A
+retry once activation has settled then succeeds. That is the only story so far that
+explains a zero from *both* independent paths.
+
+It also has precedent in this repo: `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`
+(fixed, archived) is the same class — active-project state read before it settled on a
+shared server.
+
+### What this changes for whoever picks it up
+
+The originally-proposed harness — "N parallel `symbols(name=X)` calls immediately
+post-activation" — is still the right experiment, but instrument it for the **root**, not
+for LSP readiness: log the resolved `root` alongside each 0-match and compare it to the
+intended project. If they differ on the failing calls, the fix is in activation ordering,
+not in `symbols` at all, and the disclosure work below becomes secondary.
+
+Building an LSP-warming harness would have measured the wrong variable.
+
+### Fix direction once that is settled
+
+There is already a house convention for exactly this shape, used twice, so the disclosure
+question needs no invention:
+
+- `references.rs` sets `completeness_warning` when the LSP returns 0 references but the
+  identifier appears elsewhere by grep — *"the reference index may still be warming after
+  a reindex. Re-run, or corroborate with grep…"*;
+- `list_overview.rs` sets `"lsp": "warming"` plus a hint, and `display.rs` renders
+  `[lsp warming]`.
+
+Search mode should do the same: a zero-or-suspect result that coincided with a degraded
+language must say so in the **response**, not only in `tracing`. The harm this bug causes
+is not the retry — it is an agent concluding "this symbol does not exist" from an answer
+that actually meant "not indexed yet".
+
+**Deliberately not implemented here.** `symbols` is the most-used tool in the server, and
+the root cause is narrowed but not confirmed; patching the disclosure before knowing which
+of the paths above fires risks papering over the real one. Confirm the fallback gate first.
 
 ## Tests added (2026-07-28)
 
