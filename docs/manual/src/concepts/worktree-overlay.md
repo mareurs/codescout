@@ -1,5 +1,10 @@
 # Worktree Overlay
 
+> ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
+> crates.io; the API may change without notice. The full cohort is listed under
+> `[Unreleased]` in
+> [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
+
 A codescout session running from a linked git worktree shares the main
 checkout's artifact catalog, and forks individual artifacts only when it writes
 to them.

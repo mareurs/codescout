@@ -1,5 +1,10 @@
 # Constitution Trackers
 
+> ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
+> crates.io; the API may change without notice. The full cohort is listed under
+> `[Unreleased]` in
+> [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
+
 A tracker archetype for rules the agent must follow no matter what — enforced
 mechanically by hooks rather than by trusting prose.
 

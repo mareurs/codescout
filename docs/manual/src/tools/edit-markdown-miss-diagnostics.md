@@ -1,5 +1,10 @@
 # `edit_markdown` Miss Diagnostics
 
+> ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
+> crates.io; the API may change without notice. The full cohort is listed under
+> `[Unreleased]` in
+> [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
+
 When an `action="edit"` `old_string` fails to match, the error says *why* rather
 than only *that*.
 

@@ -1,5 +1,10 @@
 # Catalog GC &amp; Repair
 
+> ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
+> crates.io; the API may change without notice. The full cohort is listed under
+> `[Unreleased]` in
+> [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
+
 The artifact catalog tolerates files disappearing. A row whose file is gone is
 stamped, not dropped — and if the file comes back, the row does too.
 

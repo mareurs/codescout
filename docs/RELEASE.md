@@ -21,6 +21,15 @@ Full release checklist — run from `master`, never from `experiments` or featur
 # 1. Bump version in Cargo.toml
 #    Edit version = "X.Y.Z" in Cargo.toml
 
+# 1b. Drop the unreleased-cohort callouts from the manual, in the SAME commit as
+#     the version bump — otherwise the published docs tell readers a feature they
+#     can now install is unavailable. The callout is byte-identical across every
+#     page carrying it, so removal is mechanical, not a per-page judgement:
+#       grep -rl 'Unreleased — on the `experiments` branch only' docs/manual/src/
+#     Delete the five-line blockquote from each hit. Trigger is the RELEASE, not
+#     the merge to master: the callout claims "not in vX.Y.Z and not on crates.io",
+#     and both stay true on master until a version is actually published.
+
 # 2. Build release binary and verify
 cargo build --release
 cargo test
@@ -211,6 +220,9 @@ cargo test
 #      - docs/manual/src/ has a page per new subsystem, wired into SUMMARY.md
 #      - docs/manual/src/experimental/index.md does not claim the branch is empty
 #      - README.md's feature claims still match the tool surface
+#      - each new subsystem page carries the unreleased-cohort callout. These
+#        STAY through the merge and come off at release (step 1b of the Release
+#        Cycle above) — master is not crates.io.
 mcp call codescout librarian '{"action":"audit_doc_refs","emit_tracker":true}'
 
 # 5. Merge. --ff-only so git refuses rather than silently making a merge commit

@@ -1,5 +1,10 @@
 # Entry Citations (`append_entry`, `entry_cite`)
 
+> ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
+> crates.io; the API may change without notice. The full cohort is listed under
+> `[Unreleased]` in
+> [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
+
 Trackers whose entries carry monotonic ids — `F-1`, `W-7`, `T-21` — can allocate
 the next id atomically and cite each other at entry grain rather than only at
 file grain.
