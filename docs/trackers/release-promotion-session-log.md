@@ -179,8 +179,24 @@ boundaries; ids are content-addressed), the retrieval benchmark for the chunk
 floor, reranker options 1–3, the toolchain pin-vs-float call, the MCP orphan
 idle-timeout definition. The merge itself is still the user's to run.
 
-**Verify CI rather than trusting this line:** the run for `297e1074` was queued at
-writing time. `gh run list --branch experiments --limit 1`. And per
+**CI CONFIRMED: run 31107853410 on `6348dfad` — 15/15 jobs green.** The first fully-green
+run on `experiments`; `Audit Doc Refs` had been red for weeks. `Windows-gnu cross (MinGW +
+wine)` is green too.
+
+Two commits landed after that run and are verified against a fresh clone rather than only
+locally (`de4f7cc`: 0 high, 881 files, 46726 refs, 8906 broken at `med`):
+
+- `c8efc17a` — **`SymbolMissing` no longer gates.** The flap mechanism turned out to be a
+  band straddle inside one match in `resolve_file_symbol`: LSP answers and symbol absent →
+  `SymbolMissing`/high; LSP does not answer → `Unknown`/low. A single unanswered request
+  moved the exit code. `high` is now reserved for deterministic filesystem verdicts
+  (`Missing`, `FileMissing`). Nothing had asserted the old value, so the map is now pinned
+  by a test.
+- `de4f7ccd` — backlog bug archived through the librarian; the three inbound citations that
+  the archive broke were repointed by the same mechanical rule.
+
+**Still verify the current run rather than trusting this line** — there is one in flight for
+`de4f7ccd`. `gh run list --branch experiments --limit 1`. And per
 `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`, do not treat a
 single green `Audit Doc Refs` as proof — that bug is still open.
 ## Resume — round 3, written 2026-08-06 for session compaction

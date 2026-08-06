@@ -1387,6 +1387,17 @@ so it teaches nothing at the moment of writing.
 **Promote-when: fired.** At 10 datapoints with zero counter-examples, this is no longer
 an observation. The fix is a hook-side deny on `(head|tail)` with no sibling predicate in
 the pipeline, which is a strictly smaller rule than the current advisory matcher.
+
+**Refinement after 13 (same session, later):** #11–#13 were `grep -rln … | head -20`,
+`git diff … | grep -E … | head -12`, and `git status --porcelain … | grep -v "^ M"`. The
+last one is a **genuine content filter**, not a length trimmer — so the "not one was a real
+filter" claim holds for the first ten and is **not** universal. Stating that plainly because
+it is the counter-example the proposed rule has to survive, and it does: a
+predicate-free-trimmer deny would have **allowed** #13, while the current unbounded-LHS gate
+blocked it. That is the proposal working as intended — strictly less restrictive than
+today's gate on exactly the case where the pipe was legitimate. It also means the current
+gate has a real false-positive rate of its own, which the narrower rule would reduce rather
+than add to.
 ### U-34 — `edit_code action=insert` takes the ANCHOR in `symbol`, while an `anchor` param also exists
 
 **When:** 2026-08-06. Inserting a new function after an existing one.
