@@ -6,6 +6,112 @@ All notable changes to codescout are documented here.
 
 ### Added
 
+- **Worktree sessions now overlay the artifact catalog instead of forking it.**
+  A session running from a linked git worktree reads the main checkout's
+  artifacts live until it writes one. The first mutating call (`append_entry`,
+  `update`, `artifact_event`, `artifact_augment`, `link`) forks that artifact —
+  seeding a shadow row at the worktree path, a `worktree_fork` event carrying
+  the fork-time base, and a `worktree_of` lineage link. `find`/`get` dedup
+  shadow against main, annotating the winner `"overlay": true`. Fold a session
+  back with `librarian(action="merge_worktree", root=…, dry_run=true)`, which
+  applies each shadow's *delta* against its fork-time base rather than
+  overwriting the main row; `abandon=true` drops the shadows instead.
+  `delete`/`move` against a main-root artifact from a worktree session are
+  refused — act from the main checkout. `doctor`'s `worktree_scoped_row` check
+  and `fix=reseat_worktree` are now the legacy fallback, for rows with no
+  active registration.
+- **Catalog garbage collection with a grace period (schema v10).** A row whose
+  file has vanished is stamped `missing_since` rather than dropped, hidden from
+  `find` once past the grace window (listing and search only — `get` and
+  `doctor` still see it), and reconciled back to visible if the file returns.
+  `doctor` reports a `catalog_health` block (`hidden_rows`, `move_candidates`,
+  `move_candidates_detail`), where move candidates are detected by commit-hash
+  overlap between a dead row and a live one — i.e. the file was moved, not
+  deleted. Reconciliation also runs throttled and best-effort on ordinary
+  librarian calls, so a stale catalog heals without a manual pass.
+- **`doctor` gained three repair modes.** `fix="prune_missing"` batch-drops rows
+  under a dead root, `fix="rehome"` rewrites a moved root's ids while preserving
+  every child row (events, observations, links, augmentation) via a deferred-FK
+  id-rewrite, and `fix="reseat_worktree"` re-points worktree-scoped rows. All
+  three are dry-run by default and require `confirm=true` to write.
+- **`artifact(action="append_entry")` — atomic entry allocation for monotonic-ID
+  trackers.** Assigns the next `<id_prefix>-<n>` from the live maximum across
+  both the augmentation's `entry_collection` rows *and* the ids the markdown
+  body already claims, so a body that ran ahead of params cannot reissue an id
+  (the response carries a `warning` when params lags). Replaces the
+  read-then-write dance for F-N / W-N / T-N logs.
+- **Entry-grain citations (`entry_cite`, schema v9).** Artifacts gained a lazy,
+  deduped, immutable `slug`, and entries can cite other entries: pass `cites`
+  to `append_entry` with 16-hex artifact ids, `<slug>:<local>` entry ids, or
+  unique rel_paths, and the edges are created atomically — an unresolvable or
+  ambiguous ref aborts the whole call rather than guessing. `artifact(action=
+  "get", include_links=true)` surfaces them. Not supported from a worktree
+  checkout.
+- **`librarian(action="link_scan")` — derive citation edges from prose.** Parses
+  artifact bodies, resolves citation tokens against their defining headings, and
+  materializes or prunes scanner-owned `rel="cites"` edges. Ambiguous tokens are
+  reported, never guessed. `write=false` (the default) reports; `write=true`
+  applies. Idempotent, and the repair path after moves or reindex — the catalog's
+  abs_path pre-clean cascade-drops a moved artifact's links, and a re-scan heals
+  them. First live run on this repo: 755 artifacts, 430 edges from zero.
+- **`artifact(action="graft")` — merge one artifact into another.** Re-points the
+  source's events, observations and links onto the destination, merges
+  augmentation params with collision renumbering, flags near-duplicate entries
+  for review, and deletes the source last.
+- **Constitution trackers and `codescout constitution-check`.** A new tracker
+  archetype holds project rules with optional path scoping. The CLI subcommand
+  is a read-only, fast query for hook consumption: with `--path` it returns the
+  rules matching that path (for a `PreToolUse` hook), without it the global
+  path-less rules (for `UserPromptSubmit`). Always exits 0 and prints `[]` on
+  any internal error, so a hook can never block on it.
+- **`edit_markdown` now explains why an edit missed.** A failed `old_string`
+  match returns a tiered diagnostic instead of a bare miss: nearest-match
+  similarity scoring, whitespace and invisible-character classification rendered
+  visibly, and detection of whether the target line sits inside a fenced code
+  block. The hint adapts to which tier fired, and survives into `body_edits` on
+  augmented artifacts. Batch edits also gained overlap detection and an
+  end-to-start apply engine, so a multi-section batch cannot corrupt its own
+  later offsets.
+- **Opt-in startup dotenv, so the MCP launcher needs no env injection.** At
+  startup codescout loads `$CODESCOUT_ENV_FILE`, or else
+  `<global_config_dir>/.env` (e.g. `~/.config/codescout/.env`). A variable
+  already present in the process environment always wins over the file. A
+  missing default path is a silent no-op; a missing *explicit*
+  `$CODESCOUT_ENV_FILE` is a surfaced warning. The current working directory is
+  never read — a user-scoped server must not absorb an arbitrary repo's `.env`.
+- **`get_guide("project-activation-bootstrap")`, auto-injected on activate.** A
+  main-agent exploration protocol (load project memories and the open-bug ledger
+  before exploring; route lookups by what you already know; verify at the bytes)
+  that arrives with the first `workspace(action="activate")` of a session rather
+  than waiting to be asked for.
+- **`[ignored_paths] force_include` in `.codescout/project.toml`.** A list of
+  globs the librarian indexer walks even though the repo's ignore files exclude
+  them — for a `docs/trackers/` tracked only on a local branch. The
+  supplemental walk is scoped to each glob's literal directory prefix rather
+  than re-walking the repo with ignores disabled, and is best-effort: an absent
+  or unparseable config resolves to no force-includes, never an error.
+- **`librarian(action="reindex", reembed=true)`.** Content that had not changed
+  was previously never re-embedded, so enabling embeddings or switching
+  model/backend left the corpus silently un-vectorized. `reembed` requeues it,
+  independent of `force`. The response now also reports `embedded` and an
+  `embed_note`, because `unchanged: N` alone read identically whether N files
+  needed no work or N files were skipped by mistake — which is exactly how the
+  no-op stayed invisible.
+- **A minimum chunk size for AST-split code (`AST_CHUNK_MIN`, 250 chars).** Inner-node
+  decomposition emitted one embedding per declaration however small it was; on a
+  real Kotlin corpus 5,133 of 43,582 chunks were single lines. Runs of adjacent,
+  contiguous, undersized declarations now coalesce into one chunk. Only
+  contiguous chunks merge, which keeps reconstruction byte-exact, and gap chunks
+  are excluded so a container's declarations keep their own metadata headers.
+  **Existing semantic indexes chunk differently after this change and should be
+  rebuilt.**
+- **Per-project index lock**, so two concurrent index builds on one project can
+  no longer interleave writes.
+- **Embed batch size is discovered from the sparse backend's `/info`** instead of
+  being assumed, and sub-batches are pipelined order-preservingly.
+  `CODESCOUT_EMBED_BATCH` overrides it.
+- **Opt-in `artifact_vec` dimension migration**, for switching to an embedding
+  model with a different vector width without discarding the catalog.
 - **`grep` gained ripgrep-style flags and modes.** `ignore_case`, `whole_word`,
   `glob`, and `include_hidden` params; `mode="files"` for ranked per-file
   match counts instead of line-level hits; hits carry their enclosing symbol
@@ -32,6 +138,25 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **Path parameters are aliased consistently across every tool.** `file_path`
+  works wherever `path` does, and vice versa; a wrong-but-obvious param name is
+  repaired and the call proceeds, with the hint naming the canonical form. The
+  same repair-and-continue treatment covers inverted filter-AST leaves — the
+  `{"eq": {"field": …, "value": …}}` shape is accepted and corrected rather than
+  rejected.
+- **The IL3 shell gate parses shell structure instead of matching raw text.** The
+  unbounded-LHS-piped-to-a-trimmer check no longer trips on a pipe character
+  inside a heredoc body or a quoted string.
+- **`symbols` advertises body availability in overview mode**, not only in search
+  results, so the follow-up call that fetches a body is discoverable from the
+  first response.
+- **`memory(action="read", sections=…)` follows the memory's shallowest heading
+  level** rather than assuming `###`, so section filtering works on memories
+  written with `##` sections.
+- **Embedding sub-batch inflight defaults to 1**, not 4 — the higher default
+  saturated modest backends and cost more in retries than it won in throughput.
+- **`usage` tags errors with a tool-scoped `err_family`**, so recurring failure
+  shapes are aggregatable per tool rather than a flat error string.
 - **Dense embeddings are now always OpenAI-compatible.** Removed the
   `DenseProtocol::Tei` path and the `CODESCOUT_EMBEDDER_PROTOCOL` env var —
   every shipped profile (cpu/gpu/amd) already used the OpenAI-compatible
@@ -48,6 +173,32 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **`librarian(action="context", anchor_id=…)` no longer starves the anchor's
+  neighbours.** The packing loop's "always include the first item" guard
+  admitted an oversized anchor unconditionally and exhausted the token budget
+  before any neighbour was considered. Anchor mode now reserves half the budget
+  for neighbours and truncates the anchor's own section when it exceeds the
+  reserve; topic-search behaviour is untouched.
+- **`link_scan` no longer swallows every other tracker entry.** It enabled
+  pulldown_cmark's `ENABLE_YAML_STYLE_METADATA_BLOCKS`, which pairs *any* two
+  bare `---` lines as a metadata block — and session-log trackers separate
+  entries with a bare `---`, so roughly every other entry heading was never
+  registered as a link target. Frontmatter is now skipped by an explicit
+  byte-offset guard instead. The post-fix rescan surfaced 16 previously
+  invisible edges and pruned 8 stale ones.
+- **`edit_code` with `action="replace"` preserves the symbol's doc comments**
+  instead of dropping them with the rest of the lead region.
+- **`edit_code` reindent no longer shifts the contents of multi-line string
+  literals**, and samples its indentation base from a validated non-blank line.
+  An unclosed `"` at end of line is now treated as opening a multi-line literal.
+- **Tool state is never indexed.** Internal state files no longer enter the
+  semantic index as if they were project content.
+- **Disk-backed catalog connections set `busy_timeout`**, so a concurrent writer
+  yields instead of failing the call outright.
+- **The LSP mux dedups `cached_capabilities` by registration id**, fixing
+  duplicate capability entries after repeated client registration.
+- **Test lock files no longer leak into the per-user runtime directory**, where
+  they outlived the test run and confused later sessions.
 - **Memory recall no longer makes a wasted sparse-embedding HTTP call.**
   `HttpDenseEmbedder` (memory / dense-only retrieval) now hits only the
   dense endpoint via `EmbedderHttp::dense_query`, instead of computing a
@@ -82,6 +233,16 @@ All notable changes to codescout are documented here.
 
 ### Docs
 
+- **Seven new manual pages** for subsystems that had none: worktree overlay,
+  catalog GC &amp; repair, entry citations, `link_scan`, `artifact(action="graft")`,
+  constitution trackers, and `edit_markdown` miss diagnostics. Also corrected
+  `concepts/librarian-embedded.md`, which still advertised "15 librarian tools"
+  including a standalone `workspace_state_at` — there are five, and
+  `workspace_state_at` folded into `librarian(action="workspace_state_at")`.
+- **Three new ADRs**: `docs/adrs/2026-07-10-repair-and-continue-input-handling.md`
+  (why a malformed-but-unambiguous tool input is repaired and continued rather
+  than rejected), `docs/adrs/2026-07-20-artifact-vec-shared-catalog-boundary.md`,
+  and `docs/adrs/2026-07-25-embedding-transport-boundary.md`.
 - **`CLAUDE.md` cut from 42KB to 12.5KB** (677→184 lines), relocating Git
   release/ship procedures to `docs/RELEASE.md`, companion-plugin hook
   inventory to `docs/architecture/companion-plugin.md`, and prompt-surface
