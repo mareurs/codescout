@@ -139,6 +139,26 @@ below). Nothing re-reads `archive/`, so this step has to look there explicitly �
 Step 5 is the drift-detection step — `audit_doc_refs` is the canonical lint for stale
 path / link / line references across all markdown surfaces.
 
+**Run the audit against a fresh clone before believing a local green.** The gate asks
+"does this path exist", and your working tree has things a clean checkout does not:
+worktrees, untracked runtime state (`.codescout/private-memories/`, `.claude/worktrees/`),
+`.git/worktrees/`, build output. A ref naming any of those *resolves* locally and so
+produces no finding at all — the local run cannot see the class, at any severity, which is
+worse than reporting it below the gate. Measured 2026-08-06: six consecutive local runs
+exited 0 while CI reported four `high` findings.
+
+```bash
+git clone --quiet --no-hardlinks --depth 1 "file://$PWD" /tmp/ci-proxy
+./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high \
+  --json --project /tmp/ci-proxy
+```
+
+One command and ~30 seconds, versus a ~12-minute CI round-trip per attempt. Two things to
+check in the output, not just the exit code: `n_refs_found` should be in the tens of
+thousands (a tiny number means the scan did not find the corpus), and the `med` finding
+count should stay large — if broken-ref *reporting* falls along with the `high` count, that
+is an extractor regression wearing the costume of a docs improvement.
+
 ### Before cherry-pick: mutation-test the diff (recommended for load-bearing logic)
 
 Static tests + clippy prove code compiles and passes the assertions you wrote — they say
@@ -224,6 +244,9 @@ cargo test
 #        STAY through the merge and come off at release (step 1b of the Release
 #        Cycle above) — master is not crates.io.
 mcp call codescout librarian '{"action":"audit_doc_refs","emit_tracker":true}'
+#    Then re-run it against a fresh clone before trusting the result — see
+#    "Run the audit against a fresh clone" under Standard Ship Sequence for why a
+#    local green can be blind to a whole class of finding.
 
 # 5. Merge. --ff-only so git refuses rather than silently making a merge commit
 #    if ancestry changed between step 1 and here.

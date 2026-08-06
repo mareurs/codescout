@@ -862,6 +862,48 @@ size is the estimate you should have had.*
 
 **Status:** validated — 156 sites, 0 remaining, diff shape asserted, one semantic
 contradiction recovered that the mechanical rule could not have found.
+## W-7 — Verify a filesystem-dependent gate against a fresh clone, not the working tree
+
+**Observed:** 2026-08-06, round 5. `Audit Doc Refs` went red in CI on a tree where the
+local gate had exited 0 six times in a row.
+
+**Pattern:** for any gate whose verdict depends on *what exists on disk*, verify against
+`git clone --depth 1 file://$PWD /tmp/x` and scan that, with the same binary. A working
+tree is strictly more populated than a clean checkout — untracked runtime state, worktrees,
+build output, tool caches — so every "does this path exist" check is optimistic locally,
+and optimistic in the direction that produces a false pass.
+
+**Counterfactual, and it is sharper than the usual F-5 skew:** the four CI findings were
+`.git/worktrees/`, `.claude/worktrees/` and `.codescout/private-memories/`. Locally those
+directories exist, so the refs **resolved** — they produced no finding *at all*. The local
+run could not report them even in principle, at any severity. This is not "local is a
+weaker gate"; it is "local cannot see this class". Six clean local runs were six
+measurements of the wrong tree.
+
+The clone cost one command and ~30 seconds, and it converted the next push from a guess
+into proof: 881 files, 46673 refs, **0 high, EXIT=0**, with 8882 broken refs still
+reported at `med`. Without it the alternative was another ~12-minute CI round-trip per
+attempt, and one had already been spent.
+
+**The second lesson, which is about the test rather than the gate.** The
+`gitignored_path` cap *had* a passing test. It asserted `.worktrees/my-feature` — a file
+*inside* an ignored directory. Docs name the directory itself, `.claude/worktrees/`, and
+the matcher reads the final path component, which a trailing separator leaves empty. So
+every directory-shaped ref escaped the cap while the suite stayed green. The fixture shape
+was the blind spot, not the assertion: **when a rule is about paths, cover both `foo` and
+`foo/`** — they are the same location and they are not the same string.
+
+**Impact:** high — caught a whole silently-escaping class in the cap, and established a
+verification step that removes CI round-trips from the loop for any filesystem-dependent
+gate.
+
+**Promote-when:** immediately for the project-shaped half — the fresh-clone check belongs
+in `docs/RELEASE.md` beside the `Audit Doc Refs` step, since it is this repo's gate. The
+craft-shaped half (`cover foo and foo/`; verify environment-dependent gates against a
+clean checkout) is **R-58** in `docs/trackers/reconnaissance-patterns.md`.
+
+**Status:** validated — one CI failure diagnosed, reproduced locally, fixed, and the fix
+proven against a CI-equivalent tree before pushing.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
