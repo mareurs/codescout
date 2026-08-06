@@ -169,6 +169,17 @@ severity_reason == "gitignored_path"  →  review by hand
 Raising `fail_on` to `med` is not viable — roughly 8.4k pre-existing broken refs already sit
 at `med` by design.
 
+**Also verified through the live MCP surface, 2026-08-06 after a release rebuild.** Worth
+recording separately from the CLI run above, because this session established that a source
+fix is inert in a stale MCP binary — the sibling bug
+`docs/issues/archive/2026-08-06-artifact-create-bug-defaults-to-invalid-draft-status.md`
+reproduced itself for exactly that reason. Same probe, same temporarily-restored `/.github/`
+rule, run through `librarian(action="audit_doc_refs")` rather than the binary directly:
+`.github/workflows/nope-does-not-exist.yml` reports `high` / `policy_default`, and
+`.codescout/private-memories/nope.md` stays `med` / `gitignored_path`. Binary mtime alone
+would not have shown this — it cannot prove which binary the running server actually
+executes.
+
 ## Resume
 
 Fixed and verified, including end-to-end through a real binary rather than the test suite
