@@ -2207,14 +2207,14 @@ mod tests {
             .filter(|t| t.pinnable())
             .map(|t| t.name())
             .collect();
-        for n in [
-            "read_file",
-            "edit_file",
-            "memory",
-            "grep",
-            "artifact",
-            "librarian",
-        ] {
+        for n in ["read_file", "edit_file", "memory", "grep"] {
+            assert!(pinnable.contains(n), "{n} must be pinnable");
+        }
+        // `artifact` / `librarian` are only registered with the feature on, so
+        // asserting them unconditionally fails the `--no-default-features` and
+        // `--features local-embed` configs.
+        #[cfg(feature = "librarian")]
+        for n in ["artifact", "librarian"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
         for n in ["workspace", "get_guide", "get_usage_stats"] {
@@ -2732,6 +2732,8 @@ mod tests {
         );
     }
 
+    // `artifact` only registers with the librarian feature on.
+    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_find_honors_workspace_pin() {
         // BUG (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md): the
@@ -2836,6 +2838,8 @@ mod tests {
         );
     }
 
+    // `artifact` only registers with the librarian feature on.
+    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_create_honors_workspace_pin() {
         // Whole-family pin (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md):

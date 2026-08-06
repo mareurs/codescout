@@ -18,6 +18,14 @@ severity: low
 
 # BUG: audit_doc_refs flags JSON/config pointers as missing file paths with severity high
 
+> **2026-08-06 — wider than JSON pointers, and now failing CI.** The same extractor
+> also misclassifies `Type/method` (codescout's own `name_path` symbol syntax), GitHub
+> `org/repo` slugs, and ellipsis-elided external paths (`…/rocks/v492/LOCK`) as local
+> file paths at severity `high`. All 18 high-severity findings on `experiments` are
+> false positives of this class, and the `audit-doc-refs` CI job is red on them (it has
+> no `continue-on-error`). Token inventory, per-ref classification and the proposed
+> extractor + severity fix:
+> `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
 ## Summary
 
 `looks_like_path` classifies any relative multi-segment slash token as a filesystem
@@ -184,4 +192,3 @@ finding remains.
 - `docs/issues/archive/2026-05-17-audit-doc-refs-basename-false-positives.md` — the
   no-slash sibling, fixed
 - `docs/trackers/retrieval-benchmark.md:228` — the document that surfaced it
-

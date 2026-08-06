@@ -173,6 +173,39 @@ let target = chunk_size.min(AST_CHUNK_TARGET);
    **Verdict:** rejected — the corpus mean is 1.27×. 5.53× is a tail case. Do not
    quote the single-file number as typical.
 
+> **2026-08-06 — candidate 1 is IMPLEMENTED on `experiments`, but this file stays
+> `open`: the benchmark validation it requires has NOT been run.**
+>
+> `ca442498` (`experiments`) adds `AST_CHUNK_MIN = 250` and `coalesce_small_chunks`,
+> which is candidate 1 as written here — a floor with sibling merge, container header
+> preserved. Code gate is green (`cargo fmt --check`, `cargo clippy -- -D warnings`,
+> `cargo test` across all three CI feature configs) with seven tests, and both
+> behaviours are mutation-verified: dropping the gap exclusion kills 4 tests,
+> `AST_CHUNK_MIN = 0` kills the end-to-end coalesce test.
+>
+> **What is still owed, and why the status is not `fixed`:** this file's own Fix
+> section requires validation against
+> `docs/research/2026-05-06-retrieval-stack-benchmark.md` before landing, on the
+> grounds that small chunks were chosen deliberately for precision and a floor
+> trades recall sharpness for cost — "must be measured, not assumed". That
+> measurement has not happened. The code proves the floor works as specified; it
+> does not prove the specification was a good trade.
+>
+> It also jumped the ordering decision recorded in *Resume* — the throughput work
+> was to land first because it leaves vectors byte-identical, whereas this change
+> invalidates the corpus. That sequencing was not honoured.
+>
+> Candidate 3 (container-header / leading-gap overlap) turned out to be a distinct,
+> pre-existing defect and is now tracked on its own:
+> `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`. The
+> coalescing change closed only the half where merging *swallowed* that gap and lost
+> the declaration's metadata header; the duplication itself is untouched.
+>
+> **To close this file:** run the retrieval benchmark against a corpus rebuilt at
+> `ca442498` and compare scores to the pinned baseline. If recall holds, flip to
+> `fixed`, label the SHA `experiments`, and note the master-side SHA is still owed
+> after cherry-pick. If recall drops, `AST_CHUNK_MIN` is the tuning knob — or
+> candidate 2 (skip trivial declarations) is the narrower alternative.
 ## Fix
 
 Not yet implemented — needs a decision, and re-tuning invalidates the whole

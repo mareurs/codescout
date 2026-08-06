@@ -11,6 +11,19 @@ kind: bug
 
 # BUG: audit_doc_refs reads `Type/method` and org/repo slugs as local file paths
 
+> **KNOWN — same root cause as the earlier filing
+> `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`
+> ("audit_doc_refs flags JSON/config pointers as missing file paths with severity
+> high", still open).** That file has priority; this one was opened during a
+> merge-readiness pass before its ledger neighbour was consulted — a capture-discipline
+> miss, recorded rather than hidden.
+>
+> Kept as a separate file because it adds three token classes the earlier one does not
+> cover (`Type/method` `name_path` syntax, GitHub org/repo slugs, ellipsis-elided
+> external paths) plus the evidence that the CI gate is *currently failing* on them.
+> Fix them together: it is one extractor and one severity policy. Whoever picks this up
+> should read both files and can fold this one in via
+> `artifact(action="graft", from_id="56b725405a9c36d1", into_id="21f6d21b3bf82c30")`.
 ## Summary
 
 `audit_doc_refs` classifies any `A/B` token in prose as a `file_path` ref. That
