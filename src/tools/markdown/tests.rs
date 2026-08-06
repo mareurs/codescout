@@ -1844,12 +1844,12 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
     assert!(
         rendered.contains("lines  @file_"),
         "MAP header must show `<n> lines  <file_id>`, got first 200 chars: {}",
-        &rendered.chars().take(200).collect::<String>()
+        rendered.chars().take(200).collect::<String>()
     );
     assert!(
         rendered.contains("# codescout  L1"),
         "MAP must render top heading with line number, got: {}",
-        &rendered.chars().take(500).collect::<String>()
+        rendered.chars().take(500).collect::<String>()
     );
     assert!(
         rendered.contains("  ### "),
