@@ -1495,3 +1495,56 @@ should be `PreToolUse` and deny, not `PostToolUse` and hint.
 
 **Status:** open — needs a decision on whether BUG-021 is a live hazard or a stale
 precaution before choosing between documenting the carve-out and enforcing it.
+
+### U-37 — `edit_file(replace_all=true)` right after an insert rewrote the line inside the helper being introduced, making it call itself
+
+**Observed:** 2026-08-06, de-saturating `scan_meta.degraded` in
+`src/librarian/tools/audit_doc_refs/resolver.rs`.
+
+**Sequence, and the order is the whole bug:**
+
+1. `edit_code(action="insert")` added a helper whose body was
+   `ctx.degraded_languages.borrow_mut().push(lang.to_string());` guarded by an
+   `if lang != "unknown"`.
+2. `edit_file(old_string="ctx.degraded_languages.borrow_mut().push(lang.to_string());",
+   new_string="note_degraded(ctx, lang);", replace_all=true)` to convert the two real
+   call sites.
+
+Step 2 matched **three** occurrences, not two — the third being the line inside the helper
+from step 1. Result:
+
+```rust
+fn note_degraded(ctx: &ResolveCtx<'_>, lang: &str) {
+    if lang != "unknown" {
+        note_degraded(ctx, lang);   // <- unbounded recursion
+    }
+}
+```
+
+**Got:** `cargo check` **passed** — infinite recursion is not a compile error, and clippy's
+`only_used_in_recursion` did not fire on this shape either. It surfaced as
+`has overflowed its stack / fatal runtime error: stack overflow, aborting` (SIGABRT) in
+`resolver_unknown_when_lsp_offline`, i.e. only because a test happened to exercise that
+path.
+
+**Severity:** med — no wrong code shipped, but the failure mode is a hard process abort and
+the only thing that caught it was test coverage on the affected branch. A helper introduced
+on a path with no test would have compiled, passed clippy, and recursed in production.
+
+**Root cause:** `replace_all` is scoped to the file *as it is at that moment*, which
+includes anything the previous call inserted. "Replace every call site" and "the helper
+contains a copy of the call site" are the same string, and nothing distinguishes them.
+
+**Fix idea, in order of preference:**
+
+1. **Do the `replace_all` FIRST, then insert the helper.** The helper cannot be caught by a
+   replace that already ran. Zero tooling changes; purely ordering.
+2. Write the helper body differently from the call sites it replaces — here, using a local
+   binding or a different receiver expression would have made the strings non-identical.
+3. Tool-side: `edit_file` could report the **match count** on `replace_all` ("replaced 3
+   occurrences"), which would have made this visible immediately. It currently returns a
+   bare `"ok"`, so the caller never learns the arity of what they just did. That is the
+   cheap generalisable fix, and it helps every `replace_all` caller, not just this shape.
+
+**Status:** open — (1) and (2) are discipline and cost nothing; (3) is a small tool change
+worth doing because a silent arity is what turned a two-site edit into a three-site one.

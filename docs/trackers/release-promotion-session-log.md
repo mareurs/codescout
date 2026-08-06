@@ -23,6 +23,109 @@ tags:
 > **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
 > Resume block below. Produced F-2, F-3, W-1.
 
+## Resume — round 6, written 2026-08-06 for session compaction
+
+**Read this one.** Rounds 2–5 are superseded where they disagree; round 5's *"two decisions
+left"* is closed (both taken), and its CI table is extended below.
+
+### Git state (verified, not remembered)
+
+- `experiments` at **`fcb6598f`**, tree clean, nothing unpushed.
+- **426 ahead / 0 behind `master`**, `merge-base --is-ancestor` confirms **fast-forward
+  promotion is available**. Use `docs/RELEASE.md` § *Large-Cohort Promotion (Fast-Forward)*,
+  not the Standard Ship Sequence.
+- Local gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  **3504 tests passed / 0 failed / 44 ignored**. Audit: `EXIT=0`, 0 high findings.
+
+### CI — three confirmed green runs, two QUEUED at writing time
+
+| run | SHA | result |
+|---|---|---|
+| 31107853410 | `6348dfad` | 15/15 |
+| 31108238052 | `db4b1968` | 15/15 |
+| 31109236437 | `de4f7ccd` | 15/15 |
+| 31122588792 | `e58ad463` | **queued** |
+| 31122862704 | `fcb6598f` | **queued** |
+
+**Do not report a verdict for the last two from this document — GitHub's runners were
+backed up and neither had started.** `gh run list --branch experiments --limit 2`.
+The three green runs predate the round-6 code changes, so the queued pair is the first CI
+exposure for the bug-status default, the `degraded` fix and the kotlin NMT flag.
+
+### What round 6 changed
+
+Triage of the open-bug ledger first exposed that **the ledger itself was under-reporting**:
+`find(kind="bug", status="open")` returned 5 where the correct filter returns **8**. Two
+independent causes, both fixed:
+
+- `artifact(create, kind="bug")` defaulted `status` to `draft` — not in the bug vocabulary
+  at all (`open|investigating|fixed|mitigated|wontfix|zombie`); `create.rs` read
+  `unwrap_or("draft")` with no reference to `kind`. Now resolved per kind, and an
+  out-of-vocabulary bug status is refused with the six listed. Filed as
+  `docs/issues/2026-08-06-artifact-create-bug-defaults-to-invalid-draft-status.md`.
+- The **documented query** names one of two non-terminal states, so any bug marked
+  `investigating` — what the guide instructs you to set while working it — is invisible.
+  Fixed at all three prescribing sites, including
+  `src/prompts/guides/project-activation-bootstrap.md`, which is auto-injected on
+  activation. The two sites that merely *explain* the filter were left alone.
+
+Then three fixes:
+
+- **`scan_meta.degraded` de-saturated.** It was `true` on every run because
+  `detect_language` returns `"unknown"` for any extension outside its six and that counted
+  as degradation. Measured `true`/`["unknown"]` → **`false`/`[]`** on the same tree. This
+  was the prerequisite that made the non-determinism bug's own earlier proposal ("exit
+  non-zero when degraded") unusable — it would have failed all fifteen green CI jobs.
+- **kotlin-lsp gets `-XX:NativeMemoryTracking=summary`** (item 3 of that bug). Inserted
+  *before* `-Xmx2g` so codescout's cap stays the final one; the test asserts the **ordering**,
+  because an edit appending after `-Xmx` would silently reopen the original bug.
+- **`SymbolMissing` out of the gating band** (`c8efc17a`, round 5) — see round 5.
+
+### One bug advanced with NO code change, deliberately — see W-8
+
+The `symbols` search flake's filed hypothesis (LSP warming) is **refuted**. The tree-sitter
+fallback is gated on `matches.is_empty()`, so a 0-match implies tree-sitter found nothing
+either, and tree-sitter never touches the LSP. The surviving hypothesis is a `root`
+resolution race at activation (`require_project_root_for`, `symbols.rs:225`) — a different
+bug class, with precedent in the archived shared-server active-project race.
+
+**If you pick that up: instrument the resolved `root` per 0-match, not LSP readiness.** The
+harness as originally specified measures the wrong variable.
+
+### Open bugs — use the CORRECT query
+
+```
+artifact(action="find", kind="bug",
+         filter={"status": {"in": ["open", "investigating"]}})
+```
+
+Blocked on a **user decision or measurement**, not on work:
+
+- reranker 42× latency — needs live-arm measurement and a product call;
+- AST chunker minimum chunk size — its own precondition demands the retrieval benchmark
+  first ("must be measured, not assumed");
+- MCP orphans — needs an idle-timeout value and a definition of "idle";
+- kotlin item 1 — cherry-pick to protected `master`;
+- researcher rerank score scale — likely sibling-repo scope, unverified.
+
+### Do NOT re-do
+
+Everything in round 4's list still holds, plus:
+
+- **Do not trust `find(kind="bug", status="open")`** — it hides `investigating`.
+- **Do not build the symbols-flake harness around LSP readiness** — refuted, W-8.
+- **Do not `replace_all` a line right after inserting a helper containing it** — U-37: it
+  rewrote the helper's own body into a self-call, compiled clean, and surfaced only as a
+  stack-overflow SIGABRT in one test.
+- **Do not gate on `scan_meta.degraded` without checking what it contains** — that mistake
+  is already recorded once in that bug file's history.
+
+### Still owed
+
+Unchanged: `index(force=true)` rebuild (ast-chunker moved chunk boundaries; ids are
+content-addressed — ~2h, not started, nobody asked), the retrieval benchmark for the chunk
+floor, reranker options 1–3, the toolchain pin-vs-float policy call, and the kotlin bug's
+items 1/5/6. The merge itself is the user's to run.
 ## Resume — round 4, written 2026-08-06 for session compaction
 > **Update, same day — round 5. Both decisions below were TAKEN, and
 > `Audit Doc Refs` now reports 0 high findings locally (`EXIT=0`).** The section
@@ -551,6 +654,7 @@ Ranked by what to do first.
 | W-2 | 2026-08-06 | high | If a truncated list feeds a pass/fail verdict, sort by the verdict's key before truncating | Would have "fixed all 18" and stayed red with no visible cause; the 18 was itself a windowed miscount of a >50 population | validated |
 | W-3 | 2026-08-06 | high | Read the product code before believing a platform-specific red test | Relaxing `derive_dead_roots`' guard to green the test makes a prune `WHERE` match every row — data loss shipped to fix a test | validated |
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
+| W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
 | W-5 | 2026-08-06 | high | Invoke the tool under test; verify the binary is newer than its sources | Reading it had missed all five: a SIGABRT, a path escape resolving `/etc/passwd:12` as Resolved, a false premise about which half of the corpus was scanned, an unused field that already was the fix, and mdBook link semantics | validated |
 
@@ -934,6 +1038,59 @@ clean checkout) is **R-58** in `docs/trackers/reconnaissance-patterns.md`.
 
 **Status:** validated — one CI failure diagnosed, reproduced locally, fixed, and the fix
 proven against a CI-equivalent tree before pushing.
+## W-8 — Reading the fallback gate eliminated the hypothesis a whole harness was going to measure
+
+**Observed:** 2026-08-06, round 6, working the open-bug ledger. The `symbols` search flake
+(`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`) was
+filed with an explicit instruction: *"Not proposed — root cause unconfirmed. Needs a
+controlled, scripted reproduction (N parallel `symbols(name=X)` calls immediately
+post-activation, repeated across several projects/runs) before a fix can be targeted."*
+
+**Pattern:** when a bug names a suspected mechanism, find the **fallback or guard that
+would mask that mechanism** and read its condition *before* costing a reproduction. An
+unreachable hypothesis is cheaper to eliminate than to measure.
+
+**Counterfactual.** Everything pointed at LSP warming, and not weakly:
+
+- the source's own comment names the exact state — *"a pathological LSP state (silent
+  `workspace/symbol` on a still-indexing server …)"*;
+- three degradation paths really are invisible to the agent: budget-exceeded yields
+  `Ok(Vec::new())` with only a `tracing::warn!`, and both a task error and a join error are
+  silently `continue`d;
+- the symptom (0-match, succeeds on retry) is textbook cold-index behaviour.
+
+One line ended it. The tree-sitter fallback is gated on `matches.is_empty()` — the
+aggregate of *already-filtered* matches — so it runs whenever the final answer would be
+zero, no matter which languages degraded, and non-matching LSP results never enter
+`matches` and so cannot suppress it. **A 0-match therefore implies tree-sitter found
+nothing either, and tree-sitter never touches the LSP.** Server readiness cannot produce
+this symptom at all.
+
+So the harness as specified — parallel calls instrumented for LSP readiness — would have
+run, produced a flake, and measured the wrong variable. The surviving hypothesis is a
+different bug class entirely: both paths key off one `root` from
+`require_project_root_for` (`symbols.rs:225`), and a root not yet settled post-activation
+makes the LSP query one tree while the walker walks the same wrong tree — both correctly
+returning nothing. Kin to the archived shared-server active-project race, which is the
+same class already seen and fixed here once.
+
+**Impact:** high — avoided building a harness around a refuted mechanism, and redirected
+the instrument from LSP readiness to the resolved `root`, which is a one-line log rather
+than a parallel-call rig.
+
+**The restraint is part of the win.** No code change was made. `symbols` is the most-used
+tool in the server, the cause is narrowed but *not* confirmed, and the bug's own rule is
+"not proposed until confirmed". Patching the disclosure now would have papered over
+whichever path actually fires. What did land is the diagnosis plus the house convention to
+mirror once it is confirmed (`references.rs`'s `completeness_warning`, `list_overview`'s
+`"lsp": "warming"`) — so the next session inherits the answer and the pattern, not a guess.
+
+**Promote-when:** a second bug where reading a guard refutes the filed hypothesis. Captured
+as **R-59**; craft-shaped, so it graduates to the reconnaissance SKILL.md rather than to
+project memory.
+
+**Status:** validated — hypothesis refuted from code, replacement hypothesis named with its
+precedent, and the experiment redesigned before any of it was built.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
