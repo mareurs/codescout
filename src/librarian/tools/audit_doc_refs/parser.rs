@@ -17,7 +17,9 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
     for (event, span) in parser {
         let line = byte_offset_to_line(text, span.start);
         match event {
-            Event::Code(content) => {
+            // A span that renders a code span literally is showing what a
+            // reference looks like, not making one. See `is_markup_display`.
+            Event::Code(content) if !is_markup_display(content.as_ref()) => {
                 for raw in tokenize_code_span(content.as_ref()) {
                     if let Some(kind) = classify(raw, true) {
                         candidates.push(RefCandidate {
@@ -130,6 +132,22 @@ fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
     s.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | ',' | ';' | '`'))
         .map(trim_token_edges)
         .filter(|t| !t.is_empty())
+}
+/// Whether a code span is *displaying markup* rather than making a reference.
+///
+/// A single-backtick span cannot contain a backtick, so any backtick inside the
+/// span's content proves the author reached for multi-backtick delimiters —
+/// `` `src/foo.py` `` — whose only purpose is to render a code span literally.
+/// That is an illustration of what a reference looks like, not a reference. The
+/// audit's own manual page is the motivating case: its "Reference kinds" table
+/// shows one example ref per `ref_kind`, and every one of them was reported as
+/// drift against this repo.
+///
+/// Skipped outright rather than severity-capped, for the same reason
+/// `is_placeholder` skips a placeholder link target: it is not a citation at
+/// all, so there is nothing to report at any band.
+fn is_markup_display(content: &str) -> bool {
+    content.contains('`')
 }
 
 /// Trim trailing sentence punctuation (period, brackets, braces) that often
@@ -312,6 +330,27 @@ mod tests {
         assert_eq!(cands[0].raw_ref, "src/foo.py");
         assert_eq!(cands[0].ref_kind, RefKind::FilePath);
         assert_eq!(cands[0].position, RefPosition::InlineSpan);
+    }
+    /// The audit's own manual page documents each `ref_kind` with one example ref,
+    /// written with double-backtick delimiters so the inner backticks render. Every
+    /// one of those examples was reported as drift against this repo — the tool
+    /// flagging its own documentation. A span whose content carries a backtick is
+    /// markup being displayed, not a reference being made.
+    #[test]
+    fn parser_skips_a_code_span_that_is_displaying_markup() {
+        let (cands, _) =
+            parse("| `file_path` | extension-bearing path | `` `src/mrv/chat_app.py` `` |");
+        assert!(
+            !cands.iter().any(|c| c.raw_ref == "src/mrv/chat_app.py"),
+            "a markup-display span should yield no candidate; got {:?}",
+            cands.iter().map(|c| &c.raw_ref).collect::<Vec<_>>()
+        );
+
+        // Over-match guard: an ordinary single-backtick span naming the same path is
+        // a citation and must still be extracted. Without this the skip could
+        // swallow every code span and still look correct.
+        let (cands, _) = parse("The reader is `src/mrv/chat_app.py` itself.");
+        assert!(cands.iter().any(|c| c.raw_ref == "src/mrv/chat_app.py"));
     }
 
     #[test]

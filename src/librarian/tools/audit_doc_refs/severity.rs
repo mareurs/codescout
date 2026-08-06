@@ -67,6 +67,62 @@ pub fn cap_inferred_path(
     }
     (sev, reason)
 }
+/// Cap a `missing` severity when the reference sits inside a code block.
+///
+/// A fenced or indented code block is a *transcript* — a command the reader will
+/// run, a payload they will send, a sample of output they will see — not a
+/// citation the author is making. `git worktree add .worktrees/my-feature` names
+/// a path that is *supposed* not to exist yet; `"path": "src/services/auth.rs"`
+/// inside a tool-call example names a file in the reader's project, not in this
+/// one. Reporting either as drift asks the docs to stop teaching.
+///
+/// The asymmetry is already established for the sibling position: `parse_refs`
+/// keeps every link target because an explicit link *is* author intent to point
+/// somewhere real. A code block carries no such intent, so it reports below the
+/// gate rather than above it.
+pub fn cap_code_block(
+    verdict: Verdict,
+    position: super::RefPosition,
+    sev: Severity,
+    reason: &'static str,
+) -> (Severity, &'static str) {
+    if matches!(
+        verdict,
+        Verdict::Missing | Verdict::FileMissing | Verdict::SymbolMissing
+    ) && position == super::RefPosition::FencedBlock
+        && sev == Severity::High
+    {
+        return (Severity::Med, "code_block");
+    }
+    (sev, reason)
+}
+
+/// Cap a `missing` severity when the referenced path is gitignored.
+///
+/// A gitignored path is *expected* absent. It is generated at runtime
+/// (`.codescout/embeddings.db`), created by the reader to opt into something
+/// (`.claude/codescout-companion.json`), or a scratch location the docs instruct
+/// them to make (`.worktrees/my-feature`). Absence in a clean checkout is the
+/// normal state, so it carries no drift signal — and `high` is reserved for
+/// "definitely a local path, and definitely gone".
+///
+/// Note this is strictly narrower than excluding the citing page: a doc that
+/// names both a gitignored runtime file and a real tracked path still gates on
+/// the tracked one.
+pub fn cap_gitignored_path(
+    verdict: Verdict,
+    is_gitignored: bool,
+    sev: Severity,
+    reason: &'static str,
+) -> (Severity, &'static str) {
+    if matches!(verdict, Verdict::Missing | Verdict::FileMissing)
+        && is_gitignored
+        && sev == Severity::High
+    {
+        return (Severity::Med, "gitignored_path");
+    }
+    (sev, reason)
+}
 
 /// Apply path-based drop rules. Returns `(severity, reason)`.
 pub fn apply_drops(
@@ -97,9 +153,17 @@ fn drop_two(s: Severity) -> Severity {
     drop_one(drop_one(s))
 }
 
+/// Whether the citing document is archived.
+///
+/// Any `archive/` path segment counts, not just the literal `docs/archive/` this
+/// once tested. The project archives in place — `docs/trackers/archive/`,
+/// `docs/plans/archive/`, `docs/issues/archive/` — so keying on one location
+/// left the others gating at full severity, which is what a retired session log
+/// citing `src/prompts/server_instructions.md` (renamed long ago) was doing.
 fn matches_archive(p: &Path) -> bool {
     let s = crate::util::fs::RepoPath::from(p);
-    s.as_str().contains("docs/archive/") || s.as_str().ends_with(".archive.md")
+    let s = s.as_str();
+    s.ends_with(".archive.md") || s.split('/').any(|seg| seg == "archive")
 }
 
 fn matches_issues(p: &Path) -> bool {

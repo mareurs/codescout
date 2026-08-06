@@ -13,6 +13,11 @@ pub struct ResolveCtx<'a> {
     /// `mod.rs::call`. Empty disables the fallback (treat misses as
     /// `Verdict::Missing` exactly as before).
     pub basename_index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+    /// Compiled `.gitignore` for the repo, used by `is_gitignored` to cap
+    /// findings whose absence is the normal state. `None` disables the cap
+    /// (every ref is treated as tracked), which is the behaviour tests get
+    /// unless they opt in.
+    pub gitignore: Option<ignore::gitignore::Gitignore>,
 }
 
 pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
@@ -26,13 +31,8 @@ pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
 }
 
 fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
-    if c.raw_ref.starts_with("../") || c.raw_ref.starts_with('/') {
-        return Resolution {
-            verdict: Verdict::Unknown,
-            severity: Severity::Low,
-            severity_reason: "policy_default",
-            notes: Some("path outside active project; scope=umbrella required".to_string()),
-        };
+    if points_outside_project(&c.raw_ref) {
+        return outside_project();
     }
     let path = ctx.repo_root.join(&c.raw_ref);
     if path.exists() {
@@ -49,7 +49,13 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     if let Some(r) = try_basename_fallback(&c.raw_ref, ctx) {
         return r;
     }
-    verdict_with_drops_for_ref(Verdict::Missing, &c.raw_ref, Path::new(&c.md_file), ctx)
+    verdict_with_drops_for_ref(
+        Verdict::Missing,
+        &c.raw_ref,
+        Path::new(&c.md_file),
+        c.position,
+        ctx,
+    )
 }
 
 /// Look up `raw_ref` in the basename index when it has no `/`. Returns
@@ -126,6 +132,9 @@ fn symbol_tree_contains(syms: &[crate::lsp::SymbolInfo], name: &str) -> bool {
 
 fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     let (path_str, line_str) = c.raw_ref.rsplit_once(':').expect("file_line invariant");
+    if points_outside_project(path_str) {
+        return outside_project();
+    }
     let direct = ctx.repo_root.join(path_str);
     // Same basename shorthand `resolve_file_path` already accepts, for the same
     // reason: an ADR citing `process.rs:66-135` means the repo's one
@@ -139,7 +148,13 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         resolved
     } else {
         return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
-            verdict_with_drops_for_ref(Verdict::Missing, path_str, Path::new(&c.md_file), ctx)
+            verdict_with_drops_for_ref(
+                Verdict::Missing,
+                path_str,
+                Path::new(&c.md_file),
+                c.position,
+                ctx,
+            )
         });
     };
     // Parse `N` (single line) or `N-M` (line range). Range covers two checks:
@@ -203,30 +218,20 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             ctx.memory_globs,
         );
     }
-    // fs-scheme link → resolve per markdown convention.
-    //
-    // Refs starting with `./` or `../` are *explicitly* relative to the
-    // file containing the link. Joining them to repo_root would resolve
-    // `docs/agents/foo.md` → `../manual/X.md` against repo_root and miss
-    // the intended `docs/manual/X.md`. Anchor to md_file.parent() so the
-    // OS's `..` lookup walks from the right base.
-    //
-    // Refs that don't carry an explicit `./` or `../` prefix stay rooted
-    // at repo_root — the project convention in this codebase is to write
-    // such refs as repo-root-relative even inside docs that live one
-    // subdirectory deep.
-    let path = if c.raw_ref.starts_with("./") || c.raw_ref.starts_with("../") {
-        let md_dir = ctx
-            .repo_root
-            .join(&c.md_file)
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.repo_root.to_path_buf());
-        md_dir.join(&c.raw_ref)
-    } else {
-        ctx.repo_root.join(&c.raw_ref)
-    };
-    if path.exists() {
+
+    // A cross-file link may carry a fragment: `../concepts/lite-stack.md#the-tradeoff`
+    // addresses a heading inside another page. Only the path part names a file, so
+    // strip the fragment before touching the filesystem — otherwise the whole
+    // string is stat'd and an existing page is reported as a missing file. The
+    // fragment itself is deliberately not validated across files: mdBook's slug
+    // rules are its own, and a wrong-slug guess would trade these false positives
+    // for a new set.
+    let path_part = c
+        .raw_ref
+        .split_once('#')
+        .map(|(p, _)| p)
+        .unwrap_or(&c.raw_ref);
+    if path_part.is_empty() {
         return Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
@@ -234,7 +239,46 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             notes: None,
         };
     }
-    if let Some(r) = try_basename_fallback(&c.raw_ref, ctx) {
+
+    // fs-scheme link → resolve per markdown convention.
+    //
+    // Refs starting with `./` or `../` are *explicitly* relative to the file
+    // containing the link. Joining them to repo_root would resolve
+    // `docs/agents/foo.md` → `../manual/X.md` against repo_root and miss the
+    // intended `docs/manual/X.md`. Anchor to md_file.parent() so the OS's `..`
+    // lookup walks from the right base.
+    //
+    // A ref with no explicit prefix is ambiguous, because this repo genuinely
+    // holds two conventions:
+    //   * `docs/manual/src/**` is an mdBook, where an internal link MUST be
+    //     page-relative — `[x](configuration/project-toml.md)` from
+    //     `src/architecture.md` addresses `src/configuration/project-toml.md`,
+    //     and writing it repo-root-relative would break the rendered book.
+    //   * elsewhere under `docs/`, the house style writes such refs
+    //     repo-root-relative even from a subdirectory.
+    // Accept either. Existence under one convention is proof the author meant
+    // that one, and reporting a link the reader can follow is the bug worth
+    // avoiding. Page-relative is tried first because it is the markdown standard.
+    let md_dir = ctx
+        .repo_root
+        .join(&c.md_file)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.repo_root.to_path_buf());
+    let resolved = if path_part.starts_with("./") || path_part.starts_with("../") {
+        md_dir.join(path_part).exists()
+    } else {
+        md_dir.join(path_part).exists() || ctx.repo_root.join(path_part).exists()
+    };
+    if resolved {
+        return Resolution {
+            verdict: Verdict::Resolved,
+            severity: Severity::Low,
+            severity_reason: "policy_default",
+            notes: None,
+        };
+    }
+    if let Some(r) = try_basename_fallback(path_part, ctx) {
         return r;
     }
     verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
@@ -261,6 +305,9 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         .rsplit_once("::")
         .or_else(|| c.raw_ref.rsplit_once(':'))
         .expect("file_symbol invariant: raw_ref must contain a `::` or `:` separator");
+    if points_outside_project(path_str) {
+        return outside_project();
+    }
     // Same basename shorthand `resolve_file_path` and `resolve_file_line` accept:
     // a doc citing `refresh.rs::call` means the repo's one `refresh.rs`. Without
     // this the three ref kinds disagree about identical path parts.
@@ -274,6 +321,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             Verdict::FileMissing,
             path_str,
             Path::new(&c.md_file),
+            c.position,
             ctx,
         );
     };
@@ -397,8 +445,14 @@ fn path_evidence(raw_ref: &str, ctx: &ResolveCtx<'_>) -> severity::PathEvidence 
     }
 }
 
-/// `verdict_with_drops`, then cap the band when the ref's classification as a
-/// repo-relative path was inferred rather than structural.
+/// `verdict_with_drops`, then cap the band for each reason the ref's absence is
+/// weaker evidence than plain drift.
+///
+/// Three independent caps apply, in order of how much they narrow:
+/// 1. the path classification was inferred, not structural (`cap_inferred_path`);
+/// 2. the ref sits in a code block, so it is a transcript (`cap_code_block`);
+/// 3. the path is gitignored, so absence is its normal state
+///    (`cap_gitignored_path`).
 ///
 /// Used only on the two path-classification paths (`file_path`, `file_line`).
 /// A markdown link target is deliberately NOT routed through here: `[x](y.md)`
@@ -408,18 +462,79 @@ fn verdict_with_drops_for_ref(
     verdict: Verdict,
     raw_ref: &str,
     md_file: &Path,
+    position: super::RefPosition,
     ctx: &ResolveCtx<'_>,
 ) -> Resolution {
     let base = severity::default_severity(verdict);
     let (sev, reason) = severity::apply_drops(md_file, base, ctx.memory_globs);
     let (sev, reason) =
         severity::cap_inferred_path(verdict, path_evidence(raw_ref, ctx), sev, reason);
+    let (sev, reason) = severity::cap_code_block(verdict, position, sev, reason);
+    let (sev, reason) =
+        severity::cap_gitignored_path(verdict, is_gitignored(raw_ref, ctx), sev, reason);
     Resolution {
         verdict,
         severity: sev,
         severity_reason: reason,
         notes: None,
     }
+}
+
+/// Whether a ref's path part points outside the active project.
+///
+/// `Path::join` resolves an absolute argument by *discarding* the base
+/// (`/repo`.join(`/etc/passwd`) == `/etc/passwd`) and never normalises `..`, so
+/// an unguarded `repo_root.join(path_str).exists()` stats the real filesystem
+/// outside the project. `resolve_file_path` has always rejected these shapes;
+/// `file_line` and `file_symbol` split off only the path part and did not, so a
+/// doc citing `/etc/passwd:12` came back `Resolved` — range-checked against the
+/// host's real file.
+fn points_outside_project(path_str: &str) -> bool {
+    let p = Path::new(path_str);
+    p.is_absolute()
+        || p.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+}
+
+/// The shared verdict for a ref whose target lies outside the active project.
+/// Not a miss — the audit simply has no authority over it.
+fn outside_project() -> Resolution {
+    Resolution {
+        verdict: Verdict::Unknown,
+        severity: Severity::Low,
+        severity_reason: "policy_default",
+        notes: Some("path outside active project; scope=umbrella required".to_string()),
+    }
+}
+
+/// Whether `raw_ref` names a gitignored location.
+///
+/// Checks the ref *and every parent directory*: `.gitignore` here carries
+/// `/.worktrees/`, a directory rule, and the docs cite paths *inside* it
+/// (`.worktrees/my-feature`). `matched_path_or_any_parents` is the ignore
+/// crate's entry point for exactly that question. Both the file and directory
+/// forms are tried because the ref does not exist, so there is nothing to stat
+/// and no way to know which it would have been.
+fn is_gitignored(raw_ref: &str, ctx: &ResolveCtx<'_>) -> bool {
+    let Some(gi) = ctx.gitignore.as_ref() else {
+        return false;
+    };
+    // The escape guard is load-bearing, not defensive: `matched_path_or_any_parents`
+    // *panics* on a path outside its root. Callers now reject those refs earlier,
+    // but this function must stay safe on its own — a panic here aborts the whole
+    // audit process, which is how it was found.
+    if points_outside_project(raw_ref) {
+        return false;
+    }
+    let abs = ctx.repo_root.join(raw_ref);
+    gi.matched_path_or_any_parents(&abs, false).is_ignore()
+        || gi.matched_path_or_any_parents(&abs, true).is_ignore()
 }
 
 fn slugify(s: &str) -> String {
@@ -456,6 +571,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            gitignore: None,
         }
     }
 
@@ -486,6 +602,144 @@ mod tests {
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::High);
         assert_eq!(r.severity_reason, "policy_default");
+    }
+    /// A ref inside a code block is a transcript — a command the reader runs, a
+    /// payload they send — so `high`, the gating band, is the wrong report for it.
+    /// The pair is the point: identical ref, identical absent target, only the
+    /// position differs.
+    #[test]
+    fn resolver_caps_a_missing_path_cited_inside_a_code_block() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let at = |position| RefCandidate {
+            md_file: "docs/manual/src/concepts/guide.md".to_string(),
+            md_line: 1,
+            raw_ref: "src/services/auth.rs".to_string(),
+            ref_kind: RefKind::FilePath,
+            position,
+        };
+
+        let in_block = resolve_ref(&at(RefPosition::FencedBlock), &ctx(tmp.path(), &[]));
+        assert_eq!(in_block.verdict, Verdict::Missing);
+        assert_eq!(in_block.severity, Severity::Med);
+        assert_eq!(in_block.severity_reason, "code_block");
+
+        // Over-match guard: the same ref written in prose is a citation, and still
+        // gates. Without this the cap could swallow every finding and look correct.
+        let in_prose = resolve_ref(&at(RefPosition::InlineSpan), &ctx(tmp.path(), &[]));
+        assert_eq!(in_prose.severity, Severity::High);
+        assert_eq!(in_prose.severity_reason, "policy_default");
+    }
+
+    /// A gitignored path is *expected* absent, so its absence is not drift. Both
+    /// rule shapes are covered: a rule naming the file, and a directory rule whose
+    /// match lands on the ref's parent rather than the ref itself.
+    #[test]
+    fn resolver_caps_missing_paths_that_gitignore_declares_generated_or_local() {
+        let tmp = TempDir::new().unwrap();
+        // The root segments exist — as they do in the real repo — so these refs are
+        // `Structural` and reach the gating band before this cap sees them.
+        // Otherwise `cap_inferred_path` would fire first and the assertion on
+        // `severity_reason` would silently be testing the wrong cap.
+        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".worktrees")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join(".gitignore"),
+            "/.codescout/embeddings.db\n/.worktrees/\n",
+        )
+        .unwrap();
+
+        let gi = {
+            let mut b = ignore::gitignore::GitignoreBuilder::new(tmp.path());
+            assert!(b.add(tmp.path().join(".gitignore")).is_none());
+            b.build().unwrap()
+        };
+        let globs: [globset::Glob; 0] = [];
+        let ctx_gi = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &globs,
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: Some(gi),
+        };
+
+        for raw in [".codescout/embeddings.db", ".worktrees/my-feature"] {
+            let r = resolve_ref(
+                &cand(raw, "docs/manual/src/concepts/x.md", RefKind::FilePath),
+                &ctx_gi,
+            );
+            assert_eq!(r.severity, Severity::Med, "{raw} should not gate");
+            assert_eq!(r.severity_reason, "gitignored_path", "{raw}");
+        }
+
+        // Over-match guard: a tracked path that is genuinely gone still gates, in
+        // the same doc, under the same gitignore.
+        let tracked = resolve_ref(
+            &cand(
+                "src/gone.rs",
+                "docs/manual/src/concepts/x.md",
+                RefKind::FilePath,
+            ),
+            &ctx_gi,
+        );
+        assert_eq!(tracked.severity, Severity::High);
+        assert_eq!(tracked.severity_reason, "policy_default");
+    }
+    /// `ignore`'s `matched_path_or_any_parents` panics — not errors — when handed a
+    /// path outside its root, and two ref shapes reach it that way: an absolute path
+    /// (which `Path::join` resolves by *discarding* the base) and one containing
+    /// `..`. `resolve_file_path` rejects both early, but `file_line` and
+    /// `file_symbol` split off only the path part and pass it straight through, so
+    /// the first real run aborted the whole audit with SIGABRT.
+    #[test]
+    fn resolver_does_not_abort_on_a_ref_that_escapes_the_repo_root() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(".gitignore"), "/.worktrees/\n").unwrap();
+        let gi = {
+            let mut b = ignore::gitignore::GitignoreBuilder::new(tmp.path());
+            assert!(b.add(tmp.path().join(".gitignore")).is_none());
+            b.build().unwrap()
+        };
+        let globs: [globset::Glob; 0] = [];
+        let ctx_gi = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &globs,
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: Some(gi),
+        };
+
+        // Each of these aborted the process before the escape guard. `/etc/passwd:12`
+        // additionally came back `Resolved` — range-checked against the host's real
+        // file — because `file_line` never had the outside-project guard that
+        // `file_path` did.
+        for raw in [
+            "/etc/passwd:12",
+            "../outside/thing.rs:3",
+            "/absolute/file.rs",
+            "../../climb.rs",
+            "docs/../../escape.rs",
+        ] {
+            let kind = if raw.contains(':') {
+                RefKind::FileLine
+            } else {
+                RefKind::FilePath
+            };
+            let r = resolve_ref(&cand(raw, "docs/spec.md", kind), &ctx_gi);
+            assert_eq!(r.verdict, Verdict::Unknown, "{raw} is out of scope");
+            assert_eq!(r.severity, Severity::Low, "{raw}");
+        }
+
+        // Over-match guard: an ordinary in-project ref is unaffected by the escape
+        // check — it still reaches the real resolution path and reports a miss.
+        let inside = resolve_ref(
+            &cand("docs/spec.md", "docs/x.md", RefKind::FilePath),
+            &ctx_gi,
+        );
+        assert_eq!(inside.verdict, Verdict::Missing);
     }
 
     #[test]
@@ -519,6 +773,40 @@ mod tests {
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::Med);
         assert_eq!(r.severity_reason, "archive_drop");
+    }
+    /// The project archives in place, so `archive/` appears at several depths.
+    /// Keying the drop on the literal `docs/archive/` left retired session logs and
+    /// superseded plans gating at full severity — documents nobody is asked to
+    /// trust, blocking CI on references they were correct to make.
+    #[test]
+    fn severity_drops_one_level_in_any_archive_directory() {
+        let tmp = TempDir::new().unwrap();
+        // A structural ref rooted in an existing directory, so the band reaching
+        // `apply_drops` is `high` and these assertions read the archive rule rather
+        // than `cap_inferred_path`.
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let missing = "src/gone.rs";
+
+        for md in [
+            "docs/trackers/archive/old-session-log.md",
+            "docs/plans/archive/2026-03-20-superseded.md",
+            "docs/superpowers/plans/archive/older.md",
+        ] {
+            let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
+            assert_eq!(r.severity, Severity::Med, "{md}");
+            assert_eq!(r.severity_reason, "archive_drop", "{md}");
+        }
+
+        // Over-match guard: a live tracker beside the archive keeps gating, and a
+        // path merely *containing* the word is not an archive directory.
+        for md in [
+            "docs/trackers/bug-fix-session-log.md",
+            "docs/manual/src/concepts/archived-artifacts.md",
+        ] {
+            let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
+            assert_eq!(r.severity, Severity::High, "{md}");
+            assert_eq!(r.severity_reason, "policy_default", "{md}");
+        }
     }
 
     #[test]
@@ -583,6 +871,7 @@ mod tests {
                 lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
+                gitignore: None,
             },
         );
         assert_eq!(r.verdict, Verdict::SymbolMissing);
@@ -599,6 +888,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            gitignore: None,
         };
         let r = resolve_ref(&c, &ctx);
         assert_eq!(r.verdict, Verdict::Unknown);
@@ -621,6 +911,7 @@ mod tests {
                 lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
+                gitignore: None,
             },
         );
         // File exists on disk but LSP returned no symbols → SymbolMissing, NOT Unknown.
@@ -660,6 +951,7 @@ mod tests {
                 lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
+                gitignore: None,
             },
         );
         assert_eq!(r.verdict, Verdict::Resolved);
@@ -711,6 +1003,7 @@ mod tests {
             lsp: Some(lsp),
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            gitignore: None,
         };
         let mk_lsp = || {
             MockLspProvider::with_client(
@@ -820,6 +1113,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            gitignore: None,
         };
         let r = resolve_ref(
             &cand("docling_reader.py", "docs/adr/0006.md", RefKind::FilePath),
@@ -857,6 +1151,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            gitignore: None,
         };
 
         let r = resolve_ref(
@@ -886,6 +1181,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            gitignore: None,
         };
 
         let r = resolve_ref(
@@ -914,6 +1210,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            gitignore: None,
         };
 
         let r = resolve_ref(&cand("mod.rs:12", "docs/spec.md", RefKind::FileLine), &ctx);
@@ -939,6 +1236,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            gitignore: None,
         };
         let r = resolve_ref(
             &cand("__init__.py", "docs/spec.md", RefKind::FilePath),
@@ -967,6 +1265,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            gitignore: None,
         };
         let r = resolve_ref(
             &cand("nonexistent.py", "docs/spec.md", RefKind::FilePath),
@@ -1030,6 +1329,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            gitignore: None,
         };
         let r = resolve_ref(
             &cand("src/foo/bar.py", "docs/spec.md", RefKind::FilePath),
@@ -1145,5 +1445,75 @@ mod tests {
             "repo-root-relative link should keep resolving against repo_root; got {:?}",
             r
         );
+    }
+    /// `docs/manual/src/**` is an mdBook, where an internal link with no `./`
+    /// prefix is page-relative — writing it repo-root-relative would break the
+    /// rendered book. Both conventions live in this repo, so both must resolve; the
+    /// sibling test above pins the repo-root half.
+    #[test]
+    fn resolver_link_resolves_page_relative_inside_the_mdbook() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = tmp.path().join("docs/manual/src/configuration");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("project-toml.md"), "# Project toml\n").unwrap();
+
+        let r = resolve_ref(
+            &cand(
+                "configuration/project-toml.md",
+                "docs/manual/src/architecture.md",
+                RefKind::Link,
+            ),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+
+        // Over-match guard: accepting both conventions must not accept a link that
+        // exists under neither.
+        let r = resolve_ref(
+            &cand(
+                "configuration/nope.md",
+                "docs/manual/src/architecture.md",
+                RefKind::Link,
+            ),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+    }
+
+    /// A cross-file link may address a heading inside another page. Only the path
+    /// part names a file, so stat'ing the whole string reports an existing page as a
+    /// missing file — which is strictly worse than saying nothing about the anchor.
+    #[test]
+    fn resolver_link_strips_the_fragment_before_resolving_the_path() {
+        let tmp = TempDir::new().unwrap();
+        let concepts = tmp.path().join("docs/manual/src/concepts");
+        std::fs::create_dir_all(&concepts).unwrap();
+        std::fs::write(
+            concepts.join("lite-stack.md"),
+            "# Lite stack\n\n## The tradeoff\n",
+        )
+        .unwrap();
+
+        for raw in [
+            "../concepts/lite-stack.md#the-tradeoff",
+            "lite-stack.md#the-tradeoff",
+        ] {
+            let r = resolve_ref(
+                &cand(raw, "docs/manual/src/concepts/security.md", RefKind::Link),
+                &ctx(tmp.path(), &[]),
+            );
+            assert_eq!(r.verdict, Verdict::Resolved, "{raw}");
+        }
+
+        // Over-match guard: a fragment is not a licence to invent the file.
+        let r = resolve_ref(
+            &cand(
+                "../concepts/gone.md#whatever",
+                "docs/manual/src/concepts/security.md",
+                RefKind::Link,
+            ),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
     }
 }

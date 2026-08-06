@@ -220,6 +220,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .collect();
 
     let basename_index = build_basename_index(&repo_root);
+    let gitignore = build_gitignore(&repo_root);
 
     let resolve_ctx = resolver::ResolveCtx {
         repo_root: &repo_root,
@@ -227,6 +228,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         lsp: Some(ctx.lsp.clone()),
         degraded_languages: Default::default(),
         basename_index,
+        gitignore,
     };
 
     let mut all_findings: Vec<Finding> = Vec::new();
@@ -339,6 +341,25 @@ fn build_basename_index(
         count += 1;
     }
     index
+}
+/// Compile the repo-root `.gitignore` for the gitignored-path severity cap.
+///
+/// Only the root file is loaded — not nested `.gitignore`s and not the user's
+/// global excludes. The cap exists to recognise paths *this repo* declares
+/// generated-or-local, and a nested rule reaching a documented path is rare
+/// enough not to justify the extra walk. Any failure returns `None`, which
+/// disables the cap rather than failing the audit: a missing or malformed
+/// `.gitignore` should cost precision, never the run.
+fn build_gitignore(repo_root: &std::path::Path) -> Option<ignore::gitignore::Gitignore> {
+    let path = repo_root.join(".gitignore");
+    if !path.exists() {
+        return None;
+    }
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(repo_root);
+    // `add` reports a parse error per file rather than returning Result; one bad
+    // line should not discard the rules that did parse.
+    let _ = builder.add(&path);
+    builder.build().ok()
 }
 
 async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
