@@ -232,6 +232,37 @@ MCP server picks it up on restart.
 
 ## Resume
 
+**2026-08-06 verify-open pass.** One item from the *Fix* section was actionable without
+deciding between options 1-3, and is done: `docs/manual/src/concepts/retrieval-stack.md`
+§ *Reranker* now carries a callout that the latency column is **per serving runtime, not
+per model**, naming the p95 3091 ms measured on the Q4_K_M/llama-server swap and telling
+AMD-profile readers to budget from that rather than the TEI row.
+
+**The `~80 ms` figure itself was deliberately NOT changed**, and that is a correction to
+this file's own closing instruction ("That figure needs correcting regardless"). That line
+predates the CORRECTED note at the top of the Summary and does not survive it:
+
+- The table row is explicitly labelled **TEI**, and the 3091 ms was measured on
+  **llama-server/GGUF**. A measurement of one runtime does not falsify a figure for
+  another.
+- The two available TEI numbers disagree in a direction that cannot be reconciled by
+  picking one: `docs/trackers/retrieval-benchmark.md` records TEI at **p50 ~150 ms**,
+  while the manual claims **p95 ~80 ms**. A p95 below a p50 for the same deployment is
+  impossible, so at least one is from a different configuration — and nothing on hand says
+  which.
+
+Editing the number would have replaced a possibly-stale figure with a guess. The callout
+fixes the actual reader hazard (someone on llama-server budgeting 80 ms) while leaving the
+number for whoever re-measures TEI.
+
+**Still blocked on a decision, which is the maintainer's:** options 1-3 in *Fix* trade
+latency against a reranking benefit that the retraction leaves unmeasured. Nothing should
+be defaulted on or off until one arm matching the **live** config (dense + sparse + rerank
+— the third arm, never benchmarked) is measured. Note also that `.env.gpu` edits do not
+reach running MCP servers, which carry the env Claude Code launched them with; that is the
+same drift class as the now-archived
+`docs/issues/archive/2026-07-25-env-copy-flow-stale-model-dir.md`.
+
 The score and latency questions are settled **for the dense-only arm** (4 runs each, zero score
 variance). Three things remain — note that item 0 was discovered while trying to apply the fix
 and changes what this bug can claim:

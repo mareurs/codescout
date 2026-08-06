@@ -265,6 +265,17 @@ fusion gives +2 points over dense-only at `bm25_boost=5.0`.
 | bge-reranker-base | TEI | 9 | 35 | ~250 ms (CPU) |
 | jina-rerank-v2 | Infinity | **11** | 38 (jina-v2 dense), 36 (CodeRank Q4 dense) | ~120 ms |
 
+> ⚠ **Latency here is per serving runtime, not per model.** The `Protocol` column is
+> load-bearing: the same `bge-reranker-v2-m3` weights served as a Q4_K_M GGUF on
+> llama-server (the swap made on 2026-07-27 to work around a CUDA OOM) measured
+> **p95 3091 ms** — roughly an order of magnitude above the TEI row above. If you are
+> on the AMD profile, which sets `CODESCOUT_RERANKER_PROTOCOL=llama-server`, budget
+> from that number, not this table. Measurements and the open question of whether the
+> reranker earns its keep at all are in
+> `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`; note that
+> file's own retraction — the arms it compared differ in four dimensions, so it
+> establishes the latency cost but **not** a score regression.
+
 bge-v2-m3 wins on the full suite and is the default. jina-rerank-v2 lifts
 the T5 (real-usage) tier by +1 every time but loses on long natural-language
 queries. The protocol toggle (`CODESCOUT_RERANKER_PROTOCOL=infinity`) lets
