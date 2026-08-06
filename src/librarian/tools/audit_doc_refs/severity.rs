@@ -139,6 +139,9 @@ pub fn apply_drops(
     if matches_issues(md_file) {
         return (drop_one(base), "issues_drop");
     }
+    if matches_historical(md_file) {
+        return (drop_one(base), "historical_drop");
+    }
     (base, "policy_default")
 }
 
@@ -170,6 +173,64 @@ fn matches_issues(p: &Path) -> bool {
     crate::util::fs::RepoPath::from(p)
         .as_str()
         .contains("docs/issues/")
+}
+/// Directories under `docs/` holding **dated, point-in-time records**: written
+/// once to describe the tree as it stood, and never revised to follow it.
+///
+/// A code review in `docs/reviews/2026-04-24/` cites `src/tools/github.rs:680-690`
+/// because that is what it reviewed; re-checking those line numbers against HEAD
+/// asks a historical document to be a live one. Session logs are the same species —
+/// an `F-N` entry opens `**Observed:** <date>` — as are superseded plans and
+/// benchmark write-ups.
+///
+/// This is not a new policy so much as the one `issues_drop` already encodes.
+/// Bug files are acted on constantly and still report below the gate, because
+/// what they *are* is a dated ledger. Extending the same treatment to the other
+/// ledgers is the consistent reading; keeping `docs/issues/**` capped while
+/// `docs/trackers/**` gates at full severity was the inconsistent one.
+///
+/// Deliberately **absent**, and still gating at full severity: `docs/manual/**`,
+/// the root `docs/*.md` guides, `CLAUDE.md`, every `README.md`,
+/// `docs/architecture/**`, `docs/conventions/**`, `docs/adrs/**`,
+/// `docs/evals/**`, `docs/templates/**`. Those are what a reader acts on *now*,
+/// which is what the gate is for.
+pub const DEFAULT_HISTORICAL_DIRS: &[&str] = &[
+    "plans",
+    "research",
+    "reviews",
+    "spikes",
+    "superpowers",
+    "trackers",
+    "usage-reports",
+];
+
+/// Whether the citing document is a dated, point-in-time record.
+///
+/// Two shapes, because the project uses two:
+///
+/// * a directory under `docs/` from `DEFAULT_HISTORICAL_DIRS` — matched on the
+///   segment immediately below `docs/`, so `docs/ROADMAP.md` does not qualify
+///   (its second segment is the filename) and neither does `docs/manual/src/…`;
+/// * a root-level `docs/review-*.md`. Dated reviews live both in
+///   `docs/reviews/` and at the top of `docs/` under this name — the librarian's
+///   own built-in classifier patterns list `docs/review-*.md` — and a review is a
+///   record of one commit either way. `docs/review-2026-03-05.md` cites seventeen
+///   line-pinned ranges into modules since split apart.
+fn matches_historical(p: &Path) -> bool {
+    let s = crate::util::fs::RepoPath::from(p);
+    let s = s.as_str();
+    let mut segs = s.split('/');
+    if segs.next() != Some("docs") {
+        return false;
+    }
+    let Some(second) = segs.next() else {
+        return false;
+    };
+    let is_leaf = segs.next().is_none();
+    if is_leaf {
+        return second.starts_with("review-") && second.ends_with(".md");
+    }
+    DEFAULT_HISTORICAL_DIRS.contains(&second)
 }
 
 fn matches_memory(p: &Path, globs: &[globset::Glob]) -> bool {

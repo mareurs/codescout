@@ -797,14 +797,64 @@ mod tests {
             assert_eq!(r.severity_reason, "archive_drop", "{md}");
         }
 
-        // Over-match guard: a live tracker beside the archive keeps gating, and a
-        // path merely *containing* the word is not an archive directory.
+        // Over-match guard: a path merely *containing* the word is not an archive
+        // directory, and a live reference doc keeps gating. (A live tracker is no
+        // longer the example here — trackers now take `historical_drop`; see
+        // `severity_drops_one_level_for_dated_record_directories_only`.)
         for md in [
-            "docs/trackers/bug-fix-session-log.md",
             "docs/manual/src/concepts/archived-artifacts.md",
+            "docs/conventions/test-env-isolation.md",
         ] {
             let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
             assert_eq!(r.severity, Severity::High, "{md}");
+            assert_eq!(r.severity_reason, "policy_default", "{md}");
+        }
+    }
+    /// Dated ledgers report below the gate; what a reader acts on now does not.
+    /// The two halves are asserted together because the value of this rule is
+    /// entirely in where its boundary falls — a version that dropped everything
+    /// under `docs/` would pass the first loop and be useless.
+    #[test]
+    fn severity_drops_one_level_for_dated_record_directories_only() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let missing = "src/gone.rs";
+
+        for md in [
+            "docs/plans/2026-04-22-refactoring-plan.md",
+            "docs/reviews/2026-04-24/phase-2-tools.md",
+            "docs/research/2026-04-03-embedding-model-benchmark.md",
+            "docs/usage-reports/2026-07-01-usage-analysis.md",
+            "docs/superpowers/plans/2026-02-28-lsp-mock-impl.md",
+            "docs/spikes/something.md",
+            "docs/trackers/bug-fix-session-log.md",
+            // The root-level form of the same thing — a dated review, which the
+            // librarian's own classifier patterns already name as `docs/review-*.md`.
+            "docs/review-2026-03-05.md",
+        ] {
+            let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
+            assert_eq!(r.severity, Severity::Med, "{md} should not gate");
+            assert_eq!(r.severity_reason, "historical_drop", "{md}");
+        }
+
+        // The boundary. Every one of these is read to decide what to do *now*, so a
+        // stale reference in it costs the reader something the gate exists to prevent.
+        for md in [
+            "docs/manual/src/concepts/tool-selection.md",
+            "docs/ROADMAP.md",
+            "CLAUDE.md",
+            "README.md",
+            "docs/architecture/companion-plugin.md",
+            "docs/conventions/test-env-isolation.md",
+            "docs/adrs/2026-07-20-artifact-vec-shared-catalog-boundary.md",
+            "docs/evals/reconnaissance-output.md",
+            "docs/templates/session-log.md",
+            // Not a dated review: the `review-` prefix is what the rule keys on, and
+            // a guide that merely mentions reviewing must keep gating.
+            "docs/reviewing-guide.md",
+        ] {
+            let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
+            assert_eq!(r.severity, Severity::High, "{md} must keep gating");
             assert_eq!(r.severity_reason, "policy_default", "{md}");
         }
     }

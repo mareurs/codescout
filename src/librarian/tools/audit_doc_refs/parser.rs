@@ -13,13 +13,20 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
     let warnings = fence_warnings(text, &md_file);
 
     let mut in_code_block = false;
+    // Set by an `<!-- audit-doc-refs:ignore -->` comment, cleared at the next
+    // heading of any level. See `is_ignore_marker` for why the scope is a section.
+    let mut suppressed = false;
     let parser = Parser::new_ext(text, opts).into_offset_iter();
     for (event, span) in parser {
         let line = byte_offset_to_line(text, span.start);
         match event {
+            Event::Html(html) | Event::InlineHtml(html) if is_ignore_marker(html.as_ref()) => {
+                suppressed = true;
+            }
+            Event::Start(Tag::Heading { .. }) => suppressed = false,
             // A span that renders a code span literally is showing what a
             // reference looks like, not making one. See `is_markup_display`.
-            Event::Code(content) if !is_markup_display(content.as_ref()) => {
+            Event::Code(content) if !suppressed && !is_markup_display(content.as_ref()) => {
                 for raw in tokenize_code_span(content.as_ref()) {
                     if let Some(kind) = classify(raw, true) {
                         candidates.push(RefCandidate {
@@ -34,7 +41,7 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
             }
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
-            Event::Text(content) if in_code_block => {
+            Event::Text(content) if in_code_block && !suppressed => {
                 for raw in tokenize_code_span(content.as_ref()) {
                     if let Some(kind) = classify(raw, true) {
                         candidates.push(RefCandidate {
@@ -52,7 +59,9 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
             // to copy, not a citation. Everything else is kept: an explicit link IS
             // author intent to point somewhere real, which is why link targets are
             // otherwise unfiltered here.
-            Event::Start(Tag::Link { dest_url, .. }) if !is_placeholder(dest_url.as_ref()) => {
+            Event::Start(Tag::Link { dest_url, .. })
+                if !suppressed && !is_placeholder(dest_url.as_ref()) =>
+            {
                 candidates.push(RefCandidate {
                     md_file: md_file.clone(),
                     md_line: line,
@@ -148,6 +157,29 @@ fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
 /// all, so there is nothing to report at any band.
 fn is_markup_display(content: &str) -> bool {
     content.contains('`')
+}
+/// Whether an HTML comment is the audit's suppression marker.
+///
+/// Scope is **from the marker to the next heading of any level** — a section, not
+/// a line and not a file. Three reasons that granularity and not another:
+///
+/// * A line-scoped marker cannot be expressed where it is most needed. Inserting
+///   an HTML comment between the rows of a markdown table breaks the table, and
+///   example refs cluster in tables (the audit's own manual page documents each
+///   `ref_kind` with one).
+/// * A file-scoped marker is too blunt for this repo. The pages carrying
+///   fictional teaching paths also cite real codescout modules, and that is
+///   precisely where drift costs a reader most.
+/// * Examples cluster by section anyway, so the section is the unit an author is
+///   already thinking in.
+///
+/// Use it for a run of deliberately fictional paths (`src/services/auth.rs` in a
+/// walkthrough), for user-created or runtime files the docs correctly name but a
+/// clean checkout will not have, and for configuration *values* that merely look
+/// like paths. Do not use it to silence a reference you have not checked — the
+/// whole value of the gate is that an unchecked stale path is loud.
+fn is_ignore_marker(html: &str) -> bool {
+    html.contains("audit-doc-refs:ignore")
 }
 
 /// Trim trailing sentence punctuation (period, brackets, braces) that often
@@ -351,6 +383,61 @@ mod tests {
         // swallow every code span and still look correct.
         let (cands, _) = parse("The reader is `src/mrv/chat_app.py` itself.");
         assert!(cands.iter().any(|c| c.raw_ref == "src/mrv/chat_app.py"));
+    }
+    /// The marker's scope is a section, so the test that matters is the one showing
+    /// where suppression *stops*. A version that never cleared the flag would pass
+    /// any single-section assertion and silence the rest of the file.
+    #[test]
+    fn parser_ignore_marker_suppresses_to_the_next_heading_only() {
+        let md = "\
+## Examples
+
+<!-- audit-doc-refs:ignore -->
+
+Walk through `src/services/auth.rs`, then run:
+
+```bash
+grep -r foo src/services/
+```
+
+See [the sample](src/foo.py) too.
+
+## Real references
+
+The extractor lives in `src/librarian/tools/audit_doc_refs/parser.rs`.
+";
+        let (cands, _) = parse(md);
+        let refs: Vec<&str> = cands.iter().map(|c| c.raw_ref.as_str()).collect();
+
+        for silenced in ["src/services/auth.rs", "src/services/", "src/foo.py"] {
+            assert!(
+                !refs.contains(&silenced),
+                "{silenced} is inside the marked section; got {refs:?}"
+            );
+        }
+
+        // The heading ended it. Without this the marker would silence everything
+        // after it, which is the failure mode a per-section scope exists to avoid.
+        assert!(
+            refs.contains(&"src/librarian/tools/audit_doc_refs/parser.rs"),
+            "suppression must stop at the next heading; got {refs:?}"
+        );
+    }
+
+    /// Over-match guard for the marker: an unmarked section behaves exactly as
+    /// before. Asserted separately so a regression cannot hide behind the
+    /// suppression assertions above.
+    #[test]
+    fn parser_extracts_normally_without_an_ignore_marker() {
+        let md = "\
+## Examples
+
+Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
+";
+        let (cands, _) = parse(md);
+        let refs: Vec<&str> = cands.iter().map(|c| c.raw_ref.as_str()).collect();
+        assert!(refs.contains(&"src/services/auth.rs"), "got {refs:?}");
+        assert!(refs.contains(&"src/foo.py"), "got {refs:?}");
     }
 
     #[test]
