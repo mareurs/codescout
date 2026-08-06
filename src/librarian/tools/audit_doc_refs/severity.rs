@@ -56,7 +56,13 @@ pub fn cap_inferred_path(
     sev: Severity,
     reason: &'static str,
 ) -> (Severity, &'static str) {
-    if verdict == Verdict::Missing && evidence == PathEvidence::Inferred && sev == Severity::High {
+    // `FileMissing` carries the same inference as `Missing`: a `file_symbol` ref
+    // whose path part is a bare name earned its path classification from an
+    // extension alone, so a miss there is equally a guess.
+    if matches!(verdict, Verdict::Missing | Verdict::FileMissing)
+        && evidence == PathEvidence::Inferred
+        && sev == Severity::High
+    {
         return (Severity::Med, "inferred_path");
     }
     (sev, reason)

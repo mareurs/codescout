@@ -107,6 +107,22 @@ fn unique_basename_path(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<std::path
         _ => None,
     }
 }
+/// Depth-first search for `name` anywhere in a document-symbol tree.
+///
+/// `document_symbols` returns a TREE — `convert_document_symbols` nests impl
+/// methods and class members under their parent — so a flat `iter()` over the top
+/// level only ever sees free functions and type declarations. Every `Type::method`
+/// reference in the docs was reported `symbol_missing` for that reason:
+/// `src/server.rs::from_parts` names a child of `impl CodeScoutServer`, not a
+/// top-level symbol.
+///
+/// Matches the bare `name` or the slash-joined `name_path`, so both
+/// `src/server.rs::from_parts` and `src/server.rs::CodeScoutServer/from_parts`
+/// resolve — `is_symbol_suffix` already admits `/`, so docs use both shapes.
+fn symbol_tree_contains(syms: &[crate::lsp::SymbolInfo], name: &str) -> bool {
+    syms.iter()
+        .any(|s| s.name == name || s.name_path == name || symbol_tree_contains(&s.children, name))
+}
 
 fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     let (path_str, line_str) = c.raw_ref.rsplit_once(':').expect("file_line invariant");
@@ -245,14 +261,22 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         .rsplit_once("::")
         .or_else(|| c.raw_ref.rsplit_once(':'))
         .expect("file_symbol invariant: raw_ref must contain a `::` or `:` separator");
-    let path = ctx.repo_root.join(path_str);
-    if !path.exists() {
-        return verdict_with_drops(
+    // Same basename shorthand `resolve_file_path` and `resolve_file_line` accept:
+    // a doc citing `refresh.rs::call` means the repo's one `refresh.rs`. Without
+    // this the three ref kinds disagree about identical path parts.
+    let direct = ctx.repo_root.join(path_str);
+    let path = if direct.exists() {
+        direct
+    } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
+        resolved
+    } else {
+        return verdict_with_drops_for_ref(
             Verdict::FileMissing,
+            path_str,
             Path::new(&c.md_file),
-            ctx.memory_globs,
+            ctx,
         );
-    }
+    };
     let lang = detect_language(path_str);
     let Some(lsp) = ctx.lsp.clone() else {
         ctx.degraded_languages.borrow_mut().push(lang.to_string());
@@ -298,7 +322,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     };
     match result {
         Some(syms) => {
-            if syms.iter().any(|s| s.name == name) {
+            if symbol_tree_contains(&syms, name) {
                 Resolution {
                     verdict: Verdict::Resolved,
                     severity: Severity::Low,
@@ -639,6 +663,86 @@ mod tests {
             },
         );
         assert_eq!(r.verdict, Verdict::Resolved);
+    }
+    /// An impl method is a CHILD of its `impl` block in the document-symbol
+    /// tree, so the old flat `syms.iter()` never saw it. Every
+    /// `src/foo.rs::method` reference in the docs was reported
+    /// `symbol_missing` against a symbol that plainly exists —
+    /// `src/server.rs::from_parts` supplied 5 of 50 high findings on
+    /// 2026-08-06. Both the bare name and the slash-joined `name_path` must
+    /// resolve, since `is_symbol_suffix` admits `/` and docs use both shapes.
+    #[test]
+    fn resolver_resolves_a_symbol_nested_under_its_impl_block() {
+        use crate::lsp::mock::{MockLspClient, MockLspProvider};
+        use crate::lsp::{SymbolInfo, SymbolKind};
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("foo.rs"),
+            "impl Thing { pub fn nested() {} }\n",
+        )
+        .unwrap();
+        let leaf = SymbolInfo {
+            name: "nested".to_string(),
+            name_path: "Thing/nested".to_string(),
+            kind: SymbolKind::Method,
+            file: tmp.path().join("foo.rs"),
+            start_line: 0,
+            end_line: 0,
+            range_start_line: None,
+            start_col: 0,
+            children: vec![],
+            detail: None,
+        };
+        let parent = SymbolInfo {
+            name: "Thing".to_string(),
+            name_path: "Thing".to_string(),
+            kind: SymbolKind::Struct,
+            file: tmp.path().join("foo.rs"),
+            start_line: 0,
+            end_line: 0,
+            range_start_line: None,
+            start_col: 0,
+            children: vec![leaf],
+            detail: None,
+        };
+        let ctx_for = |lsp| ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: Some(lsp),
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+        };
+        let mk_lsp = || {
+            MockLspProvider::with_client(
+                MockLspClient::new().with_symbols(tmp.path().join("foo.rs"), vec![parent.clone()]),
+            )
+        };
+
+        // Bare method name, the shape the docs actually use.
+        let r = resolve_ref(
+            &cand("foo.rs::nested", "docs/spec.md", RefKind::FileSymbol),
+            &ctx_for(mk_lsp()),
+        );
+        assert_eq!(
+            r.verdict,
+            Verdict::Resolved,
+            "bare nested name must resolve"
+        );
+
+        // Slash-joined name_path.
+        let r = resolve_ref(
+            &cand("foo.rs::Thing/nested", "docs/spec.md", RefKind::FileSymbol),
+            &ctx_for(mk_lsp()),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved, "name_path must resolve too");
+
+        // The guard against over-matching: a name absent from the whole tree
+        // must still report missing, or this fix would resolve everything.
+        let r = resolve_ref(
+            &cand("foo.rs::absent", "docs/spec.md", RefKind::FileSymbol),
+            &ctx_for(mk_lsp()),
+        );
+        assert_eq!(r.verdict, Verdict::SymbolMissing);
     }
 
     // ── Task 8b: path-outside-project + anchor link resolution ───────────────

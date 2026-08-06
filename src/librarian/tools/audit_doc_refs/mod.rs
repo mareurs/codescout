@@ -157,7 +157,15 @@ pub const DEFAULT_AUDIT_GLOBS: &[&str] =
 /// explicit `paths` argument is honoured verbatim so callers can opt back
 /// into auditing excluded subtrees on demand. See H-6 (C) in
 /// docs/trackers/codescout-usage-hookify.md.
-pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &["docs/agents/**"];
+///
+/// `docs/lessons/**` joins for the same reason one layer out: a lessons
+/// retrospective records what using codescout on *another* project taught us, so
+/// every path it cites belongs to that project's tree. Resolving them here is a
+/// category error, not drift — one such file supplied 28 of 50 high-severity
+/// findings on 2026-08-06, every one of them correct prose
+/// (`src/pc_kb/corpus.py`, `docs/trackers/mrv-chat-watch/**`, …). See
+/// docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md.
+pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &["docs/agents/**", "docs/lessons/**"];
 
 pub const MAX_FILES_DEFAULT: usize = 10_000;
 
