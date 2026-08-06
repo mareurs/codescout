@@ -106,7 +106,17 @@ sprint roadmaps — written once, maintained across sessions.
 **Embedded by default.** No separate server to install. Opt out with
 `LIBRARIAN_ENABLED=0` for a leaner tool surface.
 
-→ **Full artifact guide:** [librarian embedded](https://mareurs.github.io/codescout/concepts/librarian-embedded.html) · [trackers](https://mareurs.github.io/codescout/concepts/tracker-design.html) · [time-travel](https://mareurs.github.io/codescout/concepts/workspace-state-at.html) · [augmentation templates](https://mareurs.github.io/codescout/concepts/augmentation-render-template.html)
+**Worktrees, catalog hygiene, and derived citation graphs.** A session running
+from a git worktree overlays the main checkout's catalog and forks an artifact
+only when it writes to one, then folds the delta back with
+`librarian(action="merge_worktree")`. A row whose file disappears is stamped
+rather than dropped — hidden from `find` past a grace window, restored if the
+file returns, with `doctor` repair modes for the move case (`rehome`) and the
+genuinely-dead case (`prune_missing`). Citations are derived rather than
+declared: write `F-3` in prose and `librarian(action="link_scan")` materializes
+the edge, ambiguous tokens reported instead of guessed.
+
+→ **Full artifact guide:** [librarian embedded](https://mareurs.github.io/codescout/concepts/librarian-embedded.html) · [trackers](https://mareurs.github.io/codescout/concepts/tracker-design.html) · [time-travel](https://mareurs.github.io/codescout/concepts/workspace-state-at.html) · [augmentation templates](https://mareurs.github.io/codescout/concepts/augmentation-render-template.html) · [worktree overlay](https://mareurs.github.io/codescout/concepts/worktree-overlay.html) · [catalog GC](https://mareurs.github.io/codescout/concepts/catalog-gc.html) · [entry citations](https://mareurs.github.io/codescout/concepts/entry-citations.html)
 
 ## Retrieval Stack
 

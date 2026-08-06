@@ -169,6 +169,80 @@ Or, after the fact: `git log master --oneline --grep="<subject prefix>"` to reco
 
 This applies to **every SHA-citing surface** — tracker entries (F-N / W-N / U-N / H-N / R-N), `artifact_event` `anchor_commit` / `also_mutates`, `docs/issues/<bug>.md` Fix sections, ADRs. The concise rule + the cross-repo `<repo>:<sha>` prefix convention live in memory `gotchas` (Cherry-Pick SHA Discipline, Cross-Repo Commit References).
 
+## Large-Cohort Promotion (Fast-Forward)
+
+The Standard Ship Sequence assumes one commit, or a handful. It does not scale to
+a cohort — `experiments` has reached 387 commits ahead of `master` at least once
+(2026-08-06) — and cherry-picking that commit-by-commit is both impractical and
+wrong: it mints a new SHA for every commit, orphaning every SHA citation across
+`docs/issues/`, the trackers, and the ADRs, and it discards the one property that
+makes the promotion safe.
+
+Check for that property first:
+
+```bash
+git rev-list --left-right --count master...experiments
+# "0<TAB>387" — master has NO commits of its own, so it is a strict ancestor and
+# the promotion is a fast-forward. Any NON-ZERO left number means master has
+# diverged: stop and reconcile before going further.
+```
+
+A fast-forward moves `master` onto the exact commits already tested on
+`experiments`. No new SHAs, so **step 4 of the Standard Ship Sequence is moot** —
+nothing to reconcile, and no rebase owed afterwards.
+
+### Sequence
+
+```bash
+# 1. Confirm ancestry (above). Non-zero on the left → stop.
+
+# 2. Working tree must be clean. An uncommitted file is not part of the cohort,
+#    and if `cargo fmt --check` fails on it, it fails CI right after the merge.
+git status --short
+
+# 3. Full gate, run from experiments
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+
+# 4. Documentation gate. A cohort this size is exactly where the human-facing
+#    surfaces rot, because nothing fails the build when they do:
+#      - CHANGELOG.md [Unreleased] covers the cohort
+#      - docs/manual/src/ has a page per new subsystem, wired into SUMMARY.md
+#      - docs/manual/src/experimental/index.md does not claim the branch is empty
+#      - README.md's feature claims still match the tool surface
+mcp call codescout librarian '{"action":"audit_doc_refs","emit_tracker":true}'
+
+# 5. Merge. --ff-only so git refuses rather than silently making a merge commit
+#    if ancestry changed between step 1 and here.
+git checkout master
+git merge --ff-only experiments
+git push
+
+# 6. Nothing to rebase — both refs now point at the same commit. Confirm:
+git log --oneline -1 master
+git log --oneline -1 experiments
+```
+
+### Why `--ff-only` rather than a bare `git merge`
+
+A bare `git merge` succeeds either way: it fast-forwards when it can and creates
+a merge commit when it cannot. If anyone pushed to `master` between the ancestry
+check and the merge, the bare form quietly produces a merge commit containing
+integration that was never tested. `--ff-only` fails instead — which is the
+answer you want, because it sends you back to step 1.
+
+### Why the documentation gate is a listed step
+
+The 2026-08-06 cohort shipped 62 `feat` commits whose agent-facing surfaces
+(`src/prompts/guides/*`) and design records (ADRs) were fully current, while the
+mdBook manual had **zero** mentions of any of the ten new subsystems and
+`CHANGELOG.md`'s `[Unreleased]` still described the previous cohort. That is not
+carelessness — it is the predictable result of gating one and not the other:
+`prompt_surfaces_reference_only_real_tools` and
+`claude_md_contains_no_deprecated_tool_names` fail the build on drift, and
+nothing does the same for the manual. Until a gate exists, this step is the
+substitute.
 ## Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.

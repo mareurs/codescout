@@ -346,5 +346,5 @@ is no per-project Qdrant instance.
   pipeline works, similarity scoring, and when to reach for semantic vs symbol search
 - [Dashboard](concepts/dashboard.md) — visual UI for project health, tool usage
   stats, index status, and memory browsing
-- The full internal architecture with contributor-level detail is in
-  `docs/ARCHITECTURE.md` in the repository root.
+- `CONTRIBUTING.md` in the repository root — setup, PR checklist, and the
+  pre-commit gate.

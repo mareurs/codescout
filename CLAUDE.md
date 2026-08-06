@@ -187,7 +187,7 @@ cold start behavior, circuit breaker, and LSP mux details.
 Files:
 
 - **`docs/PROGRESSIVE_DISCOVERABILITY.md`** — Canonical guide for output sizing, overflow hints, and agent guidance patterns. **READ THIS before adding or modifying any tool.**
-- `docs/ARCHITECTURE.md` — Component details, tech stack, design principles
+- `docs/manual/src/architecture.md` — Component details, tech stack, design principles. (There is no `docs/ARCHITECTURE.md`; it was deliberately deleted — see `docs/superpowers/specs/2026-05-06-doc-audit-design.md` § 1a.)
 - `docs/ROADMAP.md` — Quick status overview
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
 - `docs/RELEASE.md` — Release cycle, ship sequence, git-workflow safety
