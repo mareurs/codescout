@@ -1278,6 +1278,10 @@ impl tokio::io::AsyncRead for ResilientStdin {
 /// Uses the OS CSPRNG exclusively. Aborts startup on failure rather than
 /// falling back to a weak token — a predictable bearer on a network-reachable
 /// endpoint is equivalent to no auth.
+///
+/// Only reachable from the `#[cfg(feature = "http")]` transport arm, so it is
+/// gated to match — otherwise `--no-default-features` builds warn dead_code.
+#[cfg(feature = "http")]
 fn os_random_auth_token() -> Result<String> {
     let mut buf = [0u8; 32];
     // File::open + read_exact, not std::fs::read — device nodes have no EOF.
@@ -1290,6 +1294,9 @@ fn os_random_auth_token() -> Result<String> {
 
 /// Constant-time bearer string comparison. Prevents timing oracles that let
 /// an attacker enumerate valid token bytes by measuring response latency.
+///
+/// Gated with its only caller, the `http` transport arm.
+#[cfg(feature = "http")]
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

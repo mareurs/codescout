@@ -23,7 +23,7 @@ Because `isError` is false, sibling tool calls in the same MCP batch continue no
 
 ## Configuration
 
-Set `write_lock_timeout_secs` in `.codescout/config.toml` under `[security]`:
+Set `write_lock_timeout_secs` in `.codescout/project.toml` under `[security]`:
 
 ```toml
 [security]

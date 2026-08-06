@@ -13,7 +13,7 @@
 - [repair-and-continue-input-law](architecture-snow-lion/repair-and-continue-input-law.md) — deterministic input mistakes are repaired + noted, not errored (saves the retry LLM call); RecoverableError only for missing/ambiguous; writes never auto-guessed
 ## docs-lotus-frog
 
-- [experimental-docs-lifecycle](docs-lotus-frog/experimental-docs-lifecycle.md) — experimental doc creation, removal, and graduation checklist for this repo
+- [experimental-docs-lifecycle](docs-lotus-frog/experimental-docs-lifecycle.md) — new-subsystem pages go straight into the main manual with a uniform unreleased callout; staging-then-move retired at 0/62 compliance; callout comes off at release, not at merge
 - [release-notes-soul](docs-lotus-frog/release-notes-soul.md) — three-act structure (compression → retrieval → evals) and the *codescout-grades-codescout* soul line for release notes
 
 ## common

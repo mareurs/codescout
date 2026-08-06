@@ -29,7 +29,7 @@ Detection is purely name-based — no external config and no registry lookup.
 
 ## Configuration
 
-No user-facing configuration. Set your model via `project.toml` as usual:
+No user-facing configuration. Set your model via `.codescout/project.toml` as usual:
 
 ```toml
 [embeddings]
@@ -57,7 +57,7 @@ from the prefix automatically.
 
 ## Adding a new asymmetric model
 
-Extend `RemoteEmbedder::query_prefix_for` in `src/embed/remote.rs`:
+Extend `RemoteEmbedder::query_prefix_for` in `crates/codescout-embed/src/remote.rs`:
 
 ```rust
 fn query_prefix_for(model: &str) -> Option<String> {

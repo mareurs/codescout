@@ -68,6 +68,23 @@ docs that teach by example — `audit-doc-refs.md` cites `src/foo.py` and
 `artifact-move.md` cites `docs/trackers/my-tracker.md` as an example argument.
 Those are correct prose that the lint cannot distinguish from drift.
 
+
+### A fourth class, at `med` rather than `high`
+
+mdBook **relative links** are reported `verdict: "ambiguous_basename"`,
+`severity: "med"`. Example: `docs/manual/src/agents/overview.md:21` links
+`[Claude Code](claude-code.md)`, and the audit reports *"basename matches 2
+files: docs/agents/claude-code.md, docs/manual/src/agents/claude-code.md"*.
+
+The link is **correct** — mdBook resolves it relative to the containing file, and
+lengthening the path to disambiguate would break the book. The audit resolves
+basenames globally, which is the wrong resolution rule for a relative link inside
+a known book root.
+
+This class does not gate CI (`--fail-on high`), so it is noise rather than a
+blocker. It belongs in the same fix: relative links inside `docs/manual/src/`
+should resolve against their own directory first and only report ambiguity if
+*that* fails. Do not "fix" these by rewriting the links.
 ## Reproduction
 
 At `7938d68b` on `experiments`:

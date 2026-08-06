@@ -78,6 +78,36 @@ memory `research/loadbearing-mcp-guidance`.
 
 **Standing backlog:**
 
+**A local gate that covers the non-default feature configs (2026-08-06).** CLAUDE.md's
+pre-commit line (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`) covers
+**one of nine** CI test cells — the `default` config on the host OS. CI runs a 3x3
+matrix (ubuntu/macos/windows x default/local-embed/no-features), and feature-gate rot
+is invisible to a default-features build **by construction**: a test file that uses
+`codescout::librarian` without `#[cfg(feature = "librarian")]` compiles and passes
+locally while failing six matrix cells. That happened twice in one cohort — once at
+compile time (`tests/link_scan.rs`, `src/server.rs`'s `make_server`, fixed `7938d68b`)
+and once at behaviour time (three `server::tests` asserting the `artifact` tool is
+registered, fixed `be75e705`) — and kept CI red for roughly three weeks because the
+local gate reports green.
+
+Cheapest guard is a single alias running the five steps that actually gate a merge:
+
+```bash
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --no-default-features
+cargo test --features local-embed --no-default-features
+```
+
+A `cargo xtask gate` (or a `[alias]` entry in `.cargo/config.toml`) plus a one-line
+CLAUDE.md change pointing at it. The two non-default `cargo test` runs are the whole
+value — they are what the host-OS default build cannot see. Note this does NOT cover
+the Windows-only failures (`docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`),
+which need a real Windows runner. Full gate definition and the ancestry check now live
+in [`docs/RELEASE.md`](RELEASE.md) § *Large-Cohort Promotion*; friction write-up is F-3
+in `docs/trackers/release-promotion-session-log.md`.
+
 **Tracker cross-linking stream (2026-07-05, research-validated, SHIPPED W1–W3 + seed).**
 Plan: `~/.claude-sdd/plans/eager-pondering-brook.md`. `link_scan` derives scanner-owned
 `rel="cites"` edges from prose citations (dc35c70e); cross-linking convention +
