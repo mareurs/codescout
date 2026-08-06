@@ -24,6 +24,10 @@ tags:
 > Resume block below. Produced F-2, F-3, W-1.
 
 ## Resume — round 4, written 2026-08-06 for session compaction
+> **Update, same day — round 5. Both decisions below were TAKEN, and
+> `Audit Doc Refs` now reports 0 high findings locally (`EXIT=0`).** The section
+> headed "The two decisions left" is superseded; read the round-5 addendum at the
+> end of this Resume instead. Everything else here still holds.
 
 **Read this one. Rounds 2 and 3 are superseded on every point of fact** — round 3's
 magnitude estimate for the doc-drift backlog was wrong by ~5×, and its "one mechanism
@@ -123,6 +127,62 @@ fixing what it gets wrong.
 - Toolchain pin vs float: still a policy call.
 - MCP orphan idle-timeout value and the definition of "idle".
 - The merge itself is the user's to run.
+## Resume — round 5 addendum, written 2026-08-06
+
+**`Audit Doc Refs` reports 0 high findings.** `./target/release/codescout
+audit-doc-refs --no-emit-tracker --fail-on high --json --project .` → `EXIT=0`.
+Branch at `297e1074`, **415 ahead / 0 behind `master`**, clean, pushed. Local gate:
+fmt, `clippy --all-targets -D warnings`, **3498 tests passed / 0 failed**.
+
+### The two decisions, as taken
+
+1. **Dated documents no longer gate** — `historical_drop` covers
+   `docs/{plans,research,reviews,spikes,superpowers,trackers,usage-reports}/**` and
+   root-level `docs/review-*.md`. The argument that settled it: `issues_drop`
+   already does exactly this for bug files, which are acted on constantly. What a
+   ledger *is* — a dated record — is what decides the band, not how often it is
+   read. Still gating, and asserted in the test: `docs/manual/**`, root
+   `docs/*.md`, `CLAUDE.md`, `**/README.md`, `architecture/`, `conventions/`,
+   `adrs/`, `evals/`, `templates/`.
+2. **`<!-- audit-doc-refs:ignore -->` is section-scoped** — marker to the next
+   heading of any level. Line scope was impossible where it was most needed (an
+   HTML comment between table rows breaks the table); file scope was rejected
+   because the same pages cite real modules.
+
+### Not a silencing — check this before trusting the green
+
+The audit still reports **8388 broken refs**, all at `med`, spread across
+`archive_drop` (35 of the shown 50), `inferred_path` (10), `basename_ambiguous`
+(4), `gitignored_path` (1). Every finding is still emitted; only the band moved.
+If a future change makes the *count* fall too, that is the thing to distrust.
+
+### What else landed in round 5
+
+- **156 stale archive citations repointed** across 62 tracked files by a rule that
+  needs no prose reading (`<dir>/<name>.md` absent + `<dir>/archive/<name>.md`
+  present → insert `archive/`). 195 insertions / 195 deletions, a pure 1:1 swap;
+  re-scan reports 0 remaining. Idempotent by construction.
+- **Marked sections**, each with its reason inline — fictional teaching paths,
+  correctly-documented user/runtime files, and configuration values that look
+  like paths. Including the audit's own manual page, whose "Reference kinds"
+  table the tool was reporting as drift.
+- **Remaining genuine drift fixed**: `PROGRESSIVE_DISCOVERABILITY.md`'s File
+  References table (one row had to become two — the three functions now live in
+  `src/symbol/query.rs` and `src/tools/symbol/symbols.rs`), and five dead ROADMAP
+  pointers, three of which were **deleted with no successor** and are now stated
+  as deleted rather than repointed at a guess.
+
+### Still owed
+
+Unchanged from round 4: `index(force=true)` rebuild (ast-chunker moved chunk
+boundaries; ids are content-addressed), the retrieval benchmark for the chunk
+floor, reranker options 1–3, the toolchain pin-vs-float call, the MCP orphan
+idle-timeout definition. The merge itself is still the user's to run.
+
+**Verify CI rather than trusting this line:** the run for `297e1074` was queued at
+writing time. `gh run list --branch experiments --limit 1`. And per
+`docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`, do not treat a
+single green `Audit Doc Refs` as proof — that bug is still open.
 ## Resume — round 3, written 2026-08-06 for session compaction
 
 > **Read this one. Rounds 1 and 2 below are kept for the record but are superseded on
@@ -461,6 +521,7 @@ Ranked by what to do first.
 | W-2 | 2026-08-06 | high | If a truncated list feeds a pass/fail verdict, sort by the verdict's key before truncating | Would have "fixed all 18" and stayed red with no visible cause; the 18 was itself a windowed miscount of a >50 population | validated |
 | W-3 | 2026-08-06 | high | Read the product code before believing a platform-specific red test | Relaxing `derive_dead_roots`' guard to green the test makes a prune `WHERE` match every row — data loss shipped to fix a test | validated |
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
+| W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
 | W-5 | 2026-08-06 | high | Invoke the tool under test; verify the binary is newer than its sources | Reading it had missed all five: a SIGABRT, a path escape resolving `/etc/passwd:12` as Resolved, a false premise about which half of the corpus was scanned, an unused field that already was the fix, and mdBook link semantics | validated |
 
 ---
@@ -752,6 +813,55 @@ tool-behaviour seam repeats it, since the lesson is craft-shaped, not project-sh
 
 **Status:** validated — five independent finds in one session, each confirmed by a
 failing test or a crash, not by inference.
+## W-6 — Mechanising the decidable half of a cleanup is what makes the undecidable half visible
+
+**Observed:** 2026-08-06, round 5, clearing the stale archive-citation class.
+
+**Pattern:** when a cleanup has a part that is decidable *without reading prose*,
+mechanise exactly that part and run it over the whole corpus first. The residue is
+then, by construction, the part that needed judgement — and it is small enough to read.
+
+The decidable rule here:
+
+> ref is `<dir>/<name>.md`, that path does not exist, `<dir>/archive/<name>.md` does
+> → insert `archive/`.
+
+**Counterfactual, concrete:** the plan of record sized this class from a sample of 11
+and called it "mostly bug files archived today". Run over the corpus it was **156
+citations across 62 tracked files** — 14× the sample — and it included a *tracker*
+(`vdi-reliability-session-log.md`), not only bug files, which the sample had missed
+entirely. Fixing 156 sites by hand at a conservative two calls each is ~300 tool
+calls; the script was three.
+
+**The part worth keeping:** the mechanical pass then surfaced something no rule could
+have decided. `windows-platform-support.md` listed three files under **"Active bug
+files"** — and after the repoint those three read
+`docs/issues/archive/…`, i.e. "active" pointing at the archive, in a section that
+already had a separate "Archived CI-Windows bugs" line beside it. The contradiction was
+invisible while the paths were merely *wrong*; it became legible the moment they were
+*right*. Same shape in reverse for four other sites, which on inspection were dated
+`**Observed:** <date>` statements where "the only open bug" was true when written — those
+were correctly left alone.
+
+**Impact:** high — 14× scope correction, ~300 tool calls avoided, and one live tracker's
+present-tense claim corrected that a hand pass would very likely have re-typed.
+
+**Two guards the mechanisation needed, both non-obvious:**
+
+1. **Idempotence by construction.** The replacement inserts `archive/` into the very
+   substring being matched, so a second pass matches nothing. Verified rather than
+   assumed: `grep -rc "archive/archive"` → 0.
+2. **Shape assertion on the diff.** 195 insertions / 195 deletions across 62 files — a
+   pure 1:1 line swap is what a path repoint must look like, and any other ratio would
+   mean the sed had eaten something. Cheaper and stricter than reading 62 diffs.
+
+**Promote-when:** a second cleanup where a decidable rule is separable from a judgement
+call. At that point promote to the reconnaissance SKILL.md, since the lesson is
+craft-shaped: *mechanise the decidable part first; the residue is the judgement, and its
+size is the estimate you should have had.*
+
+**Status:** validated — 156 sites, 0 remaining, diff shape asserted, one semantic
+contradiction recovered that the mechanical rule could not have found.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
