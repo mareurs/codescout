@@ -1,4 +1,24 @@
+---
+status: superseded
+---
 # Features
+
+> **Superseded — historical record, archived 2026-08-06.**
+>
+> This was a running feature log from the project's first months. It is no
+> longer maintained: its last entry is the 5-tool GitHub integration, and every
+> concept it covers now has a canonical home in the mdBook manual
+> (`docs/manual/src/`) — output buffers, `run_command`, progressive
+> disclosure, `RecoverableError`, the dashboard, library search, and the rest.
+>
+> Nothing referenced this file. A retirement audit on 2026-08-06 found all 20
+> inbound mentions were in dated plans, specs and research notes from
+> 2026-03 to 2026-04 — no live surface (README, CLAUDE.md, SUMMARY.md, the
+> manual) pointed here. Rather than grow a second source of truth alongside the
+> manual, it is archived.
+>
+> For current feature documentation start at the manual's table of contents
+> (`docs/manual/src/SUMMARY.md`); for what changed when, see `CHANGELOG.md`.
 
 Implemented capabilities in codescout. For what's coming next, see [`ROADMAP.md`](ROADMAP.md).
 

@@ -15,6 +15,18 @@ severity: medium
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
 
+> **Verify-open datapoint 2026-08-06 — still open, NOT reproduced, NOT cleared.**
+>
+> On the home project (`codescout`) the two surfaces agree: `workspace(action="activate")`
+> reported 21 memories and `memory(action="list")` returned the same 21 topics. That is a
+> data point, not a verdict — the bug's scenario is a *foreign* project after
+> `activate`, which this pass did not exercise (reproducing it means activating another
+> workspace, and the workspace gate then owes a return trip home).
+>
+> Note for whoever picks this up: this cohort's `d668927e`
+> (`fix(memory): section filter follows the shallowest heading level`) is a **different**
+> defect in the same tool — it does not address topic visibility. Do not read it as a fix
+> for this.
 ## Summary
 > **STATUS: zombie — not reproducible as of 2026-07-28.** A verify-open pass ran
 > `memory(action="list")` against this project: it returned **21 topics**, not 2
