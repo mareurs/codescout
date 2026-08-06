@@ -300,6 +300,40 @@ and fmt (see `docs/RELEASE.md` § Large-Cohort Promotion) — but it does mean t
 doc-lint signal is unusable until then, since everything is red.
 
 ## Resume
+### Ready to script — the archived-citation class is a pure prefix insertion (11/11 confirmed)
+
+Do this before either decision below; it needs no policy call and it is the largest
+mechanical chunk left. Sampled every archived-file finding in the three biggest live
+trackers — `release-promotion-session-log.md`, `reconnaissance-patterns.md`,
+`codescout-usage-frictions.md` — and **11 of 11** resolved to
+`docs/issues/archive/<identical-basename>.md`. Not one needed a judgement call.
+
+The rule, and it is decidable without reading the prose:
+
+> if a ref is `docs/issues/<name>.md`, that path does not exist, **and**
+> `docs/issues/archive/<name>.md` does, the citation is stale and the fix is to insert
+> `archive/`.
+
+Confirmed instances included `2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail`,
+`2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files`,
+`2026-08-06-ast-chunker-recursion-duplicates-leading-gap`,
+`2026-07-28-audit-doc-refs-json-pointer-false-positive`,
+`2026-05-28-path-annotation-spam` — i.e. mostly bug files archived *this same day*, which
+is the warning in § Fix playing out at scale: **archiving a bug file breaks every inbound
+citation and nothing tells you.**
+
+**Two cautions for whoever scripts it:**
+
+- **Route tracker writes through the librarian.** `artifact(action="update",
+  patch={body_edits:[…]})` accepts a batch, and each entry takes `replace_all`. A bare
+  `sed -i` is wrong for any *augmented* tracker (`tool-usage-patterns.md` is one) because
+  its body is rendered from the catalog and a direct file edit is overwritten. Check
+  `artifact(action="get").augmentation` before touching a file.
+- **Do not generalise this into the resolver.** Teaching `resolve_file_path` to fall back
+  to `archive/` would make every stale citation resolve silently — and a reader following
+  a pre-archive path still gets nothing. The staleness is real; only the *fix* is
+  mechanical. This is also why `try_basename_fallback` deliberately skips refs containing
+  a slash.
 
 Two decisions remain, and **both are gate-semantics calls, not code details** — which
 is why they were left rather than taken. Everything that did not depend on them is

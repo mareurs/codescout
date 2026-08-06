@@ -23,6 +23,106 @@ tags:
 > **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
 > Resume block below. Produced F-2, F-3, W-1.
 
+## Resume — round 4, written 2026-08-06 for session compaction
+
+**Read this one. Rounds 2 and 3 are superseded on every point of fact** — round 3's
+magnitude estimate for the doc-drift backlog was wrong by ~5×, and its "one mechanism
+decision" framing turned out to be two decisions plus five outright defects.
+
+### Git state (verified, not remembered)
+
+- `experiments` at **`8fffebb3`**, tree clean, nothing unpushed, in sync with origin.
+- **412 ahead / 0 behind `master`** — still a strict ancestor, so promotion remains a
+  fast-forward. `docs/RELEASE.md` § *Large-Cohort Promotion (Fast-Forward)*, not the
+  Standard Ship Sequence.
+- Two commits this round: `a68f412c` (audit_doc_refs code) and `8fffebb3` (docs). Split
+  deliberately — the backlog bug itself warned that mixing extractor changes with dozens
+  of doc edits makes both unreviewable.
+
+### Gate state
+
+- **Local gate green:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  and `cargo test` → **3495 passed, 0 failed, 44 ignored**.
+- **CI on `8fffebb3` was still running at the time of writing** (7 green: Format, Clippy,
+  Tool Docs Sync, MSRV, ubuntu no-features, ubuntu local-embed, macos local-embed;
+  `Audit Doc Refs` and the platform matrix in flight). **Do not report a CI verdict from
+  this document — re-query it.** `gh run list --branch experiments --limit 1`.
+- Remember the local gate cannot predict CI (F-5): local clippy is two minor versions
+  behind `dtolnay/rust-toolchain@stable`, and there is still no `rust-toolchain.toml`.
+
+### What landed this round
+
+Five `audit_doc_refs` defects, each with tests carrying over-match guards:
+
+1. `resolve_file_line` / `resolve_file_symbol` had no outside-project guard that
+   `resolve_file_path` always had — a doc citing `/etc/passwd:12` resolved **`Resolved`**,
+   range-checked against the host's real file.
+2. `ignore`'s `matched_path_or_any_parents` **panics** rather than errors on an
+   out-of-root path; the first real run aborted with SIGABRT.
+3. Link resolution knew one of the repo's **two** conventions. `docs/manual/src/**` is an
+   mdBook (internal links must be page-relative); ~28 correct links were reported missing.
+4. `path.md#fragment` links were stat'd whole — 8 findings calling existing pages missing.
+5. `matches_archive` tested the literal `docs/archive/`, so `docs/trackers/archive/`,
+   `docs/plans/archive/` and siblings got **no archive drop at all**.
+
+Three severity caps: `code_block` (a block is a transcript, not a citation — reads
+`RefPosition`, which the parser already populated and nothing consumed), `gitignored_path`
+(absence is the normal state), and skipping markup-display spans (the audit was flagging
+its own manual's example column).
+
+Doc fixes, all confirmed against filesystem or `git log` first: ~12 genuine drift
+citations; **two links broken in the rendered book**; **a rendering bug** in
+`tool-selection.md` where stray duplicate fences swallowed two prose paragraphs; and two
+substantive defects — `semantic-search-diversity.md` documented an **inactive** feature
+(`MAX_CHUNKS_PER_FILE` exists nowhere; the cap is `#[allow(dead_code)]`), and
+`librarian-mcp.md` cited a file in a crate **dissolved** in `d48bf992`.
+
+### Measured state of the one red job
+
+Per-directory `--paths` counts (the only trustworthy method — see F-6):
+
+- **Zero high findings:** `docs/{adrs,architecture,archive,conventions,evals,issues,spikes,templates}`.
+- `docs/manual`: **22 → 11**.
+- Residue: `docs/research` 37, `docs/usage-reports` 20, and `docs/{plans,reviews,superpowers,trackers}`
+  each ≥50 (capped, so unknown-but-larger). **Several hundred total**, overwhelmingly one
+  class: dated point-in-time documents whose refs were correct when written.
+
+### The two decisions left — both yours, both gate-semantics
+
+They are written out in full, with recommendations and the arguments against, in
+`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` § Resume.
+In brief: (1) do dated documents gate CI — extend the drop policy (recommended) or
+narrow the scan set; (2) what scope should the `<!-- audit-doc-refs:ignore -->` marker
+have for the last 11 manual findings — section-scoped recommended, because a line-scoped
+marker cannot live inside a markdown table.
+
+**Neither was taken unilaterally**, and that is deliberate: three caps were already added
+this round on defect grounds, and these two change what the gate *means* rather than
+fixing what it gets wrong.
+
+### Do NOT re-do
+
+- **Do not blanket-exclude `docs/manual/src/concepts/**`.** Measured: this round found
+  two book-breaking links, a rendering bug, and an inactive-feature page in there.
+  Excluding it hides all three.
+- **Do not "fix" a finding by editing prose to satisfy the lint.** Confirm at the
+  filesystem and `git log --all --follow`; if the reference is correct, the extractor is
+  what needs changing. That discipline is what produced all five defects above.
+- **Do not trust an aggregate read through the 50-finding cap** (F-6). Use `--paths`.
+- **Do not trust a single green `Audit Doc Refs` run** — the gate is non-deterministic:
+  `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
+- **Do not trust a stale release binary.** It was two days old and predated all four
+  source files of the tool under test. `find src crates -name '*.rs' -newer target/release/codescout`.
+
+### Owed / unverified
+
+- `index(force=true)` rebuild still owed — the ast-chunker change moved chunk boundaries
+  and ids are content-addressed.
+- Retrieval benchmark for the chunk floor; reranker options 1–3 still unchosen (needs a
+  live-arm measurement).
+- Toolchain pin vs float: still a policy call.
+- MCP orphan idle-timeout value and the definition of "idle".
+- The merge itself is the user's to run.
 ## Resume — round 3, written 2026-08-06 for session compaction
 
 > **Read this one. Rounds 1 and 2 below are kept for the record but are superseded on
@@ -351,6 +451,7 @@ Ranked by what to do first.
 | F-3 | 2026-08-06 | med | process | fixed-verified | Treated CLAUDE.md's three local commands as "the gate"; the merge gate is 15 CI jobs, red for 3 weeks |
 | F-4 | 2026-08-06 | med | process | fixed-verified | Three bug files' own `## Fix` sections carried wrong premises — stale-by-superseding, wrong severity, already-implemented |
 | F-5 | 2026-08-06 | high | process | open | Local gate structurally cannot predict CI — clippy 1.95 vs 1.97, separator bugs invisible on Linux, `--all-features` unusable |
+| F-6 | 2026-08-06 | med | measurement | mitigated | The 50-finding cap mis-sized the backlog plan by ~5× — third instance of a capped view corrupting a number the gate acts on |
 
 ## Wins Index
 
@@ -360,6 +461,7 @@ Ranked by what to do first.
 | W-2 | 2026-08-06 | high | If a truncated list feeds a pass/fail verdict, sort by the verdict's key before truncating | Would have "fixed all 18" and stayed red with no visible cause; the 18 was itself a windowed miscount of a >50 population | validated |
 | W-3 | 2026-08-06 | high | Read the product code before believing a platform-specific red test | Relaxing `derive_dead_roots`' guard to green the test makes a prune `WHERE` match every row — data loss shipped to fix a test | validated |
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
+| W-5 | 2026-08-06 | high | Invoke the tool under test; verify the binary is newer than its sources | Reading it had missed all five: a SIGABRT, a path escape resolving `/etc/passwd:12` as Resolved, a false premise about which half of the corpus was scanned, an unused field that already was the fix, and mdBook link semantics | validated |
 
 ---
 
@@ -567,6 +669,89 @@ End state: nine failures, three root causes, **zero product changes** — and CI
 
 **Status:** validated — prediction made before the evidence existed, then confirmed.
 
+## F-6 — A capped findings list corrupted a magnitude estimate for the third time, in the document written to warn about it
+
+**Observed:** 2026-08-06, round 4, planning the doc-drift work from
+`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
+
+**Expected (the plan):** "~11 gitignore-aware + ~42 marker + ~8 by hand" ≈ **61** findings,
+sized as one focused session.
+
+**Got:** per-directory `--paths` counts totalling **several hundred**, with four
+directories each hitting the 50-cap so their true counts are still unknown. The estimate
+was ~5× low.
+
+**Probable cause:** the estimate was read off the JSON `findings` array, which
+`OutputGuard` truncates to 50 while the exit code is computed over all of them. So the
+plan described the *window*, not the population — and after the ranked-ordering fix (W-2)
+the window is the 50 most severe, which reads even more like a complete list.
+
+**Two aggravations specific to this instance:**
+
+- `overflow.total` reports **46683**, which is `n_refs_found` — total *references scanned*,
+  not total findings. Sitting beside `shown: 50` it invites reading 46683 as the finding
+  count. Neither number is the one a planner needs.
+- Scan order decides which of the ≥N high findings land in the window. The first top-50
+  looked manual-dominated; after the manual was fixed, an entirely different 50 appeared
+  from directories that had shown nothing. Progress was invisible in the aggregate for
+  three consecutive rounds of real fixes.
+
+**Severity:** med — no wrong code, but it mis-scoped the work twice and would have led to
+reporting "backlog cleared" after clearing one directory's worth.
+
+**Status:** mitigated — the method is now pinned in the backlog bug's § Resume and in
+round 4's *Do NOT re-do*: count with `--paths` per directory, never from the top-level run.
+
+**Fix idea / Pointer:** the audit should report an uncapped `n_findings_by_severity`
+alongside the capped array — three integers, no truncation risk. This is the same defect
+class as `2026-08-06-audit-doc-refs-gate-hides-its-own-cause` (already fixed by ranking):
+the gate's own summary does not carry the number the gate acts on. Third instance overall
+— the first corrupted "18 findings" in a bug file, the second hid the gating cause, this
+one mis-sized the plan. Kin R-50 ("the view is not the set").
+
+## W-5 — Invoking the tool under test, instead of reading it, produced five defects that reading had missed
+
+**Observed:** 2026-08-06, round 4, working the `audit_doc_refs` backlog. The plan of
+record had been written by *reading* the extractor; this round ran it.
+
+**Pattern:** when the seam is a **tool**, the scout is one real invocation whose output
+you read — preceded by confirming the artifact you invoked was built from current source.
+
+**Counterfactual, with the concrete finds:**
+
+1. The local release binary was **two days old and predated all four source files** of the
+   tool under test. Every number from it would have described the *old* extractor — the
+   exact error that made three prior CI verdicts meaningless (F-5 kin). Caught by
+   `find src crates -name '*.rs' -newer target/release/codescout` before any measurement.
+2. Running it died with **SIGABRT** — `ignore`'s `matched_path_or_any_parents` panics
+   rather than errors outside its root. Unknowable from the signature, which returns
+   `Match`, not `Result`. Reading the crate docs would not have surfaced it either.
+3. A test written for that panic asserted on the real verdict and caught a **pre-existing**
+   escape: `/etc/passwd:12` resolved **`Resolved`**, range-checked against the host's file.
+   Two ref kinds lacked a guard the third had always carried.
+4. The backlog bug's own written premise — "the extractor only reads code spans and
+   links" — was **false**: `parse_refs` walks code-block text too. Measured split of one
+   top-50: 18 prose / 18 fenced / 2 indented, so half the population was invisible to the
+   plan built on that sentence.
+5. `RefPosition` was populated by the parser and **read by nothing**. The discriminator
+   the fix needed already existed, unused — visible only by grepping its uses, not by
+   reading the parser that writes it.
+
+Without the invocation: a SIGABRT shipped into a CI gate, a path escape left in place, a
+mechanism hand-rolled beside the unused one already there, and a plan built on a false
+premise about which half of the corpus it covered.
+
+**Impact:** high — four of the five are correctness defects in a gate, and the fifth would
+have produced duplicate machinery.
+
+**Promote-when:** already at threshold with W-1 ("dumping an internal pure function's real
+output beat reasoning from its source") — same lesson, one level up: W-1 was a function,
+this is a whole tool. Captured as **R-57** in `docs/trackers/reconnaissance-patterns.md`
+with a proposed Phase 1 addition. Promote to the reconnaissance SKILL.md if a third
+tool-behaviour seam repeats it, since the lesson is craft-shaped, not project-shaped.
+
+**Status:** validated — five independent finds in one session, each confirmed by a
+failing test or a crash, not by inference.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

@@ -1360,6 +1360,33 @@ risk against genuine filters.
 
 ---
 
+**Update 2026-08-06 (round 4) — ×3 more, 10 total. The count keeps rising and the shape
+has never varied.**
+
+The three new ones, in order:
+
+| # | Command | Trimmer |
+|---|---|---|
+| 8 | `find src crates -name '*.rs' -newer target/release/codescout` | `\| head -20` |
+| 9 | `cargo build --release --bin codescout` | `\| tail -2` |
+| 10 | `git ls-files crates/librarian-mcp` | `\| head` |
+
+All three are **predicate-free length trimmers** — no `grep`, no filter, nothing but
+"show me less". That is now **10 for 10**: not one violation across the whole session
+was a genuine content filter. The denyable subset is exact, and a rule limited to
+`head`/`tail` with no accompanying predicate would have caught every one while never
+touching a legitimate `\| grep FAILED`.
+
+**What this datapoint adds beyond U-30 and the first U-33:** the intervention itself is
+now falsified twice over. U-30 was written to stop the slips; three more followed in the
+same session. U-33 was written to characterise them; three more followed after *that*.
+A friction log is a record, and a record does not change in-flight behaviour — only the
+gate does. The advisory PreToolUse echo fires *after* the violation is already composed,
+so it teaches nothing at the moment of writing.
+
+**Promote-when: fired.** At 10 datapoints with zero counter-examples, this is no longer
+an observation. The fix is a hook-side deny on `(head|tail)` with no sibling predicate in
+the pipeline, which is a strictly smaller rule than the current advisory matcher.
 ### U-34 — `edit_code action=insert` takes the ANCHOR in `symbol`, while an `anchor` param also exists
 
 **When:** 2026-08-06. Inserting a new function after an existing one.
@@ -1416,3 +1443,44 @@ value would not. Document the absolute-vs-displayed asymmetry on the filter surf
 **Status:** open.
 
 ---
+
+### U-36 — The harness's batch-independent-calls rule directly contradicts codescout's serialize-writes rule
+
+**Observed:** 2026-08-06, working the doc-drift backlog. Issued two independent
+`edit_markdown` calls in one block — different files, no shared state.
+
+**Got:** both succeeded, and a `PostToolUse` hook fired:
+
+```
+[cs-hint] Parallel writes risk inconsistent state (BUG-021) — serialize write tool calls.
+```
+
+**The conflict is textual, not a judgement call.** The harness system prompt ends with:
+
+> If you intend to call multiple tools and there are no dependencies between the calls,
+> make all of the independent calls in the same block, otherwise you MUST wait for
+> previous calls to finish first
+
+That is an unconditional instruction with an emphatic MUST on its converse. Two
+independent edits to two different markdown files satisfy its antecedent exactly. So the
+harness instructs the batch, and codescout's hook then flags the batch as a hazard.
+
+**Why it matters more than the warning suggests:** the hook is `PostToolUse` — it fires
+*after* both writes have already landed. If BUG-021 is real, the advisory arrives too late
+to prevent the inconsistent state it names; if it is not real, the hint is training an
+agent away from a batching rule the harness demands. Either way the current arrangement
+cannot be correct.
+
+**Severity:** med — no damage observed (both edits verified applied), but the agent is
+left choosing which of two directives to violate on every multi-file doc pass, and doc
+passes are exactly where independent writes are most natural.
+
+**Fix idea:** state the carve-out where the batching rule is read, not only after it is
+broken. codescout's server instructions already carry Iron Laws 1–6; a seventh line —
+*"write tools (`edit_code`, `edit_file`, `edit_markdown`, `create_file`, `artifact`) are
+serialized; batch reads freely"* — would resolve it before the call is composed, the same
+reasoning as U-33's promote-when. If BUG-021 is genuinely a correctness hazard, the hook
+should be `PreToolUse` and deny, not `PostToolUse` and hint.
+
+**Status:** open — needs a decision on whether BUG-021 is a live hazard or a stale
+precaution before choosing between documenting the carve-out and enforcing it.
