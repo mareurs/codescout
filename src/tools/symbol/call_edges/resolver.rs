@@ -314,10 +314,7 @@ fn enclosing_function_name(
             // Function node found but no name child (e.g. anonymous arrow function).
             return None;
         }
-        match node.parent() {
-            Some(p) => node = p,
-            None => return None,
-        }
+        node = node.parent()?;
     }
 }
 
@@ -382,10 +379,7 @@ fn enclosing_function_node<'tree>(
                 }
             }
         }
-        match node.parent() {
-            Some(p) => node = p,
-            None => return None,
-        }
+        node = node.parent()?;
     }
 }
 

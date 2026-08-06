@@ -115,7 +115,7 @@ impl CachedResolver {
             let guard = self.positions.lock().unwrap();
             let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
             let mut out = Vec::new();
-            for (_, (p, _, _)) in guard.iter() {
+            for (p, _, _) in guard.values() {
                 if seen.insert(p.clone()) {
                     out.push(p.clone());
                 }
