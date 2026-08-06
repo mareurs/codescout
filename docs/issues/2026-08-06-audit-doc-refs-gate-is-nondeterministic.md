@@ -23,6 +23,26 @@ precision work. Not caused by that work: the varying refs are `file_symbol` kind
 whose resolution depends on the LSP, and the scan already self-reports
 `scan_meta.degraded: true` with `lsp_languages_offline: ["unknown"]`.
 
+**Update 2026-08-06, later the same day — the stakes inverted.** When this was filed the
+gate had several hundred high findings, so a flap of one or two changed nothing: the run
+was red either way. `Audit Doc Refs` now reports **0** high findings
+(`a7c1d7f6` + `297e1074`). At zero, a single flap into a `high` verdict is the difference
+between green and red, and there is no cushion absorbing it.
+
+So the practical severity rose without the bug changing. Two consequences worth acting on:
+
+- **A spuriously red run is now possible on an unchanged tree.** Anyone seeing
+  `Audit Doc Refs` fail should re-run before believing it, and should compare the finding
+  list rather than the exit code — a flapped finding will be a `file_symbol` ref.
+- **The `scan_meta.degraded` hole is now the bigger half.** A degraded scan that reports
+  green is indistinguishable from a genuinely clean one, and green is now the expected
+  state, so the failure mode is silent rather than loud. Fix direction 1 below (make
+  degradation gate-visible) should be preferred over waiting for a forcing recipe.
+
+The zero also gives a much sharper reproducer than the one in § Reproduction: any flap at
+all now shows up as a **non-zero exit on a tree that just exited zero**, which is trivial
+to detect in a loop — run the full scan N times and compare exit codes, no `--paths`
+narrowing and no finding-set diffing required.
 ## Symptom (Effect)
 
 Two consecutive sweeps over the same directories, no edits in between:
@@ -100,9 +120,64 @@ reported and ignored.
 
 ## Hypotheses tried
 
-None yet — this file is a capture-on-notice record, written the moment the flap was
-seen rather than at task end.
+**Exit-code stability at zero — 6 consecutive full scans, all `exit=0`** (2026-08-06,
+`297e1074`, warm LSP mux). Run bare, no `--paths` narrowing:
 
+```
+for i in 1 2 3 4 5 6; do
+  ./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high \
+    --json --project . >/dev/null 2>&1; echo "run $i: exit=$?"
+done
+```
+
+So the flap does **not** reproduce on demand under a warm mux, which bounds its rate
+rather than clearing it: the original observation was two flaps in one sitting, both on
+`--paths`-narrowed scans of `docs/evals/` and `docs/conventions/`. Two candidate
+explanations survive, and they are distinguishable:
+
+- **Cold vs. warm mux.** Both original flaps came early in a sweep, where one invocation
+  starts the mux (`mux process ready for rust`) and later ones attach
+  (`mux already running for rust`). All six runs above attached to a warm mux. **Next
+  experiment:** kill the socket between runs (`ls /run/user/$UID/codescout-rust-mux-*`)
+  and repeat. If the exit code moves, hypothesis 1 in § Root cause is confirmed and the
+  fix is a policy decision, not a hunt.
+- **`--paths` narrowing changes which LSP languages are touched**, so a narrowed scan can
+  be degraded in a way a full scan is not. Worth checking because CI runs the full scan,
+  which would make the flap CI-invisible — and therefore mean the local observation
+  overstates the CI risk.
+
+Not yet tried: forcing the cold-mux case, and diffing the finding *sets* rather than the
+counts across runs.
+**Narrowed-scan stability — 6 runs each of the two directories where the flap was
+actually seen, all 0** (2026-08-06, `297e1074`):
+
+```
+for i in 1 2 3 4 5 6; do
+  ... --paths "docs/evals/**/*.md"       -> high=0
+  ... --paths "docs/conventions/**/*.md" -> high=0
+done
+```
+
+**So the flap does not reproduce in either shape — 12 attempts, 0 reproductions.** That is
+worth stating plainly rather than leaving the LSP-warmth hypothesis looking confirmed: it
+is one observation, and it has now survived no replication.
+
+What is still certain, and is the part that matters: the two measurements were taken
+minutes apart on an unchanged tree with the same binary and the same jq selection, and
+they disagreed (`conventions` 1→0, `evals` 2→0). Something moved that was not the input.
+
+A third explanation now looks at least as likely as the two above, and it is the one the
+original observation is most consistent with: **the flapping counts came from a
+rapid-fire sweep of ~11 back-to-back invocations**, each starting a fresh process against
+the shared mux socket. Contention or a mid-restart mux during that burst would degrade one
+invocation and not its neighbours. The 12 replication attempts were paced (two per
+iteration), which is exactly the condition that would *not* trigger it.
+
+**Next experiment, and it is cheap:** re-run the original 11-directory sweep verbatim,
+several times, and watch for any non-zero count. That reproduces the *burst*, which the
+paced runs deliberately did not. If it flaps there and never in paced runs, the fix is
+about mux contention under concurrent short-lived processes, not about warmth — and the
+gate could be made deterministic simply by warming the LSP once before scanning.
 ## Fix
 
 Not implemented. Two candidate directions, and they are not exclusive:
@@ -146,4 +221,3 @@ green run on a symbol-heavy diff as unconfirmed.
   sibling flake, still open.
 - `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
   backlog this was found while working.
-

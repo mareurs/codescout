@@ -136,6 +136,54 @@ no prose edit can fix them without making the docs worse. See § Resume.
    date-template placeholder link), both since fixed in the extractor.
 
 ## Fix
+**2026-08-06, third pass — RESOLVED. `--fail-on high` reports 0 findings.**
+
+`./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high --json
+--project .` → `EXIT=0`. Local gate green alongside it: fmt, `clippy --all-targets -D
+warnings`, 3498 tests / 0 failed. Commits `a7c1d7f6` (code) and `297e1074` (docs) on
+`experiments`.
+
+### How the residue was actually distributed — four classes, not three
+
+The plan below had three. The fourth only appeared once the first three stopped
+saturating the 50-finding window, which is the same lesson as F-6:
+
+1. **Dated, point-in-time records** — the overwhelming majority. Resolved by
+   `historical_drop`, extended to root-level `docs/review-*.md` after
+   `docs/review-2026-03-05.md` turned out to hold 17 line-pinned refs into modules
+   since split apart. The librarian's own classifier patterns already name that form.
+2. **Stale archive citations** — 156 across 62 tracked files, 14× the sampled
+   estimate, and including a *tracker* the sample had missed. Mechanised; see W-6 in
+   `docs/trackers/release-promotion-session-log.md`.
+3. **Fictional teaching paths and documented-but-absent files** — resolved by the
+   section-scoped marker.
+4. **Configuration values that merely look like paths** — not anticipated at all.
+   `librarian-embedded.md` lists built-in classifier *patterns*; ROADMAP names modules
+   for unbuilt features. Both docs are correct and neither reference can ever resolve.
+   Marker, with the reason inline.
+
+### The part that was genuine drift after all that
+
+Small, and worth naming because it is what the gate exists for:
+
+- `docs/PROGRESSIVE_DISCOVERABILITY.md`'s File References table pointed at
+  `src/tools/symbol.rs` for three functions that now live in **two** modules
+  (`src/symbol/query.rs`, `src/tools/symbol/symbols.rs`) — one row had to become two —
+  plus `src/prompts/server_instructions.md`, renamed to `source.md` long ago.
+- Five dead ROADMAP pointers. **Three had no successor anywhere in history** (the v1
+  implementation plan, the MCP-elicitation note, the contributor-skills design) and are
+  now stated as deleted rather than repointed at a guess. Its Kotlin-LSP pointer named
+  a bug pruned in `c6184884` after the fix landed in `dc44ac3d`.
+- `src/tools/run_command.rs` is a directory now.
+
+### Guard against reading the green as "clean"
+
+The audit still emits **8388 broken refs**, all at `med`. The bands moved; nothing was
+suppressed out of the report. **If a future change drops that count too, distrust it** —
+that is the signature of an extractor regression rather than a docs improvement. And
+`docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md` is still open: a flap
+into a `high` verdict now costs a spuriously red gate, so the non-determinism matters
+*more* at zero than it did at several hundred.
 **2026-08-06, second pass — substantially worked. The estimate below was wrong by ~5×,
 for the same reason the original bug existed: it was measured through the 50-finding cap.**
 

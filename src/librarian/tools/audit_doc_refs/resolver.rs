@@ -513,7 +513,7 @@ fn outside_project() -> Resolution {
     }
 }
 
-/// Whether `raw_ref` names a gitignored location.
+/// Whether `raw_ref` names a location git will never track.
 ///
 /// Checks the ref *and every parent directory*: `.gitignore` here carries
 /// `/.worktrees/`, a directory rule, and the docs cite paths *inside* it
@@ -522,9 +522,6 @@ fn outside_project() -> Resolution {
 /// forms are tried because the ref does not exist, so there is nothing to stat
 /// and no way to know which it would have been.
 fn is_gitignored(raw_ref: &str, ctx: &ResolveCtx<'_>) -> bool {
-    let Some(gi) = ctx.gitignore.as_ref() else {
-        return false;
-    };
     // The escape guard is load-bearing, not defensive: `matched_path_or_any_parents`
     // *panics* on a path outside its root. Callers now reject those refs earlier,
     // but this function must stay safe on its own — a panic here aborts the whole
@@ -532,7 +529,30 @@ fn is_gitignored(raw_ref: &str, ctx: &ResolveCtx<'_>) -> bool {
     if points_outside_project(raw_ref) {
         return false;
     }
-    let abs = ctx.repo_root.join(raw_ref);
+
+    // Docs name a directory with a trailing slash (`.claude/worktrees/`), and so do
+    // gitignore's own directory rules — but the matcher reads the final path
+    // component, and a trailing separator leaves that component empty, so nothing
+    // matches. Every such ref silently escaped this cap. Strip it first: `foo/` and
+    // `foo` denote the same path.
+    let cleaned = raw_ref.trim_end_matches('/');
+    if cleaned.is_empty() {
+        return false;
+    }
+
+    // `.git/` is not in `.gitignore` — git excludes its own directory structurally,
+    // so no pattern mentions it and the matcher cannot know. It is nonetheless the
+    // clearest possible case of untracked state whose shape depends on repo
+    // history: `.git/worktrees/` exists only once a worktree has been added, which
+    // is exactly why a doc describing worktrees resolved locally and not in CI.
+    if cleaned == ".git" || cleaned.starts_with(".git/") {
+        return true;
+    }
+
+    let Some(gi) = ctx.gitignore.as_ref() else {
+        return false;
+    };
+    let abs = ctx.repo_root.join(cleaned);
     gi.matched_path_or_any_parents(&abs, false).is_ignore()
         || gi.matched_path_or_any_parents(&abs, true).is_ignore()
 }
@@ -687,6 +707,68 @@ mod tests {
         assert_eq!(tracked.severity, Severity::High);
         assert_eq!(tracked.severity_reason, "policy_default");
     }
+    /// Docs name a *directory* with a trailing slash — `.claude/worktrees/`,
+    /// `.codescout/private-memories/` — and gitignore's own directory rules are
+    /// written the same way. Both forms must reach the same verdict, or the cap
+    /// silently misses exactly the refs it exists for.
+    ///
+    /// This is the CI-vs-local skew that a green local gate hid: those directories
+    /// exist in a working checkout, so the refs resolved and produced no finding at
+    /// all locally, while a fresh clone has neither and reported them `high`.
+    #[test]
+    fn resolver_caps_a_gitignored_directory_ref_written_with_a_trailing_slash() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
+        // A real checkout always has `.git`, so the root segment exists and these
+        // refs reach the gating band as `Structural`. Without it `cap_inferred_path`
+        // fires first and the assertion would be reading the wrong cap.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::write(
+            tmp.path().join(".gitignore"),
+            "/.claude/*\n!/.claude/skills/\n.codescout/private-memories/\n",
+        )
+        .unwrap();
+        let gi = {
+            let mut b = ignore::gitignore::GitignoreBuilder::new(tmp.path());
+            assert!(b.add(tmp.path().join(".gitignore")).is_none());
+            b.build().unwrap()
+        };
+        let globs: [globset::Glob; 0] = [];
+        let ctx_gi = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &globs,
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: Some(gi),
+        };
+
+        for raw in [
+            ".claude/worktrees/",
+            ".claude/worktrees",
+            ".codescout/private-memories/",
+            ".codescout/private-memories",
+            // `.git/` is never in `.gitignore` — git excludes its own directory
+            // structurally — yet `.git/worktrees/` exists only once a worktree has been
+            // added, which is why the docs describing worktrees passed locally and
+            // failed on a fresh clone.
+            ".git/worktrees/",
+            ".git/worktrees",
+        ] {
+            let r = resolve_ref(
+                &cand(
+                    raw,
+                    "docs/manual/src/concepts/worktrees.md",
+                    RefKind::FilePath,
+                ),
+                &ctx_gi,
+            );
+            assert_eq!(r.severity, Severity::Med, "{raw} should not gate");
+            assert_eq!(r.severity_reason, "gitignored_path", "{raw}");
+        }
+    }
+
     /// `ignore`'s `matched_path_or_any_parents` panics — not errors — when handed a
     /// path outside its root, and two ref shapes reach it that way: an absolute path
     /// (which `Path::join` resolves by *discarding* the base) and one containing
