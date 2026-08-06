@@ -1,4 +1,9 @@
-/.github/
+# Narrowed from `/.github/` (4dac3a3c, 2026-03-03), which was added in the same
+# commit that deleted .github/copilot-instructions.md — the intent was to stop that
+# one generated file coming back, not to ignore CI. The broad rule made `git add`
+# refuse new workflow files while the existing ones stayed tracked, since gitignore
+# has no effect on paths already in the index.
+/.github/copilot-instructions.md
 /.worktrees/
 /target
 /.mcp.json
