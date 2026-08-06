@@ -1568,7 +1568,16 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         let live_parent = tempfile::tempdir().unwrap();
         let covered_root = live_parent.path().join("repo");
-        seed_artifact(&cat, "wt", &covered_root.join("x.md").to_string_lossy());
+        // Seed the RepoPath-normalised (forward-slash) shape that production
+        // writers store. `to_string_lossy()` on a joined PathBuf yields
+        // BACKSLASHES on Windows, while `count_dead_root` builds its LIKE
+        // prefix through `RepoPath::from_path` — so a backslash seed matched
+        // nothing there and the per-root count came back 0.
+        seed_artifact(
+            &cat,
+            "wt",
+            &crate::util::fs::RepoPath::from_path(&covered_root.join("x.md")).into_string(),
+        );
         let covered_root_str = crate::util::fs::RepoPath::from_path(&covered_root).to_string();
         reg::upsert_active(&cat, &covered_root_str, &covered_root_str, None, 1000).unwrap();
         // A second, uncovered dead root so the totals assertion isn't

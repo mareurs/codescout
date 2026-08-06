@@ -1717,10 +1717,19 @@ struct Point {
 
         // rust-analyzer indexes in the background after initialize; retry until
         // workspace/symbol returns results. Local Linux: typically < 2s, but GHA
-        // runners (especially macOS + Windows) can be I/O-slower under load.
-        // Budget 15s (30 × 500ms) on all platforms.
+        // runners (especially macOS + Windows) can be I/O-slower under load. The
+        // loop exits early on success, so a generous ceiling costs nothing when
+        // indexing is fast.
+        //
+        // Windows gets 4× the budget (60s vs 15s): the 15s ceiling was still not
+        // enough there — "workspace/symbol 'add' should return results within the
+        // retry budget", run 31094160241 — while the same commit passed on ubuntu
+        // and macOS. Cold `cargo metadata` with no warm target cache on that
+        // runner is the difference, not a logic fault, so widen the budget rather
+        // than skip the test and lose Windows coverage of workspace/symbol.
+        let attempts = if cfg!(windows) { 120 } else { 30 };
         let mut symbols = vec![];
-        for _ in 0..30 {
+        for _ in 0..attempts {
             symbols = client.workspace_symbols("add").await.unwrap();
             if !symbols.is_empty() {
                 break;
