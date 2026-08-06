@@ -193,11 +193,14 @@ Two follow-ups, both small:
 
 ## References
 
-- `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` — the
-  bug whose measurement this defect corrupted.
-- `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md` — same
-  subsystem, extractor polarity.
+- `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` —
+  the bug whose measurement this defect corrupted.
+- `docs/issues/archive/2026-07-28-audit-doc-refs-json-pointer-false-positive.md` —
+  same subsystem, extractor polarity.
 - `docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md` —
   the omnibus silent-cap family this belongs to.
-- `docs/PROGRESSIVE_DISCLOSURE.md` — "Treating the summary as authoritative"
-  anti-pattern.
+- `docs/PROGRESSIVE_DISCOVERABILITY.md` — "Treating the summary as authoritative"
+  anti-pattern. (There is no docs/PROGRESSIVE_DISCLOSURE.md; five other docs still
+  cite that nonexistent name — see the drift backlog.)
+- `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
+  remaining population, including the wrong-guide-name citations above.

@@ -23,6 +23,131 @@ tags:
 > **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
 > Resume block below. Produced F-2, F-3, W-1.
 
+## Resume — round 3, written 2026-08-06 for session compaction
+
+> **Read this one. Rounds 1 and 2 below are kept for the record but are superseded on
+> every point of fact.** Round 2's item 1 ("push, then re-read CI") is done; its
+> "remaining issues" list is down from five to one.
+
+### Git state
+
+- Branch `experiments` @ `e6d8ffa8`, **409 commits ahead of `master`, still a strict
+  ancestor** (`git rev-list --left-right --count master...experiments` → `0 409`).
+  Tree clean, nothing unpushed.
+- Promotion is a **fast-forward**, not a cherry-pick. Use `docs/RELEASE.md`
+  § *Large-Cohort Promotion (Fast-Forward)*, NOT the Standard Ship Sequence.
+- The merge itself is the user's to run ("Prepare only — I run the merge").
+
+### CI state — 14 of 15 green
+
+Run `31098286970` on `cd643d58`. Baseline for comparison: `30852803569` (2026-08-03)
+was 4 green / 11 red, measured on code 21 commits stale.
+
+| Green (14) | Red (1) |
+|---|---|
+| Format, Clippy, Tool Docs Sync, MSRV (1.88) | **`Audit Doc Refs`** |
+| ubuntu × default / no-features / local-embed | |
+| macos × default / no-features / local-embed | |
+| windows × default / no-features / local-embed | |
+| Windows-gnu cross (MinGW + wine) | |
+
+`Test (windows-latest / default)`: **3283 passed, 0 failed.**
+
+### The one open item: `Audit Doc Refs`
+
+Diagnosed and measured, not unknown. Tracked in
+`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
+
+After the extractor fixes and the `docs/lessons/**` exclusion, >50 high findings remain
+in **three sub-classes needing three different mechanisms**:
+
+1. **Fictional example paths** (~42 of the current window) — src/services/auth.rs ×11,
+   src/foo.rs ×5, docs/trackers/my-tracker.md, ./gradlew (left un-code-spanned here on
+   purpose: this file gates, and code-spanning a nonexistent example path would add it
+   to the very backlog this entry describes). Almost all in
+   `docs/manual/src/concepts/**`. Nothing syntactic separates "illustrative" from
+   "stale", so these need an author-supplied marker
+   (`<!-- audit-doc-refs:ignore-file -->` or similar).
+2. **Gitignored runtime state** (~11) — `.worktrees/*` ×8, .codescout/embeddings.db
+   ×3. A gitignore-aware severity cap clears these with no markers and no prose edits:
+   a doc naming generated state is not citing a tracked file.
+3. **Genuine drift** (~8) — including citations to the six bug files archived earlier
+   today. Mechanical: repoint to `docs/issues/archive/…`. Note only the
+   non-`docs/issues/` citers gate, since `docs/issues/**` gets `issues_drop` High→Med.
+
+**Recommended order:** (2) then (1) then (3). **Mechanism choice was deliberately NOT
+taken** — it is a design decision on a user-facing lint with several defensible answers,
+and the user was asked.
+
+**Do NOT blanket-exclude `docs/manual/src/concepts/**`.** The manual also cites real
+codescout paths, and that is exactly where doc drift hurts readers most. Excluding it
+would trade the gate's whole value for a green check.
+
+### Do NOT re-do these — decisions made with evidence
+
+- **`~80 ms` reranker figure in `retrieval-stack.md` stays.** Its bug file says "correct
+  it regardless", but that line predates a **CORRECTED** note at the top of the same
+  file which retracts the comparison it rests on. The row is labelled TEI; the 3091 ms
+  was measured on llama-server. The two available TEI numbers disagree impossibly
+  (tracker p50 ~150 ms vs manual p95 ~80 ms). A callout was added instead. See F-4.
+- **Reranker options 1–3 stay unchosen.** Needs a measurement of the *live* arm
+  (dense + sparse + rerank), which was never benchmarked.
+- **MCP-orphan direction 1 ("exit on stdio EOF") is already implemented** —
+  `ResilientStdin` absorbs only `WouldBlock`, so a 0-byte EOF propagates and the process
+  exits. The orphans are never *sent* one. The fix is direction 2 (idle timeout), which
+  needs a timeout value + a definition of idle; firing on a live-but-quiet session is
+  worse than the leak. Still reproducing: 16 processes, oldest 2d22h, ~1.05 GB RSS.
+  **Do not bulk-kill by pattern** — the list always includes the killer's own server.
+- **`derive_dead_roots`' `is_absolute()` guard stays.** Relaxing it to green a POSIX
+  fixture makes a prune `WHERE` match every absolute row. See W-3.
+- **`count_dead_root_counts_rows_under_root` keeps its POSIX literals.** It calls
+  `count_dead_root` directly, so it never reaches that guard; its subject is
+  prefix-sibling LIKE semantics, not paths on disk.
+- **The seven `⚠ Unreleased` manual callouts stay through the merge.** Removal trigger
+  is the *release*, not `master` — both their claims stay true on master.
+- **`symbols` Bug A is closed** (retracted; `include_body` IS honoured). Only Bug B
+  (intermittent search-mode 0-match) keeps that file open, and it needs a scripted
+  post-activation repro that hand-issued MCP calls cannot express.
+
+### Owed / unverified
+
+- **`index(force=true)` rebuild is owed.** The ast-chunker window fix changes chunk
+  boundaries and ids are content-addressed, so the existing semantic index holds the old
+  (duplicated) chunk set. This is a run, not a code change.
+- **Retrieval benchmark for the chunk floor** — the only thing that flips
+  `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` to fixed. Precondition
+  stated in that file and still unmet.
+- **Toolchain skew is unresolved and will recur on its own schedule.** No
+  `rust-toolchain.toml` + `dtolnay/rust-toolchain@stable` ⇒ CI re-resolves `stable` every
+  run and can go red with zero commits (that is how Clippy broke on 1.97 against
+  unchanged code). Pin vs float is a policy call. See F-5.
+- **A dedicated ordering test is owed** for the findings-cap fix — see the Resume of
+  `docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`.
+- **mdbook is not installed**, so the manual was never build-verified this session.
+
+### Techniques worth keeping
+
+- **Per-job CI logs while a run is still in progress:**
+  `gh api --allow-escape-sequences "/repos/mareurs/codescout/actions/jobs/<id>/logs"`.
+  `gh run view --log-failed` refuses until the whole run finishes, and a stalled sibling
+  blocks it indefinitely (`Windows-gnu cross` sat 41+ min on "Install MinGW + wine").
+- **Polling a job's conclusion:** GitHub returns `conclusion: ""` for pending, and jq's
+  `//` only defaults on `null`/`false` — so `.conclusion // "pending"` never fires. Guard
+  with `[ -n "$C" ]`.
+- **`--all-features` is structurally invalid here** — `codescout-embed` has a
+  `compile_error!` for mutually-exclusive ONNX backends.
+
+### Where the rest of the record lives
+
+| Surface | Holds |
+|---|---|
+| `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` | the one open CI blocker, with the bisect method |
+| `docs/issues/archive/2026-08-06-windows-*.md` | WIN-28 (nine panics, three causes) + WIN-29 duplicate proof |
+| `docs/trackers/windows-platform-support.md` | WIN-28/29 index rows + a History entry |
+| this file, F-4 / F-5 / W-2 / W-3 / W-4 | the session's transferable lessons |
+| `docs/trackers/reconnaissance-patterns.md` R-55, R-56 | recon-skill proposals |
+| `docs/trackers/codescout-usage-frictions.md` U-30, U-33/34/35 | tool frictions; IL3 now ×7 in one session |
+
 ## Resume — round 2, written 2026-08-06 for session compaction
 
 > **CI IS NOW 14/15 GREEN.** Run `31098286970` on `cd643d58` — baseline was 4 green / 11 red
@@ -51,14 +176,14 @@ tags:
 >
 > **The one remaining red is `Audit Doc Refs`**, and it is NOT undiagnosed. Measured population
 > after the extractor fixes and the `docs/lessons/**` exclusion: >50 findings, ~42 of them
-> illustrative paths inside `docs/manual/src/concepts/**` (`src/services/auth.rs`, `src/foo.rs`,
-> `.worktrees/my-feature`, `docs/trackers/my-tracker.md`). Three sub-classes needing three
+> illustrative paths inside `docs/manual/src/concepts/**` (src/services/auth.rs, src/foo.rs,
+> .worktrees/my-feature, docs/trackers/my-tracker.md — un-code-spanned, see round 3). Three sub-classes needing three
 > different mechanisms — see
 > `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`:
 >
 > 1. **Fictional example paths** — need an author-supplied marker; nothing syntactic separates
 >    "illustrative" from "stale".
-> 2. **Gitignored runtime state** (`.worktrees/*` ×8, `.codescout/embeddings.db` ×3) — a
+> 2. **Gitignored runtime state** (`.worktrees/*` ×8, .codescout/embeddings.db ×3) — a
 >    gitignore-aware severity cap handles these with no markers and no prose edits.
 > 3. **Genuine drift** (~8), including citations to the six bug files archived earlier today.
 >
@@ -224,12 +349,17 @@ Ranked by what to do first.
 | F-1 | 2026-07-02 | med | codescout-tool | promoted-to-bug-tracker | `audit_doc_refs` flags legitimate cross-repo hook paths as `missing`/`high`, inconsistently |
 | F-2 | 2026-08-06 | high | process | mitigated | Bug ledger never queried at the seam — reimplemented a filed fix and skipped its stated precondition |
 | F-3 | 2026-08-06 | med | process | fixed-verified | Treated CLAUDE.md's three local commands as "the gate"; the merge gate is 15 CI jobs, red for 3 weeks |
+| F-4 | 2026-08-06 | med | process | fixed-verified | Three bug files' own `## Fix` sections carried wrong premises — stale-by-superseding, wrong severity, already-implemented |
+| F-5 | 2026-08-06 | high | process | open | Local gate structurally cannot predict CI — clippy 1.95 vs 1.97, separator bugs invisible on Linux, `--all-features` unusable |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-06 | med | Dump actual output of an *internal pure function*, don't derive it from source | Reasoning predicted the wrong padding chunk; the dump surfaced a whole-file duplicate + a second pre-existing bug | validated |
+| W-2 | 2026-08-06 | high | If a truncated list feeds a pass/fail verdict, sort by the verdict's key before truncating | Would have "fixed all 18" and stayed red with no visible cause; the 18 was itself a windowed miscount of a >50 population | validated |
+| W-3 | 2026-08-06 | high | Read the product code before believing a platform-specific red test | Relaxing `derive_dead_roots`' guard to green the test makes a prune `WHERE` match every row — data loss shipped to fix a test | validated |
+| W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 
 ---
 
@@ -329,6 +459,113 @@ The existing guidance covers the *external* case: this skill's Phase 1 says *"Fo
 **Status:** validated — single datapoint, drift caught and a second bug found before the commit landed. Awaiting promotion criterion.
 
 ---
+
+## F-4 — Three bug files' own `## Fix` sections carried wrong premises; following them would have produced worse code
+
+**Observed:** 2026-08-06, working the open-bug ledger one entry at a time.
+
+**When:** Reading each bug's `## Fix` section as the plan before implementing it.
+
+**Expected:** A filed bug's Fix section is the most reliable available guidance — it was written by someone holding the evidence.
+
+**Got:** Three of the six were materially wrong, in three different ways:
+
+1. **Stale-by-superseding.** `2026-07-28-reranker-costs-42x...` closes with *"That figure needs correcting regardless"*, but a **CORRECTED** note added later at the top of its own Summary retracts the comparison that claim rests on. The Fix section predates its own file's retraction. Following it would have replaced a possibly-stale `~80 ms` with a guess, across a runtime boundary (TEI vs llama-server) the two numbers do not share.
+2. **Wrong severity assessment.** `2026-08-06-ast-chunker-recursion-duplicates-leading-gap` states the trailing-gap branch is *"harmless in size — it emits the container's closing brace"*. A failing test written before the fix showed it emits the closing brace **plus every line after the container to EOF**. A floor-only fix, which is what that framing invites, would have left half the bug.
+3. **Already implemented.** `2026-07-28-mcp-servers-outlive-their-clients` ranks *"exit on stdio EOF"* as the cheapest fix and says the shutdown path is unread. Reading it showed `ResilientStdin` absorbs only `WouldBlock`, so a 0-byte EOF already propagates and the process already exits. The orphans are never *sent* an EOF, so the fix is direction 2 (idle timeout) and direction 1 should be struck.
+
+**Probable cause:** A Fix section is written at peak context and then never re-read against later edits to the same file. Nothing links a Summary-level retraction to the Fix section it invalidates, and nothing re-checks a "not implemented" claim against the code.
+
+**Workaround:** Treat a bug file's Fix section as a *hypothesis with a citation*, not a plan. Verify its premises the same way any other claim gets verified — read the code it names, and check whether a later dated note in the same file contradicts it. All three were caught this way; each correction is recorded in the bug file itself.
+
+**Severity:** med — each would have produced a wrong or half fix that passed local tests. Not high only because the verification that caught them is the same reconnaissance pass already required before editing.
+
+**Status:** fixed-verified — all three corrected in their bug files, with the correction stated as a correction rather than silently applied.
+
+**Fix idea / Pointer:** Worth a line in `get_guide("tracker-conventions")`: when a bug file gains a dated retraction, re-read its Fix section in the same edit. See also R-56.
+
+## F-5 — The local gate structurally cannot predict CI: three independent skews, one of them silent
+
+**Observed:** 2026-08-06, after a locally-green six-step gate met a red CI three times in a row.
+
+**When:** Every push this session. The local gate (`fmt`, `clippy -- -D warnings`, `cargo test`, plus three feature-gate builds) exited 0 each time.
+
+**Expected:** A green local gate predicts a green CI, modulo the known Windows and doc-lint gaps.
+
+**Got:** Three distinct classes of local-vs-CI divergence, none of which any amount of local testing would surface:
+
+1. **Toolchain version skew.** Local `clippy 0.1.95`; CI's `dtolnay/rust-toolchain@stable` resolved **1.97.0**. Three pre-existing patterns (`question_mark` ×2, `for_kv_map`) are lints 1.97 emits and 1.95 does not. There is no `rust-toolchain.toml`, so CI re-resolves `stable` every run and can go red **with zero commits**. Clippy breaks on the calendar.
+2. **Platform-invisible bugs.** Linux has one path separator, so a forward-slash-vs-backslash mismatch is *unobservable* there. 3488 tests passed locally before each of the three Windows pushes; the separator bug needed CI to exist at all — and one of them needed two CI round-trips, because normalising the seed moved the mismatch downstream into the test's own comparison.
+3. **A gate command that cannot run locally.** `cargo clippy --all-features` fails on this workspace by construction — `codescout-embed` has a `compile_error!` for mutually-exclusive ONNX backends. Reaching for `--all-features` as a "stronger" local check produces a build failure unrelated to the code under test.
+
+**Probable cause:** The local gate was specified as a command list (CLAUDE.md's three commands) rather than as an equivalence claim against CI. Nobody pinned the toolchain, so the strongest local check drifts out of alignment silently.
+
+**Workaround:** None applied — recorded rather than fixed, because the remedy is a policy call (pin a toolchain so local == CI and upgrades are deliberate, vs keep floating and absorb periodic lint debt). Two operational mitigations that did work: push early to get a real verdict, and read a failing job's log via the REST endpoint rather than waiting for the whole run.
+
+**Severity:** high — it converted "gate green, ready to merge" into three false readiness claims in one session, and the toolchain half will recur on its own schedule.
+
+**Status:** open — the three lints are fixed and Windows is green, but the *skew* is unaddressed and needs the pinning decision.
+
+**Fix idea / Pointer:** Add `rust-toolchain.toml` pinning the channel CI uses, or add a CI job that fails when `cargo --version` differs from a pinned expectation. Either makes the skew loud instead of silent.
+
+## W-2 — Ordering a capped findings list by severity turned an unactionable gate into a self-explaining one
+
+**Observed:** 2026-08-06, after fixing all 18 findings a bug file tabulated and watching the gate still exit 1.
+
+**Pattern:** When a tool truncates a result list *and* computes a pass/fail verdict over the untruncated set, order the shown slice by whatever drives the verdict. `audit_doc_refs` did `findings.iter().take(50)` in scan order while the exit code scanned all 46 572 — and since most refs resolve, the shown 50 were almost always `resolved`/`low`. The gate reported failure and displayed nothing that caused it.
+
+**Counterfactual:** Without this, the next step was a 16-run per-subdirectory bisect just to see *which files* had findings, repeated after every fix. Worse, the truncation had already corrupted the record: the "18 findings, all false positives" table in `2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` was the count *inside the window*, not the population. Fixing exactly those 18 and declaring victory was the live failure mode — and it is what I was about to do. After the ordering fix the shown 50 were 50/50 high, and the real population turned out to be >50 across 11 subdirectories.
+
+**Confirming data points:**
+1. Baseline run: 18 high in the window, `n_refs_broken: 10487`. Post-fix run: 0 high in the window, exit still 1 — proof the window was never representative.
+2. The same defect had already been filed once as a family: `docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md`.
+
+**Impact:** high — a gate that hides its own cause trains people to bypass it, and it silently corrupted a bug file's central measurement.
+
+**Promote-when:** A second silent-cap instance appears in a tool that also gates. At two datapoints, promote to `docs/PROGRESSIVE_DISCOVERABILITY.md` as "if a truncated list feeds a verdict, sort by the verdict's key before truncating".
+
+**Status:** validated — fixed in `45669701`, verified live (window went 0/50 high to 50/50 high), and filed as `docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`.
+
+## W-3 — Reading the product code before believing a red test prevented turning a test failure into a data-loss bug
+
+**Observed:** 2026-08-06, diagnosing nine Windows test failures (WIN-28).
+
+**Pattern:** When a test fails only on one platform, read the product code it exercises before changing anything. The failure may be the test asserting something false *about a correct implementation*.
+
+**Counterfactual:** Two of the three clusters were exactly that shape, and the obvious fix was harmful in both:
+
+- Cluster A's four tests failed because `derive_dead_roots` skips non-absolute `abs_path` rows and `"/gone/old"` is not absolute on Windows. The tempting fix — relax the guard — is guarded by its own test and its own comment: without it the ancestor climb bottoms out at an empty `PathBuf` whose prune `WHERE` **matches every absolute row**. That is a catalog-wide data-loss bug, shipped to make a red test green.
+- `lock_path_is_not_sited_in_bare_temp_dir` failed because `per_user_runtime_dir()` returns bare `temp_dir()` on Windows — deliberately, since `%LOCALAPPDATA%\Temp` is already per-user, as `lock_path`'s own doc comment states. The assertion was wrong, not the code. Relaxing the assertion would have deleted a real Unix-side guard against a symlink-truncation attack.
+
+End state: nine failures, three root causes, **zero product changes** — and CI went 14/15 green.
+
+**Confirming data points:**
+1. WIN-28, this session: 2 of 3 clusters were correct-implementation cases.
+2. Pairs with F-4 — in both cases the written artifact (a test, a bug file's Fix section) was the thing that was wrong, and the code was right.
+
+**Impact:** high — prevented a data-loss regression and preserved a security guard.
+
+**Promote-when:** A second platform-specific failure resolves as "assertion wrong, code right". At two datapoints, promote to CLAUDE.md as "a platform-specific test failure is a claim about the code, not a fact about it — read the implementation and its guard comments first".
+
+**Status:** validated — `cd643d58`, CI run `31098286970`, windows/default 3283 passed 0 failed.
+
+## W-4 — Stating a duplicate hypothesis with its own falsification test, then letting CI run it
+
+**Observed:** 2026-08-06, closing WIN-29 (`Windows-gnu cross`) as a duplicate of WIN-28.
+
+**Pattern:** When closing a bug as a duplicate on inference rather than proof, write the falsification test into the closure — and name the observation that would reopen it. Here: dump both jobs' failing-test sets and diff them; reopen if the cross job ever fails a test `windows-latest` passes.
+
+**Counterfactual:** Without the diff, `Windows-gnu cross` stayed the only red cell with no known cause, which made four red cells look like two independent problems and left the merge picture ambiguous. Guessing "probably the same" without the diff would have been indistinguishable from the truth right up until it wasn't. And the prediction was checkable: the duplicate claim says the cross job goes green from fixture fixes alone, with no MinGW- or wine-specific change. It did.
+
+**Confirming data points:**
+1. Failing sets identical, nine tests byte for byte (run `31092134665`).
+2. `Windows-gnu cross` green on run `31098286970` after only the nine fixture fixes.
+
+**Impact:** med — collapsed four red cells into one bug and produced a checkable prediction instead of an assumption.
+
+**Promote-when:** A second duplicate closure carries a falsification recipe and it later fires (or holds). At two datapoints, promote to `get_guide("tracker-conventions")` as "a duplicate closure names the observation that reopens it".
+
+**Status:** validated — prediction made before the evidence existed, then confirmed.
 
 ## Template for new entries
 

@@ -92,6 +92,8 @@ to master — the tracker outlives them.
 | WIN-25 | process-spawn | fixed | `collect_go_deps` shelled out to `go env GOMODCACHE` (blocking `.output()`, no timeout → EDR CreateProcessW hang, same class as WIN-14/WIN-24). `go` has no library binding, so GOMODCACHE is re-derived from the environment via a pure `go_mod_cache_from()` (GOMODCACHE → GOPATH/pkg/mod → `<home>/go/pkg/mod`, home via platform::home_dir()); a `go env -w`-only override degrades to source-not-found, never hangs. 5-case pure unit test on the Linux gate. Same Snow Lion review pass as WIN-24 | vdi-windows 13534cbd | 2026-06-15 |
 | WIN-26 | retrieval-stack | fixed | VDI can't run Docker/Qdrant, so the WIN-22 remote-embeddings fix is necessary but NOT sufficient: code `semantic_search` is hard-wired to Qdrant (the in-process path was removed 2026-05-07). Needs a daemon-free "lite" stack = remote OpenAI dense + in-process sqlite-vec (statically-linked `vec0`, EDR-safe — already proven for librarian via `ArtifactBackend::SqliteVec`, see `migrate_v6.rs`). Plan: generalize that escape hatch to code search + memory. Phase 0 (dense always OpenAI-compatible + drop TEI + dense-only-leak fix) shipped 825c0c52; Phases 1-4 ALL SHIPPED to master (1: 0ff972f7 CodeVectorStore trait, 2a: b96c8ae4 SqliteVecCodeStore, 2b: 93ef0d43 sqlite memory store, 3: 9d40d36b dense-only + lite flag, 4: 5c1ecfa8 lean default build, server-stack feature-gated). Closed 2026-07-02 by verify-open pass. | docs/plans/2026-06-16-two-stack-retrieval-lite.md | 2026-06-16 |
 | WIN-27 | test-portability | open | first full wine suite (windows-gnu CI) showed 20 pre-existing failures; 8-test guide_hint cluster FIXED 2026-07-05 (make_server now seeds LIBRARIAN_WORKSPACE so build_tool_context does not depend on the absent ~/.config workspace under wine) and un-skipped in CI, verified 10 pass/1 ignored under wine; 12 remain skipped (symbols/glob-walk emulation quirks, preflight/gitignore, markdown compact, run_command quoting, head_sha) plus validate_prune_request_gates (the one real-Windows MSVC failure) | docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md | 2026-07-02 |
+| WIN-28 | test-portability | fixed | nine real-Windows (MSVC) lib failures on `experiments`: 7 in `librarian::tools::doctor` (catalog rehome + prune_missing), `librarian::util::like_escape_idiom_is_not_inlined_outside_helper`, `retrieval::index_lock::lock_path_is_not_sited_in_bare_temp_dir`. Three root causes, **zero product defects**: (a) POSIX-shaped absolute literals — `"/gone/old"` is not absolute on Windows, so `validate_rehome_request`'s gate rejected the fixture and `derive_dead_roots` skipped the row *by design*; (b) mixed-separator expectation vs OS-shaped `CARGO_MANIFEST_DIR`; (c) a Unix-only siting assertion — `per_user_runtime_dir()` returns bare `temp_dir()` on Windows deliberately, since `%LOCALAPPDATA%\Temp` is already per-user. Fixed by a `dead_root(tag)` fixture helper, `RepoPath` normalisation on both sides of two comparisons, `#[cfg(unix)]` scoping plus a new platform-independent replacement assertion, and a 4× Windows LSP-indexing budget. Verified CI run `31098286970`: windows/default **3283 passed 0 failed**, all three windows cells green. | docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md | 2026-08-06 |
+| WIN-29 | ci | fixed | `Windows-gnu cross (MinGW + wine)` red and undiagnosed — closed as a **duplicate of WIN-28**, confirmed twice: its failing-test set was byte-identical to `Test (windows-latest / default)`'s nine, and it went green from the same nine fixture fixes with no MinGW- or wine-specific change. No cross-target defect exists. Reopen only if the cross job ever fails a test `windows-latest` passes. | docs/issues/archive/2026-08-06-windows-gnu-cross-job-red-undiagnosed.md | 2026-08-06 |
 ## Currently stable on Windows
 
 What works now (post the VDI reliability stream, on `experiments`):
@@ -160,6 +162,35 @@ When a Windows issue is found or its status changes:
    it in `ref`.
 
 ## History
+
+### 2026-08-06 — WIN-28 + WIN-29 opened and closed same day; Windows fully green
+
+First CI run against a non-stale `experiments` in three weeks (the remote had been
+21 commits behind, so every prior verdict described code that no longer existed)
+surfaced nine real-Windows MSVC failures and a red `Windows-gnu cross`. Both are
+now fixed and the whole Windows matrix is green — run `31098286970` on `cd643d58`,
+14 of 15 jobs green overall.
+
+Three things worth carrying forward:
+
+- **None of the nine was a product defect.** Two assertions were failing against
+  *correct* implementations. Relaxing `derive_dead_roots`' `is_absolute()` guard to
+  accept a POSIX fixture would have made a prune `WHERE` match every absolute row —
+  a data-loss bug shipped to green a test. See W-3 in
+  `docs/trackers/release-promotion-session-log.md`.
+- **Separator bugs are unobservable on Linux.** 3488 tests passed locally before each
+  of three pushes. One failure needed two CI round-trips because normalising a seeded
+  path moved the mismatch downstream into the test's own comparison.
+- **Per-job CI logs are reachable while a run is still in progress.**
+  `gh run view --log-failed` refuses until the whole run finishes, and a stalled
+  sibling blocks it indefinitely (`Windows-gnu cross` sat 41+ min on "Install MinGW +
+  wine", then was cancelled by the next push). Use
+  `gh api --allow-escape-sequences /repos/{o}/{r}/actions/jobs/{id}/logs`.
+
+WIN-27's row still lists `validate_prune_request_gates` as "the one real-Windows MSVC
+failure" — that predates WIN-28 and is now stale in the sense that the real-Windows
+failure set was nine, not one. `validate_prune_request_gates` itself passes in run
+`31098286970`.
 
 ### 2026-06-09 — tracker created
 Seeded with 13 WIN-N entries from the VDI reliability work stream plus the

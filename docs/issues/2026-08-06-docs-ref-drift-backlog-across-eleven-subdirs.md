@@ -125,6 +125,41 @@ extractor only reads code spans and links. If this recurs often, an
 
 ## Fix
 
+**2026-08-06 — one whole class is already enumerated and ready to fix: a guide filename that has never existed.**
+
+`docs/PROGRESSIVE_DISCLOSURE.md` is cited **6 times across 5 files** and there is no such
+file. The real one is `docs/PROGRESSIVE_DISCOVERABILITY.md` (confirmed by `ls`, and it is
+the name CLAUDE.md uses). Every citation is a plain rename:
+
+```
+docs/trackers/bug-fix-session-log.md:2512                                   <- GATES
+docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md:53,84
+docs/issues/2026-07-28-il3-gate-matches-pipes-inside-heredoc-text.md:183
+docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md:226
+```
+
+Only the first gates — `docs/issues/**` takes `issues_drop` and `docs/issues/archive/**`
+takes `archive_drop`, both High→Med. Fix all six anyway; five of them are wrong regardless
+of severity.
+
+The sixth citation was **introduced by this session** and is already fixed, in
+`docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md` § References — along
+with two more self-inflicted ones: that file cited the two `audit_doc_refs` bug files at
+their *pre-archive* paths, which archiving them earlier the same day had invalidated.
+
+**That is the generalisable warning for whoever works this list: archiving a bug file
+breaks every inbound citation, and nothing tells you.** Six files were archived on
+2026-08-06; their citers are part of this backlog. Check with
+`grep -rl '<archived-basename>' docs/` after any `artifact(action="move")`.
+
+**A second self-inflicted trap, worth avoiding while documenting this bug:** writing an
+illustrative path inside a code span, in a file under a gating directory, *adds* a finding.
+The round-3 Resume in `docs/trackers/release-promotion-session-log.md` originally
+code-spanned src/services/auth.rs and src/foo.rs while describing them as false positives,
+which would have added ~19 high findings to the very backlog it documents. They are
+un-code-spanned there now. Prose naming a nonexistent example path must stay outside
+backticks — the extractor reads only code spans and link targets.
+
 Not implemented — deliberately out of scope for the merge-prep pass that found it.
 Two reasons: the population is large enough to need its own session, and mixing
 dozens of doc edits into a commit whose subject is extractor precision would make

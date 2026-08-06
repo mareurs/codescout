@@ -1317,3 +1317,102 @@ note in `data/memory-protocol.md` § Staging.
 **Status:** open.
 
 ---
+
+
+### U-33 — IL3 recurred ×3 MORE in the same session after U-30 was written (7 total); the shape is "trim for my own reading"
+
+**When:** 2026-08-06, same session as U-30, *after* U-30 had already been written up.
+Three further server-side IL3 rejections:
+
+1. `cargo check --lib --all-features 2>&1 | tail -40`
+2. `cargo check --no-default-features …; cargo test … | grep -E 'test result|FAILED'; …`
+3. `git add -A && git commit … ; git push origin experiments 2>&1 | tail -2`
+
+**Why this is not just "U-30 again":** writing U-30 — including its own analysis that
+all four slips were "the same instinct" — did not reduce the rate. Three more followed
+within the same session, giving **7 in one session**. That is evidence about the
+intervention, not about the operator: a friction log entry is a *record*, and records
+do not change in-flight behaviour. Only the gate did, every time.
+
+**Sharper characterisation of the shape than U-30 had.** All seven share one property:
+the trimmer was added to make the output **short enough for me to read**, not to select
+information. `| tail -40`, `| tail -2`, `| tail -5` are pure length limits with no
+predicate. That distinguishes them from a genuine filter (`grep FAILED`), and it is
+exactly the case the `@cmd_*` buffer already solves better — the buffer *is* the
+length limit, and it preserves the rest.
+
+Case 3 is the most instructive: the pipe sat on `git push`, whose output is two lines
+regardless. The trimmer bought nothing at all; it was reflex, not intent.
+
+**Cost:** 3 more wasted round-trips (7 total this session). Each is a full
+re-transmission of a long compound command — see U-29 for that family.
+
+**Status:** open. Escalates U-30's priority rather than duplicating it: the recurrence
+now spans a within-session write-up, so "the operator will remember" is falsified as a
+mitigation.
+
+**Promotes to:** H-1. The evidence now supports the stronger reading — a **deny** hook
+is the only intervention that has ever changed this behaviour, and the companion's is
+warn-only because its deny twin was orphaned by the `.sh`→`.mjs` port (U-30). A cheap
+partial fix worth considering: deny only the *predicate-free* trimmers (`head`/`tail`
+with no pattern), which is the whole observed population and carries no false-positive
+risk against genuine filters.
+
+---
+
+### U-34 — `edit_code action=insert` takes the ANCHOR in `symbol`, while an `anchor` param also exists
+
+**When:** 2026-08-06. Inserting a new function after an existing one.
+
+**Tried:** `edit_code(action="insert", path=…, anchor="is_module_path", position="after", body=…)`
+→ `missing 'symbol' parameter`. Then
+`edit_code(action="insert", symbol="is_path_segment", anchor="is_module_path", position="after", …)`
+— reading `symbol` as "the symbol I am creating" — → `symbol not found: is_path_segment`.
+Third attempt, `symbol="is_module_path", position="after"` with no `anchor`, succeeded.
+
+**Got:** two failed calls to learn that for `insert`, `symbol` names the **existing
+anchor**, and `anchor` is either an alias or inert. The error messages are individually
+correct and jointly misleading: the first says a required param is missing without
+saying what it should contain, and the second confirms `symbol` is looked up as an
+existing symbol — which only makes sense once you already know the answer.
+
+**Cost:** 2 round-trips, one of them re-transmitting a ~16-line body.
+
+**Fix idea:** either drop `anchor` from the schema, or make `insert`'s `symbol`
+description read "the EXISTING symbol to insert relative to". A one-line hint on the
+`missing 'symbol'` error ("for action=insert, `symbol` is the anchor") would have cost
+zero round-trips. Kin U-26 (action grammar learned via sequential errors).
+
+**Status:** open.
+
+---
+
+### U-35 — `artifact(find, filter={rel_path:{eq: "<exact path>"}})` returns 0 for a path that `contains` matches
+
+**When:** 2026-08-06, looking up `docs/research/README.md` after `read_markdown`
+refused it as librarian-managed.
+
+**Tried:** `artifact(action="find", filter={"rel_path": {"eq": "docs/research/README.md"}})`
+→ `count: 0`. Same call with `{"contains": "research/README"}` → the artifact, whose
+`abs_path` is reported as `docs/research/README.md`.
+
+**Got:** an exact-match filter missing a row whose displayed path is exactly the
+argument. Most likely cause: `rel_path` is stored (or compared) as an absolute path
+while `find` *displays* it project-relative via the path-strip layer, so `eq` compares
+against a different string than the one shown. `get_guide("progressive-disclosure")`
+does warn that "the catalog stores absolute paths; the strip layer is a display-time
+transform" — but it frames that as a *verification* concern, not as a filter-semantics
+one, and nothing on the `find` surface says `eq` needs the absolute form.
+
+**Cost:** 1 wasted round-trip, and the failure mode is silent: `count: 0` from an exact
+filter reads as "no such artifact", which would be a wrong conclusion for anyone not
+suspicious enough to retry with `contains`.
+
+**Fix idea:** either normalise `rel_path` comparisons to the displayed form, or have
+`find` emit a hint when a `rel_path` `eq` filter yields 0 but a `contains` on the same
+value would not. Document the absolute-vs-displayed asymmetry on the filter surface in
+`get_guide("librarian")` § Filter Syntax.
+
+**Status:** open.
+
+---
