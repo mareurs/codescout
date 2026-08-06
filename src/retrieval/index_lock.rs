@@ -274,7 +274,7 @@ mod tests {
         );
     }
 
-    /// The lock must not sit directly in the bare, world-writable temp dir: a
+    /// The lock must not sit directly in a WORLD-WRITABLE temp dir: a
     /// predictable path there lets a local user pre-create it as a symlink,
     /// which `set_len(0)` in `acquire` would then truncate (or simply hold the
     /// flock to wedge every index run). Holds for both `per_user_runtime_dir()`
@@ -282,6 +282,19 @@ mod tests {
     /// `temp_dir()/codescout-{uid}` fallback — since both are namespaced away
     /// from bare `temp_dir()`. Fails on a revert of `lock_path` to
     /// `std::env::temp_dir()` directly.
+    ///
+    /// **Unix-only, by construction rather than by omission.** The threat is
+    /// `/tmp` being world-writable. On Windows `temp_dir()` is
+    /// `%LOCALAPPDATA%\Temp` — already inside the user's own profile — so
+    /// `per_user_runtime_dir()`'s `#[cfg(not(unix))]` arm returns it unchanged
+    /// on purpose, and `lock_path`'s doc comment states that intent
+    /// ("already-per-user `temp_dir()` on Windows"). Asserting the Unix
+    /// invariant there fails against a *correct* implementation, which is what
+    /// it did: see
+    /// `docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`.
+    /// The platform-independent half of the invariant is
+    /// `lock_path_is_sited_in_the_per_user_runtime_dir` below.
+    #[cfg(unix)]
     #[test]
     fn lock_path_is_not_sited_in_bare_temp_dir() {
         let p = lock_path("some-project-for-siting-check");
@@ -289,6 +302,22 @@ mod tests {
             p.parent(),
             Some(std::env::temp_dir().as_path()),
             "lock file must not sit directly in the bare temp dir, got parent {:?}",
+            p.parent()
+        );
+    }
+
+    /// The half of the siting invariant that holds on every platform: the lock
+    /// lives in the directory `per_user_runtime_dir()` designates, which is what
+    /// makes it per-user at all. Keeps Windows covered after the test above was
+    /// scoped to Unix — a revert that sites the lock anywhere else still fails
+    /// here, on every platform.
+    #[test]
+    fn lock_path_is_sited_in_the_per_user_runtime_dir() {
+        let p = lock_path("some-project-for-siting-check");
+        assert_eq!(
+            p.parent(),
+            Some(crate::socket_discovery::per_user_runtime_dir().as_path()),
+            "lock must sit in per_user_runtime_dir(), got parent {:?}",
             p.parent()
         );
     }

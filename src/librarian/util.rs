@@ -88,9 +88,15 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        // Forward-slash normalised on both sides of the comparison below.
+        // `CARGO_MANIFEST_DIR` is OS-shaped (`D:\a\codescout\codescout` on
+        // Windows), and walkdir appends OS separators to it, so the actual hit
+        // came out mixed (`...codescout/src\librarian\util.rs`) while the
+        // expected value used forward slashes throughout. See
+        // docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md
+        let root = normalize_rel_path(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let mut hits: Vec<String> = Vec::new();
-        for entry in walkdir::WalkDir::new(root)
+        for entry in walkdir::WalkDir::new(&root)
             .into_iter()
             .filter_map(|e| e.ok())
         {
@@ -103,7 +109,10 @@ mod tests {
             };
             let count = content.matches(needle.as_str()).count();
             if count > 0 {
-                hits.push(format!("{} ({count})", path.display()));
+                hits.push(format!(
+                    "{} ({count})",
+                    normalize_rel_path(&path.display().to_string())
+                ));
             }
         }
         assert_eq!(

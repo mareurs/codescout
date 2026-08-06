@@ -948,6 +948,35 @@ mod tests {
             )
             .unwrap();
     }
+    /// An absolute, forward-slash-normalised root that does not exist, on any
+    /// platform.
+    ///
+    /// A literal like `"/nonexistent-root/repo"` is **not absolute on Windows** —
+    /// `Path::is_absolute` there wants a drive or UNC prefix — so a POSIX-shaped
+    /// fixture silently changes what the test exercises:
+    ///
+    /// - `validate_rehome_request` rejects it at the absolute-path gate before the
+    ///   test's actual subject runs, and
+    /// - `derive_dead_roots` skips such rows outright, by design and on purpose
+    ///   (see `derive_dead_roots_skips_non_absolute_paths` — the guard stops the
+    ///   ancestor climb bottoming out at an empty `PathBuf` whose prune `WHERE`
+    ///   would match every absolute row).
+    ///
+    /// Both are correct product behaviour, so the fixture is what has to change.
+    /// `temp_dir()` supplies a real absolute prefix everywhere; the unique suffix
+    /// keeps the path missing. Its PARENT exists, which is what makes the derived
+    /// dead root land on the suffix directory rather than climbing further.
+    /// Normalised with `RepoPath` so it concatenates cleanly with the forward-slash
+    /// `abs_path` shape the catalog stores.
+    fn dead_root(tag: &str) -> String {
+        let p = std::env::temp_dir().join(format!("codescout-nonexistent-{tag}"));
+        assert!(
+            !p.exists(),
+            "fixture root must not exist on disk: {}",
+            p.display()
+        );
+        crate::util::fs::RepoPath::from_path(&p).into_string()
+    }
 
     fn seed_commit(cat: &Catalog, hash: &str, git_root: &str) {
         cat.conn
@@ -1208,8 +1237,11 @@ mod tests {
         let cat = Catalog::open(&dir.path().join("c.db")).unwrap();
         let live = dir.path().join("live");
         std::fs::create_dir_all(&live).unwrap();
+        // Absolute-but-missing on every platform; see `dead_root`.
+        let gone_old = dead_root("rehome-gates-old");
+        let gone_new = dead_root("rehome-gates-new");
         // new_root must exist
-        assert!(validate_rehome_request(Some("/gone/old"), Some("/also/gone"), &cat.conn).is_err());
+        assert!(validate_rehome_request(Some(&gone_old), Some(&gone_new), &cat.conn).is_err());
         // old_root must NOT exist
         assert!(validate_rehome_request(
             Some(live.to_str().unwrap()),
@@ -1226,18 +1258,14 @@ mod tests {
         )
         .is_err());
         // new_root is required
-        assert!(validate_rehome_request(Some("/gone/old"), None, &cat.conn).is_err());
+        assert!(validate_rehome_request(Some(&gone_old), None, &cat.conn).is_err());
         // new_root must be absolute
-        assert!(
-            validate_rehome_request(Some("/gone/old"), Some("relative/new"), &cat.conn).is_err()
-        );
+        assert!(validate_rehome_request(Some(&gone_old), Some("relative/new"), &cat.conn).is_err());
         // happy path: old gone, new exists
-        assert!(validate_rehome_request(
-            Some("/gone/old"),
-            Some(live.to_str().unwrap()),
-            &cat.conn
-        )
-        .is_ok());
+        assert!(
+            validate_rehome_request(Some(&gone_old), Some(live.to_str().unwrap()), &cat.conn)
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -1245,7 +1273,8 @@ mod tests {
         let new_dir = tempfile::tempdir().unwrap();
         let new_root = new_dir.path().to_str().unwrap();
         let new_root_str = crate::util::fs::RepoPath::from_path(new_dir.path()).into_string();
-        let old_root = "/nonexistent-rehome-root/repo";
+        let old_root_buf = dead_root("rehome-repo");
+        let old_root = old_root_buf.as_str();
         let expected_new_abs = format!("{new_root_str}/docs/x.md");
 
         let cat = Catalog::open_in_memory().unwrap();
@@ -1327,7 +1356,8 @@ mod tests {
         // RecoverableError re-asserting a missing `old_root` param.
         let new_dir = tempfile::tempdir().unwrap();
         let new_root = new_dir.path().to_str().unwrap();
-        let old_root = "/nonexistent-rehome-root/old-root-arg-repo";
+        let old_root_buf = dead_root("rehome-old-root-arg-repo");
+        let old_root = old_root_buf.as_str();
 
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact(&cat, "a1", &format!("{old_root}/docs/x.md"));
@@ -1355,17 +1385,23 @@ mod tests {
         let new_dir = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         let ctx = TestToolContextBuilder::new(cat).build();
+        // Must be absolute-but-missing on every platform, or the call fails at
+        // the absolute-path gate and this asserts on the wrong error string.
+        let empty_root = dead_root("rehome-empty");
         let err = call(
             &ctx,
             json!({
                 "fix": "rehome",
-                "root": "/nonexistent-rehome-root/empty",
+                "root": empty_root,
                 "new_root": new_dir.path().to_str().unwrap(),
             }),
         )
         .await
         .unwrap_err();
-        assert!(err.to_string().contains("no catalog rows found"));
+        assert!(
+            err.to_string().contains("no catalog rows found"),
+            "got: {err}"
+        );
     }
 
     /// `rehome` must refuse an `old_root` that an ACTIVE registration still
@@ -1508,7 +1544,11 @@ mod tests {
     #[tokio::test]
     async fn prune_missing_batch_dry_run_lists_dead_roots_without_deleting() {
         let cat = Catalog::open_in_memory().unwrap();
-        seed_artifact(&cat, "a1", "/nonexistent-root/repo/docs/x.md");
+        seed_artifact(
+            &cat,
+            "a1",
+            &format!("{}/docs/x.md", dead_root("prune-dry-run")),
+        );
         let ctx = TestToolContextBuilder::new(cat).build();
 
         let v = call(&ctx, json!({ "fix": "prune_missing" })).await.unwrap(); // no root, no confirm
@@ -1533,7 +1573,11 @@ mod tests {
         reg::upsert_active(&cat, &covered_root_str, &covered_root_str, None, 1000).unwrap();
         // A second, uncovered dead root so the totals assertion isn't
         // vacuously true either way.
-        seed_artifact(&cat, "uncovered", "/nonexistent-uncovered-root/repo/y.md");
+        seed_artifact(
+            &cat,
+            "uncovered",
+            &format!("{}/repo/y.md", dead_root("prune-uncovered")),
+        );
         let ctx = TestToolContextBuilder::new(cat).build();
 
         let v = call(&ctx, json!({ "fix": "prune_missing" })).await.unwrap();
@@ -1570,7 +1614,11 @@ mod tests {
         let live = tempfile::tempdir().unwrap();
         let live_file = live.path().join("here.md");
         std::fs::write(&live_file, "x").unwrap();
-        seed_artifact(&cat, "dead", "/nonexistent-root/repo/x.md"); // gone subtree
+        seed_artifact(
+            &cat,
+            "dead",
+            &format!("{}/x.md", dead_root("prune-confirm")),
+        ); // gone subtree
         seed_artifact(&cat, "live", &live_file.to_string_lossy()); // live file
         let ctx = TestToolContextBuilder::new(cat).build();
 
