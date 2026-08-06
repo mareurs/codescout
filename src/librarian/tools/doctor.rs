@@ -1595,7 +1595,18 @@ mod tests {
         let rows = v["dead_roots"].as_array().unwrap();
         let covered_row = rows
             .iter()
-            .find(|r| r["root"].as_str().unwrap() == covered_root.to_string_lossy())
+            .find(|r| {
+                // Normalise both sides. The dry-run row's `root` is a PathBuf
+                // built out of the (forward-slash) seeded abs_path, while
+                // `covered_root` is a tempdir join that renders with BACKSLASHES
+                // on Windows — comparing the raw strings compares two spellings
+                // of the same path and never matches there.
+                crate::util::fs::RepoPath::from_path(std::path::Path::new(
+                    r["root"].as_str().unwrap(),
+                ))
+                .to_string()
+                    == covered_root_str
+            })
             .expect("covered root present in dry-run preview");
         assert!(
             covered_row["would_skip"]
