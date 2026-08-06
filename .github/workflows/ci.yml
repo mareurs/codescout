@@ -5,6 +5,15 @@ on:
     branches: [master, experiments]
   pull_request:
 
+# One 15-job matrix per push starves the runner pool when pushes land in a row: on
+# 2026-08-06, six pushes to `experiments` left 72 jobs contending, with the tip's run
+# queued behind ~57 jobs belonging to commits it already superseded. Superseding runs
+# for the same ref fixes that at the source. `master` is exempt — a protected branch's
+# runs must always complete, never be cancelled by a later push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 env:
   CARGO_TERM_COLOR: always
 
