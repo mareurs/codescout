@@ -1,21 +1,137 @@
 ---
 id: e6697aea0ee3ea37
 kind: tracker
-status: draft
+status: active
 title: Release Promotion Session Log
-owners: []
 tags:
 - session-log
 - release-promotion
 - reconnaissance
-topic: null
-time_scope: null
 ---
 
 > Per-work-stream friction/win log for the `experiments` -> `master` promotion
 > (79-commit fast-forward, local range `eca9902e..339cea47`). Copied from
 > `docs/templates/session-log.md`; see that file for the full status vocabulary
 > and entry templates.
+
+> Per-work-stream friction/win log for the recurring `experiments` -> `master`
+> promotion. Copied from `docs/templates/session-log.md`; see that file for the
+> full status vocabulary and entry templates.
+>
+> **Round 1 — 2026-07-02.** 79-commit fast-forward, local range
+> `eca9902e..339cea47`. Shipped. Produced F-1.
+> **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
+> Resume block below. Produced F-2, F-3, W-1.
+
+## Resume — round 2, written 2026-08-06 for session compaction
+
+Wipe and rewrite this block each session. Everything below is verified, not assumed.
+
+### Git state
+
+- Branch `experiments` at **`553e618e`**; 10 commits from this session
+  (`ca442498..553e618e`).
+- `git rev-list --left-right --count master...experiments` → **`0  397`**. Master is a
+  strict ancestor, so the promotion is a **fast-forward**, not a cherry-pick. Re-check
+  this before merging — a non-zero left number means master diverged.
+- **17 commits unpushed.** This matters: the last CI run (`30852803569`, 2026-08-03) is
+  from *before* this session, so its verdicts are stale for 6 of the jobs.
+- Procedure to follow: `docs/RELEASE.md` § *Large-Cohort Promotion (Fast-Forward)*.
+  Do **not** use the Standard Ship Sequence — it cherry-picks single commits and would
+  mint 397 new SHAs, orphaning every SHA citation in `docs/issues/` and the trackers.
+
+### Gate state — green locally, all six steps exit 0 at `553e618e`
+
+```bash
+cargo fmt --check
+cargo clippy -- -D warnings                              # CI's exact invocation
+cargo test                                               # 3344 lib tests
+cargo check --no-default-features --all-targets           # warning-free
+cargo test --no-default-features                         # 2477 tests
+cargo test --features local-embed --no-default-features
+```
+
+The last three are the ones that matter and the ones CLAUDE.md's three-command line
+omits — they are where this session found five defects. See F-3, T-16.
+
+### What still blocks a green merge (the "remaining issues")
+
+Ranked by what to do first.
+
+1. **Push, then re-read CI.** Cheapest possible move and it may close two items for
+   free. The stale run predates `7938d68b` (feature-gate compile fixes) and `be75e705`
+   (three behaviour-gated tests). Expected to clear: `Clippy`, `Tool Docs Sync`, and the
+   four non-Windows `no-features` / `local-embed` cells. Expected to stay red: the three
+   Windows cells, `Audit Doc Refs`, and possibly `windows-gnu`.
+2. **`docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`**
+   (open, high; WIN-28). Nine tests fail on `windows-latest`, all in code this cohort
+   added — 7 catalog `rehome`/`prune_missing`, the `like_escape` idiom guard, the index
+   lock. Linux and macOS pass the same config, so path semantics not logic. **Blocked on
+   a Windows runner**: the per-test panic output was never captured, and guessing at path
+   normalisation risks fixing the tests rather than the code. Its Resume names
+   `validate_rehome_gates` as the narrowest starting point.
+3. **`docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`**
+   (open, high). The `audit-doc-refs` job is a hard gate (`--fail-on high`, no
+   `continue-on-error`) and all 18 high-severity findings are **extractor false
+   positives**: `Type/method` (codescout's own `name_path` syntax, 8 of 18), GitHub
+   `org/repo` slugs, ellipsis-elided external paths, plus an mdBook relative-link class
+   at `med`. **Do NOT "fix" this by editing the three ADRs** — their prose is correct.
+   Fix the extractor (start with the `name_path` shape: 18 → 10) or drop the gate and say
+   so in the workflow comment, which currently claims all hi-sev findings are reconciled.
+   Cross-references the earlier `2026-07-28-audit-doc-refs-json-pointer-false-positive.md`,
+   which has priority.
+4. **`docs/issues/2026-08-06-windows-gnu-cross-job-red-undiagnosed.md`** (open, medium;
+   WIN-29). Undiagnosed by choice. Leading hypothesis after a ledger query: WIN-28's nine
+   failures are not in `scripts/build-windows.sh`'s wine skip-list, so this is likely
+   item 2 wearing a second hat — confirm before fixing twice, and `graft` it into WIN-28's
+   file if so.
+5. **`docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`** (open,
+   medium). Pre-existing, not a regression, does not block the merge. The inner-node
+   recursion re-derives gaps against the whole file with `prev_end` reset to 0, emitting a
+   chunk that duplicates every line before the container. Fix plan is in the file; it
+   changes the emitted chunk set for every decomposed container in every language and
+   invalidates existing indexes, so it wants its own change.
+
+### Do NOT re-do these — decisions already made with evidence
+
+- **`docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` stays `open`.** Its Fix
+  candidate 1 was implemented at `ca442498` (7 tests, both behaviours mutation-verified),
+  but that file requires validation against
+  `docs/research/2026-05-06-retrieval-stack-benchmark.md` before landing — *"must be
+  measured, not assumed"* — and **the benchmark was never run**. It also records an
+  ordering decision (throughput work first, being vector-identical) that `ca442498`
+  jumped. Running that benchmark is the only thing that turns it `fixed`. See F-2.
+- **The seven new manual pages keep their `⚠ Unreleased` callout through the merge.**
+  Removal triggers at **release**, not at merge — master is not crates.io. Mechanical:
+  `grep -rl 'Unreleased — on the `experiments` branch only' docs/manual/src/`, then
+  `docs/RELEASE.md` § *Release Cycle* step **1b**.
+- **New subsystem docs go straight into the main manual**, not staged under
+  `docs/manual/src/experimental/`. The staging-then-move flow measured 0/62 compliance
+  this cohort; see the revised buddy memory `experimental-docs-lifecycle`.
+- **`docs/FEATURES.md` is archived** to `docs/archive/FEATURES.md` (zero live inbound
+  refs; moved through the catalog, id preserved).
+
+### Where the rest of the record lives
+
+| Surface | What it holds from this round |
+|---|---|
+| `CHANGELOG.md` `[Unreleased]` | All ten feature clusters + notable fixes; the canonical cohort list |
+| `docs/RELEASE.md` | Large-Cohort Promotion procedure; Release Cycle step 1b |
+| `docs/ROADMAP.md` standing backlog | The local five-step gate alias proposal |
+| `docs/trackers/reconnaissance-patterns.md` | R-55 (`miss → proposal`): query the ledger by file identity, not task category |
+| `docs/trackers/codescout-usage-frictions.md` | U-30 (IL3 ×4 + the orphaned deny hook), U-31 (shell-on-source blocks CI-gate repro), U-32 (`.buddy` write asymmetry) |
+| `docs/trackers/codescout-usage-hookify.md` | H-1 stale flag **resolved** — deny hook orphaned by the `.sh` → `.mjs` port |
+| `docs/trackers/tool-usage-patterns.md` | T-14/15/16, plus T-013 params row backfilled |
+| `docs/trackers/windows-platform-support.md` | WIN-28, WIN-29 |
+| `docs/RELEASE-TODO.md` | CI-gate record corrected (`audit-doc-refs` is a hard gate, and it is red) |
+
+### Unverified / owed
+
+- `mdbook` is not installed here, so the book was never build-verified. Cross-link
+  targets were checked against `SUMMARY.md` by hand.
+- The retrieval benchmark for the chunk floor (see *Do NOT re-do*).
+- `docs/RELEASE-TODO.md`'s "Error message path sanitization" item could not be verified —
+  `strip_project_prefix` does not exist under that name; the mechanism was not chased.
 
 ## Index
 

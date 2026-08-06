@@ -53,7 +53,23 @@ MCP `run_command` output instead of using the `@cmd_*` buffer system.
 - The `warn` rule has shipped and run for ≥1 session without false-positive
   complaints on script-internal pipes; then promote `warn` → `deny`.
 
-**Status:** **shipped (deny) — 2026-05-18.** — ⚠️ **Stale (pika audit 2026-06-11):** `hooks.json` currently registers `il3-warn-hook.sh`, NOT `il3-deny-hook.sh` (the deny script is present on disk but unwired). The hard *deny* observed in practice comes from codescout's **server-side `run_command` gate**, not this companion hook — companion IL3 is warn-only. Whether the deny-hook was reverted or never registered is unconfirmed; re-verify `hooks.json` before citing this as an active deny rule.
+**Status:** **NOT shipped as a companion deny — warn-only.** (Was recorded `shipped (deny) — 2026-05-18`; the 2026-06-11 pika audit flagged that as stale and left the cause unconfirmed.)
+
+⚠️ **Resolved 2026-08-06 — the deny hook was orphaned by the `.sh` → `.mjs` port.** Verified at the source, not inferred:
+
+- `hooks/hooks.json:94` registers `${CLAUDE_PLUGIN_ROOT}/hooks/il3-warn-hook.mjs`.
+- `hooks/il3-warn-hook.mjs:2` — *"Port of il3-warn-hook.sh. Advisory only: allows the call, injects a context"*.
+- `hooks/il3-deny-hook.sh` is present on disk, absent from `hooks.json`, and is still `.sh` while every registered hook in that directory has migrated to `.mjs`.
+
+So the answer to the audit's open question is **neither reverted nor never-registered**: the migration ported the *warn* variant forward and left the *deny* variant behind in the old language. Nothing chose warn-only — it is migration residue. The hard deny observed in practice is codescout's **server-side `run_command` gate**, confirmed live ×4 in the 2026-08-06 session (U-30): each rejection arrived as a companion `additionalContext` warning followed by a server `IL3 violation — … BLOCKED`.
+
+**Why warn-only is worse than it looks.** Because the companion allows the call, its warning is delivered as context *on an already-committed call* — the model reads the rule after choosing the shape, which is the position where a warning changes least. The server then rejects, so the user pays two round-trips for one mistake. Deny at the hook layer with the corrected command pre-composed would cost one.
+
+**Next action (pick one, do not leave both):**
+1. Port `il3-deny-hook.sh` → `il3-deny-hook.mjs` and register it in `hooks.json`, keeping the bounded-LHS carve-out (`ls`/`cat`/`awk`/`sed`/`find -maxdepth N`) and the script-internal-pipe exemption that motivated `warn` originally; or
+2. Delete `il3-deny-hook.sh`, accept server-side denial as the only gate, and stop describing companion IL3 as a deny rule anywhere.
+
+Option 1 is the better trade only if the hook can also *rewrite* — a deny that merely repeats the server's verdict earlier saves nothing but a little latency. U-30's cases 2 and 3 (compound commands whose first clause is bounded, unbounded pipe hiding in a later clause) are the shapes any new predicate must catch.
 
 **Promotion evidence:**
 - U-1: 45 strikes in one session (session `753e9a4a`), warn-mode caught all.

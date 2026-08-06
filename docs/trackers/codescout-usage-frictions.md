@@ -1196,3 +1196,124 @@ expensive to have composed.
 
 **Status:** open. No hookify rule proposed — a hook cannot see the payload cost;
 the fix belongs in the tool's rejection path.
+
+
+### U-30 — IL3 slips ×4 in one session; companion hook is warn-only and its deny twin was orphaned by the .sh→.mjs port
+
+**When:** 2026-08-06, `experiments` → `master` merge-prep session. Four separate
+`run_command` calls rejected server-side for IL3.
+
+**Got:** each rejection came in two parts — a companion `PreToolUse` hook emitting
+`additionalContext: "IL3 warning — piped … to a log-trimmer"` (advisory, allows the
+call), then codescout's own gate returning
+`IL3 violation — … BLOCKED`. The four shapes:
+
+1. `git log … --pretty=%s | sed … | sort | uniq -c` (commit-type census)
+2. `grep -m3 ^version Cargo.toml; …; git tag --sort=-v:refname | head -6` — the
+   *offending* pipe was on `git tag`, but the compound started with a bounded
+   `grep`, which is what made it feel safe
+3. `cargo fmt --check; …; cargo check … | tail -5; cargo clippy … | tail -5`
+4. `find docs -iname '*handoff*' | head` — bare `find` (no `-maxdepth`), so
+   correctly unbounded
+
+All four were the same instinct: trim a long output *at the source* rather than run
+bare and query `@cmd_*`. Cases 2 and 3 are the interesting ones — a compound command
+whose first clause is bounded reads as compliant, and the unbounded pipe hides in a
+later clause.
+
+**Resolves the ⚠️ flag on H-1** (open since the 2026-06-11 pika audit, which asked
+whether the deny hook was reverted or never registered). Verified at the source
+2026-08-06:
+
+- `hooks/hooks.json:94` registers `il3-warn-hook.mjs`.
+- `hooks/il3-warn-hook.mjs:2` says *"Port of il3-warn-hook.sh. Advisory only:
+  allows the call, injects a context…"*.
+- `hooks/il3-deny-hook.sh` exists on disk, is **not** in `hooks.json`, and is still
+  `.sh` while every registered hook has migrated to `.mjs`.
+
+So the answer is neither reverted nor never-registered: **the deny hook was orphaned
+by the shell→mjs migration.** The warn variant was ported forward, the deny variant
+was left behind in the old language. Companion IL3 has been warn-only since that
+port, while H-1 recorded `shipped (deny)`.
+
+**Cost:** 4 wasted round-trips. Also, because the companion warns rather than denies,
+the warning arrives as *context on an allowed call* — the model reads it after having
+already committed to the shape, which is precisely the position where a warning
+changes least.
+
+**Status:** open — the recurrence is behavioral; the wiring finding is actionable and
+recorded on H-1.
+
+**Promotes to:** H-1 (evidence added; the fix is to register a deny hook in `.mjs`,
+or to delete `il3-deny-hook.sh` and stop claiming deny).
+
+---
+
+### U-31 — The shell-on-source guard makes the `tool-docs-sync` CI gate impossible to reproduce locally
+
+**When:** 2026-08-06, diagnosing why the `Tool Docs Sync` CI job was red.
+
+**Expected:** run the job's own command locally to see the diff before fixing.
+
+**Got:** the job body is
+
+```bash
+grep -rhA1 'fn name(&self)' src/tools/ --include='*.rs' --exclude-dir=tests … \
+  | grep -E '^\s*"[a-z_]+"' | sed 's/.*"\(.*\)".*/\1/' | sort -u > /tmp/code-tools.txt
+grep -rohE '^#{1,2} `[a-z_]+`$' docs/manual/src/tools/ | … > /tmp/doc-tools.txt
+diff -u /tmp/code-tools.txt /tmp/doc-tools.txt
+```
+
+`run_command` refused: `shell access to source files is blocked`, hint pointing at
+`symbols` / `references` / `grep`. Correct per Iron Law 3 — but the CI gate *is* a
+recursive shell grep over `src/`, so the gate and the guard are mutually exclusive.
+Reproducing it meant re-deriving both sides with codescout `grep` and diffing 34
+names by eye.
+
+**Why it matters:** this is a class, not a one-off. Any CI gate implemented as
+`grep -r` over sources is unrunnable from inside a codescout session, so the agent
+asked to fix a red gate cannot see the gate's own output. The friction is not the
+guard's correctness — it is that no escape hatch is advertised in the refusal for
+"I am deliberately reproducing a build gate". `acknowledge_risk: true` exists and is
+mentioned in the hint, but reads as a danger override rather than the right tool for
+this job.
+
+**Fix idea:** either (a) reimplement the CI gate against `codescout symbols` output
+so one command works in both places, or (b) have the refusal hint name
+`acknowledge_risk: true` as the sanctioned path for reproducing a CI gate
+specifically, rather than only as a risk bypass.
+
+**Status:** open.
+
+---
+
+### U-32 — `.buddy/` is read-exempt but not write-exempt, and the buddy summon flow tells you to use native tools
+
+**When:** 2026-08-06, updating a buddy project memory after `/buddy:summon`.
+
+**Expected:** `.buddy/` is guard-exempt — the summon command says so explicitly:
+*"Read that one file first with native `Read`… the `.buddy/` path is guard-exempt,
+and `read_markdown` would fragment a persona-sized file into a heading map."*
+Native `Read` on the spilled payload worked exactly as documented.
+
+**Got:** native `Write` to `.buddy/memory/docs-lotus-frog/<slug>.md` was **denied** —
+*"codescout's create_file is the tracked path for new source files… The native Write
+tool bypasses codescout's safety gates and file tracking."* Succeeded via
+`create_file(overwrite=true)`.
+
+The exemption is read-only, which is defensible — writes should be tracked. But the
+asymmetry is undocumented on both sides: the buddy summon flow advertises native-tool
+access for `.buddy/` without qualifying it as reads-only, and the memory protocol's
+write steps (`git add .buddy/memory/<rel-path>`) don't name the write tool at all.
+
+**Cost:** one round-trip. Trivial in isolation; recorded because it is a
+prompt-surface disagreement between two active plugins, which is the class that
+quietly wastes calls in every session that touches memory.
+
+**Fix idea:** one clause in the summon command — *"native `Read` for the payload;
+writes to `.buddy/` still go through `create_file` / `edit_file`"* — and the same
+note in `data/memory-protocol.md` § Staging.
+
+**Status:** open.
+
+---

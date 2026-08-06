@@ -48,6 +48,23 @@ toolchain, 45-minute timeout. Branch `experiments` at the run's commit — which
 is **11 commits behind** the current local HEAD, so some or all of this may
 already be fixed.
 
+> **Prior art found after filing (2026-08-06).** A ledger query I should have run
+> first turns candidate 1 below from a guess into the leading hypothesis:
+>
+> - `docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md`
+>   (`status: mitigated`) is the pre-existing wine-suite bug, and WIN-27 in
+>   `docs/trackers/windows-platform-support.md` records its outcome: the 8-test
+>   `guide_hint` cluster was fixed and un-skipped, **12 tests remain skipped** in
+>   `scripts/build-windows.sh`, and `validate_prune_request_gates` was "the one
+>   real-Windows MSVC failure" (since fixed this cohort).
+> - A red job therefore means failures **outside** that skip list. WIN-28's nine
+>   new failures — catalog `rehome`/`prune_missing`, the `like_escape` guard, the
+>   index lock — are all new surface from this cohort and are **not** in the skip
+>   list. Under wine they would run, and fail.
+>
+> So this is most likely
+> `docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`
+> wearing a second hat, not an independent defect. Confirm before fixing twice.
 ## Root cause
 
 **Unknown — not investigated.** Three candidates, none tested:

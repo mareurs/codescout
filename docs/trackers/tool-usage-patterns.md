@@ -159,6 +159,48 @@ A per-repo `usage.db` mining pass (backend-kotlin + codescout, 2026-07-01 → 20
 ### T-012 — `artifact(get, heading=)` required the full heading text, not a short id
 
 Same mining pass found 6 occurrences in backend-kotlin (`heading="SI-20"`, `headings=["SI-19","SI-20"]`, `headings=["## SI-22","## SI-1"]`, `heading="SI-29"`, `heading="## SI-33"`) plus 1 in codescout, spanning a week — every heading query style against a numbered-section tracker (`## SI-N — <long title>`) missed, `body_meta.heading_missing: true`, no error. `get.rs` used a bespoke exact-match-only matcher instead of the shared, already-tested `file_summary::resolve_section_range` 4-tier fuzzy cascade that backs `read_markdown`/`edit_markdown`'s documented "fuzzy matched" `heading=` param — a prompt-surface consistency gap, not a caller error. See `docs/issues/2026-07-09-artifact-get-heading-exact-match-only.md`.
+
+### T-14 — The ledger query that was never made: `artifact(find, kind="bug")` before editing a file
+
+**Tool:** `artifact` · **Verdict:** wrong-tool (omitted call) · **Observed:** 2026-08-06,
+self-inflicted, during `experiments` → `master` merge preparation.
+
+The session opened with an uncommitted change in `src/embed/ast_chunker.rs`. The *code*
+seam was scouted properly — symbol bodies read, module tests run, real chunk output
+dumped (T-15). The **decision** seam was never scouted. No
+`artifact(find, kind="bug")` ran until roughly 60 tool calls later, and then only for an
+unrelated verify-open pass.
+
+**What the missing call would have returned.** Two open files, both directly on point:
+
+- `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` (open, high) whose *Fix
+  candidate 1* is, verbatim, *"Introduce `AST_CHUNK_MIN` (~200-300 chars) and coalesce
+  consecutive inner declarations below it into one chunk, keeping the container header"*
+  — the change that was then implemented at 250 chars. The same file carries a landing
+  precondition (*"validated against the retrieval benchmark … must be measured, not
+  assumed"*) and a sequencing decision (throughput work first, being vector-identical).
+  Both were violated.
+- `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`, whose root
+  cause a newly-filed bug duplicated.
+
+**Why the existing guidance did not fire — the transferable part.** The rule exists and
+was *in context from the first tool response*: `get_guide("project-activation-bootstrap")`
+is auto-injected on `workspace(activate)` and its Phase 0 says *"Bug or regression work:
+`artifact(action="find", kind="bug", status="open")` — the known-bug ledger. Don't re-file
+a filed bug as new."*
+
+It is trigger-shaped by **task category**. An agent that has classified its session as
+*documentation + merge prep* answers "am I doing bug work?" with no — and keeps answering
+no right up to the moment it edits a file with an open high-severity bug against it. A
+category trigger cannot fire for someone whose self-classification excludes the category.
+
+**Prompt gap / proposed fix.** Retrigger on **file identity** rather than task category:
+before the first edit to any file, query the ledger scoped to that path or subsystem. What
+the ledger holds is unreachable by any other means — not from the code, not from `git log`:
+chosen-but-unimplemented fix candidates, preconditions on landing, and cross-change
+ordering decisions. Filed as R-55 (`miss → proposal`) in
+`docs/trackers/reconnaissance-patterns.md`; narrative in F-2 of
+`docs/trackers/release-promotion-session-log.md`.
 ## run_command observations
 
 ### T-013 — `cargo test 2>&1 | tail -25`, then grepping that 25-line buffer as proof of a clean 3400-test suite
@@ -206,6 +248,67 @@ write `grep -c FAILED @buffer` and stop there. Suggested addition to the
 progressive-disclosure guide's run_command section: when asserting a suite is clean, assert
 completeness (binary count, terminal marker), not just absence of failures.
 
+
+### T-15 — A throwaway printing test beat reading the source, for an internal pure function
+
+**Tool:** `run_command` · **Verdict:** legitimate · **Observed:** 2026-08-06.
+
+Question: what does `nodes_to_chunks` actually emit when it decomposes a container?
+Rather than derive it from the source — which was open, short, and readable — inserted a
+throwaway `#[test]` printing every chunk's line span, metadata and content, and ran
+`cargo test … -- --nocapture`. Two calls, then deleted.
+
+**It contradicted the source-based prediction.** Reading the code, the coalesce run looked
+padded by the container's trailing `}` gap. The dump showed the padding was a **leading**
+gap spanning lines 1-8 — the entire file prefix before the container, emitted because the
+recursion re-derives gaps against the whole `source` with `prev_end` reset to 0. That shape
+was not predicted, and it is a second, pre-existing defect (now
+`docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`).
+
+It also produced the exact assertion strings — `src/mystore.rs :: impl MyStore ::     pub fn build(&self)`,
+leading whitespace intact — that seven new tests now pin. Guessed strings would have
+needed a round-trip each to correct.
+
+**Prompt gap.** The rule exists but is scoped to the wrong things. This skill's Phase 1 says
+*"For tools / external APIs: read the actual response shape, not docs"*, and
+`get_guide("project-activation-bootstrap")` Phase 2 says *"A claim about how a TOOL behaves
+needs the call run once and the real output read — reading the source alone misses runtime
+shape."* Both frame it around tools and external APIs. The temptation is **strongest** for an
+internal pure function, precisely because the source is right there and reading it feels
+authoritative. Suggested widening: *"tools, APIs, and any function whose output shape you
+are about to assert on."* Paired with W-1 in
+`docs/trackers/release-promotion-session-log.md`.
+
+### T-16 — Reporting a three-command local subset as "the gate"
+
+**Tool:** `run_command` · **Verdict:** debatable · **Observed:** 2026-08-06.
+
+Ran `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, found
+them green, and proceeded through merge preparation treating the branch as gate-clean.
+
+The **calls** are defensible — `--all-targets` is a superset of CI's `cargo clippy`, so that
+part was stricter, not looser. The defect is the **inference**: three commands on one host
+OS with default features were reported as the merge gate.
+
+**What the real gate is.** `.github/workflows/ci.yml` runs a 3x3 matrix
+(ubuntu/macos/windows × default/local-embed/no-features) plus `Format`, `Clippy`,
+`Tool Docs Sync`, `MSRV`, `windows-gnu` and `Audit Doc Refs`. The three local commands cover
+**one of nine** test cells.
+
+**Proof standard met — the alternative was run.** Executing the two non-default configs
+locally surfaced five genuine failures the default build cannot see: two compile-time
+(`tests/link_scan.rs` and `src/server.rs`'s `make_server` using `librarian` symbols with no
+`#[cfg]`) and three behaviour-time (`server::tests` asserting the `artifact` tool is
+registered). Feature-gate rot is invisible to a default-features build **by construction**.
+`gh run list --branch experiments` then showed failure on every run back to 2026-07-13.
+
+**Prompt gap.** CLAUDE.md's *"Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`
+before completing any task"* is per-task hygiene that reads as a complete gate, and
+`docs/RELEASE.md`'s ship sequence reinforced it (*"tests passing, clippy clean"*) with no
+mention of feature configs or of consulting CI at all. Partially closed: `docs/RELEASE.md`
+now carries a *Large-Cohort Promotion* section listing all five steps with the ancestry
+check first. Residual is a single local alias that runs all five — ROADMAP standing backlog;
+narrative in F-3.
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)

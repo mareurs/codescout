@@ -90,6 +90,58 @@ neutral (streak unchanged).
 **Promote-when:** same shape (superseded-fired-win, or curated-surface-decline) recurs in a second sweep → PR the step-1 refinement into `tracker-hygiene/SKILL.md`.
 
 **Resolution 2026-07-17 (codescout A-18, prompt-tdd):** the step-1 refinement is **NO-SHIP**. Base-arm eval (skill @1.15.0, no guard, sonnet, n=10×2): superseded-win scenario 10/10 WITHHOLD, non-superseded mutation twin 10/10 PROMOTE = 20/20 correct discrimination. Sonnet already cross-checks a superseding correction before promoting, so adding a supersession guard to step-1 would be a dead rule (H2 accretion). HY-1 stays a **hit** (D10 fired correctly); the *refinement proposal* is retired as unwarranted. Residue: sonnet-only (Fable/Haiku untested); the curated-surface-bloat half (vdi W-5) is taste, never evalled. Regression guards kept: `prompt-engineering/scenarios/skills/tracker-hygiene-d10-{superseded,clean-twin}`.
+## HY-2 — Verify-open found a 0% zombie rate; that is the cadence working, not evidence against it
+
+**Observed:** 2026-08-06, during an **ad-hoc** hygiene pass inside the
+`experiments` → `master` merge-prep session. The `tracker-hygiene` skill was **not
+invoked** and no detector ran — hence an HY entry rather than a `## Sweep` entry, and
+`next-sweep-due: 2026-08-16` is deliberately left untouched (not yet due).
+
+**What ran.** CLAUDE.md's verify-open cadence — *"Before any 'what's open?' report or
+backlog triage, run a verify-open pass on session-log entries with `Status: open` older
+than 14 days"* — applied to the bug ledger, plus `librarian(action="audit_doc_refs")`,
+a `docs/FEATURES.md` retirement audit, and a `docs/RELEASE-TODO.md` triage.
+
+**Result: 0 of 2 eligible entries were zombie-open.**
+
+- `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`
+  — correctly open. Its own body states that Bug A shipped (`0f6815f8`) and that
+  *"Bug B — search-mode intermittent 0-matches — remains open and unconfirmed. It is
+  the only reason this file is still open."* Nothing to reconcile.
+- `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
+  — could not be cleared. Home-project counts agree (21 = 21), but the bug's scenario is
+  a *foreign* project after `activate`, which the pass did not exercise. Recorded as a
+  dated datapoint, status left `open`. Also warned off a false lead: this cohort's
+  `d668927e` (`fix(memory): section filter follows the shallowest heading level`) is a
+  **different** defect in the same tool.
+
+**Why this matters for the skill.** The cadence's justification in CLAUDE.md is a
+**75% zombie-open rate** — 3 of 4 entries flipped in the W-7 scout pass (2026-05-25,
+`docs/trackers/bug-fix-session-log.md`). A naive reading of today's 0/2 is "the cadence
+over-claims". The correct reading is the opposite: the 2026-07-21 pass
+(`docs(issues): reconcile bug ledger after verify-open sweep`) already cleaned this
+ledger, so **there was nothing left to find**. A low zombie rate on a ledger that was
+recently swept is the success condition, not a counter-example.
+
+**Proposal for the skill:** when a detector reports zero findings, the sweep entry should
+record *when that surface was last reconciled*, so a future reader can distinguish "clean
+because maintained" from "clean because the detector missed". Without that, a run of
+zero-finding sweeps is indistinguishable from a broken detector — and the trust-state
+table above treats a no-finding sweep as neutral, which is right, but the *reason* is not
+captured anywhere.
+
+**Also worth noting for D2 (terminal-not-archived):** this pass deliberately did **not**
+archive `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` even though its
+fix landed (`ca442498`) with a green gate. The file names its own landing precondition —
+validation against the retrieval benchmark, *"must be measured, not assumed"* — and that
+measurement was not run. A D2 detector keying on "fix SHA present + gate green" would
+flag this as terminal-not-archived and be **wrong**. Bug files can carry preconditions
+beyond the code gate; the detector needs to read the Fix section, not just detect a SHA.
+
+**Status:** open — both proposals unimplemented; recorded for the next real sweep.
+
+---
+
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:
