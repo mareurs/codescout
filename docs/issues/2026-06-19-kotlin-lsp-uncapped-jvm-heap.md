@@ -344,6 +344,31 @@ apply under different indexing triggers), but it's the first non-ballooning
 codescout-repo kotlin-lsp lifecycle observed all session. Continue monitoring
 further organic spawns before downgrading this bug's severity or status.
 ## Resume
+**Update 2026-08-06 — item 3 DONE.** `-XX:NativeMemoryTracking=summary` is now in the
+Kotlin branch of `default_config` (`src/lsp/servers/mod.rs`), so the next occurrence can
+be attributed by category with `jcmd <pid> VM.native_memory summary` instead of inferred
+from the heap-vs-RSS gap. That gap is the whole remaining question here: the heap cap is
+verified in effect at 2 GiB and native memory still reached 35–37 GB on two of three
+captures, so NMT is the instrument for the *unsolved* half, not a nice-to-have.
+
+Two details in the implementation worth keeping:
+
+- The flag is inserted **before** `-Xmx2g`, preserving the existing invariant that
+  codescout's `-Xmx` is the final one in the string — the JVM honours the last `-Xmx`, so
+  ordering is what makes our cap beat one inherited from the ambient
+  `JAVA_TOOL_OPTIONS`. The new test asserts the ordering, not just the presence, because
+  a later edit that appends anything after `-Xmx` would silently reopen the original bug.
+- Gate green with it: fmt, `clippy --all-targets -D warnings`, 3504 tests / 0 failed.
+  **Not yet live-verified** — that needs `cargo rb` + `/mcp` and then
+  `jcmd <kotlin-lsp pid> VM.native_memory summary` returning a breakdown rather than
+  "Native memory tracking is not enabled".
+
+Remaining, unchanged and re-stated so the list is honest: item 1 (cherry-pick to master —
+gated, and `master` is protected so it is the user's call), item 5 (bump kotlin-lsp to
+`262.8190.0`), item 6 (content-root scoping, which upstream #203 suggests may not be
+honoured — verify empirically before relying on it). Item 2's known limitation also still
+stands: a mem-kill does not count toward the LSP circuit breaker, so a slow
+kill→respawn→grow→kill loop is bounded but unthrottled.
 
 Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified twice more** (2026-07-08: `jcmd` MaxHeapSize = 2 GiB confirmed in effect on two independent codescout-repo JVMs) — the heap cap itself is not bypassed. However, the 2026-07-08 live captures (see Evidence) prove Fix 1 alone does **not** bound worst-case host-memory exposure: native memory independently reached 35.6-37.4 GB on 2 of 3 captures, matching or exceeding the pre-fix ceiling. Remaining:
 

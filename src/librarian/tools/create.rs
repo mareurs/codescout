@@ -59,6 +59,51 @@ pub struct Args {
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
     pub augment: Option<AugmentSpec>,
 }
+/// The six statuses a `kind: bug` file may carry, per
+/// `get_guide("tracker-conventions")` § *Bug files*.
+const BUG_STATUSES: &[&str] = &[
+    "open",
+    "investigating",
+    "fixed",
+    "mitigated",
+    "wontfix",
+    "zombie",
+];
+
+/// Resolve the `status` for a new artifact, defaulting **per kind**.
+///
+/// The two vocabularies are disjoint and the default used to ignore `kind`, so
+/// every bug file created without an explicit status got `draft` — a value the bug
+/// vocabulary does not contain. That is not cosmetic: the canonical triage query is
+/// `find(kind="bug", status="open")`, so such a bug never appears in the answer to
+/// "what's open?" and nothing anywhere notices. Seen live on a bug that was
+/// written, committed, pushed and cited from three documents, and still absent from
+/// the ledger.
+///
+/// An out-of-vocabulary status on a bug is refused rather than silently stored,
+/// because the failure it causes is invisible by construction — the row simply does
+/// not match a query someone else runs later.
+///
+/// Tracker statuses are deliberately NOT validated here: that vocabulary documents
+/// `active | draft | archived | superseded` but the guide also states that
+/// unrecognised values "appear as active", i.e. free-form is load-bearing there.
+///
+/// See `docs/issues/2026-08-06-artifact-create-bug-defaults-to-invalid-draft-status.md`.
+fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String> {
+    match requested {
+        Some(s) if kind == "bug" && !BUG_STATUSES.contains(&s) => {
+            Err(RecoverableError::new(format!(
+                "status {s:?} is not a bug status; use one of: {}",
+                BUG_STATUSES.join(", ")
+            )))
+        }
+        Some(s) => Ok(s.to_string()),
+        // A new bug is open; a new tracker or design artifact is a draft.
+        None if kind == "bug" => Ok("open".to_string()),
+        None => Ok("draft".to_string()),
+    }
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a: Args = serde_json::from_value(args)?;
 
@@ -115,7 +160,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         std::fs::create_dir_all(parent)?;
     }
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
-    let status = a.status.as_deref().unwrap_or("draft").to_string();
+    let status = resolve_status(&a.kind, a.status.as_deref())?;
     let fm = Frontmatter {
         id: Some(id.clone()),
         kind: Some(a.kind.clone()),
@@ -239,6 +284,86 @@ mod tests {
         assert!(content.contains("title: X"));
         let id = v["id"].as_str().unwrap();
         assert!(artifact::get(&ctx.catalog.lock(), id).unwrap().is_some());
+    }
+    /// A new bug must land in the answer to "what's open?". The two vocabularies are
+    /// disjoint, and defaulting `kind: bug` to the tracker default `draft` put the row
+    /// outside `find(kind="bug", status="open")` — so a bug written, committed and cited
+    /// was still absent from the ledger, with nothing to notice it.
+    #[tokio::test]
+    async fn new_bug_defaults_to_open_and_a_new_tracker_still_defaults_to_draft() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let bug = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/issues/2026-01-01-x.md",
+                "kind": "bug", "title": "B", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let bug_id = bug["id"].as_str().unwrap().to_string();
+
+        // Read back through the catalog, which is what the triage query reads.
+        let row = artifact::get(&ctx.catalog.lock(), &bug_id)
+            .unwrap()
+            .expect("bug row present");
+        assert_eq!(
+            row.status, "open",
+            "a new bug must be `open`, not the tracker default"
+        );
+
+        // Over-match guard: the tracker default is unchanged. Without this the fix could
+        // have been \"default everything to open\", which breaks the tracker vocabulary.
+        let tracker = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/trackers/t.md",
+                "kind": "tracker", "title": "T", "body": "t"
+            }),
+        )
+        .await
+        .unwrap();
+        let trow = artifact::get(&ctx.catalog.lock(), tracker["id"].as_str().unwrap())
+            .unwrap()
+            .expect("tracker row present");
+        assert_eq!(trow.status, "draft", "tracker default must not change");
+    }
+
+    /// An out-of-vocabulary bug status is refused rather than stored, because the harm it
+    /// causes is invisible: the row simply fails to match a query someone runs later.
+    #[tokio::test]
+    async fn an_out_of_vocabulary_bug_status_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/issues/2026-01-01-y.md",
+                "kind": "bug", "title": "Y", "body": "y", "status": "draft"
+            }),
+        )
+        .await
+        .expect_err("`draft` is a tracker status, not a bug status");
+        let msg = err.to_string();
+        assert!(msg.contains("not a bug status"), "got: {msg}");
+        // The message must name the alternatives, or the caller has to go read a guide.
+        assert!(msg.contains("investigating"), "got: {msg}");
+
+        // Over-match guard: every documented bug status is still accepted.
+        for (i, s) in BUG_STATUSES.iter().enumerate() {
+            call(
+                &ctx,
+                json!({
+                    "repo": "r", "rel_path": format!("docs/issues/2026-01-01-ok-{i}.md"),
+                    "kind": "bug", "title": "OK", "body": "ok", "status": s
+                }),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{s} should be accepted: {e}"));
+        }
     }
 
     #[tokio::test]

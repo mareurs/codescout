@@ -327,7 +327,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     };
     let lang = detect_language(path_str);
     let Some(lsp) = ctx.lsp.clone() else {
-        ctx.degraded_languages.borrow_mut().push(lang.to_string());
+        note_degraded(ctx, lang);
         return Resolution {
             verdict: Verdict::Unknown,
             severity: Severity::Low,
@@ -386,7 +386,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             }
         }
         None => {
-            ctx.degraded_languages.borrow_mut().push(lang.to_string());
+            note_degraded(ctx, lang);
             Resolution {
                 verdict: Verdict::Unknown,
                 severity: Severity::Low,
@@ -406,6 +406,26 @@ fn detect_language(path: &str) -> &'static str {
         Some("java") => "java",
         Some("go") => "go",
         _ => "unknown",
+    }
+}
+/// Record that a language server could not answer for `lang`.
+///
+/// `"unknown"` is deliberately excluded. `detect_language` above maps six
+/// extensions; every other path part in a `file_symbol` ref — a `.sh`, `.toml`,
+/// `.md` — comes back `"unknown"`, and there is no server for it to begin with.
+/// Counting that as degradation made `scan_meta.degraded` **true on every run**,
+/// including all fifteen green CI jobs, which left the flag carrying no
+/// information: a saturated signal cannot distinguish anything.
+///
+/// The flag's job is to tell a caller *"my coverage was incomplete because a server
+/// I expected was missing"*. A file that has no server by design is not that, and
+/// conflating the two is what made a proposed fix — gate on `degraded` — unusable,
+/// since it would have failed every run ever.
+///
+/// See `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
+fn note_degraded(ctx: &ResolveCtx<'_>, lang: &str) {
+    if lang != "unknown" {
+        ctx.degraded_languages.borrow_mut().push(lang.to_string());
     }
 }
 
@@ -1064,6 +1084,39 @@ mod tests {
         let r = resolve_ref(&c, &ctx);
         assert_eq!(r.verdict, Verdict::Unknown);
         assert!(ctx.degraded_languages.borrow().iter().any(|l| l == "rust"));
+    }
+    /// A path part with no LSP mapping is **out of scope**, not degraded coverage.
+    /// Recording it made `scan_meta.degraded` true on every run — including all fifteen
+    /// green CI jobs — which left the flag unable to distinguish anything, and made
+    /// "gate on `degraded`" an unusable proposal. The sibling test above pins the other
+    /// half: a language that *does* have a server still marks the scan degraded.
+    #[test]
+    fn resolver_does_not_mark_scan_degraded_for_a_language_with_no_server_by_design() {
+        let tmp = TempDir::new().unwrap();
+        // Extensions outside detect_language's six. There is no server for any of them,
+        // so their absence is not a coverage gap.
+        for (file, refstr) in [
+            ("deploy.sh", "deploy.sh:main"),
+            ("Cargo.toml", "Cargo.toml:package"),
+            ("notes.md", "notes.md:Summary"),
+        ] {
+            std::fs::write(tmp.path().join(file), "x\n").unwrap();
+            let ctx = ResolveCtx {
+                repo_root: tmp.path(),
+                memory_globs: &[],
+                lsp: None,
+                degraded_languages: Default::default(),
+                basename_index: std::collections::HashMap::new(),
+                gitignore: None,
+            };
+            let r = resolve_ref(&cand(refstr, "docs/spec.md", RefKind::FileSymbol), &ctx);
+            assert_eq!(r.verdict, Verdict::Unknown, "{refstr}");
+            assert!(
+                ctx.degraded_languages.borrow().is_empty(),
+                "{refstr} must not mark the scan degraded; got {:?}",
+                ctx.degraded_languages.borrow()
+            );
+        }
     }
 
     #[test]

@@ -88,12 +88,24 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             // not workload. -Xmx is appended LAST so codescout's cap wins over any
             // -Xmx inherited from the ambient JAVA_TOOL_OPTIONS (the JVM honors the
             // final -Xmx). watch_memory's 4/8 GiB thresholds assume this 2 GiB cap.
+            //
+            // NativeMemoryTracking=summary is on because -Xmx is NOT the whole
+            // story: with the heap verifiably pinned at 2 GiB, live captures still
+            // showed native memory reaching 35-37 GB, matching the pre-cap ceiling.
+            // Without NMT that gap can only be inferred from heap-vs-RSS; with it,
+            // `jcmd <pid> VM.native_memory summary` attributes it by category
+            // (RocksDB / JNI direct buffers / JIT code cache) at the moment of the
+            // next occurrence, which is the difference between diagnosing that
+            // growth and guessing at it. Cost is a few percent and a small
+            // bookkeeping overhead — cheap against re-waiting for a rare event.
             // See docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
+            let cs_opts = format!(
+                "-Duser.home={} -XX:NativeMemoryTracking=summary -Xmx2g",
+                analyzer_home.display()
+            );
             let java_tool_options = match std::env::var("JAVA_TOOL_OPTIONS") {
-                Ok(prev) if !prev.trim().is_empty() => {
-                    format!("{prev} -Duser.home={} -Xmx2g", analyzer_home.display())
-                }
-                _ => format!("-Duser.home={} -Xmx2g", analyzer_home.display()),
+                Ok(prev) if !prev.trim().is_empty() => format!("{prev} {cs_opts}"),
+                _ => cs_opts,
             };
             Some(LspServerConfig {
                 command: crate::platform::lsp_binary_name("kotlin-lsp"),
@@ -419,6 +431,28 @@ mod tests {
         assert!(
             jto.contains("-Xmx"),
             "JAVA_TOOL_OPTIONS must pin an explicit JVM heap cap (-Xmx); got {jto}"
+        );
+    }
+    /// `-Xmx` bounds the heap and nothing else. With the cap verifiably in effect,
+    /// live captures still showed native memory at 35-37 GB — matching the ceiling the
+    /// cap was added to remove. NMT is what turns the next occurrence into an
+    /// attributable breakdown (`jcmd <pid> VM.native_memory summary`) instead of a
+    /// heap-vs-RSS subtraction, so it is part of the fix, not an optional extra.
+    #[test]
+    fn kotlin_enables_native_memory_tracking() {
+        let cfg = default_config("kotlin", std::path::Path::new("/tmp/ws")).unwrap();
+        let jto = kotlin_java_tool_options(&cfg);
+        assert!(
+            jto.contains("-XX:NativeMemoryTracking=summary"),
+            "JAVA_TOOL_OPTIONS must enable NMT so native growth is attributable; got {jto}"
+        );
+        // -Xmx must still come last: the JVM honours the final -Xmx, which is how
+        // codescout's cap wins over one inherited from the ambient environment.
+        let xmx = jto.rfind("-Xmx").expect("an -Xmx must be present");
+        let nmt = jto.find("-XX:NativeMemoryTracking").unwrap();
+        assert!(
+            nmt < xmx,
+            "-Xmx must remain the last heap flag so it wins over an inherited one; got {jto}"
         );
     }
 

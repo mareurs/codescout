@@ -129,11 +129,17 @@ by the default scope:
 artifact(action="find", kind="tracker")
 ```
 
-For bugs, swap the kind and (optionally) constrain status:
+For bugs, swap the kind. **Constrain on both non-terminal states, not just `open`** —
+the vocabulary has two, and `investigating` is what this guide tells you to set while
+you are actively working a bug, so `status="open"` alone hides exactly the bugs someone
+is in the middle of:
 
 ```
-artifact(action="find", kind="bug", status="open")
+artifact(action="find", kind="bug",
+         filter={"status": {"in": ["open", "investigating"]}})
 ```
+
+`status="open"` remains right when you specifically mean *not yet started*.
 
 Surface archived rows when needed:
 

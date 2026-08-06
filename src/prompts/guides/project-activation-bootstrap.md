@@ -7,7 +7,10 @@ bug is the one you never re-investigate because the project already documented i
 
 - `memory(action="list")`, then read the topics matching your task.
   `architecture`, `gotchas`, and `conventions` usually pay off.
-- Bug or regression work: `artifact(action="find", kind="bug", status="open")` —
+- Bug or regression work:
+  `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})` —
+  both non-terminal states, since `status="open"` alone hides any bug marked
+  `investigating` —
   the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery
   KNOWN and cite the ledger path.
 - If a `get_guide` topic matches your area (`error-handling`,

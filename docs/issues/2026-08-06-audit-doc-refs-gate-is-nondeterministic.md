@@ -1,7 +1,7 @@
 ---
 id: d965b9fd79298e46
 kind: bug
-status: draft
+status: open
 title: 'BUG: audit-doc-refs high-finding count varies between identical runs — the CI gate is non-deterministic'
 tags:
 - audit_doc_refs
@@ -9,6 +9,11 @@ tags:
 - flake
 - lsp
 - determinism
+opened: 2026-08-06
+owner: marius
+related:
+- '523233935cc53bc4'
+severity: medium
 ---
 
 ## Summary
@@ -292,6 +297,42 @@ This is also a methodological note worth keeping: replicating a flake *after* fi
 flaked tests nothing, and it is easy to do accidentally when the flake surfaces during a
 cleanup pass.
 ## Fix
+**2026-08-06 — both halves implemented. The flap can no longer move the exit code, and
+`scan_meta.degraded` carries information for the first time.**
+
+1. **`SymbolMissing` no longer gates** (`c8efc17a`). `high` is now reserved for verdicts
+   that are deterministic filesystem facts — `Missing`, `FileMissing`. `SymbolMissing`
+   joins `LineOob` and `AmbiguousBasename` at `med`: still reported, no longer able to
+   swing an exit code. This is Fix option 1 from § Root cause. Nothing had asserted the
+   old value, so the whole verdict-to-band map is now pinned by a test.
+2. **`degraded` de-saturated.** `note_degraded` skips `"unknown"` — the value
+   `detect_language` returns for any extension outside its six, i.e. a `.sh`, `.toml` or
+   `.md` path part that never had a server to lose. Measured before and after on the same
+   tree:
+
+   | | before | after |
+   |---|---|---|
+   | `scan_meta.degraded` | `true` (every run) | **`false`** |
+   | `lsp_languages_offline` | `["unknown"]` | **`[]`** |
+
+   **This is the prerequisite that made Fix direction 1 in § Root cause unusable, and it
+   is now met.** Gating on `degraded` was a proposal that would have failed every run
+   ever, including all fifteen green CI jobs; the flag can now actually mean "a server I
+   expected was missing".
+
+**Why this stays open rather than closing here.** The two changes remove the *consequence*
+— a flap can no longer decide green-versus-red — without establishing *why* an individual
+`document_symbols` call occasionally returns `None`. That question is still open, it is
+shared with `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
+and it now has a clean instrument: with `degraded` no longer saturated, a run where a real
+language server fails to answer is visible in `lsp_languages_offline` instead of being
+buried under a permanent `["unknown"]`.
+
+**A note on the mistake worth not repeating.** One of this file's own earlier fix
+directions — "exit non-zero when `scan_meta.degraded`" — was written before anyone checked
+what that field actually contained on a real run. It was wrong for a reason a single
+`jq .scan_meta` would have shown. Reading the field beat reasoning about it, which is the
+same lesson as W-5 in `docs/trackers/release-promotion-session-log.md`.
 
 Not implemented. Two candidate directions, and they are not exclusive:
 
