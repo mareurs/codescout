@@ -378,6 +378,23 @@ Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified twice more**
 4. Cross-ref the cgroup blast-radius cap — now tracked in `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md` (the sibling 68 GiB OOM bug is fixed + archived).
 5. **Bump kotlin-lsp to `262.8190.0`** (see Upstream status) — picks up upstream #213's workspace-cache fix. Cheap, low-risk, independent of Fix 2/3.
 6. **Investigate content-root scoping** for the codescout-repo kotlin-lsp launch (restrict indexing to `tests/fixtures/kotlin-library` instead of the full monorepo `--cwd`) — per upstream #203 (open, unfixed, no maintainer response), scoping config may not be honored; verify empirically before relying on it as a fix.
+**Update 2026-08-06 (later) — item 1's stated gate has cleared.** The orthogonal failure
+this file blocks the cherry-pick on, `replace_symbol_surfaces_stale_error_after_max_retries`,
+now **passes**: a full `cargo test` at `598624be` reports 3505 passed / 0 failed / 44
+ignored, with that test explicitly reported `ok`. The blocker named here is no longer
+blocking.
+
+Two caveats before treating item 1 as open road. One green run does not establish that an
+LSP-dependent test is *stably* fixed rather than intermittently green — the F-18/F-23 class
+it belongs to is timing-sensitive. And the cherry-pick itself remains the user's call,
+since `master` is protected.
+
+**Item 3's live verification is now possible and still owed.** codescout was rebuilt and
+reconnected on 2026-08-06, which is the precondition this file recorded, so
+`jcmd <kotlin-lsp pid> VM.native_memory summary` should now return a category breakdown
+rather than "Native memory tracking is not enabled". That needs a kotlin LSP brought up
+first.
+
 ## References
 - Launch env builder: `src/lsp/servers/mod.rs:85-106`
 - Memory watcher (log-only) + fictional-cap comment: `src/lsp/mux/process.rs:751-786`, comment at `:752`

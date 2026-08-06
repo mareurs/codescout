@@ -1319,7 +1319,7 @@ note in `data/memory-protocol.md` § Staging.
 ---
 
 
-### U-33 — IL3 recurred ×3 MORE in the same session after U-30 was written (7 total); the shape is "trim for my own reading"
+### U-33 — IL3 recurred repeatedly in the same session after U-30 was written; the shape is "trim for my own reading"
 
 **When:** 2026-08-06, same session as U-30, *after* U-30 had already been written up.
 Three further server-side IL3 rejections:
@@ -1398,6 +1398,23 @@ blocked it. That is the proposal working as intended — strictly less restricti
 today's gate on exactly the case where the pipe was legitimate. It also means the current
 gate has a real false-positive rate of its own, which the narrower rule would reduce rather
 than add to.
+**Further refinement after 15 (same session, later still).** #14 was a chained
+`git log -S … -- .gitignore` whose command substitution carried `| tail -1` and whose outer
+clause carried `| head -30`; #15 was `cargo fmt && cargo test --lib audit_doc_refs 2>&1 |
+tail -40`. Both are predicate-free length trimmers, so the tally is **13 of 15 pure "show
+me less"**, with #13 still the only genuine content filter.
+
+**What is new at 15 is *when* they fire.** Both landed immediately after a stretch of
+deliberate, careful work — a mutation-verified regression test, a scouted seam — rather
+than during a careless patch. The rule was also quoted correctly, unprompted, elsewhere in
+the same session. So this is not a knowledge gap: it is a reflex that fires when attention
+is on the command's *content* rather than its *shape*. Compose-time is the only moment that
+can reach a reflex, which is precisely where a record cannot act and a deny hook can.
+
+That makes three interventions now falsified by recurrence within one session: U-30 (write
+it down), U-33 (characterise it), and the advisory PreToolUse echo (warn after composing).
+The deny-hook conclusion is unchanged and the evidence for it is now 15 deep.
+
 ### U-34 — `edit_code action=insert` takes the ANCHOR in `symbol`, while an `anchor` param also exists
 
 **When:** 2026-08-06. Inserting a new function after an existing one.
