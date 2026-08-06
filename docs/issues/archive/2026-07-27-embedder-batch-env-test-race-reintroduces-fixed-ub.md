@@ -161,7 +161,18 @@ Run affected test modules with `-- --test-threads=1` (or `cargo test --lib retri
 
 ## Resume
 
-`src/librarian/indexer.rs:1070-1183`'s `EnvGuard` (raw `set_var`/`remove_var` + `#[serial_test::serial]` on its 3 callers) still has the rejected-shape anti-pattern and needs the same treatment as `embedder.rs` got here: either (a) mirror the thread-local injection pattern from `src/retrieval/embedder.rs` (if all its callers are sync `#[test]`, a thread-local still works — sync tests run their whole body on one OS thread too, no tokio flavor concern), or (b) thread the `LIBRARIAN_ARTIFACT_VEC_MIGRATE` override as an explicit parameter per `a656f8cec220d347`'s original fix. Confirm which of `write_embeddings_dim_mismatch_bails_by_default` / `_migrates_when_opted_in` / `_backs_up_file_backed_catalog` actually race in practice (same repro method: run the containing module's tests repeatedly at default parallelism) before choosing the fix shape.
+N/A — both occurrences closed. `embedder.rs` fixed at `9a782a86`; `indexer.rs`
+fixed and verified on `experiments` at **`45669701`** (label: `experiments`;
+master-side SHAs still need recording after cherry-pick per CLAUDE.md § "After
+cherry-pick").
+
+If a third occurrence of this pattern appears, the remedy is settled and needs no
+re-derivation: thread the overridable value as data (injected field for a builder,
+explicit parameter for a free function), read env once at the edge, keep the
+env→value mapping a pure function so it is testable, and delete the `EnvGuard`.
+Do **not** reach for `#[serial]` — `a656f8cec220d347` establishes it cannot help
+against untagged tests — and do not `#[cfg]`-fork, which leaves an arm no test
+executes.
 ## References
 - `a656f8cec220d347` — `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md` — parent diagnosis + rejected/accepted fix for the identical shape.
 - `docs/conventions/test-env-isolation.md` — "Known gaps (open)" section, documents this exact cross-module gap as accepted/deferred at the project level.

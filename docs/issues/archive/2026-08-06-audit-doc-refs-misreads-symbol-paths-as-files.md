@@ -208,13 +208,14 @@ one option that has no upside — it trains everyone to ignore a red check.
 
 ## Resume
 
-Start with the `name_path` case, which is 8 of the 18 and the least ambiguous
-fix: in the extractor, before emitting a `file_path` ref, test the token against
-the `name_path` shape and route it to the symbol index. Re-run
-`cargo run --bin codescout -- audit-doc-refs --no-emit-tracker --fail-on high --json --project .`
-and confirm the count drops from 18 to 10. Then handle the `…/` prefix (4) and
-the `github.com` adjacency (4).
+N/A for this bug — fixed and verified on `experiments` at **`45669701`** (label:
+`experiments`; the master-side SHA still needs recording after cherry-pick, per
+CLAUDE.md § "After cherry-pick" — an experiments SHA orphans on rebase and
+nothing re-reads `archive/` to repair it).
 
+The gate is still red on **genuine** drift, tracked separately in
+`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`. Do not
+reopen this file for that.
 ## References
 
 - `src/librarian/tools/audit_doc_refs/` — extractor and severity policy

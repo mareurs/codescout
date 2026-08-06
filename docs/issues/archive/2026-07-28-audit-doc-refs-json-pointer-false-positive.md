@@ -194,13 +194,10 @@ directory reference still resolves.
 
 ## Resume
 
-Open `src/librarian/tools/audit_doc_refs/parser.rs:188-196` and replace the bare
-`return true` with option 1 above (`has_known_ext(s) || resolves_on_disk`). Add the
-rejection test next to `parser_rejects_git_refs`. Then re-run
-`librarian(action="audit_doc_refs", paths=["docs/trackers/retrieval-benchmark.md"],
-emit_tracker=false)` and confirm `n_refs_broken` drops by one and no high-severity
-finding remains.
-
+N/A — fixed and verified on `experiments` at **`45669701`** (label: `experiments`;
+master-side SHA still needs recording after cherry-pick per CLAUDE.md § "After
+cherry-pick"). `mcpServers/codescout/env` is rejected by the positive-evidence
+rule, guarded by `parser_rejects_config_pointers_and_elided_paths`.
 ## References
 
 - `src/librarian/tools/audit_doc_refs/parser.rs:147-199` — `looks_like_path`

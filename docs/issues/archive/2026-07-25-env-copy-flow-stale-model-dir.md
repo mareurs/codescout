@@ -1,14 +1,14 @@
 ---
 id: '8a4db17751b1e233'
 kind: bug
-status: open
+status: fixed
 title: Copy-based `.env` profile flow drifts — local `.env` pins a nonexistent CODESCOUT_MODEL_DIR that compose reads by default
 tags:
 - docker-compose
 - configuration
 - docs
 - retrieval
-closed: ''
+closed: 2026-08-06
 opened: 2026-07-25
 owner: marius
 related:
@@ -240,6 +240,11 @@ every retrieval measurement on this host dense-only. Cross-ref
 
 ## Fix
 
+**IMPLEMENTED 2026-08-06 (experiments, `45669701`). Both parts done.**
+
+1. **Local:** repo-root `.env` line 26 corrected from `CODESCOUT_MODEL_DIR=/home/marius/models` (nonexistent) to `./models`, matching `.env.gpu` and the compose default at `docker-compose.yml:77`. The missing `LIBRARIAN_EMBED_MODEL=CodeRankEmbed` / `LIBRARIAN_EMBED_URL=http://127.0.0.1:48081/v1` pair was appended, kept in sync with `.env.amd:55-56`, with a comment naming the 2026-07-10 librarian outage as the reason they matter. `.env` was backed up before editing and `CARGO_REGISTRY_TOKEN` was verified still present afterwards — the file is gitignored, so git could not have restored it.
+2. **Repo-side:** `docs/manual/src/concepts/retrieval-stack.md` no longer documents `cp .env.amd .env`. It now shows `ln -sfn "$PWD/.env.amd" ~/.config/codescout/.env` for the MCP servers and `docker compose --env-file .env.amd` for compose, with a **Why not `cp`** section giving both observed reasons: a copy has no link to its source (this bug), and a copy destroys the secrets the profile files deliberately do not carry.
+
 Two parts; the second is the one that stops recurrence.
 
 1. **Local, immediate:** drop the `CODESCOUT_MODEL_DIR` line from repo-root
@@ -260,10 +265,14 @@ Two parts; the second is the one that stops recurrence.
 
 ## Tests added
 
-N/A — documentation and local config. No Rust surface. `librarian(action="audit_doc_refs")`
-would catch a stale *path reference* in the manual but not a semantically wrong
-env value, so there is no existing gate to extend.
+N/A, justified: both halves are configuration and prose. The local half edits a
+gitignored file that no test may read; the repo-side half is documentation, whose
+only automated guard is the `audit_doc_refs` link check (the new paths it cites all
+resolve). A test asserting "the manual does not say `cp`" would pin wording rather
+than behaviour.
 
+The real recurrence guard is mechanical rather than a test: the symlink makes
+`.env.amd` the single source of truth, so there is no second copy left to drift.
 ## Workarounds
 
 Always pass `--env-file` explicitly so repo-root `.env` is never the
@@ -282,23 +291,13 @@ docker inspect <container> --format '{{range .Mounts}}{{.Source}} -> {{.Destinat
 
 ## Resume
 
-**Added 2026-07-28 —** also re-point the stale symlink as part of this fix:
-`ln -sfn "$PWD/.env.gpu" ~/.config/codescout/.env`, then restart the MCP servers
-(`/mcp`) and confirm with `printenv CODESCOUT_RETRIEVAL_PROFILE` → `gpu` from
-inside a codescout `run_command`. Deliberately NOT done in the session that
-found it: it changes config for all three Claude Code profiles on this machine
-at once, so it wants to be a decision, not a side effect. Until it is done,
-`.env.amd` is the file the servers actually read — keep the two profile files in
-sync or the next edit to `.env.gpu` will be silently ignored the same way.
+N/A — fixed on `experiments` at **`45669701`** (label: `experiments`; master-side
+SHA still needs recording after cherry-pick per CLAUDE.md § "After cherry-pick").
 
-Decide the split first: does repo-root `.env` hold secrets only, or secrets plus
-profile config? That answer determines whether the manual's step becomes a
-symlink instruction or an `--env-file` instruction. Then edit
-`docs/manual/src/concepts/retrieval-stack.md:119` accordingly and fix the local
-`.env` by deleting its `CODESCOUT_MODEL_DIR` line — verify with
-`docker compose --profile cpu config | grep -A1 volumes` that the resolved mount
-is `./models` before starting anything.
-
+Note for whoever next touches profile config: the 2026-07-28 evidence subsection
+above records that the *symlink* flow drifted too, which falsifies calling it
+"drift-proof". The symlink removes the stale-copy failure mode, not every failure
+mode — re-pointing it is still a manual step.
 ## References
 
 - `docs/manual/src/concepts/retrieval-stack.md:119` — the copy-based flow

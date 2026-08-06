@@ -400,15 +400,15 @@ point.
 
 ## Resume
 
-Decide a fix direction from the four options above (or another), implement
-it in `src/librarian/tools/update.rs` (guard logic around lines 124-198 and
-342-347) and/or the doc surfaces named in *Fix*, then add a permanent
-regression test named `body_edits_replace_include_subsections_growth_blind_spot`
-using the *Reproduction* snippet as a starting point — assert whichever
-observable behavior the chosen fix produces (refusal, a
-`replaced_subsections` field, or at minimum an updated doc string) rather
-than today's silent success.
+N/A — fixed and verified on `experiments` at **`45669701`** (label: `experiments`;
+master-side SHA still needs recording after cherry-pick per CLAUDE.md § "After
+cherry-pick").
 
+One judgement was deliberately left to the maintainer rather than decided here:
+whether `replaced_subsections` should eventually *gate* (refuse above N consumed
+subsections) rather than only report. This filing argued against refusal and the
+fix followed that argument; revisit only if a real loss recurs **despite** the new
+signal being present in the response.
 ## References
 
 - `src/librarian/tools/update.rs` — `call` (`update.rs:200-462`),

@@ -169,13 +169,16 @@ sit near the bottom.
 
 ## Resume
 
-Add `body_start: usize` as a parameter to `nodes_to_chunks` (default `0` for the
-top-level call, `expanded_start` for the recursive one) and initialise
-`prev_end = body_start`. Then re-run the *Reproduction* diagnostic and confirm
-chunk 3 disappears while chunks 0–2 and the `fn build` chunk are unchanged. Run
-`cargo test --lib embed::ast_chunker` — the four guards named under *Fix* are the
-ones expected to move if the change is wrong.
+One action left, and it is a run rather than a code change: **`index(force=true)`
+to rebuild the semantic index.** Chunk ids are content-addressed, so every
+decomposed container in every language now hashes differently; until the rebuild,
+the existing index holds the old (duplicated) chunk set.
 
+Fixed and verified on `experiments` at **`45669701`** (label: `experiments`;
+master-side SHA still needs recording after cherry-pick per CLAUDE.md § "After
+cherry-pick"). Regression test:
+`container_recursion_does_not_duplicate_lines_outside_the_container` in
+`src/embed/ast_chunker.rs`.
 ## References
 
 - `src/embed/ast_chunker.rs` — `nodes_to_chunks` (gap branches and the inner-node
