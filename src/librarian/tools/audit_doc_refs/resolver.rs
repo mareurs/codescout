@@ -984,6 +984,45 @@ mod tests {
         );
         assert!(!r.severity_reason.is_empty(), "Link severity_reason empty");
     }
+    /// `high` gates CI, so the band must be reserved for verdicts that are
+    /// deterministic on an unchanged tree. This pins the split, because nothing did:
+    /// `SymbolMissing` sat at `high` untested, and it is the one verdict computed from
+    /// an LSP response rather than from the filesystem.
+    ///
+    /// `resolve_file_symbol` returns `SymbolMissing` when the server answers and the
+    /// symbol is absent, and `Unknown` when the server does not answer. With
+    /// `SymbolMissing` at `high` those two straddled the gate, so one unanswered
+    /// request flipped the exit code — observed twice as a count moving up and back
+    /// down on an identical tree.
+    #[test]
+    fn default_severity_gates_only_on_deterministic_filesystem_verdicts() {
+        use crate::librarian::tools::audit_doc_refs::severity::default_severity;
+
+        // Filesystem facts: same answer on every run.
+        for v in [Verdict::Missing, Verdict::FileMissing] {
+            assert_eq!(default_severity(v), Severity::High, "{v:?} should gate");
+        }
+
+        // Everything else reports without gating. `SymbolMissing` is the load-bearing
+        // entry: it is a real drift signal, and it is still reported — at `med`.
+        for v in [
+            Verdict::SymbolMissing,
+            Verdict::AnchorMissing,
+            Verdict::LineOob,
+            Verdict::AmbiguousBasename,
+        ] {
+            assert_eq!(default_severity(v), Severity::Med, "{v:?} must not gate");
+        }
+
+        for v in [
+            Verdict::Unknown,
+            Verdict::ResolvedBasename,
+            Verdict::Resolved,
+            Verdict::External,
+        ] {
+            assert_eq!(default_severity(v), Severity::Low, "{v:?}");
+        }
+    }
 
     // ── Task 8: LSP-backed FileSymbol tests ──────────────────────────────────
 

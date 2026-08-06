@@ -1,12 +1,29 @@
 use super::{Severity, Verdict};
 use std::path::Path;
 
+/// Base severity per verdict, before any path-based drop or cap.
+///
+/// `high` gates CI, so it is reserved for verdicts that are **deterministic
+/// filesystem facts**: the path is not there, or the path a `file_symbol` ref
+/// names is not there. Those answers do not change between two runs on the same
+/// tree.
+///
+/// `SymbolMissing` is deliberately **not** among them, despite being a real drift
+/// signal. It is computed from an LSP `document_symbols` response, and
+/// `resolve_file_symbol` puts the answered and unanswered cases in different
+/// bands: answered-and-absent was `SymbolMissing`/high, unanswered is
+/// `Unknown`/low. That made gate membership a function of whether a language
+/// server replied to one request — observed twice as a finding count moving up and
+/// then back down on an unchanged tree, and it is worst at zero findings, where a
+/// single flap is the whole verdict. `med` keeps the report and takes the
+/// non-determinism out of the exit code. See
+/// `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
 pub fn default_severity(verdict: Verdict) -> Severity {
     use Severity::*;
     use Verdict::*;
     match verdict {
-        Missing | FileMissing | SymbolMissing => High,
-        AnchorMissing | LineOob | AmbiguousBasename => Med,
+        Missing | FileMissing => High,
+        SymbolMissing | AnchorMissing | LineOob | AmbiguousBasename => Med,
         Unknown | ResolvedBasename => Low,
         Resolved | External => Low,
     }
