@@ -30,7 +30,7 @@ left"* is closed (both taken), and its CI table is extended below.
 
 ### Git state (verified, not remembered)
 
-- `experiments` at **`fcb6598f`**, tree clean, nothing unpushed.
+- `experiments` at **`1f20de99`** (this handoff commit), tree clean, nothing unpushed.
 - **426 ahead / 0 behind `master`**, `merge-base --is-ancestor` confirms **fast-forward
   promotion is available**. Use `docs/RELEASE.md` § *Large-Cohort Promotion (Fast-Forward)*,
   not the Standard Ship Sequence.
@@ -44,8 +44,10 @@ left"* is closed (both taken), and its CI table is extended below.
 | 31107853410 | `6348dfad` | 15/15 |
 | 31108238052 | `db4b1968` | 15/15 |
 | 31109236437 | `de4f7ccd` | 15/15 |
+| 31109795037 | `382c3344` | 15/15 |
 | 31122588792 | `e58ad463` | **queued** |
 | 31122862704 | `fcb6598f` | **queued** |
+| — | `1f20de99` | not yet queued at writing |
 
 **Do not report a verdict for the last two from this document — GitHub's runners were
 backed up and neither had started.** `gh run list --branch experiments --limit 2`.
