@@ -115,6 +115,28 @@ job over.
 
 ## Resume
 
+**2026-08-06 — still red on current HEAD; the run to read is `31091169757`** (commit
+`99695a10`). First trustworthy evidence for this job: every prior verdict described code 21
+commits stale.
+
+One fact now available that was not before: the six previously-red **non-Windows** cells
+(Clippy, Tool Docs Sync, and the four ubuntu/macos feature-gate cells) are all green, so
+this job's failure is not shared with them. Combined with all three `windows-latest` cells
+still failing, the leading hypothesis stays the one recorded here — that this is WIN-28
+wearing a second hat, i.e. failures outside the 12-test wine skip-list recorded in WIN-27,
+not a distinct MinGW/wine defect. Confirm or kill it by diffing the two failure sets:
+
+```bash
+for J in "Windows-gnu cross (MinGW + wine)" "Test (windows-latest / default)"; do
+  gh run view 31091169757 --log-failed \
+    --job $(gh run view 31091169757 --json jobs -q \
+              ".jobs[] | select(.name==\"$J\") | .databaseId")
+done
+```
+
+If the failing test names are a subset of WIN-28's nine, close this as a duplicate and
+track the fix there.
+
 Cheapest first step, because it may close the file for free: push the current
 `experiments` HEAD (14+ commits newer, carrying `7938d68b` and `be75e705`) and
 see whether the job goes green on its own. If it is still red, pull the job's

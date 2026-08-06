@@ -131,6 +131,28 @@ a deliberate coverage reduction that should be recorded, not a silent one.
 
 ## Resume
 
+**2026-08-06 — reproduced on current HEAD; the run to read is `31091169757`** (commit
+`99695a10`, branch `experiments`). This is the first CI run against a non-stale tree since
+2026-08-03, so it is the first trustworthy evidence for this bug — earlier runs described
+code 21 commits behind.
+
+All three Windows cells fail: `Test (windows-latest / default)`,
+`Test (windows-latest / no-features)`, `Test (windows-latest / local-embed)`. That the
+failure is feature-independent is itself information: it points at the platform-behaviour
+failures catalogued here rather than at feature-gate rot, which is what the other six
+previously-red cells turned out to be (all now green).
+
+Fetch the panic output with:
+
+```bash
+gh run view 31091169757 --log-failed \
+  --job $(gh run view 31091169757 --json jobs \
+            -q '.jobs[] | select(.name=="Test (windows-latest / default)") | .databaseId')
+```
+
+Still blocked on a Windows runner for interactive work, but the logs alone should give the
+nine panic messages, which is enough to start.
+
 Get the panic output: re-run CI on the current `experiments` HEAD (11 commits
 newer than run 30852803569 — some of these may already be fixed), then open the
 `Test (windows-latest / default)` job log and capture the assertion message for

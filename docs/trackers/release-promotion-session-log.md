@@ -25,6 +25,45 @@ tags:
 
 ## Resume — round 2, written 2026-08-06 for session compaction
 
+> **SUPERSEDED in part, 2026-08-06 — item 1 ("push, then re-read CI") is DONE.** Pushed
+> `d7988aca..99695a10` (22 commits) to `origin/experiments`. CI now runs on current HEAD
+> for the first time since 2026-08-03; every verdict before this described code 21
+> commits stale, which is why the old "11 of 15 red" picture was unactionable.
+>
+> **CI state now: 10 green / 5 red** (run `31091169757` on `99695a10`), from a baseline of
+> **4 green / 11 red** (run `30852803569`, 2026-08-03).
+>
+> | Cleared | Still red |
+> |---|---|
+> | Tool Docs Sync | Audit Doc Refs — `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` |
+> | ubuntu/no-features | Test (windows-latest / default) — WIN-28 |
+> | ubuntu/local-embed | Test (windows-latest / no-features) — WIN-28 |
+> | macos/no-features | Test (windows-latest / local-embed) — WIN-28 |
+> | macos/local-embed | Windows-gnu cross (MinGW + wine) — WIN-29 |
+> | Clippy | |
+>
+> **The state change that matters for the merge decision: there is no longer an
+> undiagnosed red cell.** All five have an open bug file, and three of the five are one
+> bug (WIN-28) wearing three hats. Previously six of the reds were feature-gate rot,
+> invisible to a default-features build by construction.
+>
+> **Clippy needed a fix nobody could have predicted locally.** It stayed red on run
+> `31089996833` against code nobody had touched: the log's help URLs name
+> `rust-clippy/rust-1.97.0` while this machine runs `clippy 0.1.95`. Three pre-existing
+> patterns (`question_mark` ×2 in `src/tools/symbol/call_edges/resolver.rs`, `for_kv_map`
+> in `src/tools/symbol/call_graph/mod.rs`) are lints 1.97 emits and 1.95 does not. Fixed
+> in `99695a10`; Clippy green on the next run.
+>
+> **Standing hazard this exposed, unresolved and needing a policy call:** there is no
+> `rust-toolchain.toml`, and CI uses `dtolnay/rust-toolchain@stable`, so CI re-resolves
+> `stable` on every run and can acquire new lints with **zero commits**. Clippy therefore
+> breaks on the calendar, and a locally-green `cargo clippy -- -D warnings` is not a
+> predictor of the CI job. Two options, both the maintainer's to pick: pin a toolchain in
+> the repo (local == CI, upgrades become deliberate), or keep floating and accept periodic
+> lint debt. Nothing was imposed here.
+>
+> Items 2-5 of the Resume below stand unchanged.
+
 Wipe and rewrite this block each session. Everything below is verified, not assumed.
 
 ### Git state
