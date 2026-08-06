@@ -178,6 +178,42 @@ several times, and watch for any non-zero count. That reproduces the *burst*, wh
 paced runs deliberately did not. If it flaps there and never in paced runs, the fix is
 about mux contention under concurrent short-lived processes, not about warmth — and the
 gate could be made deterministic simply by warming the LSP once before scanning.
+**Burst reproduction — 2 sweeps of 15 back-to-back invocations each, no flap** (2026-08-06).
+This was the experiment the paragraph above nominated, and it failed to reproduce:
+
+```
+for sweep in 1 2; do for d in <15 docs subdirs>; do <scan --paths docs/$d/**/*.md>; done; done
+→ sweep 1: nonzero: none
+→ sweep 2: nonzero: none
+```
+
+### Running total: 42 invocations, 0 reproductions, across three shapes
+
+Paced full scans (6), paced narrowed scans (12), and two burst sweeps of 15 invocations
+each (30). The bug has resisted every attempt. What remains certain is only the original pair of
+measurements: minutes apart, unchanged tree, same binary, same jq selection, and
+`docs/conventions` went 0 → **1** → 0 and `docs/evals` 0 → **2** → 0 across three
+consecutive sweeps, with the only edits in between landing in *other* directories
+(`docs/manual/**`). So it went up and came back down on its own.
+
+### The reason further replication here may be worthless
+
+A candidate that deserves stating because it changes what the next session should do:
+**the flapping refs may no longer exist.** `docs/conventions/test-env-isolation.md` and
+`docs/evals/reconnaissance-output.md` were both edited during that same stretch to fix
+genuine drift, and the refs removed were symbol- and path-bearing. If hypothesis 1 in
+§ Root cause is right — LSP warmth flipping a `file_symbol` between `Unknown`/low and
+`SymbolMissing`/high — then the specific refs that could flap are gone from those files,
+and every replication attempt since has been run against a corpus with the cause removed.
+
+That makes the 42 clean runs weak evidence rather than strong. **Do not close this on
+count of clean runs.** The way to settle it is to reproduce the *conditions*, not the
+corpus: check out the tree as it stood at `2377e9c1` (before those two files were fixed)
+and sweep that, where the flappable refs still exist.
+
+This is also a methodological note worth keeping: replicating a flake *after* fixing what
+flaked tests nothing, and it is easy to do accidentally when the flake surfaces during a
+cleanup pass.
 ## Fix
 
 Not implemented. Two candidate directions, and they are not exclusive:
