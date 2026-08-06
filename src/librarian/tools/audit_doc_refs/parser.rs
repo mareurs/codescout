@@ -45,7 +45,12 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
                     }
                 }
             }
-            Event::Start(Tag::Link { dest_url, .. }) => {
+            // A link whose target is a naming-convention placeholder
+            // (`[YYYY-MM-DD-slug.md](./YYYY-MM-DD-slug.md)`) is an example of markup
+            // to copy, not a citation. Everything else is kept: an explicit link IS
+            // author intent to point somewhere real, which is why link targets are
+            // otherwise unfiltered here.
+            Event::Start(Tag::Link { dest_url, .. }) if !is_placeholder(dest_url.as_ref()) => {
                 candidates.push(RefCandidate {
                     md_file: md_file.clone(),
                     md_line: line,
@@ -143,6 +148,35 @@ fn is_module_path(s: &str) -> bool {
             .all(|c| c.is_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
         && s.split('.').all(|part| !part.is_empty())
 }
+/// A documentation placeholder rather than a concrete target.
+///
+/// Two spellings, both of which this repo uses in naming-convention docs:
+/// angle-bracket templates (`<date>-<slug>.md`, `<topic>-session-log.md`) and the
+/// un-bracketed date template (`YYYY-MM-DD-slug.md`) used for issue, research, and
+/// ADR filenames. No real filename carries a literal `YYYY`.
+///
+/// Applied to link targets as well as code-span tokens — a markdown link whose
+/// target is a placeholder is an example of markup to copy, not a citation.
+fn is_placeholder(s: &str) -> bool {
+    s.contains('<') || s.contains('>') || s.contains("YYYY") || s.contains("yyyy")
+}
+
+/// One segment of an unanchored path candidate, spelled the way filesystem
+/// paths actually are: lowercase letters, digits, and separator punctuation.
+///
+/// Capitalization is the discriminator. Real directory names are lowercase or
+/// kebab/snake (`docs`, `crates`, `codescout-embed`); an uppercase segment in
+/// an unanchored slash-joined token almost always means the token is an
+/// identifier idiom rather than a path — `Type/method`, `LspClient/hover`,
+/// `Kotlin/kotlin-lsp`, `rocks/v492/LOCK`, `mcpServers/codescout/env`.
+/// Uppercase *file* names reach `looks_like_path` with an extension
+/// (`README.md`) and are admitted before this rule runs.
+fn is_path_segment(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        })
+}
 
 fn looks_like_path(s: &str) -> bool {
     if s.contains(char::is_whitespace) {
@@ -176,9 +210,9 @@ fn looks_like_path(s: &str) -> bool {
         // a concrete path.
         return false;
     }
-    if s.contains('<') || s.contains('>') {
+    if is_placeholder(s) {
         // Template placeholders (<date>-<slug>.md, <topic>-session-log.md,
-        // YYYY-MM-DD-<slug>.md) are documentation, not real paths.
+        // YYYY-MM-DD-slug.md) are documentation, not real paths.
         return false;
     }
     if s.contains('$') {
@@ -186,14 +220,28 @@ fn looks_like_path(s: &str) -> bool {
         return false;
     }
     if s.contains('/') {
-        // `/foo` with no further structure (no second segment, no extension)
-        // is almost always a slash-command or shell shorthand in prose, not a
-        // file path. Require either a second path segment or a known extension.
-        let single_root_segment = s.starts_with('/') && !s[1..].contains('/');
-        if single_root_segment {
-            return has_known_ext(s);
+        // An explicit anchor is unambiguous author intent: they meant a
+        // location on a filesystem, so classify and let the resolver judge.
+        if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
+            // `/foo` with no further structure (no second segment, no extension)
+            // is almost always a slash-command or shell shorthand in prose, not a
+            // file path. Require either a second path segment or a known extension.
+            let single_root_segment = s.starts_with('/') && !s[1..].contains('/');
+            if single_root_segment {
+                return has_known_ext(s);
+            }
+            return true;
         }
-        return true;
+        // Unanchored `a/b` — require POSITIVE evidence of pathness instead of
+        // accepting by default. Accept-by-default is what grew the rejection
+        // list above one documentation idiom at a time, and it still let three
+        // whole classes through: `Type/method` (codescout's own name_path
+        // syntax), GitHub `org/repo` slugs, and JSON config pointers like
+        // `mcpServers/codescout/env`. Each of those fails on capitalization,
+        // which real directory names essentially never carry without also
+        // carrying an extension (README.md, CHANGELOG.md — admitted above by
+        // has_known_ext before this rule can see them).
+        return has_known_ext(s) || s.ends_with('/') || s.split('/').all(is_path_segment);
     }
     has_known_ext(s)
 }
@@ -511,6 +559,104 @@ mod tests {
                 "bare ext '{ext}' must not classify as FilePath, got: {cands:?}"
             );
         }
+    }
+    /// `Type/method` is codescout's own `name_path` symbol syntax, accepted by
+    /// `symbols(name_path=…)` and `edit_code(symbol=…)`. It is not a path.
+    #[test]
+    fn parser_rejects_name_path_symbol_syntax() {
+        for case in [
+            "See `Type/method` for the shape.",
+            "The `SensitiveString/fmt` impl redacts.",
+            "`LspClient/hover` returns None when offline.",
+        ] {
+            let (cands, _) = parse(case);
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+                "name_path must not classify as FilePath, got {cands:?} for {case}"
+            );
+        }
+    }
+
+    /// GitHub `org/repo` and Homebrew tap slugs live next to upstream URLs in
+    /// prose about other projects.
+    #[test]
+    fn parser_rejects_org_repo_slugs() {
+        for case in [
+            "Upstream `Kotlin/kotlin-lsp` state as of today.",
+            "Run `brew install JetBrains/utils/kotlin-lsp` to get it.",
+        ] {
+            let (cands, _) = parse(case);
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+                "org/repo slug must not classify as FilePath, got {cands:?} for {case}"
+            );
+        }
+    }
+
+    /// JSON/config pointers (`mcpServers/codescout/env`) and elided external
+    /// paths (`…/rocks/v492/LOCK`) are the two remaining accept-by-default
+    /// classes from the slash branch.
+    #[test]
+    fn parser_rejects_config_pointers_and_elided_paths() {
+        for case in [
+            "Set `mcpServers/codescout/env` in the client config.",
+            "The JVM holds `rocks/v492/LOCK` until it exits.",
+            "The lock lives at `…/rocks/v492/LOCK` under the analyzer home.",
+        ] {
+            let (cands, _) = parse(case);
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+                "config pointer / elided path must not classify as FilePath, got {cands:?} for {case}"
+            );
+        }
+    }
+
+    /// The regression guard for the positive-evidence rule: tightening the
+    /// slash branch must not cost us extension-less *directory* refs, which are
+    /// a large share of what the audit legitimately checks.
+    #[test]
+    fn parser_still_accepts_extensionless_directory_refs() {
+        for case in [
+            "docs/issues",
+            "src/lsp/mux",
+            "crates/codescout-embed",
+            ".github/workflows",
+        ] {
+            let (cands, _) = parse(&format!("See `{case}` for details."));
+            assert!(
+                cands
+                    .iter()
+                    .any(|c| c.raw_ref == case && c.ref_kind == RefKind::FilePath),
+                "directory ref {case} must still classify as FilePath, got {cands:?}"
+            );
+        }
+    }
+    /// Naming-convention docs show the shape of a filename, sometimes inside a
+    /// markdown link. Link targets are otherwise unfiltered (an explicit link is
+    /// author intent), so the placeholder check has to run there too.
+    #[test]
+    fn parser_rejects_date_template_placeholder_links() {
+        let (cands, _) = parse(
+            "> **Superseded** by [YYYY-MM-DD-slug.md](./YYYY-MM-DD-slug.md) — one-line reason.\n",
+        );
+        assert!(
+            cands.is_empty(),
+            "a date-template placeholder link is an example, not a citation; got {cands:?}"
+        );
+    }
+
+    /// The complement: a real link target must still be extracted, or the
+    /// placeholder filter would have disarmed link checking entirely.
+    #[test]
+    fn parser_still_extracts_concrete_link_targets() {
+        let (cands, _) = parse("See [the guide](docs/manual/src/architecture.md) for detail.\n");
+        assert!(
+            cands
+                .iter()
+                .any(|c| c.raw_ref == "docs/manual/src/architecture.md"
+                    && c.ref_kind == RefKind::Link),
+            "concrete link targets must still be checked; got {cands:?}"
+        );
     }
 
     #[test]

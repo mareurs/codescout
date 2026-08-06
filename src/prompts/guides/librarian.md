@@ -199,6 +199,24 @@ artifact(update, id=X, patch={body_edits: [{
 }]})
 ```
 
+**The second anti-pattern: `replace` + `include_subsections: true` to add a
+sibling entry.** `replace` always consumes its section's children; the flag only
+decides whether that is refused or permitted. Reconstructing a section from
+memory to append one entry silently drops any child you forgot:
+
+```text
+artifact(update, id=X, patch={body_edits: [{
+    heading: "## Wins", action: "replace", include_subsections: true,
+    content: "## Wins\n\n### W-3 — new\n..."     # W-1, W-2 are GONE
+}]})
+```
+
+The shrink guard cannot catch this — it compares whole-file bytes, and a write
+that adds more than it removed passes by construction. Since 2026-08-06 the
+response and the `field_patch` payload both carry `replaced_subsections` naming
+what was destroyed; **read it.** To add a sibling, target the last existing child
+with `insert_after` instead of replacing the parent.
+
 **Body-shrink guard.** Any body write that would reduce the file by more
 than 50% is refused with `RecoverableError("body-shrink guard: ...")`.
 The error hint names both `body_edits[]` and the `force=true` escape.
@@ -208,7 +226,10 @@ history trimming is expected to shrink the body.
 
 **Body mutations emit `field_patch` events.** Every body write records a
 `field_patch` event with `payload={field: "body", prev_bytes, new_bytes,
-edits_count, mode, forced}`. Query forensic history with
+edits_count, mode, forced, replaced_subsections}`. Note that `prev_bytes` /
+`new_bytes` are whole-file aggregates: a replace that destroyed a child section
+while growing the file reads as a benign append, so `replaced_subsections` is the
+only field that reveals it. Query forensic history with
 `artifact_event(action="list", artifact_id=X)`.
 
 **`patch` accepts only declared keys.** Unknown keys (e.g.

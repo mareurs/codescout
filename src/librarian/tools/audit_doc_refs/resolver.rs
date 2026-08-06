@@ -49,7 +49,7 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     if let Some(r) = try_basename_fallback(&c.raw_ref, ctx) {
         return r;
     }
-    verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
+    verdict_with_drops_for_ref(Verdict::Missing, &c.raw_ref, Path::new(&c.md_file), ctx)
 }
 
 /// Look up `raw_ref` in the basename index when it has no `/`. Returns
@@ -94,13 +94,38 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
         }
     }
 }
+/// The single indexed path for a slash-less basename, if exactly one exists.
+///
+/// `try_basename_fallback` answers "what verdict?"; this answers "which file?",
+/// which is what a line-range check needs before it can range-check anything.
+fn unique_basename_path(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<std::path::PathBuf> {
+    if raw_ref.contains('/') {
+        return None;
+    }
+    match ctx.basename_index.get(raw_ref)?.as_slice() {
+        [only] => Some(ctx.repo_root.join(only)),
+        _ => None,
+    }
+}
 
 fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     let (path_str, line_str) = c.raw_ref.rsplit_once(':').expect("file_line invariant");
-    let path = ctx.repo_root.join(path_str);
-    if !path.exists() {
-        return verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs);
-    }
+    let direct = ctx.repo_root.join(path_str);
+    // Same basename shorthand `resolve_file_path` already accepts, for the same
+    // reason: an ADR citing `process.rs:66-135` means the repo's one
+    // `process.rs`, and range-checking it is more useful than calling it
+    // missing. Without this the two ref kinds disagree about identical path
+    // parts — see
+    // `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
+    let path = if direct.exists() {
+        direct
+    } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
+        resolved
+    } else {
+        return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
+            verdict_with_drops_for_ref(Verdict::Missing, path_str, Path::new(&c.md_file), ctx)
+        });
+    };
     // Parse `N` (single line) or `N-M` (line range). Range covers two checks:
     // both endpoints in bounds, and start <= end.
     let (start, end): (u32, u32) = if let Some((a, b)) = line_str.split_once('-') {
@@ -326,6 +351,53 @@ fn verdict_with_drops(
         notes: None,
     }
 }
+/// How much a ref vouches for being a *repo-relative* path, which is what a
+/// `missing` verdict actually claims.
+///
+/// Two independent ways to be a guess:
+/// 1. **No separator at all** — the token earned `FilePath` from a known
+///    extension alone. `RELEASES.md` in an ADR about an upstream repository.
+/// 2. **A root segment absent from the repo** — the token is almost certainly
+///    relative to something else. `librarian/catalog.db` is a suffix of
+///    `dirs::data_local_dir()`; there is no `librarian/` at the repo root.
+///    Meanwhile `docs/issues/x.md` has a real `docs/`, so it is judged strictly
+///    and a miss there is genuine drift.
+fn path_evidence(raw_ref: &str, ctx: &ResolveCtx<'_>) -> severity::PathEvidence {
+    let Some((root, _)) = raw_ref.split_once('/') else {
+        return severity::PathEvidence::Inferred;
+    };
+    if ctx.repo_root.join(root).exists() {
+        severity::PathEvidence::Structural
+    } else {
+        severity::PathEvidence::Inferred
+    }
+}
+
+/// `verdict_with_drops`, then cap the band when the ref's classification as a
+/// repo-relative path was inferred rather than structural.
+///
+/// Used only on the two path-classification paths (`file_path`, `file_line`).
+/// A markdown link target is deliberately NOT routed through here: `[x](y.md)`
+/// is explicit author intent to point at a local file, so a missing link target
+/// stays `high` even without a slash.
+fn verdict_with_drops_for_ref(
+    verdict: Verdict,
+    raw_ref: &str,
+    md_file: &Path,
+    ctx: &ResolveCtx<'_>,
+) -> Resolution {
+    let base = severity::default_severity(verdict);
+    let (sev, reason) = severity::apply_drops(md_file, base, ctx.memory_globs);
+    let (sev, reason) =
+        severity::cap_inferred_path(verdict, path_evidence(raw_ref, ctx), sev, reason);
+    Resolution {
+        verdict,
+        severity: sev,
+        severity_reason: reason,
+        notes: None,
+    }
+}
+
 fn slugify(s: &str) -> String {
     s.to_lowercase()
         .chars()
@@ -377,8 +449,14 @@ mod tests {
     #[test]
     fn resolver_missing_for_absent_path() {
         let tmp = TempDir::new().unwrap();
+        // A real `src/` with the file absent: the ref is structural AND
+        // rooted in the repo, so this is the gating band. The bare-name and
+        // absent-root variants are capped — see
+        // `resolver_still_missing_when_basename_not_in_index` and
+        // `resolver_ref_with_absent_root_segment_is_capped`.
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
         let r = resolve_ref(
-            &cand("gone.py", "docs/spec.md", RefKind::FilePath),
+            &cand("src/gone.py", "docs/spec.md", RefKind::FilePath),
             &ctx(tmp.path(), &[]),
         );
         assert_eq!(r.verdict, Verdict::Missing);
@@ -654,6 +732,90 @@ mod tests {
             r.notes
         );
     }
+    /// `file_line` gets the same basename shorthand as `file_path`, and then
+    /// range-checks the file it resolved to. Real case: an ADR citing
+    /// `process.rs:66-135` for codescout's own spawn path was reported
+    /// missing at severity high while `src/lsp/mux/process.rs` sat on disk.
+    #[test]
+    fn resolver_file_line_resolves_via_unique_basename() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src/lsp/mux")).unwrap();
+        std::fs::write(tmp.path().join("src/lsp/mux/process.rs"), "x\n".repeat(200)).unwrap();
+
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "process.rs".to_string(),
+            vec![std::path::PathBuf::from("src/lsp/mux/process.rs")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+        };
+
+        let r = resolve_ref(
+            &cand("process.rs:66-135", "docs/adrs/mux.md", RefKind::FileLine),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::Resolved, "notes: {:?}", r.notes);
+        assert_eq!(r.severity, Severity::Low);
+    }
+
+    /// The range is still checked against the *resolved* file, so a basename
+    /// hit does not blanket-approve any line number.
+    #[test]
+    fn resolver_file_line_range_checked_against_resolved_basename() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/tiny.rs"), "a\nb\nc\n").unwrap();
+
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "tiny.rs".to_string(),
+            vec![std::path::PathBuf::from("src/tiny.rs")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+        };
+
+        let r = resolve_ref(
+            &cand("tiny.rs:900", "docs/spec.md", RefKind::FileLine),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::LineOob);
+    }
+
+    /// An ambiguous basename in a `file_line` ref reports as ambiguous
+    /// (med) rather than missing (high) — same verdict `file_path` gives.
+    #[test]
+    fn resolver_file_line_reports_ambiguous_basename() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "mod.rs".to_string(),
+            vec![
+                std::path::PathBuf::from("src/a/mod.rs"),
+                std::path::PathBuf::from("src/b/mod.rs"),
+            ],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+        };
+
+        let r = resolve_ref(&cand("mod.rs:12", "docs/spec.md", RefKind::FileLine), &ctx);
+        assert_eq!(r.verdict, Verdict::AmbiguousBasename);
+        assert_eq!(r.severity, Severity::Med);
+    }
 
     #[test]
     fn resolver_ambiguous_when_basename_matches_multiple_files() {
@@ -688,6 +850,10 @@ mod tests {
         );
     }
 
+    /// Still reported, but capped below the CI gate. A bare name earns
+    /// `FilePath` from nothing but its extension, so "not found anywhere"
+    /// does not prove drift — it may name a file in another repository
+    /// (`RELEASES.md` in an ADR about upstream kotlin-lsp).
     #[test]
     fn resolver_still_missing_when_basename_not_in_index() {
         let tmp = TempDir::new().unwrap();
@@ -703,7 +869,41 @@ mod tests {
             &ctx,
         );
         assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::Med, "inferred path must not gate CI");
+        assert_eq!(r.severity_reason, "inferred_path");
+    }
+
+    /// The other half of the contract: a ref rooted in a directory that
+    /// really exists is unambiguously local, so a miss stays in the gating
+    /// band. Without this the cap could silently disarm the whole audit.
+    #[test]
+    fn resolver_structural_missing_ref_stays_high() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs/adrs")).unwrap();
+        let r = resolve_ref(
+            &cand("docs/adrs/gone.md", "docs/spec.md", RefKind::FilePath),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::High);
+    }
+
+    /// A ref whose root segment does not exist in the repo is relative to
+    /// something else, not to the repo root. Real case: an ADR documenting
+    /// `dirs::data_local_dir().join("librarian/catalog.db")` — the audit read
+    /// `librarian/catalog.db` as repo-relative and gated CI on it, while the
+    /// repo's own librarian lives at `src/librarian/`.
+    #[test]
+    fn resolver_ref_with_absent_root_segment_is_capped() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src/librarian")).unwrap();
+        let r = resolve_ref(
+            &cand("librarian/catalog.db", "docs/adrs/x.md", RefKind::FilePath),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::Med);
+        assert_eq!(r.severity_reason, "inferred_path");
     }
 
     #[test]
@@ -712,6 +912,9 @@ mod tests {
         // must remain Missing — even if `bar.py` is in the basename index,
         // we don't second-guess an explicit path.
         let tmp = TempDir::new().unwrap();
+        // A real `src/` so the ref is repo-rooted and stays in the gating
+        // band; see `resolver_ref_with_absent_root_segment_is_capped`.
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
         let mut index = std::collections::HashMap::new();
         index.insert(
             "bar.py".to_string(),

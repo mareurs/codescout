@@ -11,6 +11,56 @@ pub fn default_severity(verdict: Verdict) -> Severity {
         Resolved | External => Low,
     }
 }
+/// Whether a ref's classification as a *local filesystem path* is structural
+/// or inferred.
+///
+/// `Structural` — the token carries path syntax that cannot mean much else: a
+/// `/` separator, or an explicit `./` `../` `/` anchor.
+///
+/// `Inferred` — the token is a bare name that earned `FilePath` from nothing
+/// but a known extension. `RELEASES.md`, cited in an ADR about an upstream
+/// repository, is this shape; so is every doc that names a file belonging to
+/// someone else.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PathEvidence {
+    Structural,
+    Inferred,
+}
+
+impl PathEvidence {
+    /// Purely syntactic half of the judgement: a token with no separator at all
+    /// earned `FilePath` from an extension alone. The other half — whether the
+    /// root segment exists in the repo — needs the filesystem and so lives in
+    /// `resolver::path_evidence`.
+    pub fn of_syntax(raw_ref: &str) -> Self {
+        if raw_ref.contains('/') {
+            Self::Structural
+        } else {
+            Self::Inferred
+        }
+    }
+}
+
+/// Cap a `missing` severity when the path classification itself was a guess.
+///
+/// `high` is what gates CI (`--fail-on high`), so it has to mean "definitely a
+/// local path, and definitely gone". A bare name that resolves nowhere may
+/// simply live in another repository — report it, but below the gate, and say
+/// so in `severity_reason` rather than leaving `policy_default` to imply the
+/// classification was certain.
+///
+/// See `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
+pub fn cap_inferred_path(
+    verdict: Verdict,
+    evidence: PathEvidence,
+    sev: Severity,
+    reason: &'static str,
+) -> (Severity, &'static str) {
+    if verdict == Verdict::Missing && evidence == PathEvidence::Inferred && sev == Severity::High {
+        return (Severity::Med, "inferred_path");
+    }
+    (sev, reason)
+}
 
 /// Apply path-based drop rules. Returns `(severity, reason)`.
 pub fn apply_drops(

@@ -1,9 +1,9 @@
 ---
 id: d9463a43a52d3984
 kind: bug
-status: open
+status: fixed
 title: 'BUG: embedder resolve_batch_size tests reintroduce the just-fixed EnvGuard+#[serial] env race (a656f8cec220d347), plus same pattern live in indexer.rs'
-closed: null
+closed: 2026-08-06
 opened: 2026-07-27
 owner: marius
 related:
@@ -107,6 +107,25 @@ paired with `#[test] #[serial_test::serial]` on its 3 callers (`write_embeddings
    **Evidence link:** see Evidence, "Isolation control".
 
 ## Fix
+
+**`src/librarian/indexer.rs` occurrence: FIXED 2026-08-06 (experiments) — both occurrences are now closed.**
+
+Same remedy as embedder round 2 (value threaded as data, no `#[cfg]` fork), adapted to a free function rather than a builder:
+
+- `write_embeddings_with(cat, embeddings, allow_dim_migration: bool)` holds all the logic; the env check `std::env::var(ARTIFACT_VEC_MIGRATE_ENV).as_deref() != Ok("1")` became `if !allow_dim_migration`.
+- `write_embeddings(cat, embeddings)` is retained as a thin edge wrapper that reads the env var once and delegates — mirroring how `EmbedderHttp::new()` reads `CODESCOUT_EMBED_BATCH` and threads it through `.with_batch_override(...)`. The three production call sites (`indexer.rs:658`, `indexer.rs:671`, `artifact_store.rs:191`) keep their signatures.
+- `EnvGuard` and both its `impl` blocks are **deleted** from the test module, along with the lone `std::env::remove_var` call. `set_var`/`remove_var` now appear in `indexer.rs` only inside comments.
+- The three affected tests inject explicitly: `write_embeddings_with(&cat, &[...], false)` for the bails-by-default case, `..., true)` for the two migration cases. `#[serial_test::serial]` was dropped from all three — with no env mutation there is nothing left to serialize, and per `a656f8cec220d347` `#[serial]` never protected them from untagged tests anyway.
+
+**One improvement over the embedder precedent.** Round 2's reviewer objection was that a `#[cfg]`-forked arm is never executed by any test; the analogous residue here would be an untested env→bool mapping in the wrapper. So the mapping is its own pure function:
+
+```rust
+fn migrate_opt_in(raw: Option<&str>) -> bool { raw == Some("1") }
+```
+
+tested by `migrate_opt_in_requires_exactly_one`, which pins that `None`, `"0"`, `"true"` and `""` all fail to opt into a destructive rebuild — without touching process-global env. The only line no test exercises is now the irreducible `std::env::var(...)` read itself.
+
+Verification: `cargo test --lib librarian::indexer` — 26/26 green, including the new mapping test.
 
 **`src/retrieval/embedder.rs` occurrence: FIXED (Task 4, round 2 — supersedes the round-1 fix below).**
 

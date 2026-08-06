@@ -568,7 +568,29 @@ fn build_response(
 ) -> Result<Value> {
     let cap = 50;
     let total = findings.len();
-    let shown_findings: Vec<_> = findings.iter().take(cap).map(finding_to_json).collect();
+    // Show the findings that DRIVE the exit code first. Plain `take(50)` in scan
+    // order fronted the list with *resolved* refs, so a `--fail-on high` run could
+    // exit 1 while every one of the 50 shown findings was `resolved`/`low` — a gate
+    // that reports failure and hides the cause. Ranking by (unresolved, severity)
+    // makes the output self-explaining; the exit code itself still considers every
+    // finding, so this changes presentation only. Stable sort, so scan order is
+    // preserved within a rank.
+    // See docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md
+    let mut ranked: Vec<&Finding> = findings.iter().collect();
+    ranked.sort_by_key(|f| {
+        let resolved = matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External);
+        let sev = match f.resolution.severity {
+            Severity::High => 0u8,
+            Severity::Med => 1,
+            Severity::Low => 2,
+        };
+        (resolved, sev)
+    });
+    let shown_findings: Vec<_> = ranked
+        .iter()
+        .take(cap)
+        .map(|f| finding_to_json(f))
+        .collect();
 
     let overflow = if total > cap {
         let mut by_file: std::collections::BTreeMap<String, usize> =
@@ -581,7 +603,9 @@ fn build_response(
             "total": total,
             "by_file": by_file,
             "hint": format!(
-                "narrow with paths=[...] or read full tracker at {}",
+                "shown findings are ordered most-severe-first, so any finding driving \
+                 the exit code appears above; narrow with paths=[...] or read full \
+                 tracker at {}",
                 tracker_path.unwrap_or("<no tracker>")
             ),
         })

@@ -116,7 +116,7 @@ Picking the wrong one cost a real ~600-line tracker body in 2026-05-25
 
 | Patch shape | Effect | Guard |
 |---|---|---|
-| `patch={body_edits: [{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}, ...]}` | Surgical per-section edits. Each entry mirrors `edit_markdown`'s batch shape. Atomic (all-or-nothing). | Per-entry `include_subsections` guard for `action="replace"`. |
+| `patch={body_edits: [{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}, ...]}` | Surgical per-section edits. Each entry mirrors `edit_markdown`'s batch shape. Atomic (all-or-nothing). | `action="replace"` is refused when it would consume nested headings — **unless** `include_subsections: true`, which is the guard's off switch, not a guard. |
 | `patch={body: "..."}` | Total overwrite — the new string becomes the entire body. | **50% shrink guard.** If the new body is more than 50% shorter than the old body, the write is refused with `RecoverableError("body-shrink guard: ...")`. |
 | `force=true` (top-level on the call) | Bypass the shrink guard. | Use only when shrinkage is intentional (full rewrite, archiving). |
 
@@ -139,7 +139,13 @@ the valid fields, instead of silently no-opping.
 **Forensic trail.** Every body mutation emits an `events` row:
 
 - `kind="field_patch"`
-- `payload={field: "body", prev_bytes, new_bytes, edits_count, mode: "overwrite"|"edits", forced}`
+- `payload={field: "body", prev_bytes, new_bytes, edits_count, mode: "overwrite"|"edits", forced, replaced_subsections}`
+
+`prev_bytes` / `new_bytes` are **whole-file** aggregates, so they cannot express
+a section-level loss: a `replace` that dropped a child heading while adding more
+text than it removed records `prev_bytes < new_bytes` and reads as a benign
+append. `replaced_subsections` (added 2026-08-06) is the field that names the
+destroyed headings.
 
 Query via `artifact_event(action="list", artifact_id=X)` — a single body
 write that shouldn't have happened is now reconstructable from the event
@@ -151,6 +157,25 @@ timeline without scraping `usage.db`.
 1. artifact(get, id=X, heading="Currently Shipped")  → returns one section
 2. artifact(update, id=X, patch={body: <just that section>})  → WIPES body
 ```
+
+**The second anti-pattern.** `body_edits` is surgical, but not *automatically*
+safe. Using `replace` + `include_subsections: true` to add one entry to a section
+means reconstructing that whole section from memory — and every child you forget
+to re-emit is deleted:
+
+```text
+artifact(update, id=X, patch={body_edits: [{
+    heading: "## Wins", action: "replace", include_subsections: true,
+    content: "## Wins\n\n### W-3 — new\n..."     # W-1 and W-2 are GONE
+}]})
+```
+
+Nothing refuses this — the opt-in flag is what you passed to make it legal, and
+the shrink guard is satisfied because the file grew. The surviving signal is
+`replaced_subsections` in the response and the event payload. The safe shape for
+"add a sibling" is `insert_after` targeting the last existing child heading, which
+never re-emits content it isn't changing. Filed as
+`docs/issues/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
 
 The `artifact(get, heading=)` shape *returns* a section, but
 `patch={body}` *replaces* the entire body with whatever string is passed.

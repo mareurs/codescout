@@ -180,14 +180,18 @@ A companion Claude Code plugin (`../claude-plugins/codescout-companion/`) is **a
 See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts,
 cold start behavior, circuit breaker, and LSP mux details.
 
-**Tracking:** `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`
+**Tracking:** the concurrent-instance failures were fixed in `dc44ac3d` (per-instance
+system-path, circuit breaker, diagnostics); that bug file was pruned as a dupe in
+`c6184884`, so the memory above is the canonical account. Still open:
+`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
 
 ## Docs
 
 Files:
 
 - **`docs/PROGRESSIVE_DISCOVERABILITY.md`** — Canonical guide for output sizing, overflow hints, and agent guidance patterns. **READ THIS before adding or modifying any tool.**
-- `docs/manual/src/architecture.md` — Component details, tech stack, design principles. (There is no `docs/ARCHITECTURE.md`; it was deliberately deleted — see `docs/superpowers/specs/2026-05-06-doc-audit-design.md` § 1a.)
+- `docs/manual/src/architecture.md` — Component details, tech stack, design principles. (There is no docs/ARCHITECTURE.md — deliberately deleted, and left un-code-spanned
+  here so the doc-ref audit does not read a statement of absence as a citation — see `docs/superpowers/specs/2026-05-06-doc-audit-design.md` § 1a.)
 - `docs/ROADMAP.md` — Quick status overview
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
 - `docs/RELEASE.md` — Release cycle, ship sequence, git-workflow safety

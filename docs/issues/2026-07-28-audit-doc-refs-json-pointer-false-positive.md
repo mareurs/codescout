@@ -1,14 +1,14 @@
 ---
 id: '21f6d21b3bf82c30'
 kind: bug
-status: open
+status: fixed
 title: audit_doc_refs flags JSON/config pointers as missing file paths with severity high
 tags:
 - librarian
 - audit_doc_refs
 - false-positive
 - tooling
-closed: ''
+closed: 2026-08-06
 opened: 2026-07-28
 owner: marius
 related:
@@ -141,6 +141,22 @@ misclassification, not independent evidence of a bad path.
    **Verdict:** rejected — `degraded: false`, `lsp_languages_offline: []`.
 
 ## Fix
+
+**IMPLEMENTED 2026-08-06 (experiments) — fixed at the polarity, as this filing argued for.**
+
+`looks_like_path`'s unanchored-slash branch no longer ends in `return true`. It now requires positive evidence of pathness:
+
+```rust
+return has_known_ext(s) || s.ends_with('/') || s.split('/').all(is_path_segment);
+```
+
+`is_path_segment` accepts lowercase letters, digits, `.`, `_`, `-` — so `mcpServers/codescout/env` is rejected on the uppercase `S` in `mcpServers`, and no tenth denylist entry was added. The rejection list stayed at nine.
+
+Why capitalization is the right discriminator, and why this does not gut the tool: real directory names are lowercase or kebab/snake (`docs/issues`, `src/lsp/mux`, `crates/codescout-embed`, `.github/workflows` — all still classified, guarded by `parser_still_accepts_extensionless_directory_refs`), while uppercase *file* names always carry an extension (`README.md`, `CHANGELOG.md`) and are admitted by `has_known_ext` before the segment rule runs. Slash-joined identifiers borrowed into documentation idioms — config pointers, `Type/method`, `org/repo` — are exactly the tokens that carry uppercase without an extension.
+
+A second, narrower rejection was added for placeholders in the same pass: `is_placeholder` now covers the un-bracketed date template (`YYYY-MM-DD-slug.md`) alongside the angle-bracket form, and — unlike the old `<`/`>` check — it is applied to **markdown link targets** too, which `parse_refs` previously pushed unconditionally with no filtering at all.
+
+See `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` § Fix for the full three-part change (this polarity fix plus the `file_line` basename fallback and the inferred-path severity cap).
 
 Not implemented. Preferred direction, in order of increasing ambition:
 

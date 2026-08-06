@@ -116,13 +116,35 @@ sparse image lacks a `render` group entry, so group names don't resolve).
 No NVIDIA-style runtime extension needed; AMD exposes the GPU via standard
 Linux character devices.
 
-**Wire codescout:** copy `.env.amd` (in the repo root) to `.env`. It sets the
-ports above plus the reranker protocol selector for llama-server's
-Cohere-shape `/rerank` (dense is OpenAI-compatible by default):
+**Wire codescout:** point at `.env.amd` (in the repo root) — **symlink or
+`--env-file`, do not copy.** It sets the ports above plus the reranker protocol
+selector for llama-server's Cohere-shape `/rerank` (dense is OpenAI-compatible
+by default):
 
 ```bash
 CODESCOUT_RERANKER_PROTOCOL=llama-server  # Cohere-shape /rerank
 ```
+
+```bash
+# MCP servers: one symlink, so .env.amd stays the single source of truth and
+# switching profiles is re-pointing it.
+ln -sfn "$PWD/.env.amd" ~/.config/codescout/.env
+
+# Compose: name the profile explicitly rather than copying it into .env.
+docker compose --env-file .env.amd --profile amd up -d
+```
+
+**Why not `cp .env.amd .env`?** Two reasons, both observed in practice:
+
+- A copy has no link to its source, so editing `.env.amd` leaves `.env` silently
+  stale. That pinned a nonexistent `CODESCOUT_MODEL_DIR` in the repo-root `.env`
+  with no signal — `docs/issues/2026-07-25-env-copy-flow-stale-model-dir.md`.
+- Repo-root `.env` also holds secrets (`CARGO_REGISTRY_TOKEN`) that the profile
+  files deliberately do not carry, so a copy **destroys** them. Keep `.env` for
+  secrets only and let profile config come from `.env.amd` / `.env.gpu`.
+
+The symlink is the mechanism the self-load-dotenv design settled on — see
+`docs/superpowers/specs/2026-07-10-codescout-self-load-dotenv-design.md`.
 
 **Why dense + reranker use llama.cpp instead of TEI:**
 - TEI's ROCm path is fragile and lags upstream; `rocm/llama.cpp` is AMD-built.

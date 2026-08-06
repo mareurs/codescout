@@ -1,6 +1,7 @@
 ---
 kind: bug
 status: open
+title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A retracted — include_body is honored)'
 tags:
 - symbols
 - include_body
@@ -24,6 +25,14 @@ severity: medium
 # BUG: `symbols` overview mode silently ignores `include_body=true`; search mode occasionally 0-matches then succeeds on retry
 
 ## Summary
+
+> **2026-08-06 — verify-open pass. Bug A confirmed closed at the source; Bug B still open, one more non-repro recorded.**
+>
+> Bug A re-verified independently of the 07-28 retraction: all three overview branches in `src/tools/symbol/list_overview.rs` (lines 231-232, 413-414, 566-567) read `optional_bool_param(&input, "include_body")` and fall back to the guard only when the caller passed nothing — the exact pattern `symbols.rs` uses. Nothing left to fix. The title has been narrowed to Bug B accordingly.
+>
+> Bug B repro attempt: 8 parallel search-mode `symbols(name=…)` calls fired in a single batch — `looks_like_path`, `nodes_to_chunks`, `apply_body_edits`, `upsert_tracker`, `build_basename_index`, `coalesce_small_chunks`, `is_placeholder`, `unique_basename_path`. **8/8 resolved**, including the last two, which had been *created minutes earlier in the same session* — so neither the LSP nor the symbol index was lagging behind fresh writes.
+>
+> **This is weak evidence and does not narrow the bug.** The batch was NOT fired immediately after a `workspace(action="activate")`, which both original occurrences had in common and which the root-cause hypothesis names as a precondition. A single non-repro of an intermittent fault proves nothing regardless; recorded only so the next session does not repeat the same inconclusive test and mistake it for progress. The controlled repro this file asks for — N parallel calls in a loop, immediately post-activation, counting 0-match rate — is still owed and is not expressible through hand-issued MCP calls.
 > **RETRACTED 2026-07-28, later the same day — the narrowing below is WRONG, and
 > Bug A is closed.**
 >

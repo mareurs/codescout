@@ -106,6 +106,40 @@ and had a different proximate cause each time.
 
 ## Fix
 
+**2026-08-06 — shutdown path now READ, and the ordering above is wrong. Direction 1 is already implemented.**
+
+`src/server.rs:1408-1428` is the stdio serve path:
+
+```rust
+let (stdin, stdout) = rmcp::transport::stdio();
+let service = server.serve((ResilientStdin::new(stdin), stdout)).await?;
+tokio::select! {
+    result = service.waiting() => { /* logs service_exit */ }
+    reason  = shutdown_signal()  => { /* logs service_exit */ }
+}
+lsp.shutdown_all().await;
+```
+
+`ResilientStdin::poll_read` (`src/server.rs:1238`) intercepts **only** `ErrorKind::WouldBlock`, arming a 1 ms backoff; every other outcome passes through unchanged via `other => other`. A true EOF in tokio's `AsyncRead` is `Poll::Ready(Ok(()))` with zero bytes filled — it is not an error, so it is **not** absorbed. It reaches rmcp, which reports `QuitReason::Closed`, `service.waiting()` returns, and the process runs `lsp.shutdown_all()` and exits.
+
+So "exit on stdio EOF" is not a missing feature. Which means the orphans are not failing to *notice* EOF — **they are never sent one.** EAGAIN and EOF are distinct signals: `EAGAIN` means "no data yet, peer still attached", while a closed peer yields a 0-byte read. A process that never sees EOF has a client whose write end is still open — the parent died without closing it, or the fd was inherited by a surviving descendant. `shutdown_signal()` does not help either, because nothing signals these processes.
+
+**Therefore direction 2 (idle timeout) is the fix, and direction 1 should be struck.** The precedent named in the original list still holds: the LSP mux in this same process tree already runs `--idle-timeout 180`.
+
+**Blocked on one decision, deliberately not taken here:** what counts as idle, and how long. A timeout that fires on a live-but-quiet session is worse than the leak — it would kill an MCP server mid-conversation while the user is reading. Needs an explicit value plus a definition of idle (last tool call? last successful stdin read?) before implementation. Direction 3 (suppress the session-start index refresh when another server holds the project's index lock) is independent, carries none of that risk, and remains the cheapest safe win.
+
+**Still reproducing, worse than filed.** Live count 2026-08-06: **16** `codescout ... start` processes, oldest `etime=252846s` (**2 days 22 h**), combined RSS ~1.05 GB:
+
+```
+35497   etime=252846s rss=32992KB
+903598  etime=219368s rss=9380KB
+961164  etime=218504s rss=50000KB
+...
+3790736 etime=4878s   rss=65900KB
+```
+
+Not mitigated by anything in the interim. Note for whoever works this: **do not bulk-kill by pattern** — the list always includes the server for the session doing the killing.
+
 Not implemented, and the shutdown path is unread. Directions, cheapest first:
 
 1. **Exit on stdio EOF.** If the server is stdio-transport, a closed stdin is an
@@ -152,4 +186,3 @@ the same tree.
 - `docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md` — filed in the
   same session; unrelated mechanism, but both were surfaced by measuring rather than
   trusting a first reading
-

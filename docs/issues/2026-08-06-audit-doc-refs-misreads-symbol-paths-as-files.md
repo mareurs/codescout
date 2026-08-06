@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- audit_doc_refs
+- ci
+- lint-precision
+closed: 2026-08-06
 opened: 2026-08-06
-closed:
-severity: high
 owner: marius
 related: []
-tags: [librarian, audit_doc_refs, ci, lint-precision]
-kind: bug
+severity: high
 ---
 
 # BUG: audit_doc_refs reads `Type/method` and org/repo slugs as local file paths
@@ -151,6 +155,20 @@ a gate at `--fail-on high`. The workflow is authoritative: it is a gate.
    failed.
 
 ## Fix
+
+**IMPLEMENTED 2026-08-06 (experiments).** All three classes in the table above are gone, verified by re-running the reproduction: `SensitiveString/fmt`, `Type/method`, `LspClient/hover`, `Kotlin/kotlin-lsp`, `JetBrains/utils/kotlin-lsp`, `rocks/v492/LOCK` and `…/rocks/v492/LOCK` are no longer classified at all; `RELEASES.md` now reports `severity: med`, `severity_reason: inferred_path`; `process.rs:66-135` now reports `verdict: resolved`. `n_refs_broken` fell 10487 → 8875.
+
+Three changes, not one — the 18 findings turned out to be three distinct defects:
+
+1. **Extractor polarity** (`parser.rs::looks_like_path`). The unanchored-slash branch was `return true`; it now requires positive evidence of pathness — a known extension, a trailing `/`, or all-lowercase segments (`is_path_segment`). Capitalization is the discriminator: real directory names are lowercase or kebab/snake, while `Type/method`, `Kotlin/kotlin-lsp`, `rocks/v492/LOCK` and `mcpServers/codescout/env` all carry uppercase. This closes the sibling bug `docs/issues/2026-07-28-audit-doc-refs-json-pointer-false-positive.md` at the same root, which is why that filing's "the polarity is the defect" framing was adopted over adding a tenth denylist entry.
+2. **Missing capability** (`resolver.rs::resolve_file_line`). It never had the basename fallback `resolve_file_path` has, so `process.rs:66-135` — a correct reference to `src/lsp/mux/process.rs` lines 66-135, which is exactly the `run` function the ADR describes — was reported missing at severity high. It now resolves the unique basename and range-checks the file it resolved to.
+3. **Severity honesty** (`severity.rs::cap_inferred_path` + `resolver.rs::path_evidence`). A `missing` verdict caps at `med` when the ref's claim to be *repo-relative* was inferred: no separator at all (`RELEASES.md` earned `file_path` from an extension alone), or a root segment absent from the repo (`librarian/catalog.db` is a suffix of `dirs::data_local_dir()`; there is no `librarian/` at the root). `high` now means "definitely a local path, definitely gone".
+
+Item (c) of the original plan — github-adjacency detection — was **not** implemented and is not needed: `classify` only sees the token, not the line, so it would require plumbing line context, and the capitalization rule already rejects both org/repo slugs.
+
+**No ADR prose was edited to appease the lint.** Two doc changes were made because the references were genuinely stale, not misread: `docs/adrs/2026-07-20-artifact-vec-shared-catalog-boundary.md` cited `docs/issues/2026-06-14-...-qdrant.md` after that file moved to `docs/issues/archive/`, and `CLAUDE.md` cited `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`, which was added in `dc44ac3d` and pruned as a stale dupe in `c6184884` — dead, not renamed. Both surfaced only *after* the false positives stopped drowning them.
+
+**The gate is still red for an unrelated reason.** See `docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`: the 50-finding cap is applied in scan order, so "18 findings" was the count inside a truncated window, not the population. A per-directory bisect finds high findings in 11 of 16 `docs/` subdirectories. Those are a separate docs-hygiene backlog, not this bug.
 
 Not implemented. Two independent changes, both worth doing:
 

@@ -40,7 +40,7 @@ the concrete projects it is about to affect.
   at the same time.
 - `sqlite-vec` is not legacy cruft awaiting removal — it was deliberately
   **retained** as a permanent escape hatch when the artifact index was
-  ported to Qdrant (`docs/issues/2026-06-14-librarian-artifact-index-port-to-qdrant.md`,
+  ported to Qdrant (`docs/issues/archive/2026-06-14-librarian-artifact-index-port-to-qdrant.md`,
   fixed in `3fbfbe2a`, tracked as **L-11 wontfix** for dropping the
   dependency). It exists for a named, concrete scenario: no Qdrant running
   at all ("the vdi-windows path"), verified by that task's own manual-test

@@ -640,6 +640,13 @@ fn coalesce_small_chunks(
 ///
 /// Pass `ts_lang: None` to disable the recursive inner-node path (used for the
 /// single-level recursion limit — inner calls never recurse further).
+///
+/// `window` is the 0-indexed half-open range of `source` lines this call owns.
+/// The top level owns the whole file; a container recursion owns only the
+/// container's body. Both gap branches derive their content from this window, so a
+/// recursion cannot re-emit lines before or after its container that the outer
+/// call has already chunked — see
+/// `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`.
 #[allow(clippy::too_many_arguments)]
 fn nodes_to_chunks(
     source: &str,
@@ -651,10 +658,13 @@ fn nodes_to_chunks(
     lang: &str,
     file_path: &str,
     container_path: &[String],
+    window: (usize, usize),
 ) -> Vec<RawChunk> {
     let lines: Vec<&str> = source.lines().collect();
+    let (win_start, win_end) = window;
+    let win_end = win_end.min(lines.len());
     let mut chunks = Vec::new();
-    let mut prev_end: usize = 0;
+    let mut prev_end: usize = win_start;
 
     for node in nodes {
         let expanded_start = expand_doc_comment_start(&lines, node.start_line, doc_prefixes);
@@ -726,6 +736,9 @@ fn nodes_to_chunks(
             // Emit a header chunk (impl/class signature) for embedding context.
             let mut header =
                 extract_container_header(&lines, expanded_start, node_end, doc_prefixes);
+            // `end_line` is 1-indexed inclusive, so it doubles as the 0-indexed
+            // exclusive end of the header — i.e. where the container's body starts.
+            let body_start = header.end_line;
             if !header.content.trim().is_empty() {
                 header.metadata = build_metadata_header(
                     file_path,
@@ -752,6 +765,9 @@ fn nodes_to_chunks(
                 lang,
                 file_path,
                 &inner_container,
+                // The container's body only. Anything outside it belongs to this
+                // call's own gap branches, not the recursion's.
+                (body_start, node_end),
             );
             // Apply the floor here rather than inside the recursion: this is the
             // only path that decomposes regardless of size, so it is the only one
@@ -802,9 +818,10 @@ fn nodes_to_chunks(
         prev_end = node_end;
     }
 
-    // Trailing gap
-    if prev_end < lines.len() {
-        let gap_content = lines[prev_end..].join("\n");
+    // Trailing gap — bounded by the window, so a container recursion emits its
+    // own closing brace and nothing beyond it.
+    if prev_end < win_end {
+        let gap_content = lines[prev_end..win_end].join("\n");
         if !gap_content.trim().is_empty() {
             if gap_content.len() > chunk_size {
                 let sub = codescout_embed::chunker::split(&gap_content, chunk_size, 0);
@@ -818,7 +835,7 @@ fn nodes_to_chunks(
                 chunks.push(RawChunk {
                     content: gap_content,
                     start_line: prev_end + 1,
-                    end_line: lines.len(),
+                    end_line: win_end,
                     metadata: Some(file_path.to_string()),
                 });
             }
@@ -978,6 +995,8 @@ pub fn split_file(source: &str, lang: &str, path: &Path, chunk_size: usize) -> V
                     lang,
                     &file_path_str,
                     &container_path,
+                    // The top level owns every line in the file.
+                    (0, source.lines().count()),
                 )
             } else {
                 codescout_embed::chunker::split(source, target, 0)
@@ -1916,6 +1935,41 @@ mod tests {
             gap_chunks.len(),
             1,
             "use statements should appear in exactly one chunk, not duplicated by overlap"
+        );
+    }
+    /// The inner-node recursion used to be handed the whole file with
+    /// `prev_end` reset to 0, so its leading-gap branch re-emitted every line
+    /// before the container and its trailing-gap branch re-emitted every line
+    /// after it. Both are already chunked by the outer call.
+    /// See `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`.
+    #[test]
+    fn container_recursion_does_not_duplicate_lines_outside_the_container() {
+        let source = concat!(
+            "use std::io;\n",
+            "use std::fmt;\n",
+            "\n",
+            "impl Store {\n",
+            "    fn alpha(&self) -> usize {\n        41\n    }\n",
+            "\n",
+            "    fn beta(&self) -> usize {\n        42\n    }\n",
+            "}\n",
+            "\n",
+            "fn tail_marker() -> usize {\n    99\n}\n",
+        );
+
+        let chunks = split_file(source, "rust", Path::new("test.rs"), 4000);
+        let count = |needle: &str| chunks.iter().filter(|c| c.content.contains(needle)).count();
+
+        assert_eq!(
+            count("use std::io"),
+            1,
+            "leading imports must not be re-emitted by the container recursion; chunks: {chunks:#?}"
+        );
+        assert_eq!(
+            count("fn tail_marker"),
+            1,
+            "the fn AFTER the container must not be re-emitted by the recursion's \
+                 trailing-gap branch; chunks: {chunks:#?}"
         );
     }
 

@@ -121,7 +121,14 @@ fn apply_frontmatter_patch(
 /// `artifact(update, patch={body_edits: [...]})` to provide surgical body
 /// mutation on librarian-managed files — `edit_markdown` itself refuses to
 /// touch them (see `librarian_guard::guard_not_librarian_managed`).
-fn apply_body_edits(working: &str, edits: &[Value]) -> Result<String> {
+///
+/// `consumed` collects the headings that an opted-in
+/// `replace` + `include_subsections: true` destroyed. `replace` always consumes
+/// its section's children; the flag only decides whether that is an error or a
+/// permitted operation, so without this list the caller gets no signal at all
+/// when the whole-file shrink guard is satisfied by a net-larger write.
+/// See `docs/issues/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
+fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) -> Result<String> {
     let mut buf = working.to_string();
     for (i, edit) in edits.iter().enumerate() {
         let heading = edit["heading"].as_str().ok_or_else(|| {
@@ -161,20 +168,29 @@ fn apply_body_edits(working: &str, edits: &[Value]) -> Result<String> {
                 )
             })?
         } else {
-            if action == "replace" && !edit["include_subsections"].as_bool().unwrap_or(false) {
+            // Compute the victim list for EVERY replace, not only the ones we
+            // are about to refuse. `include_subsections: true` used to skip this
+            // block entirely, which meant the one guard purpose-built for
+            // "replace is about to wipe a nested heading" never ran on the exact
+            // calls that do the wiping.
+            if action == "replace" {
                 if let Ok(victims) =
                     crate::tools::markdown::edit_markdown::find_consumed_subsections(&buf, heading)
                 {
                     if !victims.is_empty() {
-                        return Err(super::RecoverableError::with_hint(
-                            format!(
-                                "body_edits[{i}]: replace on '{heading}' would wipe {n} nested heading(s): {list}. \
-                                 Pass include_subsections: true to opt into consuming children.",
-                                n = victims.len(),
-                                list = victims.join(", "),
-                            ),
-                            "Prefer action=\"edit\" with old_string/new_string to target text inside the section without touching its subsections.",
-                        ));
+                        if edit["include_subsections"].as_bool().unwrap_or(false) {
+                            consumed.extend(victims);
+                        } else {
+                            return Err(super::RecoverableError::with_hint(
+                                format!(
+                                    "body_edits[{i}]: replace on '{heading}' would wipe {n} nested heading(s): {list}. \
+                                     Pass include_subsections: true to opt into consuming children.",
+                                    n = victims.len(),
+                                    list = victims.join(", "),
+                                ),
+                                "Prefer action=\"edit\" with old_string/new_string to target text inside the section without touching its subsections.",
+                            ));
+                        }
                     }
                 }
             }
@@ -260,6 +276,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     let body_changing = patch.body.is_some() || patch.body_edits.is_some();
+    // Headings destroyed by an opted-in `replace` + `include_subsections: true`.
+    // Surfaced in the response and the `field_patch` payload so a section-level
+    // loss is visible even when the whole-file write grew.
+    let mut consumed_subsections: Vec<String> = Vec::new();
 
     let new_content = if let Some(new_body) = &patch.body {
         let (fm_opt, old_body) = crate::librarian::frontmatter::parse(&original)?;
@@ -291,7 +311,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 apply_frontmatter_patch(fm, patch);
             })?;
         }
-        apply_body_edits(&working, edits).map_err(|e| {
+        apply_body_edits(&working, edits, &mut consumed_subsections).map_err(|e| {
             // Extract nudge inputs in a scoped block so the borrow of `e` ends
             // before we either rebuild or return it.
             let rebuilt = {
@@ -420,6 +440,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "edits_count": patch.body_edits.as_ref().map(|v| v.len()).unwrap_or(0),
                     "mode": if patch.body.is_some() { "overwrite" } else { "edits" },
                     "forced": a.force,
+                    // Forensic trail for section-level loss. `prev_bytes` /
+                    // `new_bytes` are whole-file aggregates and read as a benign
+                    // append when a replace drops a child but the file grows.
+                    "replaced_subsections": consumed_subsections,
                 })
                 .to_string(),
                 anchor_commit: None,
@@ -457,6 +481,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     if !corrections.is_empty() {
         out["corrections"] = json!(corrections);
+    }
+    if !consumed_subsections.is_empty() {
+        out["replaced_subsections"] = json!(consumed_subsections);
     }
     Ok(out)
 }
@@ -1031,11 +1058,100 @@ mod tests {
             "old_string": "x",
             "new_string": "y",
         })];
-        let msg = apply_body_edits("## Foo", &edits).unwrap_err().to_string();
+        let msg = apply_body_edits("## Foo", &edits, &mut Vec::new())
+            .unwrap_err()
+            .to_string();
         assert!(
             msg.contains("action='edit'"),
             "replace-without-content error must name action='edit'; got: {msg}"
         );
+    }
+    /// An opted-in `include_subsections` replace proceeds, but the headings
+    /// it destroyed come back in `consumed`. Before this, the ONE guard built
+    /// to notice "replace is about to wipe a nested heading" was skipped by
+    /// the very flag that permits the wiping, and the whole-file shrink guard
+    /// cannot compensate: a net-larger write passes it by construction.
+    /// See `docs/issues/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
+    #[test]
+    fn body_edits_include_subsections_reports_what_it_destroyed() {
+        let body = "## Wins\n\n### W-1 — first win\n\nBody of W-1.\n\n### W-2 — second win\n\nBody of W-2.\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Wins",
+            "action": "replace",
+            "content": "## Wins\n\n### W-3 — a brand new win with plenty of text to grow the file\n\nLots of replacement prose here so the whole-file byte count rises.\n",
+            "include_subsections": true,
+        })];
+        let mut consumed = Vec::new();
+        let out = apply_body_edits(body, &edits, &mut consumed).unwrap();
+
+        assert!(
+            out.contains("W-3"),
+            "the opted-in replace must still apply: {out}"
+        );
+        assert!(
+            !out.contains("W-1"),
+            "replace consumes children — this test exists because it does: {out}"
+        );
+        assert_eq!(
+            consumed.len(),
+            2,
+            "both destroyed subsections must be reported, got {consumed:?}"
+        );
+        assert!(
+            consumed.iter().any(|h| h.contains("W-1"))
+                && consumed.iter().any(|h| h.contains("W-2")),
+            "consumed must name the lost headings, got {consumed:?}"
+        );
+        assert!(
+            out.len() > body.len(),
+            "precondition: the write must be net-LARGER, so the whole-file \
+                 shrink guard would never have fired ({} -> {})",
+            body.len(),
+            out.len()
+        );
+    }
+
+    /// The refusal is unchanged when the caller has NOT opted in — moving the
+    /// victim computation out of the `!include_subsections` branch must not
+    /// turn the BUG-043 guard into a no-op.
+    #[test]
+    fn body_edits_replace_still_refuses_without_include_subsections() {
+        let body = "## Wins\n\n### W-1 — first win\n\nBody of W-1.\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Wins",
+            "action": "replace",
+            "content": "## Wins\n\nreplacement\n",
+        })];
+        let mut consumed = Vec::new();
+        let err = apply_body_edits(body, &edits, &mut consumed)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("W-1") && err.contains("include_subsections"),
+            "refusal must name the victim and the opt-in flag; got: {err}"
+        );
+        assert!(
+            consumed.is_empty(),
+            "a refused edit destroyed nothing, so it must report nothing: {consumed:?}"
+        );
+    }
+
+    /// A replace on a leaf section (no children) reports nothing — the list
+    /// must mean "content was destroyed", not "a replace happened".
+    #[test]
+    fn body_edits_leaf_replace_reports_nothing_consumed() {
+        let body = "## Alpha\n\nalpha text\n\n## Beta\n\nbeta text\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Alpha",
+            "action": "replace",
+            "content": "## Alpha\n\nnew alpha text\n",
+            "include_subsections": true,
+        })];
+        let mut consumed = Vec::new();
+        let out = apply_body_edits(body, &edits, &mut consumed).unwrap();
+        assert!(out.contains("new alpha text"));
+        assert!(out.contains("beta text"), "sibling must survive: {out}");
+        assert!(consumed.is_empty(), "no children to consume: {consumed:?}");
     }
 
     async fn seed_with_augment(

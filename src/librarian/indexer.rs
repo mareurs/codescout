@@ -458,6 +458,29 @@ fn force_include_candidates(abs_root: &Path) -> Result<Vec<std::path::PathBuf>> 
     Ok(results)
 }
 
+/// Does this raw `LIBRARIAN_ARTIFACT_VEC_MIGRATE` value opt into the destructive
+/// `artifact_vec` rebuild?
+///
+/// Pure on purpose. The opt-in used to be read from process-global env deep inside
+/// `write_embeddings`, which forced tests to mutate that global — the exact
+/// `set_var`-in-tests race that `a656f8cec220d347` removed project-wide. Keeping the
+/// decision a value means the mapping is testable without touching env at all, and
+/// the only untestable line left is the `env::var` read itself.
+/// See `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+fn migrate_opt_in(raw: Option<&str>) -> bool {
+    raw == Some("1")
+}
+
+/// Write pre-computed embedding vectors into `artifact_vec`.
+///
+/// Reads the migration opt-in from the environment once, here at the edge, and
+/// hands it to [`write_embeddings_with`] as data. Tests call that function
+/// directly with an explicit flag rather than mutating process-global env.
+pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+    let raw = std::env::var(ARTIFACT_VEC_MIGRATE_ENV).ok();
+    write_embeddings_with(cat, embeddings, migrate_opt_in(raw.as_deref()))
+}
+
 /// Write pre-computed embedding vectors into `artifact_vec`.
 ///
 /// The `vec0` virtual table does not honor `INSERT OR REPLACE` conflict
@@ -471,9 +494,13 @@ fn force_include_candidates(abs_root: &Path) -> Result<Vec<std::path::PathBuf>> 
 /// fails here with a clear message instead of at the SQL layer post-DELETE.
 ///
 /// A dimension mismatch against existing rows (e.g. after switching embedding
-/// models) is a loud, safe stop **by default** — see [`rebuild_artifact_vec_at_dim`]
-/// for the explicit, backed-up, opt-in migration path.
-pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+/// models) is a loud, safe stop unless `allow_dim_migration` — see
+/// [`rebuild_artifact_vec_at_dim`] for the explicit, backed-up migration path.
+pub fn write_embeddings_with(
+    cat: &Catalog,
+    embeddings: &[(String, Vec<f32>)],
+    allow_dim_migration: bool,
+) -> Result<()> {
     use rusqlite::OptionalExtension;
 
     if embeddings.is_empty() {
@@ -516,7 +543,7 @@ pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Res
         // Each f32 takes 4 bytes in the little-endian blob serialization.
         let existing_dim = (blob_len / 4) as usize;
         if batch_dim != existing_dim {
-            if std::env::var(ARTIFACT_VEC_MIGRATE_ENV).as_deref() != Ok("1") {
+            if !allow_dim_migration {
                 anyhow::bail!(
                     "embedding dim mismatch vs catalog: batch={}, existing={}. \
                      Likely causes: (1) embedder is misconfigured and returns error \
@@ -1067,32 +1094,6 @@ kind = "memory"
         assert_eq!(count, 1, "second write must replace, not duplicate");
     }
 
-    /// RAII guard: save current value of an env var, set new value, restore on
-    /// drop. Mirrors the `EnvGuard` in `src/librarian/mod.rs`/`src/agent/mod.rs`
-    /// — without it, a test mutating `LIBRARIAN_ARTIFACT_VEC_MIGRATE` leaks the
-    /// value into the rest of the process.
-    struct EnvGuard {
-        key: &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let original = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.original.take() {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
     fn seed_artifact_row(cat: &Catalog, id: &str) {
         let now = chrono::Utc::now().timestamp_millis();
         let row = crate::librarian::catalog::artifact::ArtifactRow {
@@ -1116,15 +1117,14 @@ kind = "memory"
     }
 
     #[test]
-    #[serial_test::serial]
     fn write_embeddings_dim_mismatch_bails_by_default() {
-        std::env::remove_var(ARTIFACT_VEC_MIGRATE_ENV);
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact_row(&cat, "a");
         seed_artifact_row(&cat, "b");
-        write_embeddings(&cat, &[("a".into(), vec![0.1f32; 768])]).unwrap();
+        write_embeddings_with(&cat, &[("a".into(), vec![0.1f32; 768])], false).unwrap();
 
-        let err = write_embeddings(&cat, &[("b".into(), vec![0.2f32; 3072])]).unwrap_err();
+        let err =
+            write_embeddings_with(&cat, &[("b".into(), vec![0.2f32; 3072])], false).unwrap_err();
         assert!(
             err.to_string()
                 .contains("embedding dim mismatch vs catalog"),
@@ -1143,17 +1143,31 @@ kind = "memory"
         assert_eq!(count, 1, "rejected batch must not be inserted");
     }
 
+    /// The env value → opt-in mapping, tested as a pure function so no test in
+    /// this module mutates process-global env. `set_var` in a concurrently-run
+    /// test is the UB that `a656f8cec220d347` removed project-wide; see
+    /// `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
     #[test]
-    #[serial_test::serial]
+    fn migrate_opt_in_requires_exactly_one() {
+        assert!(migrate_opt_in(Some("1")));
+        assert!(!migrate_opt_in(None), "unset must not opt in");
+        assert!(!migrate_opt_in(Some("0")));
+        assert!(
+            !migrate_opt_in(Some("true")),
+            "only the literal \"1\" opts into a destructive rebuild"
+        );
+        assert!(!migrate_opt_in(Some("")));
+    }
+
+    #[test]
     fn write_embeddings_dim_mismatch_migrates_when_opted_in() {
-        let _guard = EnvGuard::set(ARTIFACT_VEC_MIGRATE_ENV, "1");
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact_row(&cat, "a");
         seed_artifact_row(&cat, "b");
-        write_embeddings(&cat, &[("a".into(), vec![0.1f32; 768])]).unwrap();
+        write_embeddings_with(&cat, &[("a".into(), vec![0.1f32; 768])], true).unwrap();
 
         // Opted in: the 3072-dim batch must migrate the table instead of erroring.
-        write_embeddings(&cat, &[("b".into(), vec![0.2f32; 3072])]).unwrap();
+        write_embeddings_with(&cat, &[("b".into(), vec![0.2f32; 3072])], true).unwrap();
 
         // The old 768-dim row is gone (table was dropped + recreated), only
         // the new 3072-dim row survives.
@@ -1174,21 +1188,19 @@ kind = "memory"
 
         // The new dim is now the catalog's baseline — a second 3072-dim batch
         // must succeed without further migration.
-        write_embeddings(&cat, &[("a".into(), vec![0.3f32; 3072])]).unwrap();
+        write_embeddings_with(&cat, &[("a".into(), vec![0.3f32; 3072])], true).unwrap();
     }
 
     #[test]
-    #[serial_test::serial]
     fn write_embeddings_migration_backs_up_file_backed_catalog() {
-        let _guard = EnvGuard::set(ARTIFACT_VEC_MIGRATE_ENV, "1");
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("catalog.db");
         let cat = Catalog::open(&db_path).unwrap();
         seed_artifact_row(&cat, "a");
         seed_artifact_row(&cat, "b");
-        write_embeddings(&cat, &[("a".into(), vec![0.1f32; 768])]).unwrap();
+        write_embeddings_with(&cat, &[("a".into(), vec![0.1f32; 768])], true).unwrap();
 
-        write_embeddings(&cat, &[("b".into(), vec![0.2f32; 3072])]).unwrap();
+        write_embeddings_with(&cat, &[("b".into(), vec![0.2f32; 3072])], true).unwrap();
 
         let backups: Vec<_> = std::fs::read_dir(tmp.path())
             .unwrap()

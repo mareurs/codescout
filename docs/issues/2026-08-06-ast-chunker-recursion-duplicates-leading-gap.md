@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- embed
+- chunking
+- retrieval
+closed: 2026-08-06
 opened: 2026-08-06
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [embed, chunking, retrieval]
-kind: bug
+severity: medium
 ---
 
 # BUG: container decomposition emits a gap chunk duplicating everything before the container
@@ -119,6 +122,24 @@ from merge runs (`ca442498`). The duplication itself is untouched.
    **Evidence link** — *Diagnostic dump, `ca442498`*.
 
 ## Fix
+
+**IMPLEMENTED 2026-08-06 (experiments).**
+
+`nodes_to_chunks` now takes an explicit `window: (usize, usize)` — the 0-indexed half-open range of `source` lines the call owns. `prev_end` starts at `win_start` instead of `0`, and the trailing-gap branch is bounded by `win_end` instead of `lines.len()`. The top-level call passes `(0, source.lines().count())`; the container recursion passes `(body_start, node_end)`, where `body_start` is the header chunk's `end_line` (1-indexed inclusive, so it doubles as the 0-indexed exclusive end of the header). Taking the header's end rather than the container's start keeps genuine intra-container gaps — field declarations between `class X {` and its first method — still chunked.
+
+**Correction to the Root cause above:** it claims the trailing-gap branch is "harmless in size — it emits the container's closing brace as its own chunk". That is only true when the container is the file's last node. Because `lines` was the whole file, the recursion's trailing gap was `lines[last_inner_end..]` — the closing brace **plus every line after the container to EOF**. A failing test written before the fix dumped the chunk set and proved it:
+
+```
+RawChunk { content: "use std::io;\nuse std::fmt;\n\nimpl Store {", start_line: 1, end_line: 4 }   <- leading dup
+RawChunk { content: "}\n\nfn tail_marker() -> usize {\n    99\n}", start_line: 12, end_line: 16 }  <- trailing dup
+RawChunk { content: "fn tail_marker() -> usize {\n    99\n}", start_line: 14, end_line: 16 }      <- the real one
+```
+
+So the trailing branch duplicated as much as the leading one whenever anything followed the container — which is the common case. Both branches needed bounding; a floor-only fix would have left half the bug.
+
+All four guard tests the blast-radius note named are green unchanged: `chunk_overlap_removed_from_ast_paths`, `ast_split_captures_gap_text`, `ast_split_trailing_gap_captured`, `sub_split_covers_all_body_lines`. Full `ast_chunker` module: 72/72.
+
+**Index invalidation still applies.** Chunk ids are content-addressed, so every decomposed container in every language re-chunks and the existing semantic index needs a rebuild. That is a run of `index(force=true)`, not a code follow-up.
 
 Not implemented. Plan: give the recursion an explicit starting `prev_end` (the
 container's body start line) so it stops re-deriving gaps it does not own, or
