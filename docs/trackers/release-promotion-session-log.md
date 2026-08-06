@@ -37,7 +37,7 @@ left"* is closed (both taken), and its CI table is extended below.
 - Local gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   **3504 tests passed / 0 failed / 44 ignored**. Audit: `EXIT=0`, 0 high findings.
 
-### CI — three confirmed green runs, two QUEUED at writing time
+### CI — four confirmed 15/15 runs, then a runner-starved tail
 
 | run | SHA | result |
 |---|---|---|
@@ -45,24 +45,37 @@ left"* is closed (both taken), and its CI table is extended below.
 | 31108238052 | `db4b1968` | 15/15 |
 | 31109236437 | `de4f7ccd` | 15/15 |
 | 31109795037 | `382c3344` | 15/15 |
-| 31122588792 | `e58ad463` | **queued** |
-| 31122862704 | `fcb6598f` | **queued** |
-| — | `1f20de99` | **queued** |
-| — | `e2cf177d` | **queued** |
+| 31122588792 | `e58ad463` | 4 green · 8 cancelled · 3 queued |
+| 31122862704 | `fcb6598f` | 6 green (incl. **Audit Doc Refs**) · 9 queued |
+| 31123110469 | `1f20de99` | 15 queued |
+| 31123262588 | `e2cf177d` | 15 queued |
+| 31123770393 | `8f5b72fb` | 15 queued |
 
-**The queue was stalled, not the code.** Four runs sat `queued` with none reaching
-`in_progress` for 30+ minutes — a 30-minute watcher expired without a single job starting.
-GitHub's hosted runners were backed up. So a `queued` row here means *never ran*, not *ran
-and hung*, and the four green rows above plus a clean local gate (fmt, clippy `-D warnings`,
-3504 tests, audit `EXIT=0`) are the current evidence. Re-query before drawing any
-conclusion; if they are still queued, that is a GitHub capacity condition to wait out, not
-something to debug.
+**CORRECTION, 17:45Z — the previous version of this section was false, and it is the kind of
+false that propagates.** It read: *"Four runs sat `queued` with none reaching `in_progress`
+… a 30-minute watcher expired without a single job starting."* Jobs did start. **Ten jobs
+completed successfully** across the two oldest of those runs, and **none failed**. The error
+was reading the **run-level** `status` field as a per-job claim: a run stays `queued` while
+its own jobs run, pass, and get cancelled — `gh run list` reported `queued` for a run that
+already held six green jobs. Never quote a run-level status as job evidence; tally the jobs:
 
-**Do not report a verdict for the last two from this document — GitHub's runners were
-backed up and neither had started.** `gh run list --branch experiments --limit 2`.
-The three green runs predate the round-6 code changes, so the queued pair is the first CI
-exposure for the bug-status default, the `degraded` fix and the kotlin NMT flag.
+```
+gh run view <id> --json jobs --jq '[.jobs[] | if .status=="completed" then .conclusion else .status end] | group_by(.) | map("\(.[0]):\(length)") | join(" ")'
+```
 
+**Mechanism — runner starvation, verified two ways.** Every cancelled job carries
+`steps=0`, so it never executed a step; every green job carries `steps=12`. And
+`.github/workflows/ci.yml` declares no `concurrency:` block, so newer-push supersession
+cannot be the cause either. The original *verdict* — a GitHub capacity condition rather than
+our code — therefore survives. Only the evidence offered for it was invented.
+
+**What round 6's code has actually cleared.** `fcb6598f` is docs-only on top of `e58ad463`,
+so its tree carries all three fixes. The union of distinct green jobs across those two runs
+is **8 of 15**: Audit Doc Refs, Format, MSRV (1.88), Windows-gnu cross, Test ubuntu
+no-features, and Test windows × default / local-embed / no-features. Still unexposed on CI:
+**Clippy**, Tool Docs Sync, Test ubuntu default, Test ubuntu local-embed, and Test macos ×3.
+Clippy is the one that matters — F-5 records that the local clippy is a different version
+from CI's, so a local pass is not evidence for it.
 ### What round 6 changed
 
 Triage of the open-bug ledger first exposed that **the ledger itself was under-reporting**:
@@ -656,6 +669,7 @@ Ranked by what to do first.
 | F-4 | 2026-08-06 | med | process | fixed-verified | Three bug files' own `## Fix` sections carried wrong premises — stale-by-superseding, wrong severity, already-implemented |
 | F-5 | 2026-08-06 | high | process | open | Local gate structurally cannot predict CI — clippy 1.95 vs 1.97, separator bugs invisible on Linux, `--all-features` unusable |
 | F-6 | 2026-08-06 | med | measurement | mitigated | The 50-finding cap mis-sized the backlog plan by ~5× — third instance of a capped view corrupting a number the gate acts on |
+| F-7 | 2026-08-06 | med | measurement | fixed-verified | Quoted a run-level CI `status` as per-job evidence — wrote "not a single job starting" into this log while ten jobs had already passed |
 
 ## Wins Index
 
@@ -1102,6 +1116,39 @@ project memory.
 
 **Status:** validated — hypothesis refuted from code, replacement hypothesis named with its
 precedent, and the experiment redesigned before any of it was built.
+## F-7 — A run-level CI `status` was quoted as per-job evidence, and the false claim was committed
+
+**Observed:** 2026-08-06 ~17:39–17:45Z, resuming after compaction to re-query CI for the
+round-6 commits.
+
+**When:** Writing the round-6 compaction handoff. `gh run list --branch experiments` returned
+`status: queued` for five runs, so the handoff recorded that no job had started and that the
+round-6 fixes had local verification only.
+
+**Expected:** A run whose `status` is `queued` has not begun executing.
+
+**Got:** Run `31122862704` reported `status: queued` while **six of its jobs had already
+completed `success`** — including `Audit Doc Refs`, the job this whole work stream exists to
+turn green. Run `31122588792` reported `queued` with 4 success / 8 cancelled / 3 queued. The
+run-level field is an aggregate that stays `queued` until every job leaves the queue; it
+carries no information about whether jobs ran.
+
+**Probable cause:** The claim was taken from the cheapest field that looked authoritative
+instead of from the per-job tally, and the field's *name* invites exactly that reading. Same
+shape as W-5 (reading the tool instead of invoking it) and R-19 (asserting a checkable fact
+without reading it this session): the real answer was one `gh run view --json jobs` away.
+
+**Severity:** med — no code was wrong, but the false claim was committed in `8f5b72fb` to a
+document whose entire purpose is to be trusted by the next session, and it understated the
+branch's real CI coverage from 8 green jobs to zero. A later session reading it would have
+re-run work already proven green, or blocked the promotion for want of evidence it had.
+
+**Status:** fixed-verified — the CI section above is rewritten from per-job data, and the
+tally command is pinned there so the shortcut is not available next time.
+
+**Fix idea / Pointer:** For any CI claim, the unit of evidence is the **job**, never the run.
+A run-level status answers "is this run finished", never "did anything run".
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
