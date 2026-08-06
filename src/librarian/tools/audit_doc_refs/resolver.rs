@@ -2,6 +2,23 @@ use super::severity;
 use super::{RefCandidate, RefKind, Resolution, Severity, Verdict};
 use std::path::Path;
 
+/// The `.gitignore` matcher plus the index-derived directory set required to read
+/// it correctly.
+///
+/// Bundled into one type rather than added as a second `ResolveCtx` field so the
+/// fourteen tests that opt out with `gitignore: None` stay untouched.
+pub struct TrackedIgnore {
+    pub matcher: ignore::gitignore::Gitignore,
+    /// Forward-slash relative directories holding at least one file in git's index,
+    /// plus `""` for the repo root.
+    ///
+    /// `.gitignore` has no effect on paths already tracked, so a directory that
+    /// holds tracked files is not "a location git will never track" — which is the
+    /// question `is_gitignored` actually needs answered. An empty set means
+    /// *unknown* and restores the prior behaviour of trusting the matcher alone.
+    pub tracked_dirs: std::collections::HashSet<String>,
+}
+
 pub struct ResolveCtx<'a> {
     pub repo_root: &'a Path,
     pub memory_globs: &'a [globset::Glob],
@@ -13,11 +30,11 @@ pub struct ResolveCtx<'a> {
     /// `mod.rs::call`. Empty disables the fallback (treat misses as
     /// `Verdict::Missing` exactly as before).
     pub basename_index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
-    /// Compiled `.gitignore` for the repo, used by `is_gitignored` to cap
-    /// findings whose absence is the normal state. `None` disables the cap
-    /// (every ref is treated as tracked), which is the behaviour tests get
-    /// unless they opt in.
-    pub gitignore: Option<ignore::gitignore::Gitignore>,
+    /// Compiled `.gitignore` for the repo plus the index-derived directory set
+    /// needed to read it correctly, used by `is_gitignored` to cap findings whose
+    /// absence is the normal state. `None` disables the cap (every ref is treated
+    /// as tracked), which is the behaviour tests get unless they opt in.
+    pub gitignore: Option<TrackedIgnore>,
 }
 
 pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
@@ -535,12 +552,17 @@ fn outside_project() -> Resolution {
 
 /// Whether `raw_ref` names a location git will never track.
 ///
-/// Checks the ref *and every parent directory*: `.gitignore` here carries
-/// `/.worktrees/`, a directory rule, and the docs cite paths *inside* it
-/// (`.worktrees/my-feature`). `matched_path_or_any_parents` is the ignore
-/// crate's entry point for exactly that question. Both the file and directory
-/// forms are tried because the ref does not exist, so there is nothing to stat
-/// and no way to know which it would have been.
+/// Two questions get conflated here and must not be: *does a `.gitignore` rule match
+/// this path*, and *would git ever track it*. They differ because **gitignore has no
+/// effect on paths already in the index**. This repo is the counterexample that found
+/// the bug: `/.github/` was ignored to suppress one generated Copilot file while five
+/// files beneath it stayed tracked, including both CI workflows. Treating those as
+/// untracked dropped a missing-workflow ref from `high` to `med` — under the
+/// `fail_on: high` gate, and so invisible to it.
+///
+/// A rule naming the path *itself* is therefore decisive; a rule that reaches the path
+/// only through a parent directory defers to whether that directory holds tracked
+/// files.
 fn is_gitignored(raw_ref: &str, ctx: &ResolveCtx<'_>) -> bool {
     // The escape guard is load-bearing, not defensive: `matched_path_or_any_parents`
     // *panics* on a path outside its root. Callers now reject those refs earlier,
@@ -573,8 +595,39 @@ fn is_gitignored(raw_ref: &str, ctx: &ResolveCtx<'_>) -> bool {
         return false;
     };
     let abs = ctx.repo_root.join(cleaned);
-    gi.matched_path_or_any_parents(&abs, false).is_ignore()
-        || gi.matched_path_or_any_parents(&abs, true).is_ignore()
+
+    // A rule naming this path itself settles it: `/target`, `/.mcp.json` and
+    // `.codescout/private-memories/` are refused on their own account, and nothing
+    // can be tracked under a name git rejects outright. Both forms are tried because
+    // the ref does not exist, so there is nothing to stat and therefore no way to
+    // know whether it would have been a file or a directory.
+    if gi.matcher.matched(&abs, false).is_ignore() || gi.matcher.matched(&abs, true).is_ignore() {
+        return true;
+    }
+
+    // Nothing named it directly, so only a parent-directory rule can still reach it.
+    if !gi
+        .matcher
+        .matched_path_or_any_parents(&abs, false)
+        .is_ignore()
+        && !gi
+            .matcher
+            .matched_path_or_any_parents(&abs, true)
+            .is_ignore()
+    {
+        return false;
+    }
+
+    // A parent rule matched. That decides the question only if the parent holds no
+    // tracked files; otherwise git demonstrably tracks things there and a missing ref
+    // is a real defect, not normal absence.
+    //
+    // The *immediate* parent, never any ancestor. `.codescout/` holds tracked files
+    // while `.codescout/private-memories/` holds none, so walking ancestors would
+    // find the tracked `.codescout/` and stop capping private-memories refs — undoing
+    // the CI-vs-local fix this cap was built for.
+    let parent = cleaned.rsplit_once('/').map_or("", |(p, _)| p);
+    !gi.tracked_dirs.contains(parent)
 }
 
 fn slugify(s: &str) -> String {
@@ -702,7 +755,12 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
-            gitignore: Some(gi),
+            gitignore: Some(TrackedIgnore {
+                matcher: gi,
+                // Empty = unknown, so the matcher alone decides — the behaviour these
+                // cases were written against.
+                tracked_dirs: Default::default(),
+            }),
         };
 
         for raw in [".codescout/embeddings.db", ".worktrees/my-feature"] {
@@ -761,7 +819,12 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
-            gitignore: Some(gi),
+            gitignore: Some(TrackedIgnore {
+                matcher: gi,
+                // Empty = unknown, so the matcher alone decides — the behaviour these
+                // cases were written against.
+                tracked_dirs: Default::default(),
+            }),
         };
 
         for raw in [
@@ -789,6 +852,84 @@ mod tests {
         }
     }
 
+    /// `.gitignore` cannot answer "would git ever track this" by itself, because it has
+    /// no effect on paths already in the index. `/.github/` is ignored in this repo —
+    /// added to suppress one generated Copilot file — while five files beneath it are
+    /// tracked, including both CI workflows. A doc citing a *deleted* workflow was
+    /// therefore capped to `med` and slipped under the `fail_on: high` gate.
+    ///
+    /// The three refs below are the whole decision tree: parent rule + tracked parent,
+    /// own-path rule + tracked parent, parent rule + untracked parent.
+    #[test]
+    fn resolver_still_gates_a_missing_path_under_a_tracked_but_ignored_directory() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".github/workflows")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codescout/private-memories")).unwrap();
+        // A real checkout always has `.git`, so the root segment exists and these refs
+        // reach the gating band as `Structural`. Without it `cap_inferred_path` fires
+        // first and the assertions would be reading the wrong cap.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::write(
+            tmp.path().join(".gitignore"),
+            "/.github/\n/.github/workflows/generated.yml\n.codescout/private-memories/\n",
+        )
+        .unwrap();
+        let gi = {
+            let mut b = ignore::gitignore::GitignoreBuilder::new(tmp.path());
+            assert!(b.add(tmp.path().join(".gitignore")).is_none());
+            b.build().unwrap()
+        };
+        let globs: [globset::Glob; 0] = [];
+        let ctx_gi = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &globs,
+            lsp: None,
+            degraded_languages: std::cell::RefCell::new(Vec::new()),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: Some(TrackedIgnore {
+                matcher: gi,
+                // What `build_tracked_dirs` derives from an index that holds
+                // `.github/workflows/ci.yml`: the directory, its ancestor, and the
+                // root.
+                tracked_dirs: [".github/workflows", ".github", ""]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+            }),
+        };
+
+        // The bug. Ignored only via the parent `/.github/`, but that parent tracks
+        // files, so a missing workflow is a real defect and must keep gating.
+        let missing_workflow = resolve_ref(
+            &cand(
+                ".github/workflows/gone.yml",
+                "docs/manual/src/x.md",
+                RefKind::FilePath,
+            ),
+            &ctx_gi,
+        );
+        assert_eq!(missing_workflow.severity, Severity::High);
+        assert_eq!(missing_workflow.severity_reason, "policy_default");
+
+        for raw in [
+            // Named by a rule directly, *and* its parent is tracked. The own-path check
+            // has to be consulted before the parent check or this stops capping.
+            ".github/workflows/generated.yml",
+            // Parent rule, parent tracks nothing: still capped. This is the guard
+            // against widening the lookup from the immediate parent to any ancestor —
+            // `""` (the repo root) is in the set whenever anything is tracked at all,
+            // so an ancestor walk would degenerate into never capping anything.
+            ".codescout/private-memories/notes.md",
+        ] {
+            let r = resolve_ref(
+                &cand(raw, "docs/manual/src/x.md", RefKind::FilePath),
+                &ctx_gi,
+            );
+            assert_eq!(r.severity, Severity::Med, "{raw} should stay capped");
+            assert_eq!(r.severity_reason, "gitignored_path", "{raw}");
+        }
+    }
+
     /// `ignore`'s `matched_path_or_any_parents` panics — not errors — when handed a
     /// path outside its root, and two ref shapes reach it that way: an absolute path
     /// (which `Path::join` resolves by *discarding* the base) and one containing
@@ -811,7 +952,12 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
-            gitignore: Some(gi),
+            gitignore: Some(TrackedIgnore {
+                matcher: gi,
+                // Empty = unknown, so the matcher alone decides — the behaviour these
+                // cases were written against.
+                tracked_dirs: Default::default(),
+            }),
         };
 
         // Each of these aborted the process before the escape guard. `/etc/passwd:12`

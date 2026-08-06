@@ -220,7 +220,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .collect();
 
     let basename_index = build_basename_index(&repo_root);
-    let gitignore = build_gitignore(&repo_root);
+    // The matcher is only half the answer — see `build_tracked_dirs`. Building the
+    // index set only when a `.gitignore` exists keeps the git open off the path of
+    // repos that have none.
+    let gitignore = build_gitignore(&repo_root).map(|matcher| resolver::TrackedIgnore {
+        tracked_dirs: build_tracked_dirs(&repo_root),
+        matcher,
+    });
 
     let resolve_ctx = resolver::ResolveCtx {
         repo_root: &repo_root,
@@ -360,6 +366,50 @@ fn build_gitignore(repo_root: &std::path::Path) -> Option<ignore::gitignore::Git
     // line should not discard the rules that did parse.
     let _ = builder.add(&path);
     builder.build().ok()
+}
+
+/// Forward-slash relative directories holding at least one file in git's index —
+/// every ancestor included — plus `""` for the repo root.
+///
+/// `.gitignore` has no effect on paths already tracked, so the matcher alone cannot
+/// answer "would git ever track this"; see `resolver::is_gitignored`, which needs both
+/// halves. `/.github/` is ignored in this repo while five files beneath it are tracked.
+///
+/// `Repository::open` rather than `discover`, deliberately: the set must be keyed to
+/// the same root the matcher was built for, and `discover` could walk up to an
+/// enclosing repo whose index paths would not line up with `repo_root`. This matches
+/// `git_head_commit` above. Any failure yields an empty set, which restores the prior
+/// matcher-only behaviour rather than failing the audit — the same trade
+/// `build_gitignore` makes.
+///
+/// Keys are `String`, not `PathBuf`: git index paths are always forward-slash, and so
+/// are the doc refs they get compared against, whereas `PathBuf` equality on Windows
+/// would not equate the two separator forms.
+fn build_tracked_dirs(repo_root: &std::path::Path) -> std::collections::HashSet<String> {
+    let mut dirs = std::collections::HashSet::new();
+    let Ok(repo) = git2::Repository::open(repo_root) else {
+        return dirs;
+    };
+    let Ok(index) = repo.index() else {
+        return dirs;
+    };
+    for entry in index.iter() {
+        let Ok(rel) = std::str::from_utf8(&entry.path) else {
+            continue;
+        };
+        // Anything tracked at all makes the repo root a tracked directory.
+        dirs.insert(String::new());
+        let mut cur = rel;
+        while let Some((parent, _)) = cur.rsplit_once('/') {
+            // Already present means its ancestors are too — every chain walks to the
+            // root — so there is nothing left to add above this point.
+            if !dirs.insert(parent.to_string()) {
+                break;
+            }
+            cur = parent;
+        }
+    }
+    dirs
 }
 
 async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
