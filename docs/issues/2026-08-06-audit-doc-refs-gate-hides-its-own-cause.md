@@ -202,5 +202,5 @@ Two follow-ups, both small:
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — "Treating the summary as authoritative"
   anti-pattern. (There is no docs/PROGRESSIVE_DISCLOSURE.md; five other docs still
   cite that nonexistent name — see the drift backlog.)
-- `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
+- `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
   remaining population, including the wrong-guide-name citations above.

@@ -1,12 +1,20 @@
 ---
-status: open
-opened: 2026-08-06
-closed:
-severity: medium
-owner: marius
-related: ["56b725405a9c36d1", "21f6d21b3bf82c30"]
-tags: [docs, audit_doc_refs, ci, drift, backlog]
 kind: bug
+status: archived
+tags:
+- docs
+- audit_doc_refs
+- ci
+- drift
+- backlog
+closed: 2026-08-06
+closed_sha: 6348dfad (experiments)
+opened: 2026-08-06
+owner: marius
+related:
+- '56b725405a9c36d1'
+- '21f6d21b3bf82c30'
+severity: medium
 ---
 
 # BUG: real doc-reference drift in 11 of 16 docs/ subdirectories keeps the Audit Doc Refs gate red
@@ -348,6 +356,31 @@ and fmt (see `docs/RELEASE.md` § Large-Cohort Promotion) — but it does mean t
 doc-lint signal is unusable until then, since everything is red.
 
 ## Resume
+**CLOSED 2026-08-06 — `Audit Doc Refs` is green in CI. Run 31107853410 on `6348dfad`:
+15/15 jobs green, the first fully-green run on `experiments`.**
+
+The SHA above is an **`experiments`** SHA and will be orphaned by the next
+`git rebase master`. **The master-side SHA still needs recording after cherry-pick** —
+recover it with `git log master --oneline --grep="gitignored-path cap"` if lost.
+
+Verified three ways, because a local green had already lied once:
+
+1. `--fail-on high` → `EXIT=0` on the working tree, six consecutive runs.
+2. `--fail-on high` → `EXIT=0` against a fresh `git clone --depth 1` — the check that
+   caught what the working tree could not see. 881 files, 46716 refs.
+3. CI, 15/15.
+
+**And the number that says it was not silenced: 8904 broken refs are still reported**, all
+at `med`. If a later change drops that count too, distrust it.
+
+The two decisions this file existed to frame were both taken — `historical_drop` and the
+section-scoped marker. Rationale, alternatives, and the arguments against each are in
+§ Resume below and in `docs/trackers/release-promotion-session-log.md` § *Resume — round 5*.
+
+Still open, and deliberately not folded into this closure:
+`docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`. At zero high findings
+a single flap now decides green-versus-red, so that bug matters *more* after this fix than
+before it.
 ### Ready to script — the archived-citation class is a pure prefix insertion (11/11 confirmed)
 
 Do this before either decision below; it needs no policy call and it is the largest

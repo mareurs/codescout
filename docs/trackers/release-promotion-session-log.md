@@ -94,7 +94,7 @@ Per-directory `--paths` counts (the only trustworthy method — see F-6):
 ### The two decisions left — both yours, both gate-semantics
 
 They are written out in full, with recommendations and the arguments against, in
-`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` § Resume.
+`docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` § Resume.
 In brief: (1) do dated documents gate CI — extend the drop policy (recommended) or
 narrow the scan set; (2) what scope should the `<!-- audit-doc-refs:ignore -->` marker
 have for the last 11 manual findings — section-scoped recommended, because a line-scoped
@@ -216,7 +216,7 @@ was 4 green / 11 red, measured on code 21 commits stale.
 ### The one open item: `Audit Doc Refs`
 
 Diagnosed and measured, not unknown. Tracked in
-`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
+`docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
 
 After the extractor fixes and the `docs/lessons/**` exclusion, >50 high findings remain
 in **three sub-classes needing three different mechanisms**:
@@ -301,7 +301,7 @@ would trade the gate's whole value for a green check.
 
 | Surface | Holds |
 |---|---|
-| `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` | the one open CI blocker, with the bisect method |
+| `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` | the one open CI blocker, with the bisect method |
 | `docs/issues/archive/2026-08-06-windows-*.md` | WIN-28 (nine panics, three causes) + WIN-29 duplicate proof |
 | `docs/trackers/windows-platform-support.md` | WIN-28/29 index rows + a History entry |
 | this file, F-4 / F-5 / W-2 / W-3 / W-4 | the session's transferable lessons |
@@ -339,7 +339,7 @@ would trade the gate's whole value for a green check.
 > illustrative paths inside `docs/manual/src/concepts/**` (src/services/auth.rs, src/foo.rs,
 > .worktrees/my-feature, docs/trackers/my-tracker.md — un-code-spanned, see round 3). Three sub-classes needing three
 > different mechanisms — see
-> `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`:
+> `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`:
 >
 > 1. **Fictional example paths** — need an author-supplied marker; nothing syntactic separates
 >    "illustrative" from "stale".
@@ -365,7 +365,7 @@ would trade the gate's whole value for a green check.
 >
 > | Cleared | Still red |
 > |---|---|
-> | Tool Docs Sync | Audit Doc Refs — `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` |
+> | Tool Docs Sync | Audit Doc Refs — `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` |
 > | ubuntu/no-features | Test (windows-latest / default) — WIN-28 |
 > | ubuntu/local-embed | Test (windows-latest / no-features) — WIN-28 |
 > | macos/no-features | Test (windows-latest / local-embed) — WIN-28 |
@@ -733,7 +733,7 @@ End state: nine failures, three root causes, **zero product changes** — and CI
 ## F-6 — A capped findings list corrupted a magnitude estimate for the third time, in the document written to warn about it
 
 **Observed:** 2026-08-06, round 4, planning the doc-drift work from
-`docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
+`docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md`.
 
 **Expected (the plan):** "~11 gitignore-aware + ~42 marker + ~8 by hand" ≈ **61** findings,
 sized as one focused session.

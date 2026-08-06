@@ -91,22 +91,99 @@ session should fix, because without a forcing recipe any "fix" is unfalsifiable.
 
 ## Root cause
 
-Not confirmed. The leading hypothesis, in order of fit:
+**Mechanism identified in code (2026-08-06), not inferred.** `resolve_file_symbol` ends in
+a two-arm match on the LSP symbol lookup, and the two arms sit in *different severity
+bands*:
 
-1. **LSP warmth changes the verdict band, not just the latency.** `resolve_file_symbol`
-   returns `Verdict::Unknown` (severity `low`) when no LSP is available, and
-   `SymbolMissing` (`high`) when an LSP answers and the symbol is absent. So the
-   *same* stale symbol ref lands below the gate on a cold run and above it on a warm
-   one. That is exactly a 2→0 / 1→0 flap, and it needs no bug anywhere else —
-   the severity model simply makes gate membership a function of LSP readiness.
-2. Mux ownership races on a shared socket, related to the known concurrent-instance
-   class (memory `gotchas` § LSP).
+```rust
+match <lsp document_symbols lookup> {
+    Some(syms) => if symbol_tree_contains(&syms, name) { Resolved }
+                  else { verdict_with_drops(Verdict::SymbolMissing, ..) },  // High
+    None => { ctx.degraded_languages.borrow_mut().push(lang.to_string());
+              Resolution { verdict: Unknown, severity: Low, .. } }          // Low
+}
+```
 
-If (1) is the cause, the honest fix is a policy one: a degraded scan must not be
-allowed to produce a *green* gate either. Today `scan_meta.degraded: true` is
-reported and ignored.
+`default_severity` maps `SymbolMissing` → **High** and `Unknown` → **Low**. So for one
+stale `file_symbol` ref, *whether the LSP answers* decides whether the finding gates.
+Answered-and-absent is a gating drift report; unanswered is a silent low. Nothing about
+the reference changed — only whether a language server responded on that call.
 
+That is the whole flap, and it needs no bug anywhere else: the severity model makes gate
+membership a function of per-request LSP responsiveness. It also explains the shape
+observed twice — counts moving *up* then back *down* — which a monotonic warm-up story
+would not produce.
+
+**It is per-ref, not per-run.** `scan_meta.degraded` is permanently `true` (see § Evidence),
+so scan-level availability is constant while the verdict is not. Whatever moves is one
+lookup, not the session.
+
+The earlier ranking of mux-ownership races (kin to the concurrent-instance class in memory
+`gotchas` § LSP) is now secondary: it may explain *why* an individual lookup occasionally
+returns `None`, but the reason a returned `None` changes the **exit code** is the fork
+above.
+
+### What this makes the fix
+
+The honest options are narrower than they looked:
+
+1. **Take `file_symbol` out of the gate.** Cap `SymbolMissing` below `high`, or route it
+   through a drop. One line, removes the entire class, and costs only that a genuinely
+   renamed symbol reports at `med` — which is where a `file_line` range check already
+   sits. Recommended.
+2. **Require the LSP for languages present in the repo** and fail the run when a lookup
+   returns `None`, so the two arms stop straddling the gate. Correct but needs a warm-up
+   barrier and makes CI depend on language-server availability.
+
+**Not viable as written:** "exit non-zero when `scan_meta.degraded`". That flag is saturated
+— `"unknown"` is pushed for every ref into a file whose extension is outside the six
+languages `detect_language` knows, so it is `true` on every run including all 15 green CI
+runs. Fixing the flag to mean "a server I expected was missing" is a prerequisite, and
+arguably its own defect.
 ## Evidence
+### Second instance, observed 2026-08-06 at the zero boundary — and it changes the picture
+
+Immediately after archiving the backlog bug and repointing its three inbound citations,
+two **consecutive** full scans on an identical tree:
+
+```
+run A: {"exit": 1, "high": 1, "broken": 8494}
+run B: (same command, seconds later)  high: 0     <- empty finding list
+```
+
+Then 8 further runs: `high=0` every time. So the flap is real and it is rare — this was
+roughly the 43rd invocation of the session after 42 clean ones — and it landed exactly
+where it costs the most, at the zero boundary where one finding is the whole verdict.
+
+**The evidence was lost, and that is my error, not the tool's.** Run A printed only the
+count and discarded the JSON; run B was a *fresh scan*, so by the time the finding list was
+asked for, the flap had passed. The identity of the flapped ref is therefore unknown.
+**Always persist the full JSON per run when hunting a flake** — a count is not evidence, and
+re-running to "look closer" destroys the only sample.
+
+### `scan_meta.degraded` is permanently true, which kills Fix direction 1 as written
+
+Across all 10 runs, without variation:
+
+```
+degraded=true  offline=["unknown"]
+```
+
+Not a transient. `"unknown"` is what `detect_language` returns for a path whose extension
+has no LSP mapping, and `resolve_file_symbol` pushes that onto `degraded_languages` before
+returning `Verdict::Unknown`. Any `file_symbol` ref into such a file therefore marks the
+whole scan degraded — permanently, benignly, on every run.
+
+So **"exit non-zero when `scan_meta.degraded`" would fail every single run**, including all
+15/15-green CI runs. The signal is saturated and carries no information as it stands.
+Before that fix direction is usable, `degraded` has to distinguish *a language whose server
+is missing* from *a file that has no server by design* — which is arguably the real defect
+here, since the flag exists to tell a caller its coverage was incomplete and currently
+cannot.
+
+That also weakens hypothesis 1 as the sole explanation: degradation is constant while the
+verdict is not, so whatever moves must be finer-grained than the scan-level flag — a
+per-ref LSP response, not a per-run LSP availability.
 
 - `scan_meta` in every local run of the full scan: `{"degraded": true,
   "lsp_languages_offline": ["unknown"]}`. The tool already knows it is not seeing
@@ -255,5 +332,5 @@ green run on a symbol-heavy diff as unconfirmed.
   `SymbolMissing` is `High` and `Unknown` is `Low`.
 - `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` —
   sibling flake, still open.
-- `docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
+- `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
   backlog this was found while working.
