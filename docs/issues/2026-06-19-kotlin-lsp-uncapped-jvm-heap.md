@@ -364,8 +364,8 @@ Two details in the implementation worth keeping:
   "Native memory tracking is not enabled".
 
 Remaining, unchanged and re-stated so the list is honest: item 1 (cherry-pick to master —
-gated, and `master` is protected so it is the user's call), item 5 (bump kotlin-lsp to
-`262.8190.0`), item 6 (content-root scoping, which upstream #203 suggests may not be
+gated, and `master` is protected so it is the user's call), item 5 (**CLOSED — the host runs
+`262.9593.0`, past the requested `262.8190.0`; see the later 2026-08-06 update**), item 6 (content-root scoping, which upstream #203 suggests may not be
 honoured — verify empirically before relying on it). Item 2's known limitation also still
 stands: a mem-kill does not count toward the LSP circuit breaker, so a slow
 kill→respawn→grow→kill loop is bounded but unthrottled.
@@ -394,6 +394,106 @@ reconnected on 2026-08-06, which is the precondition this file recorded, so
 `jcmd <kotlin-lsp pid> VM.native_memory summary` should now return a category breakdown
 rather than "Native memory tracking is not enabled". That needs a kotlin LSP brought up
 first.
+
+**Item 3 live-verified 2026-08-06, with a control.** `jcmd 3478451 VM.native_memory summary`
+against the codescout-workspace instance — launched from the rebuilt binary, whose
+`JAVA_TOOL_OPTIONS` reads `-Duser.home=… -XX:NativeMemoryTracking=summary -Xmx2g` — returns
+a full category breakdown. The same command against a pre-rebuild instance (pid 173538, cwd
+`backend-kotlin`, no flag) returns exactly `Native memory tracking is not enabled`. So the
+flag, and only the flag, accounts for the difference. The live process listing also confirms
+the ordering invariant the unit test pins: NMT appears *before* `-Xmx2g`, leaving codescout's
+cap as the final `-Xmx`.
+
+**Baseline capture — healthy instance, 51 minutes uptime, codescout workspace:**
+
+| | |
+|---|---|
+| `VmRSS` | 532 740 kB (~520 MiB) |
+| NMT total committed | 442 641 kB (~432 MiB) |
+| NMT total reserved | 4 100 593 kB (~3.9 GiB) |
+| `VmSize` | 5 420 700 kB (~5.2 GiB) |
+| Java Heap reserved | 2 097 152 kB = **exactly 2 GiB** — the cap in effect, confirmed a third time |
+| Java Heap committed / peak | 131 072 kB / 224 256 kB |
+| largest non-heap committed | GC 128 136 kB, Metaspace 63 379 kB, Code 28 970 kB |
+| threads | 104 |
+| `VmSwap` | 0 |
+
+**What the baseline establishes, and the limit it exposes.** NMT accounts for ~83 % of RSS
+here; the unaccounted ~88 MiB is the expected shape of mappings NMT does not track
+(executable and shared-library text, page tables). That ratio is the yardstick, and it turns
+the next occurrence into a decision rather than a puzzle:
+
+- **NMT total committed grows with RSS** → the balloon is JVM-managed, and the category
+  breakdown names it. NMT is sufficient.
+- **NMT total stays near 500 MiB while RSS reaches 35 GB** → the balloon is *outside* JVM
+  tracking: native allocations made by libraries called through JNI, with IntelliJ's
+  RocksDB-backed indexes the prime suspect. NMT cannot attribute that, and the instrument
+  becomes `pmap -X` / `smaps_rollup` plus a malloc profiler.
+
+This **qualifies** rather than refutes this file's claim that NMT is the instrument for the
+unsolved half. It is the right first instrument and it now works — but a 35 GB RSS beside a
+500 MiB NMT total would mean the answer lives where NMT cannot see, and that outcome is
+itself the finding. So capture **both** numbers at the same moment: an NMT summary without a
+matching `VmRSS` cannot distinguish the two cases, and the 2026-07-08 captures recorded RSS
+without NMT, which is the same blind spot from the other side.
+
+**A non-finding, recorded so it is not re-investigated.** The live listing shows the worktree
+instance (pid 3148316, cwd `backend-kotlin/.worktrees/its-s2`) carrying
+`GRADLE_USER_HOME=/tmp/codescout-mux-gradle-26a9e85d58931839` — its *parent repo's* hash —
+while its `user.home` and `--system-path` use its own `509dba098b20943c`. That reads like a
+cross-instance leak and is not:
+`kotlin_worktree_shares_gradle_home_but_not_system_path` in `src/lsp/servers/mod.rs` asserts
+exactly this shape, so a worktree reuses the main repo's Gradle cache while keeping a private
+IntelliJ system dir.
+
+**Item 5 is done twice over, and this file had not recorded the second bump.** The host now
+runs **`LS-262.9593.0`**, installed **2026-08-03** (`pacman -Qi kotlin-lsp-bin` →
+`262.9593.0-1`), which is *newer* than the `262.8190.0` item 5 asks for. So the Resume's
+"remaining" list was stale in both directions: the 2026-07-08 update above records the
+8190 bump as applied, and the host has since moved past it. **Item 5 is closed.** What is
+not yet done is reviewing 262.9593.0's changelog — the jump from 8190 is unreviewed here, so
+whether it touches #203 or the RocksDB path is unknown.
+
+**All three live instances confirmed on that binary.** `/proc/<pid>/exe` for pids 3478451,
+3148381 and 173538 all resolve to `/usr/share/kotlin/kotlin-lsp/bin/intellij-server` with no
+`(deleted)` marker, and `/usr/bin/kotlin-lsp` was re-symlinked 2026-08-03 04:55. All three
+started 2026-08-06, well after that, so none is holding a stale inode — the check this file
+used for the 8190 upgrade, applied again.
+
+**Three concurrent post-upgrade lifecycles, none ballooning:**
+
+| pid | uptime | `VmRSS` | `VmSwap` | workspace |
+|---|---|---|---|---|
+| 3478451 | 53 min | 532 808 kB (~520 MiB) | 0 | **`codescout`** — the workspace that used to balloon |
+| 3148381 | 2 h 00 min | 518 100 kB (~506 MiB) | 0 | `backend-kotlin/.worktrees/its-s2` |
+| 173538 | **10 h 53 min** | 557 632 kB (~545 MiB) | 0 | `backend-kotlin` |
+
+Host at capture: `MemTotal` 125.1 GiB, `MemAvailable` 68.5 GiB — no pressure, and no
+mem-kill fired (uptimes are continuous, so there is no kill→respawn loop hiding under these
+numbers).
+
+The 10 h 53 min instance is the load-bearing one. Every pre-upgrade capture in this file's
+Evidence began climbing **within 5–20 s of spawn** and reached 20–37 GB; this one sat at
+545 MiB for nearly eleven hours. And 3478451 is the `codescout` workspace specifically — the
+multi-language repo where Kotlin is a minority, which is the configuration § Upstream status
+blames for triggering #203, while `backend-kotlin` was said to escape it. It is flat too.
+The NMT baseline recorded just above is therefore a `262.9593.0` measurement, not a
+`262.7569.0` one.
+
+**This file's own monitoring criterion is now met.** The 2026-07-08 entry said *"Continue
+monitoring further organic spawns before downgrading this bug's severity or status"*; with
+the 2 h 07 min sample there, these three make **four** non-ballooning post-upgrade
+lifecycles against three ballooning pre-upgrade ones. The case for `severity: high` →
+`medium` is now evidence-backed rather than hopeful.
+
+**Not taken, deliberately.** Severity stays `high` and status stays `investigating`, for two
+reasons that the samples do not touch: upstream **#203 is still open and unfixed**, so the
+mechanism blamed for the balloon has no upstream resolution and could resurface under a
+different indexing trigger; and this bug is titled for a **host OOM**, where the cost of an
+optimistic label is paid by the whole machine. Four clean samples across one version is
+encouraging, not exculpatory. The concrete next step is a spawn against the `codescout`
+workspace under a real Kotlin query load rather than idle attachment — all three captures
+here are lightly-used instances, and the pre-upgrade balloons followed indexing.
 
 ## References
 - Launch env builder: `src/lsp/servers/mod.rs:85-106`
