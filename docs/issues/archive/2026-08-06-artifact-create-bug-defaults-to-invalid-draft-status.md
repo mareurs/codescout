@@ -1,7 +1,7 @@
 ---
 id: '76b47df029338177'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(create, kind="bug") defaults status to `draft` — not in the bug vocabulary, and invisible to the canonical open-bug query'
 tags:
 - librarian
@@ -9,6 +9,7 @@ tags:
 - tracker-conventions
 - bookkeeping
 - silent-failure
+closed: 2026-08-06
 ---
 
 ## Summary
@@ -175,6 +176,24 @@ Not implemented. Three parts, and they are independent:
    Part 3 is worth doing **even if 1 and 2 are declined**, because it is the half that
    hides a state the guide actively instructs people to use.
 
+### Implemented and verified on the live MCP path
+
+**Fix commit:** `e58ad463` — **experiments** (`git branch --contains e58ad463` lists
+`experiments` only; not yet on `master`). `resolve_status(kind, requested)` in
+`src/librarian/tools/create.rs` resolves the default per kind and refuses an
+out-of-vocabulary bug status.
+
+**Live verification 2026-08-06, after a release rebuild and MCP reconnect** — the check this
+file's Resume demanded, because the earlier reproduction proved the source fix was inert in a
+stale binary:
+
+- `artifact(create, kind="bug")` with no `status` → `status: open`
+- `artifact(create, kind="bug", status="wip")` → refused:
+  `status "wip" is not a bug status; use one of: open, investigating, fixed, mitigated, wontfix, zombie`
+
+CI also ran the regression tests on `fcb6598f`, whose tree contains this fix: three test jobs
+green (ubuntu no-features, windows default, windows local-embed).
+
 ## Tests added
 
 None yet. The regression test for part 1 is a create-then-find round trip asserting the
@@ -188,20 +207,11 @@ with the `in` filter above rather than `status="open"`.
 
 ## Resume
 
-1. Read the create path's status defaulting and confirm half one. Named guess:
-   `src/librarian/tools/create.rs`.
-2. Apply parts 1–3. Part 3 first if time is short — it is documentation-only and it is
-   the part that hides a legitimate state rather than producing one bad row.
-3. Sweep for other victims: `artifact(action="find", kind="bug")` with no status
-   constraint, and compare against the `status="open"` result. Any bug in the first set
-   and not the second is either terminal-and-unarchived or invisible-and-live, and the
-   two are worth telling apart.
-
-**Added 2026-08-06 ~18:35Z:** before archiving, rebuild with `cargo rb`, reconnect the MCP
-session, then create a throwaway bug via `artifact(create, kind="bug")` with no `status` and
-confirm it returns `open`. Until that passes the fix is source-only — see the fresh
-reproduction under Evidence.
-
+Fixed and verified — no investigation remains. **One bookkeeping item outstanding:**
+`e58ad463` is an **experiments** SHA. After the cohort reaches `master` (fast-forward or
+cherry-pick), record the master-side SHA in the Fix section above via `git rev-parse HEAD` on
+`master`. An experiments SHA orphans on rebase, and nothing re-reads `docs/issues/archive/` to
+repair it.
 ## References
 
 - `get_guide("tracker-conventions")` § *Bug files* — the six-value vocabulary and the

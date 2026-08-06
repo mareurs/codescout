@@ -334,17 +334,21 @@ what that field actually contained on a real run. It was wrong for a reason a si
 `jq .scan_meta` would have shown. Reading the field beat reasoning about it, which is the
 same lesson as W-5 in `docs/trackers/release-promotion-session-log.md`.
 
-Not implemented. Two candidate directions, and they are not exclusive:
+**Superseded — kept for the record.** The block below was the pre-implementation plan, and it
+contradicted the "both halves implemented" opening above until 2026-08-06. Both directions are
+now resolved:
 
-1. **Make degradation gate-visible.** If `scan_meta.degraded` is true, `--fail-on high`
-   should not report a clean pass; either exit non-zero with a distinct code or refuse
-   to render a verdict. A gate that silently downgrades its own coverage is worse than
-   a gate that fails loudly.
-2. **Make symbol resolution deterministic for CI.** Either require the LSP for the
-   languages present (fail the run if unavailable), or drop `file_symbol` refs to a
-   non-gating band entirely so the gate depends only on the filesystem. The second is
-   cheap and removes the whole class; the first keeps the check but needs a warm-up
-   barrier.
+1. ~~Make degradation gate-visible.~~ **Invalidated on measurement** — `degraded` was
+   saturated `true`, so gating on it would have failed every run ever, including all fifteen
+   green CI jobs. It is de-saturated above, and deliberately *not* wired to the exit code.
+2. ~~Make symbol resolution deterministic for CI.~~ **Its cheap option was adopted** —
+   `SymbolMissing` moved to a non-gating band, so the gate now depends only on deterministic
+   filesystem facts. The warm-up-barrier variant was not pursued.
+
+**Confirmed live on a release rebuild, 2026-08-06.** A full default scan through the freshly
+built MCP binary: 884 files, 8500 broken refs, **0 high**, `exit_code: 0`,
+`scan_meta.degraded: false`, `lsp_languages_offline: []`. The earlier before/after table was
+measured mid-session; this re-measures it on the binary the fix actually ships in.
 
 ## Tests added
 
