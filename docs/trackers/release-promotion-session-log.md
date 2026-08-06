@@ -195,8 +195,22 @@ locally (`de4f7cc`: 0 high, 881 files, 46726 refs, 8906 broken at `med`):
 - `de4f7ccd` — backlog bug archived through the librarian; the three inbound citations that
   the archive broke were repointed by the same mechanical rule.
 
-**Still verify the current run rather than trusting this line** — there is one in flight for
-`de4f7ccd`. `gh run list --branch experiments --limit 1`. And per
+**Three consecutive fully-green CI runs, confirmed:**
+
+| run | SHA | result |
+|---|---|---|
+| 31107853410 | `6348dfad` | 15/15 — trailing-slash cap fix |
+| 31108238052 | `db4b1968` | 15/15 |
+| 31109236437 | `de4f7ccd` | 15/15 — first run including the `SymbolMissing` band change |
+
+`Audit Doc Refs` passed in all three, and `Windows-gnu cross (MinGW + wine)` with them. The
+run for the final docs commit was still in flight at writing time — **check it rather than
+trusting this line**, `gh run list --branch experiments --limit 1`.
+
+The streak matters more than any single green, given
+`docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`: that bug is still open,
+and three independent runs is the strongest available evidence that the band change removed
+the flap from the exit code rather than merely not tripping it once. `gh run list --branch experiments --limit 1`. And per
 `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`, do not treat a
 single green `Audit Doc Refs` as proof — that bug is still open.
 ## Resume — round 3, written 2026-08-06 for session compaction
