@@ -230,6 +230,77 @@ Capture C — pid 955632, spawned 04:52:45 (13 min after Capture B was killed)
    throughout) stayed under 500MB the entire session — consistent with the
    2026-06-20 entry's "50x the real project's LSP" observation, now confirmed
    to persist with Fix 1 applied.
+
+### 2026-08-07 — the distribution caps the heap independently of codescout, and the changelog is a dead end
+
+Two of the outstanding items closed, and the result reframes what this bug is titled for.
+
+**The installed package ships its own 2 GiB cap.**
+`/usr/share/kotlin/kotlin-lsp/bin/intellij-server.vmoptions`, owned by `kotlin-lsp-bin
+262.9593.0-1` (built and installed 2026-08-03), contains:
+
+```
+-Xms128m
+-Xmx2048m
+-XX:+HeapDumpOnOutOfMemoryError
+```
+
+**It is demonstrably honored.** `jcmd <pid> VM.flags` on all three live kotlin-lsp JVMs (878769,
+1605859, 1681565) reports identical values:
+
+```
+-XX:InitialHeapSize=134217728  -XX:MaxHeapSize=2147483648  -XX:SoftMaxHeapSize=2147483648
+```
+
+`InitialHeapSize` = **128 MiB** is the discriminator: codescout passes only `-Xmx2g` via
+`JAVA_TOOL_OPTIONS` and never sets `-Xms`, so 128 MiB can only have come from the vmoptions file.
+That proves the file is read, which in turn means its `-Xmx2048m` would cap the heap at 2 GiB
+**even if codescout passed nothing at all**. Both sources agree at 2 GiB, so the precedence
+question between `JAVA_TOOL_OPTIONS` (prepended, loses to later args) and vmoptions is moot here.
+
+**What this does NOT establish.** Whether the package in use when this bug was opened (2026-06-19)
+also shipped the cap. The file's mtime is the current package's build date, not the date the
+`-Xmx` line was introduced, and `/var/cache/pacman/pkg` holds no older `kotlin-lsp` package to
+extract and compare. So the original ~31 GiB observation is consistent with either an uncapped
+older package or a launcher path that bypassed vmoptions, and this machine can no longer
+discriminate. Recorded as unresolved rather than assumed either way.
+
+**Consequence for severity, which belongs with item 1's decision.** The host-OOM risk in this
+bug's title is now contained by **two independent 2 GiB caps**, and measured usage is ~25% of that
+— three instances flat at 520 / 506 / 545 MiB, the last at 10h53m. `severity: high` is hard to
+justify against that; the argument for holding it was that #203 is open and the captures were
+lightly used, and only the second half still stands.
+
+### 2026-08-07 — changelog review (item 5 follow-up): nothing relevant, and 262.9593.0 is the newest release
+
+`262.9593.0` is the **latest** kotlin-lsp release. Its notes, and every other release's, say
+nothing about JVM heap, memory sizing, `-Xmx`, vmoptions, indexing scope, content roots, or
+large-monorepo performance. The only adjacent entry is older — v261.13587.0: *"Indices are now
+stored in a dedicated folder and are properly shared between multiple projects"* — which is the
+feature codescout already exploits via its per-instance `--system-path`.
+
+So there is no upstream fix to wait for or adopt, and no configuration knob announced anywhere.
+
+`idea.properties` in the same directory carries only `idea.max.intellisense.filesize=2500` and
+`idea.max.content.load.filesize=20000` — file-size limits, not scope controls. There is no
+scoping setting in the shipped configuration.
+
+**#203 re-verified:** OPEN, **0 comments**, created *and* last updated 2026-05-15 — no maintainer
+response in nearly three months. `The LSP always queries all files in the workspace root`.
+
+### What that does to item 6 (content-root scoping)
+
+Item 6 exists to shrink the indexing footprint. With the heap hard-capped at 2 GiB from two
+independent sources and actual usage flat at ~25% of the cap, **there is no heap pressure left for
+scoping to relieve.** Its remaining value is startup latency and disk, not OOM avoidance — a
+different and much weaker motivation than the one it was written under.
+
+The experiment was therefore **not run**: it changes how codescout launches kotlin-lsp, and
+#203's title says plainly that the LSP always queries all files in the workspace root, with no
+maintainer response suggesting a knob exists. Spending a launch-config change plus a mux restart
+to confirm a documented upstream limitation, in service of a pressure that measurement says is
+absent, is the wrong trade. Reclassify item 6 as a performance question or drop it — that call
+goes with item 1's.
 ## Hypotheses tried
 1. **Hypothesis:** The 27 GB is workload-driven (large project to index).
    **Test:** compare against the kotlin-lsp serving the real Kotlin backend
