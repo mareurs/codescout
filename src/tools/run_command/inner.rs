@@ -336,6 +336,19 @@ pub(crate) async fn run_command_inner(
     // --- Step 4: Resolve working directory ---
     let work_dir = resolve_work_dir(root, cwd_param)?;
 
+    // --- Step 4.2: Shell preflight ---
+    // Last check before anything is spawned, and deliberately after the policy
+    // gates above: a blocked command is blocked whether or not a shell exists,
+    // and reporting the missing shell first would mask the real answer. On
+    // Windows every spawn goes through Git Bash; without one the OS answers
+    // `program not found`, which names neither the requirement nor the fix.
+    // See docs/issues/2026-08-08-run-command-unusable-without-git-bash.md (WIN-36).
+    if let Some(hint) = crate::platform::shell_unavailable_hint() {
+        return Err(
+            RecoverableError::with_hint("no POSIX shell available to run commands", hint).into(),
+        );
+    }
+
     // --- Step 4.7: Background spawn with warm return ---
     if run_in_background {
         if buffer_only {

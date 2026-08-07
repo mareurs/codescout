@@ -63,6 +63,14 @@ pub(crate) async fn run_command_interactive(
         root.to_path_buf()
     };
 
+    // Shell preflight — same contract as the non-interactive path: after the
+    // policy gates, before the spawn. See WIN-36.
+    if let Some(hint) = crate::platform::shell_unavailable_hint() {
+        return Err(
+            RecoverableError::with_hint("no POSIX shell available to run commands", hint).into(),
+        );
+    }
+
     // Spawn with piped stdin/stdout/stderr via the hardened shell builder.
     // Interactive overrides the builder's default stdin (NUL on Windows) with a
     // real pipe, since it drives the child's stdin.

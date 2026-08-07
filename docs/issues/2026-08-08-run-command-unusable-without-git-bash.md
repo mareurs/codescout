@@ -99,6 +99,17 @@ called `Result::unwrap()` on an `Err` value: program not found
 3. **Hypothesis:** the resolver reaches its `bash` fallback and the OS message is the
    whole diagnostic.
    **Verdict:** confirmed — see Root cause.
+4. **Hypothesis (about the fix, not the bug):** the preflight belongs at the top of
+   `RunCommand::call`, since no command can run without a shell.
+   **Test:** the wine job went 22 failures → 8, and the 8 were *new* — `il3_blocks_*`,
+   `run_command_blocks_cat_on_source_file`, `run_command_cwd_rejects_nonexistent_path`,
+   `run_command_dangerous_rejected_without_ack`. All four gates are pure policy: a
+   blocked command is blocked whether or not a shell exists, and answering "no shell"
+   first masks the real reason for the refusal.
+   **Verdict:** rejected — the preflight moved to `run_command_inner` step 4.2, after
+   the gates and cwd resolution, immediately before the spawn, with the same check
+   added to the interactive path. Worth recording as the general shape: a preflight
+   that runs before the policy layer changes what every policy rejection *says*.
 
 ## Fix
 
@@ -112,8 +123,12 @@ security layer tokenizes POSIX while the shell executes something else.
   bare-`bash` fallback so nothing panics at startup.
 - `shell_unavailable_hint()` in `src/platform/windows.rs`, `src/platform/unix.rs`
   (always `None`), re-exported from `src/platform/mod.rs`.
-- `RunCommand::call` in `src/tools/run_command/mod.rs` preflights it and returns a
-  `RecoverableError` naming Git for Windows and `CODESCOUT_BASH` before any spawn.
+- `run_command_inner` step 4.2 in `src/tools/run_command/inner.rs` preflights it and
+  returns a `RecoverableError` naming Git for Windows and `CODESCOUT_BASH` — after the
+  dangerous-command / source-block / shell-mode gates and cwd resolution, immediately
+  before the spawn. `run_command_interactive` in
+  `src/tools/run_command/interactive.rs` carries the same check at the same point.
+  Placement is load-bearing; see Hypotheses tried #4.
 - `.github/workflows/ci.yml` — the 22 wine failures are skipped as environmental, with
   the un-skip protocol (install Git in the image, drop the block wholesale) in the
   comment.
