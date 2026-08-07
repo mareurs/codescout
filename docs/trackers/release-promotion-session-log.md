@@ -30,6 +30,31 @@ tags:
 Every other task (#15-#32) is complete. Do not re-derive the backlog from this log — the task list is
 authoritative and each entry carries its evidence.
 
+### Round 16 addendum (2026-08-08) — read this before the git-state section below
+
+Round 9's tip **`f244ad17` FAILED CI** on `Audit Doc Refs`, after this Resume was written.
+Cause: archiving three bug files on 2026-08-07 (`9886773e`, `2feeabf5`) moved their paths and
+left **25 dangling citations across 15 files**; one of them was in the published manual, which
+gates at full severity. Fixed in **`e20b3a04`** — 12 live surfaces re-pointed, 13 historical
+ones deliberately left. See **F-20**.
+
+Current state, verified 2026-08-08:
+
+- tip **`e20b3a04`**, **475 ahead / 0 behind** `master` — still a clean fast-forward
+- CI run `31219510777` on that exact SHA: **green, all 15 jobs**, `Audit Doc Refs` included
+- **open bugs are now 6, not 5.** The new one is
+  `docs/issues/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md` —
+  `DEFAULT_AUDIT_GLOBS` is an allow-list and `CHANGELOG.md` / `CONTRIBUTING.md` are outside
+  it, hiding 18 broken refs and 8 high findings from every CI run. **Does not block the
+  merge** (it is a coverage gap, not a regression), and deliberately not fixed on the eve of
+  the promotion: its 8 highs are in released-version sections describing a module layout
+  that was correct when it shipped, so it needs a severity story for changelog history
+  before the glob widens.
+- `docs/trackers/pr-review-session-log.md` is still the concurrent session's — never stage it.
+
+**The gate rule is unchanged and this round is the proof of it:** a green run on whatever the
+tip is *at that moment*, never a SHA from this log. Round 9 handed over a tip that had not
+finished its run; it went red.
 ### THE MERGE IS UNBLOCKED AND IS THE MAINTAINER'S TO RUN
 
 This inverts round 8's header. The deferral was *"no merge yet until we solve all issues"*; that
@@ -1043,6 +1068,7 @@ Ranked by what to do first.
 | F-17 | 2026-08-07 | high | process | fixed-verified | A `--force` reindex ran 7 min dense-only against sqlite-vec instead of hybrid-against-Qdrant, because `cargo build --release` omits `server-stack` and `VectorBackend::resolve()` then defaults to lite — caught only by noticing the sparse container had zero traffic while dense had 73,232 lines; the start log reported chunk_target and flush_batch but neither of the two fields that were wrong |
 | F-18 | 2026-08-07 | high | process | mitigated | A routine `/mcp` killed a running rebuild 4 min in, because `run_command` children inherit the MCP server's lifetime — and took both `@bg_*` buffers with it; second time in one session that server-side state died with a reconnect, the first being the very argument used in the #16 decision. Long jobs must be `setsid`-detached and log to a file |
 | F-19 | 2026-08-07 | med | process | mitigated | Three `pgrep`/`pkill -f` process checks matched their own argv: one falsely reported an indexer running (the exact safety precondition it was checking), one made a poll loop unable to ever exit, and one killed the command running it. `ps -C <binary>` cannot self-match because the checker is not named after the binary |
+| F-20 | 2026-08-08 | high | process | fixed-verified | Archiving three bug files moved their paths and left 25 dangling citations across 15 files; the one in the published manual failed `Audit Doc Refs` on `f244ad17` — the exact commit handed over as merge-ready. Archiving is a bug file's normal end state, so every `docs/issues/<slug>.md` citation is a scheduled break. Reading the audit's severity policy (drops key on the CITING document) rather than only its verdict is what sized the fix correctly: 12 live surfaces re-pointed, 13 historical ones deliberately left. Prevention shipped in the archive flow (`get_guide("tracker-conventions")`); fixed in `e20b3a04` |
 
 ## Wins Index
 
@@ -2201,6 +2227,56 @@ rather than intent.
 **Status:** mitigated — rule stated; nothing enforces it.
 
 **Fix idea / Pointer:** Prefer `ps -C <name>` over `pgrep -f <pattern>` for liveness checks, and never `pkill -f` a pattern that appears in the command being typed. If a pattern match is unavoidable, exclude self explicitly (`pgrep -f pat | grep -v "^$$\$"`). Cheap enough to be a habit rather than a lookup.
+## F-20 — Archiving a bug file broke the manual's citation and failed CI on the promotion tip
+
+**Observed:** 2026-08-08, checking CI on `f244ad17` — the commit deliberately made last so
+the final tip would get one clean run.
+
+**When:** After round 9 closed. Three bug files had been archived the previous day via
+`artifact(action="move")`, correctly and through the catalog.
+
+**Expected:** Green. The archive moves were done the documented way, and `docs/RELEASE.md`'s
+documentation gate lists no citation step.
+
+**Got:** `Audit Doc Refs` **failed**, exit 1, one high finding:
+`docs/manual/src/concepts/retrieval-stack.md:275` citing
+`docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md` — the pre-archive
+path. Every other job passed; the four `cancelled` runs above it were the concurrency block
+working, not failures.
+
+**Probable cause:** Archiving is a bug file's **normal end state**, so every citation of
+`docs/issues/<slug>.md` in a durable surface is a scheduled break — and the move is the moment
+it fires. Nothing in the archive flow said to re-point them. Three moves produced 25 dangling
+refs across 15 files.
+
+**Why only one was reported** — and why fixing all 25 would have been wrong: the audit's
+severity policy keys on the **citing** document (`severity.rs:145`), dropping one band for
+`archive/` and one for `docs/issues/`. So 24 siblings sat at `med` **by design**, because
+`archive_drop` exists precisely so a retired record citing a moved path does not gate.
+Rewriting an archived snapshot to satisfy a linter that already ignores it would falsify the
+record. Reading the policy instead of only the verdict is what produced the right scope: 12
+live surfaces fixed, 13 historical ones left. (Recorded as **R-66** in
+`docs/trackers/reconnaissance-patterns.md`.)
+
+**Workaround → fix:** `e20b3a04` re-points the manual page, `CHANGELOG.md` (2),
+`docs/trackers/retrieval-benchmark.md`, the audit design spec, `.env.example` (2), `.env.gpu`,
+and eight doc comments across four source files. Prevention landed in the same commit:
+`get_guide("tracker-conventions")` § Bug files now carries a re-point-the-citations step in
+the archive flow — with the grep, the instruction to leave archived snapshots alone, and the
+warning that a green CI run is not the check for this (the audit cannot see `CHANGELOG.md`
+at all).
+
+**Severity:** high — it failed the gate on the exact commit handed over as merge-ready, and
+the handover said "check the tip rather than trusting this line", which is the only reason it
+was caught rather than merged red.
+
+**Status:** fixed-verified — CI run `31219510777` on `e20b3a04` green across all 15 jobs;
+`audit-doc-refs --fail-on high` exits 0 locally, top finding `med`.
+
+**Fix idea / Pointer:** The durable one is already shipped (the guide step). The stronger,
+unbuilt version: teach `resolve_file_path` to try `<dir>/archive/<basename>` before reporting
+`Missing`, which would make the whole class self-healing — noted here rather than filed,
+because it trades a true-positive signal (the citation *is* stale) for silence.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
