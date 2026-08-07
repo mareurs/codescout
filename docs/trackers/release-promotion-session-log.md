@@ -799,6 +799,7 @@ Ranked by what to do first.
 | F-9 | 2026-08-07 | med | measurement | fixed-verified | A `--profile minimal` toolchain install produced 12 test failures that read as a compiler regression; the cause was a missing `rust-analyzer` component |
 | F-10 | 2026-08-07 | med | process | fixed-verified | A mutation that failed to kill a test almost got a *correct* test rewritten — the mutation was incomplete (two `Err` arms at different indentation depths), not the test weak |
 | F-11 | 2026-08-07 | med | process | fixed-verified | A bug file's prescribed fix was already implemented — the test it said to convert to a bounded poll already polled for 5 s, so shipping the fix as written would have been a no-op that closed the bug and left the flake |
+| F-13 | 2026-08-07 | high | measurement | fixed-verified | A two-point probe produced a published recommendation that a 28-point probe inverted — the two samples happened to be the extremes of a bimodal distribution, and the middle turned out to overlap the bottom |
 | F-12 | 2026-08-07 | med | test-design | fixed-verified | Seven tests and a green gate shipped a warning whose truncation hid the entry it existed for — every fixture had exactly one hidden entry, so the `more > 0` branch was never exercised; the project's own "both sides of every condition" lens would have caught it |
 
 ## Wins Index
@@ -1664,6 +1665,53 @@ name a live-surface call as an explicit step for any change to tool-facing outpu
 `cargo rb` + reconnect (which only establishes that the new code is running).
 
 **Status:** validated.
+
+## F-13 — A two-point probe produced a recommendation a 28-point probe inverted
+
+**Observed:** 2026-08-07, calibrating researcher's rerank `min_score`.
+
+**When:** Immediately after probing the reranker with one on-topic and one deliberately absurd
+document, and again an hour later after widening the sample because the task itself said to.
+
+**Expected:** the two-point probe bounds the scale. On-topic scored `0.9965708`, absurd scored
+`0.0000107` — four clean orders of magnitude, so any threshold in `0.001`–`0.05` looked safe with
+enormous margin. I wrote that into the bug file, the task, and a commit message.
+
+**Got:** at 28 documents across four relevance tiers, the bands **overlap**. A same-domain document
+("Cargo resolves a dependency graph into Cargo.lock") scored `0.0000108` — *below* banana bread at
+`0.0000114`. Ten documents that all genuinely answered their query included a hedged phrasing at
+`0.0000105`, a terse correct answer at `0.0000114`, and a raw `error[E0502]` demonstrating the exact
+mechanism at `0.0000111`. The `on`-tier floor came out **below** the off-topic ceiling, so the
+recommended range would have dropped correct answers.
+
+**Probable cause:** the two samples were, by construction, the extremes — I chose "clearly relevant"
+and "absurd" precisely to bound the range. On a **bimodal** distribution the extremes are exactly
+the two points that carry no information about the middle, and the middle is where a threshold
+lives. `cross-encoder/ms-marco-MiniLM-L-6-v2` (22M params, MS MARCO, lexically driven) rewards
+surface-token overlap with the query and collapses everything else into a `1e-5` floor — so two full
+correct answers to different queries scored `0.934` and `0.0000989`.
+
+**Workaround:** none needed — retracted in place, in the bug file and the task, before anyone acted
+on it. Both retractions are recorded as their own Evidence subsections rather than edited away, so
+the wrong advice and its correction sit next to each other.
+
+**Severity:** high — higher than F-12. The recommendation was *published* (bug file, task
+description, commit message `65075c6f`) and was specific enough to act on directly. Acting on it
+would have silently dropped same-domain sources from every research result, and the symptom — fewer
+sources — is one the threshold is *supposed* to produce, so it would have looked like the fix
+working.
+
+**Status:** fixed-verified — retracted with the 28-point evidence, and the corrected conclusion is
+stronger than the original question: no threshold works on this model, which redirects the bug from
+tuning to model selection.
+
+**Fix idea / Pointer:** when characterising an unknown numeric scale, **the first probe must span
+the middle, not the extremes.** Two hand-picked endpoints measure the range and say nothing about
+the distribution's shape, and "clearly A" versus "clearly not-A" is the natural pair to reach for.
+Minimum viable shape is three tiers with the middle one adversarial — the case a threshold must NOT
+catch. Kin to F-12 (a one-element fixture never reaches the truncation branch): same failure, moved
+from test fixtures to measurement samples, and in both the sample was chosen for convenience and
+happened to omit the only region that mattered.
 
 ## Template for new entries
 

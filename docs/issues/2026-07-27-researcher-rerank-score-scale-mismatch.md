@@ -1,13 +1,18 @@
 ---
+kind: bug
 status: open
+title: 'BUG: researcher''s reranker is a no-op in its shipping config — ms-marco-MiniLM-L-6-v2 scores lexical overlap, so no min_score separates relevant from irrelevant and the 0.7 relevance weight contributes ~1e-5'
+tags:
+- researcher
+- rerank
+- calibration
+- cross-repo
+closed: null
 opened: 2026-07-27
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
-tags: [researcher, rerank, calibration, cross-repo]
-kind: bug
+- docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
+severity: medium
 ---
 
 # BUG: researcher's rerank score scale is uncalibrated — min_score was dead under TEI, weight blend now distorted under llama-server
@@ -219,6 +224,77 @@ So the immediate fix is much smaller than the *Fix* section's two options imply:
 `0.9965708` — leave a threshold anywhere in roughly `0.001`–`0.05` dropping the off-topic band with
 four orders of magnitude of margin. The normalisation-plus-protocol-flag work remains the right
 shape for making a backend swap safe, but it is no longer needed to make the filter function.
+
+### 2026-08-07, widened sample — RETRACTS the threshold recommendation above
+
+The recommendation two subsections up ("anywhere in `0.001`–`0.05`") came from a **two-document**
+probe and is **wrong**. Widening to 28 documents inverts it.
+
+**The model.** `GET /info` on 30083: `cross-encoder/ms-marco-MiniLM-L-6-v2`, `float32`,
+TEI 1.8.3 on the **CPU** image, `max_input_length: 512`, `auto_truncate: true`. Six layers,
+~22M parameters, trained on MS MARCO short-query/short-passage ranking.
+
+**Wide probe — 3 queries × 18 documents across four relevance tiers:**
+
+| tier | n | min | max |
+|---|---|---|---|
+| `on` (directly answers) | 4 | **0.070537020** | 0.995220600 |
+| `near` (same domain, different question) | 5 | **0.000010750** | 0.002344542 |
+| `tangential` (shared vocabulary only) | 5 | 0.000016503 | 0.000430511 |
+| `off` (unrelated) | 4 | 0.000010696 | **0.000013643** |
+
+The lowest KEEP (`0.0000108`, a `near` document about Cargo's dependency graph) sits **below** the
+highest DROP (`0.0000136`). The bands overlap. A threshold at `0.001` would have dropped
+same-domain sources scoring `0.00057` and `0.00021`.
+
+**Boundary probe — 10 documents that all genuinely answer their query**, written to be weak-but-correct
+(terse, hedged, partial, vocabulary-shifted, and one raw compiler error demonstrating the answer):
+
+```
+0.934022370  on/full              (reuses "borrow checker", "data races", "mutable reference")
+0.000098932  on/full              (correct, full, different surface vocabulary)
+0.000029214  on/no-overlap-vocab
+0.000014959  on/partial
+0.000012642  on/terse
+0.000011418  on/terse             "Aliasing XOR mutability, enforced statically."
+0.000011109  on/code              error[E0502] demonstrating exactly the mechanism
+0.000010749  on/no-overlap-vocab
+0.000010485  on/hedged
+```
+
+`on`-tier floor: **0.000010485** — below the `off` ceiling. Two full, correct answers to different
+queries scored `0.934` and `0.0000989`, a 10⁴ spread. What separates them is **shared surface
+tokens with the query**, not correctness.
+
+**So no `min_score` on this model can separate answering from non-answering documents for this
+workload.** Any value above ~`1.4e-5` drops correct answers phrased differently from the question;
+any value below it drops nothing. That is not a tuning problem, and both options under *Fix* — which
+retune a constant — cannot solve it.
+
+This is the model behaving as designed, not a misconfiguration: MS MARCO MiniLM-L6 is a small,
+lexically-driven, saturating ranker aimed at short web queries over short passages, applied here to
+long-form technical documents against natural-language questions.
+
+### Second retraction: the blend is NOT "fine" under TEI, it is degenerate
+
+The subsection above says the weight blend is fine under TEI because relevance in [0,1] is
+commensurate with authority and quality. The distribution refutes that.
+`combined = relevance*0.7 + authority*0.2 + quality*0.1`, and relevance is ~`1e-5` for every
+document except a near-verbatim lexical match — so its term contributes ~`7e-6` while
+`domain_authority * 0.2` reaches `0.2`. A **~28,000× span mismatch**, in the opposite direction from
+the llama-server case but with the same consequence: one term decides the ranking.
+
+Under TEI, ordering is therefore set almost entirely by **domain authority and quality score**. The
+cross-encoder's only effect is to occasionally promote a document whose wording echoes the query.
+That is a defensible ranking strategy, but it is not what `0.7 / 0.2 / 0.1` claims, and it means the
+rerank stage buys very little for its latency.
+
+### A third finding, incidental but load-bearing
+
+`RerankerClient::rerank` sends `s.content.chars().take(2000)` per source, into a model with
+`max_input_length: 512` and `auto_truncate: true`. So roughly the first 512 tokens are scored and
+the rest of each 2000-char slice is discarded server-side, silently. Any relevance signal past that
+point is invisible to the reranker regardless of threshold.
 ## Hypotheses tried
 
 1. **Hypothesis:** the two backends need different request shapes, so the swap
@@ -260,30 +336,42 @@ healthy, so this is a one-line revert plus a Claude Code restart.
 
 ## Resume
 
-Both the measurement and the provenance question are **done** — see the 2026-08-07 Evidence
-subsections. Nothing left to investigate.
+Measurement, provenance, and model identification are all **done** — see the 2026-08-07 Evidence
+subsections, including two explicit retractions of earlier recommendations in this same file.
 
-**The canonical configuration is TEI on `localhost:30083`**, set identically in all three profiles'
-user-scope MCP `env`, with no `RERANK_MIN_SCORE` so the −5.0 code default applies. TEI returns
-sigmoid scores in [0,1], so **the off-topic filter is inert in the shipping configuration** — and
-the weight blend is fine there, because relevance is commensurate with authority and quality.
+**State of the shipping configuration:** TEI on `localhost:30083` serving
+`cross-encoder/ms-marco-MiniLM-L-6-v2` (22M params, CPU), set identically in all three profiles'
+user-scope MCP `env`, with `min_score` at the −5.0 code default. In that configuration the rerank
+stage is **effectively a no-op**: the filter cannot fire (scores are ≥ 0), and the 0.7 relevance
+weight contributes ~`7e-6` against an authority term reaching `0.2`, so ordering is decided by
+authority and quality.
 
-**Fix, in priority order:**
+**Do NOT just set a constant.** That was this file's earlier advice and it is retracted: at n=28 the
+relevant and irrelevant score bands overlap, so every threshold either drops correct answers or
+drops nothing.
 
-1. **Set `min_score` in TEI units.** Anywhere in `0.001`–`0.05` drops the measured off-topic band
-   (`0.0000107`) with orders of magnitude of margin below the measured on-topic score
-   (`0.9965708`). One-line change; makes a dead knob work. Worth widening the sample past two
-   documents before picking the exact value.
-2. **Add an explicit protocol/normalisation setting** so a backend swap cannot silently change the
-   score scale underneath the blend. `RerankerClient` hardcodes the TEI request/response shape
-   while being pointed at an arbitrary URL, which is how the 48083 server ended up with logits
-   feeding a blend calibrated for [0,1]. Codescout solved the same fork with
-   `CODESCOUT_RERANKER_PROTOCOL` selecting `Protocol::Infinity` in `src/retrieval/reranker.rs`, and
-   `.env.gpu` warns that omitting it silently falls back to the TEI shape.
-3. **Optional housekeeping:** the 48083 server (pid 373104) runs a superseded config revision.
-   Restarting that session realigns it; nothing in the code needs to change for it.
+**Three real options, and the choice is the maintainer's:**
 
-Only step 1 needs a decision, and only about the exact constant.
+1. **Accept it and delete the knobs.** Reranking stays a no-op, `RERANK_MIN_SCORE` and the three
+   weights come out, and the latency of a CPU cross-encoder pass per source is reclaimed. Honest,
+   and cheapest.
+2. **Change the model.** A threshold needs a ranker whose scores are calibrated across paraphrase,
+   not one that rewards lexical echo. That is a model-selection exercise with its own benchmark, and
+   it should be measured against the same four-tier probe shape used here before adopting anything —
+   the harness is `scratchpad/rerank-scale-probe.py` and `rerank-on-boundary.py` (session-local;
+   re-create from the tables above).
+3. **Keep it as a lexical-echo booster and make that explicit.** Drop `min_score` entirely, lower
+   `relevance_weight` to reflect that it only fires on near-verbatim matches, and document the
+   intent so nobody re-tunes a threshold that cannot work.
+
+Independently of the choice, two fixes stand on their own:
+
+- **Add an explicit protocol/normalisation setting.** `RerankerClient` hardcodes the TEI
+  request/response shape while accepting an arbitrary URL, which is how the one stale server ended
+  up feeding llama-server logits into a [0,1]-calibrated blend. Codescout's precedent is
+  `CODESCOUT_RERANKER_PROTOCOL` → `Protocol::Infinity` in `src/retrieval/reranker.rs`.
+- **Reconcile the 2000-char slice with the 512-token limit**, or accept and document that only the
+  head of each source is scored.
 ## References
 
 - `researcher/src/embeddings/reranker.rs:10-19` — request/response types
