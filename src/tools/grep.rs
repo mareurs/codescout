@@ -882,7 +882,15 @@ impl WalkAudit {
                 Some(if dir { format!("{name}/") } else { name })
             })
             .collect();
-        names.sort();
+        // Directories before files, alphabetical within each group. A pruned directory hides an
+        // unbounded subtree; a pruned dotfile hides exactly one file — so directories carry far
+        // more information per character of a truncated list. Pure alphabetical ordering put
+        // `.github/` 12th of 16 in this repo, behind five `.env*` files, which cut the one entry
+        // the warning existed to surface.
+        names.sort_by(|a, b| {
+            let (a_dir, b_dir) = (a.ends_with('/'), b.ends_with('/'));
+            b_dir.cmp(&a_dir).then_with(|| a.cmp(b))
+        });
         names
     }
 
@@ -912,7 +920,7 @@ impl WalkAudit {
             ));
         }
         if !hidden.is_empty() {
-            let shown: Vec<&str> = hidden.iter().take(5).map(String::as_str).collect();
+            let shown: Vec<&str> = hidden.iter().take(8).map(String::as_str).collect();
             let more = hidden.len() - shown.len();
             msg.push_str(&format!(
                 " Hidden paths were not searched, including {}{} at the search root. Pass \
@@ -1715,5 +1723,40 @@ mod tests {
     fn format_grep_leaves_a_trustworthy_zero_bare() {
         let out = format_grep(&json!({ "total": 0 }));
         assert_eq!(out, "0 matches");
+    }
+    #[tokio::test]
+    async fn a_pruned_directory_survives_truncation_of_the_hidden_list() {
+        // Regression for a live-tree failure the earlier tests could not see: each of them had
+        // exactly one hidden entry, so the truncation path never ran. The real repo has 16, and
+        // pure alphabetical ordering put `.github/` 12th — behind five `.env*` files — cutting
+        // the one entry the warning existed to surface. Directories sort first now, because a
+        // pruned directory hides an unbounded subtree and a pruned dotfile hides one file.
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("src");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.rs"), "fn main() {}\n").unwrap();
+        // Nine dotfiles that all sort before the directory alphabetically.
+        for i in 0..9 {
+            std::fs::write(sub.join(format!(".aaa{i}")), "x\n").unwrap();
+        }
+        std::fs::create_dir_all(sub.join(".zeta")).unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({ "pattern": "ABSENT_PATTERN", "path": sub.to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0);
+        let w = res["completeness_warning"].as_str().unwrap();
+        assert!(
+            w.contains(".zeta/"),
+            "the pruned directory must survive truncation: {w}"
+        );
+        assert!(
+            w.contains("and 2 more"),
+            "10 entries with a cap of 8 must report the remainder: {w}"
+        );
     }
 }
