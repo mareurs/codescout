@@ -1241,6 +1241,32 @@ it.
 
 **Status:** validated.
 
+**Extended 2026-08-07 to CI's full Linux matrix.** The first run covered `default` features
+only. CI's test job is 3 OS × 3 configs, and its greens for the other two Linux configs were
+recorded on `fcb6598f` — six commits behind the tip, predating both of the day's code fixes.
+Re-run on 1.97.1 with `LIBRARIAN_WORKSPACE` seeded empty exactly as the workflow does:
+
+| config | flags | result |
+|---|---|---|
+| `default` | *(none)* | 3505 passed / 0 failed / 44 ignored |
+| `no-features` | `--no-default-features` | 2587 passed / 0 failed / 39 ignored |
+| `local-embed` | `--features local-embed --no-default-features` | 2588 passed / 0 failed / 39 ignored |
+
+**8680 tests, zero failures.** `default` matches the earlier run's counts exactly, so seeding
+an empty librarian workspace changed nothing — no test was leaning on the developer's real
+`workspace.toml`, which is the hidden env dependency `docs/conventions/test-env-isolation.md`
+exists to prevent.
+
+Two incidental readings worth keeping. Reading the workflow *before* running is what surfaced
+both the `components: rust-analyzer` line — independent confirmation of F-9's diagnosis, since
+CI installs precisely the component `--profile minimal` omitted — and the empty-workspace
+seeding the first run had skipped. And `local-embed` runs exactly **one** test more than
+`no-features` (2588 vs 2587), so that feature's entire suite-level delta is a single case;
+thin coverage for a flag that swaps the embedding backend.
+
+Still not locally reproducible, and still owed to real CI: the macOS and Windows rows,
+`Windows-gnu cross`, and `Tool Docs Sync`.
+
 ## F-9 — A minimal-profile toolchain install produced 12 test failures that read as a compiler regression
 
 **Observed:** 2026-08-07, immediately after installing 1.97.1 to run CI's gate locally (W-9).
