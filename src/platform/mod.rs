@@ -61,14 +61,6 @@ pub fn lsp_binary_name(base: &str) -> String {
     imp::lsp_binary_name(base)
 }
 
-/// Build the verbatim command-line tail handed to `cmd /C` on Windows.
-/// Wrapped in an outer quote pair so cmd's `/C` quote rule consumes exactly
-/// that pair and runs the inner command — including its own quotes — verbatim.
-/// Pure + cross-platform so it is testable on the Linux CI.
-pub fn build_windows_cmdline(cmd: &str) -> String {
-    format!("/C \"{cmd}\"")
-}
-
 /// Resolve the on-disk binary name for a dual-packaged LSP server, parameterized
 /// over an existence probe so the extension-preference logic is pure and
 /// unit-testable on any platform (the `PATH` side-effect lives in the Windows
@@ -120,23 +112,122 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     imp::shell_command_configured(cmd)
 }
 
+/// Tokenize a command string using POSIX shell rules: single quotes are
+/// literal, double quotes group without consuming backslash escapes, and an
+/// unescaped backslash escapes the next character outside single quotes.
+///
+/// Shared by both platforms because both now execute through a POSIX shell
+/// (`sh -c` on Unix, Git Bash `bash -c` on Windows). One tokenizer here is
+/// load-bearing rather than tidy: this feeds the security layer's
+/// dangerous-command and pipeline checks, so tokenizing with rules the
+/// executing shell does not use would let a command read as safe here and
+/// then behave differently when it actually runs.
+///
+/// Pure + cross-platform so its tests run on every CI target, not just Windows.
+pub fn posix_tokenize(cmd: &str) -> Result<Vec<String>, String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape_next = false;
+
+    for ch in cmd.chars() {
+        if escape_next {
+            current.push(ch);
+            escape_next = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escape_next = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    if in_single || in_double {
+        return Err("unclosed quote".to_string());
+    }
+    Ok(tokens)
+}
+
+/// Render a path for interpolation into a shell command string.
+///
+/// Unix: unchanged. Windows: backslashes become forward slashes, because the
+/// command is executed by Git Bash, where `\` is an escape character — a raw
+/// `C:\Users\x\tmp` reaches the shell as `C:Usersxtmp` and names nothing.
+/// Git Bash accepts the `C:/Users/x/tmp` form natively.
+///
+/// Deliberately does NOT quote. `OutputBuffer::resolve_refs` matches substituted
+/// words against the same strings it pushes into `temp_path_strings` to decide
+/// `is_buffer_only`, which in turn gates the dangerous-command check. Adding
+/// quotes here would break that match and silently reclassify buffer-only
+/// commands. Whitespace in the path is therefore still the caller's problem —
+/// unchanged from the previous behaviour, not a new gap.
+pub fn shell_path_str(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
+    }
+}
+
+/// Windows only: assign `child` to a kill-on-close Job Object so dropping the
+/// returned guard reaps the entire process tree, not just the direct child.
+///
+/// The Unix side already reaps the tree via `process_group(0)` + `killpg`.
+/// Windows has no process-group analogue, so a Job Object is how cancel/timeout
+/// stops a shell's own children — without it `kill_on_drop` kills `bash` and
+/// leaves whatever it launched still running.
+#[cfg(windows)]
+pub fn kill_on_close_job(child: &tokio::process::Child) -> Option<windows::JobGuard> {
+    imp::kill_on_close_job(child)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn windows_cmdline_wraps_in_outer_quotes() {
-        // cmd /C with a leading quote strips the outer-pair quotes of the whole
-        // line and runs the remainder verbatim, so the command — including its
-        // own inner quotes — must be wrapped in exactly one outer pair.
+    fn posix_tokenize_handles_quotes_and_escapes() {
+        // Single quotes are literal; double quotes group; backslash escapes
+        // outside single quotes. These are the rules the executing shell
+        // (`sh -c` / Git Bash `bash -c`) applies, so the security layer must
+        // read commands the same way it will run them.
         assert_eq!(
-            build_windows_cmdline(r#"py -c "print(1)""#),
-            r#"/C "py -c "print(1)"""#
+            posix_tokenize("echo 'hello world'").unwrap(),
+            vec!["echo", "hello world"]
         );
         assert_eq!(
-            build_windows_cmdline("git --version"),
-            r#"/C "git --version""#
+            posix_tokenize(r#"py -c "print(1)""#).unwrap(),
+            vec!["py", "-c", "print(1)"]
         );
+        assert_eq!(
+            posix_tokenize(r"echo a\ b").unwrap(),
+            vec!["echo", "a b"],
+            "backslash escapes a separator outside quotes"
+        );
+        assert_eq!(
+            posix_tokenize(r#"echo '\n'"#).unwrap(),
+            vec!["echo", r"\n"],
+            "backslash stays literal inside single quotes"
+        );
+    }
+
+    #[test]
+    fn posix_tokenize_rejects_unclosed_quote() {
+        // Must be an error, not a silent truncation: the security layer treats
+        // the token list as authoritative when deciding what a command does.
+        assert!(posix_tokenize(r#"echo "unterminated"#).is_err());
+        assert!(posix_tokenize("echo 'unterminated").is_err());
     }
 
     #[test]

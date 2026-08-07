@@ -416,7 +416,12 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
 // Workflow: run_command large output → buffer → grep via buffer ref
 // ---------------------------------------------------------------------------
 
-#[cfg(unix)]
+// Previously #[cfg(unix)]: `seq` and `grep` do not exist under cmd.exe, so this
+// round-trip was unrunnable on Windows. Commands now execute through a POSIX
+// shell on both platforms, which makes this the direct regression test for that
+// change — it exercises the whole path end to end: buffered output, @cmd_ ref
+// substitution (which must render the temp path in a form the shell survives),
+// and a POSIX filter reading it back.
 #[tokio::test]
 async fn integration_run_command_buffer_round_trip() {
     use codescout::tools::run_command::RunCommand;

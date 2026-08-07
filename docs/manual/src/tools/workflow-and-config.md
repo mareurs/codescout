@@ -186,7 +186,23 @@ shell_command_mode = "disabled"
 | `"unrestricted"` | Commands execute normally (alias for `warn`, no functional difference). |
 | `"disabled"` | All calls return an error. |
 
-On Unix the command runs under `sh -c`. On Windows it runs under `cmd /C`.
+Commands run under a POSIX shell on every platform: `sh -c` on Unix, Git Bash
+`bash -c` on Windows. That is what makes the buffer-query tips below (`grep`,
+`tail`) work identically everywhere — under the previous `cmd /C` those
+binaries did not exist on Windows, so the documented workflow was unrunnable
+there.
+
+Windows therefore requires Git for Windows. codescout resolves the shell from
+`CODESCOUT_BASH`, then `CLAUDE_CODE_GIT_BASH_PATH`, then the standard Git
+install locations, then `PATH` — deliberately skipping `%SystemRoot%\System32`,
+because on a WSL-enabled machine the `bash.exe` there is the WSL launcher, not
+Git Bash, and selecting it would silently run every command in a different
+filesystem namespace.
+
+Paths in commands follow POSIX rules on both platforms: `\` is an escape
+character, so write `C:/Users/...` (or quote it) rather than `C:\Users\...`.
+Buffer refs (`@cmd_*`, `@file_*`, `@bg_*`) are substituted in the
+forward-slash form automatically.
 
 ---
 

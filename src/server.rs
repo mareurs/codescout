@@ -3104,15 +3104,14 @@ mod tests {
         // the project root (e.g. from readlink/realpath) must be returned
         // verbatim, not silently rewritten to a relative-looking string.
         let (dir, server) = make_server().await;
-        // Build with platform-native separators (\\ on Windows, / on Unix); avoid
-        // single-quote shell syntax which cmd.exe treats as literal characters.
-        let abs = dir
-            .path()
-            .join("some")
-            .join("nested")
-            .join("path")
-            .to_string_lossy()
-            .into_owned();
+        // Spell the path in the form the executing shell survives. Commands run
+        // through a POSIX shell on both platforms (Git Bash on Windows), where
+        // `\` is an escape character — a native `C:\a\b` literal would reach
+        // `echo` as `C:ab` and this test would be asserting on shell escaping
+        // rather than on the regression it guards, which is codescout rewriting
+        // absolute path literals in stdout. Separator style is irrelevant to that.
+        let abs =
+            crate::platform::shell_path_str(&dir.path().join("some").join("nested").join("path"));
 
         let req = CallToolRequestParams::new("run_command").with_arguments(
             serde_json::from_value(serde_json::json!({

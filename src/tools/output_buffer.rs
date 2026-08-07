@@ -538,7 +538,11 @@ impl OutputBuffer {
                     )
                     .into());
                 }
-                let path_str = log_path.to_string_lossy().to_string();
+                // Forward-slash form, same reason as the snapshot branch below:
+                // Git Bash executes the command and would eat the backslashes of
+                // a native Windows path, so `cat @bg_x` would name a file that
+                // does not exist and silently return nothing.
+                let path_str = crate::platform::shell_path_str(&log_path);
                 result = result.replace(token, &path_str);
                 temp_path_strings.push(path_str);
                 continue;
@@ -596,7 +600,12 @@ impl OutputBuffer {
                 .keep()
                 .map_err(|e| anyhow::anyhow!("failed to persist temp file: {e}"))?;
 
-            let path_str = path.to_string_lossy().to_string();
+            // Forward-slash form: the command is executed by a POSIX shell on
+            // both platforms now, and Git Bash would eat the backslashes of a
+            // native Windows path (`C:\a\b` -> `C:ab`). Pushed into
+            // `temp_path_strings` in the same form so the `is_buffer_only`
+            // match below still recognises these as our own temp files.
+            let path_str = crate::platform::shell_path_str(&path);
             // Replace all occurrences of this token with the temp path
             result = result.replace(token, &path_str);
             temp_path_strings.push(path_str);
@@ -787,7 +796,10 @@ mod tests {
         let (cmd, files, is_buffer_only, _refreshed) =
             buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
         assert!(!cmd.contains(&id));
-        assert!(cmd.contains(std::path::MAIN_SEPARATOR)); // temp file path
+        // Forward slash on both platforms: substituted paths are rendered for a
+        // POSIX shell (`shell_path_str`), so this is no longer MAIN_SEPARATOR on
+        // Windows. The assertion's point is that the ref became a real path.
+        assert!(cmd.contains('/')); // temp file path
         assert_eq!(files.len(), 1);
         assert!(is_buffer_only);
         let content = std::fs::read_to_string(&files[0]).unwrap();
@@ -1362,8 +1374,11 @@ mod tests {
         let (resolved, temp_paths, is_buffer_only, _refreshed) =
             buf.resolve_refs(&format!("tail -f {id}")).unwrap();
 
+        // Compare against the shell-rendered form, which is what gets
+        // interpolated into the command; on Windows that is the forward-slash
+        // spelling, because Git Bash would eat a native path's backslashes.
         assert!(
-            resolved.contains(&log_path.to_string_lossy().to_string()),
+            resolved.contains(&crate::platform::shell_path_str(&log_path)),
             "expected the LIVE log path in the resolved command, got: {resolved}"
         );
         assert!(

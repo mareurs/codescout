@@ -164,6 +164,10 @@ tikv-jemallocator = "0.6"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    # Job Objects: used to reap the whole process tree on cancel/timeout.
+    # Killing only the direct child leaves grandchildren (e.g. `sleep` under
+    # `bash -c`) running, which is how a cancelled run_command kept going.
+    "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
 

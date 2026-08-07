@@ -2513,10 +2513,8 @@ async fn buffer_query_returns_up_to_200_lines_inline() {
     let content: String = (1..=100).map(|i| format!("{i}\n")).collect();
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
-    // Query the buffer — 100 lines is within the BUFFER_QUERY_INLINE_CAP
-    #[cfg(windows)]
-    let query = format!("type {output_id}");
-    #[cfg(not(windows))]
+    // Query the buffer — 100 lines is within the BUFFER_QUERY_INLINE_CAP.
+    // `cat` works on both platforms now that Windows runs through Git Bash.
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -2545,9 +2543,6 @@ async fn buffer_query_truncation_hint_shows_next_page() {
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
     // Query it — output exceeds 100-line cap, so hint should show next-page command
-    #[cfg(windows)]
-    let query = format!("type {output_id}");
-    #[cfg(not(windows))]
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -3757,7 +3752,7 @@ async fn background_command_with_quotes_captures_output() {
     for _ in 0..150 {
         let out = RunCommand
             .call(
-                json!({ "command": format!("type {ref_id}"), "timeout_secs": 10 }),
+                json!({ "command": format!("cat {ref_id}"), "timeout_secs": 10 }),
                 &ctx,
             )
             .await;
