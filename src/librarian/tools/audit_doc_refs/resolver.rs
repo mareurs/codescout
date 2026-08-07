@@ -147,6 +147,29 @@ fn symbol_tree_contains(syms: &[crate::lsp::SymbolInfo], name: &str) -> bool {
         .any(|s| s.name == name || s.name_path == name || symbol_tree_contains(&s.children, name))
 }
 
+/// Does tree-sitter find `name` in `path`?
+///
+/// This is a **readiness oracle, not a second resolver.** A language server that has
+/// accepted a `documentSymbol` request but has not finished indexing answers with an
+/// empty or partial tree, and `resolve_file_symbol` used to take that as authoritative
+/// absence — the branch even said so: *"the LSP responded (not offline), so an empty
+/// symbol list means the symbol genuinely isn't there."* That is false during warm-up.
+/// tree-sitter parses the file on the spot with no index and no server, so when the two
+/// disagree it is the server that is behind, not the doc that is wrong.
+///
+/// Same discrimination `symbols` already makes when it marks output `"lsp": "warming"`,
+/// reused here rather than reinvented.
+///
+/// A parse error or an unsupported language yields `false`, which falls back to the
+/// previous behaviour (`SymbolMissing`) rather than inventing a verdict out of a failed
+/// parse. Erring toward the old answer keeps this change from manufacturing new
+/// `Unknown`s on languages tree-sitter cannot read.
+fn ast_has_symbol(path: &Path, name: &str) -> bool {
+    crate::ast::extract_symbols(path)
+        .map(|syms| symbol_tree_contains(&syms, name))
+        .unwrap_or(false)
+}
+
 fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     let (path_str, line_str) = c.raw_ref.rsplit_once(':').expect("file_line invariant");
     if points_outside_project(path_str) {
@@ -354,6 +377,8 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     };
     let lang_id = lang.to_string();
     let repo_root = ctx.repo_root.to_path_buf();
+    // `path` is moved into `fut` below; the AST cross-check after the await needs it too.
+    let ast_path = path.clone();
     // `client_within_budget` bounds cold-start latency instead of an unbounded
     // wait a hung/slow LSP could otherwise stall on (see
     // docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md).
@@ -393,6 +418,28 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                     severity: Severity::Low,
                     severity_reason: "policy_default",
                     notes: None,
+                }
+            } else if ast_has_symbol(&ast_path, name) {
+                // The server ANSWERED, and tree-sitter disagrees with it — so the symbol
+                // exists and the server is behind its own index. `SymbolMissing` here is
+                // a false claim about the code, and it is the mechanism behind the
+                // resolved <-> broken tally drift: `SymbolMissing` is the only
+                // LSP-dependent verdict in the `broken` bucket, and this branch never
+                // marked the scan degraded because the server was not *offline*. That is
+                // also why `scan_meta.degraded` read `false` on every cold run that lost
+                // 60-69 resolutions.
+                // See docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md
+                note_degraded(ctx, lang);
+                Resolution {
+                    verdict: Verdict::Unknown,
+                    severity: Severity::Low,
+                    severity_reason: "lsp_behind_ast",
+                    notes: Some(format!(
+                        "LSP returned {} symbol(s) for this file without `{name}`, but \
+                         tree-sitter finds it — the server is mid-index, so the scan is \
+                         degraded rather than the reference broken",
+                        syms.len()
+                    )),
                 }
             } else {
                 verdict_with_drops(
@@ -1265,29 +1312,91 @@ mod tests {
         }
     }
 
+    /// A lagging LSP must not produce a false `SymbolMissing`.
+    ///
+    /// This test previously asserted the OPPOSITE, as `resolver_prefers_disk_truth_on_lsp_lag`,
+    /// and its own name was the argument against it: disk truth here is that `bar` EXISTS, so
+    /// reporting it missing is the opposite of preferring disk truth. The old comment read *"the
+    /// LSP responded (not offline), so an empty symbol list means the symbol genuinely isn't
+    /// there"* — false during warm-up, and the mechanism behind the resolved <-> broken tally
+    /// drift in docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md. Inverted by
+    /// decision 2026-08-07.
     #[test]
-    fn resolver_prefers_disk_truth_on_lsp_lag() {
+    fn resolver_defers_to_the_ast_when_the_lsp_lags_behind_disk() {
         use crate::lsp::mock::{MockLspClient, MockLspProvider};
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("foo.rs"), "pub fn bar() {}\n").unwrap();
-        // LSP returns no symbols (simulates lag / stale index) but file exists on disk.
+        // The LSP answers (it is NOT offline) but returns no symbols — a server mid-index.
         let lsp = MockLspProvider::with_client(MockLspClient::new());
         let c = cand("foo.rs:bar", "docs/spec.md", RefKind::FileSymbol);
-        let r = resolve_ref(
-            &c,
-            &ResolveCtx {
-                repo_root: tmp.path(),
-                memory_globs: &[],
-                lsp: Some(lsp),
-                degraded_languages: Default::default(),
-                basename_index: std::collections::HashMap::new(),
-                gitignore: None,
-            },
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: Some(lsp),
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: None,
+        };
+        let r = resolve_ref(&c, &ctx);
+
+        // tree-sitter finds `bar`, so the server is behind its own index and the reference is
+        // fine. `Unknown` says "no opinion"; `SymbolMissing` would be a false claim about the
+        // code AND would land in the `broken` bucket, which is what made the tally drift.
+        assert_eq!(
+            r.verdict,
+            Verdict::Unknown,
+            "LSP returned nothing but the AST has `bar` — must not report it missing"
         );
-        // File exists on disk but LSP returned no symbols → SymbolMissing, NOT Unknown.
-        // This encodes the "prefer disk truth" rule: the LSP responded (not offline),
-        // so an empty symbol list means the symbol genuinely isn't there.
-        assert_eq!(r.verdict, Verdict::SymbolMissing);
+        // The other half, and the one that matters more: this branch used to leave the scan
+        // looking clean, because the server was not *offline*. A caller then could not tell an
+        // incomplete scan from a complete one — `degraded` read false on every cold run.
+        assert_eq!(
+            &*ctx.degraded_languages.borrow(),
+            &["rust".to_string()],
+            "an LSP lagging behind the AST must mark the scan degraded"
+        );
+        assert!(
+            r.notes
+                .as_deref()
+                .unwrap_or_default()
+                .contains("tree-sitter"),
+            "the note should say why this is Unknown rather than missing; got {:?}",
+            r.notes
+        );
+    }
+
+    /// The complement, so the change above cannot be read as "never report a missing symbol":
+    /// when the AST agrees with the LSP that the name is absent, it really is absent. Without
+    /// this, deleting the `symbol_tree_contains` check inside `ast_has_symbol` — making it
+    /// return `true` unconditionally — would leave the suite green while the audit stopped
+    /// reporting stale symbol refs entirely.
+    #[test]
+    fn resolver_still_reports_symbol_missing_when_the_ast_agrees() {
+        use crate::lsp::mock::{MockLspClient, MockLspProvider};
+        let tmp = TempDir::new().unwrap();
+        // `bar` is genuinely NOT in this file — only `baz` is.
+        std::fs::write(tmp.path().join("foo.rs"), "pub fn baz() {}\n").unwrap();
+        let lsp = MockLspProvider::with_client(MockLspClient::new());
+        let c = cand("foo.rs:bar", "docs/spec.md", RefKind::FileSymbol);
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: Some(lsp),
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: None,
+        };
+        let r = resolve_ref(&c, &ctx);
+        assert_eq!(
+            r.verdict,
+            Verdict::SymbolMissing,
+            "both sources agree `bar` is absent — real drift, and it must still be reported"
+        );
+        assert!(
+            ctx.degraded_languages.borrow().is_empty(),
+            "a genuine miss is not a degraded scan; got {:?}",
+            ctx.degraded_languages.borrow()
+        );
     }
 
     #[test]

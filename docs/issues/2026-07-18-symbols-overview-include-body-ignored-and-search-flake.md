@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: zombie
 title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A fixed in b2344aab; Bug B mitigated + instrumented)'
 tags:
 - symbols
@@ -9,6 +9,7 @@ tags:
 - list_overview
 - parameter-ignored
 closed: null
+last_observed: 2026-08-07
 opened: 2026-07-18
 owner: marius
 related:
@@ -25,6 +26,28 @@ severity: medium
 # BUG: `symbols` overview mode silently ignores `include_body=true`; search mode occasionally 0-matches then succeeds on retry
 
 ## Summary
+> **Status: `zombie` as of 2026-08-07, by maintainer decision.** Bug A is fixed (`b2344aab`); Bug B
+> is mitigated and instrumented, has not recurred, and its root cause is unconfirmed. There is no
+> work available — it resolves only by firing again, and the instrumentation is already in place to
+> catch it when it does. Kept open in the ledger rather than archived, which is what `zombie` is for
+> (`docs/issues/_TEMPLATE.md`).
+>
+> **Re-open trigger — any ONE of these:**
+>
+> 1. A `symbols` search-mode call 0-matches and then succeeds on retry, in any session. The
+>    instrumentation added for Bug B is what to read first; do not re-derive from scratch.
+> 2. The diagnostic added for Bug B fires in `.codescout/diagnostic-*.log` without a
+>    user-visible 0-match — that is the same defect caught earlier, and a better starting point
+>    than the symptom.
+> 3. An LSP-backed lookup elsewhere shows the same shape: an empty result that a retry fixes.
+>    2026-08-07 established that this shape has a general cause — a language server answers
+>    before it has finished indexing, and callers take the empty answer as authoritative. That
+>    mechanism is now fixed in `audit_doc_refs` specifically (`resolve_file_symbol` cross-checks
+>    tree-sitter before reporting a symbol absent), so if `symbols` search mode has the same
+>    shape, the same remedy applies and this bug becomes actionable rather than trigger-gated.
+>
+> Trigger 3 is the one to watch: it converts this from "wait for a flake" into "apply a known fix",
+> and it is the reason this is `zombie` rather than `wontfix`.
 
 > **2026-08-06 — verify-open pass. Bug A confirmed closed at the source; Bug B still open, one more non-repro recorded.**
 >

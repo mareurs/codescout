@@ -650,6 +650,49 @@ fn collect_markdown_files(
     Ok(out)
 }
 
+/// Which summary counter a verdict contributes to.
+///
+/// `bucket`'s match is deliberately **exhaustive** — no `_` arm — so adding a `Verdict`
+/// variant is a compile error until it has been bucketed. The three counters used to be
+/// three independent filters covering 7 of the 10 variants, which left
+/// `ResolvedBasename`, `AmbiguousBasename` and `External` in none of them: `n_refs_found`
+/// (itself only `findings.len()`) did not equal their sum, and 2,426 of 47,094 refs on
+/// this repo were invisible in the summary. A test can *assert* a partition; an
+/// exhaustive match **is** one.
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+enum Bucket {
+    /// The doc's claim holds — the reference points at something real.
+    Resolved,
+    /// Actionable: a reader following this lands nowhere useful.
+    Broken,
+    /// The resolver could not form an opinion. Evidence for neither side.
+    Unknown,
+}
+
+/// The single definition of "did this reference resolve", used by the summary counters,
+/// the display ranking, and the exit code alike. Those were three separate `matches!`
+/// expressions and they did not agree.
+fn bucket(verdict: Verdict) -> Bucket {
+    match verdict {
+        // `ResolvedBasename` sits here by decision (2026-08-07). It IS a successful
+        // resolution: the audit found exactly one file with that basename and says which
+        // one in `notes`, and `docs/RELEASE.md` step 5 already describes it as OK.
+        // Counting it as unresolved made `--fail-on low`/`any` exit 1 on a working
+        // reference — 3 of 44 findings on `docs/RELEASE.md` alone.
+        Verdict::Resolved | Verdict::ResolvedBasename | Verdict::External => Bucket::Resolved,
+        // `AmbiguousBasename` is a doc defect the author fixes by adding a path prefix,
+        // and `default_severity` already bands it `Med` alongside every other verdict
+        // here — so this is where it was implicitly grouped all along.
+        Verdict::Missing
+        | Verdict::FileMissing
+        | Verdict::SymbolMissing
+        | Verdict::LineOob
+        | Verdict::AnchorMissing
+        | Verdict::AmbiguousBasename => Bucket::Broken,
+        Verdict::Unknown => Bucket::Unknown,
+    }
+}
+
 fn build_response(
     findings: &[Finding],
     warnings: &[ParseWarning],
@@ -671,7 +714,7 @@ fn build_response(
     // See docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md
     let mut ranked: Vec<&Finding> = findings.iter().collect();
     ranked.sort_by_key(|f| {
-        let resolved = matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External);
+        let resolved = bucket(f.resolution.verdict) == Bucket::Resolved;
         let sev = match f.resolution.severity {
             Severity::High => 0u8,
             Severity::Med => 1,
@@ -706,33 +749,25 @@ fn build_response(
         Value::Null
     };
 
-    let n_broken = findings
-        .iter()
-        .filter(|f| {
-            matches!(
-                f.resolution.verdict,
-                Verdict::Missing
-                    | Verdict::FileMissing
-                    | Verdict::SymbolMissing
-                    | Verdict::LineOob
-                    | Verdict::AnchorMissing
-            )
-        })
-        .count();
-    let n_unknown = findings
-        .iter()
-        .filter(|f| f.resolution.verdict == Verdict::Unknown)
-        .count();
-    let n_resolved = findings
-        .iter()
-        .filter(|f| f.resolution.verdict == Verdict::Resolved)
-        .count();
+    // These three now PARTITION `findings`, so `n_refs_found` == their sum by
+    // construction. Asserted by `summary_counters_partition_every_verdict`.
+    let count_in = |b: Bucket| {
+        findings
+            .iter()
+            .filter(|f| bucket(f.resolution.verdict) == b)
+            .count()
+    };
+    let n_broken = count_in(Bucket::Broken);
+    let n_unknown = count_in(Bucket::Unknown);
+    let n_resolved = count_in(Bucket::Resolved);
 
-    // A finding "counts" toward a fail_on threshold unless its verdict is
-    // Resolved or External — those two are the only verdicts that mean
-    // "this reference is fine," regardless of the severity value they carry.
+    // A finding "counts" toward a fail_on threshold unless it RESOLVED, regardless of the
+    // severity it carries. Shares `bucket` with the counters and the ranking above, which
+    // were three separate `matches!` expressions that disagreed: `ResolvedBasename` was
+    // exempt from neither, so `--fail-on low`/`any` exited 1 on a successful basename
+    // resolution that `docs/RELEASE.md` step 5 calls OK.
     let counts = |f: &Finding| -> Option<Severity> {
-        if matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External) {
+        if bucket(f.resolution.verdict) == Bucket::Resolved {
             None
         } else {
             Some(f.resolution.severity)
@@ -883,6 +918,75 @@ mod tests {
                 notes: None,
             },
         }
+    }
+
+    /// `n_refs_found` must equal the three buckets' sum.
+    ///
+    /// It did not. The counters were three independent filters covering 7 of the 10 `Verdict`
+    /// variants, so `ResolvedBasename`, `AmbiguousBasename` and `External` were counted in
+    /// `found` and in no bucket — 2,426 of 47,094 refs on this repo, invisible in the summary.
+    /// `bucket`'s exhaustive match is the structural guard; this pins the arithmetic that guard
+    /// is supposed to produce.
+    #[test]
+    fn summary_counters_partition_every_verdict() {
+        let all = [
+            Verdict::Resolved,
+            Verdict::ResolvedBasename,
+            Verdict::External,
+            Verdict::Missing,
+            Verdict::FileMissing,
+            Verdict::SymbolMissing,
+            Verdict::LineOob,
+            Verdict::AnchorMissing,
+            Verdict::AmbiguousBasename,
+            Verdict::Unknown,
+        ];
+        let findings: Vec<Finding> = all.iter().map(|v| mk_finding(*v, Severity::Low)).collect();
+        let r = build_response(&findings, &[], &[], 1, None, None, "never").unwrap();
+
+        let found = r["n_refs_found"].as_u64().unwrap();
+        let sum = r["n_refs_resolved"].as_u64().unwrap()
+            + r["n_refs_broken"].as_u64().unwrap()
+            + r["n_refs_unknown"].as_u64().unwrap();
+        assert_eq!(found, all.len() as u64, "one finding per verdict was built");
+        assert_eq!(
+            sum, found,
+            "the three counters must partition n_refs_found; resolved={} broken={} unknown={} \
+             sum={sum} found={found}",
+            r["n_refs_resolved"], r["n_refs_broken"], r["n_refs_unknown"]
+        );
+    }
+
+    /// A basename resolution is a SUCCESS, and all three consumers of that judgement must agree.
+    /// Before this, `ResolvedBasename` was counted in no bucket, ranked with the *unresolved*
+    /// half, and counted toward the fail-on threshold — so `--fail-on low` exited 1 on a working
+    /// reference that `docs/RELEASE.md` step 5 calls OK.
+    #[test]
+    fn resolved_basename_counts_as_resolved_everywhere() {
+        let f = [mk_finding(Verdict::ResolvedBasename, Severity::Low)];
+        let r = build_response(&f, &[], &[], 1, None, None, "low").unwrap();
+        assert_eq!(
+            r["exit_code"], 0,
+            "a successful basename resolution must not trip --fail-on low"
+        );
+        assert_eq!(r["n_refs_resolved"], 1, "and it must count as resolved");
+        assert_eq!(r["n_refs_broken"], 0);
+        assert_eq!(r["n_refs_unknown"], 0);
+    }
+
+    /// The other side of that condition, so widening the exemption cannot quietly relax the gate.
+    /// `AmbiguousBasename` is NOT a success — the basename matched more than one file, and the
+    /// author fixes it by adding a path prefix — so it stays in `broken` and stays gating.
+    #[test]
+    fn ambiguous_basename_still_counts_against_the_gate() {
+        let f = [mk_finding(Verdict::AmbiguousBasename, Severity::Med)];
+        let r = build_response(&f, &[], &[], 1, None, None, "med").unwrap();
+        assert_eq!(
+            r["exit_code"], 1,
+            "an ambiguous basename must still trip --fail-on med"
+        );
+        assert_eq!(r["n_refs_broken"], 1, "and it belongs in the broken bucket");
+        assert_eq!(r["n_refs_resolved"], 0);
     }
 
     /// The CLI's `--fail-on` value set and the set `build_response` honors are

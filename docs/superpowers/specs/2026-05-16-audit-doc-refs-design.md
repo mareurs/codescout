@@ -511,7 +511,7 @@ it (with a single `.gitkeep`) and proceeds.
 | `resolver_line_oob_for_short_file` | line past EOF → `line_oob`, severity `med` |
 | `resolver_symbol_missing_for_renamed_symbol` | mock LSP returns none → `symbol_missing` |
 | `resolver_unknown_when_lsp_offline` | LSP unavailable → `unknown`, `scan_meta.degraded=true` |
-| `resolver_prefers_disk_truth_on_lsp_lag` | file exists + LSP not found → `symbol_missing` NOT `unknown` |
+| ~~`resolver_prefers_disk_truth_on_lsp_lag`~~ → `resolver_defers_to_the_ast_when_the_lsp_lags_behind_disk` | **INVERTED 2026-08-07.** Was: file exists + LSP not found → `symbol_missing` NOT `unknown`. Now: if tree-sitter finds the symbol, the server is mid-index → `unknown` **and** mark the scan degraded. The original rule's own name was the argument against it — disk truth is that the symbol *exists*, so reporting it missing is the opposite of preferring disk truth. It was also the mechanism behind the resolved↔broken tally drift (`docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`): `symbol_missing` is the only LSP-dependent verdict in the `broken` bucket, and this branch never marked the scan degraded because the server was not *offline*. Paired with `resolver_still_reports_symbol_missing_when_the_ast_agrees`, which keeps genuine drift reported. |
 | `resolver_external_for_https_link` | `https://...` → `external`, dropped from tracker |
 | `severity_drops_one_level_in_archive` | `docs/archive/` ref → `med`, reason `archive_drop` |
 | `severity_drops_two_levels_in_memory` | matches `.buddy/memory/**` etc. → `low`, reason `memory_drop` |

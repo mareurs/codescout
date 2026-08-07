@@ -13,6 +13,32 @@ kind: bug
 # BUG: AST chunker has no minimum chunk size — 12% of chunks are single lines, inflating re-embed to ~2h
 
 ## Summary
+> **DEFERRED 2026-08-07 by maintainer decision — stays `open`, no work scheduled.** Both candidate
+> fixes were on the table (minimum chunk size + sibling merge, or skip trivial declarations) and
+> neither was chosen, for two reasons:
+>
+> 1. **This file's own ordering.** It puts the embedder-batch-concurrency work first, and that has
+>    not happened.
+> 2. **Sequencing against the reindex.** Chunk ids are content-addressed, so any chunker change
+>    moves boundaries and invalidates every vector. The `index --force` rebuild (~2h) is already
+>    owed for the *previous* `ast_chunker` change. Landing a chunker fix now means rebuilding
+>    twice; deferring means one rebuild serves both. Deferring is therefore strictly cheaper as
+>    long as the current chunker output is tolerable, and it is.
+>
+> **New evidence supporting the 12% figure, from an independent direction (2026-08-07).** With the
+> sparse leg re-enabled, a 2000-point sample of the live `code_chunks` collection shows **7.7% of
+> chunks carry an EMPTY sparse vector** — SPLADE produced no terms for them. A single-line chunk is
+> exactly the input that yields no terms, so 7.7% empty-sparse and 12% single-line are the same
+> population measured two different ways. That is a second, cheaper confirmation of this bug's
+> central claim than re-running the chunk-size histogram.
+>
+> It also adds a consequence this file did not have: those chunks are **dense-only in RRF**, so the
+> chunker defect is not merely wasted embedding cost — it silently removes 7.7% of the corpus from
+> the sparse leg's reach. Worth folding into the motivation whenever this is picked up.
+>
+> **Re-open for scheduling when:** the embedder-batch-concurrency work lands, or a retrieval
+> measurement attributes a score loss to single-line chunks. Do it BEFORE the next `index --force`,
+> not after, so one rebuild covers both.
 
 `nodes_to_chunks` emits one chunk per inner declaration "regardless of size",
 with no floor. On a Kotlin codebase this produces 5,133 single-line chunks and

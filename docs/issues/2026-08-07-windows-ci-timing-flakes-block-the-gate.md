@@ -1,7 +1,7 @@
 ---
 id: e817931ef9d51dd0
 kind: bug
-status: open
+status: zombie
 title: 'BUG: two Windows CI tests flake on wall-clock/race assumptions — one is skip-listed on wine but gates on MSVC'
 tags:
 - windows
@@ -10,6 +10,7 @@ tags:
 - test-portability
 - timing
 closed: ''
+last_observed: 2026-08-07
 opened: 2026-08-07
 owner: marius
 related:
@@ -20,6 +21,30 @@ severity: medium
 # BUG: two Windows CI tests flake on wall-clock/race assumptions
 
 ## Summary
+> **Status: `zombie` as of 2026-08-07, by maintainer decision.** Not observed since, root cause not
+> confirmed, and there is no work available: both flakes resolve only by recurring. Kept open in the
+> ledger rather than archived, exactly what the `zombie` status exists for
+> (`docs/issues/_TEMPLATE.md`). This was the last thing blocking the `experiments` -> `master`
+> promotion, and "work harder" could not have closed it — a trigger-gated bug is not reachable by
+> effort.
+>
+> **Re-open trigger — any ONE of these, and this goes straight back to `open`:**
+>
+> 1. A `windows-latest` job fails on either named test again. Route it per the file's own § Fix
+>    rather than re-diagnosing: the wine skip is PERMANENT (no Python launcher under wine, see
+>    the `.github/workflows/ci.yml` comment), so an MSVC-side failure is a genuinely different
+>    signal from the skip-listed one.
+> 2. The same wall-clock assumption appears in a NEW test. The class, not the instance, is what
+>    matters — and W-14 (`docs/trackers/release-promotion-session-log.md`) is the general form:
+>    a first measurement after idle is a warm-up artifact, and a test that asserts on one is
+>    timing-dependent by construction.
+> 3. Any test in this repo starts using `std::time::Instant` under `#[tokio::test(start_paused =
+>    true)]`. That combination is the trap F-11 found here: `tokio::time::Instant` is virtualised
+>    and `std::time::Instant` is not, so virtual-time tests built on the latter are wall-clock
+>    tests wearing a deterministic costume.
+>
+> Nothing about the analysis below is retracted — it stays as the starting point for whoever picks
+> this up when it fires.
 
 Two single-test failures turned a 15-job CI run red with no code defect, at the exact moment a
 440-commit promotion was waiting on that gate. Re-running only the two failed jobs, with zero
