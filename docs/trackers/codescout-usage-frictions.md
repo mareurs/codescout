@@ -1565,3 +1565,43 @@ contains a copy of the call site" are the same string, and nothing distinguishes
 
 **Status:** open — (1) and (2) are discipline and cost nothing; (3) is a small tool change
 worth doing because a silent arity is what turned a two-site edit into a three-site one.
+
+
+### U-38 — `edit_file(replace_all=true)` matched 1 of 2 intended sites (different indentation) and reported plain `"ok"`
+
+**Observed:** 2026-08-07, mutation-testing the new walk-error guard in
+`src/tools/symbol/symbols.rs`.
+
+**Tried:** neutralise both `Err`-arm counters at once —
+`edit_file(old_string="                    audit.errors += 1;", replace_all=true)`.
+
+**Got:** `"ok"`. One of the two sites changed. The two statements are byte-identical apart from
+leading whitespace: the accepted-files walk sits at 16 spaces, the tree-sitter fallback walk at
+20, because it is nested inside `if matches.is_empty()`. My `old_string` carried 20, so
+`replace_all` correctly replaced *all* occurrences of that string — one — and said so in the
+only way it can: not at all.
+
+**Iron Law / pattern:** not an Iron Law breach; a **silent partial application**. The response
+is a bare `"ok"` with no match count, so "replaced 2" and "replaced 1" are indistinguishable
+from the caller's side. `replace_all` reads as an intent ("every occurrence") while it is
+actually a predicate ("every occurrence *of this exact string*"), and in Rust the same statement
+at two nesting depths is two different strings.
+
+**Cost, and it is the interesting part.** The partial mutation left one counter live, so the
+test under examination still passed — which read as *"the test is vacuous"*. The next step I
+nearly took was rewriting a correct regression test for a real defect. Two cheap checks
+separated the explanations instead: `id -u` plus a `chmod 000` probe confirmed the test's
+precondition genuinely held, and grepping for the mutation marker showed it had landed at only
+one site. Recorded as F-10 in `docs/trackers/release-promotion-session-log.md`.
+
+**Fix idea:** have `edit_file` return the match count (`{"ok": true, "replaced": 2}`) rather than
+a bare `"ok"`. That single number would have made the partial application self-evident, and it
+is the same class of gap as U-37 — both are cases where `edit_file` did exactly what it was told
+and told the caller nothing about what that was. Two datapoints now, one session apart, same
+tool, same missing field.
+
+**Recurrence:** 1st observed for the indentation shape; 2nd for the "`edit_file` reports no
+match information" family (see U-37).
+
+**Status:** open — the workaround (grep for the marker after mutating) is a habit, not a
+mechanism. A `replaced` count in the response would retire both halves.

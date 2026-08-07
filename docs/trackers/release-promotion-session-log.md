@@ -23,6 +23,131 @@ tags:
 > **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
 > Resume block below. Produced F-2, F-3, W-1.
 
+## Resume — round 7, written 2026-08-07 for session compaction
+
+**Supersedes rounds 2–6.** The promotion is one command away and that command is the user's.
+
+### Git state (verified, not remembered)
+
+| | |
+|---|---|
+| `experiments` HEAD | **`3bfa4025`** |
+| working tree | clean |
+| `master...HEAD` | **`0` left / `442` right** — `master` has no commits of its own, so the promotion is a fast-forward |
+| pushed | yes |
+
+### CI — and how to read it in this repo, which cost three wrong conclusions to learn
+
+| run | SHA | result |
+|---|---|---|
+| 31151333288 | `2d824f15` | **15/15**, attempt **2** (two flaky jobs re-run) |
+| 31152786383 | `f7fefa96` | **15/15**, attempt **1** — clean, no intervention |
+| 31155578139 | `3bfa4025` | **15/15**, attempt **1** — clean, no intervention |
+
+All three SHAs above are confirmed green. But **the docs-only tracker commit carrying this Resume
+moves the tip past `3bfa4025`**, so by the time you read this the tip's own run is unverified —
+structural, not an oversight: recording the verification invalidates the verification of the tip.
+So the Git-state table's HEAD is `3bfa4025` **plus that docs commit**; confirm with
+`git log --oneline -1`. Either wait for the tip's run, or fast-forward to a SHA in the table
+(`git merge --ff-only 3bfa4025`), which promotes 442 commits with a clean 15/15 behind it and
+leaves the docs-only commits for the next cycle. Read any run per-job:
+
+```
+gh run view <id> --json jobs --jq '.jobs[] | "\(if .status=="completed" then .conclusion else .status end)\tsteps=\(.steps|length)\t\(.name)"'
+```
+
+Three rules, each learned by getting it wrong first (F-7, F-8, WIN-30):
+
+1. **Run-level `status` is an aggregate, not a result.** A run reports `queued` while its own
+   jobs run, pass, and get cancelled — `gh run list` said `queued` for a run already holding six
+   green jobs.
+2. **`steps` separates scheduling from testing.** A non-success job with `steps=0` never executed
+   (scheduling/outage); `steps=12` means it ran and really failed. Three runs on 2026-08-06
+   reported run-level `failure`/`cancelled` with **zero** executed jobs.
+3. **`attempt` distinguishes a clean green from a rescued one.** `2d824f15`'s 15/15 needed a
+   re-run of two flaky jobs; `f7fefa96`'s did not.
+
+GitHub Actions was in a **declared major outage** for most of 2026-08-06 (incident opened
+15:22:49Z). It is resolved — "All Systems Operational" as of 2026-08-07 ~05:40Z, and runs are
+being created within seconds of a push again.
+
+### The promotion gate — all of `docs/RELEASE.md` § Large-Cohort Promotion except step 5
+
+| step | state |
+|---|---|
+| 1. ancestry is a fast-forward | ✅ 0 left / 442 right |
+| 2. clean working tree | ✅ |
+| 3. local gate | ✅ fmt, `clippy --all-targets -D warnings`, **3515 passed / 0 failed / 44 ignored** — and separately green on **CI's own toolchain 1.97.1** across all three feature configs (8680 tests) |
+| 4. documentation gate + fresh-clone audit | ✅ 0 high, `degraded: false`; `CHANGELOG.md` `[Unreleased]` covers the cohort; `experimental/index.md` no longer claims the branch is empty |
+| **5. `git merge --ff-only experiments`** | ⬅ **the user's to run** — `master` is protected |
+
+After the merge: nothing to rebase, both refs point at the same commit. The unreleased-cohort
+callouts **stay** (they come off at release, not at promotion), and archived bug files citing
+`experiments` SHAs stay valid because a fast-forward mints no new SHAs.
+
+### What round 7 changed
+
+- **`audit_doc_refs` gitignore cap consulted `.gitignore` but not the index** (`598624be`) —
+  `/.github/` was ignored while five files beneath it were tracked, so a doc citing a *deleted*
+  workflow was capped `high` → `med`, under the `fail_on: high` gate. Fixed with an index-derived
+  `TrackedIgnore`; own-path rules still decide, and only a parent-only match consults the tracked
+  set. Bug archived, verified by regression test + mutation + real binary + the live MCP path.
+- **`/.github/` narrowed** to `/.github/copilot-instructions.md` (`6ca02767`) — the single
+  generated file `4dac3a3c` was actually suppressing.
+- **clippy 1.97 fix** (`fb3b1a05`) — found by installing CI's *resolved* toolchain side by side
+  (`cargo +1.97.1`) during the outage. Local `stable` is 1.95.0; CI's floats and had moved to
+  1.97.1. See **W-9**; this is F-5's first observed instance and its first mitigation.
+- **kotlin bug: items 3 and 5 closed.** NMT live-verified by `jcmd` with a control; item 5 was
+  already done twice over (host runs `262.9593.0`). Three concurrent instances measured flat at
+  ~520 MiB / 506 MiB / **545 MiB at 10h53m** — four clean post-upgrade lifecycles now. Severity
+  deliberately left `high`: #203 is still open upstream and all three captures were lightly used.
+- **WIN-30** — two Windows timing flakes; both passed on an unchanged re-run.
+- **`symbols` 0-match flake** (`3bfa4025`) — both walks used `walker.flatten()`, silently
+  discarding every `ignore::Walk` error, so a truncated walk looked complete and zeroed both
+  search paths at once. Now counted, and a zero declares whether it can be trusted.
+
+### Do NOT re-do
+
+1. **Do not re-derive CI state from run-level fields.** Use the per-job command above.
+2. **Do not merge the two `symbols` walks.** They look redundant and are a recovery path — W-10.
+3. **Do not rebuild an LSP-warming harness for the symbols flake.** W-8 killed that hypothesis
+   from the `matches.is_empty()` gate.
+4. **Do not reopen WIN-29** on its literal trigger; WIN-30 refined it to require surviving a
+   re-run.
+5. **Do not re-investigate the worktree `GRADLE_USER_HOME` asymmetry** — asserted behaviour,
+   R-61.
+6. **Do not trust `cargo test` green as evidence about the live MCP surface.** The binary is a
+   separate artifact; a source fix is inert until `cargo rb` + reconnect.
+7. **Do not assume a surviving mutation means a weak test** — verify the mutation landed first
+   (F-10, U-38).
+8. **Do not re-run the doc-drift sweep**; `audit_doc_refs` is 0 high on 883 files, fresh-clone
+   verified.
+
+### Open bugs — 8, and use this query
+
+```
+artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})
+```
+
+`status="open"` alone hides anything marked `investigating`. Two fixed today and archived; two
+filed today (WIN-30, and the gitignore-cap one now archived). Of the 8, **six need a user
+decision or a measurement**: reranker 42× (live-arm measurement + product call), MCP orphans
+(definition of "idle"), AST chunker floor (its own precondition is the retrieval benchmark),
+researcher rerank scale (sibling repo), kotlin items 1 and 6, and audit-doc-refs
+non-determinism (consequence fixed, root cause unconfirmed by design). The `symbols` flake is
+`open` on purpose: the harm is neutralised and the next occurrence is self-diagnosing, but the
+original symptom was never reproduced.
+
+### Still owed
+
+- **`index(force=true)` rebuild** (~2h) — the ast-chunker change moved chunk boundaries and ids
+  are content-addressed. Deliberately not started.
+- **The toolchain pin-vs-float decision.** Both W-9's and F-9's promote-when criteria converge on
+  it: pin `rust-toolchain.toml` with an explicit `components` list and both problems vanish by
+  construction.
+- **`262.9593.0`'s changelog** is unreviewed in the kotlin bug.
+- **The merge itself.**
+
 ## Resume — round 6, written 2026-08-06 for session compaction
 
 **Read this one.** Rounds 2–5 are superseded where they disagree; round 5's *"two decisions
@@ -672,6 +797,7 @@ Ranked by what to do first.
 | F-7 | 2026-08-06 | med | measurement | fixed-verified | Quoted a run-level CI `status` as per-job evidence — wrote "not a single job starting" into this log while ten jobs had already passed |
 | F-8 | 2026-08-06 | med | process | fixed-verified | Diagnosed queued CI from run metadata for 70 minutes; GitHub had declared an Actions **major outage** two hours before the first affected run |
 | F-9 | 2026-08-07 | med | measurement | fixed-verified | A `--profile minimal` toolchain install produced 12 test failures that read as a compiler regression; the cause was a missing `rust-analyzer` component |
+| F-10 | 2026-08-07 | med | process | fixed-verified | A mutation that failed to kill a test almost got a *correct* test rewritten — the mutation was incomplete (two `Err` arms at different indentation depths), not the test weak |
 
 ## Wins Index
 
@@ -683,6 +809,7 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-10 | 2026-08-07 | high | Before merging two code paths that look redundant, ask what *triggers* the second one | The two `symbols` walks share an identical filter and look duplicated; a truncated first walk empties `matches`, which is precisely what triggers the fallback — merging them would have deleted the recovery path and made the bug under repair strictly worse | validated |
 | W-9 | 2026-08-07 | high | When CI is unavailable and its toolchain floats, install CI's *resolved* toolchain side-by-side and run the gate through it | Local `stable` was 1.95.0 while CI's `@stable` had moved to 1.97.1; clippy 1.97 rejects two `assert!` borrows that 1.95 accepts, so the Clippy job was going to fail on the first run created after the outage | validated |
 | W-5 | 2026-08-06 | high | Invoke the tool under test; verify the binary is newer than its sources | Reading it had missed all five: a SIGABRT, a path escape resolving `/etc/passwd:12` as Resolved, a false premise about which half of the corpus was scanned, an unused field that already was the fix, and mdBook link semantics | validated |
 
@@ -1300,6 +1427,75 @@ the *suite* needs, not just the gate's: `--component clippy,rustfmt,rust-analyze
 pin `rust-toolchain.toml` with an explicit `components` list so CI and local get the same set
 by construction — the same fix W-9's promote-when proposes, and the same standing pin-vs-float
 decision.
+
+## W-10 — Apparent duplication was the recovery path; merging it would have worsened the bug being fixed
+
+**Observed:** 2026-08-07, fixing the `symbols` 0-match flake
+(`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`).
+
+**Pattern:** Before merging two code paths that apply the same filter and look redundant,
+establish what *triggers* the second one. If the second path runs precisely when the first
+fails, the duplication is a retry, and collapsing it removes the recovery rather than the waste.
+
+**Counterfactual:** `search_project_symbols` walks the project twice with the identical filter
+(`is_file` + `detect_language`) — once to build the `accepted_files` set that gates every LSP
+match via `in_walk`, once for the tree-sitter fallback. Reusing the first set for the second
+walk is an obvious-looking win on the server's most-used tool, and it is wrong: the fallback's
+gate is `if matches.is_empty()`, so a walk-1 truncation — which filters out every LSP symbol —
+is exactly what *triggers* walk 2. A complete walk 2 then still finds the symbol. Merging them
+would have converted a recoverable truncation into an unconditional zero, in the same commit
+that claimed to fix zeroes. I was one edit from doing it.
+
+**Confirming data points:**
+1. This session, `symbols`: the merge was scoped, then abandoned on reading the fallback gate.
+2. W-8 (same bug, earlier): reading that *same* `matches.is_empty()` gate is what eliminated
+   the LSP-warming hypothesis. One gate, two saves — which is itself the argument for reading
+   the gate rather than the call site.
+
+**Impact:** high — the change would have passed review as an optimisation, passed the whole
+test suite, and silently removed the retry that the bug's own recoveries depended on.
+
+**Promote-when:** a second case where a "redundant" path turns out to be failure-triggered. At
+two datapoints, promote to the codescout `reconnaissance` memory as: *before deduplicating two
+paths, read the condition that selects between them.*
+
+**Status:** validated.
+
+## F-10 — An unkilled mutation nearly got a correct test rewritten
+
+**Observed:** 2026-08-07, mutation-testing the new `symbols` walk-error guard.
+
+**When:** After `an_unreadable_directory_is_counted_rather_than_silently_dropped` passed, I
+mutated the error counting to confirm the test would fail without the fix.
+
+**Expected:** the test dies.
+
+**Got:** it passed. The immediate reading — "the test is vacuous, probably my root-guard is
+returning early" — was wrong. `edit_file(replace_all=true)` had matched **one of two**
+occurrences, because the two `Err` arms sit at different indentation depths (the fallback walk
+is nested inside `if matches.is_empty()`), and my `old_string` carried one indentation. The
+surviving counter kept the warning present and the test green.
+
+**Probable cause:** two compounding things. `replace_all` reports no match count (see U-38), so
+a partial application is silent; and "mutation survived" has two explanations — weak test, or
+incomplete mutation — of which only the first is the one people reach for.
+
+**Workaround:** two cheap checks separated them in one round trip: `id -u` plus an actual
+`chmod 000` probe proved the test's precondition really held (not root, directory genuinely
+unreadable), and grepping for the mutation marker showed it had landed at only one of the two
+sites. With both counters neutralised the test died as intended.
+
+**Severity:** med — no wrong code shipped, but the wrong reading would have meant rewriting a
+correct regression test for a real defect, weakening it in the name of strengthening it. That
+is worse than having no mutation step at all, because it launders a bad edit through a rigorous
+looking process.
+
+**Status:** fixed-verified — mutation completed, test killed, both counters restored, full
+suite green at 3515.
+
+**Fix idea / Pointer:** when a mutation fails to kill a test, verify the mutation landed
+**before** doubting the test — grep for the marker and count the sites. Corollary for
+`replace_all` on Rust: identical statements at different nesting depths are *different strings*.
 
 ## Template for new entries
 
