@@ -42,6 +42,13 @@ impl RetrievalConfig {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(768),
             profile: std::env::var("CODESCOUT_RETRIEVAL_PROFILE").unwrap_or_else(|_| "cpu".into()),
+            // Dense-vs-sparse fusion weight — corpus- and model-dependent by
+            // construction, so 3.0 is a value that worked on OUR corpus and dense
+            // model, not a calibration anyone else inherits (memory `conventions`
+            // § Environment-Agnostic Tuning). Our own sweep peaked at 5.0 (35/75)
+            // while 3.0 stayed the default; both are observations, and users
+            // re-derive theirs with scripts/sweep-bm25-boost.sh. Inert while
+            // CODESCOUT_DISABLE_SPARSE is set.
             bm25_boost: std::env::var("CODESCOUT_BM25_BOOST")
                 .ok()
                 .and_then(|s| s.parse().ok())

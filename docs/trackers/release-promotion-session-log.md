@@ -938,6 +938,7 @@ Ranked by what to do first.
 | F-11 | 2026-08-07 | med | process | fixed-verified | A bug file's prescribed fix was already implemented — the test it said to convert to a bounded poll already polled for 5 s, so shipping the fix as written would have been a no-op that closed the bug and left the flake |
 | F-13 | 2026-08-07 | high | measurement | fixed-verified | A two-point probe produced a published recommendation that a 28-point probe inverted — the two samples happened to be the extremes of a bimodal distribution, and the middle turned out to overlap the bottom |
 | F-12 | 2026-08-07 | med | test-design | fixed-verified | Seven tests and a green gate shipped a warning whose truncation hid the entry it existed for — every fixture had exactly one hidden entry, so the `more > 0` branch was never exercised; the project's own "both sides of every condition" lens would have caught it |
+| F-14 | 2026-08-07 | med | process | fixed-verified | Memory `conventions` § Bug Tracking still gated bug archiving on reaching `master` — the superseded rule — while `CLAUDE.md`, `_TEMPLATE.md`, and `docs/RELEASE.md` all say "verified on `experiments`, master not required"; memory is the one surface with no lint, and it is the one loaded at session start |
 
 ## Wins Index
 
@@ -949,8 +950,8 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
-| W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | validated |
-| W-12 | 2026-08-07 | high | Run the fix against the real tree as a step distinct from the gate — a green suite says the branches you wrote tests for work, not that the output is useful | Seven tests passed and clippy was clean, yet the shipped `grep` warning read ".buddy/, .cargo/, .claude/, .env, .env.amd and 11 more" — alphabetical truncation cut `.github/`, the entry the whole fix existed to surface. Every fixture had one hidden entry; the repo has 16 | validated |
+| W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
+| W-12 | 2026-08-07 | high | Run the fix against the real tree as a step distinct from the gate — a green suite says the branches you wrote tests for work, not that the output is useful | Seven tests passed and clippy was clean, yet the shipped `grep` warning read ".buddy/, .cargo/, .claude/, .env, .env.amd and 11 more" — alphabetical truncation cut `.github/`, the entry the whole fix existed to surface. Every fixture had one hidden entry; the repo has 16 | promoted-to-permanent-docs |
 | W-11 | 2026-08-07 | high | Scout a bug file's `## Fix` before implementing it — a fix written from a CI log line has never touched the code | WIN-30's Fix prescribed replacing a fixed wait with a bounded poll; the poll was already there, so the change would have been inert, the bug archived, and the next flake would have read as a regression of a fix that never existed | validated |
 | W-10 | 2026-08-07 | high | Before merging two code paths that look redundant, ask what *triggers* the second one | The two `symbols` walks share an identical filter and look duplicated; a truncated first walk empties `matches`, which is precisely what triggers the fallback — merging them would have deleted the recovery path and made the bug under repair strictly worse | validated |
 | W-9 | 2026-08-07 | high | When CI is unavailable and its toolchain floats, install CI's *resolved* toolchain side-by-side and run the gate through it | Local `stable` was 1.95.0 while CI's `@stable` had moved to 1.97.1; clippy 1.97 rejects two `assert!` borrows that 1.95 accepts, so the Clippy job was going to fail on the first run created after the outage | validated |
@@ -1798,11 +1799,12 @@ required someone re-walking U-39 from scratch.
 **Impact:** high — it is the only step that caught a defect defeating the feature's entire purpose,
 and it cost one tool call.
 
-**Promote-when:** met at two datapoints. The Standard Ship Sequence in `docs/RELEASE.md` should
-name a live-surface call as an explicit step for any change to tool-facing output, distinct from
-`cargo rb` + reconnect (which only establishes that the new code is running).
+**Promote-when:** met at two datapoints, and DISCHARGED 2026-08-07 (see Status). The Standard Ship
+Sequence in `docs/RELEASE.md` now names a live-surface call as an explicit step for any change to
+tool-facing output, distinct from `cargo rb` + reconnect (which only establishes that the new code
+is running).
 
-**Status:** validated.
+**Status:** promoted-to-permanent-docs — `docs/RELEASE.md` § *Before cherry-pick: read the live output of any tool-facing change (required)*, with a pointer at step 1 of the Standard Ship Sequence so a reader who scans only the code block still meets it. Marked **required** rather than advisory — unlike the mutation-test step beside it — because it costs one tool call and no cheaper check covers the class.
 
 ## F-13 — A two-point probe produced a recommendation a 28-point probe inverted
 
@@ -1884,14 +1886,31 @@ named as the precondition for any falsifiable fix.
 understanding than the original question: the MCP fix reduced to a threshold, the kotlin bug lost
 its severity justification, and the researcher bug moved from tuning to model selection.
 
-**Promote-when:** criterion met. This belongs in the bug-file template itself — a
+**Promote-when:** criterion met, and DISCHARGED 2026-08-07 (see Status). This belonged in the bug-file template itself — a
 `## Premise check` line, or a note under `## Root cause` that a mechanism recorded without a
 measurement is a hypothesis. The complement is already there in spirit ("Root cause — if unknown,
 write `Unknown — see Hypotheses tried`"); what is missing is that a **stated** root cause also
 decays, and nothing marks when it was last checked.
 
-**Status:** validated.
+**Status:** promoted-to-permanent-docs — landed 2026-08-07 in `docs/issues/_TEMPLATE.md` § Root cause: every stated mechanism now also cites what **measured** it (command + date), and a mechanism read out of the code but never observed at runtime says so explicitly (`inferred from src/x.rs:12 — not measured`). One line mirrored into memory `conventions` § Bug Tracking so it is in context at session start rather than only at template-copy time. This is option (b) of task #31 — cite the command rather than add a `## Premise check` section — chosen because the template already demands `path:line` on every root-cause claim, so it extends an existing habit instead of adding a section that gets left as `N/A`.
 
+## F-14 — Memory `conventions` still gated bug archiving on `master`, three surfaces after the rule changed
+
+**Observed:** 2026-08-07, reading memory `conventions` as prerequisite context for labelling the tuning constants (task #30) — not looking for drift.
+
+**When:** Session-start memory load, before any edit.
+
+**Expected:** Memory `conventions` § Bug Tracking agrees with the project's other three statements of the same rule.
+
+**Got:** *"Archive to `docs/issues/archive/` only after the fix ships to `master` (verify via `git branch --contains`)"* — the superseded rule. `CLAUDE.md` § Bug Tracking, the comment block in `docs/issues/_TEMPLATE.md`, and `docs/RELEASE.md` step 4 all say the opposite: archive once the fix is **verified on `experiments`**; reaching `master` is explicitly NOT required, because `experiments` is never deleted. The memory also omitted both safety clauses the other surfaces carry — archive via `artifact(action="move")` rather than `git mv` (`id = sha256(abs_path)`), and the experiments-SHA-orphans-on-rebase caveat.
+
+**Probable cause:** The rule moved and three of four surfaces were updated. Memory is the surface with no lint: `audit_doc_refs` checks path / link / line refs, not semantic agreement between two prose statements of one rule, and `.codescout/memories/` is not in its corpus at all. Same fix-then-forget root cause as the verify-open cadence and the bug-file-archive discipline — `CLAUDE.md` names three bookkeeping surfaces that leak this way, and memory is a fourth it does not name.
+
+**Severity:** med — the stale copy is strictly more conservative, so following it holds archives back rather than archiving falsely. What makes it more than cosmetic is *precedence*: the memory is loaded at session start and the correct rule is not, so it wins by default, and the pile of `fixed`-but-unarchived bugs the current rule exists to prevent is exactly what it reinstates.
+
+**Status:** fixed-verified — memory `conventions` § Bug Tracking rewritten this session to match the other three, both safety clauses included, plus the new W-13 root-cause measurement line.
+
+**Fix idea / Pointer:** The durable fix is a *pointer*, not a fourth copy — memory should cite `get_guide("tracker-conventions")` for archiving rather than restate it, so there is nothing left to drift. Deferred as its own pass: the same argument applies to several other sections of that memory, and collapsing them is a judgement call about how much a session-start surface should carry inline.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

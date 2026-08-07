@@ -77,6 +77,9 @@ When a bug fix or tested feature on `experiments` is ready to land in `master`:
 
 ```bash
 # 1. Commit on experiments (tests passing, clippy clean)
+#    Changed tool-facing OUTPUT? Call the tool live on this repo and read the bytes
+#    first — see "Before cherry-pick: read the live output" below. A green suite does
+#    not establish that what the tool SAYS is useful.
 git add <files> && git commit -m "..."
 
 # 2. Cherry-pick to master and push
@@ -158,6 +161,33 @@ check in the output, not just the exit code: `n_refs_found` should be in the ten
 thousands (a tiny number means the scan did not find the corpus), and the `med` finding
 count should stay large — if broken-ref *reporting* falls along with the `high` count, that
 is an extractor regression wearing the costume of a docs improvement.
+
+### Before cherry-pick: read the live output of any tool-facing change (required)
+
+`cargo rb` + `/mcp` establishes that the new code is *running*. It does not establish that
+what the code *says* is useful. For any change to tool-facing **output** — warnings, hints,
+completeness notes, summaries, rendered text — invoke the tool once against this repository
+and read the bytes before the cherry-pick.
+
+```bash
+cargo rb          # then /mcp to reconnect
+# then call the changed tool on the REAL tree, not a fixture, and read what it emits:
+#   grep(pattern="…", glob="…")   → is the warning it prints actually actionable?
+```
+
+Two datapoints, both escapes past a fully green gate:
+
+- The `grep` hidden-skip warning shipped with 7 tests, clippy clean, 3522 green, CI 15/15 on
+  attempt 1, bug archived — and its output was useless. Every fixture had exactly one hidden
+  entry, so the truncation branch never ran; the real tree has 16, and alphabetical ordering
+  cut the single entry the feature existed to surface (`cdfbbe0f` fixed it).
+- Round 6's `create.rs` fix was proved inert in a live MCP session despite a green suite —
+  the same lesson one layer lower.
+
+Unlike the mutation run below this is **required, not advisory**: it costs one tool call, and
+no cheaper check covers the class. The test-side corollary lives in memory
+`test-design-discipline` — when a change adds a cap, truncation, aggregation, or ordering,
+the fixture must **exceed** the cap, or the branch under test never executes.
 
 ### Before cherry-pick: mutation-test the diff (recommended for load-bearing logic)
 

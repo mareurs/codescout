@@ -90,6 +90,14 @@ that moves the reproducibility line.*
 not symptom-language. Cite `path:line` for every claim. If unknown, write
 `Unknown — see Hypotheses tried` and link.*
 
+*Also cite what **measured** it — the command and the date, on one line:
+`measured 2026-08-07: ps -o ppid= <pid> → every parent alive`. A mechanism read
+out of the code but never observed at runtime says so instead: `inferred from
+src/x.rs:12 — not measured`. This is the premise a later session re-checks
+BEFORE working the bug, and an unmeasured mechanism is a hypothesis wearing a
+conclusion's clothes: of the five bugs worked on 2026-08-07, all five had a
+false premise or a wrong prescription, and four fell to a single command (W-13,
+`docs/trackers/release-promotion-session-log.md`).*
 ## Evidence
 *One subsection per piece of evidence. Include the source of the evidence
 (`.codescout/diagnostic-XXXX.log`, session JSONL path, command output).

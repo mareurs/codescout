@@ -54,6 +54,13 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
 - **A scale-free form does not conjure signal that is not there.** 2026-08-07: `cross-encoder/ms-marco-MiniLM-L-6-v2` (22M params, MS MARCO, lexically driven) scored a hedged correct answer at `1.05e-5` and an absurd one at `1.14e-5` — overlapping bands, so *no* rule, absolute or relative, separates them. Check that the bands separate at all before shipping any filter, and ship the probe so the user can check on their model.
 - **Ship the calibration probe, not the calibration.** Give users the four-tier measurement (directly-answers / same-domain / tangential / unrelated, the middle tier adversarial), state what our model measured *labelled with the model name*, and let them derive their own value. See F-13 in `docs/trackers/release-promotion-session-log.md` for why a two-point probe is not enough to characterise a scale.
 
+- **Classify before flagging — one of these three classes is in scope, not all `unwrap_or`s.**
+  1. *Compatibility constants* — a wrong value means **broken**, not degraded, and there is nothing to calibrate. `model_dim` `unwrap_or(768)` (`src/retrieval/config.rs`) must match the embedding model or nothing works. **Out of scope.**
+  2. *Degradation deadlines* — a wrong value costs one slower or coarser call and self-heals on the next. `LSP_FIRST_CALL_BUDGET` (2 s, `src/lsp/mod.rs`): over budget, callers fall back to tree-sitter marked `"lsp": "warming"` while the start continues detached. **Out of scope**, provided the fallback is documented at the constant.
+  3. *Tuning constants* — a wrong value silently returns **worse results**, with no error and no self-healing, and the value was calibrated against a specific model / corpus / hardware. **The only class the rule targets.**
+  Discriminating question: *would a wrong value raise an error, or quietly degrade output?* Quietly degrade ⇒ in scope. Swept 2026-08-07: exactly one in codescout (`bm25_boost`), four in researcher (all `src/config.rs`).
+- **Labelling is a legitimate fix, and usually the right one.** The rule is not "no constants", it is "no *unlabelled* constant presented as a universal default". A number that names the model/corpus/hardware it was measured on and points at the probe that re-derives it has discharged the obligation; changing the value is a separate decision needing its own evidence. Worked example of the fixed shape: the `CODESCOUT_BM25_BOOST` block in `.env.example`. **A contradiction between two labels is the tell that neither was written as an observation** — `.env.example` said "Tuned to 3.0", `.env.gpu` said "5.0 was the measured peak (35/75)", and both were true of different sweeps.
+
 ## Testing Patterns
 
 - Cache-invalidation tests use a **three-query sandwich** (baseline → assert-stale → invalidate → assert-fresh), not two. The step-3 stale assertion is what makes it a *regression* test — it fails if the system ever changes to eager-reread. Canonical example: `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs`.
@@ -70,7 +77,8 @@ Full operational detail (bump matrix, 2200-byte slice cap, verify-slice hazard) 
 ## Bug Tracking
 
 Every noticed bug gets a file in `docs/issues/YYYY-MM-DD-<slug>.md` (copy `_TEMPLATE.md`).
-Archive to `docs/issues/archive/` only after the fix ships to `master` (verify via `git branch --contains`).
+Archive to `docs/issues/archive/` once the fix is **verified on `experiments`** — gate green plus a regression test. Reaching `master` is NOT required (`experiments` is never deleted). Archive via `artifact(action="move", …)`, never a bare `git mv` (`id = sha256(abs_path)`, so a hand-move orphans the catalog row). An experiments-only archive carries the SHA labelled `experiments` plus a Resume line saying the master-side SHA is still owed — an experiments SHA orphans on rebase.
+Every `## Root cause` cites both the mechanism (`path:line`) and what **measured** it (command + date); a mechanism inferred from code but never observed at runtime says so (W-13).
 Frontmatter/status vocabulary: `get_guide("tracker-conventions")`.
 
 ## Commit Style
