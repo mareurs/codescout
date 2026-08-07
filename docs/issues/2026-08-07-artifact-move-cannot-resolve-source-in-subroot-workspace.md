@@ -128,8 +128,9 @@ provided for free. That boundary is security-relevant: this is the guard that
 refuses paths outside every managed root, so `/work/sub` must not be treated as
 containing `/work/subterfuge`.
 
-**Resume:** record the master-side SHA after cherry-pick — `b5c8bbb0` is an
-`experiments` SHA and orphans on rebase.
+`b5c8bbb0` is an `experiments` SHA and stays one: it was decided 2026-08-07 that
+`master` (897 commits behind, 0 ahead) is not being synced, so no cherry-pick and
+no master-side SHA is pending.
 
 ## Tests added
 

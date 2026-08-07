@@ -94,9 +94,11 @@ over shell metacharacters — including `'`, which is the one character that cou
 escape the new single-quoting.
 ## Resume
 
-**Master-side SHA still to record.** `d564c9bb` and `20d12b5f` are `experiments`
-SHAs and orphan on rebase; after cherry-pick, run `git rev-parse HEAD` on master
-and replace them above. Check with `git branch --contains <sha>`.
+N/A for master — decided 2026-08-07 that no cherry-pick is planned. `master` is
+897 commits behind `experiments` and 0 ahead (its HEAD is the merge base), so
+`experiments` is a strict superset and is where this work lives. The SHAs above
+are `experiments` SHAs and stay that way; re-open this line only if master is
+ever fast-forwarded or a cherry-pick is scheduled.
 
 Otherwise done — `tee_path_is_safe` is extracted and directly unit-tested, so a future
 re-tightening of the allowlist fails a fast test instead of only surfacing

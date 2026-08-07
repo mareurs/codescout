@@ -125,5 +125,9 @@ directory`) before the fix, and the test passes after it.
 
 ## Resume
 
-N/A — fixed. One residual bookkeeping step: record the **master-side** SHA after
-cherry-pick. `94a63c32` is an `experiments` SHA and orphans on rebase.
+N/A — fixed and MCP-verified on `experiments` (`94a63c32`).
+
+No master-side SHA is pending: decided 2026-08-07 that `master` stays where it
+is. It is 897 commits behind `experiments` and 0 ahead, so `experiments` is a
+strict superset and the canonical branch for this work. Re-open only if master
+is fast-forwarded.
