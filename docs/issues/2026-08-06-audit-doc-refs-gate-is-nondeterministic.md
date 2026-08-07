@@ -170,7 +170,7 @@ the direction decision is closer to **fixed** than to `zombie` — the original 
 cause, and the cause was removed.
 
 **The `degraded` premise inverted.** "Not viable as written" rested on the flag being
-saturated `true`; `note_degraded` (`resolver.rs`) now excludes `"unknown"` languages for
+saturated `true`; `note_degraded` (`src/librarian/tools/audit_doc_refs/resolver.rs`) now excludes `"unknown"` languages for
 precisely that reason, with a docstring that also cites this bug file. Measured 2026-08-07:
 `degraded: false` with `lsp_languages_offline: []` on a fresh-clone full-corpus run, and false
 in all 57 paired warm/cold runs. So the flag is no longer saturated — it is now *silent* on
