@@ -58,6 +58,8 @@ never re-evaluated against `%TEMP%`.
 
 ## Fix
 
+`d564c9bb` (experiments), completed by `20d12b5f` (experiments).
+
 Landed as part of the bash-only shell change:
 
 - The path is now rendered via `platform::shell_path_str`, which emits the
@@ -66,6 +68,10 @@ Landed as part of the bash-only shell change:
 - `:` added to the allowlist for the drive-letter prefix. It is not a shell
   metacharacter inside a word, so the SF-4 property (no injectable
   metacharacters in an interpolated path) is preserved.
+- `~` added in `20d12b5f`. The first fix shipped incomplete: `:` covered the
+  drive letter but not the `~` that 8.3 short names put in `%TEMP%`
+  (`MAILIN~1.002`), so `inject_tee` stayed unreachable on this host after the
+  commit that claimed to fix it.
 
 ## Tests
 
@@ -88,7 +94,11 @@ over shell metacharacters — including `'`, which is the one character that cou
 escape the new single-quoting.
 ## Resume
 
-Done — `tee_path_is_safe` is extracted and directly unit-tested, so a future
+**Master-side SHA still to record.** `d564c9bb` and `20d12b5f` are `experiments`
+SHAs and orphan on rebase; after cherry-pick, run `git rev-parse HEAD` on master
+and replace them above. Check with `git branch --contains <sha>`.
+
+Otherwise done — `tee_path_is_safe` is extracted and directly unit-tested, so a future
 re-tightening of the allowlist fails a fast test instead of only surfacing
 through an end-to-end command on a machine whose temp path happens to contain
 the offending character.
