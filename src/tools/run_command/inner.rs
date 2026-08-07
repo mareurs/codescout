@@ -336,12 +336,24 @@ pub(crate) async fn run_command_inner(
     // --- Step 4: Resolve working directory ---
     let work_dir = resolve_work_dir(root, cwd_param)?;
 
-    // --- Step 4.2: Shell preflight ---
-    // Last check before anything is spawned, and deliberately after the policy
-    // gates above: a blocked command is blocked whether or not a shell exists,
-    // and reporting the missing shell first would mask the real answer. On
-    // Windows every spawn goes through Git Bash; without one the OS answers
-    // `program not found`, which names neither the requirement nor the fix.
+    // --- Step 4.2: Incompatible-parameter gate ---
+    // Hoisted above the preflight with the other policy checks: this rejection is
+    // about the caller's arguments and is true on any host, shell or no shell.
+    if run_in_background && buffer_only {
+        return Err(RecoverableError::with_hint(
+            "run_in_background cannot be used with buffer queries",
+            "Remove run_in_background, or run the query as a plain command without @ref interpolation.",
+        )
+        .into());
+    }
+
+    // --- Step 4.3: Shell preflight ---
+    // LAST check before anything is spawned, and that ordering is the contract:
+    // every gate above rejects on policy or arguments and is true whether or not
+    // a shell exists, so answering "no shell" first would replace the real reason
+    // for the refusal with an environmental one. On Windows every spawn goes
+    // through Git Bash; without one the OS answers `program not found`, which
+    // names neither the requirement nor the fix.
     // See docs/issues/2026-08-08-run-command-unusable-without-git-bash.md (WIN-36).
     if let Some(hint) = crate::platform::shell_unavailable_hint() {
         return Err(
@@ -351,13 +363,6 @@ pub(crate) async fn run_command_inner(
 
     // --- Step 4.7: Background spawn with warm return ---
     if run_in_background {
-        if buffer_only {
-            return Err(RecoverableError::with_hint(
-                "run_in_background cannot be used with buffer queries",
-                "Remove run_in_background, or run the query as a plain command without @ref interpolation.",
-            )
-            .into());
-        }
         return spawn_background_command(resolved_command, &work_dir, ctx).await;
     }
 

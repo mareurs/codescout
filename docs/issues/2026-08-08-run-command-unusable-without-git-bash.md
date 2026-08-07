@@ -106,10 +106,19 @@ called `Result::unwrap()` on an `Err` value: program not found
    `run_command_dangerous_rejected_without_ack`. All four gates are pure policy: a
    blocked command is blocked whether or not a shell exists, and answering "no shell"
    first masks the real reason for the refusal.
-   **Verdict:** rejected — the preflight moved to `run_command_inner` step 4.2, after
-   the gates and cwd resolution, immediately before the spawn, with the same check
-   added to the interactive path. Worth recording as the general shape: a preflight
-   that runs before the policy layer changes what every policy rejection *says*.
+   **Verdict:** rejected — the preflight moved into `run_command_inner`, after the
+   gates and cwd resolution, with the same check added to the interactive path.
+   Worth recording as the general shape: a preflight that runs before the policy
+   layer changes what every policy rejection *says*.
+5. **Hypothesis:** "after the gates" was enough — one move fixes it.
+   **Test:** the next wine run went 8 failures → 1, and the survivor was
+   `run_in_background_rejects_buffer_only`, whose gate sat at step 4.7, *below* the
+   preflight at 4.2. Same class as #4, one layer deeper.
+   **Verdict:** rejected. The rule is not "after the gates" but **last, immediately
+   before the spawn** — so the incompatible-parameter check was hoisted to step 4.2
+   and the preflight became 4.3. Two rounds of CI to find both instances of one
+   ordering rule is the cost of stating it as a position rather than as an invariant;
+   the comment at step 4.3 now states the invariant.
 
 ## Fix
 
@@ -123,12 +132,13 @@ security layer tokenizes POSIX while the shell executes something else.
   bare-`bash` fallback so nothing panics at startup.
 - `shell_unavailable_hint()` in `src/platform/windows.rs`, `src/platform/unix.rs`
   (always `None`), re-exported from `src/platform/mod.rs`.
-- `run_command_inner` step 4.2 in `src/tools/run_command/inner.rs` preflights it and
-  returns a `RecoverableError` naming Git for Windows and `CODESCOUT_BASH` — after the
-  dangerous-command / source-block / shell-mode gates and cwd resolution, immediately
-  before the spawn. `run_command_interactive` in
+- `run_command_inner` step 4.3 in `src/tools/run_command/inner.rs` preflights it and
+  returns a `RecoverableError` naming Git for Windows and `CODESCOUT_BASH` — last,
+  immediately before the spawn, below the dangerous-command / source-block /
+  shell-mode gates, cwd resolution, and the incompatible-parameter check hoisted to
+  step 4.2 for exactly this reason. `run_command_interactive` in
   `src/tools/run_command/interactive.rs` carries the same check at the same point.
-  Placement is load-bearing; see Hypotheses tried #4.
+  Placement is load-bearing; see Hypotheses tried #4 and #5.
 - `.github/workflows/ci.yml` — the 22 wine failures are skipped as environmental, with
   the un-skip protocol (install Git in the image, drop the block wholesale) in the
   comment.
