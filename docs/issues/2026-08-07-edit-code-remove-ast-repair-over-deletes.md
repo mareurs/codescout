@@ -141,10 +141,40 @@ Reduce the trigger: create a small file with a plain `fn` followed by a `#[cfg(t
 is to serialize internally rather than only warn. If it does not, instrument the repair path per Fix
 step 2.
 
+## Adjacent gap found in the same session: no supported way to append an item at end-of-file
+
+Not the same defect, but the reason the workaround above had to reach outside the tool surface, so it
+belongs with it.
+
+Adding a `#[cfg(test)] mod` at the end of `src/retrieval/config.rs` and `src/retrieval/search.rs` was
+necessary (clippy 1.97's `items_after_test_module` requires a test module to be the **last** item in
+its file) and turned out to be unreachable through the intended tools:
+
+| attempt | result |
+|---|---|
+| `edit_file` with the file's tail as anchor | **refused** — *"edit contains a symbol definition (`fn `) — use symbol tools for structural changes"*. Correct guard; a test module is all `fn`s. |
+| `edit_code insert, symbol="impl RetrievalConfig", position="after"` | **failed** — *"cannot determine end of 'impl RetrievalConfig' for insert-after — AST parse failed"*, while `symbols(path)` reported that same impl at 62-104 and `cargo check --lib` exited 0. So not a syntax error. |
+| `edit_code insert, symbol="from_env", position="after"` | would place the module **inside** the impl block — invalid Rust. |
+| `run_command` heredoc append | blocked by the source-file guard, then allowed with `acknowledge_risk: true`. **This is what was used.** |
+
+So when the last item in a file is an `impl` block, there is no non-escape-hatch path to append a new
+top-level item after it. The escape hatch worked and was verified immediately (`cargo fmt`, `clippy
+--all-targets -D warnings`, 3536 tests), but reaching for `acknowledge_risk` to do something as
+ordinary as "add a test module at the end of a file" is a signal about tool coverage rather than about
+the author.
+
+**Worth noting the guards were all individually right.** `edit_file` should refuse `fn ` definitions
+(BUG-027). Source-file shell access should be gated. The gap is only that the *supported* path
+(`edit_code`) cannot anchor on an `impl` block, so the two correct guards compose into a dead end.
+
+**Cheapest fix:** teach `edit_code insert` an explicit end-of-file target — `position="eof"`, needing
+no symbol resolution at all and therefore immune to the AST-parse failure above. That single addition
+removes the dead end without weakening either guard. Secondary: make `insert-after` on an `impl` work,
+since `symbols()` clearly resolves its extent even when the insert path cannot.
+
 ## References
 
 - `src/symbol/edit.rs` — `CorruptionVerdict`, the post-edit check that did not catch this
 - `src/ast/parser.rs` — `has_syntax_errors`, the predicate Fix step 1 would use
 - BUG-021 (parallel writes) — the hook warning present at the time
 - F-19 / F-18 in `docs/trackers/release-promotion-session-log.md` — same session
-

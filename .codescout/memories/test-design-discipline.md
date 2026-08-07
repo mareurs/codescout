@@ -41,6 +41,38 @@ text), call it once against the real repository and read the bytes. That is a st
 from the gate and from `cargo rb` + reconnect — the latter only establishes that the new code
 is running, not that what it says is useful.
 
+### Corollary: an invariant test proves the SHAPE, never the ASSIGNMENT
+
+When a bug is "these numbers don't add up", the obvious test is the arithmetic — and it is
+the one that cannot catch the bug's twin. An identity that holds for *any* assignment
+verifies the shape and says nothing about whether each item is in the right place.
+
+2026-08-07, measured rather than reasoned. `audit_doc_refs`'s three summary counters covered
+7 of 10 `Verdict` variants, so 2,426 of 47,094 refs were counted in `n_refs_found` and in no
+bucket. The fix routed every verdict through one exhaustive `match`, and got two tests:
+`summary_counters_partition_every_verdict` (one finding per verdict; buckets must sum to
+found) and `resolved_basename_counts_as_resolved_everywhere` (that verdict specifically must
+land in `resolved`). Mutating `bucket()` to put `ResolvedBasename` in `broken` **killed the
+second and left the first green** — because summing correctly is true under every possible
+assignment. Writing only the obvious test would have let the mutation live.
+
+So: for any partition, grouping, routing table, or dispatch map, write **two** tests — one
+for the invariant, one for at least one specific member's placement, chosen as the member
+whose misplacement would be most consequential. And prefer an **exhaustive `match` with no
+wildcard arm** over any test: adding a variant then fails to compile until it is handled. A
+test asserts a partition; an exhaustive match *is* one.
+
+### Corollary: a first measurement is a warm-up artifact until a second one agrees
+
+Not a test-design rule strictly, but it fails the same way — a number that looks legitimate
+because it has units and is internally consistent. Three instances on 2026-08-07 (W-14):
+sparse embed read 146.8 ms cold and **16.8 ms** warm (8.7×, and it fed a shipping decision);
+the `audit_doc_refs` tally migrated by up to 69 refs cold and was byte-identical warm; and
+`resolve_file_symbol` returned `SymbolMissing` for symbols that exist when the server answered
+before finishing indexing — the same trap promoted from a latency error into a false claim
+about the code. In a benchmark, discard the first iteration and **say in the write-up that you
+did**; a mean over a run that started cold folds a one-off into every per-item number.
+
 ## Round-trip completeness (writer shape ↔ reader surfacing)
 
 For any writer/reader pair, every distinct shape the WRITER can emit must be reachable and
