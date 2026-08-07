@@ -1,7 +1,7 @@
 ---
 id: c63b594c54199e81
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep''s zero/absent result is silent about the hidden-path skip, so `.github/` reads as "not present anywhere"'
 tags:
 - grep
@@ -9,7 +9,7 @@ tags:
 - false-negative
 - completeness-warning
 - tooling
-closed: ''
+closed: 2026-08-07
 opened: 2026-08-07
 owner: marius
 related:
@@ -159,7 +159,8 @@ grep(pattern="background_command_with_quotes_captures_output", glob="**/*.yml",
 
 ## Fix
 
-Implemented on `experiments`.
+Implemented on `experiments` in **`624f7f05`** — `experiments`-side SHA; see Resume for the
+master-side rule.
 
 `src/tools/grep.rs` now carries a `WalkAudit` (sibling of the one in
 `src/tools/symbol/symbols.rs`) providing:
