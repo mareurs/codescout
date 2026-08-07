@@ -119,9 +119,11 @@ membership a function of per-request LSP responsiveness. It also explains the sh
 observed twice — counts moving *up* then back *down* — which a monotonic warm-up story
 would not produce.
 
-**It is per-ref, not per-run.** `scan_meta.degraded` is permanently `true` (see § Evidence),
-so scan-level availability is constant while the verdict is not. Whatever moves is one
-lookup, not the session.
+**It is per-ref, not per-run.** Scan-level availability is constant while the verdict is
+not — whatever moves is one lookup, not the session. (The original form of this paragraph
+read *"`scan_meta.degraded` is permanently `true`"*; that was true when written and is now
+inverted — see § Status of these fix options below. The per-ref conclusion is unaffected,
+since it never depended on which constant value the flag held.)
 
 The earlier ranking of mux-ownership races (kin to the concurrent-instance class in memory
 `gotchas` § LSP) is now secondary: it may explain *why* an individual lookup occasionally
@@ -145,6 +147,50 @@ The honest options are narrower than they looked:
 languages `detect_language` knows, so it is `true` on every run including all 15 green CI
 runs. Fixing the flag to mean "a server I expected was missing" is a prerequisite, and
 arguably its own defect.
+### Status of these fix options — verified 2026-08-07, and option 1 already shipped
+
+Re-read the code before acting on the two options above; both of this section's premises had
+moved since it was written.
+
+**Option 1 is DONE.** `default_severity` (`src/librarian/tools/audit_doc_refs/severity.rs`)
+now reads `Missing | FileMissing => High`, `SymbolMissing | AnchorMissing | LineOob |
+AmbiguousBasename => Med`, everything else `Low`. Its docstring cites this bug file by path,
+and `default_severity_gates_only_on_deterministic_filesystem_verdicts`
+(`src/librarian/tools/audit_doc_refs/resolver.rs`) pins the split verdict-by-verdict. So
+`SymbolMissing` was capped below `high` exactly as recommended, and the recommendation should
+not be made a third time.
+
+**Consequence for the gate — the flap is not merely unreproduced, it is now structurally
+impossible.** `high` is reserved for `Missing` and `FileMissing`, and both are deterministic
+filesystem answers on an unchanged tree. No LSP-dependent verdict can reach the `high` band,
+so at `--fail-on high` no amount of language-server variance can move the exit code. That is
+the mechanism behind § Evidence's "99 invocations, exit code and high count never moved": the
+runs are confirmation of a shipped fix, not an unexplained absence. It also means item 3 of
+the direction decision is closer to **fixed** than to `zombie` — the original symptom had a
+cause, and the cause was removed.
+
+**The `degraded` premise inverted.** "Not viable as written" rested on the flag being
+saturated `true`; `note_degraded` (`resolver.rs`) now excludes `"unknown"` languages for
+precisely that reason, with a docstring that also cites this bug file. Measured 2026-08-07:
+`degraded: false` with `lsp_languages_offline: []` on a fresh-clone full-corpus run, and false
+in all 57 paired warm/cold runs. So the flag is no longer saturated — it is now *silent* on
+the case that matters, which is the opposite failure and a genuinely different problem: a
+partial-but-successful `document_symbols` reply calls neither `note_degraded` branch.
+
+**What the severity re-banding did NOT fix, and is what remains open here.** The three summary
+counters are computed from **verdicts, not severities** (`build_response`), so
+`SymbolMissing` still lands in `n_refs_broken` regardless of its band. The resolved <-> broken
+migration under cold start is therefore untouched by option 1 and is the live defect: the gate
+is deterministic, the *tally* is not. Anyone reading this section for the tally must not
+mistake option 1's landing for a fix to it.
+
+**Measured vs deduced** (per the `## Root cause` convention in `docs/issues/_TEMPLATE.md`):
+measured 2026-08-07 — `default_severity`'s mapping and its test read directly from the source;
+`degraded: false` from a full-corpus run and from the 57 paired runs; counter arithmetic
+(47094 found vs 44668 bucketed repo-wide, 44 vs 41 on a single uncapped file). Deduced, not
+measured — that this repo's language servers return partial symbol trees during warm-up. The
+cheapest falsification is logging `syms.len()` on the `Some(syms)` + `!contains` branch across
+one cold and one warm run for the same file.
 ## Evidence
 ### Second instance, observed 2026-08-06 at the zero boundary — and it changes the picture
 
