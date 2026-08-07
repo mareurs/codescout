@@ -69,13 +69,32 @@ Landed as part of the bash-only shell change:
 
 ## Tests
 
-Covered indirectly by the `run_command` suite (134 passing). No dedicated
-regression test was added for the allowlist itself — see Resume.
+The first fix (d564c9bb) was **incomplete and shipped that way**: it added `:`
+for the drive letter but missed `~`, which Windows uses in 8.3 short names.
+`%TEMP%` resolves through the short form whenever the account name is long or
+contains a dot — here `C:/Users/MAILIN~1.002/AppData/Local/Temp/...` — so tee
+injection still failed after the "fix", just with a different rejected character.
 
+It slipped through because the `run_command` suite exercises `inject_tee` only
+indirectly, via end-to-end commands, and the buffer-only path (`grep … @cmd_x |
+head`) **returns before tee injection entirely**, so the green suite proved
+nothing about this check. It was caught by running a real non-buffer-only
+filtered command (`ls src/platform | head -3`) against the live rebuilt server.
+
+Follow-up adds the direct unit coverage the Resume section asked for:
+`tee_path_is_safe` is now an extracted pure function with tests over the real
+platform temp-path shapes (POSIX, Windows long name, Windows 8.3 with `~`) and
+over shell metacharacters — including `'`, which is the one character that could
+escape the new single-quoting.
 ## Resume
 
-Add a direct unit test for `inject_tee` asserting a generated temp path passes
-the SF-4 check on the host platform. The current coverage would not catch a
-future re-tightening of the allowlist that re-breaks Windows, because the
-failure only surfaces through an end-to-end command with a terminal filter.
+Done — `tee_path_is_safe` is extracted and directly unit-tested, so a future
+re-tightening of the allowlist fails a fast test instead of only surfacing
+through an end-to-end command on a machine whose temp path happens to contain
+the offending character.
 
+Remaining nuance worth knowing: the allowlist is now a tripwire, not the primary
+defence — the path is single-quoted at the interpolation site. Quoting is safe
+here specifically because `inject_tee` runs *after* `is_buffer_only` has been
+computed, so it cannot perturb that classification (unlike `resolve_refs`, where
+quoting would reclassify buffer-only commands past the dangerous-command gate).

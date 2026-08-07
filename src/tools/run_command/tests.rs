@@ -3720,6 +3720,38 @@ async fn onboarding_triggers_refresh_when_version_stale() {
         "must be lightweight refresh"
     );
 }
+#[test]
+fn tee_path_is_safe_accepts_real_platform_temp_paths() {
+    use super::inner::tee_path_is_safe;
+    // POSIX.
+    assert!(tee_path_is_safe("/tmp/codescout-unfiltered-aB3xY9"));
+    // Windows, long name — needs `:` for the drive letter.
+    assert!(tee_path_is_safe(
+        "C:/Users/someone/AppData/Local/Temp/codescout-unfiltered-aB3xY9"
+    ));
+    // Windows, 8.3 short name — needs `~`. This is the exact shape that
+    // reached the shell on the dev VDI and was rejected: `%TEMP%` resolves
+    // through the short name whenever the account name is long or dotted.
+    assert!(tee_path_is_safe(
+        "C:/Users/MAILIN~1.002/AppData/Local/Temp/codescout-unfiltered-g44yCk"
+    ));
+}
+
+#[test]
+fn tee_path_is_safe_rejects_shell_metacharacters() {
+    use super::inner::tee_path_is_safe;
+    // The interpolated path is single-quoted at the call site, so a `'` would
+    // be the one character that could break out — it must never pass.
+    assert!(!tee_path_is_safe("/tmp/x'; rm -rf /; echo '"));
+    assert!(!tee_path_is_safe("/tmp/x;y"));
+    assert!(!tee_path_is_safe("/tmp/x$(id)"));
+    assert!(!tee_path_is_safe("/tmp/x`id`"));
+    assert!(!tee_path_is_safe("/tmp/x y"));
+    assert!(!tee_path_is_safe("/tmp/x|y"));
+    assert!(!tee_path_is_safe("/tmp/x>y"));
+    assert!(!tee_path_is_safe(""));
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn background_command_with_quotes_captures_output() {

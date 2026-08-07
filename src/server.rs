@@ -3971,10 +3971,12 @@ mod guide_hint_tests {
         );
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "uses 'yes filler | head -2000' shell pipeline — both 'yes' and 'head' are Unix-only and the inject_tee path-validator rejects Windows temp file paths (C:\\Users\\...\\Temp\\codescout-unfiltered-XXX has chars outside the [a-zA-Z0-9/_-.] allowlist). See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
-    )]
+    // Previously #[ignore]d on Windows for two reasons, both now resolved:
+    // `yes`/`head` were Unix-only under cmd.exe (commands run through Git Bash
+    // on both platforms now), and inject_tee's path validator rejected every
+    // Windows temp path (it accepts the `:` drive letter and the `~` of 8.3
+    // short names, and the path is rendered forward-slashed). Re-enabled so the
+    // overflow -> progressive-disclosure-hint path is actually covered here.
     #[tokio::test]
     async fn run_command_with_overflow_emits_progressive_hint_once() {
         let (_dir, server) = make_server().await;
