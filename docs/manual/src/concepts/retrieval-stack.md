@@ -276,6 +276,33 @@ fusion gives +2 points over dense-only at `bm25_boost=5.0`.
 > file's own retraction — the arms it compared differ in four dimensions, so it
 > establishes the latency cost but **not** a score regression.
 
+> ⚠ **The reranker is OFF by default as of 2026-08-07. Set `CODESCOUT_RERANK=1` to enable
+> it.** The open question above was answered by a clean A/B — same rebuilt index, same
+> binary, same 25-TC suite, arms differing in exactly **one** dimension, which is what the
+> earlier four-dimension comparison could not do:
+>
+> | arm | full /75 | warm median latency |
+> |---|---|---|
+> | reranker on | 23 | 1559 ms |
+> | **reranker off** | **26** | **990 ms** |
+>
+> About **569 ms per query** for a result that did not improve — it helped 4 of the 25 test
+> cases and hurt 5. A 3-point net on a 25-case suite is not a large effect and should not be
+> read as one; the sufficient claim is that reranking does not measurably improve retrieval
+> on this stack while costing half a second per query. Not a trade-off — a coin flip with a
+> price.
+>
+> **This is a statement about *this* serving runtime, not about reranking.** The rows above
+> are `llama-server` on the AMD profile; the same weights over TEI measure ~80 ms, where the
+> calculus is entirely different — hence a knob rather than a deletion. If you run a
+> different cross-encoder or protocol, measure it yourself with
+> `scripts/run-tc-benchmark.py`, and **discard the first query of the run**: cold-start
+> inflated the sparse-embed figure ~9× in this same session, and a mean over a run that
+> started cold folds a one-off into every per-query number.
+>
+> These latencies are full **MCP round-trip**, not the retrieval-stage figures in the
+> stack-wide table below — different quantities, not comparable.
+
 bge-v2-m3 wins on the full suite and is the default. jina-rerank-v2 lifts
 the T5 (real-usage) tier by +1 every time but loses on long natural-language
 queries. The protocol toggle (`CODESCOUT_RERANKER_PROTOCOL=infinity`) lets

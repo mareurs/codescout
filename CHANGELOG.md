@@ -6,6 +6,16 @@ All notable changes to codescout are documented here.
 
 ### Added
 
+- **`CODESCOUT_RERANK` — the cross-encoder reranker is now opt-in and OFF by default.**
+  Measured on the AMD profile (bge-reranker-v2-m3 Q4_K_M over llama-server) with sparse
+  fusion on and a freshly rebuilt index, two arms differing in exactly one dimension:
+  reranking scored 23/75 at a 1559 ms warm median against 26/75 at 990 ms without it —
+  about 569 ms per query for a result that did not improve. Set `CODESCOUT_RERANK=1` to
+  restore the previous behaviour. The cost is serving-runtime specific (the same weights
+  over TEI measure ~80 ms), so this is a knob rather than a removal; measure on your own
+  stack with `scripts/run-tc-benchmark.py`. Details:
+  `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`.
+
 - **Opt-in idle shutdown for the stdio server** (`CODESCOUT_IDLE_SHUTDOWN_SECS`).
   Exits after the given number of seconds with no tool call. Closes the accumulation in
   `docs/issues/2026-07-28-mcp-servers-outlive-their-clients.md`, where a client that is

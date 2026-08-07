@@ -1,5 +1,25 @@
 use anyhow::Result;
 
+/// Parse `CODESCOUT_RERANK` into the opt-in flag. **Absent, blank, or unrecognised is
+/// `false`** — the reranker stays off unless someone asks for it explicitly.
+///
+/// A pure fn over `Option<&str>` rather than an inline env read, so it is testable
+/// without `std::env::set_var` — which is UB against the suite's concurrent `getenv`
+/// readers. Same shape as `server::parse_idle_shutdown` for the same reason.
+///
+/// Unrecognised values resolve to `false` rather than erroring: this gates an
+/// optimisation, so a typo costing you a disabled reranker is strictly better than a
+/// typo costing you a failed search.
+pub(crate) fn parse_rerank_opt_in(raw: Option<&str>) -> bool {
+    matches!(
+        raw.map(str::trim)
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 pub struct RetrievalConfig {
     pub qdrant_url: String,
     pub embedder_url: String,
@@ -13,6 +33,25 @@ pub struct RetrievalConfig {
     /// Skip the sparse leg entirely. Search becomes pure dense ANN.
     /// Set via CODESCOUT_DISABLE_SPARSE=1 — used in matrix control cells.
     pub disable_sparse: bool,
+    /// Apply the cross-encoder reranker. **Opt-in, default OFF** — set
+    /// `CODESCOUT_RERANK=1`.
+    ///
+    /// Note the polarity: this is a positive flag, unlike its `disable_sparse`
+    /// neighbour. Measured 2026-08-07 on the rebuilt index, both arms differing only
+    /// in this one dimension: reranking scored **23/75 at a 1559 ms warm median**
+    /// against **26/75 at 990 ms** without it — about **569 ms per query** for a
+    /// result that got no better (it helped 4 of 25 test cases and hurt 5). A
+    /// component that costs half a second and does not measurably improve retrieval
+    /// has no business being on by default, and memory `conventions`
+    /// § Environment-Agnostic Tuning says the honest shape for it is inert with the
+    /// active value opt-in.
+    ///
+    /// Kept configurable rather than deleted because the cost is entirely
+    /// model-and-hardware dependent — the same weights served over TEI rather than
+    /// llama-server measured ~80 ms, and a different cross-encoder may well earn its
+    /// keep. What is not defensible is choosing for the user silently. Full data:
+    /// `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`.
+    pub rerank: bool,
     /// Prefix prepended to qdrant collection names. Default empty (live collections
     /// `code_chunks`, `memories`, etc.). Set via
     /// CODESCOUT_QDRANT_COLLECTION_PREFIX to isolate benchmark runs (e.g.
@@ -57,8 +96,49 @@ impl RetrievalConfig {
                 .ok()
                 .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
                 .unwrap_or(false),
+            rerank: parse_rerank_opt_in(std::env::var("CODESCOUT_RERANK").ok().as_deref()),
             collection_prefix: std::env::var("CODESCOUT_QDRANT_COLLECTION_PREFIX")
                 .unwrap_or_default(),
         })
+    }
+}
+
+#[cfg(test)]
+mod rerank_opt_in_tests {
+    use super::parse_rerank_opt_in;
+
+    /// The default is the load-bearing case: absent means OFF. Every input here is
+    /// something a real `.env` produces — commented out, set empty, set to a word.
+    #[test]
+    fn rerank_is_off_unless_explicitly_requested() {
+        for raw in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("0"),
+            Some("false"),
+            Some("no"),
+            Some("off"),
+            Some("maybe"),
+            Some("2"),
+        ] {
+            assert!(
+                !parse_rerank_opt_in(raw),
+                "{raw:?} must NOT enable the reranker — off is the default, and an \
+                 unrecognised value must not silently cost ~569 ms/query"
+            );
+        }
+    }
+
+    #[test]
+    fn rerank_accepts_the_documented_truthy_forms_case_and_space_insensitively() {
+        for raw in [
+            "1", "true", "TRUE", "True", "yes", "YES", "on", "ON", " 1 ", "\ttrue\n",
+        ] {
+            assert!(
+                parse_rerank_opt_in(Some(raw)),
+                "{raw:?} should enable the reranker"
+            );
+        }
     }
 }

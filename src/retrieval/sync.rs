@@ -781,6 +781,7 @@ mod tests {
                 profile: "cpu".into(),
                 bm25_boost: 1.0,
                 disable_sparse: false,
+                rerank: false,
                 collection_prefix: String::new(),
             },
             lite: false,
