@@ -939,6 +939,7 @@ Ranked by what to do first.
 | F-13 | 2026-08-07 | high | measurement | fixed-verified | A two-point probe produced a published recommendation that a 28-point probe inverted — the two samples happened to be the extremes of a bimodal distribution, and the middle turned out to overlap the bottom |
 | F-12 | 2026-08-07 | med | test-design | fixed-verified | Seven tests and a green gate shipped a warning whose truncation hid the entry it existed for — every fixture had exactly one hidden entry, so the `more > 0` branch was never exercised; the project's own "both sides of every condition" lens would have caught it |
 | F-14 | 2026-08-07 | med | process | fixed-verified | Memory `conventions` § Bug Tracking still gated bug archiving on reaching `master` — the superseded rule — while `CLAUDE.md`, `_TEMPLATE.md`, and `docs/RELEASE.md` all say "verified on `experiments`, master not required"; memory is the one surface with no lint, and it is the one loaded at session start |
+| F-15 | 2026-08-07 | high | process | fixed-verified | A concurrent session changed the checked-out branch between commit and push; the bare `git push` reported `Everything up-to-date` at exit 0 while the commit sat undelivered, and a later `edit_markdown` then wrote to the foreign branch's tree and returned `ok` because its anchor existed on both -- refspec push is the non-destructive fix, and after a detected foreign checkout every write is suspect and must be verified from the object store |
 
 ## Wins Index
 
@@ -1911,6 +1912,29 @@ decays, and nothing marks when it was last checked.
 **Status:** fixed-verified — memory `conventions` § Bug Tracking rewritten this session to match the other three, both safety clauses included, plus the new W-13 root-cause measurement line.
 
 **Fix idea / Pointer:** The durable fix is a *pointer*, not a fourth copy — memory should cite `get_guide("tracker-conventions")` for archiving rather than restate it, so there is nothing left to drift. Deferred as its own pass: the same argument applies to several other sections of that memory, and collapsing them is a judgement call about how much a session-start surface should carry inline.
+## F-15 — A concurrent session changed the checked-out branch mid-task, and `git push` reported success
+
+**Observed:** 2026-08-07, immediately after committing `8a631282` on `experiments`.
+
+**When:** Between `git commit` -- which printed `[experiments 8a631282]` -- and the very next command, `git push`.
+
+**Expected:** `git push` delivers `experiments` to `origin/experiments`.
+
+**Got:** `Everything up-to-date`, **exit 0**. The same command's `git status --short --branch` printed `## feat/pi-secret-guard`, with an untracked `models/` that had not been there a minute earlier. `git reflog -1`: `09170aeb HEAD@{0}: checkout: moving from experiments to feat/pi-secret-guard`. This session ran no checkout. The commit was intact (`git branch --contains 8a631282` -> `experiments`) but undelivered -- and the push had genuinely *succeeded*, against a branch that was already in sync.
+
+**Probable cause:** Another of the machine's three Claude Code profiles is working in the same checkout (`/home/marius/work/claude/codescout`) and switched branches. `docs/RELEASE.md` § Concurrent-Work Rules covered a concurrent session moving HEAD *along* a branch (reset / rebase / amend) but not one changing *which* branch is checked out. A bare `git push` resolves its target at execution time from the current branch, so this failure is silent by construction.
+
+**Severity:** high -- the failure mode is a **silent no-op that looks like success**, on the one operation whose entire purpose is durability. Had the turn ended at the push, the work would have been reported as pushed while sitting local-only, and the next session's `456 ahead / 0 behind` verification would have read as agreement rather than as a discrepancy. The obvious recovery is also destructive: `git checkout experiments` to retry would have yanked the working tree out from under the other session mid-task.
+
+**Second instance, same turn -- the more dangerous half:** after the refspec push, an `edit_markdown` on `docs/RELEASE.md` succeeded against the FOREIGN branch's working tree and returned `ok`. Its anchor text (`**Before any git rebase...**`) exists on both branches, so nothing failed and nothing warned. It was caught only when the *next* edit's anchor -- `## F-14`, committed on `experiments` minutes earlier -- came back "heading not found" from a file that demonstrably contained it on `experiments`. Reverted after reading the full diff and confirming every line was this session's. The narrower lesson: once a foreign checkout is detected, every subsequent working-tree write is suspect **including the ones that report success**, and an anchor present on both branches will never reveal it. Landed content has to be verified from the object store (`git show <sha>:<path>`), not from the tree.
+
+**Third exposure, avoided:** the follow-up commit could not use `git add -A` -- the shared tree carried 57 uncommitted insertions in `docs/trackers/pr-review-session-log.md` belonging to the other session. Explicit paths only, while any concurrent work is uncommitted in the same tree.
+
+**Workaround (applied):** `git push origin experiments:experiments`. A refspec push needs no checkout, cannot target the wrong branch, and leaves the shared working tree exactly where the other session left it. Branch refs are shared per-repo rather than per-worktree, so the commit itself was never at risk -- only its delivery.
+
+**Status:** fixed-verified -- `docs/RELEASE.md` § Concurrent-Work Rules gained five rules covering all three exposures (name the refspec; do not check out to recover; treat post-detection writes as suspect and verify from the object store; explicit paths not `-A`; worktree isolation with its `merge_worktree` cost stated). This entry itself had to wait for the shared checkout to return to `experiments` -- filed as task #32 and landed once it did -- which is the friction demonstrating its own severity.
+
+**Fix idea / Pointer:** The durable form is *"on a shared checkout, always name the refspec"* -- cheap, and correct even when nothing is concurrent, which is what makes it a habit rather than a special case. A mechanical backstop is available if this recurs: a companion-plugin PreToolUse guard that rejects a bare `git push` when `git rev-parse --abbrev-ref HEAD` disagrees with the branch named in the session's most recent commit, and that warns on any working-tree write while the current branch differs from the one the session has been committing to. All the data those guards need is local and free.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
