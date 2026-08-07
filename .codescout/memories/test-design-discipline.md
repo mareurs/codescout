@@ -21,6 +21,26 @@ gated on slug-present had its slug-None side unexercised. Function-level "is it 
 test" is NOT enough — a well-tested function can hide a dead branch (coverage tools mark the
 function covered; only branch coverage or mutation testing sees the gap).
 
+### Corollary: a minimal fixture never reaches a cap, truncation, or ordering branch
+
+When a change adds a **cap, truncation, aggregation, or ordering**, the fixture must EXCEED
+the cap. A one-element fixture proves only the empty and single-element cases, and unit
+fixtures are built to be minimal — which is exactly what hides this class.
+
+2026-08-07 (F-12, `docs/trackers/release-promotion-session-log.md`): `grep`'s new
+`completeness_warning` shipped with seven tests, clippy clean, 3522 green, and CI 15/15 on
+attempt 1 — and its output was useless. Every fixture created exactly ONE hidden entry, so
+`if more > 0` was never executed. The real repo has 16, alphabetical ordering put `.github/`
+twelfth, and the cap of 5 cut the single entry the feature existed to surface. The
+`both sides of every condition` lens above catches it; it was applied to the `Option` two
+lines up (three tests pin the `None` side) and not to the truncation two lines down. Having
+the lens is not the same as sweeping every new branch with it.
+
+Pairs with W-12: for any change to tool-facing OUTPUT (warnings, hints, summaries, rendered
+text), call it once against the real repository and read the bytes. That is a step distinct
+from the gate and from `cargo rb` + reconnect — the latter only establishes that the new code
+is running, not that what it says is useful.
+
 ## Round-trip completeness (writer shape ↔ reader surfacing)
 
 For any writer/reader pair, every distinct shape the WRITER can emit must be reachable and

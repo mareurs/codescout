@@ -159,8 +159,19 @@ grep(pattern="background_command_with_quotes_captures_output", glob="**/*.yml",
 
 ## Fix
 
-Implemented on `experiments` in **`624f7f05`** — `experiments`-side SHA; see Resume for the
-master-side rule.
+Implemented on `experiments` in **`624f7f05`**, refined in **`cdfbbe0f`** — both
+`experiments`-side SHAs; see Resume for the master-side rule.
+
+**`cdfbbe0f` — the ordering fix, and the reason it is here at all.** Live verification against the
+real tree caught what none of the seven tests could: each test tree had exactly one hidden entry,
+so the truncation path never ran. The repo has 16 after the exclusions, and pure alphabetical
+ordering put `.github/` twelfth — behind five `.env*` files — so a cap of 5 cut the one entry the
+warning existed to surface. The rendered message read *".buddy/, .cargo/, .claude/, .env,
+.env.amd and 11 more"*, as useless as the bare zero it replaced. Directories now sort before
+files (alphabetical within each group) and the cap is 8. The ordering is the substantive half: a
+pruned directory hides an unbounded subtree, a pruned dotfile hides exactly one file, so
+directories carry far more information per character of a truncated list. Raising the cap alone
+would have papered over the ordering and broken again on the next repo with more dotfiles.
 
 `src/tools/grep.rs` now carries a `WalkAudit` (sibling of the one in
 `src/tools/symbol/symbols.rs`) providing:
@@ -219,7 +230,15 @@ Verified by mutation, each killing exactly one test and nothing else:
 `include_hidden_searches_dotfiles`, which pins the filtering behaviour itself, passes unchanged —
 confirming the walk's semantics did not move.
 
-Gate: fmt, `clippy --all-targets -D warnings`, **3522 passed / 0 failed** (3515 + 7).
+An eighth test came from live verification, `a_pruned_directory_survives_truncation_of_the_hidden_list`
+— nine dotfiles that all sort before a directory, asserting both that the directory survives
+truncation and that the remainder is still reported. Mutation-verified: reverting to plain
+`names.sort()` kills only that test, and its failure output reproduces the live symptom
+(`.aaa0 … .aaa7 and 2 more`). Its existence is the argument for live verification as a distinct
+step — seven passing tests, a green gate, and the shipped output was still unhelpful, because
+every fixture had one hidden entry and the real tree has sixteen.
+
+Gate: fmt, `clippy --all-targets -D warnings`, **3523 passed / 0 failed** (3515 + 8).
 ## Workarounds
 
 No longer needed for diagnosis — a zero-match now says whether it can be trusted. The remedy it

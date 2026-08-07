@@ -799,6 +799,7 @@ Ranked by what to do first.
 | F-9 | 2026-08-07 | med | measurement | fixed-verified | A `--profile minimal` toolchain install produced 12 test failures that read as a compiler regression; the cause was a missing `rust-analyzer` component |
 | F-10 | 2026-08-07 | med | process | fixed-verified | A mutation that failed to kill a test almost got a *correct* test rewritten — the mutation was incomplete (two `Err` arms at different indentation depths), not the test weak |
 | F-11 | 2026-08-07 | med | process | fixed-verified | A bug file's prescribed fix was already implemented — the test it said to convert to a bounded poll already polled for 5 s, so shipping the fix as written would have been a no-op that closed the bug and left the flake |
+| F-12 | 2026-08-07 | med | test-design | fixed-verified | Seven tests and a green gate shipped a warning whose truncation hid the entry it existed for — every fixture had exactly one hidden entry, so the `more > 0` branch was never exercised; the project's own "both sides of every condition" lens would have caught it |
 
 ## Wins Index
 
@@ -810,6 +811,7 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-12 | 2026-08-07 | high | Run the fix against the real tree as a step distinct from the gate — a green suite says the branches you wrote tests for work, not that the output is useful | Seven tests passed and clippy was clean, yet the shipped `grep` warning read ".buddy/, .cargo/, .claude/, .env, .env.amd and 11 more" — alphabetical truncation cut `.github/`, the entry the whole fix existed to surface. Every fixture had one hidden entry; the repo has 16 | validated |
 | W-11 | 2026-08-07 | high | Scout a bug file's `## Fix` before implementing it — a fix written from a CI log line has never touched the code | WIN-30's Fix prescribed replacing a fixed wait with a bounded poll; the poll was already there, so the change would have been inert, the bug archived, and the next flake would have read as a regression of a fix that never existed | validated |
 | W-10 | 2026-08-07 | high | Before merging two code paths that look redundant, ask what *triggers* the second one | The two `symbols` walks share an identical filter and look duplicated; a truncated first walk empties `matches`, which is precisely what triggers the fallback — merging them would have deleted the recovery path and made the bug under repair strictly worse | validated |
 | W-9 | 2026-08-07 | high | When CI is unavailable and its toolchain floats, install CI's *resolved* toolchain side-by-side and run the gate through it | Local `stable` was 1.95.0 while CI's `@stable` had moved to 1.97.1; clippy 1.97 rejects two `assert!` borrows that 1.95 accepts, so the Clippy job was going to fail on the first run created after the outage | validated |
@@ -1573,6 +1575,93 @@ five-week-old unknown root cause.
 **Promote-when:** criterion already met at two datapoints. Promote to the reconnaissance skill as
 an explicit Phase 1 bullet — *a bug file's or plan's prescribed fix is scouted like plan code:
 read the code it names before implementing it.* Recorded as R-62 carrying that proposal.
+
+**Status:** validated.
+
+## F-12 — Seven tests, a green gate, and the shipped output was still useless
+
+**Observed:** 2026-08-07, immediately after `624f7f05` (the `grep` hidden-skip warning) reached the
+live MCP surface.
+
+**When:** First real call against the codescout repo after the rebuild — a deliberate
+live-verification step, not a test.
+
+**Expected:** the warning names `.github/`, since surfacing exactly that entry is why the fix
+exists. Its bug file, its commit message, and its first test all say so.
+
+**Got:**
+
+```
+0 matches
+
+warning: this zero describes what was searched, not the pattern. Hidden paths were not
+searched, including .buddy/, .cargo/, .claude/, .env, .env.amd and 11 more at the search
+root. …
+```
+
+`.github/` is twelfth of sixteen alphabetically, behind five `.env*` files, and the cap was 5. The
+warning was as unhelpful as the bare zero it replaced — while reporting, accurately, that it had
+found something.
+
+**Probable cause:** every one of the seven fixtures created **exactly one** hidden entry, so
+`hidden.len() > 5` never held and the `more > 0` branch was never executed by any test. The
+truncation and the ordering were both written, both shipped, and neither was exercised.
+
+The uncomfortable part: `memory("test-design-discipline")` already carries the lens that catches
+this — *"One test per branch; both sides of every condition. Each new `if` / `match`-arm /
+`Some`-vs-`None` branch needs a test that REACHES that branch."* I applied it carefully to the
+`Option` returned by `completeness_warning` (three tests pin the `None` side) and did not apply it
+to the `if more > 0` two lines below. Having the lens is not the same as sweeping every new branch
+with it.
+
+**Workaround:** none — fixed in `cdfbbe0f`. Directories sort before files, cap raised to 8, and
+`a_pruned_directory_survives_truncation_of_the_hidden_list` builds the pathology in miniature (nine
+dotfiles that all sort before a directory). Mutation-verified: reverting to `names.sort()` kills
+only that test and its failure output reproduces the live symptom.
+
+**Severity:** med — no wrong behaviour and no false claim, but the feature did not deliver its one
+purpose, and the green gate actively argued that it had. That is the expensive kind of
+incompleteness: a passing suite is evidence, and here it was evidence for the wrong proposition.
+
+**Status:** fixed-verified — `cdfbbe0f`, gate green at 3523, mutation-killed, and confirmed on the
+real tree after rebuild.
+
+**Fix idea / Pointer:** when a change adds a **cap, a truncation, an aggregation, or an ordering**,
+the fixture must exceed the cap — a one-element fixture proves only that the empty and
+single-element cases work. Pairs with W-12: the live-tree call is what made the gap visible, and it
+is a distinct step from the gate rather than a nicer way of running it.
+
+## W-12 — The live-tree call is a distinct verification step, not a nicer way to run the tests
+
+**Observed:** 2026-08-07, verifying `624f7f05` after `cargo rb` + `/mcp`.
+
+**Pattern:** After a fix that changes what a tool **says** — warnings, hints, summaries, rendered
+output — call it once against the real repository and read the actual bytes. Do this even when the
+gate is green, and treat it as its own step with its own possible outcome, because unit fixtures
+are built to be minimal and real trees are not. Minimality is precisely what hides cap,
+truncation, ordering, and aggregation defects.
+
+**Counterfactual:** Without the live call, `624f7f05` ships as done — seven tests, clippy clean,
+3522 green, CI 15/15 on attempt 1, bug file archived with a fix SHA. Every gate the project has
+would have agreed. The warning would then have fired on real zero-matches showing `.buddy/,
+.cargo/, .claude/, .env, .env.amd` — never `.github/` — so the next reader hits the identical
+false-negative the bug was filed for, now with a warning present and pointing elsewhere, which is
+worse than silence because it looks like the question was already answered. Discovery would have
+required someone re-walking U-39 from scratch.
+
+**Confirming data points:**
+
+1. This session, round 7 — the round-6 `create.rs` fix was proved inert in a live MCP session
+   despite a green suite, because the served binary is a separate artifact. Same lesson, one layer
+   lower (*is the code running?* rather than *is the output useful?*).
+2. F-12 (this log) — green gate, useless output.
+
+**Impact:** high — it is the only step that caught a defect defeating the feature's entire purpose,
+and it cost one tool call.
+
+**Promote-when:** met at two datapoints. The Standard Ship Sequence in `docs/RELEASE.md` should
+name a live-surface call as an explicit step for any change to tool-facing output, distinct from
+`cargo rb` + reconnect (which only establishes that the new code is running).
 
 **Status:** validated.
 
