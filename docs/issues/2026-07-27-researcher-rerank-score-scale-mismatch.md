@@ -22,6 +22,29 @@ Filed here because codescout's `docs/issues/` is the tracker actually queried an
 researcher has no issues directory. Move it if researcher grows one.*
 
 ## Summary
+> **SCOPE, set 2026-08-07: this is a `researcher` defect, not a codescout one, and it does NOT
+> gate codescout's `experiments` -> `master` promotion.** It was filed here because it was found
+> from a codescout session, and the two projects share the `codescout-ecosystem` librarian
+> umbrella — but the code, the config, and the fix all live in `researcher`. Maintainer decision:
+> stay filed, stay open, stop being a codescout release decision. Nothing in codescout reads
+> `RERANK_MIN_SCORE` or the relevance/authority/quality blend.
+>
+> Two things follow that a reader should not have to re-derive:
+>
+> - **Do not "fix" this by picking a threshold.** The 28-document probe showed the bands overlap
+>   (a hedged-correct answer at `1.05e-5`, an absurd one at `1.14e-5`), so no value of any shape
+>   separates them. That retraction is recorded in § Evidence and as F-13 in
+>   `docs/trackers/release-promotion-session-log.md`. It is a **model-selection** problem.
+> - **codescout's own reranker is unaffected and is a different mechanism.** Measured 2026-08-07:
+>   codescout runs its reranker as `llama-server` (`CODESCOUT_RERANKER_PROTOCOL=llama-server`,
+>   container `codescout-reranker-amd`), which emits raw **logits**. This bug is about TEI's
+>   sigmoid-squashed `[0,1]` output. The scale mismatch that makes `RERANK_MIN_SCORE = -5.0`
+>   provably inert cannot arise on codescout's path, so there is nothing to port across.
+>
+> The transferable lesson is already promoted and needs no further action here: memory
+> `conventions` § Environment-Agnostic Tuning — a threshold expressed in the units of a
+> third-party model's output is model-specific by construction, so ship the calibration probe
+> rather than the calibration.
 
 `RERANK_MIN_SCORE` is documented as operating on a logit scale, but the TEI
 backend researcher used returned sigmoid-normalised 0..1 scores — so the filter

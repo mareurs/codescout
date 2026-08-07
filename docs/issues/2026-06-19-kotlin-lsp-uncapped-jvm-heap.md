@@ -1,20 +1,20 @@
 ---
+kind: bug
 status: investigating
+tags:
+- memory
+- oom
+- kotlin
+- lsp
+- jvm
+- stability
+closed: null
 opened: 2026-06-19
-closed:
-severity: high
 owner: marius
 related:
-  - docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md
-  - docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md
-tags:
-  - memory
-  - oom
-  - kotlin
-  - lsp
-  - jvm
-  - stability
-kind: bug
+- docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md
+- docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md
+severity: medium
 ---
 
 # BUG: codescout spawns kotlin-lsp with no `-Xmx`, so the JVM default-sizes its heap to ¼ of host RAM (~31 GiB on a 125 GiB box) and balloons toward a host OOM
@@ -414,6 +414,34 @@ is not proof #213's fix resolves this doc's symptom (or that #203 doesn't still
 apply under different indexing triggers), but it's the first non-ballooning
 codescout-repo kotlin-lsp lifecycle observed all session. Continue monitoring
 further organic spawns before downgrading this bug's severity or status.
+## Decision 2026-08-07 — items 1 and 6 both resolved; severity high -> medium
+
+The two calls this file was waiting on are taken, and the severity its original premise earned is
+no longer justified by the measurements.
+
+**Item 6 (content-root scoping): DROPPED.** Full reasoning inline at § Resume item 6. Short version
+— its motivation was OOM avoidance, and there is no heap pressure left to relieve.
+
+**Item 1 (cherry-pick to `master`): rides with the big promotion, not shipped separately.** Its
+stated gate did clear (`replace_symbol_surfaces_stale_error_after_max_retries` passes), so a
+separate cherry-pick was available — and was declined. `master` is protected, the whole
+`experiments` cohort is queued behind one fast-forward, and carving one fix out of it buys nothing
+that waiting does not. Nothing is blocked on this any more; it is simply part of the promotion.
+
+**Severity high -> medium.** The `high` band was earned by this file's title: *codescout spawns
+kotlin-lsp with no `-Xmx`, so the JVM default-sizes its heap to a quarter of host RAM (~31 GiB) and
+balloons toward a host OOM*. That premise is false. `jcmd VM.flags` reports
+`InitialHeapSize=128 MiB` — a value only the distro's own `vmoptions` sets — and the cap is
+`-Xmx2g` from two independent sources, with actual usage flat at roughly a quarter of it. A
+2 GiB-capped JVM on a 125 GiB host is not an OOM risk, so `high` was tracking a mechanism that
+measurement removed. (This is the W-13 pattern in
+`docs/trackers/release-promotion-session-log.md`: the premise, not the prescription, is the part
+that goes stale, and one command falsified it.)
+
+**What keeps this file open at `medium`.** Item 2's known limitation, unchanged and unfixed: a
+mem-kill does not count toward the LSP circuit breaker, so a slow kill -> respawn -> grow -> kill
+loop is bounded but unthrottled. That is the real remaining defect and it is independent of both
+decisions above.
 ## Resume
 **Update 2026-08-06 — item 3 DONE.** `-XX:NativeMemoryTracking=summary` is now in the
 Kotlin branch of `default_config` (`src/lsp/servers/mod.rs`), so the next occurrence can
@@ -436,8 +464,7 @@ Two details in the implementation worth keeping:
 
 Remaining, unchanged and re-stated so the list is honest: item 1 (cherry-pick to master —
 gated, and `master` is protected so it is the user's call), item 5 (**CLOSED — the host runs
-`262.9593.0`, past the requested `262.8190.0`; see the later 2026-08-06 update**), item 6 (content-root scoping, which upstream #203 suggests may not be
-honoured — verify empirically before relying on it). Item 2's known limitation also still
+`262.9593.0`, past the requested `262.8190.0`; see the later 2026-08-06 update**), item 6 (content-root scoping — **DROPPED 2026-08-07**, see below). Item 2's known limitation also still
 stands: a mem-kill does not count toward the LSP circuit breaker, so a slow
 kill→respawn→grow→kill loop is bounded but unthrottled.
 
@@ -448,7 +475,7 @@ Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified twice more**
 3. **Add `-XX:NativeMemoryTracking=summary`** to the mux's `JAVA_TOOL_OPTIONS` so the next occurrence can be diagnosed with an exact native-memory category breakdown (RocksDB vs JNI direct buffers vs JIT code cache) instead of inferring from the heap/RSS gap.
 4. Cross-ref the cgroup blast-radius cap — now tracked in `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md` (the sibling 68 GiB OOM bug is fixed + archived).
 5. **Bump kotlin-lsp to `262.8190.0`** (see Upstream status) — picks up upstream #213's workspace-cache fix. Cheap, low-risk, independent of Fix 2/3.
-6. **Investigate content-root scoping** for the codescout-repo kotlin-lsp launch (restrict indexing to `tests/fixtures/kotlin-library` instead of the full monorepo `--cwd`) — per upstream #203 (open, unfixed, no maintainer response), scoping config may not be honored; verify empirically before relying on it as a fix.
+6. ~~**Investigate content-root scoping** for the codescout-repo kotlin-lsp launch (restrict indexing to `tests/fixtures/kotlin-library` instead of the full monorepo `--cwd`).~~ **DROPPED 2026-08-07 by maintainer decision.** Three independent reasons had accumulated and none of them moved: the heap is hard-capped at 2 GiB from two sources with actual usage flat at ~25% of the cap, so there is no pressure for scoping to relieve; upstream #203 says the LSP queries all files in the workspace root regardless of `contentRoots`, open with zero maintainer response in three months, so the knob may not be honoured at all; and the 2026-08-07 changelog review across every kotlin-lsp release found nothing about heap, indexing scope, or content roots. If it ever returns it returns as a **startup-latency** question, not an OOM one — a much weaker motivation than the one it was written under.
 **Update 2026-08-06 (later) — item 1's stated gate has cleared.** The orthogonal failure
 this file blocks the cherry-pick on, `replace_symbol_surfaces_stale_error_after_max_retries`,
 now **passes**: a full `cargo test` at `598624be` reports 3505 passed / 0 failed / 44

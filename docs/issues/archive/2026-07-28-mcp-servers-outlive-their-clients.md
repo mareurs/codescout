@@ -1,7 +1,7 @@
 ---
 id: f3c9339e7e7a6822
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: one codescout MCP server accumulates per abandoned-but-live Claude Code session — 18 held open, oldest 93.5h, ~1 GiB RSS. Nothing is orphaned and the shutdown path is correct; only an idle timeout can collect them'
 tags:
 - mcp-server
@@ -9,6 +9,7 @@ tags:
 - resource-leak
 - gpu
 topic: process lifecycle
+closed: 2026-08-07
 ---
 
 # BUG: codescout MCP servers outlive their clients
@@ -254,28 +255,67 @@ is not start order, and the orphans are indistinguishable by name. Match on star
 against the session's own start, or read `/proc/<pid>/environ` for a setting known to have
 changed.
 
+## Decision 2026-08-07 — the idle timeout stays DISABLED, and the accumulation is not a defect
+
+Maintainer call, and it reverses the recommendation this file carried. The question asked was
+*"what value for `CODESCOUT_IDLE_SHUTDOWN_SECS`"*; the answer is **none — leave it unset**, on the
+argument that if the Claude Code session is still alive then its server should be too, or the
+experience degrades for no good reason.
+
+Measured the same day, on the host this bug was filed from:
+
+| fact | value |
+|---|---|
+| `codescout start --debug` servers alive | 18 |
+| …with a **living** `claude` parent (or version-named Claude Code binary) | **18 of 18** |
+| total RSS, all 22 codescout processes including muxes | **1.13 GiB** |
+| host RAM | **125 GiB** — so the servers are **0.9%** |
+| oldest server, and its parent | **4.2 days**, parent alive the same 4.2 days |
+
+Two things follow.
+
+**There is nothing orphaned to collect.** Every server has a live parent, so 18 servers means 18
+open sessions, not 18 leaks. The shutdown path is already correct and already coupled to session
+lifetime: stdin is a socketpair the parent holds, so when a `claude` parent exits the pair closes,
+stdin hits EOF, and the server exits — verified at ~30 ms with `start --debug < /dev/null`.
+Nothing is broken. This file's "abandoned-but-live" framing was the *assumption*, and it is the
+part that did not survive measurement.
+
+**An idle timeout would degrade live sessions to reclaim 0.9% of RAM.** A 4-hour window would have
+killed the 4.2-day session's server roughly 25 times over. And each kill costs more than a `/mcp`
+reconnect:
+
+- every `@cmd_*` / `@tool_*` / `@file_*` / `@ack_*` buffer is **server-side state** and dies with
+  the process, so every `@ref` already in the conversation silently becomes dangling — a later
+  `read_file("@tool_xyz")` fails for a reason the model cannot see
+- the `guide_hints_emitted` ledger resets, so guides re-inject and cost their tokens again
+- the next `symbols` call pays an LSP cold start — and per
+  `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md` a cold LSP does not merely
+  cost latency, it **changes tool results**: `audit_doc_refs` reports `SymbolMissing` for symbols
+  that are present
+
+So the trade on offer was: lose conversation-scoped server state and warm indexes, on sessions the
+user is still using, in exchange for ~1 GiB on a 125 GiB box. Wrong trade here.
+
+**What the shipped mechanism is still for.** `CODESCOUT_IDLE_SHUTDOWN_SECS` stays in the code and
+stays inert when unset — the `pending()` arm makes "disabled" structural rather than a flag someone
+can get wrong. Its value is being *available* for deployments where the parent is not a per-session
+client: an HTTP server, a shared instance behind a proxy, a supervisor-managed process. In those
+there is no parent death to key off and idle time is the only signal left. That is also why there
+is deliberately no default (memory `conventions` § Environment-Agnostic Tuning — how long a server
+may sit idle is a property of the operator's workflow, which we cannot measure for them).
+
+**Re-open trigger.** If servers are ever observed with a **dead or reparented** parent — the
+original claim — then this is a real leak and the stdin-EOF path is broken. Check with
+`ps -o ppid= -p <pid>` and confirm the parent is neither `claude` nor a Claude Code version-named
+binary. Also re-open if total codescout RSS becomes a material fraction of host RAM on a smaller
+machine, where the 0.9% finding would not hold.
 ## Resume
 
-Both measurement steps are **done** (see the two 2026-08-07 Evidence subsections). The census is
-refreshed and the shutdown path is read *and* empirically tested. Nothing further to investigate.
-
-**One decision remains and it is the maintainer's: how long is "idle", and is the reconnect cost
-acceptable?** The mechanism is forced — stdin-EOF is already implemented and cannot fire while the
-parent holds the socket, and a parent-death watch cannot fire while every parent is alive, so a
-long idle timeout measured from the last MCP request is the only option left. What is *not* forced
-is the threshold, and it trades directly against a broken connection for a user returning to a
-quiet session.
-
-Anchors for choosing it: the oldest server has been alive 93.5 h, the mean 46 h, and ten parent
-`claude` processes have been up 83 h+. Any threshold from a few hours upward collects essentially
-the whole current population. The mux's 180 s is *not* a precedent — a mux is re-dialled
-transparently on the next navigation call, whereas an MCP server exiting is user-visible.
-
-Once the threshold is chosen, implement it on the same shape as the mux's watchdog
-(`src/lsp/mux/process.rs`: a 10 s `tokio::time::interval` tick comparing `idle_since.elapsed()`
-against the timeout, then breaking the serve loop) and add a regression test with
-`#[tokio::test(start_paused = true)]` so it is deterministic rather than wall-clock dependent —
-the lesson from WIN-30's budget test this same day.
+N/A — closed `wontfix` 2026-08-07. The mechanism shipped in `5432f5c7` (experiments) and is
+deliberately unset; see § Decision above for the measurements and the re-open trigger. Nothing is
+owed except the master-side SHA for `5432f5c7` after the eventual cherry-pick, which rides with the
+`experiments` -> `master` promotion rather than needing its own pass.
 ## References
 
 - `src/bin/` — `codescout start` entry point (shutdown path unread)
