@@ -84,5 +84,6 @@ Frontmatter/status vocabulary: `get_guide("tracker-conventions")`.
 ## Commit Style
 
 Conventional commits: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
-Subject: imperative, ≤72 chars. Cherry-pick to master after all checks pass + MCP verify.
+Subject: imperative, ≤72 chars.
+**Pass the body through `git commit -F <file>`, never an inline `-m`.** Backticks inside a double-quoted `-m` are live **command substitution** — and this project's style puts backticks on every branch, tool, path, and memory topic it names. Measured 2026-08-07 (F-16): `` `conventions` `` in a `-m` body ran `conventions`, printed `command not found`, and interpolated the empty result, so the word vanished from the message while `git commit` exited 0 and the push went out. The same construct would *execute* any command a message quotes for documentation. Write the message to a scratchpad file and `-F` it; the body is then never shell-interpreted. Cherry-pick to master after all checks pass + MCP verify.
 Full release + ship procedures: `docs/RELEASE.md`. SHA-citation + cross-repo-prefix discipline: memory `gotchas`.

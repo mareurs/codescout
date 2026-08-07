@@ -940,6 +940,7 @@ Ranked by what to do first.
 | F-12 | 2026-08-07 | med | test-design | fixed-verified | Seven tests and a green gate shipped a warning whose truncation hid the entry it existed for — every fixture had exactly one hidden entry, so the `more > 0` branch was never exercised; the project's own "both sides of every condition" lens would have caught it |
 | F-14 | 2026-08-07 | med | process | fixed-verified | Memory `conventions` § Bug Tracking still gated bug archiving on reaching `master` — the superseded rule — while `CLAUDE.md`, `_TEMPLATE.md`, and `docs/RELEASE.md` all say "verified on `experiments`, master not required"; memory is the one surface with no lint, and it is the one loaded at session start |
 | F-15 | 2026-08-07 | high | process | fixed-verified | A concurrent session changed the checked-out branch between commit and push; the bare `git push` reported `Everything up-to-date` at exit 0 while the commit sat undelivered, and a later `edit_markdown` then wrote to the foreign branch's tree and returned `ok` because its anchor existed on both -- refspec push is the non-destructive fix, and after a detected foreign checkout every write is suspect and must be verified from the object store |
+| F-16 | 2026-08-07 | high | process | mitigated | Backticks in a double-quoted `git commit -m` body ran as command substitution -- cost one word here, but the construct executes arbitrary commands while `git commit` still exits 0, so the only trace is an unexplained gap in the message; `-F <file>` is the only safe form |
 
 ## Wins Index
 
@@ -1935,6 +1936,27 @@ decays, and nothing marks when it was last checked.
 **Status:** fixed-verified -- `docs/RELEASE.md` § Concurrent-Work Rules gained five rules covering all three exposures (name the refspec; do not check out to recover; treat post-detection writes as suspect and verify from the object store; explicit paths not `-A`; worktree isolation with its `merge_worktree` cost stated). This entry itself had to wait for the shared checkout to return to `experiments` -- filed as task #32 and landed once it did -- which is the friction demonstrating its own severity.
 
 **Fix idea / Pointer:** The durable form is *"on a shared checkout, always name the refspec"* -- cheap, and correct even when nothing is concurrent, which is what makes it a habit rather than a special case. A mechanical backstop is available if this recurs: a companion-plugin PreToolUse guard that rejects a bare `git push` when `git rev-parse --abbrev-ref HEAD` disagrees with the branch named in the session's most recent commit, and that warns on any working-tree write while the current branch differs from the one the session has been committing to. All the data those guards need is local and free.
+## F-16 — Backticks in a `git commit -m` body ran as command substitution and silently deleted a word
+
+**Observed:** 2026-08-07, committing `da5176d5`.
+
+**When:** Sixth commit of the session. Four earlier ones used `git commit -F <file>`; two used an inline double-quoted `-m`.
+
+**Expected:** the body reads *"per memory `conventions` § Environment-Agnostic Tuning."*
+
+**Got:** *"per memory  § Environment-Agnostic Tuning."* — note the double space — and on stderr, `sh: line 1: conventions: command not found`. The backticks were live command substitution inside the double-quoted argument, so the shell ran `conventions`, captured its empty output, and interpolated that.
+
+**Probable cause:** `git commit -m "...`x`..."` is a double-quoted shell string, where backtick substitution is active. This project's commit style uses backticks constantly — branch names, tool names, memory topics, paths — so every inline `-m` message written here is exposed by default. Nothing in the workflow warns, because nothing fails.
+
+**Severity:** high, on the failure MODE rather than on this instance's damage. Here it cost one word. But the construct **executes** whatever sits between the backticks, in the repo working directory, with the caller's privileges — a message quoting a command for documentation would run it, and the only trace left behind would be an unexplained gap in the commit body. It is silent in both directions: `git commit` exits 0, the hook chain runs, the push goes out, and a later reader cannot tell that anything was removed.
+
+**Workaround (applied, and already the session's majority practice):** write the message to a file and use `git commit -F <path>`. The body is then never shell-interpreted. Four of this session's six commits already did that; the two that did not are the exposed ones, and one of them contained backticks.
+
+**Deliberately NOT fixed by amending:** correcting `da5176d5` needs a force-push to a shared branch that another session has uncommitted work in — precisely the destructive op `docs/RELEASE.md` § Concurrent-Work Rules gained rules about earlier the same day (F-15). One missing word in a commit body does not justify it. The gap stands, documented here instead.
+
+**Status:** mitigated — the rule is stated in memory `conventions` § Commit Style and was already the majority practice; the corrupted message itself stays.
+
+**Fix idea / Pointer:** `-F` is now the documented form. A mechanical backstop is available if this recurs: a companion-plugin PreToolUse guard rejecting `git commit -m` whose argument contains a backtick — all the data that guard needs is in the command string, and unlike most such guards it has no false-positive class, since a backtick inside an inline `-m` is never what the author meant.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
