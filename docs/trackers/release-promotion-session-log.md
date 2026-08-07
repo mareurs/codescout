@@ -941,6 +941,7 @@ Ranked by what to do first.
 | F-14 | 2026-08-07 | med | process | fixed-verified | Memory `conventions` § Bug Tracking still gated bug archiving on reaching `master` — the superseded rule — while `CLAUDE.md`, `_TEMPLATE.md`, and `docs/RELEASE.md` all say "verified on `experiments`, master not required"; memory is the one surface with no lint, and it is the one loaded at session start |
 | F-15 | 2026-08-07 | high | process | fixed-verified | A concurrent session changed the checked-out branch between commit and push; the bare `git push` reported `Everything up-to-date` at exit 0 while the commit sat undelivered, and a later `edit_markdown` then wrote to the foreign branch's tree and returned `ok` because its anchor existed on both -- refspec push is the non-destructive fix, and after a detected foreign checkout every write is suspect and must be verified from the object store |
 | F-16 | 2026-08-07 | high | process | mitigated | Backticks in a double-quoted `git commit -m` body ran as command substitution -- cost one word here, but the construct executes arbitrary commands while `git commit` still exits 0, so the only trace is an unexplained gap in the message; `-F <file>` is the only safe form |
+| F-17 | 2026-08-07 | high | process | fixed-verified | A `--force` reindex ran 7 min dense-only against sqlite-vec instead of hybrid-against-Qdrant, because `cargo build --release` omits `server-stack` and `VectorBackend::resolve()` then defaults to lite — caught only by noticing the sparse container had zero traffic while dense had 73,232 lines; the start log reported chunk_target and flush_batch but neither of the two fields that were wrong |
 
 ## Wins Index
 
@@ -1999,6 +2000,61 @@ reports a mean over a run that started cold has folded a one-off into every per-
 
 **Status:** validated — three datapoints, one of them caught before it was recorded, two of them
 already costing filed-bug time.
+## F-17 — A `--force` reindex ran for seven minutes against the wrong backend, announcing nothing
+
+**Observed:** 2026-08-07, starting the ~2 h `index --force` rebuild (task #21).
+
+**When:** Immediately after building with `cargo build --release --bin codescout`, which is the
+command CLAUDE.md explicitly says NOT to use for this.
+
+**Expected:** a hybrid rebuild — dense + sparse vectors, written to the Qdrant `code_chunks`
+collection.
+
+**Got:** a dense-only run writing to sqlite-vec. Caught by comparing container traffic rather than
+by anything the tool said: the dense embedder logged 73,232 lines in two minutes while the sparse
+embedder logged **zero**, and `ss -tnp` showed the process holding exactly one connection — to
+48081 (dense). No connection to 48084 (sparse), and none to 6334 (Qdrant).
+
+**Root cause:** `cargo build --release` omits the `server-stack` feature
+(`default = ["remote-embed", "http", "librarian"]`), so `VectorBackend::resolve()`
+(`src/retrieval/code_store.rs`) falls through to its `#[cfg(not(feature = "server-stack"))]` arm and
+returns `SqliteVec`. That sets `lite = true` in `RetrievalClient::from_env`
+(`src/retrieval/client.rs`), and `dense_only = lite || config.disable_sparse` — so the sparse leg is
+skipped *and* the store is `.codescout/embeddings/project.db` rather than Qdrant. `cargo rb` is
+aliased to `build --release --features server-stack` precisely for this, and `.cargo/config.toml`
+says so in a six-line comment.
+
+**Measured 2026-08-07, both directions**, which is what makes this a mechanism rather than a guess:
+aborted run held one connection (48081) with zero sparse traffic; the rebuilt run holds 48081 +
+48084 + three to 6334, and the sparse container logged 61 lines in the first 60 s.
+
+**Severity:** high, and specifically because of the **silence-times-duration** shape. Two hours of
+work would have produced nothing usable, and every signal available said it was fine: exit code
+pending, no errors, no warnings, the dense embedder visibly busy, and a first log line reporting
+`chunk_target=1200 flush_batch=256 force_reindex=true` — three fields, none of them the two that
+were wrong. Not data loss: because the lean build never targets Qdrant, the existing 92.3% sparse
+coverage was never at risk, and a 500-point sample after the abort read 92.2%. (I called it
+destructive when aborting; that was wrong, and the abort was still correct on time alone.)
+
+**Two failures, and only one of them is mine to stop repeating.** I ignored a documented rule —
+CLAUDE.md states the release build is `cargo rb`, not `cargo build --release`. But a rule that is
+only in a doc has to be remembered every time, and this one is remembered under time pressure at the
+start of a two-hour job. The deeper defect is that **the tool did not report its own load-bearing
+configuration**, so violating the rule was undetectable from the tool's output.
+
+**Status:** fixed-verified — `sync_project`'s start line now logs `backend` and `sparse`, so line one
+of the corrected run reads `backend="qdrant" sparse="on"` and the aborted configuration would have
+read `backend="sqlite-vec" sparse="SKIPPED"`. Diagnosis time next occurrence: one line, versus the
+seven minutes plus a code read it took here.
+
+**Fix idea / Pointer:** The general rule earned here — **a long-running job must log its
+load-bearing configuration in line one, because the cost of a wrong config scales with runtime.**
+`chunk_target` and `flush_batch` were logged and are tuning trivia; backend and sparse-mode decide
+whether the run means anything, and were not. Worth applying to the other long jobs (the benchmark
+harness, `audit_doc_refs` on a full corpus). A mechanical backstop is also available if this
+recurs: have `index` refuse to run, or warn loudly, when the resolved backend is sqlite-vec while
+`CODESCOUT_QDRANT_URL` is reachable — that combination is almost always a lean-build accident
+rather than intent.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

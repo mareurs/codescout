@@ -259,10 +259,25 @@ impl crate::retrieval::client::RetrievalClient {
             .and_then(|s| s.parse().ok())
             .filter(|&n| n > 0)
             .unwrap_or(DEFAULT_FLUSH_BATCH);
+        // `backend` and `sparse` are logged because their being WRONG is silent otherwise.
+        // A plain `cargo build --release` omits the `server-stack` feature, so
+        // `VectorBackend::resolve()` defaults to sqlite-vec, which sets `lite` -> `dense_only`
+        // -> the sparse leg is skipped AND the writes go to `.codescout/embeddings/project.db`
+        // instead of Qdrant. Measured 2026-08-07: a `--force` rebuild ran seven minutes
+        // hammering the dense embedder with zero sparse requests before anyone noticed, and the
+        // only reason it was caught is that someone compared container logs. Use `cargo rb`
+        // (aliased to `--features server-stack`) for the hybrid stack; these two fields make the
+        // difference visible in line one instead of two hours later.
         tracing::info!(
             chunk_target,
             flush_batch,
             force_reindex = opts.force_reindex,
+            backend = if self.lite { "sqlite-vec" } else { "qdrant" },
+            sparse = if self.lite || self.config.disable_sparse {
+                "SKIPPED"
+            } else {
+                "on"
+            },
             "retrieval sync starting"
         );
 
