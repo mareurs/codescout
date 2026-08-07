@@ -124,6 +124,55 @@ pub rerank_min_score: f32,
 The doc comment is explicit that logits were intended. The backend was not
 delivering them.
 
+
+### 2026-08-07 — both halves confirmed by probing the endpoints directly; no Langfuse needed
+
+The previous Resume proposed running real queries and reading Langfuse's `rerank` span in/out
+counts. A direct probe answers it outright, because the defect is about the score **scale**, not
+the drop **count**. One identical two-document probe — one on-topic, one deliberately off-topic —
+posted to each live endpoint in the exact TEI shape the client uses (`{query, texts}` →
+`[{index, score}]`, `src/embeddings/reranker.rs`):
+
+| endpoint | on-topic | off-topic | scale |
+|---|---|---|---|
+| `localhost:30083` (TEI) | `0.9965708` | `0.0000107` | sigmoid, **[0,1]** |
+| `localhost:48083` (llama-server) | `5.3375511` | `-11.0001240` | raw **logits** |
+
+**`min_score = -5.0` is provably dead under TEI — not rarely triggered, unsatisfiable.** The
+filter is `if relevance_score < min_score` (`src/embeddings/reranker.rs:101`) and TEI scores are
+bounded below by 0, so no source can ever be dropped. Sixteen of the seventeen live servers point
+at 30083.
+
+**Under llama-server it is live and well placed** — off-topic at −11.0 against on-topic at +5.34,
+so −5.0 sits cleanly between. That is a second sample for the −8..−11 off-topic band this file
+recorded from one.
+
+**And that is precisely where the blend breaks, now quantified.**
+`combined = relevance*0.7 + domain_authority*0.2 + quality*0.1`. With relevance in [0,1] the three
+terms are commensurate. With logits in [−11, +5.3] the relevance term spans about [−7.7, +3.7]
+while authority and quality are confined to [0, 0.2] and [0, 0.1] — a **~40× span mismatch**, so
+relevance dominates and the other two weights are decorative.
+
+So the two configurations fail in **opposite** directions from identical code and identical
+defaults: **TEI gives a dead filter with a sane blend; llama-server gives a live filter with a
+broken blend.** No single `min_score` fixes both, because the scales are incommensurable.
+
+### Configuration provenance is unresolved — and it is NOT drift
+
+Worth pinning, because the obvious inference is wrong. The 17 live servers split 16 on 30083 and
+one (pid 373104) on 48083 — the latter the only one also carrying an explicit
+`RERANK_MIN_SCORE=-5.0`. Researcher's own `.env` sets **no** `RERANK_BASE_URL`, and the compiled
+default is `""`, which disables reranking entirely: the whole rerank block in
+`src/researcher/pipeline.rs` is gated on `!cfg.rerank_base_url.is_empty()`.
+
+The tempting conclusion — live servers carry a stale config, new ones get reranking disabled — is
+**false.** A server launched **1.3 h ago** still has 30083, alongside ones at 84.8 h and 94.1 h. So
+the value comes from a live source. Ruled out by inspection: researcher's `.env`; `~/.bashrc`,
+`~/.zshrc`, `~/.profile`, `~/.zshenv`; `systemctl --user show-environment`;
+`~/.config/environment.d/`; `~/.claude.json` and the `.claude*/` profile JSONs; codescout's
+`.mcp.json`; and the `claude daemon` process env. The value appears in `/proc/<pid>/environ`, so it
+was present at **exec** time and is therefore not a dotenv-loaded variable (runtime `setenv` does
+not alter that snapshot). Recorded so the next reader does not re-walk the same eight negatives.
 ## Hypotheses tried
 
 1. **Hypothesis:** the two backends need different request shapes, so the swap
@@ -165,12 +214,36 @@ healthy, so this is a one-line revert plus a Claude Code restart.
 
 ## Resume
 
-Run several real `/research-web` queries against the new reranker and inspect
-Langfuse's `rerank` span (`in`/`out` counts). If `out` is dropping far more
-sources than expected, `min_score -5.0` is too aggressive for this model — the
-observed off-topic band was −8 to −11, so −5.0 has margin, but that is one
-sample. Then decide between the two tuning options under "Fix".
+The measurement is **done** and it did not need Langfuse — see the 2026-08-07 Evidence. Both
+halves of the title are confirmed with numbers, and the conclusion is stronger than the two
+tuning options under *Fix*.
 
+**Neither option under Fix is sufficient, because both retune a constant.** TEI scores are [0,1]
+and llama-server scores are unbounded logits, so any single `min_score` is either dead (TEI) or
+living in the wrong units for the blend (llama-server). The shape that works for both is to
+**normalise the reranker score into [0,1] before the blend** — sigmoid for a logit-producing
+backend, identity for TEI, selected by an explicit protocol setting rather than inferred — and
+then express `min_score` in those normalised units. That makes the 0.7/0.2/0.1 weights mean what
+they appear to mean, which they currently do not under llama-server.
+
+Codescout hit the same fork and solved it with an explicit protocol flag rather than sniffing:
+`CODESCOUT_RERANKER_PROTOCOL=llama-server` selects `Protocol::Infinity` in
+`src/retrieval/reranker.rs`, and `.env.gpu` warns that dropping the line silently falls back to
+the TEI shape so every rerank call fails. Researcher has no equivalent — `RerankerClient` hardcodes
+the TEI request/response shape while being pointed at either backend, which is why the scale can
+change underneath it unnoticed.
+
+**Two decisions, both the maintainer's:**
+
+1. Which backend researcher should actually use. Sixteen live servers say TEI (30083), one says
+   llama-server (48083), and the committed default says *no reranking at all*. Until that is
+   settled, "fixing" the threshold aims at a moving target.
+2. Whether to add the normalisation plus an explicit protocol setting, or to drop reranking from
+   researcher and delete the dead knobs.
+
+First, though, resolve where `RERANK_BASE_URL=http://localhost:30083` is actually coming from —
+eight likely sources are ruled out above, and a config no one can locate is a worse problem than
+an uncalibrated threshold.
 ## References
 
 - `researcher/src/embeddings/reranker.rs:10-19` — request/response types
