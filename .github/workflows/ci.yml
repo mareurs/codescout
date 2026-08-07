@@ -17,15 +17,26 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# No job installs a toolchain. `rust-toolchain.toml` pins the version and declares the
+# components and targets, and rustup honors it automatically on the first cargo call in
+# the repo — so a toolchain-install step is not just redundant here, it is harmful.
+#
+# DO NOT add `dtolnay/rust-toolchain` back. That action exports RUSTUP_TOOLCHAIN for
+# subsequent steps, and the environment variable OVERRIDES rust-toolchain.toml. The jobs
+# would then run on whatever the action resolved while the pin file sat inert, which is
+# precisely the local-vs-CI skew the pin exists to remove — and it would be silent,
+# because everything still compiles. See rust-toolchain.toml for the W-9 / F-9 history.
+#
+# The one exception is the `msrv` job, which deliberately installs 1.88 and invokes it
+# as `cargo +1.88` so the explicit override beats the pin file. Read its comment before
+# touching it.
+
 jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
       - run: cargo fmt --check
 
   clippy:
@@ -33,9 +44,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: rui314/setup-mold@v1
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
@@ -57,9 +65,6 @@ jobs:
             flags: "--no-default-features"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rust-analyzer
       - if: runner.os == 'Linux'
         uses: rui314/setup-mold@v1
       - uses: mozilla-actions/sccache-action@v0.0.7
@@ -93,9 +98,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
       - name: Install MinGW + wine
         run: |
           sudo dpkg --add-architecture i386
@@ -149,6 +151,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The one job that DOES install a toolchain, because it must not use the pinned
+      # one. `rust-version = "1.88"` in Cargo.toml is the promise; this job is the only
+      # thing that checks it.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.88"
@@ -157,14 +162,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv
-      - run: cargo check
+      # `+1.88` is LOAD-BEARING — do not simplify to `cargo check`. rust-toolchain.toml
+      # pins 1.97.1, and a toolchain file beats `rustup default`, so a bare `cargo check`
+      # here would compile with 1.97.1 and this job would report MSRV green while never
+      # having built with 1.88. An explicit `+<toolchain>` outranks the file, so this is
+      # correct whether or not the install step also exports RUSTUP_TOOLCHAIN.
+      - run: cargo +1.88 check
 
   audit-doc-refs:
     name: Audit Doc Refs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: rui314/setup-mold@v1
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2

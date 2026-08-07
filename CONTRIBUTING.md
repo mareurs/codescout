@@ -11,6 +11,12 @@ cargo build
 cargo test
 ```
 
+The Rust version is pinned in [`rust-toolchain.toml`](rust-toolchain.toml), so the first
+`cargo` command may spend a minute letting rustup fetch that toolchain and its components
+— that is expected, and it is why the checks below reproduce CI exactly. The file's own
+comment explains why it is pinned and how to bump it. Note it is **not** the MSRV; that is
+`rust-version` in `Cargo.toml`, checked separately by CI.
+
 ## Retrieval Stack
 
 `semantic_search` (and the rest of the retrieval surface) defaults to a Qdrant + TEI
@@ -65,7 +71,8 @@ surfaces, or test scenarios where compile time matters more than runtime.
 LTO-time issues that debug skips.
 ## Before Submitting a PR
 
-Run the same checks CI will run:
+Run the same checks CI will run — and since the toolchain is pinned, "the same" is literal
+rather than approximate. A clippy lint you do not see locally is not a lint CI will find:
 
 ```bash
 cargo fmt

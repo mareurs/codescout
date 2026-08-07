@@ -1,0 +1,40 @@
+# Pinned toolchain — local and CI must agree, and the component set is declared
+# rather than implied.
+#
+# Why pinned (closes W-9 and F-9 in docs/trackers/release-promotion-session-log.md):
+#
+#   W-9: local `stable` was 1.95.0 while CI's `@stable` had floated to 1.97.1, and
+#   clippy 1.97 rejects two `assert!` borrows that 1.95 accepts. The Clippy job was
+#   going to fail on the first run created after the GitHub Actions outage, and the
+#   only reason it did not is that CI's resolved toolchain was installed locally
+#   side-by-side and run by hand (fb3b1a05). A floating channel means the local gate
+#   structurally cannot predict CI.
+#
+#   F-9: a `rustup toolchain install --profile minimal` produced 12 test failures
+#   that read as a compiler regression and were actually a missing `rust-analyzer`
+#   component. CI installed it explicitly per job; a local install had no way to know
+#   that. Declaring `components` here makes the requirement discoverable instead of
+#   folklore.
+#
+# The cost, stated so nobody is surprised: bumping is now manual, and we lose the
+# early warning a floating channel gives about upstream breakage. The trade is
+# deliberate — an unpredictable gate cost more than a stale one.
+#
+# To bump: change `channel`, run `cargo fmt && cargo clippy --all-targets -- -D
+# warnings && cargo test` locally, and expect new lints. Do it as its own commit so a
+# lint fix never rides along with a feature.
+#
+# NOT the MSRV. MSRV is `rust-version = "1.88"` in Cargo.toml and is verified by CI's
+# `msrv` job, which runs `cargo +1.88 check` — the explicit `+1.88` is load-bearing,
+# because this file would otherwise override the toolchain that job installs and the
+# MSRV gate would pass while measuring the pinned compiler instead.
+
+[toolchain]
+channel = "1.97.1"
+
+# rustfmt + clippy: the fmt and clippy jobs. rust-analyzer: the test matrix — several
+# LSP tests drive a real rust-analyzer, and its absence is F-9's 12 "failures".
+components = ["rustfmt", "clippy", "rust-analyzer"]
+
+# The windows-gnu cross job builds for MinGW under wine.
+targets = ["x86_64-pc-windows-gnu"]
