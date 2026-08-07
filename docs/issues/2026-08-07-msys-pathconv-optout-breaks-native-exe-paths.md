@@ -1,7 +1,7 @@
 ---
 id: bb584800df9f20ba
 kind: bug
-status: open
+status: fixed
 title: MSYS_NO_PATHCONV/MSYS2_ARG_CONV_EXCL in shell_command_configured break MSYS-style paths passed to native Windows binaries
 tags:
 - windows
@@ -9,6 +9,7 @@ tags:
 - path-handling
 - self-inflicted
 - regression
+closed: 2026-08-07
 ---
 
 ## Summary
@@ -85,10 +86,44 @@ resolves.
 If a specific future command genuinely needs conversion suppressed, scope it to
 that command rather than to every command the server ever runs.
 
+## Fix
+
+`94a63c32` (experiments) — `src/platform/windows.rs`.
+
+The two `.env(...)` calls are replaced by `.env_remove(...)`, not merely dropped.
+Removing them from the child environment means an exported value in the parent
+shell cannot change how commands resolve — the same reasoning that pins
+`GIT_PAGER=cat`. A shell codescout hands to an agent should behave identically
+regardless of what the launching environment happens to export.
+
+The doc comment on `shell_command_configured` was rewritten too. The old one
+asserted the opt-outs protected `sed 's/a/b/'` and `find / -name x`; that claim
+is false and was the reason the change looked justified in review, so leaving it
+in place would have invited the same mistake again.
+
+Also documented in `docs/manual/src/tools/workflow-and-config.md`: MSYS-form
+paths work on Windows including as arguments to native binaries.
+
+## Tests added
+
+`src/platform/windows.rs`, `tests::msys_form_path_resolves_for_native_binaries`.
+
+It drives `git -C '<msys-form path>' rev-parse --git-dir` and asserts the stderr
+does **not** contain `cannot change to`. `git` may still fail with "not a git
+repository" — that is fine and is the point: it proves git resolved and entered
+the directory.
+
+The test asserts on the **native** side of the boundary deliberately. A test
+driving only MSYS builtins (`ls /c/...`) passes either way, because MSYS programs
+resolve MSYS paths themselves and never see the conversion. That is precisely the
+green-check-that-cannot-fail which let the regression ship in the first place —
+the original commit's own test suite was 134 tests green.
+
+**Verified to discriminate:** the failure was reproduced live against the
+previously built binary (`fatal: cannot change to '/c/Users/...': No such file or
+directory`) before the fix, and the test passes after it.
+
 ## Resume
 
-Not yet fixed — filed at the end of the session that introduced it. The change is
-a two-line deletion plus a test; it needs the usual gate, a `cargo rb`, and a
-`/mcp` reload. Until then, pass Windows-form paths (`C:/Users/...`) to native
-binaries from `run_command`; MSYS-form works fine for `ls`, `grep`, `cat`, etc.
-
+N/A — fixed. One residual bookkeeping step: record the **master-side** SHA after
+cherry-pick. `94a63c32` is an `experiments` SHA and orphans on rebase.
