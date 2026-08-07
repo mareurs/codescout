@@ -230,6 +230,42 @@ Unset `CODESCOUT_RERANKER_URL` (or point it at a dead port — `search_in` degra
 with a `reranker degraded` warning and returns unreranked candidates). No rebuild needed; the
 MCP server picks it up on restart.
 
+## Update 2026-08-07 — sparse fusion is LIVE again, so this bug's measurement is out of scope and must be redone
+
+This file's finding (reranker costs 42x query latency and lowers the score) was taken with
+`CODESCOUT_DISABLE_SPARSE=1`, and `.env.gpu` flagged the fusion case as UNTESTED with an explicit
+instruction to re-measure if sparse came back. It came back on 2026-08-07 (`da5176d5`), so the
+instruction has fired. **Do not decide the reranker default from the numbers in this file** — they
+describe a pure-dense pipeline that is no longer the shipping one.
+
+**Verified live, not assumed.** After the `/mcp` reconnect, a `semantic_search` produced a matching
+`embed_sparse ... Success` entry in `codescout-sparse-amd`'s log at the same second, so the sparse
+leg is genuinely in the query path rather than merely un-flagged. Before that call the container had
+logged nothing since its 2026-08-03 startup, which is what makes the correlation clean.
+
+**The new baseline the re-measurement starts from — and the number NOT to use:**
+
+| sparse query embed | total | inference |
+|---|---|---|
+| first call after ~4 days idle | 146.8 ms | 145.4 ms |
+| **second call, warm** | **16.8 ms** | **16.4 ms** |
+
+**8.7x.** Recording the first call as the cost of sparse fusion would have overstated it by nearly
+an order of magnitude, and it would have fed straight into this bug's central comparison. Third
+instance of the same trap in one session — see W-14 in
+`docs/trackers/release-promotion-session-log.md`; the other two were the `audit_doc_refs` tally
+migrating under a cold LSP and `SymbolMissing` returned by a server that had answered but not yet
+indexed.
+
+So the figure to carry into the re-measurement is **~17 ms per query** for the sparse leg, warm,
+measured on this host's AMD card with the SPLADE container resident. Against a reranker reported at
+42x, that is cheap — which is precisely why the comparison has to be redone rather than inherited:
+the denominator moved.
+
+**Method note for whoever runs it.** Discard the first query of any run, and say so in the writeup.
+A benchmark that starts cold and reports a mean has folded a one-off warm-up into every
+per-query number. Also re-measure the reranker's own arm the same way — nothing here establishes
+that its 42x was warm either, and it was taken under the same conditions.
 ## Resume
 
 **2026-08-06 verify-open pass.** One item from the *Fix* section was actionable without

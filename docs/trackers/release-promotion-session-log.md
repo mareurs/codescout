@@ -952,6 +952,7 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-14 | 2026-08-07 | high | The first measurement after idle is a warm-up artifact — take the second one, and in a benchmark discard iteration one and say so | Three instances in one session: SPLADE sparse embed read 146.8 ms cold vs 16.8 ms warm (8.7x, and it feeds the reranker latency comparison in task #20); the audit_doc_refs tally migrates by up to 69 refs cold but is byte-identical warm; and `resolve_file_symbol` returns `SymbolMissing` for symbols that exist when the server answers before finishing indexing — the same trap promoted from a latency error into a false claim about the code | validated |
 | W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
 | W-12 | 2026-08-07 | high | Run the fix against the real tree as a step distinct from the gate — a green suite says the branches you wrote tests for work, not that the output is useful | Seven tests passed and clippy was clean, yet the shipped `grep` warning read ".buddy/, .cargo/, .claude/, .env, .env.amd and 11 more" — alphabetical truncation cut `.github/`, the entry the whole fix existed to surface. Every fixture had one hidden entry; the repo has 16 | promoted-to-permanent-docs |
 | W-11 | 2026-08-07 | high | Scout a bug file's `## Fix` before implementing it — a fix written from a CI log line has never touched the code | WIN-30's Fix prescribed replacing a fixed wait with a bounded poll; the poll was already there, so the change would have been inert, the bug archived, and the next flake would have read as a regression of a fix that never existed | validated |
@@ -1957,6 +1958,47 @@ decays, and nothing marks when it was last checked.
 **Status:** mitigated — the rule is stated in memory `conventions` § Commit Style and was already the majority practice; the corrupted message itself stays.
 
 **Fix idea / Pointer:** `-F` is now the documented form. A mechanical backstop is available if this recurs: a companion-plugin PreToolUse guard rejecting `git commit -m` whose argument contains a backtick — all the data that guard needs is in the command string, and unlike most such guards it has no false-positive class, since a backtick inside an inline `-m` is never what the author meant.
+## W-14 — The first measurement after idle is a warm-up artifact; three of them bit in one session
+
+**Observed:** 2026-08-07, three independent times, on three unrelated subsystems.
+
+**Pattern:** Never record the first observation after an idle period as a steady-state value. Take a
+second one and report that, and when writing a benchmark, discard the first iteration explicitly and
+**say in the writeup that you did**. The trap is not that warm-up exists — everyone knows that — it
+is that a cold number is indistinguishable from a legitimate steady-state number by inspection. It
+arrives with units, it is internally consistent, and nothing marks it as anomalous.
+
+**The three instances, and what each would have cost:**
+
+| subsystem | cold reading | warm reading | what the cold number would have caused |
+|---|---|---|---|
+| SPLADE sparse query embed | 146.8 ms | **16.8 ms** | "sparse fusion costs ~147 ms/query" — overstated **8.7x**, and it feeds the central comparison in the reranker bug (task #20), where the whole question is sparse-vs-reranker latency |
+| `audit_doc_refs` resolved/broken tally | migrates by up to 69 refs | byte-identical warm | 57 paired runs chasing "non-determinism" that is a cold-LSP artifact, and a `degraded` flag that reports `false` throughout |
+| `resolve_file_symbol` verdicts | `SymbolMissing` | `Resolved` | a doc-ref audit reporting symbols as MISSING because the server answered before it finished indexing — the branch comment asserts "the LSP responded, so an empty symbol list means the symbol genuinely isn't there" |
+
+**Confirming data points:**
+
+1. The sparse number, caught only because 147 ms for an eight-word query looked implausible for a
+   small model — i.e. caught by suspicion, not by process. That is the argument for making it a
+   rule.
+2. The audit tally, which cost 57 paired invocations before the mechanism was found in code.
+3. The `SymbolMissing` verdict, which is the same phenomenon promoted into a *correctness* bug
+   rather than a latency one — the strongest form of the lesson, because there the cold reading is
+   not merely inaccurate, it is a false claim about the codebase.
+
+**Impact:** high — instance 1 was one command away from being written into a bug file as the basis
+for a shipping decision, and instances 2 and 3 are already-filed defects whose root cause is this
+exact discrimination failure.
+
+**Promote-when:** criterion arguably already met at three same-session datapoints, but they are
+narrow — all three are "a service or index that warms up". Promote on the first instance OUTSIDE
+that shape (a cache, a JIT, a connection pool, a filesystem page cache). At that point it belongs in
+memory `test-design-discipline` alongside the existing cap/truncation corollary, as: *a measurement
+taken once, on a cold path, is a warm-up artifact until a second one agrees — and a benchmark that
+reports a mean over a run that started cold has folded a one-off into every per-item number.*
+
+**Status:** validated — three datapoints, one of them caught before it was recorded, two of them
+already costing filed-bug time.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
