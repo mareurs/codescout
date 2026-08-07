@@ -153,6 +153,17 @@ impl Tool for RunCommand {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         use super::output_buffer::OutputBuffer;
 
+        // Preflight: no shell, no command. On Windows every spawn goes through Git
+        // Bash, and without one the OS answers `program not found` — which names
+        // neither the requirement nor the fix. Fail once, actionably, up front.
+        if let Some(hint) = crate::platform::shell_unavailable_hint() {
+            return Err(super::RecoverableError::with_hint(
+                "no POSIX shell available to run commands",
+                hint,
+            )
+            .into());
+        }
+
         let command = super::require_str_param(&input, "command")?;
         let (timeout_secs, timeout_hint) = parse_timeout_input(&input);
         let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);

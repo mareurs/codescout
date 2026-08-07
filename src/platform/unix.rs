@@ -62,6 +62,12 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
+/// Always `None` — POSIX guarantees `/bin/sh`. The Windows twin can answer
+/// `Some(hint)` when no Git Bash is installed.
+pub fn shell_unavailable_hint() -> Option<String> {
+    None
+}
+
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     let mut c = tokio::process::Command::new("sh");
     c.arg("-c")

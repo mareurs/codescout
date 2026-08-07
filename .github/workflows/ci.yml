@@ -124,8 +124,19 @@ jobs:
       # on a missing `py`: it stays load-bearing on windows-latest, where `py` IS present, and a
       # probe-gated early return would silently disarm the MSVC-CRT quote-mangling guard, which is
       # the only place the test has value. (WIN-30)
+      # The 21 run_command / Git Bash skips below are ENVIRONMENTAL, not defects, and the
+      # reason is one line: this wine image has no Git for Windows. Since WIN-32 every
+      # Windows spawn goes through Git Bash, so with none installed `run_command` cannot
+      # run at all here. codescout now says so up front — `shell_unavailable_hint()` turns
+      # the OS's bare `program not found` into a RecoverableError naming CODESCOUT_BASH —
+      # but a tool that correctly refuses to run is still a failing spawn test.
+      # Un-skip protocol: install Git for Windows in the wine image (or set CODESCOUT_BASH
+      # to a bash.exe wine can execute) and drop this block wholesale — there is no
+      # per-test triage to do, they share one cause. Do NOT make these tests self-skip on a
+      # missing bash: they are load-bearing on windows-latest, where Git Bash IS present,
+      # and a probe-gated early return would disarm them there too. (WIN-32, WIN-36)
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip symbols_overview_glob_marks_grammarless
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip symbols_overview_glob_marks_grammarless --skip msys_form_path_resolves_for_native_binaries --skip run_command_with_overflow_emits_progressive_hint_once --skip run_command_without_overflow_no_progressive_hint --skip run_command_output_keeps_absolute_project_paths --skip ack_handle_executes_stored_command --skip buffer_query_returns_up_to_200_lines_inline --skip buffer_query_truncation_hint_shows_next_page --skip cat_file_no_hint_field --skip execute_shell_command_echo_cross_platform --skip execute_shell_command_exit_code_preserved --skip execute_shell_command_fast_command_succeeds --skip execute_shell_command_small_output_not_truncated --skip non_filter_pipe_no_unfiltered_ref --skip run_command_buffer_only_skips_speed_bump --skip run_command_dangerous_allowed_with_acknowledge --skip run_command_does_not_include_warning --skip run_command_short_output_returned_directly --skip run_command_safe_command_not_blocked --skip run_command_source_block_bypassed_with_acknowledge_risk --skip run_command_source_block_not_triggered_for_non_source --skip run_command_source_block_not_triggered_for_markdown --skip run_in_background_returns_bg_handle
 
   tool-docs-sync:
     name: Tool Docs Sync

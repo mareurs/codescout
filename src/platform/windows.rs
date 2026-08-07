@@ -43,7 +43,12 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
-/// Resolve the Git Bash executable, cached for the process lifetime.
+/// Resolve the Git Bash executable from an injected environment + existence probe.
+///
+/// Split out of [`git_bash_path`] so the not-installed branch is reachable in a
+/// test. It is the branch that matters: it is what a machine without Git for
+/// Windows hits, and the only way to observe it through the real resolver is to
+/// uninstall git.
 ///
 /// Resolution order is deliberate, and a plain `PATH` scan is NOT first:
 ///
@@ -60,55 +65,86 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
 /// `/mnt/c` (measured on this repo: 25-170x slower than native through the 9P
 /// boundary) and `$HOME`, installed toolchains, and PATH all differ. It would
 /// not fail loudly — it would just be wrong and slow.
+fn resolve_git_bash(
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+    is_file: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    for var in ["CODESCOUT_BASH", "CLAUDE_CODE_GIT_BASH_PATH"] {
+        if let Some(p) = env(var).map(PathBuf::from) {
+            if is_file(&p) {
+                return Some(p);
+            }
+        }
+    }
+
+    let roots = [
+        env("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs")),
+        env("ProgramFiles").map(PathBuf::from),
+        env("ProgramFiles(x86)").map(PathBuf::from),
+    ];
+    for root in roots.into_iter().flatten() {
+        let candidate = root.join("Git").join("bin").join("bash.exe");
+        if is_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    // PATH last, and never the WSL launcher under System32.
+    let system32 = env("SystemRoot")
+        .map(|r| PathBuf::from(r).join("System32"))
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32"));
+    if let Some(path) = env("PATH") {
+        for dir in std::env::split_paths(&path) {
+            if dir == system32 {
+                continue;
+            }
+            let candidate = dir.join("bash.exe");
+            if is_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+/// Resolve the Git Bash executable, cached for the process lifetime.
 ///
-/// Falls back to the bare name `bash` so an unresolvable install surfaces as a
-/// spawn error naming the program, rather than a panic at startup.
-fn git_bash_path() -> std::path::PathBuf {
+/// `None` means no Git Bash is installed — see [`resolve_git_bash`] for the
+/// resolution order. Callers that must produce a `Command` anyway fall back to
+/// the bare name `bash`, so the failure surfaces as a spawn error naming the
+/// program rather than a panic at startup; [`shell_unavailable_hint`] is the
+/// surface that turns it into an actionable message before we get there.
+fn git_bash_path() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     use std::sync::OnceLock;
 
-    static RESOLVED: OnceLock<PathBuf> = OnceLock::new();
+    static RESOLVED: OnceLock<Option<PathBuf>> = OnceLock::new();
     RESOLVED
-        .get_or_init(|| {
-            for var in ["CODESCOUT_BASH", "CLAUDE_CODE_GIT_BASH_PATH"] {
-                if let Some(p) = std::env::var_os(var).map(PathBuf::from) {
-                    if p.is_file() {
-                        return p;
-                    }
-                }
-            }
-
-            let roots = [
-                std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs")),
-                std::env::var_os("ProgramFiles").map(PathBuf::from),
-                std::env::var_os("ProgramFiles(x86)").map(PathBuf::from),
-            ];
-            for root in roots.into_iter().flatten() {
-                let candidate = root.join("Git").join("bin").join("bash.exe");
-                if candidate.is_file() {
-                    return candidate;
-                }
-            }
-
-            // PATH last, and never the WSL launcher under System32.
-            let system32 = std::env::var_os("SystemRoot")
-                .map(|r| PathBuf::from(r).join("System32"))
-                .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32"));
-            if let Some(path) = std::env::var_os("PATH") {
-                for dir in std::env::split_paths(&path) {
-                    if dir == system32 {
-                        continue;
-                    }
-                    let candidate = dir.join("bash.exe");
-                    if candidate.is_file() {
-                        return candidate;
-                    }
-                }
-            }
-
-            PathBuf::from("bash")
-        })
+        .get_or_init(|| resolve_git_bash(|var| std::env::var_os(var), |p| p.is_file()))
         .clone()
+}
+
+/// `Some(hint)` when no POSIX shell is available to spawn commands through.
+///
+/// Windows runs every command through Git Bash. Without it, `CreateProcessW`
+/// answers `program not found`, which names neither the requirement nor the fix
+/// — a whole CI job's worth of failures said only that. The hint is consumed by
+/// `run_command`, which turns it into a `RecoverableError` before any spawn.
+pub fn shell_unavailable_hint() -> Option<String> {
+    if git_bash_path().is_some() {
+        return None;
+    }
+    Some(
+        "Install Git for Windows (which provides Git Bash), or point codescout at an \
+         existing bash.exe with CODESCOUT_BASH=<path-to-bash.exe>. codescout runs Windows \
+         commands through Git Bash so that the documented buffer-query workflow \
+         (grep/tail on @cmd_* refs) and one POSIX tokenizer for the security layer hold \
+         on every platform."
+            .to_string(),
+    )
 }
 
 /// Spawn `<git-bash> -c "<cmd>"`.
@@ -137,7 +173,8 @@ fn git_bash_path() -> std::path::PathBuf {
 /// defaults to null (prevents inherited-pipe / REPL hangs on the MCP stdio
 /// server); callers needing real stdin (interactive mode) override it.
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
-    let mut std_cmd = std::process::Command::new(git_bash_path());
+    let bash = git_bash_path().unwrap_or_else(|| std::path::PathBuf::from("bash"));
+    let mut std_cmd = std::process::Command::new(bash);
     std_cmd
         .arg("-c")
         .arg(cmd)
@@ -334,6 +371,62 @@ mod tests {
     fn win32_liveness_false_for_dead_pid() {
         // A PID that almost certainly does not exist.
         assert!(!process_alive(0xFFFF_FFF0));
+    }
+
+    /// The not-installed branch: no override, no install root, nothing on PATH.
+    ///
+    /// This is the branch a Git-less Windows box hits, and the one the wine CI
+    /// job hits — 22 lib tests there failed with a bare `program not found`,
+    /// which named neither the requirement nor the fix. The real resolver
+    /// cannot reach it on a developer machine without uninstalling git, so the
+    /// probe is injected.
+    #[test]
+    fn resolve_git_bash_is_none_when_nothing_is_installed() {
+        let resolved = resolve_git_bash(
+            |var| match var {
+                "PATH" => Some(std::ffi::OsString::from(r"C:\Windows\System32")),
+                _ => None,
+            },
+            |_| false,
+        );
+        assert!(
+            resolved.is_none(),
+            "a host with no bash.exe anywhere must resolve to None, got {resolved:?}"
+        );
+    }
+
+    /// The System32 exclusion, asserted where it is decidable: a `bash.exe`
+    /// that exists ONLY under System32 is the WSL launcher and must be
+    /// rejected, even though the existence probe says yes.
+    #[test]
+    fn resolve_git_bash_never_selects_the_wsl_launcher() {
+        let resolved = resolve_git_bash(
+            |var| match var {
+                "SystemRoot" => Some(std::ffi::OsString::from(r"C:\Windows")),
+                "PATH" => Some(std::ffi::OsString::from(r"C:\Windows\System32")),
+                _ => None,
+            },
+            |p| p == std::path::Path::new(r"C:\Windows\System32\bash.exe"),
+        );
+        assert!(
+            resolved.is_none(),
+            "System32 bash.exe is the WSL launcher and must never be selected, got {resolved:?}"
+        );
+    }
+
+    /// The override wins, and it is the documented escape hatch named by
+    /// [`shell_unavailable_hint`].
+    #[test]
+    fn resolve_git_bash_honours_the_codescout_bash_override() {
+        let target = std::path::Path::new(r"D:\tools\bash.exe");
+        let resolved = resolve_git_bash(
+            |var| match var {
+                "CODESCOUT_BASH" => Some(std::ffi::OsString::from(target)),
+                _ => None,
+            },
+            |p| p == target,
+        );
+        assert_eq!(resolved.as_deref(), Some(target));
     }
 
     /// Regression: `MSYS_NO_PATHCONV=1` / `MSYS2_ARG_CONV_EXCL=*` must never

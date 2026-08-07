@@ -101,8 +101,18 @@ pub(crate) fn lsp_binary_name_with(base: &str, exists: impl Fn(&str) -> bool) ->
     format!("{base}.cmd")
 }
 
+/// `Some(hint)` when this platform has no shell to spawn commands through.
+///
+/// Unix always has `sh`, so it is always `None` there. Windows runs commands
+/// through Git Bash and answers `Some` when none is installed — `run_command`
+/// turns that into a `RecoverableError` naming the requirement, instead of
+/// letting every spawn fail with a bare `program not found`.
+pub fn shell_unavailable_hint() -> Option<String> {
+    imp::shell_unavailable_hint()
+}
+
 /// Build a fully-configured shell `tokio::process::Command` for `cmd`.
-/// Windows: `cmd /C "<cmd>"` via raw_arg (no MSVC-CRT quote mangling).
+/// Windows: `<git-bash> -c <cmd>` — a POSIX shell, same as Unix, since WIN-32.
 /// Unix: `sh -c <cmd>` in a fresh process group with SIGPIPE reset.
 /// Sets `GIT_PAGER=cat`. The caller sets cwd, stdio, and kill_on_drop.
 /// stdin defaults to null on **both** platforms (prevents inherited-pipe / REPL
