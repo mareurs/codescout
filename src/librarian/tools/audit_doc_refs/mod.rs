@@ -149,6 +149,20 @@ fn default_fail_on() -> String {
 pub const DEFAULT_AUDIT_GLOBS: &[&str] =
     &["docs/**/*.md", "CLAUDE.md", "**/CLAUDE.md", "**/README.md"];
 
+/// The `fail_on` values `build_response` actually honors — the single source of
+/// truth for the CLI's `--fail-on` value set, so the two cannot drift.
+///
+/// They drifted once: the engine gained `med` and `low` on 2026-07-05
+/// (`docs/issues/archive/2026-07-05-audit-doc-refs-fail-on-doc-mismatch.md`),
+/// and the CLI went on refusing both — with help text citing the already-fixed
+/// bug as the reason, which is the worst form of stale doc because it reads as
+/// a live pointer. `fail_on_values_are_exactly_what_build_response_honors`
+/// pins both directions.
+///
+/// `any` is a pre-existing undocumented alias for `low`, kept so no existing
+/// caller's behavior changes.
+pub const FAIL_ON_VALUES: [&str; 5] = ["high", "med", "low", "any", "never"];
+
 /// Patterns matched against rel paths AFTER the include set. Matching files
 /// are dropped from the scan. Used to exclude content that IS path-shaped
 /// markdown but represents reader-side references (agent-onboarding docs
@@ -869,6 +883,48 @@ mod tests {
                 notes: None,
             },
         }
+    }
+
+    /// The CLI's `--fail-on` value set and the set `build_response` honors are
+    /// the same list, so they cannot drift. They did drift once, for two months.
+    #[test]
+    fn fail_on_values_are_exactly_what_build_response_honors() {
+        // Every listed value must be accepted. Kills "someone adds a value to
+        // FAIL_ON_VALUES that the engine has no arm for".
+        for v in FAIL_ON_VALUES {
+            let r = build_response(
+                &[mk_finding(Verdict::Missing, Severity::High)],
+                &[],
+                &[],
+                1,
+                None,
+                None,
+                v,
+            );
+            assert!(
+                r.is_ok(),
+                "FAIL_ON_VALUES lists `{v}` but build_response rejects it"
+            );
+        }
+
+        // The other direction. Without this the loop above stays green when a
+        // value is DELETED from the list — which is exactly how `med` and `low`
+        // stayed unreachable from the CLI after the engine learned them.
+        for required in ["high", "med", "low", "never"] {
+            assert!(
+                FAIL_ON_VALUES.contains(&required),
+                "`{required}` is documented in the librarian input schema and honored \
+                 by build_response, so the CLI must accept it"
+            );
+        }
+
+        // An unlisted value must be REJECTED, not silently treated as `never` —
+        // the original defect was a gate that reported success while gating
+        // nothing.
+        assert!(
+            build_response(&[], &[], &[], 0, None, None, "medium").is_err(),
+            "an unknown fail_on value must error rather than behave like `never`"
+        );
     }
 
     #[test]

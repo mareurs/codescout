@@ -16,13 +16,19 @@ pub struct AuditArgs {
     pub paths: Vec<String>,
 
     /// Exit-code threshold. `high` exits 1 on any unresolved high-severity
-    /// finding; `any` exits 1 on any broken or unknown finding; `never`
-    /// (default) always exits 0. `med`/`low` are not yet honored by the
-    /// underlying engine — see F-9 in `docs/trackers/bug-fix-session-log.md`.
+    /// finding; `med` on high or med; `low` on any finding whose verdict is not
+    /// `resolved`/`external`; `never` (default) always exits 0. `any` is a
+    /// pre-existing alias for `low`, kept so existing callers are unaffected.
+    ///
+    /// Caveat for `low`/`any`: they also trip on `resolved_basename`, which is
+    /// a SUCCESSFUL resolution that `docs/RELEASE.md` step 5 calls OK — the
+    /// exemption covers only `resolved`/`external`. Measured 2026-08-07: 3 of
+    /// 44 findings on `docs/RELEASE.md`, 2426 of 47094 repo-wide. Prefer `high`
+    /// or `med` for gates until that is settled.
     #[arg(
         long = "fail-on",
         default_value = "never",
-        value_parser = ["high", "any", "never"],
+        value_parser = crate::librarian::tools::audit_doc_refs::FAIL_ON_VALUES,
     )]
     pub fail_on: String,
 

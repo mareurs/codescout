@@ -181,7 +181,7 @@ Two datapoints, both escapes past a fully green gate:
   attempt 1, bug archived — and its output was useless. Every fixture had exactly one hidden
   entry, so the truncation branch never ran; the real tree has 16, and alphabetical ordering
   cut the single entry the feature existed to surface (`cdfbbe0f` fixed it).
-- Round 6's `create.rs` fix was proved inert in a live MCP session despite a green suite —
+- Round 6's `src/librarian/tools/create.rs` fix was proved inert in a live MCP session despite a green suite —
   the same lesson one layer lower.
 
 Unlike the mutation run below this is **required, not advisory**: it costs one tool call, and

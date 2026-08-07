@@ -54,7 +54,7 @@ time_scope: open-ended
 | F-6 | 2026-05-20 | med | release-pipeline | fixed-verified | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
 | F-7 | 2026-05-21 | high | codescout-tool | mitigated | `references` undercounts vs `call_graph` (~18%); root is live-RA incompleteness, not position |
 | F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
-| F-9 | 2026-05-24 | med | codescout-tool | mitigated | `audit_doc_refs` `fail_on` arg silently ignores `med`/`low` despite docs |
+| F-9 | 2026-05-24 | med | codescout-tool | fixed-verified | `audit_doc_refs` `fail_on` arg silently ignores `med`/`low` despite docs — engine fixed 2026-07-05, CLI surface 2026-08-07 (zombie-open in between) |
 | F-10 | 2026-05-24 | low | release-pipeline | mitigated | RELEASE-TODO advertises "CI pipeline" as unchecked; workflow exists, push trigger pointed nowhere |
 | F-11 | 2026-05-24 | med | release-pipeline | fixed-verified | CI runner missing `mold` linker required by `.cargo/config.toml` |
 | F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
@@ -644,22 +644,54 @@ build_response was extended to honor the lower thresholds; the extension
 never happened. CLI shipping is the natural forcing function — a real
 `--fail-on` flag has to either match the docs or silently lie.
 
-**Workaround (this session):** CLI `--fail-on` accepts only the values the
-MCP code actually honors: `high | any | never`. Matches existing behavior;
-docs in `librarian.rs` schema + CLAUDE.md need a follow-up reconciliation
-(either extend build_response or correct the docs).
+**Workaround (2026-05-24, SUPERSEDED 2026-08-07 — see Status):** CLI `--fail-on`
+accepts only the values the MCP code actually honors: `high | any | never`.
+Matches existing behavior; docs in `librarian.rs` schema + CLAUDE.md need a
+follow-up reconciliation (either extend build_response or correct the docs).
 
 **Severity:** med — would have produced a CI gate that silently lets `med`
 findings through despite the user believing `--fail-on med` was active.
 A noisy bug (silent no-op gates are the worst kind) but not cascading;
 controller absorbs the divergence by accepting only verified values.
 
-**Status:** mitigated — CLI accepts only verified values for this session.
-Follow-up: decide between extending build_response or rewriting docs;
-either ships in a separate change.
+**Status:** fixed-verified — in two stages 2½ months apart, which is why this sat
+`mitigated` long after the hard part was done. Found zombie-open on 2026-08-07 by
+reading the CLI's `--help` while investigating task #17.
 
-**Fix idea / Pointer:** `src/librarian/tools/audit_doc_refs/mod.rs:542`
-(build_response). Either add `"med" if findings.iter().any(|f| matches!(f.resolution.severity, Severity::Med | Severity::High) && ...)` arms, or downgrade the docs to `high | any | never` to match reality.
+*Engine (2026-07-05):* `build_response` gained explicit `"med"` and `"low" | "any"`
+arms plus an `other => Err(...)` arm, with eight tests (`fail_on_never_is_always_zero`
+through `fail_on_unknown_value_is_rejected`). Filed and archived as
+`docs/issues/archive/2026-07-05-audit-doc-refs-fail-on-doc-mismatch.md`. The "Fix idea"
+below was taken, in its first form.
+
+*CLI (2026-08-07):* the workaround outlived its cause. `src/cli/audit_doc_refs.rs` kept
+`value_parser = ["high", "any", "never"]` and help text reading *"`med`/`low` are not yet
+honored by the underlying engine — see F-9"* — a live-looking pointer at an already-closed
+bug, which is the worst shape a stale doc can take, because a reader who follows it goes
+to fix something already fixed. Both surfaces now read one shared list,
+`audit_doc_refs::FAIL_ON_VALUES`, so the CLI cannot again refuse a value the engine
+honors. Verified on the release binary rather than from the suite:
+`[possible values: high, med, low, any, never]`, and per-level exit codes on
+`docs/RELEASE.md` are high->0, med->1, low->1, any->1, never->0, with CI's repo-wide
+`--fail-on high` still 0 (unchanged).
+
+**Regression guard:** `fail_on_values_are_exactly_what_build_response_honors`
+(`src/librarian/tools/audit_doc_refs/mod.rs`) pins both directions — every listed value
+must be accepted by `build_response`, and `high`/`med`/`low`/`never` must stay listed.
+Mutation-verified: dropping `"med"` from the list fails it with *"`med` is documented in
+the librarian input schema and honored by build_response, so the CLI must accept it"*.
+The one-directional form (iterate the list, assert each is accepted) stays **green** on a
+deletion, which is precisely how this drifted for two months — so the membership
+assertion is the load-bearing half, not the loop.
+
+**Fix idea / Pointer:** Done — the first option was taken (extend `build_response`), then
+the CLI was aligned to it. One question is deliberately left open, and is now surfaced in
+the CLI's own long help rather than buried: `low`/`any` also trip on `resolved_basename`,
+a SUCCESSFUL resolution that `docs/RELEASE.md` step 5 calls OK, because the exit-code
+exemption covers only `Resolved | External`. Measured 2026-08-07: 3 of 44 findings on
+`docs/RELEASE.md`, 2426 of 47094 repo-wide. That is the same `ResolvedBasename` accounting
+gap that makes the summary counters non-exhaustive, so it belongs to the audit-doc-refs
+direction decision (task #17), not here.
 
 ## F-10 — RELEASE-TODO advertises "CI pipeline" as unchecked; workflow already exists, push trigger points at nonexistent branch
 
