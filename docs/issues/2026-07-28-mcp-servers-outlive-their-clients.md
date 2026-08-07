@@ -2,7 +2,7 @@
 id: f3c9339e7e7a6822
 kind: bug
 status: open
-title: codescout MCP servers outlive their clients — 18 orphaned `start --debug` processes accumulated over 3 days
+title: 'BUG: one codescout MCP server accumulates per abandoned-but-live Claude Code session — 18 held open, oldest 93.5h, ~1 GiB RSS. Nothing is orphaned and the shutdown path is correct; only an idle timeout can collect them'
 tags:
 - mcp-server
 - lifecycle
@@ -119,6 +119,62 @@ and there were exactly 4 alive — one per live project/language pair, none stal
 `start --debug` processes with no such flag had piled up over four days. The two populations sit in
 the same process table under the same binary, which makes the missing-mechanism argument directly
 observable rather than inferred.
+
+### 2026-08-07: nothing is orphaned, the clients are alive, and codescout's shutdown path is not at fault
+
+Measured across all 17 live `codescout start --debug` processes.
+
+**Every one has a living parent.** No `ppid=1`, no reparenting to init. The parents are `claude`
+processes — `claude`, `claude --continue`, `claude --resume`, `claude --remote-control`,
+`claude bg-spare`, and one `.../versions/2.1.220 --session-…` — and each is at least as old as its
+child (e.g. parent 35402 at 93.9 h holding child 35497 at 93.5 h). **Ten of the parents have been
+alive 83 h or more.**
+
+**stdin is an open socketpair, not a closed pipe.** `readlink /proc/<pid>/fd/0` returns
+`socket:[…]` for 16 of 17. The peer end is held by the live parent, so no EOF is ever delivered.
+The seventeenth is instructive: a server spawned by *another* `codescout start --debug` has
+`fd0=/dev/null`, so it can never receive EOF at all.
+
+**Both channels codescout can watch are handled correctly.**
+
+- *stdin EOF terminates the server* — verified, not merely traced:
+  `./target/release/codescout start --debug < /dev/null` exits in ~30 ms with
+  `Error: MCP server error: connection closed: initialize request`, not the 25 s timeout it was
+  given. `ResilientStdin::poll_read` (`src/server.rs`) absorbs **only**
+  `ErrorKind::WouldBlock` — the Node.js `O_NONBLOCK` EAGAIN case, with a 1 ms armed sleep to avoid
+  the BUG-047 spin — and passes every other outcome through untouched, including `Ok(0)`. rmcp
+  then ends the stream and `service.waiting()` returns, after which `run()` calls
+  `lsp.shutdown_all()`.
+- *Signals are handled* — `shutdown_signal()` covers SIGINT, SIGTERM **and SIGHUP**, the last
+  added specifically for a parent that exits abruptly without sending SIGTERM.
+
+**So this file's original premise is wrong.** The servers are not outliving their clients. The
+clients are outliving their own *usefulness* while holding the socket open, and what accumulates
+is one MCP server per abandoned-but-not-exited Claude Code session. "Orphan status confirmed by
+env drift" (the Evidence subsection above) established that the *sessions* were stale; it did not
+establish that the processes were parentless, and they are not.
+
+### What that rules out
+
+| candidate signal | verdict |
+|---|---|
+| stdin EOF | **already implemented, and cannot fix this** — the peer end is open by construction |
+| parent-death watch | **cannot fix this** — every parent is alive, several for 83 h+ |
+| long idle timeout from last MCP request | **the only mechanism left** |
+
+Time-since-last-request is the only observable that distinguishes an abandoned session from a
+merely idle one. Nothing else on the process is different.
+
+Two consequences worth carrying into the decision:
+
+- **An exiting server breaks the client's connection.** A user returning to a genuinely idle
+  session would find codescout gone and need `/mcp` to reconnect. That is the entire cost, and it
+  is why the mux's 180 s is unusable here — the mux is re-dialled transparently on the next
+  navigation call, and an MCP server is not.
+- **There is a non-codescout workaround, now visible.** Killing abandoned `claude` processes reaps
+  their servers, and 10 of 17 parents have been idle 83 h+. That does not make the leak acceptable,
+  but it does mean the pressure is lower than "18 orphans" suggested — and that the nested
+  `fd0=/dev/null` servers are the only population with no alternative at all.
 ## Hypotheses tried
 
 1. **Hypothesis:** the high process count is stale `ps` output or includes the LSP mux.
@@ -200,23 +256,26 @@ changed.
 
 ## Resume
 
-The census is refreshed (see Evidence, 2026-08-07): still 18 processes, oldest now 93.5 h, ~1 GiB
-aggregate RSS, nothing reaped in 10 days. That is the measurement side done; what remains is a code
-read plus one decision.
+Both measurement steps are **done** (see the two 2026-08-07 Evidence subsections). The census is
+refreshed and the shutdown path is read *and* empirically tested. Nothing further to investigate.
 
-Read the `start` subcommand's shutdown path and determine whether it watches stdin at all — an MCP
-stdio server's client closing stdin is the canonical shutdown signal, and if `start` ignores it,
-that is the whole bug. Then compare against the mux's `--idle-timeout` implementation, which solves
-the same problem one process over in the same tree and is *observably* working: the census found 4
-mux processes, one per live project/language pair with none stale, beside 18 un-timed-out `start`
-processes.
+**One decision remains and it is the maintainer's: how long is "idle", and is the reconnect cost
+acceptable?** The mechanism is forced — stdin-EOF is already implemented and cannot fire while the
+parent holds the socket, and a parent-death watch cannot fire while every parent is alive, so a
+long idle timeout measured from the last MCP request is the only option left. What is *not* forced
+is the threshold, and it trades directly against a broken connection for a user returning to a
+quiet session.
 
-**The decision that blocks a fix is what "idle" means for `start --debug`**, and it is the
-maintainer's: an MCP server legitimately sits idle between user turns for hours, so the mux's 180 s
-is far too aggressive to copy directly. Options are stdin-EOF (precise, no timeout needed, but
-depends on the client actually closing it), a long idle timeout measured from last request, or a
-parent-death watch. Pick the signal before writing code — the wrong one kills live sessions, which
-is worse than the leak.
+Anchors for choosing it: the oldest server has been alive 93.5 h, the mean 46 h, and ten parent
+`claude` processes have been up 83 h+. Any threshold from a few hours upward collects essentially
+the whole current population. The mux's 180 s is *not* a precedent — a mux is re-dialled
+transparently on the next navigation call, whereas an MCP server exiting is user-visible.
+
+Once the threshold is chosen, implement it on the same shape as the mux's watchdog
+(`src/lsp/mux/process.rs`: a 10 s `tokio::time::interval` tick comparing `idle_since.elapsed()`
+against the timeout, then breaking the serve loop) and add a regression test with
+`#[tokio::test(start_paused = true)]` so it is deterministic rather than wall-clock dependent —
+the lesson from WIN-30's budget test this same day.
 ## References
 
 - `src/bin/` — `codescout start` entry point (shutdown path unread)
