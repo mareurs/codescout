@@ -23,6 +23,143 @@ tags:
 > **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
 > Resume block below. Produced F-2, F-3, W-1.
 
+## Resume — round 8, written 2026-08-07 for session compaction
+
+**Supersedes rounds 2–7.** The merge is **deliberately deferred** — see below. Everything actionable
+without a maintainer decision is done; **there is a live task list, use it.**
+
+### First action for the next session: `TaskList`
+
+This round created a **16-task list (#14–#30)** which is the authoritative view of what is open, who
+owns each item, and what blocks what. Read it before re-deriving anything from this log. #15 is the
+only completed one. Every remaining task carries its bug path, the constraints already established,
+and the traps not to re-walk — several are long because they encode a full investigation.
+
+### Git state (verified, not remembered)
+
+| | |
+|---|---|
+| `experiments` HEAD | **`5432f5c7`**, plus the docs-only commit carrying this Resume — confirm with `git log --oneline -1` |
+| working tree | clean at time of writing |
+| `master...HEAD` | **`0` left / `456` right** — `master` has no commits of its own, so the promotion is still a fast-forward |
+| last CI-verified SHA | **`5432f5c7`** — 15/15, attempt 1 |
+
+### THE MERGE IS DEFERRED BY DECISION — do not run it
+
+2026-08-07, explicit instruction: *"no merge yet until we solve all issues."* Task **#14** is
+blocked by the twelve bug-backed tasks and must stay that way. Do not offer the merge again until
+those close.
+
+Waiting costs nothing mechanically — `master` is protected and nothing else touches it, so the
+fast-forward stays clean however long the branch grows. Two consequences to carry:
+
+- **The merge must follow a FINAL green run on whatever the tip is then.** Every commit supersedes
+  the previously-verified SHA. Do not reuse a SHA from this log.
+- **#28 and #29 are trigger-gated on a recurrence, so "all issues" is not reachable by working
+  harder.** Both were mitigated and made self-diagnosing but never reproduced. They resolve either
+  when they fire again, or by a decision to close them `zombie` with the re-open triggers already
+  written into each. Flagged to the user; unresolved.
+
+### CI — four reading rules, each bought with a wrong conclusion
+
+Read runs per-job, never from run-level fields:
+
+```
+gh run view <id> --json jobs --jq '.jobs[] | "\(if .status=="completed" then .conclusion else .status end)\tsteps=\(.steps|length)\t\(.name)"'
+```
+
+1. **Run-level `status` is an aggregate, not a result** — it reported `queued` for a run already
+   holding six green jobs.
+2. **`steps` separates scheduling from testing** — `steps=0` never executed; `steps=12` ran and
+   really failed.
+3. **`attempt` separates a clean green from a rescued one.**
+4. **`cancelled` on a non-tip SHA is the concurrency block working**, not a failure — a newer push
+   superseded it. Two of this round's runs read that way (`94f7660d`, `65075c6f`).
+
+### What round 8 changed — 13 commits, `176a77e5..5432f5c7`
+
+- **WIN-30 half fixed** (`176a77e5`). The LSP budget test moved to `#[tokio::test(start_paused =
+  true)]` **and** `std::time::Instant` → `tokio::time::Instant`; the second half matters as much as
+  the first, because `std::time::Instant` is not virtualised and would have left the ceiling
+  trivially true. Now `0.00s`, 25/25, mutation-verified at 40 ms. The background-output test is
+  *mitigated* — its poll no longer discards `Err`, bound 5 s → 15 s. Its first run under wine named
+  the missing `py`, which **retired one member of WIN-27's twelve unknown-root-cause wine
+  failures.**
+- **`grep` zero-match false negative fixed** (`624f7f05`, refined `cdfbbe0f`, archived `4ddbcfca`).
+  `WalkAudit` + `completeness_warning`, four counted error sites, directories sorted before dotfiles
+  so truncation keeps the useful entries. Filed and closed same session.
+- **audit-doc-refs non-determinism FORCED** (`b97a3f48`) — 57 paired warm/cold runs. Retitled: the
+  tally is non-deterministic, the **gate is not**.
+- **MCP orphans: nothing is orphaned** (`1e2883a9`). Retitled. Mechanism forced to an idle timeout.
+- **kotlin heap capped twice over** (`2cfefc2e`) — distro `vmoptions` ships `-Xmx2048m`.
+- **researcher rerank measured, then retracted** (`65075c6f`, `2a20977f`, `436f8710`).
+- **`conventions` § Environment-Agnostic Tuning** (`94f7660d`) — never ship a measured constant as a
+  default; we can only test for us.
+- **Opt-in idle shutdown shipped** (`5432f5c7`) — `CODESCOUT_IDLE_SHUTDOWN_SECS`, disabled by
+  default, mechanism only, threshold left to the operator.
+
+Tracker entries added: **F-11, F-12, F-13, W-11, W-12, W-13, R-62, U-39**, U-33 refined to 16
+instances, WIN-30 row → `mitigated`. Memories: `test-design-discipline` gained the cap/truncation
+corollary; `conventions` gained Environment-Agnostic Tuning.
+
+### Do NOT re-do
+
+1. **Do not offer or run the merge** — deferred by decision, task #14 blocked.
+2. **Do not re-derive CI state from run-level fields**; and `cancelled` on a superseded SHA is not
+   a failure.
+3. **Do not hunt the audit-doc-refs gate flap with back-to-back repetition.** 42 attempts of that
+   shape found nothing and the reason is known: back-to-back runs are always mux-warm, and warm runs
+   are byte-identical. The mux self-exits at `--idle-timeout 180`, which is the real oscillator.
+4. **Do not look for a broken stdin-EOF path in `start`.** Verified correct —
+   `start --debug < /dev/null` exits in ~30 ms. `ResilientStdin` absorbs only `WouldBlock`.
+5. **Do not add `-Xmx` for kotlin-lsp** — the distro's `vmoptions` already caps at 2 GiB and is
+   honored (`InitialHeapSize=128 MiB` proves it).
+6. **Do not run the kotlin content-root scoping experiment** before deciding #24 — no heap pressure
+   remains and #203 is open/unfixed/silent for 3 months.
+7. **Do not tune `RERANK_MIN_SCORE`.** No constant works on `ms-marco-MiniLM-L-6-v2`; the bands
+   overlap at n=28. And do not "make it relative" either — scale-free does not conjure absent signal.
+8. **Do not make WIN-30's background test self-skip on a missing `py`** — a probe-gated early return
+   would pass vacuously on `windows-latest` and disarm the only guard that matters.
+9. **Do not run `index --force` before #19's sparse decision** — chunks written under
+   `DISABLE_SPARSE=1` carry empty sparse vectors, so re-enabling later mandates a second rebuild.
+10. **Do not conclude absence from a glob.** Three surfaces this session: `ignore`'s hidden-dir
+    prune, `cargo test --lib` filtering integration tests to "0 passed", and shell `*.json` not
+    matching `.claude.json`. Pass `include_hidden=true`; use `--test <target>`.
+
+### Open bugs — 8, unchanged in count
+
+```
+artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})
+```
+
+One filed and closed this round (grep), so the count held. **None is blocked on investigation any
+more** — every one is blocked on a decision, or on a recurrence. That is the round's real outcome.
+
+### What is needed from the maintainer — 11 decisions
+
+**One answer unblocks three:** #19, does the sparse leg come back? It gates #20 and #21. A VRAM
+call, not a quality one — sparse was worth ≥ 2/75 and cost ~3.0 GiB of a 6 GiB card. Recommendation:
+leave it off, which closes #19 as moot and makes #21 a plain 2 h rebuild.
+
+**Genuinely needs thought:** #17 (audit-doc-refs — tally source + `degraded` semantics + reclassify
+the unreproduced symptom) and #22 (chunker candidate, though its file orders the
+embedder-batch-concurrency work first).
+
+**A "yes" is enough, recommendation already in each task:** #16 (suggest 14400), #23 (ship, keep
+`open`, drop severity to medium), #24 (drop item 6), #25 (delete the knob), #26 (pin the toolchain —
+closes W-9 *and* F-9), #27 (add the live-surface step — promote-when met), #30 (label
+`BM25_BOOST`, don't change it).
+
+**Needs a close, not a fix:** #28, #29 — `zombie` with the recorded re-open triggers, else the merge
+waits on a flake.
+
+### Still owed
+
+- **`index --force` rebuild** (~2 h) — blocked on #19, not on effort.
+- **`docs/RELEASE.md` live-surface step** — W-12's promote-when is met; #27.
+- **Bug-file template `## Premise check`** — W-13's promote-when is met; not yet filed as a task.
+- **Master-side SHAs** for archived bug files, after the eventual cherry-pick.
+
 ## Resume — round 7, written 2026-08-07 for session compaction
 
 **Supersedes rounds 2–6.** The promotion is one command away and that command is the user's.
@@ -812,6 +949,7 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | validated |
 | W-12 | 2026-08-07 | high | Run the fix against the real tree as a step distinct from the gate — a green suite says the branches you wrote tests for work, not that the output is useful | Seven tests passed and clippy was clean, yet the shipped `grep` warning read ".buddy/, .cargo/, .claude/, .env, .env.amd and 11 more" — alphabetical truncation cut `.github/`, the entry the whole fix existed to surface. Every fixture had one hidden entry; the repo has 16 | validated |
 | W-11 | 2026-08-07 | high | Scout a bug file's `## Fix` before implementing it — a fix written from a CI log line has never touched the code | WIN-30's Fix prescribed replacing a fixed wait with a bounded poll; the poll was already there, so the change would have been inert, the bug archived, and the next flake would have read as a regression of a fix that never existed | validated |
 | W-10 | 2026-08-07 | high | Before merging two code paths that look redundant, ask what *triggers* the second one | The two `symbols` walks share an identical filter and look duplicated; a truncated first walk empties `matches`, which is precisely what triggers the fallback — merging them would have deleted the recovery path and made the bug under repair strictly worse | validated |
@@ -1712,6 +1850,47 @@ Minimum viable shape is three tiers with the middle one adversarial — the case
 catch. Kin to F-12 (a one-element fixture never reaches the truncation branch): same failure, moved
 from test fixtures to measurement samples, and in both the sample was chosen for convenience and
 happened to omit the only region that mattered.
+
+## W-13 — Every bug premise checked this session was wrong, and four fell to one command each
+
+**Observed:** 2026-08-07, working five open bugs in sequence.
+
+**Pattern:** Before working a bug, treat its **premise** as a claim rather than as context, and
+spend the cheapest measurement that could falsify it. Bug files are written under time pressure
+from a plausible mechanism plus a symptom; the mechanism is the part that goes stale, and it is
+usually the part the whole file is organised around.
+
+**Counterfactual, per bug — all five had a false premise or a wrong prescription:**
+
+| bug | premise | falsified by | what the work would have been |
+|---|---|---|---|
+| MCP orphans | "18 **orphaned** `start --debug` processes" | `ps -o ppid=` — every one has a living `claude` parent | hunting a broken stdin-EOF path that is in fact correct (verified: `start --debug < /dev/null` exits in ~30 ms) |
+| kotlin heap | "codescout spawns kotlin-lsp with **no `-Xmx`**" | `jcmd VM.flags` — `InitialHeapSize=128 MiB`, which only the distro's own `vmoptions` sets | adding a cap that the installed package already applies, twice over |
+| researcher rerank | "run real queries, read Langfuse's `rerank` span in/out counts" | one `curl` to `/rerank` | building query + Langfuse plumbing to count drops, when the defect was the score **scale** |
+| WIN-30 | "replace the fixed wait with a bounded poll" | reading the test — it already polled 50 × 100 ms | a no-op committed as a fix, bug archived, flake surviving (F-11) |
+| audit-doc-refs | "the high-finding count varies; the gate is non-deterministic" | 57 paired warm/cold runs — exit code and high count never moved | chasing a gate flap that does not happen, instead of the tally defect that does |
+
+Four of the five cost **one command**. Only the audit-doc-refs case needed real work (57
+invocations), and even there the expensive part bought a *forcing recipe*, which the file itself
+named as the precondition for any falsifiable fix.
+
+**Confirming data points:**
+
+1. W-11 / F-11 (this log) — a bug file's `## Fix` prescribed a change the code already had.
+2. W-13 (this entry) — the same disease one level up, in the premise rather than the prescription.
+3. F-2 (this log) — the bug ledger was never queried at the seam, so a filed fix was reimplemented.
+
+**Impact:** high — five bugs, five avoided wrong turns, and three of the five ended with a *better*
+understanding than the original question: the MCP fix reduced to a threshold, the kotlin bug lost
+its severity justification, and the researcher bug moved from tuning to model selection.
+
+**Promote-when:** criterion met. This belongs in the bug-file template itself — a
+`## Premise check` line, or a note under `## Root cause` that a mechanism recorded without a
+measurement is a hypothesis. The complement is already there in spirit ("Root cause — if unknown,
+write `Unknown — see Hypotheses tried`"); what is missing is that a **stated** root cause also
+decays, and nothing marks when it was last checked.
+
+**Status:** validated.
 
 ## Template for new entries
 
