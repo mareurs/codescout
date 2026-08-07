@@ -81,14 +81,30 @@ budget) measured in **real** time. Under wine, on a shared runner, 100 ms is not
 margin. The test is `#[tokio::test]` with no `start_paused`, so tokio's timers run against the
 real clock even though every sleep involved is a tokio timer.
 
-**2. `background_command_with_quotes_captures_output`** — `src/tools/run_command/tests.rs:3763`,
-message `background command output not captured`. A race between the spawned background process
-writing its output and the assertion reading it.
+**2. `background_command_with_quotes_captures_output`** — `src/tools/run_command/tests.rs`,
+message `background command output not captured`.
+
+**Corrected 2026-08-07, after reading the test.** This section first called it "a race between
+the spawned background process writing its output and the assertion reading it" and prescribed
+replacing a fixed wait with a bounded poll. The test **already polled** — 50 iterations ×
+100 ms, a 5 s bound — so that fix would have been a no-op that closed the bug and left the flake
+in place. Both claims came from the CI log line, not from the source.
+
+The real defect was in the poll's shape: `if let Ok(v) = out { … }` **discarded the `Err` arm**,
+so a command that never ran and a command still flushing both ended the loop with
+`found == false` and the same contentless message. That is why the CI red carried no information.
+The underlying MSVC intermittency remains unconfirmed — `py` demonstrably works on
+`windows-latest` (the same job passed 3299 other tests and passed this one on an unchanged
+re-run), so a genuine timing effect is still the leading explanation.
 
 **The inconsistency that made this bite.** `.github/workflows/ci.yml`'s wine step `--skip`s
-`background_command_with_quotes_captures_output` by name, as one of the 20 pre-existing wine
-failures catalogued in WIN-27. The `windows-latest` job does not skip it. So the same test is
-exempted on one Windows job and load-bearing on the other.
+`background_command_with_quotes_captures_output` by name (`.github/workflows/ci.yml:117`), as one
+of the 20 pre-existing wine failures catalogued in WIN-27. The `windows-latest` job does not skip
+it. So the same test is exempted on one Windows job and load-bearing on the other.
+
+**That split is justified, and now for a stated reason** — see *Evidence → The wine failure is a
+missing interpreter*. It was recorded here as an unexplained inconsistency because nobody had
+run the test under wine and read why it failed.
 
 ## Evidence
 
@@ -111,6 +127,35 @@ list, so its wine failure is new relative to the WIN-27 baseline rather than pre
 Attempt 1: 13 success / 2 failure. Attempt 2 (failed jobs only, same commit): **15/15**. A
 deterministic defect cannot pass an unchanged re-run.
 
+### The wine failure is a missing interpreter, not a race
+
+Run locally under wine at `ea0340b0` with the improved diagnostic in place
+(`scripts/build-windows.sh test --lib background_command_with_quotes`):
+
+```
+thread 'tools::run_command::tests::background_command_with_quotes_captures_output' panicked at
+src/tools/run_command/tests.rs:3779:5:
+background command output not captured within 15s (read errors: 0); last stdout: "Can't
+recognize 'py -c \"print('bg-ok', 2+2)\"' as an internal or external command, or batch
+script.\r\n"; last error: ""
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3319 filtered out; finished in 32.81s
+```
+
+Three readings, none of which the old contentless assertion could have supported:
+
+1. **wine has no Python launcher.** The failure is environmental, so the wine `--skip` is correct
+   and permanent — not a deferred investigation.
+2. **The background plumbing works under wine.** The buffer captured cmd's own error text, which
+   means spawn, capture, and the `type @bg_*` read path all function there. Only `py` is absent.
+   This retires one member of WIN-27's twelve-test "root cause unknown" wine cluster: it was never
+   a wine path-handling mystery.
+3. **`read errors: 0`** — every poll iteration returned `Ok`, so the discarded `Err` arm was not
+   itself the mechanism here; it was what made the *message* useless.
+
+The reason for the skip is now recorded in `.github/workflows/ci.yml` next to the flag, including
+an explicit instruction not to make the test self-skip on a missing `py`: a probe-gated early
+return would pass vacuously on `windows-latest` if the probe ever misfired, silently disarming the
+MSVC-CRT quote-mangling regression guard — the only place the test has value.
 ## Hypotheses tried
 
 1. **Hypothesis:** the failures were caused by the day's code changes (audit_doc_refs gitignore
@@ -127,33 +172,61 @@ deterministic defect cannot pass an unchanged re-run.
 
 ## Fix
 
-Not yet implemented.
+Item 1 **fixed and verified**; item 2 **mitigated**, root cause unconfirmed by design.
 
-**For the budget test — use tokio's virtual clock.** Both the mock's delay
-(`SlowStart::get_or_start` → `tokio::time::sleep(self.delay)`) and the test's own wait
-(`tokio::time::sleep(Duration::from_millis(250))`) are tokio timers, so
-`#[tokio::test(start_paused = true)]` makes the whole test deterministic. Auto-advance moves
-the clock to the **next** scheduled timer, which is the 50 ms budget rather than the 200 ms
-cold start, so the `None` return is still exercised for the right reason. `t0.elapsed()` uses
-`std::time::Instant`, which tokio does **not** virtualise — so the elapsed-time assertion keeps
-measuring real time and becomes trivially satisfied, which is exactly the robustness wanted:
-it still proves the call did not block, without depending on scheduler luck.
+**1. The budget test — virtual clock.** `src/lsp/mod.rs`, `budget_tests`:
+`#[tokio::test]` → `#[tokio::test(start_paused = true)]`, and `std::time::Instant` →
+`tokio::time::Instant`. Every wait in the test is a tokio timer (`SlowStart`'s `delay`,
+`client_within_budget`'s `timeout`, the warm-up `sleep`), so the whole schedule is now
+deterministic. Auto-advance jumps to the next deadline — the 50 ms budget, not the 200 ms cold
+start — so `None` is still returned for the right reason.
 
-**For the background-output test —** replace the fixed wait with a bounded poll on the captured
-output (deadline plus small sleep, fail on deadline). The assertion should be "output arrived
-within N seconds", not "output arrived by the time we looked".
+The second substitution matters as much as the first. Under `start_paused`, `std::time::Instant`
+is **not** virtualised, so leaving it would have made the ceiling assertion trivially true (real
+elapsed ≈ 0 ms) — non-flaky but vacuous. `tokio::time::Instant` **is** virtualised, so the 150 ms
+ceiling became an exact statement about the schedule: it now fails if the call ever waits the
+cold start out. Verified by mutation — tightening the ceiling to 40 ms fails with elapsed at the
+50 ms budget, which proves both that the clock is virtual and that the assertion is live.
 
-**Decide the skip-list inconsistency deliberately.** Either skip
-`background_command_with_quotes_captures_output` on `windows-latest` too — and record it as a
-second real-Windows failure against WIN-27's inventory — or fix it and un-skip it on wine. The
-current split is the worst option: exempted where it was noticed, gating where it was not.
+Wall-clock dependency is gone: the test reports `finished in 0.00s` and passed 25/25 consecutive
+runs.
 
+**2. The background-output test — make the failure name its own cause.** The prescribed "replace
+the fixed wait with a bounded poll" was already implemented; see the correction in *Root cause*.
+What landed instead:
+
+- the poll's `Err` arm is no longer discarded — the last error, the last stdout, and an error
+  count are kept and interpolated into the assertion message;
+- the bound went from 50 × 100 ms (5 s) to 150 × 100 ms (15 s), proportionate to a suite that
+  takes 138 s on that runner.
+
+This does not claim to fix the MSVC intermittency — it makes the next occurrence diagnose itself.
+Its first outing already paid for itself by explaining the wine failure (see Evidence).
+
+**3. The skip-list split — resolved with evidence, unchanged in effect.** Keep
+`background_command_with_quotes_captures_output` skipped on wine (no interpreter there) and
+load-bearing on `windows-latest` (interpreter present, test normally green). The reasoning and an
+explicit do-not-self-skip warning are recorded in `.github/workflows/ci.yml` beside the flag, so
+the split reads as a decision rather than an oversight.
+
+SHAs: to be recorded on commit; `experiments`-side until cherry-picked.
 ## Tests added
 
-None yet — status is `open`. When the fix lands, the regression guard is that the tests pass
-deterministically: for the budget test, that no assertion depends on wall-clock slack; for the
-background test, that the wait is a bounded poll rather than a fixed sleep.
+No new test cases — both changes harden existing tests, which is the point.
 
+- `cold_start_over_budget_returns_none_but_keeps_warming` (`src/lsp/mod.rs`, `budget_tests`) —
+  same three assertions, now on a virtual clock. Strictly **stronger** than before: the elapsed
+  ceiling went from a 100 ms jitter tolerance to an exact schedule assertion, confirmed by the
+  40 ms mutation. Determinism confirmed at 25/25 runs, each `0.00s`.
+- `background_command_with_quotes_captures_output` (`src/tools/run_command/tests.rs`) — same
+  success condition; the failure path now reports last stdout, last error, and an error count.
+  Verified by running it under wine, where it failed and named its own cause on the first try.
+  Type-checks for `x86_64-pc-windows-gnu` (`scripts/build-windows.sh check --lib --tests`, 0
+  errors).
+
+A regression test for the MSVC intermittency is intentionally absent: the symptom has never been
+reproduced, on CI or locally, and a test for an unreproduced timing effect would only re-encode
+the guess. The diagnostic is the substitute — it converts the next occurrence into evidence.
 ## Workarounds
 
 `gh run rerun <run-id> --failed` re-runs only the failed jobs and preserves the passing ones,
@@ -162,13 +235,25 @@ read — a red run has to be triaged by job `steps` count and test name before i
 
 ## Resume
 
-Apply the `start_paused = true` change to
-`cold_start_over_budget_returns_none_but_keeps_warming` in `src/lsp/mod.rs` and confirm the
-test still fails when `client_within_budget`'s budget logic is mutated (otherwise virtual time
-has made it vacuous). Then convert
-`background_command_with_quotes_captures_output` in `src/tools/run_command/tests.rs` to a
-bounded poll, and resolve the wine-vs-MSVC skip-list split in `.github/workflows/ci.yml`.
+Status stays `open` deliberately, matching the precedent set by
+`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`: the harm is
+neutralised and the next occurrence is self-diagnosing, but the MSVC symptom was never reproduced,
+so nothing here has actually been proven fixed.
 
+**Next action is to wait, not to investigate.** On the next `windows-latest` red for
+`background_command_with_quotes_captures_output`, read the assertion message and route on it:
+
+- `last stdout` empty and `read errors: 0` → the background process produced nothing in 15 s.
+  Look at spawn/flush in the `run_in_background` path, not at the test.
+- `last stdout` holds a partial line → a genuine flush race; the poll should key on process exit
+  rather than on buffer content.
+- `last stdout` holds a cmd error naming `py` → the runner image lost the Python launcher; the
+  test needs a different interpreter, not a longer poll.
+- `read errors` > 0 → the `type @bg_*` read path itself is failing; `last error` names how.
+
+Archive when either that message identifies a fix that lands with a regression test, or three
+months of green `windows-latest` runs justify closing it as `zombie` with the re-open trigger
+above. Item 1 needs nothing further.
 ## References
 
 - `src/lsp/mod.rs` — `budget_tests`, `SlowStart`
@@ -176,4 +261,3 @@ bounded poll, and resolve the wine-vs-MSVC skip-list split in `.github/workflows
 - `.github/workflows/ci.yml` — the wine job's `--skip` list
 - `docs/trackers/windows-platform-support.md` — WIN-27 baseline, and WIN-30 for this entry
 - `docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md` — the 20-failure inventory
-

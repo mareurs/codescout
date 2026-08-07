@@ -798,6 +798,7 @@ Ranked by what to do first.
 | F-8 | 2026-08-06 | med | process | fixed-verified | Diagnosed queued CI from run metadata for 70 minutes; GitHub had declared an Actions **major outage** two hours before the first affected run |
 | F-9 | 2026-08-07 | med | measurement | fixed-verified | A `--profile minimal` toolchain install produced 12 test failures that read as a compiler regression; the cause was a missing `rust-analyzer` component |
 | F-10 | 2026-08-07 | med | process | fixed-verified | A mutation that failed to kill a test almost got a *correct* test rewritten — the mutation was incomplete (two `Err` arms at different indentation depths), not the test weak |
+| F-11 | 2026-08-07 | med | process | fixed-verified | A bug file's prescribed fix was already implemented — the test it said to convert to a bounded poll already polled for 5 s, so shipping the fix as written would have been a no-op that closed the bug and left the flake |
 
 ## Wins Index
 
@@ -809,6 +810,7 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-11 | 2026-08-07 | high | Scout a bug file's `## Fix` before implementing it — a fix written from a CI log line has never touched the code | WIN-30's Fix prescribed replacing a fixed wait with a bounded poll; the poll was already there, so the change would have been inert, the bug archived, and the next flake would have read as a regression of a fix that never existed | validated |
 | W-10 | 2026-08-07 | high | Before merging two code paths that look redundant, ask what *triggers* the second one | The two `symbols` walks share an identical filter and look duplicated; a truncated first walk empties `matches`, which is precisely what triggers the fallback — merging them would have deleted the recovery path and made the bug under repair strictly worse | validated |
 | W-9 | 2026-08-07 | high | When CI is unavailable and its toolchain floats, install CI's *resolved* toolchain side-by-side and run the gate through it | Local `stable` was 1.95.0 while CI's `@stable` had moved to 1.97.1; clippy 1.97 rejects two `assert!` borrows that 1.95 accepts, so the Clippy job was going to fail on the first run created after the outage | validated |
 | W-5 | 2026-08-06 | high | Invoke the tool under test; verify the binary is newer than its sources | Reading it had missed all five: a SIGABRT, a path escape resolving `/etc/passwd:12` as Resolved, a false premise about which half of the corpus was scanned, an unused field that already was the fix, and mdBook link semantics | validated |
@@ -1496,6 +1498,83 @@ suite green at 3515.
 **Fix idea / Pointer:** when a mutation fails to kill a test, verify the mutation landed
 **before** doubting the test — grep for the marker and count the sites. Corollary for
 `replace_all` on Rust: identical statements at different nesting depths are *different strings*.
+
+## F-11 — A bug file prescribed a fix that the code already had
+
+**Observed:** 2026-08-07, starting the WIN-30 fix (two Windows CI timing flakes).
+
+**When:** Before editing, reading the two tests the bug file named.
+
+**Expected (bug file `## Fix`):** *"For the background-output test — replace the fixed wait with a
+bounded poll on the captured output (deadline plus small sleep, fail on deadline)."*
+
+**Got (scouted reality):** `background_command_with_quotes_captures_output`
+(`src/tools/run_command/tests.rs`) already polled — `for _ in 0..50` with a 100 ms sleep, a 5 s
+bound, breaking on the expected substring. There was no fixed wait to replace. The same item's
+*Root cause* ("a race between the spawned background process writing its output and the assertion
+reading it") was equally written from the CI log line rather than from the source.
+
+**Probable cause:** the bug was filed during the promotion crunch from two CI log excerpts.
+`background command output not captured` is exactly the message a fixed-wait test *would* emit, so
+the diagnosis was plausible and never checked. Nothing in the bug-file workflow requires the
+`## Fix` section to have read the code it prescribes changing.
+
+**Workaround:** none needed — the scout relocated the real defect before any edit. The poll's
+`if let Ok(v) = out` **discarded the `Err` arm**, so "the command never ran" and "the output is
+still flushing" ended the loop identically and produced the same contentless message. That is why
+the CI red carried no information — and it is the same defect class as the `walker.flatten()` bug
+fixed the same day in `symbols`: an error arm dropped, a false negative indistinguishable from a
+true one.
+
+**Severity:** med — the prescribed change would have compiled, passed, and been committed as a
+fix. The bug would have been archived and the next MSVC flake would have read as a regression of a
+fix that never existed. No wrong code, but a wrong ledger, which is harder to detect later.
+
+**Status:** fixed-verified — the bug file's Root cause and Fix are corrected in place, the real fix
+landed, and it proved itself under wine on its first run.
+
+**Fix idea / Pointer:** treat a bug file's `## Fix` as plan text, subject to the same
+reconnaissance as any other plan (R-62). Cheap tell: a Fix section that names no `path:line` for
+the code it changes has probably not opened it.
+
+## W-11 — Scouting the prescribed fix turned an inert commit into a diagnostic that paid off within the hour
+
+**Observed:** 2026-08-07, WIN-30.
+
+**Pattern:** Before implementing a fix designed in an earlier session — a bug file's `## Fix`, a
+plan task, your own prior note — read the code it prescribes changing. Prescriptions written from
+*failure output* are the highest-risk kind, because the output is precisely what the
+plausible-but-wrong mechanism would have produced.
+
+**Counterfactual:** Implementing WIN-30's Fix as written meant adding a bounded poll to a test
+that already had one — a diff that changes nothing, a green suite, a commit reading like a fix,
+and an archived bug. The flake survives. Discovery cost would then be the *next* MSVC red,
+misread as a regression of a fix that had never existed, with the bug file by then asserting the
+poll was fixed and actively steering the reader wrong.
+
+Instead the scout found the discarded `Err` arm. The replacement assertion carries last stdout,
+last error, and an error count — and on its **first** execution, run under wine, it printed
+`last stdout: "Can't recognize 'py -c \"print('bg-ok', 2+2)\"' as an internal or external
+command…"`, which (a) explained the wine failure as a missing Python launcher rather than a race,
+(b) proved spawn, capture, and the `type @bg_*` read path all work under wine, and (c) retired one
+member of WIN-27's twelve-test *root cause unknown* wine cluster, open since 2026-07-02.
+
+**Confirming data points:**
+
+1. F-3 (this log) — a plan cited a `RecoverableError.hint` field that did not exist; caught
+   pre-dispatch.
+2. F-11 (this log) — a bug file prescribed a fix the code already had.
+
+Both are one shape: a **design artifact describing code its author had not read**.
+
+**Impact:** high — converted an inert commit into the single piece of evidence that closed a
+five-week-old unknown root cause.
+
+**Promote-when:** criterion already met at two datapoints. Promote to the reconnaissance skill as
+an explicit Phase 1 bullet — *a bug file's or plan's prescribed fix is scouted like plan code:
+read the code it names before implementing it.* Recorded as R-62 carrying that proposal.
+
+**Status:** validated.
 
 ## Template for new entries
 

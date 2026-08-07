@@ -3744,23 +3744,43 @@ async fn background_command_with_quotes_captures_output() {
         .unwrap();
     let ref_id = res["output_id"].as_str().unwrap().to_string();
     // Poll the bg log buffer (same ctx → same OutputBuffer) until the line appears.
+    //
+    // The poll must NOT swallow its error arm. "still flushing" and "never ran at all"
+    // (no `py` on PATH, launcher failure) both surface as a loop that ends with
+    // found == false, so dropping the Err made the CI failure say only "not captured"
+    // — which is what left WIN-30's MSVC red undiagnosable. Keep the last stdout and
+    // the last error so the next failure names its own cause.
     let mut found = false;
-    for _ in 0..50 {
+    let mut last_stdout = String::new();
+    let mut last_err = String::new();
+    let mut errors = 0usize;
+    for _ in 0..150 {
         let out = RunCommand
             .call(
                 json!({ "command": format!("type {ref_id}"), "timeout_secs": 10 }),
                 &ctx,
             )
             .await;
-        if let Ok(v) = out {
-            if v["stdout"].as_str().unwrap_or("").contains("bg-ok 4") {
-                found = true;
-                break;
+        match out {
+            Ok(v) => {
+                last_stdout = v["stdout"].as_str().unwrap_or("").to_string();
+                if last_stdout.contains("bg-ok 4") {
+                    found = true;
+                    break;
+                }
+            }
+            Err(e) => {
+                errors += 1;
+                last_err = e.to_string();
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    assert!(found, "background command output not captured");
+    assert!(
+        found,
+        "background command output not captured within 15s \
+             (read errors: {errors}); last stdout: {last_stdout:?}; last error: {last_err:?}"
+    );
 }
 
 #[tokio::test]

@@ -1413,7 +1413,17 @@ can reach a reflex, which is precisely where a record cannot act and a deny hook
 
 That makes three interventions now falsified by recurrence within one session: U-30 (write
 it down), U-33 (characterise it), and the advisory PreToolUse echo (warn after composing).
-The deny-hook conclusion is unchanged and the evidence for it is now 15 deep.
+**Refinement at 16 (2026-08-07, WIN-30 session).** #16 was
+`grep -oE '^## (F|W)-[0-9]+' <tracker> | sort -t- -k2 -n | tail -4` — reading the highest
+allocated F-N/W-N id before appending a tracker entry. Predicate-free again, so the tally is
+**14 of 16 pure "show me less"** and #13 remains the only genuine content filter. Two details
+sharpen the *when*: the LHS was already narrow (one file, one anchored pattern), and the trimmer
+existed only to spare me the middle of a sorted list whose tail was the entire point — the
+cheapest imaginable case, which is precisely where the habit survives enforcement. It also fired
+during tracker bookkeeping rather than build-log reading, so the pattern is not specific to
+compiler output.
+
+The deny-hook conclusion is unchanged and the evidence for it is now 16 deep.
 
 ### U-34 — `edit_code action=insert` takes the ANCHOR in `symbol`, while an `anchor` param also exists
 
@@ -1605,3 +1615,48 @@ match information" family (see U-37).
 
 **Status:** open — the workaround (grep for the marker after mutating) is a habit, not a
 mechanism. A `replaced` count in the response would retire both halves.
+
+
+### U-39 — `grep`'s zero-match result is silent about the hidden-path skip, so `.github/` reads as absent
+
+**Observed:** 2026-08-07, checking whether WIN-30's bug file was right that `ci.yml` skip-lists a
+test by name.
+
+**Tried:** `grep(pattern="background_command_with_quotes_captures_output",
+glob="**/*.{yml,yaml,rs,md}")`, then three narrowing retries — `glob="**/*.yml"`,
+`glob=".github/**/*.yml"`, and `glob=".github/workflows/ci.yml"`, the file's exact path.
+
+**Got:** 15 matches in 5 files with `ci.yml` absent, then `0 matches` three times. The name is on
+`.github/workflows/ci.yml:117`. No response mentioned that hidden paths had been excluded.
+
+**Iron Law / pattern:** neither an Iron Law breach nor a tool defect — `include_hidden` is a
+documented parameter (`src/tools/grep.rs:41`, default `false`), the walk honours it at
+`src/tools/grep.rs:106` (`wb.hidden(!include_hidden)`), and `include_hidden_searches_dotfiles`
+pins the default. The gap is on the **reporting** side: `0 matches` is the same string for "does
+not occur anywhere" and "occurs only where I did not look", so the default answers *absence*
+questions wrongly and silently. Sharpest form — a glob spelling out a hidden file's full path
+still returns empty, because `overrides` are applied inside a walk that has already pruned the
+parent directory.
+
+**Cost.** Four probes and a wrong direction: I had started writing this up as a walk-level tool
+defect before finding the flag. Worse counterfactual — stopping at the first result would have
+meant "correcting" the bug file's accurate `ci.yml:117` claim into a false one and then acting on
+the correction, since this session's skip-list decision turned on exactly that line. In this repo
+the blind spot covers all of `.github/workflows/`, `.pre-commit-config.yaml`, and `.codescout/`:
+the CI configuration is invisible to every default grep.
+
+**Fix idea:** the `WalkAudit` treatment `symbols` received in `3bfa4025` — build with
+`hidden(false)`, apply the dot-prefix rule in a `filter_entry` closure that counts what it prunes,
+and attach a `completeness_warning` naming `include_hidden=true` when a zero-match result had
+entries pruned. Warn only when that count is non-zero, by the same reasoning that deliberately
+left a trustworthy zero bare in `symbols`. Filed as
+`docs/issues/2026-08-07-grep-zero-match-silent-about-hidden-skip.md`.
+
+**Recurrence:** 1st observed for grep-hidden. 3rd in the *silent false negative from a
+discarded-or-pruned walk result* family — after `symbols`'s `walker.flatten()` (`3bfa4025`) and
+WIN-30's poll discarding its `Err` arm (F-11), both the same day. Three instances, three
+different surfaces, one shape: the code knew something was missing and the response did not say
+so.
+
+**Status:** open — bug filed, fix not implemented. The workaround is a habit: pass
+`include_hidden=true` whenever the question is about absence rather than presence.

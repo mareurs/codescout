@@ -112,7 +112,13 @@ mod budget_tests {
         }
     }
 
-    #[tokio::test]
+    // Virtual time, not the wall clock: every wait here is a tokio timer — SlowStart's
+    // `delay`, `client_within_budget`'s `timeout`, and the warm-up wait below — so the
+    // whole schedule is deterministic under `start_paused`. Auto-advance jumps to the NEXT
+    // deadline, which is the 50 ms budget and not the 200 ms cold start, so `None` is still
+    // returned for the right reason. On the real clock this test allowed 100 ms of
+    // scheduler slack and flaked under wine on a shared runner (WIN-30).
+    #[tokio::test(start_paused = true)]
     async fn cold_start_over_budget_returns_none_but_keeps_warming() {
         let lsp: Arc<dyn LspProvider> = Arc::new(SlowStart {
             client: Arc::new(MockLspClient::new()),
@@ -120,7 +126,10 @@ mod budget_tests {
             ready: AtomicBool::new(false),
         });
         // Budget (50ms) < cold start (200ms): must yield None, not block 200ms.
-        let t0 = std::time::Instant::now();
+        // `tokio::time::Instant` IS virtualised, unlike `std::time::Instant`, so the
+        // ceiling below states something exact about the schedule rather than tolerating
+        // jitter: it fails if the call ever waits the cold start out.
+        let t0 = tokio::time::Instant::now();
         let got = client_within_budget(
             lsp.clone(),
             "rust",
