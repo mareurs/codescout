@@ -266,6 +266,63 @@ the denominator moved.
 A benchmark that starts cold and reports a mean has folded a one-off warm-up into every
 per-query number. Also re-measure the reranker's own arm the same way — nothing here establishes
 that its 42x was warm either, and it was taken under the same conditions.
+## Measurement 2026-08-07 (later) — the clean A/B this file could not previously produce
+
+Re-measured after the sparse re-enable (`da5176d5`) and the full `--force` rebuild (100% sparse
+coverage, 8.06 min). Both arms: same freshly rebuilt index, same binary (`cargo rb`,
+`server-stack`), same 25-TC built-in suite, back to back, **differing in exactly one dimension**.
+That is the thing this file previously could not do — the manual's own callout says the original
+arms "differ in four dimensions, so it establishes the latency cost but **not** a score
+regression." This one can.
+
+| arm | score | warm median latency | warm mean | reranker container lines |
+|---|---|---|---|---|
+| reranker ON (shipping config) | **23**/75 | **1559 ms** | 1541 ms | **+3553** |
+| reranker OFF | **26**/75 | **990 ms** | 972 ms | +2 |
+
+Method notes that matter:
+
+- **The arms were verified to differ, not assumed to.** Arm B disables the reranker by pointing
+  `CODESCOUT_RERANKER_URL` at a dead port, landing in `search_in`'s `rerank_degraded` branch — the
+  same path a user with no reranker gets. If the child's startup dotenv had overridden the injected
+  env var, arm B would have been silently identical to arm A and the comparison a no-op. The
+  reranker container's request count (+3553 vs +2) is the independent check that it did not.
+- **First query excluded from both** (W-14). The harness's own `p50` includes it; the medians above
+  do not. Cold first queries were 1068 ms (on) and 889 ms (off).
+
+### What this establishes, and what it does not
+
+**The 42x in this file's title is wrong by a factor of ~26. The real figure is 1.6x.** The
+reranker's *absolute* marginal cost is 1559 - 990 = **~569 ms per query**. What changed is the
+denominator: the original 42x was a ratio against a pure-dense baseline with sparse disabled, and
+sparse fusion is itself expensive, so the same absolute cost is now a much smaller multiple. A
+ratio is only as stable as what it is divided by, and this file's headline number was a statement
+about the baseline as much as about the reranker.
+
+**The score regression is now established rather than merely suspected: 23 vs 26, so the reranker
+costs 3 points.** Per-TC, it helped 4 and hurt 5 — TC-05, TC-07, TC-11, TC-20 improved; TC-03,
+TC-09, TC-12, TC-17, TC-25 degraded, with TC-17 going 3 -> 0. On a 25-TC suite a 3-point net is
+not a large effect and should not be reported as one. The defensible claim is the weaker and
+sufficient one: **the reranker does not measurably improve retrieval on this suite, and it costs
+~569 ms per query.** It is not a trade-off, it is a coin flip with a price.
+
+**NOT established: that the manual's stage table is wrong.** Tempting, and wrong to claim. The
+table's `End-to-end semantic_search ~125 ms (GPU)` is a retrieval-stage figure; the numbers above
+are full **MCP round-trip** latency measured by the Python harness — JSON-RPC over stdio, tool
+dispatch, overfetch of 20 candidates with content, and OutputGuard formatting all included. Those
+are different quantities and comparing them would be the same category error this file already made
+once.
+
+### An open question worth its own investigation
+
+The measured stages do not add up to the measured whole, and the gap is large. Sparse embed is
+16.8 ms warm (measured directly from the container's own `embed_sparse` span), dense should be
+~5 ms, Qdrant hybrid ~10 ms — call it ~32 ms of retrieval. Arm B's end-to-end is **990 ms**. So
+roughly **950 ms is somewhere other than the retrieval stages**, and nothing here says where.
+Candidates, none tested: MCP stdio round-trip, per-candidate content transfer at overfetch 20,
+OutputGuard formatting, project activation state. Worth a `search_in` timer breakdown (the code
+already has `timer.lap("vector_query")` / `lap("rerank")` seams) before anyone optimises the
+retrieval legs, which on this evidence are not where the time goes.
 ## Resume
 
 **2026-08-06 verify-open pass.** One item from the *Fix* section was actionable without
