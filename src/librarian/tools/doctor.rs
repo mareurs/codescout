@@ -36,6 +36,17 @@
 //!    worktree root — pending `librarian(action="merge_worktree")`, not a
 //!    reseat). Unregistered rows still feed `fix=reseat_worktree`, which is
 //!    now the LEGACY fallback for catalog drift the overlay never saw.
+//! 8. `abs_path_outside_managed_roots` — every `artifact.abs_path` must
+//!    resolve under some managed root, i.e. the precondition
+//!    `artifact(move)` / `artifact(delete)` enforce via `containing_root`.
+//!    Added after WIN-30, where that resolution silently failed for every
+//!    row on Windows and no existing check could see it: the catalog stores
+//!    `//?/C:/...` while `current_project` holds `\\?\C:\...`, and
+//!    `check_backslash` was enforcing the very forward-slash form that broke
+//!    the comparison. A firing row may simply belong to another workspace,
+//!    so the detail names the roots tried. Skipped when no roots are
+//!    configured, and for rows already flagged by
+//!    `abs_path_must_be_absolute`.
 //!
 //! Deferred to a follow-up: NFC unicode normalization, orphan
 //! `artifact_augmentation` rows (the FK already cascades on artifact
@@ -90,7 +101,8 @@ pub struct Violation {
     /// Which check fired. One of: `abs_path_must_be_absolute`,
     /// `backslash_in_abs_path`, `ads_colon_in_abs_path`,
     /// `dotdot_segment_in_abs_path`, `missing_file`,
-    /// `backslash_in_git_root`, `worktree_scoped_row`.
+    /// `backslash_in_git_root`, `worktree_scoped_row`,
+    /// `abs_path_outside_managed_roots`.
     pub check: String,
     /// The artifact id that owns the violating row, when applicable.
     /// `None` for table-wide checks (e.g. `commits.git_root` has no
@@ -147,10 +159,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .await;
     }
 
+    // Managed roots are derived before taking the catalog lock — `managed_roots`
+    // only reads `ctx`, and holding the lock across it would widen the critical
+    // section for nothing.
+    let roots = super::managed_roots(ctx);
+
     let cat = ctx.catalog.lock();
     let mut all_violations: Vec<Violation> = Vec::new();
 
-    all_violations.extend(scan_artifact_paths(&cat.conn)?);
+    all_violations.extend(scan_artifact_paths(&cat.conn, &roots)?);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
 
@@ -625,13 +642,20 @@ fn count_dead_root(
     Ok((arts.max(0) as usize, commits.max(0) as usize))
 }
 
-/// Pulls every `(id, abs_path)` row once and runs five per-row checks
+/// Pulls every `(id, abs_path)` row once and runs six per-row checks
 /// (abs_path_must_be_absolute / backslash / ads_colon / dotdot /
-/// missing_file). Single SQL fetch + in-memory passes is cheaper than five
-/// separate queries. `abs_path_must_be_absolute` runs first because it is
-/// the gating shape check — a relative-path row should be evicted, not
-/// further analyzed.
-fn scan_artifact_paths(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+/// missing_file / outside_managed_roots). Single SQL fetch + in-memory passes
+/// is cheaper than six separate queries. `abs_path_must_be_absolute` runs
+/// first because it is the gating shape check — a relative-path row should be
+/// evicted, not further analyzed, so the managed-root check is skipped for it
+/// (a relative path resolves under nothing, and reporting both would be one
+/// defect wearing two names).
+///
+/// `roots` is the managed-root list from [`super::managed_roots`]. Empty means
+/// the caller had no active project and no `[[roots]]`, in which case the
+/// managed-root check is skipped entirely rather than flagging every row —
+/// "no roots configured" is not evidence that any row is misplaced.
+fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact")?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -639,7 +663,9 @@ fn scan_artifact_paths(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 
     let mut violations = Vec::new();
     for (id, abs_path) in &rows {
-        if let Some(v) = check_abs_path_must_be_absolute(id, abs_path) {
+        let not_absolute = check_abs_path_must_be_absolute(id, abs_path);
+        let is_absolute = not_absolute.is_none();
+        if let Some(v) = not_absolute {
             violations.push(v);
         }
         if let Some(v) = check_backslash(id, abs_path, "backslash_in_abs_path") {
@@ -654,8 +680,64 @@ fn scan_artifact_paths(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
         if let Some(v) = check_missing_file(id, abs_path) {
             violations.push(v);
         }
+        if is_absolute && !roots.is_empty() {
+            if let Some(v) = check_outside_managed_roots(id, abs_path, roots) {
+                violations.push(v);
+            }
+        }
     }
     Ok(violations)
+}
+
+/// Every `artifact.abs_path` must resolve under some managed root.
+///
+/// This is exactly the precondition [`super::containing_root`] enforces for
+/// `artifact(move)` and `artifact(delete)`, restated as an invariant so it is
+/// observable *before* someone tries to move a file. It exists because it was
+/// missing: `containing_root` could not match any catalog path on Windows
+/// (WIN-30) — the catalog stores `//?/C:/...` while `current_project` holds
+/// `\\?\C:\...` — and every other doctor check stayed green throughout,
+/// because `check_backslash` was busy enforcing the very forward-slash form
+/// that broke the comparison.
+///
+/// A firing row is not necessarily corrupt: a catalog spanning several
+/// workspaces legitimately holds rows outside the active project's roots. The
+/// detail therefore names the roots that were tried, so "belongs to another
+/// workspace" is distinguishable from "drifted spelling" at a glance rather
+/// than by re-deriving it.
+fn check_outside_managed_roots(id: &str, abs_path: &str, roots: &[PathBuf]) -> Option<Violation> {
+    if super::containing_root(roots, Path::new(abs_path)).is_some() {
+        return None;
+    }
+
+    // Cap the root list: a large workspace registry would otherwise dominate
+    // the report, and the first few are the ones a reader actually checks.
+    const MAX_LISTED: usize = 5;
+    let listed: Vec<String> = roots
+        .iter()
+        .take(MAX_LISTED)
+        .map(|r| r.display().to_string())
+        .collect();
+    let elided = roots.len().saturating_sub(listed.len());
+    let suffix = if elided > 0 {
+        format!(" (+{elided} more)")
+    } else {
+        String::new()
+    };
+
+    Some(Violation::new(
+        "abs_path_outside_managed_roots",
+        Some(id.to_string()),
+        abs_path,
+        format!(
+            "resolves under none of the {} managed root(s), so artifact(move) and \
+             artifact(delete) will refuse this row. Expected if it belongs to another \
+             workspace; a defect if it should be under one of: {}{}",
+            roots.len(),
+            listed.join(", "),
+            suffix
+        ),
+    ))
 }
 
 fn scan_commits_git_root(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
@@ -1077,6 +1159,110 @@ mod tests {
         assert!(check_abs_path_must_be_absolute("a1", "").is_some());
     }
 
+    /// The check exists because `containing_root` silently failed for every
+    /// catalog row on Windows (WIN-30) while every other doctor check stayed
+    /// green. So this asserts the exact spellings involved, not a synthetic pair:
+    /// catalog rows are stored forward-slash + `//?/`-prefixed, while
+    /// `current_project` supplies the native `\\?\` form.
+    ///
+    /// Before the `containing_root` fix this test fails — which is the point of
+    /// having it. A version that only asserted the genuinely-outside case would
+    /// have passed against the broken build.
+    #[cfg(windows)]
+    #[test]
+    fn outside_managed_roots_accepts_catalog_spelling_of_a_contained_path() {
+        let roots = vec![PathBuf::from(r"\\?\C:\Users\dev\work\codescout")];
+        let contained = "//?/C:/Users/dev/work/codescout/docs/issues/a.md";
+
+        assert!(
+            check_outside_managed_roots("a1", contained, &roots).is_none(),
+            "a row inside the active project must not be flagged merely because \
+         the catalog and current_project spell the path differently"
+        );
+    }
+
+    #[test]
+    fn outside_managed_roots_flags_a_row_under_no_root() {
+        #[cfg(windows)]
+        let (roots, outside) = (
+            vec![PathBuf::from(r"\\?\C:\Users\dev\work\codescout")],
+            "//?/C:/Users/dev/work/other-repo/docs/a.md",
+        );
+        #[cfg(not(windows))]
+        let (roots, outside) = (
+            vec![PathBuf::from("/home/dev/work/codescout")],
+            "/home/dev/work/other-repo/docs/a.md",
+        );
+
+        let v = check_outside_managed_roots("a1", outside, &roots).unwrap();
+        assert_eq!(v.check, "abs_path_outside_managed_roots");
+        assert_eq!(v.artifact_id.as_deref(), Some("a1"));
+        // The detail must name the roots tried: a firing row is often just a
+        // foreign workspace, and the reader needs to tell that from real drift
+        // without re-deriving the root list.
+        assert!(v.detail.contains("codescout"), "got: {}", v.detail);
+        assert!(v.detail.contains("artifact(move)"), "got: {}", v.detail);
+    }
+
+    /// A sibling sharing a name prefix is outside the root. Same boundary
+    /// `containing_root` guards for `delete`; asserted here too so a regression
+    /// in either place is caught where a reader would look for it.
+    #[test]
+    fn outside_managed_roots_respects_the_component_boundary() {
+        #[cfg(windows)]
+        let (roots, sibling) = (
+            vec![PathBuf::from(r"\\?\C:\work\sub")],
+            "//?/C:/work/subterfuge/docs/a.md",
+        );
+        #[cfg(not(windows))]
+        let (roots, sibling) = (
+            vec![PathBuf::from("/work/sub")],
+            "/work/subterfuge/docs/a.md",
+        );
+
+        assert!(check_outside_managed_roots("a1", sibling, &roots).is_some());
+    }
+
+    /// No configured roots means no conclusion is available. Flagging every row
+    /// would turn an unconfigured caller into a catalog-wide false alarm.
+    #[test]
+    fn outside_managed_roots_is_skipped_when_no_roots_are_configured() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "anywhere", "/somewhere/entirely/else/a.md");
+
+        let v = scan_artifact_paths(&cat.conn, &[]).unwrap();
+        assert!(
+            !v.iter()
+                .any(|x| x.check == "abs_path_outside_managed_roots"),
+            "empty root list must skip the check, not flag every row"
+        );
+    }
+
+    /// A relative `abs_path` is already reported by `abs_path_must_be_absolute`.
+    /// It resolves under nothing, so without the gate it would also trip this
+    /// check — one defect wearing two names, and a misleading violation count.
+    #[test]
+    fn outside_managed_roots_defers_to_the_absoluteness_check() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "bad-relative", "docs/issues/foo.md");
+
+        #[cfg(windows)]
+        let roots = vec![PathBuf::from(r"\\?\C:\Users\dev\work\codescout")];
+        #[cfg(not(windows))]
+        let roots = vec![PathBuf::from("/home/dev/work/codescout")];
+
+        let v = scan_artifact_paths(&cat.conn, &roots).unwrap();
+        assert!(
+            v.iter().any(|x| x.check == "abs_path_must_be_absolute"),
+            "the gating check must still fire"
+        );
+        assert!(
+            !v.iter()
+                .any(|x| x.check == "abs_path_outside_managed_roots"),
+            "a relative row must be reported once, by the absoluteness check only"
+        );
+    }
+
     #[tokio::test]
     async fn doctor_call_surfaces_seeded_drift() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1103,7 +1289,9 @@ mod tests {
         seed_artifact(&cat, "clean", clean_path);
         seed_commit(&cat, "abc123", "C:/users\\marius");
 
-        let v = scan_artifact_paths(&cat.conn).unwrap();
+        // No managed roots: the outside-roots check is skipped entirely, so
+        // this existing assertion set is unchanged by its addition.
+        let v = scan_artifact_paths(&cat.conn, &[]).unwrap();
         let mut by_check: std::collections::BTreeMap<&str, usize> = Default::default();
         for x in &v {
             *by_check.entry(x.check.as_str()).or_insert(0) += 1;
