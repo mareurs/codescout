@@ -122,16 +122,26 @@ impl Tool for Grep {
             })?);
         }
         let walker = wb.build();
+        let mut audit = WalkAudit::default();
         if files_mode {
             use std::collections::BTreeMap;
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
             let mut total = 0usize;
             let mut skipped_binary = 0usize;
-            for entry in walker.flatten() {
+            for entry in walker {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => {
+                        audit.errors += 1;
+                        tracing::warn!(error = %e, "grep: walk entry unreadable (files mode)");
+                        continue;
+                    }
+                };
                 if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     continue;
                 }
                 let Ok(bytes) = std::fs::read(entry.path()) else {
+                    audit.errors += 1;
                     continue;
                 };
                 if bytes.iter().take(8192).any(|&b| b == 0) {
@@ -155,13 +165,27 @@ impl Tool for Grep {
             if skipped_binary > 0 {
                 r["skipped_binary"] = json!(skipped_binary);
             }
+            if total == 0 {
+                if let Some(w) = audit.completeness_warning(&search_path, include_hidden) {
+                    r["completeness_warning"] = json!(w);
+                }
+            }
             return Ok(r);
         }
-        'outer: for entry in walker.flatten() {
+        'outer: for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    audit.errors += 1;
+                    tracing::warn!(error = %e, "grep: walk entry unreadable");
+                    continue;
+                }
+            };
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
             let Ok(bytes) = std::fs::read(entry.path()) else {
+                audit.errors += 1;
                 continue;
             };
             if bytes.iter().take(8192).any(|&b| b == 0) {
@@ -396,6 +420,11 @@ impl Tool for Grep {
         if skipped_binary > 0 {
             result["skipped_binary"] = json!(skipped_binary);
         }
+        if total_match_count == 0 {
+            if let Some(w) = audit.completeness_warning(&search_path, include_hidden) {
+                result["completeness_warning"] = json!(w);
+            }
+        }
         Ok(result)
     }
 
@@ -412,9 +441,18 @@ impl Tool for Grep {
 
 pub(super) fn format_grep(val: &Value) -> String {
     let total = val["total"].as_u64().unwrap_or(0) as usize;
+    // Bound BEFORE the zero-match early return. A completeness warning exists precisely for the
+    // zero case, so appending it further down would leave it invisible exactly where it is the
+    // whole point — references.rs paid for that lesson under its BUG 2026-05-21.
+    let warning = val.get("completeness_warning").and_then(|v| v.as_str());
 
     if total == 0 {
-        return "0 matches".to_string();
+        let mut out = "0 matches".to_string();
+        if let Some(w) = warning {
+            out.push_str("\n\nwarning: ");
+            out.push_str(w);
+        }
+        return out;
     }
 
     let mut out = String::new();
@@ -453,6 +491,13 @@ pub(super) fn format_grep(val: &Value) -> String {
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
         out.push('\n');
         out.push_str(&format_overflow(overflow));
+    }
+    // Only reachable if a future change attaches the warning alongside results; rendering it in
+    // both branches is what keeps that change from silently losing it.
+    if let Some(w) = warning {
+        out.push_str("\nwarning: ");
+        out.push_str(w);
+        out.push('\n');
     }
     out
 }
@@ -790,6 +835,100 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
         }
     }
     path
+}
+/// What the walk declined to look at, so a zero-match result can say whether it can be
+/// trusted. Two things are invisible to a caller otherwise: `ignore::Walk` yields
+/// `Result<DirEntry, _>`, so a walk truncated by a permission error or descriptor exhaustion
+/// reads as a complete one; and the crate reports nothing about entries its own `hidden`
+/// filter pruned, so `0 matches` means the same thing whether the pattern is absent or its
+/// only copies live under a dot-prefixed path. Sibling of `WalkAudit` in
+/// `src/tools/symbol/symbols.rs`, added for the same class of false negative.
+#[derive(Default)]
+struct WalkAudit {
+    /// Walk entries and file reads that failed. Counted rather than dropped.
+    errors: usize,
+}
+
+impl WalkAudit {
+    /// Dot-prefixed entries directly under `root`, which `hidden(true)` pruned.
+    ///
+    /// Only the search root is inspected — one `read_dir`, no recursion — so the warning
+    /// wording claims nothing about deeper hidden directories. Naming the entries matters more
+    /// than counting them: a reader can judge from `.github/` whether the skip is relevant to
+    /// their query, which a bare count never tells them.
+    ///
+    /// `.git` and `.codescout` are excluded deliberately — see the comment on `uninformative`
+    /// below. Both exist by construction in every project codescout touches, so naming them
+    /// would make the warning fire on every zero-match everywhere, training readers to skip it
+    /// in the cases that do matter.
+    fn hidden_at_root(root: &std::path::Path) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return Vec::new(); // not a directory, or unreadable — nothing to claim
+        };
+        // Machine-managed metadata directories, present by construction in every project
+        // codescout touches. Their presence carries no information, so naming them would make
+        // the warning fire on essentially every zero-match — the failure mode that stops
+        // warnings from being read. Content inside them is reachable via include_hidden=true
+        // (or, for memories, the `memory` tool) when that is genuinely what was wanted.
+        let uninformative = [".git", ".codescout"];
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if !name.starts_with('.') || uninformative.contains(&name.as_str()) {
+                    return None;
+                }
+                let dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                Some(if dir { format!("{name}/") } else { name })
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The warning for a zero-match result, or `None` when the zero can be trusted.
+    ///
+    /// `None` is load-bearing: a clean walk over a tree with no hidden entries must return a
+    /// bare zero, or the warning becomes noise attached to every empty result and stops being
+    /// read at all.
+    fn completeness_warning(&self, root: &std::path::Path, include_hidden: bool) -> Option<String> {
+        let hidden = if include_hidden {
+            Vec::new()
+        } else {
+            Self::hidden_at_root(root)
+        };
+        if self.errors == 0 && hidden.is_empty() {
+            return None;
+        }
+
+        let mut msg = String::from("this zero describes what was searched, not the pattern.");
+        if self.errors > 0 {
+            msg.push_str(&format!(
+                " The walk could not read {} entr{} — re-run, and if it persists check for \
+                 unreadable directories or file-descriptor exhaustion from many concurrent \
+                 searches.",
+                self.errors,
+                if self.errors == 1 { "y" } else { "ies" }
+            ));
+        }
+        if !hidden.is_empty() {
+            let shown: Vec<&str> = hidden.iter().take(5).map(String::as_str).collect();
+            let more = hidden.len() - shown.len();
+            msg.push_str(&format!(
+                " Hidden paths were not searched, including {}{} at the search root. Pass \
+                 include_hidden=true to search them — a glob cannot re-admit them, because \
+                 overrides are applied inside a walk that has already pruned the parent \
+                 directory. `.git` and `.codescout` are excluded from this list.",
+                shown.join(", "),
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        Some(msg)
+    }
 }
 
 #[cfg(test)]
@@ -1431,5 +1570,150 @@ mod tests {
             !s.contains("other.rs"),
             "file outside the literal glob must never be included: {s}"
         );
+    }
+    #[tokio::test]
+    async fn zero_match_over_a_tree_with_a_hidden_dir_says_it_was_not_searched() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".github/workflows")).unwrap();
+        std::fs::write(
+            dir.path().join(".github/workflows/ci.yml"),
+            "run: cargo test -- --skip TARGET_NAME\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("visible.rs"), "fn main() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({ "pattern": "TARGET_NAME", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0);
+        let w = res["completeness_warning"].as_str().expect(
+            "a zero over a tree with a pruned hidden dir must say the dir was not searched",
+        );
+        assert!(w.contains(".github/"), "must name the pruned entry: {w}");
+        assert!(w.contains("include_hidden"), "must name the remedy: {w}");
+    }
+
+    #[tokio::test]
+    async fn zero_match_over_a_clean_tree_returns_a_bare_zero() {
+        // Searches a subdirectory so the project root's `.codescout/` (created by rooted_ctx)
+        // is out of scope. This pins the None branch: without it the warning would ride along
+        // on every empty result and stop being read in the cases that matter.
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("src");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.rs"), "fn main() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({ "pattern": "ABSENT_PATTERN", "path": sub.to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0);
+        assert!(
+            res.get("completeness_warning").is_none(),
+            "a walk with nothing pruned must leave the zero bare: {res}"
+        );
+    }
+
+    #[tokio::test]
+    async fn metadata_dirs_alone_do_not_trigger_the_warning() {
+        // `.git` and `.codescout` exist by construction in every project codescout touches, so
+        // if they counted, every zero-match everywhere would carry a warning.
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("src");
+        std::fs::create_dir_all(sub.join(".git")).unwrap();
+        std::fs::create_dir_all(sub.join(".codescout")).unwrap();
+        std::fs::write(sub.join("a.rs"), "fn main() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({ "pattern": "ABSENT_PATTERN", "path": sub.to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0);
+        assert!(
+            res.get("completeness_warning").is_none(),
+            "machine-managed metadata dirs must not trigger the warning: {res}"
+        );
+    }
+
+    #[tokio::test]
+    async fn include_hidden_suppresses_the_warning_even_on_a_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".github")).unwrap();
+        std::fs::write(dir.path().join(".github/ci.yml"), "nothing here\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({
+                    "pattern": "ABSENT_PATTERN",
+                    "path": dir.path().to_str().unwrap(),
+                    "include_hidden": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0);
+        assert!(
+            res.get("completeness_warning").is_none(),
+            "nothing was pruned, so this zero is trustworthy: {res}"
+        );
+    }
+
+    #[tokio::test]
+    async fn files_mode_zero_match_carries_the_completeness_warning() {
+        // mode="files" returns from its own branch, so it needs the warning wired separately —
+        // the shape of bug that hides in an early return.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".github")).unwrap();
+        std::fs::write(dir.path().join(".github/ci.yml"), "TARGET_NAME\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET_NAME",
+                    "path": dir.path().to_str().unwrap(),
+                    "mode": "files"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0);
+        assert!(
+            res["completeness_warning"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(".github/"),
+            "files mode returns early and needs its own warning: {res}"
+        );
+    }
+
+    #[test]
+    fn format_grep_surfaces_the_completeness_warning_on_zero_matches() {
+        let out = format_grep(&json!({
+            "total": 0,
+            "completeness_warning": "Hidden paths were not searched, including .github/ at the search root."
+        }));
+        assert!(out.starts_with("0 matches"), "{out}");
+        assert!(
+            out.contains(".github/"),
+            "the warning must survive the zero-match early return: {out}"
+        );
+    }
+
+    #[test]
+    fn format_grep_leaves_a_trustworthy_zero_bare() {
+        let out = format_grep(&json!({ "total": 0 }));
+        assert_eq!(out, "0 matches");
     }
 }

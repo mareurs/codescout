@@ -93,6 +93,14 @@ cannot distinguish these three states:
 State 3 is the sharpest form: the caller has demonstrated exact intent and still gets a silent
 zero.
 
+
+**A second instance of the same defect, found while implementing the fix.** Both `walker.flatten()`
+sites in `Grep::call` discarded `ignore::Walk`'s `Err` arm, and both `std::fs::read` calls dropped
+their failure with a bare `continue`. So a walk truncated by a permission error or
+file-descriptor exhaustion produced the same `0 matches` as a complete one — the identical bug
+fixed in `symbols` at `3bfa4025`, in a tool where it bites harder. Four dropped-error sites in
+one function, none of them reported. Both halves are addressed together in the Fix below, since
+they are one question from the caller's side: *can this zero be trusted?*
 ## Evidence
 
 ### The extension and the glob both work — control case
@@ -151,51 +159,84 @@ grep(pattern="background_command_with_quotes_captures_output", glob="**/*.yml",
 
 ## Fix
 
-Not yet implemented. Two parts, and the second is the one that matters.
+Implemented on `experiments`.
 
-**Report the exclusion.** Mirror the `WalkAudit` pattern that `src/tools/symbol/symbols.rs`
-gained in `3bfa4025`: count what the walk declined, and attach a `completeness_warning` naming
-`include_hidden=true` as the remedy. To get an exact count rather than a guess, invert where the
-filtering happens — build the walk with `hidden(false)` and apply the dot-prefix rule in a
-`filter_entry` closure that increments a counter. That costs no extra walk and yields "skipped N
-hidden entries" instead of a blanket caveat.
+`src/tools/grep.rs` now carries a `WalkAudit` (sibling of the one in
+`src/tools/symbol/symbols.rs`) providing:
 
-Warn on a **zero-match result** when `N > 0`, not on every zero. The `symbols` fix deliberately
-left a trustworthy zero bare, on the grounds that warning unconditionally trains the reader to
-skip the warning that matters; the same reasoning applies here, and it is why a static "hidden
-paths were not searched" note appended to every empty result is the wrong shape.
+- **error counting** at all four dropped-error sites, each with a `tracing::warn!`;
+- **`hidden_at_root`** — one `read_dir` of the search root, no recursion, naming the dot-prefixed
+  entries `hidden(true)` pruned;
+- **`completeness_warning`** — attached to `result["completeness_warning"]` on a zero-match result
+  in *both* the `mode="files"` early return and the main tail, and rendered by `format_grep` in
+  both its zero-match early return and its normal path.
 
-**Consider making an explicit glob re-admit its subtree.** When the caller passes a `glob` whose
-literal prefix names a hidden directory (`.github/**`), honouring it is almost certainly what
-they meant — the current behaviour returns empty for a path the caller spelled out in full. This
-is a behaviour change, so it wants its own decision rather than riding along with the warning.
+**What changed from this file's original plan.** It proposed inverting the filter: build with
+`hidden(false)` and apply the dot-prefix rule in a counting `filter_entry` closure. Rejected on
+reading `ignore` — its `hidden` filter is not merely a dot-prefix test; on Windows it also honours
+`FILE_ATTRIBUTE_HIDDEN`. Reimplementing it would have silently changed *which files are searched*
+on the one platform this repo cannot test locally, purchased with an exact count. Inspecting the
+search root with a single `read_dir` leaves the walk's behaviour untouched and produces the more
+useful output anyway: entry **names**, from which a reader can judge relevance, rather than a
+number that cannot tell `.github/` from `.git/`.
 
+**`.git` and `.codescout` are excluded, and that exclusion is the whole difference between a
+warning and noise.** The test helper `rooted_ctx` creates `.codescout/` in every test root, which
+made the problem concrete: both directories exist by construction in every project codescout
+touches, so counting them would attach a warning to essentially every zero-match grep everywhere
+— precisely the failure mode that teaches readers to skip warnings. Content inside them stays
+reachable via `include_hidden=true`, or `memory()` for memories.
+
+**The explicit-glob question is deliberately left open.** `glob=".github/workflows/ci.yml"` still
+returns empty, because overrides are applied inside a walk that has already pruned the parent. The
+warning now says so in as many words, which is the reporting fix. Making a literal-prefixed glob
+re-admit its subtree is a behaviour change and wants its own decision, not a ride-along.
 ## Tests added
 
-None yet. The fix wants:
+Seven, in `src/tools/grep.rs` `mod tests`. The negative cases are the ones that keep the warning
+meaningful:
 
-- zero-match grep over a tree containing a hidden directory → response carries
-  `completeness_warning` naming `include_hidden`;
-- zero-match grep over a tree with **no** hidden entries → no warning (guards against the
-  warn-on-every-zero regression);
-- a hit under a hidden path with `include_hidden=true` → no warning, results present.
+- `zero_match_over_a_tree_with_a_hidden_dir_says_it_was_not_searched` — the warning must name both
+  the pruned entry (`.github/`) and the remedy (`include_hidden`).
+- `zero_match_over_a_clean_tree_returns_a_bare_zero` — the `None` branch. Searches a subdirectory
+  so `rooted_ctx`'s `.codescout/` is out of scope.
+- `metadata_dirs_alone_do_not_trigger_the_warning` — pins the exclusion list.
+- `include_hidden_suppresses_the_warning_even_on_a_zero` — nothing pruned, so the zero is
+  trustworthy.
+- `files_mode_zero_match_carries_the_completeness_warning` — `mode="files"` returns from its own
+  branch and needed wiring separately.
+- `format_grep_surfaces_the_completeness_warning_on_zero_matches` and
+  `format_grep_leaves_a_trustworthy_zero_bare` — the renderer.
 
-`include_hidden_searches_dotfiles` (`src/tools/grep.rs:1152`) already pins the filtering
-behaviour itself and must keep passing unchanged.
+Verified by mutation, each killing exactly one test and nothing else:
 
+1. removing the warning append from `format_grep`'s zero-match early return killed only
+   `format_grep_surfaces_the_completeness_warning_on_zero_matches` — the R-60 trap, confirmed live;
+2. emptying the `uninformative` exclusion list killed only
+   `metadata_dirs_alone_do_not_trigger_the_warning`.
+
+`include_hidden_searches_dotfiles`, which pins the filtering behaviour itself, passes unchanged —
+confirming the walk's semantics did not move.
+
+Gate: fmt, `clippy --all-targets -D warnings`, **3522 passed / 0 failed** (3515 + 7).
 ## Workarounds
 
-Pass `include_hidden=true` whenever the question is about **absence** rather than presence — any
-"does X appear anywhere", "who references X", or pre-edit blast-radius sweep. For a single known
-file, `path=` bypasses the walk entirely and always sees it.
-
+No longer needed for diagnosis — a zero-match now says whether it can be trusted. The remedy it
+names is still the right one: pass `include_hidden=true` when the question is about **absence**
+rather than presence, or `path=` for a single known file, which bypasses the walk entirely.
 ## Resume
 
-Implement the `filter_entry`-based counter in `src/tools/grep.rs` around the `WalkBuilder` at
-`src/tools/grep.rs:105-117`, following `WalkAudit` in `src/tools/symbol/symbols.rs` (added
-`3bfa4025`) for both the counting shape and the warning wording. Decide the explicit-glob
-question separately; it changes behaviour, not just reporting.
+N/A for the reporting fix.
 
+**Live-surface caveat:** inert in a running MCP session until `cargo rb` plus a `/mcp` reconnect —
+the served binary is a separate artifact from the test build.
+
+**Master-side SHA still needs recording after cherry-pick.** The SHA below is `experiments`-side
+and orphans on rebase; run `git rev-parse HEAD` on `master` after the promotion and update it.
+
+One deliberate non-goal is left open and is **not** tracked here: a glob whose literal prefix names
+a hidden directory still returns empty. If that becomes worth changing it is a behaviour change to
+`Grep::call`'s override handling, and wants a fresh bug file.
 ## References
 
 - `src/tools/grep.rs:41` — `include_hidden` schema declaration, `"default": false`
@@ -206,4 +247,3 @@ question separately; it changes behaviour, not just reporting.
   sibling false-negative, same defect class
 - `docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` — the session this
   surfaced in
-

@@ -1658,5 +1658,12 @@ WIN-30's poll discarding its `Err` arm (F-11), both the same day. Three instance
 different surfaces, one shape: the code knew something was missing and the response did not say
 so.
 
-**Status:** open — bug filed, fix not implemented. The workaround is a habit: pass
-`include_hidden=true` whenever the question is about absence rather than presence.
+**Status:** fixed-verified, same session. A `WalkAudit` in `src/tools/grep.rs` now names the
+pruned entries in a `completeness_warning` on zero-match results, and the four dropped-error
+sites found while implementing it (two `walker.flatten()`, two `std::fs::read`) are counted
+rather than discarded. Seven tests, two mutations each killing exactly one test, gate green at
+3522. `.git` and `.codescout` are excluded from the warning — `rooted_ctx` creating
+`.codescout/` in every test root is what made the noise problem concrete: both exist by
+construction everywhere, so counting them would have warned on nearly every zero-match and
+taught readers to skip the warning. Still inert in a live MCP session until `cargo rb` +
+reconnect.
