@@ -123,6 +123,18 @@ pub struct CodeScoutServer {
     /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
     /// `docs/issues/2026-05-28-path-annotation-spam.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
+    /// Tokio-clock instant of the most recent `call_tool`, watched by the optional
+    /// idle-shutdown watchdog in `run()`.
+    ///
+    /// Updated on **tool calls only**. `list_tools`, resource reads and pings deliberately do
+    /// not count, so "idle" means *did no work* rather than *sent no traffic* — a client that
+    /// polls capabilities forever would otherwise pin the server open, which is the leak this
+    /// exists to close (`docs/issues/2026-07-28-mcp-servers-outlive-their-clients.md`).
+    ///
+    /// `tokio::time::Instant`, not `std::time::Instant`: the former is virtualised under
+    /// `#[tokio::test(start_paused = true)]`, so the watchdog's tests are deterministic
+    /// instead of wall-clock dependent. Same substitution WIN-30's budget test needed.
+    last_activity: Arc<parking_lot::Mutex<tokio::time::Instant>>,
 }
 
 impl CodeScoutServer {
@@ -257,7 +269,14 @@ impl CodeScoutServer {
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
             path_note_emitted_since_activation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            last_activity: Arc::new(parking_lot::Mutex::new(tokio::time::Instant::now())),
         }
+    }
+
+    /// Clone of the last-activity clock for the serve loop, which cannot borrow the server
+    /// because `serve()` consumes it.
+    pub(crate) fn last_activity_handle(&self) -> Arc<parking_lot::Mutex<tokio::time::Instant>> {
+        self.last_activity.clone()
     }
 
     fn find_tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
@@ -934,6 +953,9 @@ impl ServerHandler for CodeScoutServer {
         req: CallToolRequestParams,
         req_ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
+        // Idle-shutdown clock: a tool call is the definition of activity. Set before any
+        // early return so a rejected or cancelled call still counts as the client being alive.
+        *self.last_activity.lock() = tokio::time::Instant::now();
         let is_activate = req.name == "workspace"
             && req
                 .arguments
@@ -1206,6 +1228,61 @@ pub(crate) async fn shutdown_signal() -> &'static str {
         ctrl_c.await
     }
 }
+/// The idle window after which a stdio server exits, parsed from
+/// `CODESCOUT_IDLE_SHUTDOWN_SECS`.
+///
+/// `None` — unset, blank, unparseable, or `0` — means the watchdog never fires and behaviour is
+/// exactly what it was. There is deliberately **no default**, and that is a design position, not
+/// an omission: how long an MCP server may sit idle is a property of the operator's workflow,
+/// which codescout cannot measure for them (memory `conventions` § *Environment-Agnostic
+/// Tuning*). The inert default is also the safe one — a server that exits while its client is
+/// merely quiet costs the user a reconnect, which is worse than one that lingers.
+///
+/// Note the mux's 180 s is **not** a precedent: a mux is re-dialled transparently on the next
+/// navigation call, whereas an MCP server exiting is user-visible.
+///
+/// Kept pure — parsing a `&str` rather than reading the environment — so it is testable without
+/// `std::env::set_var`, which is UB against the suite's concurrent `getenv` readers. See
+/// `ServerEnv`.
+pub(crate) fn parse_idle_shutdown(raw: Option<&str>) -> Option<std::time::Duration> {
+    let secs: u64 = raw?.trim().parse().ok()?;
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}
+
+/// Resolve `parse_idle_shutdown` against the live environment. Called only from `run()`.
+fn idle_shutdown_from_env() -> Option<std::time::Duration> {
+    parse_idle_shutdown(
+        std::env::var("CODESCOUT_IDLE_SHUTDOWN_SECS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Complete once no tool call has arrived for `limit`; never complete when `limit` is `None`.
+///
+/// The `None` arm awaits `pending()`, so the caller's `select!` arm stays unconditional and the
+/// disabled case is *structurally* inert rather than guarded by a flag someone can get wrong.
+pub(crate) async fn idle_watchdog(
+    limit: Option<std::time::Duration>,
+    last_activity: Arc<parking_lot::Mutex<tokio::time::Instant>>,
+) {
+    let Some(limit) = limit else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    // Poll at a tenth of the window, bounded so a multi-hour window does not wake every few
+    // seconds and a short one still resolves promptly.
+    let tick = (limit / 10).clamp(
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(60),
+    );
+    loop {
+        tokio::time::sleep(tick).await;
+        if last_activity.lock().elapsed() >= limit {
+            return;
+        }
+    }
+}
 
 /// Wraps `tokio::io::Stdin` to absorb transient `WouldBlock`/`EAGAIN` errors.
 ///
@@ -1405,13 +1482,28 @@ pub async fn run(
             tracing::info!("codescout MCP server ready (stdio)");
             let server = CodeScoutServer::from_parts(agent, lsp.clone(), debug).await;
 
+            // Opt-in idle shutdown. Neither channel codescout can watch will ever fire for a
+            // session whose client has been abandoned but not exited: stdin stays open because
+            // the parent holds the socketpair, and no signal arrives because the parent is
+            // alive. Time since the last tool call is the only remaining observable. Unset =>
+            // `None` => the watchdog below never resolves, so this is inert by default.
+            let idle_after = idle_shutdown_from_env();
+            let last_activity = server.last_activity_handle();
+            if let Some(limit) = idle_after {
+                tracing::info!(
+                    instance = %instance_tag,
+                    idle_shutdown_secs = limit.as_secs(),
+                    "idle shutdown armed"
+                );
+            }
+
             let (stdin, stdout) = rmcp::transport::stdio();
             let service = server
                 .serve((ResilientStdin::new(stdin), stdout))
                 .await
                 .map_err(|e| anyhow::anyhow!("MCP server error: {}", e))?;
 
-            // Wait for service to end OR shutdown signal
+            // Wait for service to end OR shutdown signal OR the idle window to elapse
             tokio::select! {
                 result = service.waiting() => {
                     match result {
@@ -1424,6 +1516,14 @@ pub async fn run(
                 }
                 reason = shutdown_signal() => {
                     tracing::info!(instance = %instance_tag, reason, "service_exit");
+                }
+                _ = idle_watchdog(idle_after, last_activity) => {
+                    tracing::info!(
+                        instance = %instance_tag,
+                        reason = "idle_timeout",
+                        idle_shutdown_secs = idle_after.map(|d| d.as_secs()),
+                        "service_exit"
+                    );
                 }
             }
 
@@ -3403,6 +3503,76 @@ mod tests {
             .call_tool_by_name("does_not_exist", serde_json::json!({}))
             .await;
         assert!(err.is_err(), "unknown tool must error");
+    }
+    #[test]
+    fn parse_idle_shutdown_disables_on_anything_but_a_positive_integer() {
+        // Every shape that is not a positive integer must DISABLE the watchdog rather than
+        // fall back to a window we invented — see the fn's doc comment.
+        for raw in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("0"),
+            Some("-30"),
+            Some("abc"),
+            Some("30s"),
+            Some("1.5"),
+        ] {
+            assert_eq!(
+                parse_idle_shutdown(raw),
+                None,
+                "{raw:?} must leave idle shutdown disabled"
+            );
+        }
+        assert_eq!(
+            parse_idle_shutdown(Some(" 3600 ")),
+            Some(std::time::Duration::from_secs(3600)),
+            "a positive integer arms the window, whitespace tolerated"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_watchdog_never_resolves_when_disabled() {
+        // The inert default. A day of virtual time passes and the watchdog stays pending.
+        let last = Arc::new(parking_lot::Mutex::new(tokio::time::Instant::now()));
+        tokio::select! {
+            _ = idle_watchdog(None, last) => panic!("a disabled watchdog must never resolve"),
+            _ = tokio::time::sleep(std::time::Duration::from_secs(86_400)) => {}
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_watchdog_resolves_only_after_the_full_window() {
+        let last = Arc::new(parking_lot::Mutex::new(tokio::time::Instant::now()));
+        let t0 = tokio::time::Instant::now();
+        idle_watchdog(Some(std::time::Duration::from_secs(600)), last).await;
+        // `tokio::time::Instant` is virtualised under start_paused, so this is an exact
+        // statement about the schedule rather than a tolerance for jitter.
+        assert!(
+            t0.elapsed() >= std::time::Duration::from_secs(600),
+            "resolved early, at {:?}",
+            t0.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn activity_defers_the_idle_window() {
+        // The discriminating case: a watchdog that ignored `last_activity` entirely would
+        // still pass both tests above. Bumping the clock at t=300s must push the deadline
+        // from t=600s to t=900s.
+        let last = Arc::new(parking_lot::Mutex::new(tokio::time::Instant::now()));
+        let bump = last.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+            *bump.lock() = tokio::time::Instant::now();
+        });
+        let t0 = tokio::time::Instant::now();
+        idle_watchdog(Some(std::time::Duration::from_secs(600)), last).await;
+        assert!(
+            t0.elapsed() >= std::time::Duration::from_secs(900),
+            "activity at t=300s must defer the deadline to t=900s; resolved at {:?}",
+            t0.elapsed()
+        );
     }
 }
 

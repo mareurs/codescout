@@ -6,6 +6,18 @@ All notable changes to codescout are documented here.
 
 ### Added
 
+- **Opt-in idle shutdown for the stdio server** (`CODESCOUT_IDLE_SHUTDOWN_SECS`).
+  Exits after the given number of seconds with no tool call. Closes the accumulation in
+  `docs/issues/2026-07-28-mcp-servers-outlive-their-clients.md`, where a client that is
+  abandoned but never exited holds stdin open and stays alive — so neither EOF nor a signal
+  ever arrives, and one server per stale session piles up (18 measured, oldest 93.5 h,
+  ~1 GiB RSS aggregate). Time since the last tool call is the only observable separating an
+  abandoned session from a quiet one; `list_tools`, resource reads and pings deliberately do
+  not count, or a client polling capabilities would pin the server open. **Disabled unless
+  set, with no default** — how long a server may sit idle is a property of the operator's
+  workflow, and exiting on a merely-quiet client costs a `/mcp` reconnect. The LSP mux's
+  180 s is not a precedent: a mux is re-dialled transparently on the next navigation call,
+  whereas an MCP server exiting is user-visible.
 - **Worktree sessions now overlay the artifact catalog instead of forking it.**
   A session running from a linked git worktree reads the main checkout's
   artifacts live until it writes one. The first mutating call (`append_entry`,
