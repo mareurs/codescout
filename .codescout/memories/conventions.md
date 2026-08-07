@@ -44,6 +44,16 @@ codescout serves multiple agents (Claude Code, Copilot, Gemini, Antigravity). Th
 - The companion plugin (`codescout-companion`) adds Claude-Code-specific enforcement (PreToolUse hooks), but the server itself must not depend on it.
 - Project workflows, standards, and artifacts live in the repo (`docs/…`, `CLAUDE.md`), NOT in `claude-plugins/`. Plugin content is a thin UX wrapper over repo-resident source of truth — a non-CC client must never be locked out. When in doubt: would a Copilot user lose access? Then it belongs in the repo.
 
+## Environment-Agnostic Tuning — never ship a measured constant as a default
+
+Sibling of Agent-Agnostic Design, and the same question one layer down: users run **different models, different hardware, different corpora**. A number we measured is an observation about *our* setup, never a default for theirs. We can only ever test for us.
+
+- **A threshold expressed in the units of a third-party model's output is model-specific by construction.** `RERANK_MIN_SCORE = -5.0` is the worked example: sensible for a logit-emitting reranker, provably inert against TEI's sigmoid `[0,1]`, and no single value spans both. Same trap for `*_BOOST`, `*_WEIGHT`, overfetch multipliers, latency budgets, and batch sizes.
+- **Prefer scale-free forms.** Relative/rank rules (top-k, fraction of the top score, percentile of the observed batch), ratios between values we measured in the same run, or "keep everything above the largest gap in this batch". These carry no assumption about the scale, so they survive a model swap.
+- **When a constant is unavoidable, default to INERT and make the active value opt-in.** Nobody should inherit our calibration silently. A filter that is off by default and documented as needing calibration is honest; one preset to our number quietly degrades every other setup.
+- **A scale-free form does not conjure signal that is not there.** 2026-08-07: `cross-encoder/ms-marco-MiniLM-L-6-v2` (22M params, MS MARCO, lexically driven) scored a hedged correct answer at `1.05e-5` and an absurd one at `1.14e-5` — overlapping bands, so *no* rule, absolute or relative, separates them. Check that the bands separate at all before shipping any filter, and ship the probe so the user can check on their model.
+- **Ship the calibration probe, not the calibration.** Give users the four-tier measurement (directly-answers / same-domain / tangential / unrelated, the middle tier adversarial), state what our model measured *labelled with the model name*, and let them derive their own value. See F-13 in `docs/trackers/release-promotion-session-log.md` for why a two-point probe is not enough to characterise a scale.
+
 ## Testing Patterns
 
 - Cache-invalidation tests use a **three-query sandwich** (baseline → assert-stale → invalidate → assert-fresh), not two. The step-3 stale assertion is what makes it a *regression* test — it fails if the system ever changes to eager-reread. Canonical example: `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs`.

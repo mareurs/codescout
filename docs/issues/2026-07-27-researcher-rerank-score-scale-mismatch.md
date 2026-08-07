@@ -339,37 +339,47 @@ healthy, so this is a one-line revert plus a Claude Code restart.
 Measurement, provenance, and model identification are all **done** — see the 2026-08-07 Evidence
 subsections, including two explicit retractions of earlier recommendations in this same file.
 
-**State of the shipping configuration:** TEI on `localhost:30083` serving
-`cross-encoder/ms-marco-MiniLM-L-6-v2` (22M params, CPU), set identically in all three profiles'
-user-scope MCP `env`, with `min_score` at the −5.0 code default. In that configuration the rerank
-stage is **effectively a no-op**: the filter cannot fire (scores are ≥ 0), and the 0.7 relevance
-weight contributes ~`7e-6` against an authority term reaching `0.2`, so ordering is decided by
-authority and quality.
+**Governing constraint, and it outranks anything the measurements suggest:** users run different
+rerankers. Every number in this file was measured against
+`cross-encoder/ms-marco-MiniLM-L-6-v2` on a CPU TEI image — it is an observation about *our* setup
+and must not become anyone's default. A threshold expressed in the units of a third-party model's
+output is model-specific by construction, which is exactly how `-5.0` came to be inert here. See
+memory `conventions` § *Environment-Agnostic Tuning*.
 
-**Do NOT just set a constant.** That was this file's earlier advice and it is retracted: at n=28 the
-relevant and irrelevant score bands overlap, so every threshold either drops correct answers or
-drops nothing.
+So the question is **not** "what number?" — it is "what shape of rule, and off by default?"
+
+**State of the shipping configuration:** TEI on `localhost:30083` serving
+`ms-marco-MiniLM-L-6-v2`, set identically in all three profiles' user-scope MCP `env`, `min_score`
+at the −5.0 code default. The rerank stage is **effectively a no-op**: the filter cannot fire
+(scores are ≥ 0) and the 0.7 relevance weight contributes ~`7e-6` against an authority term reaching
+`0.2`, so ordering is decided by authority and quality.
 
 **Three real options, and the choice is the maintainer's:**
 
-1. **Accept it and delete the knobs.** Reranking stays a no-op, `RERANK_MIN_SCORE` and the three
-   weights come out, and the latency of a CPU cross-encoder pass per source is reclaimed. Honest,
-   and cheapest.
-2. **Change the model.** A threshold needs a ranker whose scores are calibrated across paraphrase,
-   not one that rewards lexical echo. That is a model-selection exercise with its own benchmark, and
-   it should be measured against the same four-tier probe shape used here before adopting anything —
-   the harness is `scratchpad/rerank-scale-probe.py` and `rerank-on-boundary.py` (session-local;
-   re-create from the tables above).
-3. **Keep it as a lexical-echo booster and make that explicit.** Drop `min_score` entirely, lower
-   `relevance_weight` to reflect that it only fires on near-verbatim matches, and document the
-   intent so nobody re-tunes a threshold that cannot work.
+1. **Keep the filter inert by default and delete the misleading knob.** `RERANK_MIN_SCORE = -5.0`
+   promises filtering that does not happen; that is worse than no knob. Remove it (or default it to
+   "disabled" explicitly rather than to a number that silently never fires), and if filtering is
+   wanted make the active value opt-in so nobody inherits our calibration. Cheapest, and the most
+   honest description of current behaviour.
+2. **If filtering is wanted, express the rule scale-free.** Fraction of the top score in the batch,
+   percentile of the observed batch, largest-gap split, or plain top-k — none of which assume a score
+   scale, so none breaks on a model swap. **But verify the bands separate on the user's model before
+   enabling it**: on ours they do not, and no rule of any shape can extract signal that is absent
+   (hedged correct answer `1.05e-5` vs absurd `1.14e-5`). Which is the argument for shipping the
+   *probe*, not a value — the four-tier measurement with an adversarial middle tier, so a user can
+   check their own reranker. Harness shape is in the Evidence tables above.
+3. **Change the model.** A calibrated threshold needs a ranker whose scores survive paraphrase, not
+   one that rewards lexical echo. Its own exercise, and it should be judged against the same
+   four-tier probe before adoption — with the resulting number treated as documentation of that
+   model, not as a default.
 
 Independently of the choice, two fixes stand on their own:
 
 - **Add an explicit protocol/normalisation setting.** `RerankerClient` hardcodes the TEI
-  request/response shape while accepting an arbitrary URL, which is how the one stale server ended
-  up feeding llama-server logits into a [0,1]-calibrated blend. Codescout's precedent is
-  `CODESCOUT_RERANKER_PROTOCOL` → `Protocol::Infinity` in `src/retrieval/reranker.rs`.
+  request/response shape while accepting an arbitrary URL, which is how one stale server ended up
+  feeding llama-server logits into a [0,1]-calibrated blend. Codescout's precedent is
+  `CODESCOUT_RERANKER_PROTOCOL` → `Protocol::Infinity` in `src/retrieval/reranker.rs`, and `.env.gpu`
+  warns that omitting it silently falls back to the TEI shape.
 - **Reconcile the 2000-char slice with the 512-token limit**, or accept and document that only the
   head of each source is scored.
 ## References

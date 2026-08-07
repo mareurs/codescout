@@ -11,23 +11,27 @@ hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
+hash = "14e9e33376883d046fb8fbc12dcb9fa089c731df9e07cc018a84ae2899505dfa"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "30a7f624c4d8de5cc65d120e72e395dce93ecc6b88a800b8f906c259c9125636"
+hash = "b45ab8f9a68885a75b1ad3853fa9a84ee325fa095066e2a9bdfc606f85b4a79e"
+
+[[anchors]]
+path = "docs/trackers/release-promotion-session-log.md"
+hash = "d75de2e7510a5a33277b53e2054a06052b0509f124cc068db1e12e8048e6c48e"
 
 [[anchors]]
 path = "src/lsp/client.rs"
-hash = "405d687426fa1e95832658c527198fa4ed35fa85a699041c673c1a89f30258a7"
+hash = "c178aaafd9ea04266eb65070770e63e62d90c753283153e549280f7500edfa2e"
 
 [[anchors]]
 path = "docs/conventions/test-env-isolation.md"
-hash = "e7bd0a7e552eec4d681f9786633d6e4691f3495fab7d43f86473e8f289164d7d"
+hash = "eae83a755b25ad656ff3be87f1cfc8323242a121f1a6eed69c6e329bf275b248"
 
 [[anchors]]
 path = "docs/trackers/reconnaissance-patterns.md"
-hash = "d29f30089fd51c9dae3ed731667eeabc5d534386b99bad4d68bc349c00c8e558"
+hash = "45c5b294a666fd13e39f15bed7b108dddcd18172d62439575d9b673dff820f07"
 
 [[anchors]]
 path = "src/prompts/README.md"
@@ -35,7 +39,7 @@ hash = "8b81125e68a865a61c6762a2cd744952adf7c87a9f8ce41800ebcaa1f8f2208c"
 
 [[anchors]]
 path = "docs/RELEASE.md"
-hash = "d594a784a52d372dc8d83763cd333c9c432f76c84868cc2d7b6c9c42469c62a5"
+hash = "bd353d320b14a38f95d53acd644235ac86a6b3da95e25ab158729d4364a09897"
 
 [[anchors]]
 path = "src/lib.rs"
@@ -43,7 +47,7 @@ hash = "34353cf8021dc144d167b67cc5096b2f34439e4a40980a7c90bb6d039ccca6f2"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "8e374e3d25b36b8db8969526b401313c00c1a957e33dae10ab113fba6c613374"
+hash = "e64f6da6955f17d92e188553054ff63ae3f0625d67c02e97b9b29a1e24611b30"
 
 [[anchors]]
 path = "src/lsp/mock.rs"
@@ -55,23 +59,23 @@ hash = "8e308dd3cf3a208e785b5b4ea42ae03e47138f10af95deb6e32f5fd5c3ea67bb"
 
 [[anchors]]
 path = "src/prompts/builders.rs"
-hash = "55af26e6c451545c6637ab49d18f58f3651225d287cf633370e3b6dc8e1cf0d9"
+hash = "530ed2c6d013bdee49dd3e46833996a310cfc750d7fa32d10688ef5da8253d0d"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "86d4892a183d5c32fe80f5592151bfe2664e081e0bb7037d788ae3977b565c59"
+hash = "41365b4cf4456c8cc612eb865fc3e577b72893f46ca50c682abc9c6de12c6c9d"
 
 [[anchors]]
 path = "src/tools/onboarding.rs"
-hash = "13869e975c9a8ce65174251d52357b4394de3b7e9f08eaf80ed1bb7d93d61baf"
+hash = "6bf550a0f371d0a94e809bc7b65b5d87610167d29e8fbe4c3ab666e308b2b944"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "5d62ec83a72b6a056b8ca8d47c20cfaf82431feb4de2a30043fd2f063354702a"
+hash = "4b1c61beb55374912dd76e0685ca953b7ef9a8a2471d4a930ce501f62998a7b8"
 
 [[anchors]]
 path = "docs/manual/src/experimental/index.md"
-hash = "ccf16dcc4b5a25ecb438a6ecb75da700fcd09a024282544bfcc42bde7f0f4579"
+hash = "5419a182bdd5b2dceec1509c2e28cd9a1e9578e445d3f11db9ac125d58900e81"
 
 [[anchors]]
 path = "docs/trackers/archive/experiments-to-master.md"
@@ -87,7 +91,7 @@ hash = "cc318c6d0c916b4f49599f11cbae4af6d72b2f873c44211a6e75d0637a42825b"
 
 [[anchors]]
 path = ".codescout/libraries.json"
-hash = "1760f9b4c79b1eb6e1f9d3e7e3ca377087ba8f3c061b5b9123965ca00fff41e0"
+hash = "4720f35a8a733d78c580691846610828ada8063b64f39207ac50fa62dca9cb25"
 
 [[anchors]]
 path = ".codescout/write.lock"
