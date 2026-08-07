@@ -129,7 +129,7 @@ pub struct CodeScoutServer {
     /// Updated on **tool calls only**. `list_tools`, resource reads and pings deliberately do
     /// not count, so "idle" means *did no work* rather than *sent no traffic* — a client that
     /// polls capabilities forever would otherwise pin the server open, which is the leak this
-    /// exists to close (`docs/issues/2026-07-28-mcp-servers-outlive-their-clients.md`).
+    /// exists to close (`docs/issues/archive/2026-07-28-mcp-servers-outlive-their-clients.md`).
     ///
     /// `tokio::time::Instant`, not `std::time::Instant`: the former is virtualised under
     /// `#[tokio::test(start_paused = true)]`, so the watchdog's tests are deterministic

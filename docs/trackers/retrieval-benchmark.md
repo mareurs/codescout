@@ -197,7 +197,7 @@ measured until now. Mechanism is unchanged in either server: `SearchOpts::new` s
 `overfetch: limit * 2` and `search_in` reranks every candidate, so `limit=10` means 20
 cross-encoder passes per query — TEI batches those; llama-server appears not to.
 
-**This reframes `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`**, which
+**This reframes `docs/issues/archive/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`**, which
 I filed as "the reranker costs 42×". The correct statement is narrower and more useful: *the
 GGUF/llama-server reranker costs ~13× what the TEI one did.* Worth trying before abandoning
 reranking: a TEI reranker with `--max-batch-tokens` capped low enough to fit 6 GiB, or

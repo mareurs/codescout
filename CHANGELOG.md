@@ -14,11 +14,11 @@ All notable changes to codescout are documented here.
   restore the previous behaviour. The cost is serving-runtime specific (the same weights
   over TEI measure ~80 ms), so this is a knob rather than a removal; measure on your own
   stack with `scripts/run-tc-benchmark.py`. Details:
-  `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`.
+  `docs/issues/archive/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`.
 
 - **Opt-in idle shutdown for the stdio server** (`CODESCOUT_IDLE_SHUTDOWN_SECS`).
   Exits after the given number of seconds with no tool call. Closes the accumulation in
-  `docs/issues/2026-07-28-mcp-servers-outlive-their-clients.md`, where a client that is
+  `docs/issues/archive/2026-07-28-mcp-servers-outlive-their-clients.md`, where a client that is
   abandoned but never exited holds stdin open and stays alive — so neither EOF nor a signal
   ever arrives, and one server per stale session piles up (18 measured, oldest 93.5 h,
   ~1 GiB RSS aggregate). Time since the last tool call is the only observable separating an

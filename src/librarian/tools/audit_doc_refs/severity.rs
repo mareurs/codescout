@@ -17,7 +17,7 @@ use std::path::Path;
 /// then back down on an unchanged tree, and it is worst at zero findings, where a
 /// single flap is the whole verdict. `med` keeps the report and takes the
 /// non-determinism out of the exit code. See
-/// `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
+/// `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
 pub fn default_severity(verdict: Verdict) -> Severity {
     use Severity::*;
     use Verdict::*;

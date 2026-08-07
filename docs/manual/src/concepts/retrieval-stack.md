@@ -272,7 +272,7 @@ fusion gives +2 points over dense-only at `bm25_boost=5.0`.
 > on the AMD profile, which sets `CODESCOUT_RERANKER_PROTOCOL=llama-server`, budget
 > from that number, not this table. Measurements and the open question of whether the
 > reranker earns its keep at all are in
-> `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`; note that
+> `docs/issues/archive/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`; note that
 > file's own retraction — the arms it compared differ in four dimensions, so it
 > establishes the latency cost but **not** a score regression.
 

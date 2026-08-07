@@ -428,7 +428,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 // marked the scan degraded because the server was not *offline*. That is
                 // also why `scan_meta.degraded` read `false` on every cold run that lost
                 // 60-69 resolutions.
-                // See docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md
+                // See docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md
                 note_degraded(ctx, lang);
                 Resolution {
                     verdict: Verdict::Unknown,
@@ -486,7 +486,7 @@ fn detect_language(path: &str) -> &'static str {
 /// conflating the two is what made a proposed fix — gate on `degraded` — unusable,
 /// since it would have failed every run ever.
 ///
-/// See `docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
+/// See `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
 fn note_degraded(ctx: &ResolveCtx<'_>, lang: &str) {
     if lang != "unknown" {
         ctx.degraded_languages.borrow_mut().push(lang.to_string());
@@ -1319,7 +1319,7 @@ mod tests {
     /// reporting it missing is the opposite of preferring disk truth. The old comment read *"the
     /// LSP responded (not offline), so an empty symbol list means the symbol genuinely isn't
     /// there"* — false during warm-up, and the mechanism behind the resolved <-> broken tally
-    /// drift in docs/issues/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md. Inverted by
+    /// drift in docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md. Inverted by
     /// decision 2026-08-07.
     #[test]
     fn resolver_defers_to_the_ast_when_the_lsp_lags_behind_disk() {

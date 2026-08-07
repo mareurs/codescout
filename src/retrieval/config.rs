@@ -50,7 +50,7 @@ pub struct RetrievalConfig {
     /// model-and-hardware dependent — the same weights served over TEI rather than
     /// llama-server measured ~80 ms, and a different cross-encoder may well earn its
     /// keep. What is not defensible is choosing for the user silently. Full data:
-    /// `docs/issues/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`.
+    /// `docs/issues/archive/2026-07-28-reranker-costs-42x-latency-and-lowers-score.md`.
     pub rerank: bool,
     /// Prefix prepended to qdrant collection names. Default empty (live collections
     /// `code_chunks`, `memories`, etc.). Set via

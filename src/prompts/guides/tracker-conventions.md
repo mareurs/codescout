@@ -73,6 +73,29 @@ Archive through the catalog — `artifact(action="move", id=…,
 new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
 sha256(abs_path)`, so a hand-move orphans the catalog row.
 
+**Then re-point the citations, in the same commit as the move.** The move changes
+the file's path, and archiving is a bug file's *normal* end state — so every
+citation of `docs/issues/<slug>.md` anywhere in the repo is a scheduled break, and
+the move is the moment it fires. Measured 2026-08-08: three archive moves left **25**
+dangling refs across 15 files, and the one in `docs/manual/src/concepts/`
+failed CI's `Audit Doc Refs` gate on the tip commit of a release promotion.
+
+```
+grep -rn 'docs/issues/<slug>.md' . --include='*.md' --include='*.rs' --include='.env*'
+```
+
+Fix the **live** surfaces — the manual, `CHANGELOG.md`, `README`s, active trackers,
+`.env*` templates, source doc comments. **Leave `docs/issues/archive/**` and
+superseded session-log rounds alone**: those are historical snapshots, and
+`apply_drops`' `archive_drop` exists precisely so a retired document citing a moved
+path does not gate. Rewriting them would falsify the record to satisfy a linter that
+is already ignoring them.
+
+Note the gate only catches the subset that lands in a full-severity surface, and it
+does not scan `CHANGELOG.md` at all
+(`docs/issues/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md`),
+so the grep is the check — not a green CI run.
+
 ## Tracker artifacts (docs/trackers/)
 
 Trackers are living state — multi-entry tables, observation logs, ADR
