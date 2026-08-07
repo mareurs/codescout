@@ -23,6 +23,105 @@ tags:
 > **Round 2 — 2026-08-06.** 397-commit fast-forward. **Not shipped** — see the
 > Resume block below. Produced F-2, F-3, W-1.
 
+## Resume — round 9, written 2026-08-07. Supersedes rounds 2-8.
+
+### First action: `TaskList`. Only #14 remains.
+
+Every other task (#15-#32) is complete. Do not re-derive the backlog from this log — the task list is
+authoritative and each entry carries its evidence.
+
+### THE MERGE IS UNBLOCKED AND IS THE MAINTAINER'S TO RUN
+
+This inverts round 8's header. The deferral was *"no merge yet until we solve all issues"*; that
+condition is met. Eleven decisions were taken on 2026-08-07 and every blocker cleared.
+
+**Do not run the merge yourself.** `master` is protected and the promotion is the maintainer's.
+What to hand over:
+
+- Sequence: `docs/RELEASE.md` § *Large-Cohort Promotion (Fast-Forward)* — ancestry check FIRST, then
+  `--ff-only`.
+- **The gate is a final green CI run on whatever the tip is at that moment. Never a SHA from this
+  log.** Round 8 recorded this rule; it still holds.
+- Owed *after* the promotion, both mechanical: master-side SHAs for every bug file archived carrying
+  an `experiments` SHA (they orphan on rebase — `grep -rl <sha> docs/issues/` including `archive/`),
+  and the unreleased callouts come off at **release**, not at merge.
+
+### Git state (verified 2026-08-07, not remembered)
+
+- tip `9886773e`, `experiments` == `origin/experiments`
+- **471 ahead / 0 behind** `master`
+- working tree clean EXCEPT `docs/trackers/pr-review-session-log.md`, which belongs to a **concurrent
+  session** in the same checkout. Do not stage it. See F-15/F-18.
+- toolchain now PINNED at 1.97.1 (`rust-toolchain.toml`), so the local gate reproduces CI exactly
+
+### The eleven decisions, and what each became
+
+| # | decision | outcome |
+|---|---|---|
+| 16 | idle-shutdown value | **none — stays disabled.** 18 servers, 18 live parents, 1.13 GiB of 125. Bug closed `wontfix` + archived |
+| 17 | audit tally direction | ResolvedBasename counts as resolved; tree-sitter cross-check for cold LSP. Both shipped |
+| 18 | fix the tally | `6e608545`, CI 15/15. Counters partition (residual 2426 -> **0**) |
+| 19 | sparse leg | **back on, flag-gated.** The flag was saving nothing — the container held 2.69 GiB either way |
+| 20 | reranker default | **off by default**, `CODESCOUT_RERANK` opt-in (`6ce49487`) |
+| 21 | the reindex | ran: **8.06 min**, not the inherited ~2h. Sparse coverage 92.3% -> **100%** |
+| 22 | chunker fix | **deferred**, so one rebuild served both |
+| 23 | kotlin cherry-pick | **rides with the promotion** |
+| 24 | kotlin item 6 | **dropped** |
+| 25 | researcher reranker | **descoped** — different project, does not gate codescout |
+| 26 | toolchain pin | **pinned 1.97.1** + components + targets; 5 CI install steps REMOVED |
+
+### Open bugs — 5, and none blocks the merge
+
+`artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`
+
+1. **AST chunker** — deferred by decision; title corrected (the "~2h" was 8.06 min)
+2. **researcher rerank** — descoped; a `researcher` defect filed here for umbrella reasons
+3. **kotlin heap** — retitled to what remains (mem-kill not counting toward the circuit breaker); the
+   original "no `-Xmx`" premise was falsified by one `jcmd`
+4. **`semantic_search` latency unaccounted** (NEW) — ~950 ms of a 990 ms round-trip is outside the
+   measured retrieval stages. Next step written down: two `timer.lap` calls, seams already exist
+5. **`edit_code remove` over-deletes** (NEW) — a real codescout defect; took a function's closing
+   delimiters while "repairing" a truncated LSP range and returned `status: "ok"`
+
+### Do NOT re-do — measured, settled, or falsified today
+
+1. **Do not re-recommend capping `SymbolMissing` below `high`** — shipped long ago; that is why 99
+   invocations never reproduced the gate flap.
+2. **Do not chase `degraded` being "permanently true"** — it inverted; it was *silent*, now honest.
+3. **Do not hunt the audit gate flap with back-to-back runs** — warm runs are exactly deterministic;
+   42 attempts of that shape found nothing.
+4. **Do not trust `cargo build --release` for anything touching retrieval** — it omits
+   `server-stack`, so the backend silently becomes sqlite-vec and sparse is skipped. Use `cargo rb`
+   (F-17).
+5. **Do not reindex to "fix" sparse coverage before checking it** — 92.3% already had populated
+   sparse vectors; `.env.gpu` claimed a rebuild was mandatory.
+6. **Do not quote the reranker's "42x"** — it is 1.6x; ~569 ms absolute, and the denominator moved.
+7. **Do not fold the first query of a benchmark into a mean** (W-14) — cold-start inflated one figure
+   8.7x.
+8. **Do not `pgrep -f`/`pkill -f` a pattern that appears in your own command** (F-19) — three
+   failures in one hour, one of them a self-kill.
+9. **Do not start a long job through `run_command` without `setsid`** (F-18) — a routine `/mcp` kills
+   it and takes the `@bg_*` buffers.
+10. **Do not put a `#[cfg(test)] mod` above other items** — clippy 1.97's `items_after_test_module`.
+11. **Do not use inline `git commit -m` for bodies** (F-16) — backticks are command substitution.
+12. **Do not `git add -A`** while the concurrent session has uncommitted work; and **push by
+    refspec** (F-15).
+
+### What round 9 changed — 15 commits, `5c209f28..9886773e`
+
+Discharged W-12/W-13 into permanent docs; pinned the toolchain; re-enabled sparse; rebuilt the index;
+fixed the audit tally and the cold-LSP false-missing; made the reranker opt-in; closed and archived
+two bugs and filed two; corrected three bug titles that asserted numbers measurement had killed.
+Added F-14 through F-19 and W-13/W-14.
+
+### The pattern this round is about
+
+**Premises decay faster than prescriptions, and numbers decay silently.** W-13 found five bug files
+with false premises; round 9 found the same disease in *titles* (three of five), in an *inherited
+estimate* (~2h vs 8.06 min), in a *ratio* (42x vs 1.6x), and in a *task I wrote myself* (#21's three
+premises, one of which held). Nothing enforces re-checking a stated number, and a title is the part
+nobody re-reads critically while being the part every triage reads first.
+
 ## Resume — round 8, written 2026-08-07 for session compaction
 
 **Supersedes rounds 2–7.** The merge is **deliberately deferred** — see below. Everything actionable
