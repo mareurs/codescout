@@ -202,7 +202,38 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         *by_check.entry(v.check.clone()).or_insert(0) += 1;
     }
 
+    // Cap the emitted `abs_path_outside_managed_roots` rows. On a catalog
+    // spanning several projects this check legitimately fires for every row
+    // belonging to another workspace (417 of 1314 on the authoring machine),
+    // and an unbounded list buries every other finding in the report.
+    //
+    // `by_check` is computed ABOVE this truncation, so the summary keeps the
+    // true count, and the elision is announced in the hint rather than applied
+    // silently — a report that quietly drops findings is the same failure mode
+    // this check was added to close.
+    const OUTSIDE_ROOTS_SAMPLE: usize = 10;
+    let mut shown_outside = 0usize;
+    let mut elided_outside = 0usize;
+    all_violations.retain(|v| {
+        if v.check != "abs_path_outside_managed_roots" {
+            return true;
+        }
+        if shown_outside < OUTSIDE_ROOTS_SAMPLE {
+            shown_outside += 1;
+            true
+        } else {
+            elided_outside += 1;
+            false
+        }
+    });
+
     let mut hint_parts: Vec<String> = Vec::new();
+    if elided_outside > 0 {
+        hint_parts.push(format!(
+            "abs_path_outside_managed_roots fired {} time(s); showing {shown_outside}, {elided_outside} elided (full count in summary.by_check). Rows outside the active project's roots are EXPECTED when the catalog spans several workspaces — confirm a row should be under a managed root before treating it as drift.",
+            shown_outside + elided_outside
+        ));
+    }
     if hidden_rows > 0 {
         hint_parts.push(format!(
             "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
@@ -1260,6 +1291,57 @@ mod tests {
             !v.iter()
                 .any(|x| x.check == "abs_path_outside_managed_roots"),
             "a relative row must be reported once, by the absoluteness check only"
+        );
+    }
+
+    /// The emitted violation list is capped for this check, but `summary.by_check`
+    /// must still report the true total and the hint must say what was dropped.
+    /// A report that silently truncates findings reads as "only 10 rows affected",
+    /// which is the same class of misleading-green this check exists to prevent.
+    #[tokio::test]
+    async fn outside_managed_roots_caps_the_list_but_not_the_count() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // 25 rows under no managed root — comfortably past the 10-row sample.
+        for i in 0..25 {
+            seed_artifact(
+                &cat,
+                &format!("far-{i}"),
+                &format!("/elsewhere/repo/doc-{i}.md"),
+            );
+        }
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(crate::librarian::workspace::Root {
+                name: "managed".to_string(),
+                path: PathBuf::from("/managed/root"),
+            })
+            .build();
+
+        let report = call(&ctx, json!({})).await.unwrap();
+
+        let emitted = report["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["check"] == "abs_path_outside_managed_roots")
+            .count();
+        assert_eq!(
+            emitted, 10,
+            "emitted list must be capped at the sample size"
+        );
+
+        assert_eq!(
+            report["summary"]["by_check"]["abs_path_outside_managed_roots"],
+            json!(25),
+            "summary must report every violation, not just the emitted sample"
+        );
+
+        let hint = report["catalog_health"]["hint"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            hint.contains("15 elided"),
+            "the hint must name what was dropped; got: {hint}"
         );
     }
 
