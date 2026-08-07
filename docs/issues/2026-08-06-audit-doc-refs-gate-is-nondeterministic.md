@@ -1,8 +1,8 @@
 ---
 id: d965b9fd79298e46
 kind: bug
-status: open
-title: 'BUG: audit-doc-refs high-finding count varies between identical runs — the CI gate is non-deterministic'
+status: investigating
+title: 'BUG: audit-doc-refs'' resolved/broken tally is non-deterministic under LSP cold start (forced on demand 2026-08-07); the original high-count/gate flap remains unreproduced at 99 invocations'
 tags:
 - audit_doc_refs
 - ci
@@ -200,6 +200,83 @@ per-ref LSP response, not a per-run LSP availability.
   (open) records a sibling flake: `symbols` search mode occasionally 0-matches then
   succeeds on retry. Same substrate.
 
+
+**Superseded 2026-08-07 — it is permanently FALSE, which is worse.** At `cdfbbe0f`, `degraded` was
+`false` and `lsp_languages_offline` was `[]` in **all 57 runs** recorded below, including every cold
+run that lost 60-69 resolutions to an LSP that was not ready. The claim above does not hold and the
+inverted version is the finding: the scan reports itself undegraded while silently reclassifying
+refs it could not check. Whatever `degraded` currently tracks, it is not *"the LSP was not ready"*
+— the one condition a determinism gate would need it to track. Fix direction 1 is therefore not
+dead-as-written, but it cannot be built on `degraded` in its current form.
+
+### 2026-08-07: the non-determinism is FORCED on demand — and it is not the gate
+
+The previous Resume's step 1, executed. Release binary at `cdfbbe0f`. The project's rust mux is
+`codescout mux --socket /run/user/1000/codescout-rust-mux-7e868829c00fa9b2.sock --idle-timeout 180
+-- rust-analyzer` (PID observed 1660662). **cold** = `pkill` that process immediately before the
+run, with the kill confirmed per-run by counting `mux process ready` in stderr rather than assumed;
+**warm** = mux already up. 57 invocations total.
+
+Note `--idle-timeout 180`: the mux self-exits after three idle minutes, so warm-vs-cold is not an
+artificial state. Two identical gate invocations more than 180 s apart land in different LSP states
+with nobody killing anything, which is why back-to-back repetition (all 42 earlier attempts) can
+never surface this — back-to-back runs are always warm.
+
+**`docs/issues/**/*.md`, 8 runs — the cleanest signal:**
+
+| arm | `n_refs_resolved` | `n_refs_broken` | sum | high | rc | degraded |
+|---|---|---|---|---|---|---|
+| warm ×3 | 2768, 2768, 2768 | 998, 998, 998 | 3766 | 0 | 0 | false |
+| cold ×5 | 2707, 2704, 2699, 2709, 2701 | 1059, 1062, 1067, 1057, 1065 | 3766 | 0 | 0 | false |
+
+Three facts:
+
+1. **Warm is exactly deterministic** — identical to the digit across repeats.
+2. **Cold is a race** — five distinct values, spread 10, none equal to the warm value. What varies
+   is how much of rust-analyzer's index existed at the moment each ref was queried.
+3. **The sum is conserved at 3766 in all eight runs.** Refs do not appear or vanish; they *migrate*
+   from `resolved` to `broken`.
+
+**Full corpus — same shape, and the diff is two lines.** warm ×3 all `12500 / 8570`; cold ×3
+`12423/8647`, `12427/8643`, `12426/8644`; sum 21070 in all six. `diff warm1.json cold1.json` is
+exactly and only:
+
+```
+<   "n_refs_resolved": 12500,        >   "n_refs_resolved": 12423,
+<   "n_refs_broken": 8570,           >   "n_refs_broken": 8647,
+```
+
+`overflow.total` is **47299 in all six**, and all **879** `by_file` finding counts are identical
+(verified after checking the extraction was non-empty — 879 lines each — rather than reading an
+empty-vs-empty diff as agreement).
+
+**Localisation.** The delta lives under `docs/`: `docs/issues` **64**, `docs/trackers` 2,
+`docs/superpowers` 2, and **zero** in adrs / manual / research / conventions / plans / archive /
+architecture, `src/**`, and `tests/**`.
+
+**Latency.** Full scan warm 7.1-9.7 s, cold ~14.9 s — cold roughly doubles.
+
+### What this does to this bug's own title claim
+
+The original title said the **high-finding count** varies and the **gate** is non-deterministic.
+Across every pair above — 9 `docs/` subtrees, 4 scopes, the full corpus — the exit code and the high
+count were identical in warm and cold. In `docs/issues`, where 64 refs migrate, `high` is **0** in
+both arms; because findings are emitted most-severe-first and only 50 are shown, a shown `high=0`
+alongside `med=50` means there are genuinely no high findings being hidden by the cap. The gate
+verdict did not flap once, in either direction, under the only mechanism now known to perturb the
+scan.
+
+What *is* non-deterministic is the **summary tally**, and it is inconsistent with the findings it
+summarises: 64 refs change from `resolved` to `broken` while the finding set's size and its per-file
+distribution stay bit-identical. The tally and the findings are computed on different paths, and
+only the tally is LSP-timing-sensitive. So the headline numbers move while the substance does not.
+
+**Caveat on the cap.** For any scope containing the delta, `high` saturates at the OutputGuard's
+50-finding limit, and `audit-doc-refs` has no `--limit` flag, so per-severity totals are not
+observable through `--json` at full scope. The `high=0` reasoning above works only because zero is
+below the cap and the ordering is most-severe-first. A scope where the true high count exceeds 50
+remains unmeasured for severity movement — the uncapped route is the emitted `audit_issues`
+tracker, deliberately not taken here because it mutates the catalog.
 ## Hypotheses tried
 
 **Exit-code stability at zero — 6 consecutive full scans, all `exit=0`** (2026-08-06,
@@ -278,6 +355,12 @@ measurements: minutes apart, unchanged tree, same binary, same jq selection, and
 consecutive sweeps, with the only edits in between landing in *other* directories
 (`docs/manual/**`). So it went up and came back down on its own.
 
+
+**Updated 2026-08-07: 99 invocations (42 + 57).** Zero reproductions of a *high-count* or
+*exit-code* change, now including 30+ explicitly paired warm/cold trials designed to force one.
+One reproduction, on demand and every time, of *tally* non-determinism. The distinction is the
+result: the thing this bug was opened about has not been seen in 99 tries, and a different,
+adjacent non-determinism is now forceable in a single command.
 ### The reason further replication here may be worthless
 
 A candidate that deserves stating because it changes what the next session should do:
@@ -361,14 +444,37 @@ green run on a symbol-heavy diff as unconfirmed.
 
 ## Resume
 
-1. Force the flap: run the same `--paths` scan with the mux killed vs. warm
-   (`ls /run/user/$UID/codescout-rust-mux-*`) and confirm the count moves. That
-   settles hypothesis 1 in one experiment.
-2. If confirmed, decide between Fix 1 and Fix 2 — this is a gate-semantics call,
-   not a code detail.
-3. Cross-check against the open `symbols` flake bug; if the mux is implicated in
-   both, they may share a fix.
+Step 1 of the previous Resume is **done** — there is now a forcing recipe, so any proposed fix is
+falsifiable. Steps 2 and 3 are superseded by what it found.
 
+**The next action is a decision about which bug this is, and it is the maintainer's.** The evidence
+now supports two separable defects, and they want different fixes:
+
+1. **The tally is non-deterministic and disagrees with the findings** (confirmed, forceable).
+   `n_refs_resolved`/`n_refs_broken` migrate by up to 69 refs under LSP cold start, exactly
+   compensating, while the finding set stays bit-identical. Either the tally should be computed from
+   the findings (making it definitionally consistent), or refs whose resolution was skipped because
+   the LSP was not ready need a third bucket rather than being folded into `broken`.
+2. **`degraded` does not track LSP readiness** (confirmed). It was `false` in all 57 runs, including
+   every cold run that lost resolutions. Until it does, no determinism gate can key off it, and a
+   consumer cannot tell an incomplete scan from a clean one.
+
+**And the original symptom should probably be reclassified.** At 99 invocations with 0 reproductions
+— 30+ of them adversarially paired — the high-count flap is not supported by anything measured here.
+Candidate explanations worth one cheap check each before spending more on it: the two original
+observations may have compared *different scopes*, may have read the tally rather than the finding
+count, or the tree may genuinely have changed between them (uncommitted edits during a doc-heavy
+session). If none can be established, `zombie` with a re-open trigger is more honest than `open`.
+
+**Do not** re-run back-to-back repetition to hunt the original flap. 42 attempts of that shape
+found nothing, and the reason is now known: back-to-back runs are always mux-warm, and warm runs are
+exactly deterministic.
+
+The measurement harness is `scratchpad/audit-determinism.sh` (session-local, not committed):
+`audit-determinism.sh <outdir> <warm|cold> [n] [paths-glob]`, printing per-run high/med/low,
+resolved/broken/unknown, `degraded`, whether a mux was spawned, bytes, and ms. Re-create it from
+the Evidence section above if needed; the load-bearing details are the `pkill` target and counting
+`mux process ready` to confirm the kill landed.
 ## References
 
 - `src/librarian/tools/audit_doc_refs/resolver.rs` — `resolve_file_symbol`, and the

@@ -92,6 +92,33 @@ against a GPU embedder shared with every other project — the mechanism behind
 "GPU at 100% with no obvious cause", which was investigated three separate times today
 and had a different proximate cause each time.
 
+
+### 2026-08-07 census — the leak is ongoing and now has a cost figure
+
+```
+codescout processes (all)   : 22      oldest 336430s = 93.5h    total RSS 1037 MiB
+`codescout start --debug`   : 18      oldest 93.5h   mean 46.0h
+```
+
+Measured 10 days after the original observation (`ps -o pid=,etimes=,rss=,lstart= -C codescout`).
+Two things this pins that the original entry could not:
+
+- **Nothing is being reaped.** The count is still 18 and the oldest process has aged from 2d19h
+  (≈67 h) to **93.5 h** — the same process, ~26 h older. So the residency is unbounded, not
+  long-but-finite, and no existing mechanism collects them.
+- **Aggregate cost is ~1 GiB of RSS**, which the file previously described only as "individually
+  cheap". Individually cheap and collectively a gigabyte are both true; the second is the one that
+  argues for a fix.
+
+A mean age of 46 h against an oldest of 93.5 h means the population is not one stuck outlier but a
+steady accumulation — consistent with one orphan per ended session over roughly four days.
+
+Note for the eventual fix: the mux next to them already solves this, and the census shows it
+working. Every `codescout mux` process carries `--idle-timeout` (180 s for rust, 300 s for kotlin)
+and there were exactly 4 alive — one per live project/language pair, none stale — while 18
+`start --debug` processes with no such flag had piled up over four days. The two populations sit in
+the same process table under the same binary, which makes the missing-mechanism argument directly
+observable rather than inferred.
 ## Hypotheses tried
 
 1. **Hypothesis:** the high process count is stale `ps` output or includes the LSP mux.
@@ -173,11 +200,23 @@ changed.
 
 ## Resume
 
-Read the `start` subcommand's shutdown path in `src/bin/` (or wherever `start --debug` is
-handled) and determine whether it watches stdin at all. Then compare against the mux's
-`--idle-timeout` implementation, which already solves the same problem one process over in
-the same tree.
+The census is refreshed (see Evidence, 2026-08-07): still 18 processes, oldest now 93.5 h, ~1 GiB
+aggregate RSS, nothing reaped in 10 days. That is the measurement side done; what remains is a code
+read plus one decision.
 
+Read the `start` subcommand's shutdown path and determine whether it watches stdin at all — an MCP
+stdio server's client closing stdin is the canonical shutdown signal, and if `start` ignores it,
+that is the whole bug. Then compare against the mux's `--idle-timeout` implementation, which solves
+the same problem one process over in the same tree and is *observably* working: the census found 4
+mux processes, one per live project/language pair with none stale, beside 18 un-timed-out `start`
+processes.
+
+**The decision that blocks a fix is what "idle" means for `start --debug`**, and it is the
+maintainer's: an MCP server legitimately sits idle between user turns for hours, so the mux's 180 s
+is far too aggressive to copy directly. Options are stdin-EOF (precise, no timeout needed, but
+depends on the client actually closing it), a long idle timeout measured from last request, or a
+parent-death watch. Pick the signal before writing code — the wrong one kills live sessions, which
+is worse than the leak.
 ## References
 
 - `src/bin/` — `codescout start` entry point (shutdown path unread)
