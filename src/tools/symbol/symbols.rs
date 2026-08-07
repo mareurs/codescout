@@ -252,6 +252,10 @@ impl Tool for Symbols {
         // to per-file document_symbols (A); otherwise project-scope workspace/symbol
         // (B) and any in-scope library roots (C).
         let mut matches = vec![];
+        // `None` until the project walk actually runs: the path/glob branch below
+        // never builds it, and a default-constructed audit there would report
+        // "0 source files accepted" for a perfectly trustworthy zero.
+        let mut audit: Option<WalkAudit> = None;
         if let Some(rel) = get_path_param(&input, false)? {
             search_files_restricted(
                 rel,
@@ -266,6 +270,7 @@ impl Tool for Symbols {
             .await?;
         } else {
             if scope.includes_project() {
+                let mut project_audit = WalkAudit::default();
                 search_project_symbols(
                     ctx,
                     &root,
@@ -277,8 +282,10 @@ impl Tool for Symbols {
                     depth,
                     search_pool_cap,
                     &mut matches,
+                    &mut project_audit,
                 )
                 .await?;
+                audit = Some(project_audit);
             }
             search_library_symbols(
                 ctx,
@@ -294,14 +301,24 @@ impl Tool for Symbols {
             .await?;
         }
 
-        Ok(finalize_search_results(
+        let mut result = finalize_search_results(
             matches,
             &guard,
             &root,
             include_body,
             include_body_explicit,
             &input,
-        ))
+        );
+        // A zero that cannot be trusted has to say so in the RESPONSE, not only in
+        // `tracing`. The harm in the originating bug was never the retry — it was an
+        // agent concluding "this symbol does not exist" from an answer that actually
+        // meant "the walk never saw the file".
+        if result["total"].as_u64() == Some(0) {
+            if let Some(w) = audit.as_ref().and_then(|a| a.completeness_warning(&root)) {
+                result["completeness_warning"] = json!(w);
+            }
+        }
+        Ok(result)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -431,6 +448,60 @@ async fn search_files_restricted(
     Ok(())
 }
 
+/// What the project walk could not see.
+///
+/// A `symbols` search that returns zero is indistinguishable from "the symbol does
+/// not exist" unless the walk reports how much of the tree it actually read. Both
+/// search paths depend on this one walk — LSP results are filtered through
+/// `accepted_files` by the `in_walk` predicate, and the tree-sitter fallback
+/// re-walks the same root — so a partial walk silently zeroes both at once. That is
+/// the shape of the flake in
+/// `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`:
+/// observed inside a parallel batch, recovered on a solo retry.
+#[derive(Default)]
+struct WalkAudit {
+    /// Directory entries the walk could not read. `ignore::Walk` yields
+    /// `Result<DirEntry, _>`, and the `.flatten()` this replaced dropped every
+    /// error, so an fd-exhausted or permission-denied walk was indistinguishable
+    /// from a complete one.
+    errors: usize,
+    /// Source files the walk accepted. Zero here is the strongest signal available
+    /// that `root` is not the tree the caller meant.
+    accepted: usize,
+}
+
+impl WalkAudit {
+    /// The warning to attach to a zero-match search, or `None` when the zero is
+    /// trustworthy.
+    ///
+    /// The `None` is the load-bearing half. A clean walk over a populated tree
+    /// makes "no such symbol" a real answer, and warning on every zero would train
+    /// the reader to ignore the warning in the case that matters.
+    fn completeness_warning(&self, root: &std::path::Path) -> Option<String> {
+        if self.errors > 0 {
+            return Some(format!(
+                "the directory walk under {} could not read {} entr{}, and searched {} source \
+                 file(s) — this zero may be a false negative rather than an absent symbol. \
+                 Re-run; if it persists, check for file-descriptor exhaustion (many concurrent \
+                 searches) or unreadable directories.",
+                root.display(),
+                self.errors,
+                if self.errors == 1 { "y" } else { "ies" },
+                self.accepted,
+            ));
+        }
+        if self.accepted == 0 {
+            return Some(format!(
+                "the walk under {} accepted 0 source files, so both the LSP filter and the \
+                 tree-sitter fallback had nothing to search — this zero says nothing about the \
+                 symbol. Confirm the active project with workspace(action=\"status\").",
+                root.display(),
+            ));
+        }
+        None
+    }
+}
+
 /// Project-scope search (branch B of `Symbols::call`): one `workspace/symbol`
 /// request per language (per-language timeout), falling back to a tree-sitter
 /// walk when LSP yields nothing. Body is the old `scope.includes_project()` block.
@@ -446,6 +517,7 @@ async fn search_project_symbols(
     depth: usize,
     search_pool_cap: usize,
     matches: &mut Vec<Value>,
+    audit: &mut WalkAudit,
 ) -> anyhow::Result<()> {
     // Fast path: workspace/symbol — one LSP request per language instead of
     // one textDocument/documentSymbol request per file.
@@ -455,7 +527,18 @@ async fn search_project_symbols(
         .hidden(true)
         .git_ignore(true)
         .build();
-    for entry in walker.flatten() {
+    for entry in walker {
+        // Counted, never dropped. `.flatten()` here made a partial walk look
+        // identical to a complete one, and every LSP match is gated on
+        // `accepted_files` below, so a truncated walk zeroes the whole search.
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                audit.errors += 1;
+                tracing::warn!(error = %e, "symbols: project walk entry unreadable");
+                continue;
+            }
+        };
         if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             let path = entry.path().to_path_buf();
             if let Some(lang) = ast::detect_language(&path) {
@@ -464,6 +547,7 @@ async fn search_project_symbols(
             }
         }
     }
+    audit.accepted = accepted_files.len();
 
     // Concurrently start/query all LSP servers so different languages
     // (e.g. Kotlin JVM startup) don't block each other.
@@ -572,7 +656,18 @@ async fn search_project_symbols(
             .hidden(true)
             .git_ignore(true)
             .build();
-        for entry in walker.flatten() {
+        for entry in walker {
+            // Same reasoning as the accepted-files walk above: this is the last
+            // path that can still find the symbol, so an unreadable entry here is
+            // exactly what turns a real symbol into "0 matches".
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    audit.errors += 1;
+                    tracing::warn!(error = %e, "symbols: fallback walk entry unreadable");
+                    continue;
+                }
+            };
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
@@ -1043,5 +1138,93 @@ pub(crate) fn attach_docstrings(matches: &mut [Value], root: &std::path::Path) {
             let content = content.clone();
             obj.insert("docs".to_string(), json!(content));
         }
+    }
+}
+
+#[cfg(test)]
+mod walk_audit_tests {
+    use super::WalkAudit;
+    use std::path::Path;
+
+    /// The negative case is the one that keeps the warning meaningful: a complete
+    /// walk over a tree that has sources makes "no such symbol" a real answer. If
+    /// every zero carried a warning, the warning would be noise and the reader
+    /// would learn to skip the one that matters.
+    #[test]
+    fn a_clean_walk_over_a_populated_tree_produces_no_warning() {
+        let audit = WalkAudit {
+            errors: 0,
+            accepted: 42,
+        };
+        assert_eq!(audit.completeness_warning(Path::new("/repo")), None);
+    }
+
+    /// An unreadable entry means the answer is drawn from part of the tree. The
+    /// message has to name that, name the root, and say the zero may be false —
+    /// `tracing` alone cannot reach the agent reading the response.
+    #[test]
+    fn an_unreadable_entry_makes_the_zero_suspect_and_names_the_root() {
+        let audit = WalkAudit {
+            errors: 3,
+            accepted: 10,
+        };
+        let w = audit
+            .completeness_warning(Path::new("/repo"))
+            .expect("a truncated walk must warn");
+        assert!(w.contains("/repo"), "must name the root: {w}");
+        assert!(w.contains('3'), "must name the entry count: {w}");
+        assert!(
+            w.contains("false negative"),
+            "must say the zero may be false: {w}"
+        );
+        // Singular/plural is worth pinning: this string is read by an agent
+        // deciding whether to trust a zero, and "1 entries" undermines that.
+        let one = WalkAudit {
+            errors: 1,
+            accepted: 10,
+        };
+        let w1 = one.completeness_warning(Path::new("/repo")).unwrap();
+        assert!(w1.contains("1 entry"), "singular form: {w1}");
+    }
+
+    /// Zero accepted source files is the signature of searching the wrong tree —
+    /// the root-race hypothesis in the originating bug. Both search paths key off
+    /// this same walk, so there is nothing left that could have matched.
+    #[test]
+    fn zero_accepted_files_points_at_the_root_rather_than_the_symbol() {
+        let audit = WalkAudit {
+            errors: 0,
+            accepted: 0,
+        };
+        let w = audit
+            .completeness_warning(Path::new("/wrong/tree"))
+            .expect("an empty walk must warn");
+        assert!(w.contains("/wrong/tree"), "must name the root: {w}");
+        assert!(
+            w.contains("0 source files"),
+            "must say the walk found nothing to search: {w}"
+        );
+        assert!(
+            w.contains("workspace"),
+            "must point at how to check the active project: {w}"
+        );
+    }
+
+    /// Errors take precedence: a walk that both failed and accepted nothing is
+    /// better explained by the failure than by a wrong root, and reporting the
+    /// wrong-root message there would send the reader to check activation when the
+    /// real cause is on the filesystem.
+    #[test]
+    fn a_failed_and_empty_walk_reports_the_failure_not_the_root() {
+        let audit = WalkAudit {
+            errors: 2,
+            accepted: 0,
+        };
+        let w = audit.completeness_warning(Path::new("/repo")).unwrap();
+        assert!(w.contains("false negative"), "{w}");
+        assert!(
+            !w.contains("0 source files"),
+            "must not also claim the root is wrong: {w}"
+        );
     }
 }

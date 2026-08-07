@@ -1,7 +1,7 @@
 ---
 kind: bug
 status: open
-title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A retracted — include_body is honored)'
+title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A fixed in b2344aab; Bug B mitigated + instrumented)'
 tags:
 - symbols
 - include_body
@@ -198,7 +198,13 @@ Git commit: `beba4a7033cd174a898f30777c1fd58c91814a4b` (codescout, this session)
 
 ## Root cause
 
-**Bug A — confirmed via source read.** `src/tools/symbol/list_overview.rs` never reads the
+**Bug A — was real, and is FIXED in `b2344aab`** ("fix(symbols): honor explicit include_body in
+overview mode"). All three overview branches now use the explicit-param-first pattern this
+section proposed, so the code quoted just below **no longer exists** — it is kept as the record
+of what was wrong. The earlier title called Bug A *retracted*, which reads as "the report was
+mistaken": it was not. The defect was real and it was fixed.
+
+**Original finding, as written:** `src/tools/symbol/list_overview.rs` never reads the
 caller's `include_body` input in any of its three overview branches:
 
 ```
@@ -402,6 +408,51 @@ that actually meant "not indexed yet".
 the root cause is narrowed but not confirmed; patching the disclosure before knowing which
 of the paths above fires risks papering over the real one. Confirm the fallback gate first.
 
+### Bug B — the walk was discarding its own errors, and that is now fixed (2026-08-07)
+
+Reading the two walks turned up a defect neither hypothesis had named. Both used
+`walker.flatten()`:
+
+- the accepted-files walk that every LSP match is gated on via `in_walk`, and
+- the tree-sitter fallback walk.
+
+`ignore::Walk` yields `Result<DirEntry, Error>`, so **`.flatten()` silently discarded every
+I/O error**. A walk truncated by fd exhaustion, a permission error, or any transient made a
+*partial* tree look like a *complete* one — and because both search paths key off that same
+walk, one truncation zeroes both at once.
+
+That fits the observed conditions better than the root race this file previously favoured: the
+failures happened inside a **parallel batch**, where N concurrent recursive walks plus LSP
+servers compete for file descriptors, and every recovery was a **solo** retry. The root race
+remains possible and is still covered — a wrong root yields `accepted == 0`, which now reports
+itself distinctly.
+
+**What changed.** A `WalkAudit` (`errors`, `accepted`) is threaded through
+`search_project_symbols`; both `Err` arms count and log instead of dropping. On a zero result
+the response carries `completeness_warning` — the existing house convention from
+`references.rs` — rendered by `format_search_symbols` in **both** its branches:
+
+| walk state | what the caller sees |
+|---|---|
+| clean, sources accepted | bare `0 matches` — a trustworthy answer about the symbol |
+| entries unreadable | warning naming the root, the count, and "may be a false negative" |
+| 0 source files accepted | warning pointing at the active project rather than the symbol |
+
+The **`None` case is the load-bearing half**: warning on every zero would be noise, and the
+reader would learn to skip the warning that matters.
+
+**Two things deliberately NOT done.**
+
+- **The two walks were not merged**, despite applying an identical filter (`is_file` +
+  `detect_language`). They are a *recovery path*, not duplication: if walk 1 truncates, every
+  LSP symbol is filtered out, `matches` goes empty, and that is precisely what *triggers* the
+  fallback — so a complete walk 2 can still find the symbol. Collapsing them would remove the
+  second chance and make this bug strictly worse.
+- **The zero branch of `format_search_symbols` returns early**, so the warning is appended
+  before that return. `references.rs` already paid for this lesson (its BUG 2026-05-21 comment:
+  surface the warning in both the zero and normal branches) — a warning that renders only
+  alongside results explains nothing about the result that needed explaining.
+
 ## Tests added (2026-07-28)
 
 Two in `src/tools/symbol/tests.rs`, both asserting the hint *string* rather than the
@@ -419,9 +470,70 @@ changing it would obscure that the test did its job and the reader did not.
 
 ## Tests added
 
-**Bug A (fixed 2026-07-19):** `tools::symbol::tests::symbols_overview_honors_explicit_include_body_true`
-in `src/tools/symbol/tests.rs` — asserts `symbols(path=<file>, include_body=true)` (no name/
-query/symbol) returns non-empty body text for both the single-file overview branch and the
-directory-scan branch.
+Ten, on `experiments`.
 
-Bug B has no proposed test yet — needs the controlled repro harness described above first.
+**Unit — `walk_audit_tests` in `src/tools/symbol/symbols.rs`:**
+
+- `a_clean_walk_over_a_populated_tree_produces_no_warning` — the over-match guard that keeps
+  the warning meaningful.
+- `an_unreadable_entry_makes_the_zero_suspect_and_names_the_root` — including singular/plural,
+  since an agent reads this string to decide whether to trust a zero.
+- `zero_accepted_files_points_at_the_root_rather_than_the_symbol`.
+- `a_failed_and_empty_walk_reports_the_failure_not_the_root` — precedence, so a filesystem
+  failure does not send the reader off to check activation.
+
+**Renderer — `src/tools/symbol/tests.rs`:**
+
+- `format_search_symbols_surfaces_completeness_warning_on_zero_matches`
+- `format_search_symbols_leaves_a_trustworthy_zero_bare` (over-match guard)
+- `format_search_symbols_surfaces_completeness_warning_alongside_results`
+
+**End-to-end through the real walk — `src/tools/symbol/tests.rs`:**
+
+- `search_on_a_tree_with_no_source_files_says_so_instead_of_a_bare_zero`
+- `search_on_a_populated_tree_returns_a_bare_zero_for_a_missing_symbol` — with a positive
+  control proving the fixture really is searchable, so the bare zero is a statement about the
+  symbol rather than a broken fixture.
+- `an_unreadable_directory_is_counted_rather_than_silently_dropped` (`#[cfg(unix)]`) — the
+  reproducible stand-in for the transient, guarded to skip where mode bits are ignored (root)
+  instead of asserting a precondition it cannot establish.
+
+**Verified by mutation, not by passing.** Reverting the early-return warning in
+`format_search_symbols` kills the zero-branch test and nothing else. Neutralising the error
+counting kills the unreadable-directory test.
+
+**One coverage limit, stated rather than glossed.** The unreadable-directory test pins that
+errors are counted *somewhere* in the search, not that *both* walk sites count. That surfaced
+because an incomplete mutation — the two `Err` arms sit at different indentation depths, so a
+single-indentation `replace_all` matched only one — left one counter live and the test still
+passed. Both sites are the same two-line construction exercised in the same call, so it is
+left as is. Worth remembering that "the mutation did not kill it" can mean the mutation was
+incomplete, not that the test is bad.
+
+Gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, 3515 passed / 0 failed
+/ 44 ignored.
+
+## Resume
+
+**Status is deliberately `open`, not `mitigated` or `fixed`.** A real defect was found and
+fixed (walk errors discarded) and the *harm* is neutralised (a false zero now announces
+itself) — but the originating symptom has never been reproduced, so which path actually fired
+in the two observed failures is unconfirmed. `mitigated` would be defensible; it would also
+drop this file out of `artifact(find, kind="bug", status in [open, investigating])`, and a
+recurring flake with an unconfirmed cause is better left visible to triage.
+
+**What would close it.** The next occurrence is now self-diagnosing — that is the whole point
+of the change. When a 0-match happens again, read the `completeness_warning`:
+
+- *"could not read N entries"* → the walk-truncation hypothesis is confirmed. Bound the cause
+  next: compare `ulimit -n` against the number of concurrent `symbols` calls plus running LSP
+  servers. Flip to `fixed` if the count explains it.
+- *"accepted 0 source files"* → the **root race** is confirmed instead, and the fix belongs in
+  activation ordering, not in `symbols`. Precedent:
+  `docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`.
+- **No warning at all, on a symbol that provably exists** → both hypotheses are wrong and a
+  third mechanism is at work. That is the most informative outcome of the three, and it is one
+  this file previously could not distinguish from either.
+
+**Bookkeeping.** The fix SHA is on `experiments` only. The current promotion is a fast-forward,
+which mints no new SHAs, so the citation stays valid as written once `master` catches up.

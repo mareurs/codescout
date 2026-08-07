@@ -114,8 +114,20 @@ pub fn format_search_symbols(val: &Value) -> String {
 
     let total = val["total"].as_u64().unwrap_or(symbols.len() as u64) as usize;
 
+    // Bound before the early return, because the zero branch is exactly where this
+    // warning earns its keep. `references.rs` already paid for learning that (its
+    // BUG 2026-05-21 comment: surface the warning in both the zero and normal
+    // branches) — a warning that renders only when there are results explains
+    // nothing about the answer that needed explaining.
+    let warning = val.get("completeness_warning").and_then(|v| v.as_str());
+
     if symbols.is_empty() {
-        return "0 matches".to_string();
+        let mut out = "0 matches".to_string();
+        if let Some(w) = warning {
+            out.push_str("\n\nwarning: ");
+            out.push_str(w);
+        }
+        return out;
     }
 
     // The symbols search JSON may hoist `file` to the top level (Fix C
@@ -212,6 +224,11 @@ pub fn format_search_symbols(val: &Value) -> String {
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
         out.push('\n');
         out.push_str(&format_overflow(overflow));
+    }
+
+    if let Some(w) = warning {
+        out.push_str("\n\nwarning: ");
+        out.push_str(w);
     }
 
     out

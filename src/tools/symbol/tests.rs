@@ -7555,6 +7555,206 @@ fn format_search_symbols_single_file_no_global_header() {
     assert!(out.starts_with("a.rs (1)\n"), "got:\n{out}");
 }
 
+/// The zero branch returns early, so a warning appended only after it would be
+/// invisible in the one case it exists for: an agent deciding whether "0 matches"
+/// means "absent" or "not searched". `references.rs` hit the same trap first
+/// (BUG 2026-05-21) — a warning that renders only alongside results explains
+/// nothing about the result that needed explaining.
+/// Guards `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
+#[test]
+fn format_search_symbols_surfaces_completeness_warning_on_zero_matches() {
+    use crate::tools::symbol::display::format_search_symbols;
+    let val = json!({
+        "symbols": [],
+        "total": 0,
+        "completeness_warning": "the walk under /repo accepted 0 source files, so both the LSP filter and the tree-sitter fallback had nothing to search"
+    });
+    let text = format_search_symbols(&val);
+    assert!(text.contains('0'), "must still report the zero: {text}");
+    assert!(
+        text.contains("accepted 0 source files"),
+        "the warning must render in the zero branch: {text}"
+    );
+}
+
+/// Over-match guard for the test above: a trustworthy zero must stay bare. If the
+/// renderer volunteered a warning whenever the count was zero, the warning would
+/// carry no information and the previous test would pass for the wrong reason.
+#[test]
+fn format_search_symbols_leaves_a_trustworthy_zero_bare() {
+    use crate::tools::symbol::display::format_search_symbols;
+    let val = json!({ "symbols": [], "total": 0 });
+    let text = format_search_symbols(&val);
+    assert_eq!(text, "0 matches", "no warning key means no warning: {text}");
+}
+
+/// A partial walk can still return some matches, and those results are just as
+/// suspect as a zero — the symbol you wanted may be in the part that was not read.
+#[test]
+fn format_search_symbols_surfaces_completeness_warning_alongside_results() {
+    use crate::tools::symbol::display::format_search_symbols;
+    let val = json!({
+        "symbols": [
+            { "kind": "Function", "file": "a.rs", "start_line": 1, "end_line": 5, "name": "foo", "symbol": "foo" }
+        ],
+        "total": 1,
+        "completeness_warning": "the directory walk under /repo could not read 2 entries"
+    });
+    let text = format_search_symbols(&val);
+    assert!(text.contains("foo"), "results must still render: {text}");
+    assert!(
+        text.contains("could not read 2 entries"),
+        "the warning must render in the normal branch too: {text}"
+    );
+}
+
+/// End-to-end through the real walk: a project with no source files must not
+/// answer a search with a bare zero. Both search paths key off this one walk — LSP
+/// hits are filtered through its accepted-files set and the tree-sitter fallback
+/// re-walks the same root — so "0 accepted" means nothing could have matched,
+/// whatever the symbol.
+/// Guards `docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`.
+#[tokio::test]
+async fn search_on_a_tree_with_no_source_files_says_so_instead_of_a_bare_zero() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // Deliberately no source file of any recognised language.
+    std::fs::write(dir.path().join("README.txt"), "not source\n").unwrap();
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = Symbols
+        .call(json!({ "query": "anything_at_all" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["total"].as_u64(), Some(0));
+    let w = result["completeness_warning"]
+        .as_str()
+        .expect("a zero from an empty walk must carry a warning");
+    assert!(w.contains("0 source files"), "got: {w}");
+}
+
+/// The over-match guard for the test above, also end-to-end: when the walk really
+/// did read the tree and the symbol really is absent, the zero must stay bare.
+/// Without this, the warning could be emitted on every zero and mean nothing.
+#[tokio::test]
+async fn search_on_a_populated_tree_returns_a_bare_zero_for_a_missing_symbol() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(dir.path().join("a.rs"), "pub fn findme() -> i32 { 1 }\n").unwrap();
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = Symbols
+        .call(json!({ "query": "definitely_not_present_xyz" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["total"].as_u64(), Some(0));
+    assert!(
+        result.get("completeness_warning").is_none(),
+        "a clean walk over a populated tree must leave the zero bare: {result}"
+    );
+    // Sanity: the same tree really is searchable, so the bare zero above is a
+    // statement about the symbol and not about a broken fixture.
+    let hit = Symbols
+        .call(json!({ "query": "findme" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(hit["total"].as_u64(), Some(1), "fixture must be searchable");
+}
+
+/// The defect itself: `ignore::Walk` yields `Result<DirEntry, _>` and the previous
+/// `.flatten()` discarded every `Err`, so a walk truncated by an unreadable
+/// directory was indistinguishable from a complete one. An unreadable directory is
+/// the reproducible stand-in for the transient this bug was observed under (a
+/// parallel batch, recovering on a solo retry — fd exhaustion has the same shape).
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unreadable_directory_is_counted_rather_than_silently_dropped() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(dir.path().join("a.rs"), "pub fn findme() -> i32 { 1 }\n").unwrap();
+    let locked = dir.path().join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(locked.join("hidden.rs"), "pub fn buried() {}\n").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Root (and some exotic filesystems) ignore mode bits, so the precondition
+    // cannot be established there and asserting would prove nothing.
+    if std::fs::read_dir(&locked).is_ok() {
+        let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+        return;
+    }
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = Symbols
+        .call(json!({ "query": "definitely_not_present_xyz" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["total"].as_u64(), Some(0));
+    let w = result["completeness_warning"]
+        .as_str()
+        .expect("a walk that could not read a directory must not report a bare zero");
+    assert!(
+        w.contains("could not read"),
+        "must name the truncation rather than the root: {w}"
+    );
+
+    // A truncated walk must still search what it could reach — the error is
+    // counted, not fatal.
+    let hit = Symbols
+        .call(json!({ "query": "findme" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        hit["total"].as_u64(),
+        Some(1),
+        "readable files must still be searched"
+    );
+
+    // Leave the fixture removable by the tempdir drop.
+    let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+}
+
 // ── symbols single-match focus + search-mode include_docs ──────────────────
 
 #[tokio::test]
