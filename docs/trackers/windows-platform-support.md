@@ -93,6 +93,7 @@ to master — the tracker outlives them.
 | WIN-26 | retrieval-stack | fixed | VDI can't run Docker/Qdrant, so the WIN-22 remote-embeddings fix is necessary but NOT sufficient: code `semantic_search` is hard-wired to Qdrant (the in-process path was removed 2026-05-07). Needs a daemon-free "lite" stack = remote OpenAI dense + in-process sqlite-vec (statically-linked `vec0`, EDR-safe — already proven for librarian via `ArtifactBackend::SqliteVec`, see `migrate_v6.rs`). Plan: generalize that escape hatch to code search + memory. Phase 0 (dense always OpenAI-compatible + drop TEI + dense-only-leak fix) shipped 825c0c52; Phases 1-4 ALL SHIPPED to master (1: 0ff972f7 CodeVectorStore trait, 2a: b96c8ae4 SqliteVecCodeStore, 2b: 93ef0d43 sqlite memory store, 3: 9d40d36b dense-only + lite flag, 4: 5c1ecfa8 lean default build, server-stack feature-gated). Closed 2026-07-02 by verify-open pass. | docs/plans/2026-06-16-two-stack-retrieval-lite.md | 2026-06-16 |
 | WIN-27 | test-portability | open | first full wine suite (windows-gnu CI) showed 20 pre-existing failures; 8-test guide_hint cluster FIXED 2026-07-05 (make_server now seeds LIBRARIAN_WORKSPACE so build_tool_context does not depend on the absent ~/.config workspace under wine) and un-skipped in CI, verified 10 pass/1 ignored under wine; 12 remain skipped (symbols/glob-walk emulation quirks, preflight/gitignore, markdown compact, run_command quoting, head_sha) plus validate_prune_request_gates (the one real-Windows MSVC failure) | docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md | 2026-07-02 |
 | WIN-28 | test-portability | fixed | nine real-Windows (MSVC) lib failures on `experiments`: 7 in `librarian::tools::doctor` (catalog rehome + prune_missing), `librarian::util::like_escape_idiom_is_not_inlined_outside_helper`, `retrieval::index_lock::lock_path_is_not_sited_in_bare_temp_dir`. Three root causes, **zero product defects**: (a) POSIX-shaped absolute literals — `"/gone/old"` is not absolute on Windows, so `validate_rehome_request`'s gate rejected the fixture and `derive_dead_roots` skipped the row *by design*; (b) mixed-separator expectation vs OS-shaped `CARGO_MANIFEST_DIR`; (c) a Unix-only siting assertion — `per_user_runtime_dir()` returns bare `temp_dir()` on Windows deliberately, since `%LOCALAPPDATA%\Temp` is already per-user. Fixed by a `dead_root(tag)` fixture helper, `RepoPath` normalisation on both sides of two comparisons, `#[cfg(unix)]` scoping plus a new platform-independent replacement assertion, and a 4× Windows LSP-indexing budget. Verified CI run `31098286970`: windows/default **3283 passed 0 failed**, all three windows cells green. | docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md | 2026-08-06 |
+| WIN-30 | ci | open | Two Windows tests flake on timing/race assumptions and turned a 15-job run red with no code defect: `cold_start_over_budget_returns_none_but_keeps_warming` on wine (100 ms of real-time slack) and `background_command_with_quotes_captures_output` on MSVC (skip-listed on wine, gating on MSVC). Re-run of only those jobs, unchanged, gave 15/15. Technically fires WIN-29's reopen trigger; deliberately not reopened — see History. | docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md | 2026-08-07 |
 | WIN-29 | ci | fixed | `Windows-gnu cross (MinGW + wine)` red and undiagnosed — closed as a **duplicate of WIN-28**, confirmed twice: its failing-test set was byte-identical to `Test (windows-latest / default)`'s nine, and it went green from the same nine fixture fixes with no MinGW- or wine-specific change. No cross-target defect exists. Reopen only if the cross job ever fails a test `windows-latest` passes. | docs/issues/archive/2026-08-06-windows-gnu-cross-job-red-undiagnosed.md | 2026-08-06 |
 ## Currently stable on Windows
 
@@ -164,6 +165,41 @@ When a Windows issue is found or its status changes:
    it in `ref`.
 
 ## History
+
+### 2026-08-07 — WIN-30 opened (two timing flakes turned a 15-job run red with no code defect)
+
+Run `31151333288` on `2d824f15` came back 13/15 with two single-test failures, one per Windows
+job, at the moment a 440-commit promotion was waiting on that gate. Re-running only the two
+failed jobs, unchanged, gave **15/15**.
+
+- **wine:** `lsp::budget_tests::cold_start_over_budget_returns_none_but_keeps_warming` —
+  `must not wait out the cold start`. The assertion allows **100 ms of real-time slack** (a
+  150 ms ceiling against a 50 ms budget) in a `#[tokio::test]` with no `start_paused`, even
+  though every sleep involved is a tokio timer and virtual time would make it deterministic.
+  Not on any `--skip` list, so this failure is new relative to WIN-27's baseline.
+- **windows-latest (MSVC):** `background_command_with_quotes_captures_output` —
+  `background command output not captured`. This one *is* in the wine job's `--skip` list, as
+  one of WIN-27's twenty, but `windows-latest` does not skip it. WIN-27 named
+  `validate_prune_request_gates` as "the one exception, also red on real Windows"; this makes
+  it the **second**. The split is the worst of both options — exempted where it was noticed,
+  load-bearing where it was not.
+
+**WIN-29's reopen trigger technically fired, and WIN-30 deliberately does not reopen it.**
+WIN-29 closed as a duplicate of WIN-28 under the condition *"Reopen only if the cross job ever
+fails a test `windows-latest` passes"* — which is literally what happened, since wine failed
+the budget test that MSVC passed. It is still not a cross-target defect: the test passed on an
+unchanged re-run, and a wall-clock assertion with 100 ms of margin failing under emulation is
+expected slowness, not a MinGW- or wine-specific code path. The genuine wine-specific signal is
+narrower and worth stating on its own terms — **emulation overhead makes tight real-time
+assertions unsafe on that job**, which is a property of the runner rather than of the target.
+So the trigger is refined rather than honoured as written: reopen WIN-29 only if wine fails a
+test MSVC passes **for a reason that survives a re-run**.
+
+Worth recording what these failures were *not*. Three other runs the same day reported
+run-level `failure` or `cancelled` while containing zero executed jobs (`steps=0`), during a
+GitHub Actions major outage. These two carried `steps=12`. The `steps` count is the only field
+that separates a scheduling outcome from a test outcome, and reading it is what kept three
+separate wrong conclusions off the record.
 
 ### 2026-08-06 — WIN-28 + WIN-29 opened and closed same day; Windows fully green
 
