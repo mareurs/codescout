@@ -1,6 +1,7 @@
 ---
 kind: bug
-status: investigating
+status: open
+title: 'BUG: a kotlin-lsp mem-kill does not count toward the LSP circuit breaker, so kill->respawn->grow->kill is bounded but unthrottled (the original "no -Xmx, ~31 GiB heap" premise was falsified 2026-08-07 — jcmd shows -Xmx2g from the distro vmoptions)'
 tags:
 - memory
 - oom

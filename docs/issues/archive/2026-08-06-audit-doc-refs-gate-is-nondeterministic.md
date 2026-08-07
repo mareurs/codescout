@@ -1,14 +1,15 @@
 ---
 id: d965b9fd79298e46
 kind: bug
-status: investigating
-title: 'BUG: audit-doc-refs'' resolved/broken tally is non-deterministic under LSP cold start (forced on demand 2026-08-07); the original high-count/gate flap remains unreproduced at 99 invocations'
+status: fixed
+title: 'BUG: audit-doc-refs'' summary counters did not partition n_refs_found, and a mid-index LSP produced false SymbolMissing verdicts (both fixed 2026-08-07; the original gate flap was removed earlier by severity re-banding)'
 tags:
 - audit_doc_refs
 - ci
 - flake
 - lsp
 - determinism
+closed: 2026-08-07
 opened: 2026-08-06
 owner: marius
 related:
@@ -17,6 +18,45 @@ severity: medium
 ---
 
 ## Summary
+> **FIXED 2026-08-07 in `6e608545` (experiments). CI 15/15 attempt 1.** All three questions this
+> file carried are resolved, and two of them turned out to be one defect:
+>
+> 1. **The counters now partition.** They were three independent filters covering 7 of the 10
+>    `Verdict` variants, so `ResolvedBasename`, `AmbiguousBasename` and `External` were counted in
+>    `n_refs_found` and in no bucket — 2,426 of 47,094 refs on this repo, invisible in the summary.
+>    Replaced by one `bucket()` fn whose match is **exhaustive**, so adding a variant is a compile
+>    error until it is bucketed. A test can assert a partition; an exhaustive match is one.
+>    Verified live: full corpus `47141 = 14240 + 9063 + 23838`, residual **0**.
+> 2. **A mid-index LSP no longer fakes missing symbols.** `resolve_file_symbol` treated
+>    `Some(syms)` without the name as authoritative absence — the branch comment even said so
+>    (*"the LSP responded (not offline), so an empty symbol list means the symbol genuinely isn't
+>    there"*), which is false during warm-up. It now cross-checks tree-sitter
+>    (`ast_has_symbol`): if the AST has the name, the verdict is `Unknown` + `note_degraded`
+>    rather than `SymbolMissing`. This was the tally-drift mechanism, since `SymbolMissing` is the
+>    only LSP-dependent verdict in the broken bucket and that branch never marked the scan
+>    degraded.
+> 3. **`degraded` is honest again**, as a free consequence of (2). Measured after the fix: `true`
+>    with `offline: ["rust"]` on a cold full-corpus run, `false` with zero `lsp_behind_ast`
+>    findings on a warm scoped run — so neither silent nor saturated, the failure mode
+>    `note_degraded`'s own docstring warns about.
+>
+> **The original symptom — the flapping high count — was already fixed before this file was
+> reopened, and that is why 99 invocations could not reproduce it.** `default_severity` reserves
+> `high` for `Missing`/`FileMissing`, both deterministic filesystem answers, so no LSP-dependent
+> verdict can reach the gating band. It is structurally impossible now, not merely unobserved.
+> Closing as **fixed** rather than `zombie` for exactly that reason: the cause was found and
+> removed.
+>
+> Regression guards: `summary_counters_partition_every_verdict`,
+> `resolved_basename_counts_as_resolved_everywhere`,
+> `ambiguous_basename_still_counts_against_the_gate`,
+> `resolver_defers_to_the_ast_when_the_lsp_lags_behind_disk`,
+> `resolver_still_reports_symbol_missing_when_the_ast_agrees`. The last two are the mutation-
+> verified pair — making `ast_has_symbol` return `true` unconditionally kills the second, and
+> without it that mutation would silently stop the audit reporting stale symbol refs at all.
+>
+> **Resume:** N/A. Master-side SHA still owed after the `experiments` -> `master` promotion (the
+> SHA above is experiments-side and orphans on rebase).
 
 `codescout audit-doc-refs --fail-on high` returned **different high-severity finding
 counts for the same tree and the same command** within a few minutes. A gate that

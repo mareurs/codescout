@@ -1,18 +1,39 @@
 ---
+kind: bug
 status: open
+title: 'BUG: AST chunker has no minimum chunk size — 12% of chunks are single lines (the "~2h re-embed" in the original title measured 8.06 min on 2026-08-07; deferred by decision)'
+tags:
+- indexer
+- chunker
+- retrieval
+- performance
+- embedding-cost
+closed: null
 opened: 2026-07-27
-closed:
-severity: high
 owner: marius
 related:
-  - docs/issues/2026-07-27-indexer-walks-git-and-tool-state-dirs.md
-tags: [indexer, chunker, retrieval, performance, embedding-cost]
-kind: bug
+- docs/issues/2026-07-27-indexer-walks-git-and-tool-state-dirs.md
+severity: high
 ---
 
 # BUG: AST chunker has no minimum chunk size — 12% of chunks are single lines, inflating re-embed to ~2h
 
 ## Summary
+> **Title corrected 2026-08-07.** It claimed single-line chunks inflate re-embedding to ~2 h. A
+> full `index --force` on this project that day took **483,729 ms = 8.06 min** — off by roughly 15x.
+> The likely source of the error is recorded in `src/retrieval/embedder.rs`, whose own comment says
+> the throughput sweep those numbers came from was *"taken while four duplicate indexers were
+> competing for the same GPU"* — i.e. contaminated by
+> `docs/issues/2026-07-25-concurrent-index-no-project-lock`, the very bug whose precondition this
+> file's Resume tells you to check first.
+>
+> The 12% single-line figure itself is **corroborated**, from an independent direction: with sparse
+> re-enabled, 7.7% of a 2000-point sample carried an EMPTY sparse vector, and a single line is
+> exactly the input SPLADE yields no terms for. Two measurements of the same population.
+>
+> So the defect is real and the cost is not what was written. Re-embed time is no longer an argument
+> for fixing it; the argument that survives is retrieval quality — those chunks are dense-only in
+> RRF, so 7.7% of the corpus is invisible to the sparse leg.
 > **DEFERRED 2026-08-07 by maintainer decision — stays `open`, no work scheduled.** Both candidate
 > fixes were on the table (minimum chunk size + sibling merge, or skip trivial declarations) and
 > neither was chosen, for two reasons:

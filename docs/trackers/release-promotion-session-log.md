@@ -942,6 +942,8 @@ Ranked by what to do first.
 | F-15 | 2026-08-07 | high | process | fixed-verified | A concurrent session changed the checked-out branch between commit and push; the bare `git push` reported `Everything up-to-date` at exit 0 while the commit sat undelivered, and a later `edit_markdown` then wrote to the foreign branch's tree and returned `ok` because its anchor existed on both -- refspec push is the non-destructive fix, and after a detected foreign checkout every write is suspect and must be verified from the object store |
 | F-16 | 2026-08-07 | high | process | mitigated | Backticks in a double-quoted `git commit -m` body ran as command substitution -- cost one word here, but the construct executes arbitrary commands while `git commit` still exits 0, so the only trace is an unexplained gap in the message; `-F <file>` is the only safe form |
 | F-17 | 2026-08-07 | high | process | fixed-verified | A `--force` reindex ran 7 min dense-only against sqlite-vec instead of hybrid-against-Qdrant, because `cargo build --release` omits `server-stack` and `VectorBackend::resolve()` then defaults to lite — caught only by noticing the sparse container had zero traffic while dense had 73,232 lines; the start log reported chunk_target and flush_batch but neither of the two fields that were wrong |
+| F-18 | 2026-08-07 | high | process | mitigated | A routine `/mcp` killed a running rebuild 4 min in, because `run_command` children inherit the MCP server's lifetime — and took both `@bg_*` buffers with it; second time in one session that server-side state died with a reconnect, the first being the very argument used in the #16 decision. Long jobs must be `setsid`-detached and log to a file |
+| F-19 | 2026-08-07 | med | process | mitigated | Three `pgrep`/`pkill -f` process checks matched their own argv: one falsely reported an indexer running (the exact safety precondition it was checking), one made a poll loop unable to ever exit, and one killed the command running it. `ps -C <binary>` cannot self-match because the checker is not named after the binary |
 
 ## Wins Index
 
@@ -2055,6 +2057,51 @@ harness, `audit_doc_refs` on a full corpus). A mechanical backstop is also avail
 recurs: have `index` refuse to run, or warn loudly, when the resolved backend is sqlite-vec while
 `CODESCOUT_QDRANT_URL` is reachable — that combination is almost always a lean-build accident
 rather than intent.
+## F-18 — A routine `/mcp` killed a running rebuild, because the job was a grandchild of the MCP server
+
+**Observed:** 2026-08-07, ~4 minutes into the corrected `index --force` rebuild.
+
+**When:** The user ran `/mcp` to reconnect after a binary rebuild — a one-keystroke, entirely routine action.
+
+**Expected:** the reconnect swaps the MCP server; the long-running rebuild is unaffected.
+
+**Got:** the rebuild was **killed**. It had been launched via `run_command`, so its process tree was `MCP server -> sh -c -> codescout index`, and restarting the server took the whole tree with it. Points had reached 578,344 (a couple of batches flushed) out of a run that needed ~8 minutes. Also lost in the same instant: both `@bg_*` buffers holding the run's output and the watcher's, because those are server-side state.
+
+**Probable cause:** anything started through a tool call inherits the tool server's lifetime. Nothing about `/mcp` warns that it is destructive to in-flight work, and nothing about `run_command` says its children die with the session — the coupling is invisible from both ends.
+
+**Severity:** high on expected cost rather than on this instance. Here it cost 4 minutes and a relaunch. The same coupling applied to the 2-hour figure this rebuild was believed to need would have cost two hours, and it fires on an action people take without thinking — after every `cargo rb`, which is exactly when a long job is most likely to be running.
+
+**This is the second time in one session that server-side state died with a reconnect**, and the first was the argument I had just used in a decision: § F-16's neighbour, the #16 close, records that `@cmd_*`/`@tool_*`/`@bg_*` buffers are server-side and that an idle-shutdown would dangle every `@ref` in the conversation. That reasoning was correct and I then failed to apply it forward to my own background job ten minutes later. Knowing a coupling exists is not the same as designing around it.
+
+**Workaround (applied):** relaunch under `setsid nohup ... >> logfile 2>&1 < /dev/null &`, which puts the job in its own session and process group and writes to a **file** rather than a server-side buffer. Verified: the relaunched job's parent became a non-server pid and it survived the wrapper's exit and subsequent tool calls.
+
+**Status:** mitigated — the pattern is stated below and was applied; nothing enforces it.
+
+**Fix idea / Pointer:** The rule: **anything expected to outlive a single tool call must be detached (`setsid`) and must log to a file, never to an `@bg_*` buffer.** Two candidate backstops, neither built: `run_command`'s background mode could `setsid` by default (it already writes to a log file, so it is half-way there), or the companion plugin could warn when `/mcp` is invoked while a detached-looking long job is running. The first is strictly better — it removes the coupling rather than warning about it.
+
+## F-19 — Three process-check commands matched their own argv; one killed the command running it
+
+**Observed:** 2026-08-07, three times within an hour, while monitoring the rebuild.
+
+**When:** Checking whether an indexer was running, then watching for it to finish, then cleaning up the watcher.
+
+**Expected:** each command reports on the *index* process.
+
+**Got, in order:**
+
+1. `pgrep -af 'codescout index'` — matched the `sh -c` running it, because the pattern was in that shell's own command line. Reported a running indexer when there was none, and the false "clear to rebuild" answer it produced is precisely the precondition `docs/issues/2026-07-25-concurrent-index-no-project-lock` says to verify.
+2. `pgrep -f 'codescout index --force'` inside a poll loop — matched the loop's own shell, so the loop's exit condition could never fire. It ran to its 170-iteration cap instead of exiting when the job finished, which is why the completion had to be noticed by hand.
+3. `pkill -f 'INDEX FINISHED after'` — matched the command containing that string, i.e. itself, and **killed the run_command mid-execution** (`exit_code: -1`).
+
+**Probable cause:** `pgrep`/`pkill` `-f` match against full command lines, and a checker's own argv contains the pattern by construction. The failure is silent in both directions — a false positive reads as "still running", a self-kill reads as a crash.
+
+**Severity:** med. Instance 1 produced a wrong answer to a safety precondition, instance 2 broke an automation silently, instance 3 destroyed the command issuing it. None corrupted data, but instance 1 is the shape that matters: a process-liveness check that answers wrongly is worse than one that errors.
+
+**Workaround (applied):** `ps -o pid=,args= -C <binary>` and filter afterward. `-C` matches on the executable NAME, so a shell or python checker is structurally excluded — the checker cannot match itself because it is not named `codescout`. That form was used correctly earlier in the same session, which is what makes the three failures avoidable rather than novel.
+
+**Status:** mitigated — rule stated; nothing enforces it.
+
+**Fix idea / Pointer:** Prefer `ps -C <name>` over `pgrep -f <pattern>` for liveness checks, and never `pkill -f` a pattern that appears in the command being typed. If a pattern match is unavoidable, exclude self explicitly (`pgrep -f pat | grep -v "^$$\$"`). Cheap enough to be a habit rather than a lookup.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

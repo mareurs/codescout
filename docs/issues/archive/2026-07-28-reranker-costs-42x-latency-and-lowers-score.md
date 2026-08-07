@@ -1,18 +1,65 @@
 ---
-status: open
+kind: bug
+status: fixed
+title: 'BUG: the GPU reranker costs ~569 ms/query (1.6x, not the 42x this file originally claimed) without improving the score — fixed by making it opt-in and off by default'
+tags:
+- retrieval
+- reranker
+- latency
+- benchmark
+- measured
+closed: 2026-08-07
 opened: 2026-07-28
-closed:
-severity: high
 owner: marius
 related:
-  - docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
-tags: [retrieval, reranker, latency, benchmark, measured]
-kind: bug
+- docs/issues/archive/2026-07-27-reranker-gpu-tei-cuda-oom.md
+severity: high
 ---
 
 # BUG: the GPU reranker costs 42× query latency and *lowers* the benchmark score — strictly worse on both axes
 
 ## Summary
+> **FIXED 2026-08-07 in `6ce49487` (experiments): `CODESCOUT_RERANK` — the reranker is now opt-in
+> and OFF by default.** There was previously no way to turn it off at all; `SearchOpts::new`
+> hardcoded `rerank: true` and the only gates were that per-call flag, the lite-stack bool, and an
+> empty candidate set. Set `CODESCOUT_RERANK=1` to restore the old behaviour.
+>
+> **This file's original title was wrong and is corrected above: 1.6x, not 42x.** The reranker's
+> absolute marginal cost is ~569 ms per query. What moved was the DENOMINATOR — the 42x was a ratio
+> against a pure-dense baseline with sparse disabled, and sparse fusion is itself expensive, so the
+> same absolute cost is now a much smaller multiple. A ratio is only as stable as what it divides
+> by, and that number survived ten days in a title because nobody re-derived the baseline.
+>
+> **What the clean A/B established** (same rebuilt index, same binary, same 25-TC suite, arms
+> differing in exactly one dimension — which the original four-dimension comparison could not do):
+>
+> | arm | full /75 | warm median |
+> |---|---|---|
+> | reranker on | 23 | 1559 ms |
+> | reranker off | 26 | 990 ms |
+>
+> Repeated after the knob shipped: 23 @ 1525 ms opted in, 25 @ 1005 ms by default. Note the off-arm
+> scored 26 then 25 while the on-arm was 23 both times — about a point of run-to-run variance, so
+> the **direction** is reproducible and the exact 3-point magnitude is not. Nothing in the shipped
+> docs states it as precise. The claim made is the one the evidence supports: reranking does not
+> measurably improve retrieval on this stack while costing half a second per query.
+>
+> **Kept as a knob rather than deleted, deliberately.** The cost is serving-runtime specific — the
+> same `bge-reranker-v2-m3` weights over TEI measure ~80 ms rather than ~569 ms — so a different
+> cross-encoder or protocol may well pay for itself. What is not defensible is choosing for the
+> user silently (memory `conventions` § Environment-Agnostic Tuning). `.env.example` and the manual
+> both label our figures as ours and point at `scripts/run-tc-benchmark.py`.
+>
+> Wiring verified live rather than with a mock, which is stronger evidence: default run → the
+> reranker container received 2 log lines across 25 queries (nothing); `CODESCOUT_RERANK=1` → 3552.
+>
+> **Still open, carried forward rather than lost** — see § *An open question worth its own
+> investigation*: the measured stages do not sum to the measured whole (~32 ms of retrieval against
+> a 990 ms end-to-end), so roughly 950 ms is somewhere other than the retrieval legs and nothing
+> here says where. That is a performance question about the MCP/search path, not about the
+> reranker, and it should be filed on its own rather than keeping this file open.
+>
+> **Resume:** N/A for the reranker decision. Master-side SHA owed after the promotion.
 
 > **CORRECTED 2026-07-28 after reading `docs/trackers/retrieval-benchmark.md`.** This bug's
 > original framing — "the reranker costs 42× and lowers the score" — is wrong on both halves.
