@@ -1652,7 +1652,21 @@ entries pruned. Warn only when that count is non-zero, by the same reasoning tha
 left a trustworthy zero bare in `symbols`. Filed as
 `docs/issues/2026-08-07-grep-zero-match-silent-about-hidden-skip.md`.
 
-**Recurrence:** 1st observed for grep-hidden. 3rd in the *silent false negative from a
+**Recurrence, 2nd instance same day — and it was me, in the shell, hours after fixing the tool.**
+Hunting the source of a `RERANK_BASE_URL` value, I ran
+`grep -rlE 'RERANK_BASE_URL' /home/marius/.claude-sdd/*.json …` across four candidate configs and
+got zero hits, then reported the provenance as unresolved with eight ruled-out sources. The value
+was in `/home/marius/.claude-sdd/.claude.json` all along: **`*.json` does not match a leading
+dot.** Same defect class, different surface — the shell glob prunes dotfiles exactly as
+`ignore`'s `hidden(true)` prunes dot-directories, and both report the absence as a plain zero.
+
+The generalised rule is therefore not about codescout's `grep` at all: **any glob-scoped search for
+absence must be assumed blind to dot-prefixed names until proven otherwise** — `include_hidden=true`
+for codescout's `grep`, an explicit `.*` term or `-r` on the directory for shell globs. Knowing the
+rule did not prevent the second instance; the tell that should have fired is *"I am concluding
+absence from a glob."*
+
+**Recurrence:** 2nd observed for the hidden/dotfile shape. 3rd in the *silent false negative from a
 discarded-or-pruned walk result* family — after `symbols`'s `walker.flatten()` (`3bfa4025`) and
 WIN-30's poll discarding its `Err` arm (F-11), both the same day. Three instances, three
 different surfaces, one shape: the code knew something was missing and the response did not say

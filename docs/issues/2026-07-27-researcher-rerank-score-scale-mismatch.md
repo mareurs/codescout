@@ -173,6 +173,52 @@ the value comes from a live source. Ruled out by inspection: researcher's `.env`
 `.mcp.json`; and the `claude daemon` process env. The value appears in `/proc/<pid>/environ`, so it
 was present at **exec** time and is therefore not a dotenv-loaded variable (runtime `setenv` does
 not alter that snapshot). Recorded so the next reader does not re-walk the same eight negatives.
+
+### RESOLVED same day — it is the user-scope MCP config, identical in all three profiles
+
+`RERANK_BASE_URL` is injected by Claude Code from the **user-scope MCP server `env` block**, not
+inherited from any shell. The discriminator is one comparison the eight negatives above never made:
+the parent `claude` processes of servers 1345614, 878507 and 35489 have **no** `RERANK_*` at all,
+while their children do. A variable present in the child and absent in the parent can only have
+been injected at spawn.
+
+`claude mcp get researcher` reports *"Scope: User config (available in all your projects)"*, and
+the value is set identically in **all three** profiles:
+
+```
+.claude/.claude.json        {'RERANK_BASE_URL': 'http://localhost:30083'}
+.claude-sdd/.claude.json    {'RERANK_BASE_URL': 'http://localhost:30083'}
+.claude-kat/.claude.json    {'RERANK_BASE_URL': 'http://localhost:30083'}
+```
+
+**Why the earlier search missed it, which is worth recording.** The grep was
+`/home/marius/.claude-sdd/*.json` — and `*` does not match a leading dot, so `.claude.json` was
+never examined. Identical false-negative class to the `grep` hidden-path bug fixed the same day in
+`624f7f05`, encountered in the shell rather than in the tool.
+
+**And the drift runs the other way.** No profile sets `RERANK_MIN_SCORE`, so the code default
+−5.0 applies everywhere. The one server on 48083 *with* an explicit `RERANK_MIN_SCORE=-5.0`
+(pid 373104, 23.5 h old) has neither variable in its parent `claude --continue` nor in its
+grandparent `bash` — so it came from a **superseded revision of the profile config**. It is the
+stale one; the sixteen on 30083 are current.
+
+### What that settles
+
+The canonical configuration — now and going forward — is **TEI on 30083 with `min_score` at the
+−5.0 code default**. Combined with the measured scale, that means:
+
+- **The off-topic filter does nothing at all, in the configuration that actually ships.** Not
+  "mis-tuned": inert. TEI scores are bounded below by 0 and the threshold is −5.0.
+- **The weight blend is fine** under TEI — relevance in [0,1] is commensurate with
+  `domain_authority` and the quality score, so 0.7/0.2/0.1 mean what they appear to mean.
+- **The llama-server distortion is a latent hazard, not a current defect.** It bites only if the
+  URL is repointed at a logit backend, which is exactly what one stale server did.
+
+So the immediate fix is much smaller than the *Fix* section's two options imply: express
+`min_score` in TEI units. Measured anchors from the probe — off-topic `0.0000107`, on-topic
+`0.9965708` — leave a threshold anywhere in roughly `0.001`–`0.05` dropping the off-topic band with
+four orders of magnitude of margin. The normalisation-plus-protocol-flag work remains the right
+shape for making a backend swap safe, but it is no longer needed to make the filter function.
 ## Hypotheses tried
 
 1. **Hypothesis:** the two backends need different request shapes, so the swap
@@ -214,36 +260,30 @@ healthy, so this is a one-line revert plus a Claude Code restart.
 
 ## Resume
 
-The measurement is **done** and it did not need Langfuse — see the 2026-08-07 Evidence. Both
-halves of the title are confirmed with numbers, and the conclusion is stronger than the two
-tuning options under *Fix*.
+Both the measurement and the provenance question are **done** — see the 2026-08-07 Evidence
+subsections. Nothing left to investigate.
 
-**Neither option under Fix is sufficient, because both retune a constant.** TEI scores are [0,1]
-and llama-server scores are unbounded logits, so any single `min_score` is either dead (TEI) or
-living in the wrong units for the blend (llama-server). The shape that works for both is to
-**normalise the reranker score into [0,1] before the blend** — sigmoid for a logit-producing
-backend, identity for TEI, selected by an explicit protocol setting rather than inferred — and
-then express `min_score` in those normalised units. That makes the 0.7/0.2/0.1 weights mean what
-they appear to mean, which they currently do not under llama-server.
+**The canonical configuration is TEI on `localhost:30083`**, set identically in all three profiles'
+user-scope MCP `env`, with no `RERANK_MIN_SCORE` so the −5.0 code default applies. TEI returns
+sigmoid scores in [0,1], so **the off-topic filter is inert in the shipping configuration** — and
+the weight blend is fine there, because relevance is commensurate with authority and quality.
 
-Codescout hit the same fork and solved it with an explicit protocol flag rather than sniffing:
-`CODESCOUT_RERANKER_PROTOCOL=llama-server` selects `Protocol::Infinity` in
-`src/retrieval/reranker.rs`, and `.env.gpu` warns that dropping the line silently falls back to
-the TEI shape so every rerank call fails. Researcher has no equivalent — `RerankerClient` hardcodes
-the TEI request/response shape while being pointed at either backend, which is why the scale can
-change underneath it unnoticed.
+**Fix, in priority order:**
 
-**Two decisions, both the maintainer's:**
+1. **Set `min_score` in TEI units.** Anywhere in `0.001`–`0.05` drops the measured off-topic band
+   (`0.0000107`) with orders of magnitude of margin below the measured on-topic score
+   (`0.9965708`). One-line change; makes a dead knob work. Worth widening the sample past two
+   documents before picking the exact value.
+2. **Add an explicit protocol/normalisation setting** so a backend swap cannot silently change the
+   score scale underneath the blend. `RerankerClient` hardcodes the TEI request/response shape
+   while being pointed at an arbitrary URL, which is how the 48083 server ended up with logits
+   feeding a blend calibrated for [0,1]. Codescout solved the same fork with
+   `CODESCOUT_RERANKER_PROTOCOL` selecting `Protocol::Infinity` in `src/retrieval/reranker.rs`, and
+   `.env.gpu` warns that omitting it silently falls back to the TEI shape.
+3. **Optional housekeeping:** the 48083 server (pid 373104) runs a superseded config revision.
+   Restarting that session realigns it; nothing in the code needs to change for it.
 
-1. Which backend researcher should actually use. Sixteen live servers say TEI (30083), one says
-   llama-server (48083), and the committed default says *no reranking at all*. Until that is
-   settled, "fixing" the threshold aims at a moving target.
-2. Whether to add the normalisation plus an explicit protocol setting, or to drop reranking from
-   researcher and delete the dead knobs.
-
-First, though, resolve where `RERANK_BASE_URL=http://localhost:30083` is actually coming from —
-eight likely sources are ruled out above, and a config no one can locate is a worse problem than
-an uncalibrated threshold.
+Only step 1 needs a decision, and only about the exact constant.
 ## References
 
 - `researcher/src/embeddings/reranker.rs:10-19` — request/response types
