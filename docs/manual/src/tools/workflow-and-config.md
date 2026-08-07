@@ -204,6 +204,12 @@ character, so write `C:/Users/...` (or quote it) rather than `C:\Users\...`.
 Buffer refs (`@cmd_*`, `@file_*`, `@bg_*`) are substituted in the
 forward-slash form automatically.
 
+MSYS-form paths (`/c/Users/...`) also work on Windows, including as arguments
+to native binaries such as `git.exe` — codescout leaves MSYS argument
+conversion enabled and clears `MSYS_NO_PATHCONV` / `MSYS2_ARG_CONV_EXCL` from
+the child environment so an exported value in the parent shell cannot change
+how commands resolve.
+
 ---
 
 **Tips:**

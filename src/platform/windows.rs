@@ -120,10 +120,18 @@ fn git_bash_path() -> std::path::PathBuf {
 /// those binaries exist, so the guidance codescout ships was unrunnable on
 /// Windows.
 ///
-/// `MSYS_NO_PATHCONV` / `MSYS2_ARG_CONV_EXCL` disable MSYS's argument
-/// mangling. Without them the runtime rewrites anything that looks like a Unix
-/// path into a Windows one *inside* the `-c` script, which silently corrupts
-/// commands such as `sed 's/a/b/'` or `find / -name x`.
+/// `MSYS_NO_PATHCONV` / `MSYS2_ARG_CONV_EXCL` are explicitly *removed*, not set.
+/// MSYS argument conversion is what lets a **native** (non-MSYS) binary such as
+/// `git.exe` accept an MSYS-form path: `git -C /c/work/repo` only works because
+/// the runtime rewrites the argument to `C:/work/repo` before `git` sees it.
+/// Disabling conversion breaks every native binary taking a path argument. It
+/// does *not* protect `sed 's/a/b/'` or `find / -name x` — `sed` and `find` in
+/// Git Bash are themselves MSYS binaries, and MSYS never converts arguments
+/// passed between MSYS programs, so there is nothing there to protect against.
+/// Removing the variables (rather than just declining to set them) keeps the
+/// shell deterministic when the parent process happens to export them, for the
+/// same reason `GIT_PAGER` is pinned.
+/// See `docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
 ///
 /// Sets `GIT_PAGER=cat`; the caller sets cwd, stdio, and kill_on_drop. stdin
 /// defaults to null (prevents inherited-pipe / REPL hangs on the MCP stdio
@@ -134,8 +142,8 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
         .arg("-c")
         .arg(cmd)
         .env("GIT_PAGER", "cat")
-        .env("MSYS_NO_PATHCONV", "1")
-        .env("MSYS2_ARG_CONV_EXCL", "*")
+        .env_remove("MSYS_NO_PATHCONV")
+        .env_remove("MSYS2_ARG_CONV_EXCL")
         .stdin(std::process::Stdio::null());
     tokio::process::Command::from(std_cmd)
 }
@@ -326,5 +334,43 @@ mod tests {
     fn win32_liveness_false_for_dead_pid() {
         // A PID that almost certainly does not exist.
         assert!(!process_alive(0xFFFF_FFF0));
+    }
+
+    /// Regression: `MSYS_NO_PATHCONV=1` / `MSYS2_ARG_CONV_EXCL=*` must never
+    /// reach the shell. They disable the argument rewriting that lets a native
+    /// binary accept an MSYS-form path, so `git -C /c/...` dies with
+    /// `cannot change to '/c/...': No such file or directory`.
+    ///
+    /// This asserts on the *native* side of the boundary on purpose. A test
+    /// that only ran MSYS builtins (`ls /c/...`) would pass either way — MSYS
+    /// programs resolve MSYS paths themselves and never see the conversion.
+    /// See `docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
+    #[tokio::test]
+    async fn msys_form_path_resolves_for_native_binaries() {
+        let dir = std::env::temp_dir();
+        let slashed = dir.to_string_lossy().replace('\\', "/");
+        let (drive, rest) = slashed
+            .split_once(":/")
+            .expect("temp dir should be drive-qualified");
+        let msys = format!("/{}/{}", drive.to_ascii_lowercase(), rest);
+        assert!(
+            msys.starts_with('/'),
+            "probe path must be MSYS-form, got {msys}"
+        );
+
+        let out = shell_command_configured(&format!("git -C '{msys}' rev-parse --git-dir"))
+            .output()
+            .await
+            .expect("git should be spawnable — Git Bash implies a git install");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+
+        // `git` may still fail with "not a git repository" (temp dir usually
+        // isn't one). That is fine: it proves git resolved and entered the
+        // directory. Only the chdir failure indicates conversion was disabled.
+        assert!(
+            !stderr.contains("cannot change to"),
+            "git could not resolve MSYS-form path {msys}: MSYS argument \
+             conversion is disabled. stderr: {stderr}"
+        );
     }
 }
