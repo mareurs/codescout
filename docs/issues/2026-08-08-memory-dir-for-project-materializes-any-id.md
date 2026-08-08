@@ -212,39 +212,79 @@ the review addendum of the sibling bug file.
    for this bug.
 ## Fix
 
-Not yet applied. Plan:
+Landed on `experiments` in `c0bdeec7` — *master-side SHA still to be recorded after
+cherry-pick.*
 
-1. Distinguish the two cases in `Workspace::memory_dir_for_project` — a lookup miss is not a
-   sub-project. Either return `Option<PathBuf>`/`Result` and let callers decide, or keep the
-   signature and add a sibling `resolve_project_id` that callers must go through first.
-2. In `resolve_memory_dir`, reject an unknown `project_id` with a `RecoverableError` listing
-   the workspace's real project ids — the guidance case in `get_guide("error-handling")`: a
-   deterministic input mistake the agent can correct on the retry. Do **not** auto-guess a
-   nearest match on a write path.
-3. Validate the `ws.focused` fallback the same way, and clear `focused` when it names a
-   project that no longer exists.
-4. Sweep the existing phantoms after the fix lands: they are safe to delete once nothing
-   recreates them.
+- `src/tools/memory/mod.rs` — `resolve_memory_dir` rejects an unknown
+  caller-supplied `project_id` with a `RecoverableError` naming the id and listing
+  the workspace's real ids. The `project` alias reaches the same check.
+- `src/workspace.rs` — added `Workspace::has_project`, the named check that answers
+  what `memory_dir_for_project` structurally cannot, and reused it inside
+  `set_focused`.
+- `src/workspace.rs` — rewrote `memory_dir_for_project`'s doc comment. It had
+  presented the unknown-id behaviour as a settled, deliberate fix for an older
+  co-mingling bug, which read as reassurance and stopped inquiry. It now states the
+  precondition and points here.
 
+**`ws.focused` was deliberately NOT validated, and the plan's step 3 is withdrawn.**
+`Workspace::new` seeds `focused` from `projects` and `set_focused` refuses an
+unknown id, so it is provably always a real id — a premise this file previously
+asserted needed fixing, now falsified by reading both. `focused_is_always_a_real_project_id`
+locks it down, so a future change that breaks the invariant fails a test rather than
+silently widening the hole. The `ROOT_PROJECT_ID` last resort is untouched, leaving
+the no-argument path byte-identical.
+
+**Out of scope, deliberately.** `MemoryStore::from_dir` still calls `create_dir_all`
+in its constructor, so a `read` against a *real* project with no memories yet still
+creates the directory. That is harmless — an empty directory, invisible to git, and
+legitimate for a project that exists — and splitting the constructor touches nine
+call sites for no measured symptom.
+
+**No `.gitignore` change accompanies this, and the sibling bug file's fix 2 is
+withdrawn.** A phantom project's `memories/` is structurally identical to a real
+one's, so no glob can hide the former while keeping the latter visible. Verified
+2026-08-08 in a throwaway repo: under `/.codescout/projects/*/*` plus
+`!/.codescout/projects/*/memories/`, `git check-ignore` reports the phantom's
+memory file as NOT ignored — exactly as it reports a real one's. Source-side
+validation was the only available fix, not merely the preferable one.
 ## Tests added
 
-None yet. Four are wanted, and all four are cheap because the resolution is pure:
+Five, all in `c0bdeec7`.
 
-1. **`memory_dir_for_project` distinguishes an unknown id from a known non-root project.** The
-   discriminating case the current `unwrap_or(false)` collapses. This is the one that matters:
-   a mutation flipping `unwrap_or(false)` to `unwrap_or(true)` changes behaviour in the opposite
-   direction, and no test in the suite today would notice either mutation.
-2. **`memory(write, project_id=<unknown>)` returns a `RecoverableError` naming the valid ids,
-   and creates no directory.** Assert on the absence of the directory, not just the error — the
-   litter and the error are separate failures and a fix could address only one.
-3. **`memory(read, project_id=<unknown>)` says "no such project", not "no topics".** Assert the
-   error text distinguishes the two, since `available_topics: []` is what makes the current
-   answer actionable and wrong.
-4. **A stale `ws.focused` does not route writes into a phantom directory.**
+- `src/workspace.rs` — `has_project_distinguishes_unknown_id_from_known_non_root_project`.
+  The load-bearing one. Asserts both arms, and additionally that a known id and a
+  typo produce same-shaped `projects/<id>/memories` paths — which is *why* a caller
+  can never use the return value to detect the typo. A mutation flipping either arm
+  of `has_project` fails here.
+- `src/workspace.rs` — `focused_is_always_a_real_project_id`. Guards the premise that
+  justifies validating only the caller-supplied id: seeded focus is always a real
+  project, a refused `set_focused` does not mutate focus, and an accepted one does.
+- `src/tools/memory/tests.rs` — `memory_write_with_unknown_project_id_errors_and_leaves_no_directory`.
+- `src/tools/memory/tests.rs` — `memory_read_with_unknown_project_id_says_no_such_project_not_no_topics`,
+  which asserts the combined message+hint does **not** contain "no memory topics
+  exist yet" — the exact phrasing that reported an absent project as empty.
+- Both tool-level tests assert the phantom directory does **not** appear, not merely
+  that an error came back. The error and the litter are separate failures and a fix
+  could close one without the other.
 
-Note for whoever writes 2 and 3: assert on a tree that is clean *before* the call and checked
-*after*, in that order. A fixture that only checks the return value passes even if the directory
-is still created — which is precisely how this shipped.
+**An existing test was passing because of this bug.**
+`memory_write_accepts_project_alias_for_project_id` wrote `mcp-server/package.json`
+as `{}`, which is too empty for discovery to register a project — so the
+`mcp-server` its own comment claimed to create did not exist, and its
+`.codescout/projects/mcp-server/memories/` assertion was satisfied entirely by the
+phantom-directory behaviour. Fixing the validation broke it, which is how it was
+found. The manifest now matches the sibling fixture's
+`{"scripts":{"build":"tsc"}}`, so the alias is tested against a project that is
+actually there.
+
+That is worth keeping in mind when reading the sibling fixture
+`memory_write_routes_to_project_dir`: its path assertion also passes under either
+behaviour, so it never demonstrated that discovery worked. The new tests' hint
+assertions (`hint.contains("mcp-server")`) are the first thing in the suite that
+can tell a discovered project from an invented one.
+
+Full gate on the fix commit: `cargo fmt`; `cargo clippy --all-targets -- -D warnings`
+clean; `cargo test` 3554 passed / 0 failed / 44 ignored.
 ## Workarounds
 
 Always pass a `project_id` that appears in `project_status`, or omit it entirely and let it
@@ -254,29 +294,21 @@ the bad id is used again.
 
 ## Resume
 
-Reproduction is done — do not re-run it to "confirm"; the transcript is above and the tree was
-cleaned afterwards (count back to 9, status empty).
+Fix is in. Remaining, in order:
 
-Next concrete action: locate the `mkdir`. It is on a path both `read` and `write` traverse, so
-grep `create_dir_all` across `src/` (not just `src/tools/memory/`, where it appears only in
-`tests.rs`) and check the shared resolve/ensure step that `resolve_memory_dir` feeds. Then:
+1. Confirm CI green on `experiments` at the commit containing `c0bdeec7`, then flip
+   `status: fixed` / `closed: 2026-08-08` and archive via
+   `artifact(action="move", …, new_rel_path="docs/issues/archive/…")` — never a bare
+   `git mv`. Label the SHA `experiments`; the master-side SHA still needs recording
+   after cherry-pick, since an `experiments` SHA orphans on rebase.
+2. Delete the two pre-existing phantoms, which the fix cannot retroactively remove:
+   `claude-plugins/.codescout/projects/mcp-server/` and
+   `mirela/eduplanner-site/.codescout/projects/optaplanner/`. Both are empty, so
+   `rmdir` suffices. Nothing recreates them now.
 
-1. `src/workspace.rs` — make a lookup miss distinguishable from a non-root hit. Either return
-   `Option<PathBuf>`/`Result`, or add a sibling `resolve_project_id` that callers must pass
-   through first.
-2. `src/tools/memory/mod.rs` — `resolve_memory_dir` rejects an unknown id with a
-   `RecoverableError` listing the workspace's real project ids. This is the guidance case in
-   `get_guide("error-handling")`: a deterministic input mistake the agent corrects on retry. Do
-   **not** auto-guess a nearest match on a write path.
-3. Same treatment for the `ws.focused` fallback, and clear `focused` when it names a project that
-   no longer exists.
-4. Add the four tests under Tests added, 1 and 3 first.
-5. Sweep the two existing phantoms (`claude-plugins/.codescout/projects/mcp-server/`,
-   `mirela/eduplanner-site/.codescout/projects/optaplanner/`) once nothing recreates them.
-
-The `.gitignore` half is tracked separately in
-`docs/issues/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md`. Do not close
-either one on the other's fix.
+Do **not** re-run the reproduction to confirm the bug — the transcript is above and
+the behaviour is now rejected by design. Do **not** apply a `.gitignore` glob for the
+litter; that was tried and falsified (see Fix).
 ## References
 
 - `src/workspace.rs` — `Workspace::memory_dir_for_project`, the `unwrap_or(false)` site

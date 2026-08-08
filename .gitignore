@@ -75,8 +75,20 @@ tests/fixtures/*/.codescout/
 # hand-authored per-project memory files (`*/memories/*.md`, `*.anchors.toml`)
 # maintained by explicit `chore(memories):` commits. Ignoring it would not
 # untrack those, but it would hide every future one from `git status` with no
-# error — and it shadows no cache, since that path has no untracked content at
-# all. The index DB below is the thing that is actually regenerated.
+# error. The index DB below is the thing that is actually regenerated.
+#
+# This comment used to end "and it shadows no cache, since that path has no
+# untracked content at all". That was true in a fresh clone and in CI, and false
+# on any machine where `memory(read|write|list|delete)` had been called with an
+# unknown `project_id`: that created `projects/<id>/memories` for any string.
+# Fixed at the source in c0bdeec7 — the id is now rejected — and that is the ONLY
+# available fix, because a phantom project's `memories/` is structurally identical
+# to a real one's, so no glob can hide the former while keeping the latter
+# visible. Verified 2026-08-08 in a throwaway repo: under
+# `/.codescout/projects/*/*` plus `!/.codescout/projects/*/memories/`, git reports
+# a phantom's memory file exactly as it reports a real one's. Do not re-try that
+# pattern here expecting it to suppress the litter.
+# See docs/issues/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md
 /.codescout/code-index.db
 /target-release-new/
 /.vscode/

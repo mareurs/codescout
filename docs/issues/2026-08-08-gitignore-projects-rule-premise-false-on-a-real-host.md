@@ -228,44 +228,53 @@ was wrong in the same way the original report was. Tree restored afterwards: cou
 
 ## Fix
 
-Two layers, in this order.
-
-**1 — Upstream, the real fix.** Validate `project_id` in
-`Workspace::memory_dir_for_project`. An id that is neither the root project nor a declared
-or discovered sub-project of this workspace should be an error, not a freshly created
-directory. Filed separately as
+**Fix 1 — upstream — LANDED in `c0bdeec7`** (`experiments`; master-side SHA still to
+be recorded after cherry-pick). `resolve_memory_dir` now rejects an unknown
+caller-supplied `project_id` with a `RecoverableError` listing the workspace's real
+ids, so nothing creates `projects/<id>/memories` for an id no project owns. Details,
+tests, and the deliberate scope limits are in
 `docs/issues/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
 
-**2 — Belt and braces in `.gitignore`.** Use the structural pattern already running in the
-operator's `~/personal` repo. It is strictly better than Options A/B/C below:
+**Fix 2 — the `.gitignore` pattern — WITHDRAWN. It does not work.**
 
-```gitignore
-/.codescout/*
-!/.codescout/memories/
-!/.codescout/projects/
+The addendum recommended the structural pattern running in the operator's `~/personal`
+repo, on the grounds that it re-includes `projects/*/memories/` by shape rather than by
+name and so never goes stale. Both halves of that are true and neither one matters
+here, because the litter *is* a `memories/` directory. Verified 2026-08-08 in a
+throwaway repo carrying a real fixture project and a phantom side by side:
+
+```
+$ cat .gitignore
 /.codescout/projects/*/*
 !/.codescout/projects/*/memories/
+
+$ git check-ignore -v .codescout/projects/rust-library/memories/architecture.md
+  NOT ignored: real memories file
+$ git check-ignore -v .codescout/projects/rust-library/cache/blob.bin
+.gitignore:1:/.codescout/projects/*/*   .codescout/projects/rust-library/cache/blob.bin
+$ git check-ignore -v .codescout/projects/zz-phantom/memories/zz-probe.md
+  NOT ignored: PHANTOM memories file
 ```
 
-It enumerates no ids, so it never goes stale; it keeps **every** project's `memories/`
-visible, including projects that do not exist yet; and it ignores anything generated that
-lands elsewhere under the tree. Verified non-destructive on 2026-08-08 —
-`find .codescout/projects -type f -not -path '*/memories/*'` returns nothing, so all 53
-tracked files sit inside a `memories/` directory and survive the pattern intact.
+A phantom project's `memories/` is structurally identical to a real one's. Any rule
+that keeps real per-project memories visible — which is the whole point of
+`6f261da9` — necessarily keeps a phantom's visible too. The pattern's only real effect
+is ignoring *non*-memories content under `projects/<id>/`, and this repo has none:
+`find .codescout/projects -type f -not -path '*/memories/*'` returns nothing. Adding it
+would guard against nothing observed while reading as though the litter were handled.
 
-The three original options are superseded:
+This also retires the framing in this file's Root cause. There is no glob that
+expresses the intent, not because the tree lacks a naming boundary, but because the
+two populations are *the same shape by construction*. Source-side validation was the
+only available fix, not the preferable one.
 
-- **A** (ignore the eight by name) — stale on the ninth workspace, by its own admission.
-- **B** (`projects/*/` plus `!` re-includes for the nine fixture ids) — **rejected.**
-  Enumerating ids reintroduces exactly what `6f261da9` removed: a rule that silently hides
-  the tenth fixture project. The structural pattern above is the version of B that works,
-  because it re-includes by *shape* rather than by name.
-- **C** (relocate generated foreign-workspace state) — right instinct, wrong premise. There
-  is no foreign-workspace-state feature to relocate; there is an unvalidated id to reject.
-  That is fix 1.
+**Applied here:** the `.gitignore` comment correction only. The `Deliberately NOT`
+block's third clause no longer claims the path has no untracked content "at all"; it
+states the fresh-clone/CI qualifier, cites `c0bdeec7`, and records the glob experiment
+so nobody re-tries it.
 
-The `.gitignore` comment's third clause still needs the correction this report asks for:
-the tree holds no untracked content **in a fresh clone or in CI** — not "at all".
+Options A, B and C are all superseded. B in its id-enumerating form remains rejected
+for the original reason — it reintroduces what `6f261da9` removed.
 ## Tests added
 
 None. A `.gitignore` policy has no unit-test surface, and the failure is environmental —
@@ -280,19 +289,20 @@ add the eight to `.git/info/exclude`, which is per-clone and commits nothing.
 
 ## Resume
 
-Fix 1 is the load-bearing one and is tracked in its own bug file — do not close this one on
-the `.gitignore` change alone.
+Both halves are settled — the source fix landed and the `.gitignore` half turned out
+to be a no-op. Remaining:
 
-1. On the **VDI**, before anything else: run `project_status` there and compare each
-   project's `relative_root` against the workspace `root`. That says whether the eight are
-   unvalidated ids (expected) or genuine mis-discovery, and it is not reproducible from the
-   Linux host.
-2. Apply fix 2 (the structural `.gitignore` pattern) plus the third-clause comment
-   correction in the `Deliberately NOT` block, in one commit.
-3. Re-check `git status --porcelain .codescout/projects` on both hosts afterwards. On Linux
-   it was already empty, so the pattern must not *change* anything there — that is the
-   regression check.
-4. Do not re-propose Option B in its id-enumerating form; it is rejected above with reasons.
+1. Confirm CI green on `experiments` at the commit containing the comment correction,
+   then flip `status: fixed` / `closed: 2026-08-08` and archive via
+   `artifact(action="move", …)` — never a bare `git mv`. Label the SHA `experiments`;
+   the master-side SHA still needs recording after cherry-pick.
+2. The VDI `project_status` comparison is no longer load-bearing for either bug — a
+   plain bad `project_id` reproduces both populations on one host. Keep it only if
+   the eight entries persist *after* `c0bdeec7` reaches that checkout, which would
+   mean a second, distinct cause.
+
+Do **not** apply Option A, B, or C, and do not re-try the structural glob — the
+experiment is in the Fix section above.
 ## References
 
 - `6f261da9` — the review-pass commit that set the current rule (finding 5)
