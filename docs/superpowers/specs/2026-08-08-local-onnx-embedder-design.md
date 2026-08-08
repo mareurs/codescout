@@ -99,12 +99,26 @@ Two trait seams already exist and are already used as trait objects:
 The only thing forcing HTTP is the concrete field on `RetrievalClient`, plus two call
 sites that reach past the traits.
 
+**Corrected 2026-08-08 during planning.** This section first proposed
+`CodeEmbedder: BatchEmbedder + DenseEmbedder`. That does not work:
+`DenseEmbedder::embed(&self, &str) -> Vec<f32>` collides by name with
+`EmbedderHttp`'s *inherent* `embed(&self, &str) -> EmbedOutput`, and Rust resolves
+inherent methods first — so `EmbedderHttp` would carry two same-named `embed`s with
+different return types, and the one callers got would depend on whether they held a
+concrete type or a trait object. The supertrait is replaced by distinct method names
+plus a bridge adapter:
+
 ```rust
 #[async_trait::async_trait]   // REQUIRED — see note below
-pub trait CodeEmbedder: BatchEmbedder + DenseEmbedder + Send + Sync {
+pub trait CodeEmbedder: BatchEmbedder {
     /// Query-side embed returning dense (+ sparse when the impl has it).
     async fn embed_one(&self, text: &str) -> Result<EmbedOutput>;
+    /// Dense-only query embed, for consumers that never rank on sparse.
+    async fn embed_dense_one(&self, text: &str) -> Result<Vec<f32>>;
 }
+
+/// Bridges the code embedder into the `DenseEmbedder` seam memory already holds.
+pub struct CodeDenseAdapter(pub Arc<dyn CodeEmbedder>);
 
 pub struct RetrievalClient {
     pub(crate) code_store: Arc<dyn CodeVectorStore>,
@@ -126,9 +140,9 @@ Call sites that change:
 | `src/agent/mod.rs:1743` | `HttpDenseEmbedder::new(client.embedder)` → clone the `Arc` |
 | `src/retrieval/sync.rs` | none — already `&dyn BatchEmbedder` |
 
-`agent/mod.rs` is the load-bearing one: because `CodeEmbedder: DenseEmbedder`, memory
-recall inherits whatever code search uses, through the same object. Memory is fixed by
-construction, not by a duplicated selection path.
+`agent/mod.rs` is the load-bearing one: wrapping the shared `Arc` in `CodeDenseAdapter`
+means memory recall inherits whatever code search uses, through the same instance.
+Memory is fixed by construction, not by a duplicated selection path.
 
 **`#[async_trait]` is not optional.** Native `async fn` in traits is not
 dyn-compatible, and this trait is used exclusively as `dyn CodeEmbedder`. `BatchEmbedder`
