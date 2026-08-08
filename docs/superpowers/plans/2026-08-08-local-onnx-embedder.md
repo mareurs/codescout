@@ -507,10 +507,21 @@ Append to `mod tests` in `src/retrieval/local_onnx.rs`:
                 ".fastembed_cache/models--Xenova--all-MiniLM-L6-v2/snapshots/manual".into()
             }),
         );
-        if !dir.join(MODEL_FILE).exists() {
-            eprintln!("SKIP real_embed: no weights at {}", dir.display());
+        // Ruling 2026-08-08: skip ONLY on an explicit opt-out, never on a
+        // missing file. A typo'd weights path must fail loudly rather than pass
+        // green — a skip keyed on file presence is indistinguishable from
+        // success, which is how two tests in this codebase shipped unable to
+        // fail. CI sets CODESCOUT_SKIP_ONNX_TESTS=1; the VDI never does.
+        if std::env::var("CODESCOUT_SKIP_ONNX_TESTS").is_ok() {
+            eprintln!("SKIP real_embed: CODESCOUT_SKIP_ONNX_TESTS is set");
             return;
         }
+        assert!(
+            dir.join(MODEL_FILE).exists(),
+            "no weights at {} — set CODESCOUT_TEST_ONNX_DIR, or set \
+             CODESCOUT_SKIP_ONNX_TESTS=1 to opt out deliberately",
+            dir.join(MODEL_FILE).display()
+        );
         let e = LocalOnnxEmbedder::new(&dir, 384).expect("weights present, must load");
         let a = e.embed_texts(vec!["fn main() {}".to_string()]).unwrap();
         let b = e.embed_texts(vec!["fn main() {}".to_string()]).unwrap();
