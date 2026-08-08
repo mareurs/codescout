@@ -208,19 +208,62 @@ pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
     roots
 }
 
+/// A path reduced to a form that can be compared across the two spellings
+/// Windows hands us for the same location.
+///
+/// The catalog stores `abs_path` forward-slash-normalized and verbatim-prefixed
+/// (`//?/C:/Users/...`) — `doctor`'s `check_backslash` actively enforces the
+/// forward slashes. `current_project`, canonicalized at the adapter boundary,
+/// holds the native spelling (`\\?\C:\Users\...`). Rust's Windows prefix parser
+/// only recognizes the backslash form, so the first path has no prefix
+/// component at all while the second parses as `VerbatimDisk('C')` — and
+/// `Path::starts_with`, which compares components, can never match them.
+/// See `docs/issues/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md`.
+///
+/// On Unix `\` is a legal filename byte, so only the trailing separator is
+/// trimmed there — rewriting separators would corrupt real names.
+fn comparable_path(path: &std::path::Path) -> String {
+    let raw = path.to_string_lossy();
+
+    #[cfg(windows)]
+    let normalized = {
+        let slashed = raw.replace('\\', "/");
+        let stripped = slashed.strip_prefix("//?/").unwrap_or(&slashed);
+        stripped.to_string()
+    };
+    #[cfg(not(windows))]
+    let normalized = raw.into_owned();
+
+    // Trim trailing separators so `C:/proj/` and `C:/proj` compare equal.
+    normalized.trim_end_matches('/').to_string()
+}
+
 /// The first managed root that contains `abs_path`, if any.
 ///
 /// Paths are compared lexically: stored `abs_path` values are
 /// canonical-absolute (upsert canonicalizes on write) and `current_project`
 /// is canonicalized at the adapter boundary (`adapter.rs`), so a lexical
-/// `Path::starts_with` is sound. We deliberately do NOT `canonicalize()`
-/// `abs_path` at call time — `delete` tolerates an already-removed file and
+/// comparison is sound. We deliberately do NOT `canonicalize()` `abs_path` at
+/// call time — `delete` tolerates an already-removed file and
 /// `std::fs::canonicalize` errors on a missing path.
+///
+/// The comparison runs over [`comparable_path`] rather than `Path::starts_with`
+/// because the two sides arrive spelled differently on Windows. The explicit
+/// separator check afterwards preserves the component-boundary guarantee
+/// `Path::starts_with` gave for free: `/proj/sub` must not be treated as
+/// contained by `/proj/subterfuge`. That boundary is security-relevant — this
+/// is the guard `delete` and `move` use to refuse paths outside every managed
+/// root.
 pub(crate) fn containing_root<'a>(
     roots: &'a [std::path::PathBuf],
     abs_path: &std::path::Path,
 ) -> Option<&'a std::path::PathBuf> {
-    roots.iter().find(|root| abs_path.starts_with(root))
+    let target = comparable_path(abs_path);
+    roots.iter().find(|root| {
+        let root = comparable_path(root);
+        target == root
+            || (target.starts_with(&root) && target.as_bytes().get(root.len()) == Some(&b'/'))
+    })
 }
 
 #[async_trait::async_trait]
@@ -290,4 +333,114 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(artifact_refresh::ArtifactRefreshTool),
         Arc::new(librarian::Librarian),
     ]
+}
+
+#[cfg(test)]
+mod containing_root_tests {
+    use super::containing_root;
+    use std::path::PathBuf;
+
+    /// Regression: on Windows the catalog and `current_project` spell the same
+    /// location differently, and `Path::starts_with` cannot bridge them. This
+    /// left `artifact(move)` reporting `no managed root contains <path>` for a
+    /// file `create` had just written and `find` returned happily.
+    ///
+    /// `doctor` stayed green throughout — it enforces the forward-slash form
+    /// that causes the mismatch, so it could not have caught this.
+    #[cfg(windows)]
+    #[test]
+    fn matches_catalog_forward_slash_form_against_native_verbatim_root() {
+        // Exactly as stored by the catalog (verified against catalog.db).
+        let stored =
+            PathBuf::from("//?/C:/Users/dev/work/codescout/docs/issues/2026-08-07-example.md");
+        // Exactly as `current_project` holds it after canonicalization.
+        let roots = vec![PathBuf::from(r"\\?\C:\Users\dev\work\codescout")];
+
+        assert_eq!(
+            containing_root(&roots, &stored),
+            Some(&roots[0]),
+            "catalog's //?/C:/... must resolve under current_project's \\\\?\\C:\\..."
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn matches_when_only_one_side_is_verbatim() {
+        let stored = PathBuf::from("//?/C:/Users/dev/work/codescout/docs/a.md");
+        let roots = vec![PathBuf::from(r"C:\Users\dev\work\codescout")];
+        assert_eq!(containing_root(&roots, &stored), Some(&roots[0]));
+    }
+
+    /// The component boundary is security-relevant: `containing_root` is the
+    /// guard `delete`/`move` use to refuse paths outside every managed root, so
+    /// a plain string `starts_with` would let a sibling directory escape it.
+    #[test]
+    fn does_not_match_a_sibling_sharing_a_name_prefix() {
+        #[cfg(windows)]
+        let (stored, root) = (
+            PathBuf::from("//?/C:/work/subterfuge/docs/a.md"),
+            PathBuf::from(r"\\?\C:\work\sub"),
+        );
+        #[cfg(not(windows))]
+        let (stored, root) = (
+            PathBuf::from("/work/subterfuge/docs/a.md"),
+            PathBuf::from("/work/sub"),
+        );
+
+        assert_eq!(containing_root(&[root], &stored), None);
+    }
+
+    #[test]
+    fn matches_the_root_itself() {
+        #[cfg(windows)]
+        let (stored, root) = (
+            PathBuf::from("//?/C:/work/proj"),
+            PathBuf::from(r"\\?\C:\work\proj"),
+        );
+        #[cfg(not(windows))]
+        let (stored, root) = (PathBuf::from("/work/proj"), PathBuf::from("/work/proj"));
+
+        assert_eq!(
+            containing_root(std::slice::from_ref(&root), &stored),
+            Some(&root)
+        );
+    }
+
+    #[test]
+    fn returns_none_when_no_root_contains_the_path() {
+        #[cfg(windows)]
+        let (stored, root) = (
+            PathBuf::from("//?/C:/elsewhere/a.md"),
+            PathBuf::from(r"\\?\C:\work\proj"),
+        );
+        #[cfg(not(windows))]
+        let (stored, root) = (
+            PathBuf::from("/elsewhere/a.md"),
+            PathBuf::from("/work/proj"),
+        );
+
+        assert_eq!(containing_root(&[root], &stored), None);
+    }
+
+    /// First-match ordering is load-bearing: `managed_roots` lists the active
+    /// project ahead of the legacy `[[roots]]` ancestor so a nested project
+    /// wins (1a5acfc0). Normalizing the comparison must not disturb it.
+    #[test]
+    fn prefers_the_first_matching_root() {
+        #[cfg(windows)]
+        let (stored, nested, ancestor) = (
+            PathBuf::from("//?/C:/home/work/proj/docs/a.md"),
+            PathBuf::from(r"\\?\C:\home\work\proj"),
+            PathBuf::from(r"\\?\C:\home"),
+        );
+        #[cfg(not(windows))]
+        let (stored, nested, ancestor) = (
+            PathBuf::from("/home/work/proj/docs/a.md"),
+            PathBuf::from("/home/work/proj"),
+            PathBuf::from("/home"),
+        );
+
+        let roots = vec![nested.clone(), ancestor];
+        assert_eq!(containing_root(&roots, &stored), Some(&nested));
+    }
 }

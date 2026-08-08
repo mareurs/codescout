@@ -62,6 +62,12 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
+/// Always `None` — POSIX guarantees `/bin/sh`. The Windows twin can answer
+/// `Some(hint)` when no Git Bash is installed.
+pub fn shell_unavailable_hint() -> Option<String> {
+    None
+}
+
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     let mut c = tokio::process::Command::new("sh");
     c.arg("-c")
@@ -79,38 +85,10 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     c
 }
 
+/// POSIX tokenization, shared with the Windows implementation now that both
+/// platforms execute through a POSIX shell.
 pub fn shell_tokenize(cmd: &str) -> Result<Vec<String>, String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escape_next = false;
-
-    for ch in cmd.chars() {
-        if escape_next {
-            current.push(ch);
-            escape_next = false;
-            continue;
-        }
-        match ch {
-            '\\' if !in_single => escape_next = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            c if c.is_whitespace() && !in_single && !in_double => {
-                if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
-                }
-            }
-            c => current.push(c),
-        }
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    if in_single || in_double {
-        return Err("unclosed quote".to_string());
-    }
-    Ok(tokens)
+    super::posix_tokenize(cmd)
 }
 
 pub fn terminate_process(pid: u32) -> std::io::Result<()> {

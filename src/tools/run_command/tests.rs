@@ -2513,10 +2513,8 @@ async fn buffer_query_returns_up_to_200_lines_inline() {
     let content: String = (1..=100).map(|i| format!("{i}\n")).collect();
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
-    // Query the buffer — 100 lines is within the BUFFER_QUERY_INLINE_CAP
-    #[cfg(windows)]
-    let query = format!("type {output_id}");
-    #[cfg(not(windows))]
+    // Query the buffer — 100 lines is within the BUFFER_QUERY_INLINE_CAP.
+    // `cat` works on both platforms now that Windows runs through Git Bash.
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -2545,9 +2543,6 @@ async fn buffer_query_truncation_hint_shows_next_page() {
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
     // Query it — output exceeds 100-line cap, so hint should show next-page command
-    #[cfg(windows)]
-    let query = format!("type {output_id}");
-    #[cfg(not(windows))]
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -3725,6 +3720,47 @@ async fn onboarding_triggers_refresh_when_version_stale() {
         "must be lightweight refresh"
     );
 }
+#[test]
+fn tee_path_is_safe_accepts_real_platform_temp_paths() {
+    use super::inner::tee_path_is_safe;
+    // POSIX.
+    assert!(tee_path_is_safe("/tmp/codescout-unfiltered-aB3xY9"));
+    // Windows, long name — needs `:` for the drive letter.
+    assert!(tee_path_is_safe(
+        "C:/Users/someone/AppData/Local/Temp/codescout-unfiltered-aB3xY9"
+    ));
+    // Windows, 8.3 short name — needs `~`. This is the exact shape that
+    // reached the shell on the dev VDI and was rejected: `%TEMP%` resolves
+    // through the short name whenever the account name is long or dotted.
+    assert!(tee_path_is_safe(
+        "C:/Users/MAILIN~1.002/AppData/Local/Temp/codescout-unfiltered-g44yCk"
+    ));
+}
+
+#[test]
+fn tee_path_is_safe_rejects_shell_metacharacters() {
+    use super::inner::tee_path_is_safe;
+    // The interpolated path is single-quoted at the call site, so a `'` would
+    // be the one character that could break out — it must never pass.
+    // `'` ISOLATED. The composite fixture below carries `;` and a space too,
+    // so it stays green if `'` is admitted to the allowlist — it cannot pin
+    // the one character that matters. The tee path is single-quoted at the
+    // call site in `inject_tee`, and that quoting is unescapable ONLY while
+    // `'` is excluded here; this assertion is the whole reason that holds.
+    assert!(!tee_path_is_safe("/tmp/x'y"));
+    // `\` likewise: bash reads it as an escape in an unquoted word, and it is
+    // a legal filename byte on Unix.
+    assert!(!tee_path_is_safe("/tmp/x\\y"));
+    assert!(!tee_path_is_safe("/tmp/x'; rm -rf /; echo '"));
+    assert!(!tee_path_is_safe("/tmp/x;y"));
+    assert!(!tee_path_is_safe("/tmp/x$(id)"));
+    assert!(!tee_path_is_safe("/tmp/x`id`"));
+    assert!(!tee_path_is_safe("/tmp/x y"));
+    assert!(!tee_path_is_safe("/tmp/x|y"));
+    assert!(!tee_path_is_safe("/tmp/x>y"));
+    assert!(!tee_path_is_safe(""));
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn background_command_with_quotes_captures_output() {
@@ -3757,7 +3793,7 @@ async fn background_command_with_quotes_captures_output() {
     for _ in 0..150 {
         let out = RunCommand
             .call(
-                json!({ "command": format!("type {ref_id}"), "timeout_secs": 10 }),
+                json!({ "command": format!("cat {ref_id}"), "timeout_secs": 10 }),
                 &ctx,
             )
             .await;

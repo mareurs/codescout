@@ -3104,15 +3104,14 @@ mod tests {
         // the project root (e.g. from readlink/realpath) must be returned
         // verbatim, not silently rewritten to a relative-looking string.
         let (dir, server) = make_server().await;
-        // Build with platform-native separators (\\ on Windows, / on Unix); avoid
-        // single-quote shell syntax which cmd.exe treats as literal characters.
-        let abs = dir
-            .path()
-            .join("some")
-            .join("nested")
-            .join("path")
-            .to_string_lossy()
-            .into_owned();
+        // Spell the path in the form the executing shell survives. Commands run
+        // through a POSIX shell on both platforms (Git Bash on Windows), where
+        // `\` is an escape character — a native `C:\a\b` literal would reach
+        // `echo` as `C:ab` and this test would be asserting on shell escaping
+        // rather than on the regression it guards, which is codescout rewriting
+        // absolute path literals in stdout. Separator style is irrelevant to that.
+        let abs =
+            crate::platform::shell_path_str(&dir.path().join("some").join("nested").join("path"));
 
         let req = CallToolRequestParams::new("run_command").with_arguments(
             serde_json::from_value(serde_json::json!({
@@ -3972,10 +3971,12 @@ mod guide_hint_tests {
         );
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "uses 'yes filler | head -2000' shell pipeline — both 'yes' and 'head' are Unix-only and the inject_tee path-validator rejects Windows temp file paths (C:\\Users\\...\\Temp\\codescout-unfiltered-XXX has chars outside the [a-zA-Z0-9/_-.] allowlist). See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
-    )]
+    // Previously #[ignore]d on Windows for two reasons, both now resolved:
+    // `yes`/`head` were Unix-only under cmd.exe (commands run through Git Bash
+    // on both platforms now), and inject_tee's path validator rejected every
+    // Windows temp path (it accepts the `:` drive letter and the `~` of 8.3
+    // short names, and the path is rendered forward-slashed). Re-enabled so the
+    // overflow -> progressive-disclosure-hint path is actually covered here.
     #[tokio::test]
     async fn run_command_with_overflow_emits_progressive_hint_once() {
         let (_dir, server) = make_server().await;

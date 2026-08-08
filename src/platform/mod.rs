@@ -61,14 +61,6 @@ pub fn lsp_binary_name(base: &str) -> String {
     imp::lsp_binary_name(base)
 }
 
-/// Build the verbatim command-line tail handed to `cmd /C` on Windows.
-/// Wrapped in an outer quote pair so cmd's `/C` quote rule consumes exactly
-/// that pair and runs the inner command — including its own quotes — verbatim.
-/// Pure + cross-platform so it is testable on the Linux CI.
-pub fn build_windows_cmdline(cmd: &str) -> String {
-    format!("/C \"{cmd}\"")
-}
-
 /// Resolve the on-disk binary name for a dual-packaged LSP server, parameterized
 /// over an existence probe so the extension-preference logic is pure and
 /// unit-testable on any platform (the `PATH` side-effect lives in the Windows
@@ -109,8 +101,18 @@ pub(crate) fn lsp_binary_name_with(base: &str, exists: impl Fn(&str) -> bool) ->
     format!("{base}.cmd")
 }
 
+/// `Some(hint)` when this platform has no shell to spawn commands through.
+///
+/// Unix always has `sh`, so it is always `None` there. Windows runs commands
+/// through Git Bash and answers `Some` when none is installed — `run_command`
+/// turns that into a `RecoverableError` naming the requirement, instead of
+/// letting every spawn fail with a bare `program not found`.
+pub fn shell_unavailable_hint() -> Option<String> {
+    imp::shell_unavailable_hint()
+}
+
 /// Build a fully-configured shell `tokio::process::Command` for `cmd`.
-/// Windows: `cmd /C "<cmd>"` via raw_arg (no MSVC-CRT quote mangling).
+/// Windows: `<git-bash> -c <cmd>` — a POSIX shell, same as Unix, since WIN-32.
 /// Unix: `sh -c <cmd>` in a fresh process group with SIGPIPE reset.
 /// Sets `GIT_PAGER=cat`. The caller sets cwd, stdio, and kill_on_drop.
 /// stdin defaults to null on **both** platforms (prevents inherited-pipe / REPL
@@ -120,23 +122,195 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     imp::shell_command_configured(cmd)
 }
 
+/// Tokenize a command string using POSIX shell rules: single quotes are
+/// literal, double quotes group without consuming backslash escapes, and an
+/// unescaped backslash escapes the next character outside single quotes.
+///
+/// Shared by both platforms because both now execute through a POSIX shell
+/// (`sh -c` on Unix, Git Bash `bash -c` on Windows).
+///
+/// **This is not on any security path today.** An earlier version of this
+/// comment said it fed the dangerous-command and pipeline checks. It does not:
+/// [`shell_tokenize`] is its only caller and has no production call sites, and
+/// `is_dangerous_command` (`src/util/path_security.rs`) still splits with
+/// `split_whitespace`. The claim is recorded here rather than deleted because
+/// it named a real hazard — the security layer and the executing shell
+/// disagreeing about tokenization — which the cmd.exe -> Git Bash switch made
+/// live on Windows and which nothing has closed. See
+/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+/// Do not restore the claim without first wiring this into that layer.
+///
+/// Pure + cross-platform so its tests run on every CI target, not just Windows.
+pub fn posix_tokenize(cmd: &str) -> Result<Vec<String>, String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape_next = false;
+
+    for ch in cmd.chars() {
+        if escape_next {
+            current.push(ch);
+            escape_next = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escape_next = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    if in_single || in_double {
+        return Err("unclosed quote".to_string());
+    }
+    Ok(tokens)
+}
+
+/// Render a path for interpolation into a shell command string.
+///
+/// Unix: unchanged. Windows: backslashes become forward slashes, because the
+/// command is executed by Git Bash, where `\` is an escape character — a raw
+/// `C:\Users\x\tmp` reaches the shell as `C:Usersxtmp` and names nothing.
+/// Git Bash accepts the `C:/Users/x/tmp` form natively.
+///
+/// Deliberately does NOT quote. `OutputBuffer::resolve_refs` matches substituted
+/// words against the same strings it pushes into `temp_path_strings` to decide
+/// `is_buffer_only`, which in turn gates the dangerous-command check. Adding
+/// quotes here would break that match and silently reclassify buffer-only
+/// commands. Whitespace in the path is therefore still the caller's problem —
+/// unchanged from the previous behaviour, not a new gap.
+pub fn shell_path_str(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
+    }
+}
+
+/// Whether two Windows directory paths name the same directory.
+///
+/// `Path` equality compares components byte-exactly — only the drive-letter
+/// prefix folds case — so `C:\Windows\System32` and `C:\Windows\system32` are
+/// NOT equal. That is load-bearing in `windows::resolve_git_bash`: Windows
+/// setup writes the system `PATH` in the lowercase spelling, while
+/// `%SystemRoot%` joined with `"System32"` produces the capitalized one, so the
+/// `==` meant to keep the WSL launcher out of the running never matched on a
+/// real host and let it be selected.
+///
+/// Folds ASCII case, accepts either separator, and ignores one trailing
+/// separator. Deliberately NOT a prefix test — it answers "same directory", so
+/// `C:\Windows\System` never matches `C:\Windows\System32`.
+///
+/// Lives here rather than in `windows.rs` because that module is
+/// `#[cfg(windows)]`: a fix tested only there is verified on one CI leg, and
+/// this is the half of the logic that was wrong.
+///
+/// `pub`, not `pub(crate)`, for the same reason as its neighbours: the only
+/// caller is inside `#[cfg(windows)]`, so on a Linux build `-D dead-code`
+/// rejects the crate-private form.
+pub fn windows_dir_eq(a: &std::path::Path, b: &std::path::Path) -> bool {
+    fn key(p: &std::path::Path) -> String {
+        let slashed = p.to_string_lossy().replace('\\', "/");
+        slashed.trim_end_matches('/').to_ascii_lowercase()
+    }
+    key(a) == key(b)
+}
+
+/// Windows only: assign `child` to a kill-on-close Job Object so dropping the
+/// returned guard reaps the entire process tree, not just the direct child.
+///
+/// The Unix side already reaps the tree via `process_group(0)` + `killpg`.
+/// Windows has no process-group analogue, so a Job Object is how cancel/timeout
+/// stops a shell's own children — without it `kill_on_drop` kills `bash` and
+/// leaves whatever it launched still running.
+#[cfg(windows)]
+pub fn kill_on_close_job(child: &tokio::process::Child) -> Option<windows::JobGuard> {
+    imp::kill_on_close_job(child)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn windows_cmdline_wraps_in_outer_quotes() {
-        // cmd /C with a leading quote strips the outer-pair quotes of the whole
-        // line and runs the remainder verbatim, so the command — including its
-        // own inner quotes — must be wrapped in exactly one outer pair.
+    fn posix_tokenize_handles_quotes_and_escapes() {
+        // Single quotes are literal; double quotes group; backslash escapes
+        // outside single quotes. These are the rules the executing shell
+        // (`sh -c` / Git Bash `bash -c`) applies, so the security layer must
+        // read commands the same way it will run them.
         assert_eq!(
-            build_windows_cmdline(r#"py -c "print(1)""#),
-            r#"/C "py -c "print(1)"""#
+            posix_tokenize("echo 'hello world'").unwrap(),
+            vec!["echo", "hello world"]
         );
         assert_eq!(
-            build_windows_cmdline("git --version"),
-            r#"/C "git --version""#
+            posix_tokenize(r#"py -c "print(1)""#).unwrap(),
+            vec!["py", "-c", "print(1)"]
         );
+        assert_eq!(
+            posix_tokenize(r"echo a\ b").unwrap(),
+            vec!["echo", "a b"],
+            "backslash escapes a separator outside quotes"
+        );
+        assert_eq!(
+            posix_tokenize(r#"echo '\n'"#).unwrap(),
+            vec!["echo", r"\n"],
+            "backslash stays literal inside single quotes"
+        );
+    }
+
+    #[test]
+    fn posix_tokenize_rejects_unclosed_quote() {
+        // Must be an error, not a silent truncation: the security layer treats
+        // the token list as authoritative when deciding what a command does.
+        assert!(posix_tokenize(r#"echo "unterminated"#).is_err());
+        assert!(posix_tokenize("echo 'unterminated").is_err());
+    }
+
+    /// The exact pair that made the WSL exclusion inert:
+    /// `%SystemRoot%`.join("System32") yields the capitalized spelling, while
+    /// Windows setup writes the system `PATH` with the lowercase one, and a
+    /// byte-exact `Path` compare calls those different directories.
+    ///
+    /// Runs on every CI leg — `platform::windows` is `#[cfg(windows)]`, so
+    /// asserting this only there would verify the fix on one leg of four.
+    #[test]
+    fn windows_dir_eq_folds_case_and_separators() {
+        use std::path::Path;
+
+        assert!(windows_dir_eq(
+            Path::new(r"C:\Windows\system32"),
+            Path::new(r"C:\Windows\System32"),
+        ));
+        assert!(windows_dir_eq(
+            Path::new(r"C:\WINDOWS\SYSTEM32\"),
+            Path::new("C:/Windows/System32"),
+        ));
+
+        // "Same directory", never a prefix test: a sibling whose name merely
+        // starts with the excluded one must still be searched, and a child of
+        // the excluded directory is not the excluded directory.
+        assert!(!windows_dir_eq(
+            Path::new(r"C:\Windows\System"),
+            Path::new(r"C:\Windows\System32"),
+        ));
+        assert!(!windows_dir_eq(
+            Path::new(r"C:\Windows\System32\downlevel"),
+            Path::new(r"C:\Windows\System32"),
+        ));
+        assert!(!windows_dir_eq(
+            Path::new(r"C:\tools\git\bin"),
+            Path::new(r"C:\Windows\System32"),
+        ));
     }
 
     #[test]
