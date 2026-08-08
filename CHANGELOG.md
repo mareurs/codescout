@@ -218,6 +218,18 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **`edit_code(action="remove")` now verifies what it wrote, and rolls back an edit that
+  breaks the file.** `remove` — the one action whose entire purpose is deleting a range —
+  had **no post-edit verification at all**: it wrote and returned `status: "ok"`, while
+  `replace` next door checked for dropped symbols and rolled back. A removal whose range
+  overshot by two lines took the closing `)` and `}` of the *preceding* function with it
+  and reported success; the file was left syntactically invalid. `remove` now runs the same
+  check as `replace`, and both gained a `SyntaxBroken` verdict for damage the symbol-level
+  checks structurally cannot see — dropping a delimiter loses no symbol *name*, so the file
+  was reported clean. The check only fires when the file parsed **before** the edit, so
+  editing an already-broken file is never refused. See
+  `docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
+
 - **`edit_code(action="rename")` no longer reports a partial rename as a success.** When
   the language server resolves no reference outside the declaration file — measured and
   reproducible on Kotlin for a top-level `object`, in a tree that compiled green — the

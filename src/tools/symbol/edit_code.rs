@@ -604,7 +604,83 @@ impl EditCode {
         new_lines.extend_from_slice(&lines[..start]);
         new_lines.extend_from_slice(&lines[end..]);
 
+        // `remove` had NO post-edit verification at all — it wrote and returned `ok`.
+        // The reported corruption was therefore not a check that missed; it was a check
+        // that did not exist on this path, while `replace` next door had one. Reported
+        // once, when an AST-repaired range overshot the start by two lines and took the
+        // preceding function's `)` and `}` with it, leaving the file invalid under
+        // `status: "ok"`. See
+        // docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
+        let pre_ast = crate::ast::extract_symbols(&full_path).ok();
+        let pre_set = pre_ast.as_ref().map(|s| collect_all_name_paths(s));
+        let target_ast_name_path = pre_ast
+            .as_ref()
+            .and_then(|s| find_ast_name_path(s, &sym.name, sym.start_line));
+
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
+
+        let post_ast = crate::ast::extract_symbols(&full_path);
+        let extract_err = post_ast.as_ref().err().map(|e| e.to_string());
+        let post_ast = post_ast.ok();
+
+        let syntax_regressed = std::fs::read_to_string(&full_path)
+            .ok()
+            .zip(crate::ast::detect_language(&full_path))
+            .map(|(post_src, l)| crate::symbol::edit::syntax_regressed(&content, &post_src, l))
+            .unwrap_or(false);
+
+        // `pre_count = 0` deliberately: dropping the target IS the operation here, so the
+        // TargetDropped arm must never fire. What means something on a removal is that a
+        // SIBLING vanished, or that the file stopped parsing.
+        let verdict = crate::symbol::edit::corruption_verdict(
+            0,
+            pre_set.as_ref(),
+            target_ast_name_path.as_deref(),
+            &sym.name_path,
+            post_ast.as_deref(),
+            syntax_regressed,
+        );
+
+        let rollback_reason = match &verdict {
+            CorruptionVerdict::SyntaxBroken => Some((
+                format!(
+                    "edit_code remove('{name_path}') left the file syntactically invalid — \
+                     it parsed before this edit and does not parse after it. No sibling \
+                     symbol was dropped, so the range most likely overshot into adjacent \
+                     code and took a delimiter with it. File restored."
+                ),
+                "Re-read with symbols(path) to refresh the range, then retry; if it still \
+                 looks wrong, narrow the edit via edit_file with unique anchors. Serialize \
+                 write calls — parallel edit_code writes in one block can leave the LSP \
+                 with a stale view (BUG-021).",
+            )),
+            CorruptionVerdict::SiblingsDropped(dropped) => Some((
+                format!(
+                    "edit_code remove('{name_path}') would have dropped sibling symbols: \
+                     {}. The range overshot into adjacent code (likely a stale LSP range). \
+                     File restored.",
+                    dropped.join(", ")
+                ),
+                "Try symbols(path) to refresh, then retry; or narrow the edit via \
+                 edit_file with unique anchors.",
+            )),
+            CorruptionVerdict::TargetDropped
+            | CorruptionVerdict::Clean
+            | CorruptionVerdict::Unverified => None,
+        };
+
+        if let Some((msg, hint)) = rollback_reason {
+            write_lines(&full_path, &lines, content.ends_with('\n'))?;
+            ctx.lsp.notify_file_changed(&full_path).await;
+            ctx.agent
+                .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path)
+                .await;
+            ctx.agent
+                .mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path)
+                .await;
+            return Err(RecoverableError::with_hint(msg, hint).into());
+        }
+
         ctx.lsp.notify_file_changed(&full_path).await;
         ctx.agent
             .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path)
@@ -621,6 +697,16 @@ impl EditCode {
         });
         if let Some(r) = range_repair {
             response["warning"] = json!(r.warning(&sym.name));
+        }
+        if verdict == CorruptionVerdict::Unverified {
+            response["corruption_check"] = json!("skipped");
+            response["corruption_check_error"] = json!(
+                extract_err.unwrap_or_else(|| "post-edit symbol extraction failed".to_string())
+            );
+            response["hint"] = json!(
+                "The removal was written but NOT verified against dropped siblings. \
+                 Re-read the file with symbols(path) to confirm it is intact."
+            );
         }
         Ok(response)
     }
@@ -791,12 +877,25 @@ impl EditCode {
         let extract_err = post_ast.as_ref().err().map(|e| e.to_string());
         let post_ast = post_ast.ok();
 
+        // Read back what was actually written rather than re-joining `new_lines`: the
+        // question is whether the FILE parses, and `write_lines` owns the trailing-newline
+        // decision. Nothing to verify if the read fails — the name-set checks below still
+        // run and `Unverified` still covers a failed re-extract.
+        let syntax_regressed = std::fs::read_to_string(&full_path)
+            .ok()
+            .zip(crate::ast::detect_language(&full_path))
+            .map(|(post_src, lang)| {
+                crate::symbol::edit::syntax_regressed(&content, &post_src, lang)
+            })
+            .unwrap_or(false);
+
         let verdict = crate::symbol::edit::corruption_verdict(
             pre_count,
             pre_set.as_ref(),
             target_ast_name_path.as_deref(),
             &sym.name_path,
             post_ast.as_deref(),
+            syntax_regressed,
         );
 
         // Both corrupting verdicts roll the file back identically; only the message differs.
@@ -818,6 +917,24 @@ impl EditCode {
                 ),
                 "Try symbols(path) to refresh, then retry; or narrow the edit via \
                  edit_file with unique anchors.",
+            )),
+            // The verdict the name-set checks structurally cannot reach: an edit that
+            // drops a closing delimiter loses no symbol name, so it used to land here as
+            // `Clean` with `status: "ok"` and no rollback, leaving the file invalid.
+            // Reported once, on a removal whose AST-repaired range overshot the start by
+            // two lines and took the previous function's `)` and `}` with it.
+            // See docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
+            CorruptionVerdict::SyntaxBroken => Some((
+                format!(
+                    "edit_code('{name_path}') left the file syntactically invalid — it \
+                     parsed before this edit and does not parse after it. No symbol was \
+                     dropped, so the edit most likely overshot into adjacent code and took \
+                     a delimiter with it. File restored."
+                ),
+                "Re-read with symbols(path) to refresh the ranges, then retry; if the \
+                 range still looks wrong, narrow the edit via edit_file with unique \
+                 anchors. Serialize write calls — parallel edit_code writes in one block \
+                 can leave the LSP with a stale view (BUG-021).",
             )),
             CorruptionVerdict::Clean | CorruptionVerdict::Unverified => None,
         };
