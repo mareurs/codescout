@@ -341,6 +341,19 @@ impl CodeVectorStore for SqliteVecCodeStore {
         )?;
         Ok((chunks as usize, files as usize))
     }
+
+    async fn project_has_chunks(&self, _collection: &str, project_id: &str) -> Result<bool> {
+        let conn = self.conn_for(project_id)?;
+        let conn = conn.lock();
+        // EXISTS stops at the first row; count(*) would scan the project's rows to
+        // produce a number the caller immediately discards.
+        let present: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM code_chunk WHERE project_id = ?1)",
+            rusqlite::params![project_id],
+            |r| r.get(0),
+        )?;
+        Ok(present)
+    }
 }
 
 #[cfg(test)]

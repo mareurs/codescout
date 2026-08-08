@@ -1542,26 +1542,49 @@ fn format_activate_project_prepends_warning_with_none_stored_version() {
     );
 }
 
+/// The index-status cache state machine, exercised without touching the network.
+///
+/// This used to drive step 1 through a real probe and assert it completed, on the
+/// unstated premise that "the stack is offline in tests => false, fast". That premise
+/// is false in the shipped configuration: `cargo rb` compiles `server-stack`, and with
+/// a reachable Qdrant the probe does real work. It then failed for a real reason (the
+/// probe enumerated the whole corpus — see
+/// `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`),
+/// and after that fix it still failed under full-suite load, because "a network round
+/// trip finishes inside two seconds" is not a property a unit test controls.
+///
+/// What this test is actually about is the cache logic, so it drives that directly:
+/// `resolve_first_probe` is already a pure function over the probe outcome.
 #[tokio::test]
 #[serial_test::serial]
 async fn index_status_cache_serves_stale_then_refreshes() {
     // Unique key so the process-global cache can't collide across tests.
     let pid = format!("cache-sandwich-{}", std::process::id());
-    let root = std::env::temp_dir();
+    super::index_status_remove(&pid);
 
-    // 1. Baseline: no entry -> bounded live probe (stack offline in tests => false), cached.
-    assert!(!super::check_has_index_cached(&pid, &root).await);
+    // 1. A completed probe is cached, definitively.
+    assert!(!super::resolve_first_probe(&pid, Some(false)));
     assert_eq!(super::index_status_get(&pid), Some(false));
 
-    // 2. Assert-STALE: seed true; the cached value must be returned even though
-    //    a live probe would say false. Regression step — fails if the cache is
-    //    ever bypassed for an eager re-probe.
-    super::index_status_put(&pid, true);
-    assert!(super::check_has_index_cached(&pid, &root).await);
-
-    // 3. Invalidate -> fresh: remove the entry; next call re-probes (false).
+    // 1b. A timed-out probe reports false but must NOT be cached, so the next
+    //     activation re-probes instead of serving a poisoned negative. This is the
+    //     branch the old test reached by accident and misread as a failure.
     super::index_status_remove(&pid);
-    assert!(!super::check_has_index_cached(&pid, &root).await);
+    assert!(!super::resolve_first_probe(&pid, None));
+    assert_eq!(
+        super::index_status_get(&pid),
+        None,
+        "a timeout must not cache"
+    );
+
+    // 2. Assert-STALE: seed true; the cached value is returned on a cache hit without
+    //    an eager re-probe. Regression step — fails if the cache is ever bypassed.
+    super::index_status_put(&pid, true);
+    assert!(super::check_has_index_cached(&pid, &std::env::temp_dir()).await);
+
+    // 3. Invalidate: the entry is gone, so the next call would re-probe.
+    super::index_status_remove(&pid);
+    assert_eq!(super::index_status_get(&pid), None);
 }
 #[test]
 fn first_probe_timeout_is_not_cached() {

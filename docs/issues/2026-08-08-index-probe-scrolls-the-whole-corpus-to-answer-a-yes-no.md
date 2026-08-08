@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: check_has_index scrolls every chunk of a project with full payloads to answer "are there any?", so on a real corpus it exceeds its 2s budget, reports the project unindexed, and re-does the whole scroll on every activation'
 tags:
 - retrieval
@@ -8,7 +8,7 @@ tags:
 - activation
 - performance
 - silent-wrong-answer
-closed: null
+closed: 2026-08-08
 opened: 2026-08-08
 owner: marius
 related:
@@ -125,32 +125,61 @@ above.*
 
 ## Fix
 
-Not yet implemented. In preference order:
+**Implemented on `experiments`.** Promotion is by fast-forward, so the SHA recorded at
+archive time *is* the master SHA.
 
-1. **Give existence its own query.** A `project_has_chunks(collection, project_id)` that
-   scrolls with `limit(1)`, `with_payload(false)`, `with_vectors(false)` and returns
-   whether the first page is non-empty. One round trip, no payloads, no pagination.
-   `check_has_index` calls that instead. This is the actual fix; everything else is
-   mitigation.
-2. **Stop fetching payloads in `project_index_stats` that it does not need** — it uses
-   only `file_path`, so `with_payload` should select that one key rather than `true`.
-   Independently worth doing; it does not by itself make an O(corpus) call fit in 2 s.
-3. **Do not raise `FIRST_PROBE_TIMEOUT`.** Tempting and wrong: it trades a wrong answer
-   for a slow activation, and the number that "works" is a function of the biggest
-   corpus anyone points at it — precisely the environment-specific constant memory
-   `conventions` § *Environment-Agnostic Tuning* warns against.
+1. **`CodeVectorStore::project_has_chunks`** — existence as its own trait method.
+   Qdrant: one scroll, `limit(1)`, `with_payload(false)`, `with_vectors(false)`, constant
+   work regardless of corpus size. sqlite: `SELECT EXISTS(SELECT 1 …)`, which stops at
+   the first row. `check_has_index` calls that instead of `project_index_stats(..).0 > 0`.
 
+   **Required, not defaulted.** A default delegating to `project_index_stats` would have
+   been a one-line change touching no implementors — and would have made this exact
+   defect the behaviour every future backend inherits by not thinking about it. Five
+   implementors each answering the cheap question cheaply is the point.
+
+2. **Two sibling payload over-fetches, found while fixing the first.** Both scrolls in
+   `src/retrieval/qdrant.rs` passed `with_payload(true)` and read two or three keys:
+   - `scroll_chunk_refs` reads only `chunk_id` and `content_hash`, and runs on **every
+     sync** — `stream_index` diffs against it. It was pulling every chunk's `content`
+     over the wire to compare hashes. Now `PayloadIncludeSelector{fields: [chunk_id,
+     content_hash]}`.
+   - `project_index_stats` reads only `file_path`. Now selects just that.
+
+   Neither was in the original diagnosis; both are the same mistake as the headline bug
+   (fetch everything, read a little) at different call sites. The sync-path one is
+   plausibly the more expensive of the three in aggregate.
+
+3. **`FIRST_PROBE_TIMEOUT` left at 2s**, as § Fix candidate 3 argued. The fix is to make
+   the question cheap, not the deadline generous.
+
+**Gate:** `fmt`; `clippy --all-targets -D warnings` on both default and `server-stack`;
+`cargo test` 3581; `cargo test --features server-stack` **3586 passed / 0 failed** — the
+first green run of the shipped configuration; `check --no-default-features --all-targets`
+and `test --no-default-features` green.
 ## Tests added
 
-None yet. The regression test needs the existence path asserted against a store double
-that **counts round trips** — the defect is not "returns the wrong answer" but "does
-O(corpus) work to return the right one", and only a call-count assertion discriminates
-those. `RecordingStore` in `src/retrieval/sync.rs` is the existing pattern to copy.
+- `contract_has_chunks_agrees_with_stats_and_costs_nothing_extra`
+  (`src/retrieval/code_store.rs`). Pins `project_has_chunks` to
+  `project_index_stats().0 > 0` in both the empty and populated state — the two answer
+  the same question by different routes and can drift apart silently — plus a scoping
+  case: another project's chunks must not make this one look indexed.
+  *Mutation:* making the in-memory impl ignore `project_id` fails it **on the scoping
+  assertion specifically**, not on the easy ones.
 
-`index_status_cache_serves_stale_then_refreshes` should also stop encoding "stack
-offline in tests" as an unstated premise; with the fix its first probe completes on a
-live stack, so it can assert the completed-and-cached path honestly.
+- `index_status_cache_serves_stale_then_refreshes` — rewritten hermetic. It was
+  asserting, through a live probe, that a network round trip completes inside two
+  seconds; that is not a property a unit test controls. After the fix it passed alone
+  (1.43 s) and still failed under full-suite load, which is the tell. It now drives
+  `resolve_first_probe` directly — already a pure function over the probe outcome — and
+  covers a branch the old version never asserted at all: **a timed-out probe must not be
+  cached**.
 
+**What is not covered by a test, stated rather than implied:** that the Qdrant path does
+O(1) work. That property is structural — `limit(1)`, no payload, no vectors — and
+verifying it needs a store double counting round trips against a caller that cannot
+currently be injected (`check_has_index` builds its client from env). The trait being
+required-not-defaulted is the guard that a new backend cannot regress it by omission.
 ## Workarounds
 
 None needed for correctness of search — this affects only the `index.status` field in
@@ -160,12 +189,13 @@ activation.
 
 ## Resume
 
-Read `RetrievalClient::project_index_stats` (`src/retrieval/client.rs:101`) and check
-whether any caller other than `check_has_index` needs only existence — `index(action=
-"status")` and the dashboard both plausibly want the real counts, so the fix is a new
-narrow method rather than changing the existing one. Then implement § Fix candidate 1
-and give it the round-trip-counting test described above.
+N/A — fixed 2026-08-08.
 
+One thing deliberately left: `check_has_index` resolves its client via
+`RetrievalClient::from_env()`, so no test can inject a store double and assert on call
+counts. That is why the O(1) property is argued structurally above rather than pinned by
+a test. If this area is touched again, making the client injectable is the change that
+would let the cost property be asserted rather than reasoned about.
 ## References
 
 - `src/tools/config/mod.rs:424-436` — `check_has_index`, the one-bit question

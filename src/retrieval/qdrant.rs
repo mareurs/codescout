@@ -112,7 +112,12 @@ impl QdrantWrap {
         loop {
             let mut builder = ScrollPointsBuilder::new(collection)
                 .filter(filter.clone())
-                .with_payload(true)
+                // Only these two keys are read below. `with_payload(true)` pulled
+                // every chunk's `content` over the wire — on every sync, since
+                // `stream_index` diffs against this — to compare two hashes.
+                .with_payload(qdrant_client::qdrant::PayloadIncludeSelector {
+                    fields: vec!["chunk_id".to_string(), "content_hash".to_string()],
+                })
                 .with_vectors(false)
                 .limit(1000u32);
 
@@ -154,6 +159,30 @@ impl QdrantWrap {
         Ok(refs)
     }
 
+    /// Existence only: does this project have at least one chunk?
+    ///
+    /// One scroll, one page, no payloads, no vectors — constant work regardless of
+    /// corpus size. The sibling `project_index_stats` below cannot answer this
+    /// cheaply because `file_count` requires enumerating every point.
+    pub async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool> {
+        use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
+
+        let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
+        let resp = self
+            .client
+            .scroll(
+                ScrollPointsBuilder::new(collection)
+                    .filter(filter)
+                    .with_payload(false)
+                    .with_vectors(false)
+                    .limit(1u32),
+            )
+            .await
+            .context("project_has_chunks")?;
+
+        Ok(!resp.result.is_empty())
+    }
+
     /// Scroll all chunks for a project and return summary stats:
     /// `(chunk_count, file_count)` where `file_count` is distinct `file_path`
     /// values in the payload. Used by IndexStatus to surface the same numbers
@@ -174,7 +203,11 @@ impl QdrantWrap {
         loop {
             let mut builder = ScrollPointsBuilder::new(collection)
                 .filter(filter.clone())
-                .with_payload(true)
+                // Only `file_path` is read below; `with_payload(true)` pulled every
+                // chunk's `content` over the wire to count distinct files.
+                .with_payload(qdrant_client::qdrant::PayloadIncludeSelector {
+                    fields: vec!["file_path".to_string()],
+                })
                 .with_vectors(false)
                 .limit(1000u32);
 

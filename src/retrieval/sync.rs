@@ -473,6 +473,10 @@ mod tests {
         async fn project_index_stats(&self, _c: &str, _p: &str) -> Result<(usize, usize)> {
             Ok((0, 0))
         }
+
+        async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
+            Ok(false)
+        }
     }
 
     /// Deterministic embedder fake: one dense vector per input, no HTTP. Output
@@ -869,6 +873,10 @@ mod tests {
         }
         async fn project_index_stats(&self, _c: &str, _p: &str) -> Result<(usize, usize)> {
             Ok((0, 0))
+        }
+
+        async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
+            Ok(false)
         }
     }
 

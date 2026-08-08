@@ -107,4 +107,13 @@ impl RetrievalClient {
             .project_index_stats(collection, project_id)
             .await
     }
+
+    /// Does this project have any indexed chunks? Constant-cost existence check —
+    /// use this instead of `project_index_stats(..).0 > 0`, which enumerates the
+    /// project to produce counts the caller then throws away.
+    pub async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool> {
+        self.code_store
+            .project_has_chunks(collection, project_id)
+            .await
+    }
 }
