@@ -622,12 +622,7 @@ impl OutputBuffer {
             if is_temp {
                 return false;
             }
-            // Absolute or explicitly-relative paths
-            if word.starts_with('/') || word.starts_with("./") {
-                return true;
-            }
-            // Relative paths with a directory separator but no leading flag sigil
-            !word.starts_with('-') && word.contains('/')
+            is_path_like(word)
         });
 
         Ok((result, temp_paths, is_buffer_only, refreshed_handles))
@@ -646,25 +641,63 @@ impl OutputBuffer {
     /// dangerous-command speed bump because they cannot modify the real
     /// filesystem — they only read from in-memory output buffers materialized
     /// as read-only temp files.
+    ///
+    /// Splits with [`shell_words`], not `split_whitespace`. This function used to use
+    /// the latter while its twin — the classifier inside [`Self::resolve_refs`] — used
+    /// `shell_words`, so the two copies of this gate disagreed about quoted arguments.
+    /// Both now route through [`is_path_like`].
     pub fn is_buffer_only(command: &str) -> bool {
         if !command.contains("@cmd_") && !command.contains("@file_") && !command.contains("@tool_")
         {
             return false;
         }
-        // Reject if any whitespace-separated word looks like a path.
-        for word in command.split_whitespace() {
-            // Absolute or explicitly-relative paths
-            if word.starts_with('/') || word.starts_with("./") || word.starts_with("../") {
-                return false;
-            }
-            // Relative paths with a directory separator but no leading flag sigil
-            // (e.g. "src/main.rs") — flags like "--format=a/b" are excluded by the '-' check.
-            if !word.starts_with('-') && word.contains('/') {
-                return false;
-            }
-        }
-        true
+        !shell_words(command).iter().any(|w| is_path_like(w))
     }
+}
+
+/// Whether the shell will turn `word` into a filesystem path.
+///
+/// Single source of truth for the buffer-only classifier. There were two copies of
+/// this rule — the closure in [`OutputBuffer::resolve_refs`] and the body of
+/// [`OutputBuffer::is_buffer_only`] — and they had already diverged: only one
+/// recognised `../`, and only one split quote-aware. Both now call this.
+///
+/// The question is deliberately "will the SHELL make this a path", not "does this
+/// look like a path to a reader". Those diverge exactly at tilde, parameter and glob
+/// expansion, and treating `~`, `$HOME` and `*` as non-paths let a command carrying a
+/// buffer ref skip BOTH the dangerous-command gate and the source-file block — `rm -rf
+/// ~/x` next to a `@cmd_*` ref read as buffer-only. See
+/// `docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
+///
+/// **Sigils count only at the START of a word, not anywhere in it.** `contains` was
+/// tried first and over-blocked the buffer workflows this classifier exists to serve:
+/// `awk '{print $0}' @cmd_x` (the `$0` is single-quoted, so the shell never expands
+/// it) and `grep '.*ERROR' @cmd_x` (a regex, not a glob) both became non-buffer-only,
+/// which would make the documented `@ref` pipelines demand an acknowledgement. A word
+/// that *begins* with `~`, `$` or `*` is being used as a path; one that merely
+/// contains the character is usually data. Note that `shell_words` has already
+/// stripped the quotes by this point, so quoting cannot be consulted here — the
+/// leading-sigil rule is the available proxy.
+///
+/// Residual, accepted: `rm -rf x$HOME` and `--out=$HOME/x` are not flagged. Both are
+/// contrived and neither is a regression — the first was never caught, and the second
+/// is excluded by the pre-existing flag-sigil rule below.
+///
+/// Erring is otherwise one-directional: a false `true` only makes the gates RUN, a
+/// false `false` skips them. `?` and `[` stay excluded for the same reason `contains`
+/// was dropped — they are regex metacharacters far more often than path ones.
+fn is_path_like(word: &str) -> bool {
+    // Absolute or explicitly-relative paths.
+    if word.starts_with('/') || word.starts_with("./") || word.starts_with("../") {
+        return true;
+    }
+    // Words the shell expands into a path: `~/x`, `$HOME/x`, `$PROJECT_ROOT`, `*.rs`.
+    if word.starts_with('~') || word.starts_with('$') || word.starts_with('*') {
+        return true;
+    }
+    // Relative paths with a directory separator but no leading flag sigil
+    // (e.g. "src/main.rs") — flags like "--format=a/b" are excluded by the '-' check.
+    !word.starts_with('-') && word.contains('/')
 }
 
 /// Naive shell word splitter: splits on whitespace, respecting single/double quotes.
@@ -998,6 +1031,72 @@ mod tests {
         assert!(
             !OutputBuffer::is_buffer_only("grep pattern @cmd_abc1234 /tmp/file.rs"),
             "absolute path must NOT be classified as buffer-only"
+        );
+    }
+
+    /// The bypass this classifier had: a command carrying a buffer ref alongside a
+    /// shell-expanded path read as buffer-only, and buffer-only skips BOTH the
+    /// dangerous-command gate and the source-file block. `~`, `$HOME` and `*` are
+    /// not paths to a reader; they are paths to the shell.
+    ///
+    /// Each case is destructive-or-source-reading against a REAL path once the shell
+    /// expands it, so a regression here reopens the gate skip, not just a heuristic.
+    #[test]
+    fn is_buffer_only_false_for_shell_expanded_paths() {
+        for cmd in [
+            "rm -rf ~/scratch @cmd_abc1234",
+            "cat @cmd_abc1234 $HOME/.ssh/id_rsa",
+            "rm -rf $PROJECT_ROOT @cmd_abc1234",
+            "cat @cmd_abc1234 *.rs",
+            "grep pattern @cmd_abc1234 ../src/main.rs",
+        ] {
+            assert!(
+                !OutputBuffer::is_buffer_only(cmd),
+                "shell expands this into a real path, so the gates must run: {cmd}"
+            );
+        }
+    }
+
+    /// Control for the case above, and it did its job: an earlier `contains('$')` /
+    /// `contains('*')` rule over-blocked the `awk` and `grep` cases here, which are the
+    /// documented `@ref` pipelines this classifier exists to serve. The eager
+    /// path-likeness list must not swallow genuinely buffer-only commands, or every
+    /// buffer workflow starts demanding an acknowledgement.
+    ///
+    /// The `$` and `*` here are quoted regex/awk syntax, not expansions — the shell
+    /// never turns them into paths.
+    #[test]
+    fn is_buffer_only_still_true_for_genuine_ref_only_commands() {
+        for cmd in [
+            "grep ERROR @cmd_abc1234",
+            "wc -l @cmd_abc1234",
+            "diff @cmd_abc1234 @cmd_def5678",
+            r#"awk '{print $0}' @cmd_abc1234"#,
+            r#"awk '{print $1, $3}' @cmd_abc1234"#,
+            r#"grep '.*ERROR' @cmd_abc1234"#,
+            r#"grep 'a*b' @cmd_abc1234"#,
+            "sed -n '1,20p' @cmd_abc1234",
+        ] {
+            assert!(
+                OutputBuffer::is_buffer_only(cmd),
+                "no real path here; must stay buffer-only: {cmd}"
+            );
+        }
+    }
+
+    /// The two copies of this rule had diverged — `is_buffer_only` split with
+    /// `split_whitespace` while `resolve_refs`'s classifier used `shell_words`, so a
+    /// quoted argument was read differently by the two gates. Both now go through
+    /// `is_path_like` after `shell_words`; this pins the quote-aware behaviour.
+    #[test]
+    fn is_buffer_only_splits_quote_aware() {
+        assert!(
+            !OutputBuffer::is_buffer_only(r#"grep "a b" @cmd_abc1234 /tmp/x"#),
+            "a quoted argument must not hide the real path that follows it"
+        );
+        assert!(
+            OutputBuffer::is_buffer_only(r#"grep "some pattern" @cmd_abc1234"#),
+            "a quoted pattern containing a space is not a path"
         );
     }
 

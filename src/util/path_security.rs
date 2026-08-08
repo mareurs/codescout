@@ -533,12 +533,65 @@ const DEFAULT_DANGEROUS_PATTERNS: &[(&str, &str)] = &[
     (r"\bdd\s+if=", "dd (raw disk write)"),
 ];
 
+/// Shell-normalized form of `command`, for a second pattern-matching pass.
+///
+/// Tokenizes with [`crate::platform::posix_tokenize`] — the same quote and escape
+/// rules `sh -c` and Git Bash `bash -c` apply — and rejoins with single spaces.
+/// Returns `None` when the result equals the input (the second pass would be
+/// redundant) or when the command cannot be tokenized at all.
+///
+/// **Why a second pass rather than a replacement.** The raw string catches shapes a
+/// token list does not, so matching only the normalized form would LOSE catches.
+/// Matching both can only add them, which makes this safe by construction: every
+/// command `is_dangerous_command` rejected before, it still rejects.
+///
+/// **The cost, stated plainly.** Rejoining erases the difference between "two words"
+/// and "one quoted word", so `grep 'rm' '-rf' notes.txt` now matches `rm\s+-rf` and
+/// gets flagged. That is a false positive, and it is the price of the pass. It is
+/// tolerable because a flag is not a refusal — the caller re-invokes with the
+/// returned `@ack_*` handle — and because `is_dangerous_command` has never checked
+/// command position, so this class already existed via the raw pass
+/// (`grep 'rm -rf' notes.txt` was flagged long before normalization, since the raw
+/// string literally contains `rm -rf`).
+///
+/// A NUL-substitution scheme was tried to keep quoted arguments un-bridgeable and
+/// then removed: no case could be constructed where it changed the outcome, because
+/// for whitespace to sit *inside* a token the quotes must sit outside it, which
+/// leaves the dangerous substring intact in the raw string where the raw pass
+/// already finds it. Reinstating it needs a demonstrated case, not a plausible one.
+///
+/// An unclosed quote yields `None`, so only the raw pass runs — unchanged from the
+/// previous behaviour. The shell would fail to parse such a command anyway.
+fn shell_normalized(command: &str) -> Option<String> {
+    let joined = crate::platform::posix_tokenize(command).ok()?.join(" ");
+    (joined != command).then_some(joined)
+}
+
 /// Check if a command matches a dangerous pattern.
 ///
 /// Returns the matched pattern description if dangerous, `None` if safe.
+///
+/// Patterns are matched against the raw command **and** its shell-normalized form
+/// (see [`shell_normalized`]). Quote and escape tricks — `r''m -rf /`, `rm -r\f /` —
+/// leave the raw string unmatchable while the shell still executes the destructive
+/// command; the normalized pass reads it the way the shell will.
+///
+/// This is `posix_tokenize`'s first production call site. Before this, the tokenizer
+/// written for exactly this job had none, and the security layer and the executing
+/// shell disagreed about what a command said — live on Windows since the
+/// cmd.exe -> Git Bash switch. See
+/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`; the six
+/// `split_whitespace` helpers in this file are still on the old model and are the
+/// remainder of that bug.
 pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Option<String> {
     if config.profile == SecurityProfile::Root {
         return None;
+    }
+
+    let normalized = shell_normalized(command);
+    let mut haystacks: Vec<&str> = vec![command];
+    if let Some(n) = normalized.as_deref() {
+        haystacks.push(n);
     }
 
     // Check built-in dangerous patterns (cached).
@@ -551,7 +604,7 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
             .collect()
     });
     for (re, description) in cached.iter() {
-        if re.is_match(command) {
+        if haystacks.iter().any(|h| re.is_match(h)) {
             return Some(description.to_string());
         }
     }
@@ -559,7 +612,7 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     // Check user-configured dangerous patterns.
     for pattern in &config.shell_dangerous_patterns {
         if let Ok(re) = Regex::new(pattern) {
-            if re.is_match(command) {
+            if haystacks.iter().any(|h| re.is_match(h)) {
                 return Some(format!("matches custom pattern: {}", pattern));
             }
         }
@@ -1596,6 +1649,113 @@ mod tests {
         assert!(is_dangerous_command("git push origin main", &config).is_none());
         assert!(is_dangerous_command("rm temp.txt", &config).is_none());
         assert!(is_dangerous_command("npm run build", &config).is_none());
+    }
+
+    /// The discriminating cases for matching raw-OR-normalized. Every command here
+    /// leaves the RAW string unmatchable by `rm\s+-[a-zA-Z]*f` while the shell still
+    /// executes `rm -rf`, because quote and escape characters sit between the letters
+    /// the regex needs adjacent.
+    ///
+    /// A revert to raw-only matching fails these. A switch to normalized-only passes
+    /// these but fails `raw_only_matches_are_still_caught` below — which is the point
+    /// of asserting both directions: the union is the invariant, not either arm.
+    #[test]
+    fn dangerous_command_catches_quote_and_escape_evasion() {
+        let config = PathSecurityConfig::default();
+
+        for evasion in [
+            r"r''m -rf /tmp/x",   // empty single-quote pair splits the word
+            r#"r""m -rf /tmp/x"#, // same trick with double quotes
+            r"rm -r\f /tmp/x",    // backslash escape inside the flag
+            r"'rm' -rf /tmp/x",   // whole command word quoted
+            r"git push --force'' origin main",
+        ] {
+            assert!(
+                is_dangerous_command(evasion, &config).is_some(),
+                "the shell runs this destructively, so the gate must catch it: {evasion}"
+            );
+        }
+    }
+
+    /// Guards the raw arm of the union. `\s+` in the patterns already tolerates odd
+    /// spacing, and normalization collapses it — so if someone later replaces the raw
+    /// pass with the normalized one, these must keep passing on their own.
+    #[test]
+    fn raw_only_matches_are_still_caught() {
+        let config = PathSecurityConfig::default();
+        for raw in [
+            "rm -rf /tmp/x",
+            "rm    -rf    /tmp/x",
+            "git push --force origin main",
+        ] {
+            assert!(
+                is_dangerous_command(raw, &config).is_some(),
+                "must be caught without relying on normalization: {raw}"
+            );
+        }
+    }
+
+    /// A gate that returned `Some` unconditionally would pass every evasion case
+    /// above, so the negative control belongs next to them rather than only in
+    /// `safe_command_not_flagged`. The quoted case matters specifically: normalization
+    /// rewrites the command before matching, so a benign command that merely *contains*
+    /// spaces inside quotes must survive it.
+    #[test]
+    fn normalization_does_not_flag_benign_commands() {
+        let config = PathSecurityConfig::default();
+        for benign in [
+            "echo hello",
+            r#"echo "hello world""#,
+            "cargo test --all",
+            r#"git commit -m "reset the hard way""#,
+        ] {
+            assert!(
+                is_dangerous_command(benign, &config).is_none(),
+                "must stay allowed after normalization: {benign}"
+            );
+        }
+    }
+
+    /// The false-positive class, asserted so it is a recorded property rather than a
+    /// surprise — and so that a future attempt to remove it has a test to change.
+    ///
+    /// `is_dangerous_command` has never checked command *position*: it looks for the
+    /// pattern anywhere in the string. So a command that merely quotes dangerous text
+    /// as data is flagged. The first case predates normalization entirely (the raw
+    /// string literally contains `rm -rf`); the second is added BY normalization,
+    /// which rejoins `'rm' '-rf'` into `rm -rf`.
+    ///
+    /// A flag is not a refusal — the caller re-invokes with the returned `@ack_*`
+    /// handle — which is why this is an acceptable price for catching quote evasion.
+    #[test]
+    fn quoted_dangerous_text_is_flagged_and_the_raw_pass_did_it_first() {
+        let config = PathSecurityConfig::default();
+
+        // Pre-existing: raw string contains `rm -rf`, quotes or not.
+        assert!(
+            is_dangerous_command("grep 'rm -rf' notes.txt", &config).is_some(),
+            "pre-existing behaviour, unrelated to normalization"
+        );
+
+        // Added by normalization: the raw string has `rm' '-rf` (no whitespace
+        // directly after `rm`), so only the rejoined form matches.
+        assert!(
+            is_dangerous_command("grep 'rm' '-rf' notes.txt", &config).is_some(),
+            "normalization rejoins the tokens; this is the documented cost"
+        );
+    }
+
+    /// An unclosed quote cannot be tokenized, so only the raw pass runs. Asserted so
+    /// the fallback is a recorded decision rather than incidental behaviour: the shell
+    /// would fail to parse such a command anyway, and silently *skipping* the gate on
+    /// a tokenizer error would be the dangerous reading of the same situation.
+    #[test]
+    fn unclosed_quote_still_gets_the_raw_pass() {
+        let config = PathSecurityConfig::default();
+        assert!(
+            is_dangerous_command(r#"rm -rf /tmp/x "unterminated"#, &config).is_some(),
+            "raw pass must still fire when normalization is unavailable"
+        );
     }
 
     #[test]

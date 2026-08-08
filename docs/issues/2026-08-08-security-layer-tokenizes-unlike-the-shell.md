@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: mitigated
+tags:
+- security
+- run_command
+- windows
+- tokenizer
+closed: null
 opened: 2026-08-08
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [security, run_command, windows, tokenizer]
-kind: bug
+severity: medium
 ---
 
 # BUG: the dangerous-command gate tokenizes with `split_whitespace`, not with the shell's rules — and the tokenizer written for that job has no callers
@@ -127,25 +131,75 @@ fragments is not the same token the gate inspected.
 
 ## Fix
 
-Two options, and the choice is a real one:
+**Partial — status `mitigated`, not `fixed`.** One of the four string models now agrees
+with the shell; the six `split_whitespace` helpers do not.
 
-1. **Wire it in.** Replace `split_whitespace()` in `is_dangerous_command` and the
-   pipeline checks with `platform::shell_tokenize`. This is a behaviour change to a
-   security gate — it will reclassify some commands in both directions, and needs its
-   own test pass. This is the fix the deleted comment claimed had already happened.
-2. **Delete the tokenizer.** If the gate is deliberately a coarse substring matcher,
-   `posix_tokenize` is 60 lines of dead code with 6 tests guarding nothing, and keeping
-   it invites the same false comment to be written again.
+### Landed on `experiments`
 
-Not attempted here. This file exists because option (1) was *documented* as done, and a
-reviewer reading that comment would stop looking. The comment now states the truth and
-points here.
+`is_dangerous_command` matches every pattern against the raw command **and** a
+shell-normalized form (`shell_normalized`, new, in `src/util/path_security.rs`). That is
+`posix_tokenize`'s **first production call site** — the tokenizer written for this job had
+none.
 
+Union, not replacement, and that choice is the safety argument: the raw string catches
+shapes a token list does not, so matching only the normalized form would LOSE catches.
+Matching both can only add them, so every command the gate rejected before, it still
+rejects — true by construction, and pinned by `raw_only_matches_are_still_caught`.
+
+What it closes: quote and escape evasion that leaves the raw string unmatchable while the
+shell still runs the destructive command — `r''m -rf /tmp/x`, `r""m -rf /tmp/x`,
+`rm -r\f /tmp/x`, `'rm' -rf /tmp/x`, `git push --force'' origin main`.
+
+**The cost, stated rather than discovered later.** Rejoining tokens erases the difference
+between "two words" and "one quoted word", so `grep 'rm' '-rf' notes.txt` is now flagged.
+That is a false positive and it is the price of the pass. Acceptable because a flag is not
+a refusal (the caller re-invokes with the returned `@ack_*` handle), and because
+`is_dangerous_command` has never checked command *position*, so this class already existed
+via the raw pass — `grep 'rm -rf' notes.txt` was flagged long before normalization, since
+the raw string literally contains `rm -rf`. Both are asserted in
+`quoted_dangerous_text_is_flagged_and_the_raw_pass_did_it_first` so the property is
+recorded rather than rediscovered.
+
+A NUL-substitution scheme was written to keep quoted arguments un-bridgeable, then removed:
+no case could be constructed where it changed the outcome, because for whitespace to sit
+*inside* a token the quotes must sit outside it, which leaves the dangerous substring
+intact in the raw string where the raw pass already finds it. Reinstating it needs a
+demonstrated case, not a plausible one.
+
+### Still open — what keeps this `mitigated`
+
+The six `split_whitespace` readers in `src/util/path_security.rs` are untouched:
+`stage_trims`, `grep_is_counting`, `is_unbounded_lhs`, `has_recursive_flag`,
+`extract_grep_pattern`, `check_source_file_access`. They gate IL3 pipeline policy and the
+source-file block, and they still read commands the way the shell will not. Converting
+them is the remainder, and it needs a decision the dangerous-pattern fix did not: those
+helpers inspect *head tokens and flags*, so quote-awareness changes which token is the
+head — a behaviour change per helper, not a union that can only add.
+
+The fourth model — `OutputBuffer`'s path-likeness heuristic — is fixed under
+`docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`, including the
+discovery that it existed in two already-diverged copies.
 ## Tests added
 
-None — no behaviour changed. The 6 existing `posix_tokenize` tests are correct about
-the function and say nothing about whether anything calls it, which is the defect.
+Four, in `src/util/path_security.rs`:
 
+- `dangerous_command_catches_quote_and_escape_evasion` — the five evasions above. Each
+  leaves the raw string unmatchable while the shell still runs `rm -rf` / `git push
+  --force`. A revert to raw-only matching fails these.
+- `raw_only_matches_are_still_caught` — guards the *other* arm. If someone later replaces
+  the raw pass with the normalized one, these must keep passing on their own. Asserting
+  both directions is the point: the union is the invariant, not either arm.
+- `normalization_does_not_flag_benign_commands` — negative control. A gate returning
+  `Some` unconditionally would pass every evasion case, so this belongs beside them.
+  Includes quoted-but-benign commands, since normalization rewrites before matching.
+- `quoted_dangerous_text_is_flagged_and_the_raw_pass_did_it_first` — records the
+  false-positive class, and distinguishes the pre-existing instance from the one
+  normalization adds.
+- `unclosed_quote_still_gets_the_raw_pass` — a tokenizer error must fall back to the raw
+  pass, never *skip* the gate. Recorded as a decision rather than incidental behaviour.
+
+Gate: `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 3562
+passed / 0 failed / 44 ignored.
 ## Workarounds
 
 None needed; no known exploit. `acknowledge_risk` remains the escape hatch for a command
@@ -154,13 +208,22 @@ verbs are still caught regardless of word boundaries.
 
 ## Resume
 
-Decide between Fix option 1 and 2. If 1: start at `is_dangerous_command`
-(`src/util/path_security.rs`), enumerate its `split_whitespace()` call sites, and write
-the divergence tests FIRST — a quoted-path command that the two tokenizers classify
-differently — so the change is observable. If 2: delete `platform::shell_tokenize`,
-`unix::shell_tokenize`, `windows::shell_tokenize`, `posix_tokenize` and its tests in one
-commit, and say in the message that the security layer is deliberately substring-based.
+Keep open at `mitigated`. The remainder is the six `split_whitespace` helpers.
 
+Before converting them, settle the question the first half did not have to: those helpers
+read *head tokens and flags*, so switching to `posix_tokenize` changes which token is the
+head when quoting is involved. That is a behaviour change per helper, not a union that can
+only add catches — so each needs its own before/after test, and `check_source_file_access`
+in particular decides whether a command is blocked outright.
+
+Suggested order, cheapest and least behavioural first: `has_recursive_flag`,
+`grep_is_counting`, `extract_grep_pattern`, `is_unbounded_lhs`, `stage_trims`,
+`check_source_file_access`. Consider whether a shared `tokens_or_fallback(cmd) ->
+Vec<String>` helper (tokenize, fall back to `split_whitespace` on error — never skip)
+belongs next to `shell_normalized` so the fallback rule is written once.
+
+Do not close this on the `is_dangerous_command` change alone; that is why the status is
+`mitigated`.
 ## References
 
 - `src/platform/mod.rs` — `posix_tokenize`, and the corrected comment pointing here

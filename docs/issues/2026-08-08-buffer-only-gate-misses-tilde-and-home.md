@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- security
+- run_command
+- output-buffer
+- windows
+closed: 2026-08-08
 opened: 2026-08-08
-closed:
-severity: high
 owner: marius
 related: []
-tags: [security, run_command, output-buffer, windows]
-kind: bug
+severity: high
 ---
 
 # BUG: `is_buffer_only` treats `~` and `$HOME` as non-paths, so a command carrying a buffer ref skips the dangerous-command gate entirely
@@ -93,29 +97,48 @@ That is the same reasoning `shell_path_str` already applies elsewhere in this mo
 
 ## Fix
 
-Teach the heuristic the words the shell will expand into paths. In
-`src/tools/output_buffer.rs:618`, before the separator checks:
+Landed on `experiments` (master-side SHA still to be recorded after cherry-pick).
 
-```rust
-// Expanded by the shell into a path, though they carry no separator.
-if word == "~" || word.starts_with("~/") || word.starts_with('$') || word.contains('*') {
-    return true;
-}
-```
+**The heuristic existed twice, and the two copies had already diverged.** That was not in
+the original report and is the reason a one-site fix would have left the bug half-open:
 
-Deliberately NOT applied in PR #10. It changes the behaviour of a security gate — in the
-conservative direction (more commands checked, never fewer), but it will make some
-currently-buffer-only commands take the `pending_ack` round trip, and that belongs in a
-change whose reviewers are looking at the gate rather than at Windows path handling.
-Note `^foo$` and similar regex anchors do NOT start with `$`, so the common
-`grep "^foo$" @cmd_x` idiom is unaffected — worth a test either way.
+| copy | splitter | `../` | sigils |
+|---|---|---|---|
+| closure in `OutputBuffer::resolve_refs` | `shell_words` (quote-aware) | **no** | no |
+| `OutputBuffer::is_buffer_only` | `split_whitespace` (quote-blind) | yes | no |
 
+Both now call a single `is_path_like` in `src/tools/output_buffer.rs`, and
+`is_buffer_only` splits with `shell_words` like its twin. The rule gains the shell
+expansion sigils: a word beginning `~`, `$` or `*` is path-like.
+
+**Sigils count only at the START of a word.** `contains` was tried first and the control
+test rejected it: `awk '{print $0}' @cmd_x` (the `$0` is single-quoted, so the shell never
+expands it) and `grep '.*ERROR' @cmd_x` (a regex, not a glob) both became
+non-buffer-only. Those are the documented `@ref` pipelines this classifier exists to
+serve, so `contains` would have made the buffer workflow demand an acknowledgement on
+ordinary use. `shell_words` has already stripped quotes by that point, so quoting cannot
+be consulted — leading-sigil is the available proxy.
+
+Residual, accepted and documented in the code: `rm -rf x$HOME` and `--out=$HOME/x` are
+still not flagged. Neither is a regression (the first was never caught; the second is
+excluded by the pre-existing flag-sigil rule), and both are contrived.
 ## Tests added
 
-None yet. The fix needs three: `~` alone, `$HOME`, and a glob each flip
-`is_buffer_only` to false; plus a negative for `grep "^foo$" @cmd_abc1234` staying
-buffer-only, which is the regression the fix could plausibly cause.
+Three, in `src/tools/output_buffer.rs`:
 
+- `is_buffer_only_false_for_shell_expanded_paths` — the bypass itself. Five commands that
+  are destructive or source-reading against a real path *once the shell expands them*
+  (`rm -rf ~/scratch @cmd_x`, `cat @cmd_x $HOME/.ssh/id_rsa`, `rm -rf $PROJECT_ROOT @cmd_x`,
+  `cat @cmd_x *.rs`, `grep pattern @cmd_x ../src/main.rs`). A regression here reopens the
+  gate skip, not merely a heuristic.
+- `is_buffer_only_still_true_for_genuine_ref_only_commands` — the control, and it earned
+  its place by failing: it caught the `contains` over-block described above. Eight
+  commands including `awk '{print $0}'`, `grep '.*ERROR'`, `grep 'a*b'`, `sed -n '1,20p'`.
+- `is_buffer_only_splits_quote_aware` — pins the divergence that unification closed: a
+  quoted argument must not hide the real path after it.
+
+Gate: `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 3562
+passed / 0 failed / 44 ignored.
 ## Workarounds
 
 Spell the path absolutely (`/home/you`) rather than `~` — that is already classified
@@ -124,12 +147,13 @@ correctly and takes the normal gate. The gate is also reachable deliberately via
 
 ## Resume
 
-Apply the § Fix hunk at `src/tools/output_buffer.rs:618`, then write the four tests named
-in § Tests added BEFORE running the suite, so the `^foo$` regression is observable rather
-than discovered. Then re-check `OutputBuffer::is_buffer_only` (`:649`, the static
-test-only twin) for the same gap — it duplicates the heuristic and would otherwise drift
-from the live computation at `:618`.
+Fixed and green. Remaining: confirm CI on `experiments` at the commit containing this
+change, then archive via `artifact(action="move", …)` — never a bare `git mv`. Label the
+SHA `experiments`; the master-side SHA still needs recording after cherry-pick.
 
+The sibling bug (`docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`) is
+only **mitigated** — six `split_whitespace` helpers in `path_security.rs` are still on the
+old string model. Do not close it on this fix.
 ## References
 
 - `src/tools/output_buffer.rs:618` — the heuristic
