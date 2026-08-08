@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the AST metadata header is computed and tested for every chunk but reaches neither the embedder nor the payload — ast_kind/ast_header are empty on all 579,311 chunks in the live collection'
 tags:
 - retrieval
@@ -8,7 +8,7 @@ tags:
 - chunker
 - dead-feature
 - silent-quality-loss
-closed: null
+closed: 2026-08-08
 opened: 2026-08-08
 owner: marius
 related:
@@ -167,35 +167,66 @@ the Qdrant path's history before this file calls it a regression.
 
 ## Fix
 
-Not yet implemented. The change is small; the validation is not.
+Implemented 2026-08-08 on `experiments`. Four changes, all in the retrieval path.
 
-1. **Carry the value.** Add `metadata` to what `stream_index` reads off the chunk and
-   write it into `ast_header` (and derive `ast_kind` from the chunk's node kind, or drop
-   `ast_kind` if nothing will ever fill it — a permanently-empty payload field is worse
-   than no field).
-2. **Prepend for embedding.** In `flush_pending`, build the text as
-   `{ast_header}\n{content}` when the header is non-empty, matching the contract the
-   deleted `embed_text_format_includes_metadata_prefix` test pinned.
-3. **Re-embed.** This changes embedding inputs for every chunk, so it invalidates every
-   vector — an `index --force` per project. Measured cost on codescout 2026-08-07: 8.06
-   min, not the "~2h" that has been quoted around this area.
+1. **`embed_text` is the named home for the decision** (`src/retrieval/payload.rs`).
+   It returns `{ast_header}\n{content}` when the header is present and bare content
+   when it is not. `flush_pending` calls it instead of reading `p.content` inline, so
+   "what does a chunk look like to the embedder" is now one function with one test
+   rather than the residue of a struct literal in another module.
+2. **`stream_index` carries the value** — `ast_header: c.metadata.unwrap_or_default()`
+   in place of `String::new()`.
+3. **`ast_kind` is deleted**, not populated. It had no producer anywhere in the tree,
+   so filling it meant inventing a value. Removed from the struct, from
+   `payload_to_map`, and from `map_to_payload`; points written before today still
+   carry the key and it is simply not read.
+4. **The header is now checkout-independent.** `stream_index` handed `split_file` the
+   *absolute* path (`entry.path()`), so prepending the header as-was would have
+   embedded `/home/<user>/...` into every vector and made the same code embed
+   differently per checkout location. It now passes the forward-slashed relative path
+   — the same string the payload stores. Found during implementation: all 31 of the
+   chunker's own `split_file` call sites already pass relative paths; the single
+   production caller was the outlier, and the divergence was invisible because the
+   header it produced was unconsumed.
 
-Validate against `docs/research/2026-05-06-retrieval-stack-benchmark.md` before landing.
-Prepending a header to every chunk is not obviously free — it adds tokens to short chunks
-and could dilute the body signal. That is precisely why it needs measurement rather than
-assumption, and the same benchmark gate the chunk-size floor was supposed to pass.
+**Gate:** `fmt`, `clippy --all-targets -D warnings`, `cargo test` (3580 passed),
+`check --no-default-features --all-targets`, `test --no-default-features` (2643),
+`test --features local-embed --no-default-features` (2644) — all green.
 
+**Not done, and deliberately:** the retrieval benchmark has NOT run. Prepending a
+header to every chunk is not free — it adds tokens to short chunks and may dilute
+body signal. Validate against `docs/research/2026-05-06-retrieval-stack-benchmark.md`
+before this is promoted. Nothing here should be read as evidence the change improves
+retrieval; it restores a declared contract that the code had silently stopped
+honouring.
 ## Tests added
 
-None yet. Two are needed, and the second is the one that would have caught this:
+Both mutation-verified — a test that has never been seen to fail is a test whose
+failure mode is unknown.
 
-- Unit: `flush_pending` sends `{header}\n{content}` when the header is present, plain
-  content when it is not. This is the deleted test, restored against the surviving path.
-- Integration: after an index pass over a fixture, assert the stored payload's
-  `ast_header` is non-empty for at least one known symbol chunk. A unit test on the
-  chunker cannot catch a value being dropped two modules downstream — the entire failure
-  here is that the producer's tests all passed.
+- `stream_index_embeds_the_ast_header_ahead_of_content`
+  (`src/retrieval/sync.rs`, in the existing `mod tests`). Drives a real index pass
+  over a temp file and asserts on **what the embedder received**, via a new `seen`
+  recorder on `FakeEmbedder`. Also asserts the body survives the prepend, and that no
+  absolute path leaks into the embedding input.
+  *Mutation:* restoring `ast_header: String::new()` fails it with
+  `no embedded text carried an AST header; got ["fn assemble_widget(n: usize) …"]` —
+  and **the other seven tests in that module still pass**, which is the measured proof
+  that the pre-existing suite was blind to this defect.
+- `embed_text_prepends_the_ast_header_and_omits_it_when_absent`
+  (`tests/retrieval_unit.rs`). The deleted `embed_text_format_includes_metadata_prefix`
+  contract, restored against the surviving path. Covers the empty-header branch too,
+  so a markdown chunk cannot start embedding with a leading blank line.
+  *Mutation:* making `embed_text` return `p.content.clone()` unconditionally fails it.
 
+Deliberately **not** gated behind `server-stack` — that feature is in neither
+`default` nor any CI lane, so a test carrying the gate is never compiled and cannot
+fail. Filed separately as
+`docs/issues/2026-08-08-server-stack-gated-tests-never-compiled-by-any-lane.md`.
+
+Asserting on the stored payload would not have caught the original defect: the legacy
+path stored raw content while embedding header+content, so stored content reads as raw
+in both the working and the broken world. Only the embedder's input discriminates.
 ## Workarounds
 
 None available to a user. Retrieval quality is affected but nothing is broken enough to
@@ -203,17 +234,26 @@ route around; queries that name a symbol still match its body text.
 
 ## Resume
 
-Decide first whether `ast_kind` should exist at all. `ast_header` has a clear producer
-(`build_metadata_header`) and a clear use; `ast_kind` has neither, and filling it means
-inventing a value. Read `CodePayload` at `src/retrieval/payload.rs:10-40` and check
-whether anything reads `ast_kind` back out (`map_to_payload` at `:69` deserializes it —
-find out if any caller uses the result). If nothing does, delete the field rather than
-populate it.
+The code defect is closed; the corpus is not. Two operational steps remain, in order:
 
-Then check the Qdrant path's history for whether the header was ever embedded there, so
-this file can state regression-or-never-implemented as fact rather than as the open
-question in § Root cause.
+1. **Run the retrieval benchmark** against
+   `docs/research/2026-05-06-retrieval-stack-benchmark.md` with headers on. This is a
+   gate, not a formality — if the header dilutes short-chunk signal, the honest
+   outcome is to keep `embed_text` and change what it composes.
+2. **`index --force` per project.** Chunk ids are content-addressed and content is
+   unchanged, so a normal sync **skips** every existing chunk by id and will never
+   update its vector or payload. Only `--force` re-embeds. Measured cost on codescout
+   2026-08-07: 8.06 min.
 
+Do not archive this file until step 1 has run. The fix is verified as *code*; the
+claim it improves retrieval is unmeasured, and archiving would file that claim as
+settled.
+
+One question left open from § Root cause, unchanged: whether the Qdrant path ever
+embedded the header (regression) or never did while the legacy path carried it. The
+discovery that `CodeChunk.metadata`'s own doc comment reads *"Searchable header
+prepended before embedding"* proves the contract was **declared** and violated; it
+does not prove which path violated it first.
 ## References
 
 - `src/retrieval/sync.rs:83-100` — `flush_pending`, embeds content only

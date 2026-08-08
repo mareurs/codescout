@@ -87,11 +87,14 @@ async fn flush_pending(
     pending: &mut Vec<crate::retrieval::payload::CodePayload>,
 ) -> Result<usize> {
     use crate::retrieval::embedder::EmbedOutput;
-    use crate::retrieval::payload::CodePayload;
+    use crate::retrieval::payload::{embed_text, CodePayload};
     if pending.is_empty() {
         return Ok(0);
     }
-    let texts: Vec<String> = pending.iter().map(|p| p.content.clone()).collect();
+    // What a chunk looks like to the embedder is `embed_text`'s decision, not this
+    // function's. Reading `p.content` inline here is what silently dropped the AST
+    // header when its previous consumer was deleted.
+    let texts: Vec<String> = pending.iter().map(embed_text).collect();
     let embeds = embedder.embed_batch_dyn(&texts).await?;
     let n = pending.len();
     let chunks: Vec<(CodePayload, EmbedOutput)> = pending.drain(..).zip(embeds).collect();
@@ -177,7 +180,14 @@ async fn stream_index(
             Err(_) => continue,
         };
         let rel_path = path.strip_prefix(root).unwrap_or(path);
-        for c in split_file(&source, lang, path, chunk_target) {
+        // The header this produces is now embedded, so it has to be
+        // checkout-independent and separator-stable: hand the chunker the same
+        // forward-slashed relative path the payload stores, never the absolute one.
+        // Every one of the chunker's own 31 call sites already passes a relative
+        // path; this lone production caller passed `path`, and nothing noticed
+        // because the header it produced was never consumed.
+        let rel_display = to_forward_slash(rel_path);
+        for c in split_file(&source, lang, Path::new(&rel_display), chunk_target) {
             // Skip empty/whitespace-only chunks — embedders reject empty inputs.
             if c.content.trim().is_empty() {
                 continue;
@@ -198,8 +208,10 @@ async fn stream_index(
                 language: lang.into(),
                 start_line: c.start_line as i64,
                 end_line: c.end_line as i64,
-                ast_kind: String::new(),
-                ast_header: String::new(),
+                // The chunker's identity line for this chunk, empty for non-AST
+                // languages. `embed_text` prepends it; discarding it here is what
+                // made it unreachable for four hundred thousand chunks.
+                ast_header: c.metadata.unwrap_or_default(),
                 content: c.content,
                 content_hash: hash,
                 last_indexed_commit: String::new(),
@@ -467,11 +479,19 @@ mod tests {
     /// length matches `texts` so the zip in `flush_pending` stays aligned.
     struct FakeEmbedder {
         dim: usize,
+        /// Every text handed to `embed_batch_dyn`, in order.
+        ///
+        /// This is what lets a test assert on the EMBEDDING INPUT rather than on the
+        /// stored payload — and that distinction is the whole bug: the legacy path
+        /// stored raw content while embedding `{header}\n{content}`, so inspecting
+        /// stored content would have "confirmed" correct behaviour either way.
+        seen: Mutex<Vec<String>>,
     }
 
     #[async_trait::async_trait]
     impl BatchEmbedder for FakeEmbedder {
         async fn embed_batch_dyn(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            self.seen.lock().unwrap().extend(texts.iter().cloned());
             Ok(texts
                 .iter()
                 .map(|_| EmbedOutput {
@@ -500,7 +520,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_sources(dir.path(), 10);
         let store = RecordingStore::default();
-        let emb = FakeEmbedder { dim: 4 };
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
 
         let (added, deleted) = stream_index(
             dir.path(),
@@ -537,11 +560,87 @@ mod tests {
         assert_eq!(deleted, 0);
     }
 
+    /// The regression guard the deleted `embed::index` module took with it.
+    ///
+    /// `embed_text_format_includes_metadata_prefix` asserted the text sent for
+    /// embedding is `{metadata}\n{content}` and not just content. It lived inside
+    /// the module removed in `66db4c70`, so when the surviving path turned out not
+    /// to implement the contract, nothing failed and the header quietly stopped
+    /// being embedded — 579,311 chunks' worth.
+    ///
+    /// This asserts on what the embedder RECEIVED. Asserting on the stored payload
+    /// would not have caught the original defect: the legacy path stored raw
+    /// content while embedding header+content, so stored content is raw in both
+    /// the working and the broken world.
+    #[tokio::test]
+    async fn stream_index_embeds_the_ast_header_ahead_of_content() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("widget.rs"),
+            "fn assemble_widget(n: usize) -> usize {\n    let total = n * 2;\n    total\n}\n",
+        )
+        .unwrap();
+        let store = RecordingStore::default();
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+
+        let (added, _) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            1200,
+            8,
+            &[],
+        )
+        .await
+        .unwrap();
+        assert!(added > 0, "expected at least one chunk");
+
+        let seen = emb.seen.lock().unwrap().clone();
+        let headed: Vec<&String> = seen
+            .iter()
+            .filter(|t| t.starts_with("widget.rs ::"))
+            .collect();
+        assert!(
+            !headed.is_empty(),
+            "no embedded text carried an AST header; got {seen:?}"
+        );
+
+        // Header is a PREFIX, not a replacement — the body has to survive it.
+        let (header, body) = headed[0]
+            .split_once('\n')
+            .expect("header line, then content");
+        assert!(
+            header.contains("assemble_widget"),
+            "header should name the symbol, got {header:?}"
+        );
+        assert!(
+            body.contains("let total = n * 2;"),
+            "content must survive the prepend, got {body:?}"
+        );
+
+        // Checkout-independence: the absolute temp path must not reach the vector.
+        let root = dir.path().to_string_lossy().to_string();
+        assert!(
+            !seen.iter().any(|t| t.contains(&root)),
+            "an absolute path leaked into the embedding input"
+        );
+    }
+
     #[tokio::test]
     async fn stream_index_incremental_skips_unchanged_and_prunes_stale() {
         let dir = tempfile::tempdir().unwrap();
         write_sources(dir.path(), 6);
-        let emb = FakeEmbedder { dim: 4 };
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
 
         // First pass: empty server -> everything embedded.
         let store1 = RecordingStore::default();
@@ -611,7 +710,10 @@ mod tests {
     async fn stream_index_force_reembeds_all_present_chunks() {
         let dir = tempfile::tempdir().unwrap();
         write_sources(dir.path(), 5);
-        let emb = FakeEmbedder { dim: 4 };
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
 
         let store1 = RecordingStore::default();
         let (added1, _) = stream_index(
@@ -665,7 +767,10 @@ mod tests {
             "def y():\n    return 2\n",
         )
         .unwrap();
-        let emb = FakeEmbedder { dim: 4 };
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
 
         let patterns = vec!["node_modules".to_string(), ".venv".to_string()];
         let store = RecordingStore::default();

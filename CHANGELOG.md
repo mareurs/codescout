@@ -218,6 +218,27 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **The chunk metadata header reached neither the embedder nor the payload.**
+  `build_metadata_header` computes an identity line for every chunk —
+  `src/foo.rs :: impl Bar :: fn baz(…)` — and has nine tests pinning its shape, yet
+  nothing outside the chunker consumed it: `flush_pending` embedded `payload.content`
+  alone and `stream_index` wrote `ast_header` as `String::new()`. Measured against the
+  live collection: empty on **579,311 of 579,311** points, across every project and
+  language. The legacy `embed::index` path *did* prepend it — its migration comment
+  reads *"searchable header prepended before embedding"* — and the test pinning
+  `{metadata}\n{content}` was deleted along with that module in `66db4c70`, so nothing
+  failed when the surviving path turned out not to implement the contract. What a chunk
+  looks like to the embedder is now `embed_text`'s decision and no one else's. Fixing it
+  surfaced a second defect it would have shipped: the chunker was handed the *absolute*
+  file path, so prepending the header as-was would have embedded the machine's checkout
+  location into every vector — it now carries the same forward-slashed relative path the
+  payload stores, which is what all 31 of the chunker's own call sites already passed.
+  Reaching an existing corpus needs `index --force`: chunk ids are content-addressed and
+  content is unchanged, so a normal sync skips every chunk by id. The retrieval benchmark
+  has **not** been run — this restores a declared contract and is not yet evidence of
+  better retrieval. See
+  `docs/issues/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`.
+
 - **`edit_code(action="remove")` now verifies what it wrote, and rolls back an edit that
   breaks the file.** `remove` — the one action whose entire purpose is deleting a range —
   had **no post-edit verification at all**: it wrote and returned `status: "ok"`, while
@@ -338,6 +359,11 @@ All notable changes to codescout are documented here.
   field values are searchable instead of collapsing to one line.
 
 ### Removed
+
+- `CodePayload::ast_kind`. Declared, serialized, deserialized — and written as `""` at
+  every construction site in the tree. It had no producer anywhere, so populating it
+  would have meant inventing a value; a permanently-empty payload field is worse than no
+  field. Points written before 2026-08-08 still carry the key and it is no longer read.
 
 - **Benchmark matrix scaffolding** — `docker-compose.matrix.yml` and
   `scripts/chunk-model-matrix.py`. The tuned defaults they produced (chunk

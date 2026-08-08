@@ -320,7 +320,6 @@ mod tests {
             language: lang.into(),
             start_line: 1,
             end_line: 2,
-            ast_kind: String::new(),
             ast_header: String::new(),
             content: format!("content of {id}"),
             content_hash: hash.into(),
