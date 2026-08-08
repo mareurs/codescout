@@ -1,13 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the `server-stack` feature is in neither `default` nor any CI lane, so every test behind that gate is never compiled and cannot fail'
 tags:
 - testing
 - ci
 - feature-flags
 - silent-zero-coverage
-closed: null
+closed: 2026-08-08
 opened: 2026-08-08
 owner: marius
 related:
@@ -102,26 +102,46 @@ production actually produces.
 
 ## Fix
 
-Not yet implemented.
+**Implemented on `experiments`.** A dedicated `test-server-stack` job in
+`.github/workflows/ci.yml`, running `clippy --features server-stack --all-targets
+-- -D warnings` and `cargo test --features server-stack`.
 
-1. **Add `cargo test --features server-stack` to CI.** This is no longer the expensive
-   option to weigh against a cheap one — it is the only lane that tests the shipped
-   binary. It compiles cleanly today (measured, 40 s including `qdrant-client`), so the
-   cost is a build, not a repair.
-2. **Reconsider which feature set `default` names.** If `cargo rb` is the real build,
-   `server-stack` being absent from `default` means "the tested configuration" and "the
-   shipped configuration" are named differently on purpose and drift for free. Either
-   lane it, or make the shipped set the default and let the lean build be the opt-out.
+**A job rather than a matrix entry, and Linux-only.** The `test` matrix is 3 OSes × 3
+configs; adding a fourth config would have tripled the `qdrant-client` compile across
+platforms for little marginal value. `cargo rb` is the Linux dev-box build, and the
+matrix already covers default/lean everywhere. The point is that **some** lane compiles
+this, not that every platform does. A dedicated job also matches how `windows-gnu`,
+`msrv` and `audit-doc-refs` are already structured in this file.
 
-Also worth a general guard, unchanged from the original filing: a CI step asserting every
-feature declared in `[features]` appears in at least one lane. The defect is not "someone
-forgot Qdrant" — it is that forgetting is unobservable.
+**No Qdrant service container.** The tests are hermetic: `check_has_index` returns false
+when the stack is unreachable, and the cache test now drives `resolve_first_probe`
+directly instead of performing a live probe. That is written into the job's comment so a
+future test needing a live stack adds a service container rather than making the lane
+depend on ambient reachability.
+
+The librarian seeding step is copied from the matrix job: `server-stack` sits on top of
+the **default** feature set, so `librarian` is on and `build_tool_context` needs a
+workspace file.
+
+**Not implemented: the every-feature-has-a-lane guard.** Still the right idea and now
+better understood — a naive "does each `[features]` key appear in a workflow" check
+false-positives on `librarian`, `remote-embed` and `http`, which are never named in a
+lane because they arrive via `default`. Getting it right means resolving `default`'s
+transitive members, and a brittle gate that people learn to ignore is worse than no gate.
+Tracked separately.
 ## Tests added
 
-None — this file is about tests that do not run. The fix's own verification is that
-`payload_roundtrip_preserves_fields` compiles and passes under the new lane, which it
-currently would not (stale `ast_kind` in its fixture).
+The lane **is** the test — this bug is about tests that never ran, so the fix is running
+them.
 
+What it caught on its first execution is the evidence that it was worth adding:
+`cargo test --features server-stack` failed immediately on
+`index_status_cache_serves_stale_then_refreshes`, which turned out to be a real product
+defect (the activation probe enumerating the whole corpus to answer a yes/no), filed and
+fixed as
+`docs/issues/archive/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
+
+Post-fix the lane is green: 3586 passed / 0 failed, clippy clean on the same feature set.
 ## Workarounds
 
 Run `cargo test --features server-stack` by hand before touching
@@ -129,20 +149,16 @@ Run `cargo test --features server-stack` by hand before touching
 
 ## Resume
 
-Done: `cargo check --features server-stack --all-targets` (clean, 40 s) and
-`cargo test --features server-stack` (3455 passed, **1 failed**, 11 ignored).
+N/A — fixed 2026-08-08.
 
-**Correction — the original Resume's prediction was wrong.** It said to expect compile
-errors because "the gated code has drifted... `payload_roundtrip_preserves_fields` will
-not even build until its fixture is updated." It builds. The `ast_kind` removal in
-`2bc0f9f0` had already updated that fixture as a side effect of unrelated work, so the
-rot the file predicted had been repaired before anyone looked for it. Recorded rather
-than quietly deleted: the prediction was reasonable and still false, and the next person
-should trust the measurement over the file.
+One correction preserved from the investigation, because the file was wrong and the
+next reader should trust measurement over prediction: this bug originally said to expect
+compile errors from rot, specifically that `payload_roundtrip_preserves_fields` would
+not build until its `ast_kind` fixture was updated. It built. `2bc0f9f0` had already
+fixed that fixture as a side effect of unrelated work.
 
-Next action: add the lane (§ Fix candidate 1). The one failing test is a genuine defect
-with its own bug file, not a blocker for the lane — land the lane and let it stay red
-until that fix goes in, or land them together.
+The open follow-up is the every-feature-has-a-lane guard — see § Fix for why it is
+harder than it looks and was not bundled here.
 ## References
 
 - `Cargo.toml:175` — `default`, which omits `server-stack`
