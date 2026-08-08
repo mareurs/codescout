@@ -603,6 +603,7 @@ dependencies = [
  "codescout-embed",
  "dirs 5.0.1",
  "dotenvy",
+ "fastembed",
  "filetime",
  "fs4",
  "futures",

@@ -7,6 +7,8 @@ pub mod drift;
 pub mod embedder;
 pub mod index_lock;
 pub mod index_state;
+#[cfg(feature = "local-embed-dynamic")]
+pub mod local_onnx;
 pub mod memory;
 pub mod memory_payload;
 pub mod payload;

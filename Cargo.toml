@@ -86,6 +86,11 @@ sqlite-vec = "0.1"
 #  - download_snapshots (pulls reqwest, snapshot API unused)
 #  - generate-snippets  (codegen helper, unused)
 qdrant-client = { version = "1.13", default-features = false, features = ["serde"], optional = true }
+# In-process local ONNX embedder (src/retrieval/local_onnx.rs), gated by the
+# local-embed / local-embed-dynamic features above. default-features off so
+# the ONNX backend (download-binaries vs load-dynamic) is selected by those
+# features, mirroring codescout-embed's own fastembed dependency.
+fastembed = { version = "5", optional = true, default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"] }
 # rustls with ring provider (smaller than default aws-lc-rs ~1.3 MiB). Provider
 # is installed once at process start via rustls::crypto::ring::default_provider().
@@ -198,10 +203,13 @@ remote-embed = ["codescout-embed/remote-embed"]
 server-stack = ["dep:qdrant-client"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
-local-embed = ["codescout-embed/local-embed"]
+# Also reaches the main crate's own `local_onnx` module (in-process query-path
+# embedder), so `fastembed` is pulled in directly here too, not just via
+# codescout-embed.
+local-embed = ["codescout-embed/local-embed", "dep:fastembed", "fastembed/ort-download-binaries-native-tls", "fastembed/hf-hub-native-tls"]
 # Same, but via runtime-loaded onnxruntime.dll (windows-gnu / custom ONNX). The
 # caller supplies the DLL at runtime (ORT_DYLIB_PATH); see codescout-embed.
-local-embed-dynamic = ["codescout-embed/local-embed-dynamic"]
+local-embed-dynamic = ["codescout-embed/local-embed-dynamic", "dep:fastembed", "fastembed/ort-load-dynamic", "fastembed/hf-hub-native-tls"]
 # Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
 # candle-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
 
