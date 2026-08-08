@@ -196,10 +196,33 @@ count that follows a session which wrote bug files by hand.
 
 ### Post-merge debts
 
-- master-side SHAs for bug files archived carrying `experiments` SHAs
-  (`grep -rl <sha> docs/issues/`, including `archive/`).
-- Unreleased callouts come off at **release**, not at merge.
-- A fast-forward mints no SHAs, so every citation repaired today survives the promotion intact.
+**Corrected 2026-08-08 (round 21).** This list used to open with "master-side SHAs for bug
+files archived carrying `experiments` SHAs" and close with "a fast-forward mints no SHAs" —
+the two cannot both be true, and the second is the correct one. The operator confirmed the
+promotion is a **fast-forward, not a cherry-pick**.
+
+- **There are no master-side SHAs to record.** A fast-forward moves `master` onto the exact
+  commits already on `experiments`, so every `experiments` SHA cited anywhere **is** the
+  master SHA the moment task #14 runs. `docs/RELEASE.md` § *Large-Cohort Promotion
+  (Fast-Forward)* states this: *"No new SHAs, so step 4 of the Standard Ship Sequence is
+  moot — nothing to reconcile, and no rebase owed afterwards."*
+
+  **Do not go hunting.** 24 archived bug files carry a line telling you to re-cite the
+  master SHA after cherry-pick (measured 2026-08-08:
+  `grep -ril 'cherry.pick' docs/issues/` → 24 files, 30 matches). Those lines were written
+  when cherry-pick was the assumed path. Under a fast-forward they are **satisfied by the
+  promotion itself** — the SHA already in each file is correct. They are stale instructions,
+  not open debt, and rewriting 24 archived files to say so would be churn. The two files
+  archived on 2026-08-08 were corrected in place because they were written this session and
+  named the wrong path prospectively.
+
+  The orphans-on-rebase caveat is real and stays in `CLAUDE.md` / the bug template — it
+  governs the **Standard Ship Sequence** (single fixes, cherry-picked). It does not govern
+  this cohort.
+
+- **Unreleased callouts come off at release, not at merge.** `master` is not crates.io, so
+  a reader there still cannot install the feature and the callout's claim is still true.
+  Step 1b of the Release Cycle.
 ### THE MERGE IS UNBLOCKED AND IS THE MAINTAINER'S TO RUN
 
 This inverts round 8's header. The deferral was *"no merge yet until we solve all issues"*; that

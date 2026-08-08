@@ -147,12 +147,16 @@ correctly and takes the normal gate. The gate is also reachable deliberately via
 
 ## Resume
 
-Archived 2026-08-08. Fix landed in `dbaeb78b` (**`experiments`** — an `experiments` SHA
-orphans on rebase, so treat it as provisional). CI green on that commit: run
+Archived 2026-08-08. Fix landed in **`dbaeb78b`**. CI green on that commit: run
 `31258919924`, all 15 jobs.
 
-**Still to record:** the master-side SHA, after `experiments` → `master` (task #14, on hold
-as of 2026-08-08). Come back and replace the SHA above with the one that lands on `master`.
+**Nothing further to record.** The promotion for this cohort is a **fast-forward**, not a
+cherry-pick (operator's decision, 2026-08-08; the mechanics are in `docs/RELEASE.md`
+§ *Large-Cohort Promotion (Fast-Forward)*). A fast-forward moves `master` onto these exact
+commits, so `dbaeb78b` **is** the master-side SHA once task #14 runs — no second SHA is
+minted and there is nothing to re-cite. An earlier version of this line said the master SHA
+still needed recording after cherry-pick; that applies to the Standard Ship Sequence, not
+to this promotion.
 
 The sibling bug
 (`docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`) was

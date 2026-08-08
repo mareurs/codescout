@@ -281,9 +281,11 @@ bookkeeping, in order:
    on `posix_tokenize` in `src/platform/mod.rs` — note that last one is **source**, which
    `audit_doc_refs` does not scan, so the gate will not catch it.
    `grep -rl 'security-layer-tokenizes-unlike-the-shell' . ` before moving.
-2. **Label the fix SHA `experiments`.** An `experiments` SHA orphans on rebase, so the
-   master-side SHA still needs recording after cherry-pick (task #14, on the operator's
-   hold as of 2026-08-08).
+2. **No master-side SHA to record.** The promotion for this cohort is a **fast-forward**,
+   not a cherry-pick (operator's decision, 2026-08-08 — see `docs/RELEASE.md`
+   § *Large-Cohort Promotion (Fast-Forward)*). A fast-forward moves `master` onto these
+   exact commits, so the SHAs cited here **are** the master-side SHAs once task #14 runs.
+   The orphans-on-rebase caveat belongs to the Standard Ship Sequence and does not apply.
 
 Do **not** reopen this for the pipeline-splitting defect found during the fix — that is
 `docs/issues/2026-08-08-il3-splits-pipeline-on-quoted-pipe.md`, filed separately and
