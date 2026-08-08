@@ -125,8 +125,8 @@ above.*
 
 ## Fix
 
-**Implemented on `experiments`.** Promotion is by fast-forward, so the SHA recorded at
-archive time *is* the master SHA.
+**Implemented in `feac9539` (`experiments`).** Promotion is by fast-forward, so this SHA
+*is* the master SHA — there is no second one to record later.
 
 1. **`CodeVectorStore::project_has_chunks`** — existence as its own trait method.
    Qdrant: one scroll, `limit(1)`, `with_payload(false)`, `with_vectors(false)`, constant
