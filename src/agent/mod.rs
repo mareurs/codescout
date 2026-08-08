@@ -1729,8 +1729,12 @@ impl Agent {
     /// Lazily construct (or return cached) the dense embedder for memory ops.
     ///
     /// First call performs `RetrievalClient::from_env()` (one network probe)
-    /// and wraps the resulting `EmbedderHttp` in [`HttpDenseEmbedder`].
-    /// Subsequent calls share the cached `Arc`.
+    /// and wraps the resulting `client.embedder` (`Arc<dyn CodeEmbedder>`) in
+    /// [`crate::retrieval::embedder::CodeDenseAdapter`], rather than building a
+    /// second, independent embedder. This means memory recall always rides
+    /// whatever backend code search selected — HTTP or (once the local ONNX
+    /// path lands) in-process — instead of having its own selection path that
+    /// could drift from code search's. Subsequent calls share the cached `Arc`.
     ///
     /// In tests, pre-populate via [`Agent::set_memory_embedder_for_test`] to
     /// bypass the env-driven construction path.
@@ -2162,6 +2166,27 @@ mod tests {
             "semantic_memory_store() took {elapsed:?} against a black-hole Qdrant \
              — bootstrap timeout guard regressed (unbounded case blocks up to 120s)"
         );
+    }
+
+    /// Memory recall must ride the same embedder instance code search uses. If this
+    /// regresses, memory silently keeps its own HTTP embedder and a local model
+    /// configured for code search would not reach memory at all.
+    #[tokio::test]
+    async fn memory_embedder_is_built_from_the_shared_code_embedder() {
+        use crate::retrieval::embedder::{CodeDenseAdapter, CodeEmbedder, EmbedderHttp};
+        let shared: std::sync::Arc<dyn CodeEmbedder> = std::sync::Arc::new(
+            EmbedderHttp::with_config("http://127.0.0.1:1", "http://127.0.0.1:1", 384, "m", ""),
+        );
+        let adapter = CodeDenseAdapter(shared.clone());
+        // Two Arc handles to ONE embedder.
+        assert_eq!(std::sync::Arc::strong_count(&shared), 2);
+        let err = format!(
+            "{:?}",
+            crate::retrieval::embedder::DenseEmbedder::embed(&adapter, "x")
+                .await
+                .unwrap_err()
+        );
+        assert!(err.contains("127.0.0.1:1"), "got: {err}");
     }
 
     #[tokio::test]

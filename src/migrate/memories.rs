@@ -52,7 +52,7 @@ impl HttpMigrationEmbedder {
 #[async_trait]
 impl MigrationEmbedder for HttpMigrationEmbedder {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        self.inner.embed_dense_one(text).await
+        Ok(self.inner.embed_one(text).await?.dense)
     }
 }
 
