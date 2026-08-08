@@ -92,12 +92,19 @@ fn resolve_git_bash(
     }
 
     // PATH last, and never the WSL launcher under System32.
+    //
+    // Compared with `windows_dir_eq`, never `==`: Windows setup writes the
+    // system PATH entry as `C:\Windows\system32` while the join below produces
+    // `C:\Windows\System32`, and `Path` equality is byte-exact on normal
+    // components (only the drive-letter prefix folds case). A plain `==` here
+    // therefore never matched on a real host, and this exclusion — the
+    // load-bearing step of the whole resolution order — did nothing at all.
     let system32 = env("SystemRoot")
         .map(|r| PathBuf::from(r).join("System32"))
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32"));
     if let Some(path) = env("PATH") {
         for dir in std::env::split_paths(&path) {
-            if dir == system32 {
+            if super::windows_dir_eq(&dir, &system32) {
                 continue;
             }
             let candidate = dir.join("bash.exe");
@@ -395,22 +402,63 @@ mod tests {
         );
     }
 
-    /// The System32 exclusion, asserted where it is decidable: a `bash.exe`
-    /// that exists ONLY under System32 is the WSL launcher and must be
-    /// rejected, even though the existence probe says yes.
+    /// The System32 exclusion, asserted in every spelling Windows produces.
+    ///
+    /// A `bash.exe` under System32 is the WSL launcher and must be rejected
+    /// even though the existence probe says yes. The case-folding half of that
+    /// is pinned cross-platform by `windows_dir_eq_folds_case_and_separators`
+    /// in `platform::mod`; this pins the resolver actually using it.
     #[test]
     fn resolve_git_bash_never_selects_the_wsl_launcher() {
+        // Every spelling a real host produces. The lowercase one is the whole
+        // point: `%SystemRoot%`.join("System32") is capitalized while Windows
+        // setup writes the PATH entry lowercase, and the original `==`
+        // compared them byte-exactly. A capitalized-only fixture passes
+        // against a guard that does nothing.
+        for path_spelling in [
+            r"C:\Windows\system32",
+            r"C:\Windows\System32",
+            r"C:\WINDOWS\SYSTEM32\",
+            "C:/Windows/system32",
+        ] {
+            let resolved = resolve_git_bash(
+                |var| match var {
+                    "SystemRoot" => Some(std::ffi::OsString::from(r"C:\Windows")),
+                    "PATH" => Some(std::ffi::OsString::from(path_spelling)),
+                    _ => None,
+                },
+                // Every probe answers yes, so only the exclusion can reject.
+                |_| true,
+            );
+            assert!(
+                resolved.is_none(),
+                "System32 bash.exe is the WSL launcher and must never be selected; \
+                 PATH spelled {path_spelling:?} resolved to {resolved:?}"
+            );
+        }
+    }
+
+    /// Positive control for the exclusion: it must reject System32 and nothing
+    /// else.
+    ///
+    /// Without this, `resolve_git_bash_never_selects_the_wsl_launcher` is also
+    /// satisfied by a resolver that stopped returning anything from `PATH` at
+    /// all — "never selects the wrong one" and "never selects one" are the same
+    /// assertion until something pins the accepting case.
+    #[test]
+    fn resolve_git_bash_still_accepts_a_non_system32_path_entry() {
         let resolved = resolve_git_bash(
             |var| match var {
                 "SystemRoot" => Some(std::ffi::OsString::from(r"C:\Windows")),
-                "PATH" => Some(std::ffi::OsString::from(r"C:\Windows\System32")),
+                "PATH" => Some(std::ffi::OsString::from(r"C:\tools\git\bin")),
                 _ => None,
             },
-            |p| p == std::path::Path::new(r"C:\Windows\System32\bash.exe"),
+            |_| true,
         );
-        assert!(
-            resolved.is_none(),
-            "System32 bash.exe is the WSL launcher and must never be selected, got {resolved:?}"
+        assert_eq!(
+            resolved,
+            Some(std::path::PathBuf::from(r"C:\tools\git\bin").join("bash.exe")),
+            "a PATH entry that is not System32 must still resolve"
         );
     }
 

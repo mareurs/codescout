@@ -116,7 +116,7 @@ unable to resolve any catalog row on Windows.
 
 ## Fix
 
-`94a63c32`.. → `b5c8bbb0` (experiments) — `src/librarian/tools/mod.rs`.
+`e4b86447`.. → `a8253b62` (experiments) — `src/librarian/tools/mod.rs`.
 
 Added `comparable_path()`: unifies separators and strips the verbatim prefix,
 Windows only. On Unix `\` is a legal filename byte, so only the trailing
@@ -128,7 +128,7 @@ provided for free. That boundary is security-relevant: this is the guard that
 refuses paths outside every managed root, so `/work/sub` must not be treated as
 containing `/work/subterfuge`.
 
-`b5c8bbb0` is an `experiments` SHA and stays one: it was decided 2026-08-07 that
+`a8253b62` is an `experiments` SHA and stays one: it was decided 2026-08-07 that
 `master` (897 commits behind, 0 ahead) is not being synced, so no cherry-pick and
 no master-side SHA is pending.
 
@@ -155,12 +155,20 @@ both directions rather than only the "should not match" ones.
 
 None applied. The affected bug file
 (`docs/issues/2026-08-07-inject-tee-sf4-allowlist-rejects-windows-paths.md`,
-status `fixed`, verified on `experiments` at 20d12b5f) was **left unarchived**
+status `fixed`, verified on `experiments` at bc94e67f) was **left unarchived**
 rather than `git mv`-ed, to avoid orphaning its catalog row.
 
 ## Resume
 
-Confirm the hypothesis by reading the stored `abs_path`/`rel_path` for a row
-created this way and comparing how `create` and `move` each resolve it. Then
-either make `move` apply the same project-prefix inference as `create`, or have
-`create` store the root-relative form. Once fixed, archive the SF-4 bug file.
+N/A — fixed. `comparable_path()` normalizes both sides before comparison
+(`src/librarian/tools/mod.rs`), with 6 regression tests including the
+security-relevant component boundary, and the SF-4 bug file was archived in
+`ccea32f2`.
+
+**The SHAs in this file are pre-merge branch SHAs and are not stable.** This
+branch was rebased onto `f244ad17` on 2026-08-08, which orphaned the SHAs
+originally cited here — `git cat-file -t` resolved neither `b5c8bbb0` nor
+`94a63c32`. They were repaired by matching commit subjects (`a8253b62`,
+`e4b86447`). A further rebase re-orphans them: re-check with
+`git cat-file -t <sha>` before trusting any SHA in this file, and record the
+settled `master`-side SHA after the promotion.

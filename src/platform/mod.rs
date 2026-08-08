@@ -127,11 +127,18 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
 /// unescaped backslash escapes the next character outside single quotes.
 ///
 /// Shared by both platforms because both now execute through a POSIX shell
-/// (`sh -c` on Unix, Git Bash `bash -c` on Windows). One tokenizer here is
-/// load-bearing rather than tidy: this feeds the security layer's
-/// dangerous-command and pipeline checks, so tokenizing with rules the
-/// executing shell does not use would let a command read as safe here and
-/// then behave differently when it actually runs.
+/// (`sh -c` on Unix, Git Bash `bash -c` on Windows).
+///
+/// **This is not on any security path today.** An earlier version of this
+/// comment said it fed the dangerous-command and pipeline checks. It does not:
+/// [`shell_tokenize`] is its only caller and has no production call sites, and
+/// `is_dangerous_command` (`src/util/path_security.rs`) still splits with
+/// `split_whitespace`. The claim is recorded here rather than deleted because
+/// it named a real hazard — the security layer and the executing shell
+/// disagreeing about tokenization — which the cmd.exe -> Git Bash switch made
+/// live on Windows and which nothing has closed. See
+/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+/// Do not restore the claim without first wiring this into that layer.
 ///
 /// Pure + cross-platform so its tests run on every CI target, not just Windows.
 pub fn posix_tokenize(cmd: &str) -> Result<Vec<String>, String> {
@@ -190,6 +197,35 @@ pub fn shell_path_str(path: &std::path::Path) -> String {
     }
 }
 
+/// Whether two Windows directory paths name the same directory.
+///
+/// `Path` equality compares components byte-exactly — only the drive-letter
+/// prefix folds case — so `C:\Windows\System32` and `C:\Windows\system32` are
+/// NOT equal. That is load-bearing in `windows::resolve_git_bash`: Windows
+/// setup writes the system `PATH` in the lowercase spelling, while
+/// `%SystemRoot%` joined with `"System32"` produces the capitalized one, so the
+/// `==` meant to keep the WSL launcher out of the running never matched on a
+/// real host and let it be selected.
+///
+/// Folds ASCII case, accepts either separator, and ignores one trailing
+/// separator. Deliberately NOT a prefix test — it answers "same directory", so
+/// `C:\Windows\System` never matches `C:\Windows\System32`.
+///
+/// Lives here rather than in `windows.rs` because that module is
+/// `#[cfg(windows)]`: a fix tested only there is verified on one CI leg, and
+/// this is the half of the logic that was wrong.
+///
+/// `pub`, not `pub(crate)`, for the same reason as its neighbours: the only
+/// caller is inside `#[cfg(windows)]`, so on a Linux build `-D dead-code`
+/// rejects the crate-private form.
+pub fn windows_dir_eq(a: &std::path::Path, b: &std::path::Path) -> bool {
+    fn key(p: &std::path::Path) -> String {
+        let slashed = p.to_string_lossy().replace('\\', "/");
+        slashed.trim_end_matches('/').to_ascii_lowercase()
+    }
+    key(a) == key(b)
+}
+
 /// Windows only: assign `child` to a kill-on-close Job Object so dropping the
 /// returned guard reaps the entire process tree, not just the direct child.
 ///
@@ -238,6 +274,43 @@ mod tests {
         // the token list as authoritative when deciding what a command does.
         assert!(posix_tokenize(r#"echo "unterminated"#).is_err());
         assert!(posix_tokenize("echo 'unterminated").is_err());
+    }
+
+    /// The exact pair that made the WSL exclusion inert:
+    /// `%SystemRoot%`.join("System32") yields the capitalized spelling, while
+    /// Windows setup writes the system `PATH` with the lowercase one, and a
+    /// byte-exact `Path` compare calls those different directories.
+    ///
+    /// Runs on every CI leg — `platform::windows` is `#[cfg(windows)]`, so
+    /// asserting this only there would verify the fix on one leg of four.
+    #[test]
+    fn windows_dir_eq_folds_case_and_separators() {
+        use std::path::Path;
+
+        assert!(windows_dir_eq(
+            Path::new(r"C:\Windows\system32"),
+            Path::new(r"C:\Windows\System32"),
+        ));
+        assert!(windows_dir_eq(
+            Path::new(r"C:\WINDOWS\SYSTEM32\"),
+            Path::new("C:/Windows/System32"),
+        ));
+
+        // "Same directory", never a prefix test: a sibling whose name merely
+        // starts with the excluded one must still be searched, and a child of
+        // the excluded directory is not the excluded directory.
+        assert!(!windows_dir_eq(
+            Path::new(r"C:\Windows\System"),
+            Path::new(r"C:\Windows\System32"),
+        ));
+        assert!(!windows_dir_eq(
+            Path::new(r"C:\Windows\System32\downlevel"),
+            Path::new(r"C:\Windows\System32"),
+        ));
+        assert!(!windows_dir_eq(
+            Path::new(r"C:\tools\git\bin"),
+            Path::new(r"C:\Windows\System32"),
+        ));
     }
 
     #[test]

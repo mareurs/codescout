@@ -14,7 +14,7 @@ closed: 2026-08-07
 
 ## Summary
 
-`platform::shell_command_configured` (Windows) sets, as of d564c9bb:
+`platform::shell_command_configured` (Windows) sets, as of b142a514:
 
 ```rust
 .env("MSYS_NO_PATHCONV", "1")
@@ -27,7 +27,7 @@ Windows form when a **native Windows binary** is invoked. The result is that
 similar all fail with "No such file or directory", even though the same path
 works for every MSYS binary.
 
-This is self-inflicted and the justification in d564c9bb's commit message is
+This is self-inflicted and the justification in b142a514's commit message is
 **wrong**.
 
 ## Reproduction
@@ -49,7 +49,7 @@ $ ls -d /c/Users/me/work/repo
 
 ## Why the original justification was wrong
 
-d564c9bb claimed the opt-outs were needed so MSYS "does not rewrite
+b142a514 claimed the opt-outs were needed so MSYS "does not rewrite
 Unix-looking arguments inside the -c script (which would corrupt `sed 's/a/b/'`,
 `find / -name x`)".
 
@@ -88,7 +88,7 @@ that command rather than to every command the server ever runs.
 
 ## Fix
 
-`94a63c32` (experiments) — `src/platform/windows.rs`.
+`e4b86447` (experiments) — `src/platform/windows.rs`.
 
 The two `.env(...)` calls are replaced by `.env_remove(...)`, not merely dropped.
 Removing them from the child environment means an exported value in the parent
@@ -125,7 +125,7 @@ directory`) before the fix, and the test passes after it.
 
 ## Resume
 
-N/A — fixed and MCP-verified on `experiments` (`94a63c32`).
+N/A — fixed and MCP-verified on `experiments` (`e4b86447`).
 
 No master-side SHA is pending: decided 2026-08-07 that `master` stays where it
 is. It is 897 commits behind `experiments` and 0 ahead, so `experiments` is a

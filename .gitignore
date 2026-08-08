@@ -69,8 +69,14 @@ tests/fixtures/*/.codescout/
 # see docs/manual/src/concepts/retrieval-stack.md. ~870 MB, never committed.
 /models/
 
-# Local codescout search index + per-project caches (regenerated on activate)
+# Local codescout search index (regenerated on activate).
+#
+# Deliberately NOT `/.codescout/projects/`: that tree holds 53 tracked,
+# hand-authored per-project memory files (`*/memories/*.md`, `*.anchors.toml`)
+# maintained by explicit `chore(memories):` commits. Ignoring it would not
+# untrack those, but it would hide every future one from `git status` with no
+# error — and it shadows no cache, since that path has no untracked content at
+# all. The index DB below is the thing that is actually regenerated.
 /.codescout/code-index.db
-/.codescout/projects/
 /target-release-new/
 /.vscode/

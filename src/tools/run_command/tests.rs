@@ -3742,6 +3742,15 @@ fn tee_path_is_safe_rejects_shell_metacharacters() {
     use super::inner::tee_path_is_safe;
     // The interpolated path is single-quoted at the call site, so a `'` would
     // be the one character that could break out — it must never pass.
+    // `'` ISOLATED. The composite fixture below carries `;` and a space too,
+    // so it stays green if `'` is admitted to the allowlist — it cannot pin
+    // the one character that matters. The tee path is single-quoted at the
+    // call site in `inject_tee`, and that quoting is unescapable ONLY while
+    // `'` is excluded here; this assertion is the whole reason that holds.
+    assert!(!tee_path_is_safe("/tmp/x'y"));
+    // `\` likewise: bash reads it as an escape in an unquoted word, and it is
+    // a legal filename byte on Unix.
+    assert!(!tee_path_is_safe("/tmp/x\\y"));
     assert!(!tee_path_is_safe("/tmp/x'; rm -rf /; echo '"));
     assert!(!tee_path_is_safe("/tmp/x;y"));
     assert!(!tee_path_is_safe("/tmp/x$(id)"));

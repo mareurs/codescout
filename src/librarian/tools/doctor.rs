@@ -197,20 +197,31 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Drop the lock before computing the summary — keeps lock scope minimal.
     drop(cat);
 
+    // BOTH summary numbers are taken here, above the truncation below, so they
+    // describe the same set and `total == by_check.values().sum()` holds by
+    // construction — asserted by `summary_total_partitions_by_check`.
+    //
+    // Reading `all_violations.len()` *after* the `retain` is what broke that:
+    // `total` counted the 10 shown rows while `by_check` counted all of them,
+    // in the same `summary` object, with neither labelled as authoritative.
+    // It is the same defect the audit-doc-refs counters shipped in
+    // `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
     let mut by_check: std::collections::BTreeMap<String, usize> = Default::default();
     for v in &all_violations {
         *by_check.entry(v.check.clone()).or_insert(0) += 1;
     }
+    let total_violations = all_violations.len();
 
     // Cap the emitted `abs_path_outside_managed_roots` rows. On a catalog
     // spanning several projects this check legitimately fires for every row
     // belonging to another workspace (417 of 1314 on the authoring machine),
     // and an unbounded list buries every other finding in the report.
     //
-    // `by_check` is computed ABOVE this truncation, so the summary keeps the
-    // true count, and the elision is announced in the hint rather than applied
-    // silently — a report that quietly drops findings is the same failure mode
-    // this check was added to close.
+    // `by_check` and `total` are both computed ABOVE this truncation, so the
+    // summary keeps the true count, and the elision is announced in the hint
+    // rather than applied silently — a report that quietly drops findings is
+    // the same failure mode this check was added to close. `shown` carries the
+    // post-truncation length so the two can never be confused for each other.
     const OUTSIDE_ROOTS_SAMPLE: usize = 10;
     let mut shown_outside = 0usize;
     let mut elided_outside = 0usize;
@@ -269,7 +280,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     Ok(json!({
         "violations": all_violations,
         "summary": {
-            "total": all_violations.len(),
+            "total": total_violations,
+            "shown": all_violations.len(),
             "by_check": by_check,
         },
         "catalog_health": catalog_health,
@@ -1342,6 +1354,66 @@ mod tests {
         assert!(
             hint.contains("15 elided"),
             "the hint must name what was dropped; got: {hint}"
+        );
+    }
+
+    /// `summary.total` must partition `summary.by_check`. Both sit in the same
+    /// object and `total` is the headline number a reader takes first.
+    ///
+    /// This is the INVARIANT half of the pair;
+    /// `outside_managed_roots_caps_the_list_but_not_the_count` above is the
+    /// member half, and neither substitutes for the other. A member assertion
+    /// on `by_check` stays green while `total` alone is read from the truncated
+    /// vector — which is exactly how that regression shipped here, and before
+    /// it in the audit-doc-refs counters
+    /// (`docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`).
+    #[tokio::test]
+    async fn summary_total_partitions_by_check() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // Past the 10-row sample, so the truncation branch actually runs.
+        for i in 0..25 {
+            seed_artifact(
+                &cat,
+                &format!("far-{i}"),
+                &format!("/elsewhere/repo/doc-{i}.md"),
+            );
+        }
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(crate::librarian::workspace::Root {
+                name: "managed".to_string(),
+                path: PathBuf::from("/managed/root"),
+            })
+            .build();
+
+        let report = call(&ctx, json!({})).await.unwrap();
+
+        let total = report["summary"]["total"].as_u64().unwrap();
+        let shown = report["summary"]["shown"].as_u64().unwrap();
+        let summed: u64 = report["summary"]["by_check"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|v| v.as_u64().unwrap())
+            .sum();
+
+        assert_eq!(
+            total, summed,
+            "summary.total must equal the sum of summary.by_check; \
+             total={total}, sum(by_check)={summed}"
+        );
+        assert_eq!(
+            shown,
+            report["violations"].as_array().unwrap().len() as u64,
+            "summary.shown must equal the emitted violation count"
+        );
+
+        // Guard the guard: if the fixture ever stops tripping the cap, the
+        // assertions above hold trivially and prove nothing about truncation.
+        assert!(
+            total > shown,
+            "fixture must exceed the emitted cap or this test cannot fail; \
+             total={total}, shown={shown}"
         );
     }
 

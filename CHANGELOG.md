@@ -6,6 +6,14 @@ All notable changes to codescout are documented here.
 
 ### Added
 
+- **`librarian(action="doctor")` gains an `abs_path_outside_managed_roots` check.** Reports
+  catalog rows whose `abs_path` falls under no configured root — the drift class behind the
+  Windows `containing_root` failure below. Rows outside the active project's roots are
+  EXPECTED on a catalog spanning several workspaces, so the emitted list is capped at a
+  10-row sample with the elision announced in the hint rather than applied silently.
+  `summary.total` and `summary.by_check` both count every violation and partition each
+  other; `summary.shown` carries the post-cap emitted count.
+
 - **`CODESCOUT_RERANK` — the cross-encoder reranker is now opt-in and OFF by default.**
   Measured on the AMD profile (bge-reranker-v2-m3 Q4_K_M over llama-server) with sparse
   fusion on and a freshly rebuilt index, two arms differing in exactly one dimension:
@@ -160,6 +168,21 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **`run_command` executes through Git Bash on Windows, not `cmd.exe`.** Commands now run
+  under a POSIX shell on every platform, which is what makes the documented buffer-query
+  idioms (`grep`, `tail`, `awk`, `tee`) work there at all — under `cmd /C` none of those
+  binaries exist, so the documented workflow was simply unrunnable on Windows.
+  **This makes Git for Windows a hard runtime requirement**: there is no `cmd.exe`
+  fallback. The shell is resolved from `CODESCOUT_BASH`, then `CLAUDE_CODE_GIT_BASH_PATH`,
+  then the standard Git install roots, then `PATH` — deliberately skipping
+  `%SystemRoot%\System32`, whose `bash.exe` is the WSL launcher and would silently run
+  every command in a different filesystem namespace. A host with no Git Bash now gets a
+  `RecoverableError` naming the requirement instead of a bare `program not found`.
+  Paths in commands follow POSIX rules on both platforms as a result (`C:/Users/...`, not
+  `C:\Users\...`); buffer refs are substituted forward-slashed automatically. See
+  `docs/manual/src/tools/workflow-and-config.md` and
+  `docs/issues/2026-08-08-run-command-unusable-without-git-bash.md`.
+
 - **Path parameters are aliased consistently across every tool.** `file_path`
   works wherever `path` does, and vice versa; a wrong-but-obvious param name is
   repaired and the call proceeds, with the hint naming the canonical form. The
@@ -194,6 +217,20 @@ All notable changes to codescout are documented here.
   which background operation was running at time of death.
 
 ### Fixed
+
+- **`librarian` path matching could never succeed on Windows.** `containing_root` compared
+  a catalog `abs_path` (stored forward-slashed and `//?/`-prefixed) against a root spelled
+  with backslashes, so `artifact(action="move")` and `artifact(action="delete")` answered
+  `no managed root contains …` for every row on that platform. Both sides now go through a
+  normalized comparable form, and the match is segment-aware — a sibling directory sharing
+  a name prefix still does not match. See
+  `docs/issues/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md`.
+
+- **MSYS argument conversion is no longer disabled on Windows.** `MSYS_NO_PATHCONV` and
+  `MSYS2_ARG_CONV_EXCL` are now explicitly removed from the child environment rather than
+  set, so MSYS-form paths (`/c/Users/...`) resolve for native binaries such as `git.exe`,
+  and a value exported in the parent shell cannot change how commands resolve. See
+  `docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
 
 - **`librarian(action="context", anchor_id=…)` no longer starves the anchor's
   neighbours.** The packing loop's "always include the first item" guard

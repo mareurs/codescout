@@ -8,6 +8,10 @@ tags:
 - run_command
 - tee
 - path-handling
+opened: 2026-08-07
+closed: 2026-08-07
+severity: medium
+owner: marius
 ---
 
 ## Summary
@@ -58,7 +62,7 @@ never re-evaluated against `%TEMP%`.
 
 ## Fix
 
-`d564c9bb` (experiments), completed by `20d12b5f` (experiments).
+`b142a514` (experiments), completed by `bc94e67f` (experiments).
 
 Landed as part of the bash-only shell change:
 
@@ -68,14 +72,14 @@ Landed as part of the bash-only shell change:
 - `:` added to the allowlist for the drive-letter prefix. It is not a shell
   metacharacter inside a word, so the SF-4 property (no injectable
   metacharacters in an interpolated path) is preserved.
-- `~` added in `20d12b5f`. The first fix shipped incomplete: `:` covered the
+- `~` added in `bc94e67f`. The first fix shipped incomplete: `:` covered the
   drive letter but not the `~` that 8.3 short names put in `%TEMP%`
   (`MAILIN~1.002`), so `inject_tee` stayed unreachable on this host after the
   commit that claimed to fix it.
 
 ## Tests
 
-The first fix (d564c9bb) was **incomplete and shipped that way**: it added `:`
+The first fix (b142a514) was **incomplete and shipped that way**: it added `:`
 for the drive letter but missed `~`, which Windows uses in 8.3 short names.
 `%TEMP%` resolves through the short form whenever the account name is long or
 contains a dot — here `C:/Users/MAILIN~1.002/AppData/Local/Temp/...` — so tee
