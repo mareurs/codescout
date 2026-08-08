@@ -232,7 +232,7 @@ All notable changes to codescout are documented here.
   Only `cargo rb` — the configuration we ship, and the one no CI lane compiled until this
   cohort — was affected; the `server-stack` lane added in this cohort caught it on its
   first run. See
-  `docs/issues/2026-08-08-qdrant-compat-check-printlns-to-stdout.md`.
+  `docs/issues/archive/2026-08-08-qdrant-compat-check-printlns-to-stdout.md`.
 - **The chunk metadata header reached neither the embedder nor the payload.**
   `build_metadata_header` computes an identity line for every chunk —
   `src/foo.rs :: impl Bar :: fn baz(…)` — and has nine tests pinning its shape, yet
@@ -252,7 +252,7 @@ All notable changes to codescout are documented here.
   content is unchanged, so a normal sync skips every chunk by id. The retrieval benchmark
   has **not** been run — this restores a declared contract and is not yet evidence of
   better retrieval. See
-  `docs/issues/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`.
+  `docs/issues/archive/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`.
 
 - **`edit_code(action="remove")` now verifies what it wrote, and rolls back an edit that
   breaks the file.** `remove` — the one action whose entire purpose is deleting a range —
@@ -278,7 +278,7 @@ All notable changes to codescout are documented here.
   the same disagreement check `references` already performed on the read path. The compact
   output is also corrected: it summed renamed and un-renamed occurrences into one "sites"
   figure, so a rename that changed 2 sites and missed 45 displayed as `47 sites`. See
-  `docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+  `docs/issues/archive/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
 
 - **`artifact`'s `extra` can no longer silently unclassify the artifact it writes.**
   `extra` is for frontmatter keys the schema does not model, but nothing stopped it naming
@@ -290,7 +290,7 @@ All notable changes to codescout are documented here.
   working day. `create` and `update` now refuse an `extra` key that names a modelled field
   and name the parameter that owns it, and the writer additionally drops such a key rather
   than emitting a document that cannot be read back. See
-  `docs/issues/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+  `docs/issues/archive/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
 
 - **The `run_command` safety layer now reads a command the way the shell will run it.**
   Since the switch to executing through a POSIX shell on both platforms (`sh -c`, Git Bash

@@ -203,6 +203,11 @@ This is right on three independent grounds, not just the stdout one:
 We give up a version-mismatch warning. It was never actionable — printed to the
 wrong stream, unconditional, and not surfaced to any caller.
 
+Landed on `experiments` in **`6bd44274`**. The promotion path is a fast-forward,
+so that SHA is already the master-side SHA; there is no second one to record.
+Verified by CI run `31272317541` — green across all 18 jobs, including the
+`Test (server-stack — the build cargo rb ships)` lane that reported the defect.
+
 ## Tests added
 
 `tests/cli_artifact.rs::run_cmd` now pins `CODESCOUT_QDRANT_URL` to an
@@ -222,16 +227,7 @@ the Qdrant path. Neither is needed once the fix lands.
 
 ## Resume
 
-Record this commit's SHA under `## Fix` and archive via
-`artifact(action="move", …, new_rel_path="docs/issues/archive/…")` once the CI
-run for it on `experiments` is green. The local gate (fmt, clippy `-D warnings`,
-and the full suite on both `--features server-stack` and default) is already
-green, and the guard is mutation-verified; CI is confirming that, not deciding
-it.
-
-The promotion path is **fast-forward** (`git rev-list --left-right --count
-master...experiments` → `0` on the left), so the `experiments` SHA already *is*
-the master SHA. Do **not** add a pending-master-SHA line.
+N/A — fixed, mutation-verified, and green on `experiments` in `6bd44274`.
 ## References
 
 - CI run `31271255156`, lane `Test (server-stack — the build cargo rb ships)`.
