@@ -141,7 +141,10 @@ list that is simply one shorter. There is no surface on which this looks wrong.
 
 ## Fix
 
-**Implemented on `experiments`.** Two guards, at the two ends, because either alone
+**Implemented in `ca4b7f0d` (`experiments`).** Promotion to `master` is by fast-forward,
+so this SHA *is* the master SHA — there is no second one to record later.
+
+Two guards, at the two ends, because either alone
 leaves a hole:
 
 **1. Input boundary — refuse the collision.** `reject_reserved_extra_keys`

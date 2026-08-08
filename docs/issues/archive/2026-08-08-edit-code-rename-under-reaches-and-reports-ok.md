@@ -127,7 +127,10 @@ Quoted under *Reproduction*. Two consecutive calls, identical output — rules o
 
 ## Fix
 
-**Implemented on `experiments`.** The implementation was read before choosing, and reading
+**Implemented in `514348fc` (`experiments`).** Promotion to `master` is by fast-forward,
+so this SHA *is* the master SHA — there is no second one to record later.
+
+The implementation was read before choosing, and reading
 it **falsified both of the options this section originally proposed**. Recorded here rather
 than quietly substituted, because the reasoning is the useful part.
 

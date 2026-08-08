@@ -12,21 +12,28 @@ opened: 2026-08-08
 owner: marius
 related:
 - docs/issues/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md
-severity: medium
+severity: high
 ---
 
 # BUG: `server-stack`-gated tests are compiled by no lane
 
 ## Summary
 
-`Cargo.toml:198` defines `server-stack = ["dep:qdrant-client"]`. It is not in
-`default` (`:175` — `remote-embed`, `http`, `librarian`) and appears in no workflow
-under `.github/workflows/`. Every `#[cfg(feature = "server-stack")]` test is therefore
-never built, never run, and cannot fail — in CI or locally.
+`Cargo.toml:198` defines `server-stack = ["dep:qdrant-client"]`. It is not in `default`
+(`:175`) and appears in no workflow under `.github/workflows/`. Every
+`#[cfg(feature = "server-stack")]` test is therefore never built, never run, and cannot
+fail.
 
-The Qdrant payload serialization layer is the main casualty: `payload_to_map` and
-`map_to_payload` are both gated, and the only test covering them is gated with them.
+**And it is the configuration that ships.** `.cargo/config.toml` defines
+`rb = "build --release --features server-stack"` — `cargo rb` is the command CLAUDE.md
+mandates for the live MCP release binary, and it turns the feature **on**. So the build
+that actually runs is the one build CI never compiles, and the build CI does compile is
+not the one anyone runs.
 
+That is not hypothetical: `cargo test --features server-stack` **fails today** on
+`tools::config::tests::index_status_cache_serves_stale_then_refreshes`, and the failure
+is a real product defect, filed separately as
+`docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
 ## Symptom (Effect)
 
 `cargo test --test retrieval_unit` runs 7 tests. `payload_roundtrip_preserves_fields`
@@ -95,24 +102,20 @@ production actually produces.
 
 ## Fix
 
-Not yet implemented. Two candidates:
+Not yet implemented.
 
-1. **Add a lane.** `cargo test --features server-stack` in CI. Costs a
-   `qdrant-client` compile; buys real coverage of the payload round-trip. Check
-   first whether the gated tests still pass — they have not been compiled in a long
-   time, and `ast_kind` was removed from `CodePayload` in `cb96aa47`, so
-   `payload_roundtrip_preserves_fields` needs its fixture updated before it will
-   even build.
-2. **Add a compile-only lane.** `cargo check --features server-stack --all-targets`
-   is much cheaper and catches bit-rot (the class that has already happened) without
-   running anything.
+1. **Add `cargo test --features server-stack` to CI.** This is no longer the expensive
+   option to weigh against a cheap one — it is the only lane that tests the shipped
+   binary. It compiles cleanly today (measured, 40 s including `qdrant-client`), so the
+   cost is a build, not a repair.
+2. **Reconsider which feature set `default` names.** If `cargo rb` is the real build,
+   `server-stack` being absent from `default` means "the tested configuration" and "the
+   shipped configuration" are named differently on purpose and drift for free. Either
+   lane it, or make the shipped set the default and let the lean build be the opt-out.
 
-Candidate 2 is the floor; candidate 1 is what actually tests the layer.
-
-Also worth a general guard: a CI step asserting every feature declared in
-`[features]` appears in at least one lane. That generalizes past this instance —
-the defect is not "someone forgot Qdrant", it is that forgetting is unobservable.
-
+Also worth a general guard, unchanged from the original filing: a CI step asserting every
+feature declared in `[features]` appears in at least one lane. The defect is not "someone
+forgot Qdrant" — it is that forgetting is unobservable.
 ## Tests added
 
 None — this file is about tests that do not run. The fix's own verification is that
@@ -126,11 +129,20 @@ Run `cargo test --features server-stack` by hand before touching
 
 ## Resume
 
-Run `cargo check --features server-stack --all-targets` and read the errors. That
-output is the real scope of this bug: everything it lists has been un-compiled long
-enough to rot. Fix those, then decide between candidate 1 and 2 with the compile cost
-in hand rather than estimated.
+Done: `cargo check --features server-stack --all-targets` (clean, 40 s) and
+`cargo test --features server-stack` (3455 passed, **1 failed**, 11 ignored).
 
+**Correction — the original Resume's prediction was wrong.** It said to expect compile
+errors because "the gated code has drifted... `payload_roundtrip_preserves_fields` will
+not even build until its fixture is updated." It builds. The `ast_kind` removal in
+`2bc0f9f0` had already updated that fixture as a side effect of unrelated work, so the
+rot the file predicted had been repaired before anyone looked for it. Recorded rather
+than quietly deleted: the prediction was reasonable and still false, and the next person
+should trust the measurement over the file.
+
+Next action: add the lane (§ Fix candidate 1). The one failing test is a genuine defect
+with its own bug file, not a blocker for the lane — land the lane and let it stay red
+until that fix goes in, or land them together.
 ## References
 
 - `Cargo.toml:175` — `default`, which omits `server-stack`
