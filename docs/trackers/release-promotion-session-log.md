@@ -1126,6 +1126,9 @@ Ranked by what to do first.
 | F-21 | 2026-08-08 | high | testing | fixed-verified | A test named `resolve_git_bash_never_selects_the_wsl_launcher` passed because it injected `PATH=C:\Windows\System32` — the spelling the CODE constructs — while Windows setup writes `C:\Windows\system32`, and `Path` equality folds case only on the drive-letter prefix. The exclusion never fired on a real host, so every `run_command` would run under the WSL launcher, silently. A fixture written from the code rather than the environment cannot discriminate. Fixed by `platform::windows_dir_eq` + a four-spelling sweep + a positive control (`6f261da9`) |
 | F-22 | 2026-08-08 | med | process | mitigated | A rebase onto `f244ad17` orphaned every SHA PR #10's bug files cited — `git cat-file -t` resolved none of `b5c8bbb0`, `94a63c32`, `d564c9bb`, `20d12b5f`; a sweep found 14 dead 8-hex tokens (5 PR-introduced, 9 pre-existing). The hazard `docs/issues/_TEMPLATE.md` documents, realized, and ungated: `audit_doc_refs` checks paths and symbols, not SHAs. Merging with `--rebase`/`--squash` would have re-orphaned them an hour after repair, so `--merge` became load-bearing |
 | F-23 | 2026-08-08 | med | process | fixed-verified | Predicted PR #10's CI would fail on a break inherited from its merge-base; it passed. `actions/checkout` on a `pull_request` event checks out `refs/pull/N/merge` — a synthetic merge commit on no branch, which already contained the fix. The session's "green run on whatever the tip is" rule is a PUSH-event rule; a PR run answers *is the merge result good*, not *is this commit good* |
+| F-24 | 2026-08-08 | high | process | fixed-verified | A bug file measured its symptom correctly and mis-attributed its cause: 8 `??` dirs blamed on foreign-workspace registration, when `memory_dir_for_project` derives the path from `self.root` so a foreign workspace cannot write under another repo's root. Sweep of all 15 registered roots — 9 repos with the tree, 0 untracked entries. All three proposed fixes encoded the mis-attribution; Option B reintroduced what `6f261da9` removed. The premise convention asks "is the claim measured?" and there are two questions |
+| F-25 | 2026-08-08 | med | process | fixed-verified | Recommended the `~/personal` structural `.gitignore` pattern as "strictly better than A/B/C" and had it approved as a task; `git check-ignore` in a throwaway repo then reported the phantom's `memories/` file NOT ignored — identically to a real one's. Also proposed VDI workspace-root misresolution as the mechanism before two `memory()` calls falsified it (recorded as hypothesis 4, withdrawn) |
+| F-26 | 2026-08-08 | med | test-design | fixed-verified | `memory_write_accepts_project_alias_for_project_id` wrote `mcp-server/package.json` as `{}` — too empty for discovery — so the sub-project its own comment claimed to create never existed, and its path assertion was satisfied entirely by the defect under test. Third instance of F-21's shape in two rounds |
 
 ## Wins Index
 
@@ -1138,6 +1141,8 @@ Ranked by what to do first.
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
 | W-16 | 2026-08-08 | med | Cross-compile `#[cfg(windows)]` tests before pushing them — `cargo check --target x86_64-pc-windows-gnu --tests` | `cargo test` on Linux never compiles them, so a type error first appears as a red CI leg ~6 min out; the cross-check costs ~6 s with deps warm because `rust-toolchain.toml` already pins the target. Returned green — a verification step is not paid for only by the times it fires | validated |
+| W-17 | 2026-08-08 | high | Run the thing rather than reason about it, whenever the behaviour is cheap to invoke | Four in one session: PR #9's 12/12-green guard gave 9-of-9 divergence under a nine-case probe; two `memory()` calls inverted a diagnosis; a second probe found a worse symptom on the read path; `git check-ignore` falsified a fix already recommended and approved. Joins W-5, W-12, W-13 — at promotion threshold | validated |
+| W-18 | 2026-08-08 | high | When a side effect lives in a CONSTRUCTOR, every caller is a distinct seam — `references()` it and probe a caller the report did not name | `MemoryStore::from_dir` calls `create_dir_all` in its constructor; 5 call sites. The report named `write`; probing `read` found `available_topics: []` for a non-existent project — the worse symptom, and the thing that explained why one host showed 8 `??` entries and another 2 invisible ones | validated |
 | W-15 | 2026-08-08 | high | Fan out a review by LENS not by file, brief each with the refs + established-facts-marked-challengeable, and mandate refute-before-reporting | Four lenses on PR #10 (19 files, no prior reviews) found five blockers; three landed twice independently (`summary.total` partition, dead `posix_tokenize`, the job-assignment race). The refutation passes killed real candidates including one of the controller's own seeded premises, and one reviewer corrected two premises in its own brief | validated |
 | W-14 | 2026-08-07 | high | The first measurement after idle is a warm-up artifact — take the second one, and in a benchmark discard iteration one and say so | Three instances in one session: SPLADE sparse embed read 146.8 ms cold vs 16.8 ms warm (8.7x, and it feeds the reranker latency comparison in task #20); the audit_doc_refs tally migrates by up to 69 refs cold but is byte-identical warm; and `resolve_file_symbol` returns `SymbolMissing` for symbols that exist when the server answers before finishing indexing — the same trap promoted from a latency error into a false claim about the code | validated |
 | W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
@@ -2512,6 +2517,94 @@ pre-commit gate as a conditional step — *if the diff touches `#[cfg(windows)]`
 `cargo check --target x86_64-pc-windows-gnu --tests`.*
 
 **Status:** validated — awaiting a second datapoint.
+
+## F-24 — A bug file passed the premise check on "is the claim true?" and skipped "is the claim's subject the mechanism?"
+
+**Observed:** 2026-08-08, reviewing PR #11 (`7f1b6ddc`), a bug file filed by a concurrent session against `6f261da9` — our own commit.
+
+**Expected:** the premise-check convention added in this work stream (task #31, now in `docs/issues/_TEMPLATE.md`) exists to stop a bug file from resting on an unverified claim. The file honoured it well: it measured `git status --porcelain .codescout/projects` → 8 untracked dirs, quoted a stub verbatim, and correctly identified that our `.gitignore` comment's "has no untracked content at all" was false on a developer host.
+
+**Got:** the claim was true and its subject was wrong. The file attributed the 8 dirs to *foreign-workspace registration* — "the normal state for the cross-project flows CLAUDE.md documents" — and built three fix options (A/B/C) on that attribution. Sixteen lines of `Workspace::memory_dir_for_project` say the path is derived from `self.root`, so a foreign workspace cannot write under another repo's root. A sweep of all 15 registered roots found **nine** repos with a `.codescout/projects/` tree and **zero** untracked entries in any of them — those flows run here and produce nothing. The real cause was an unvalidated `project_id`, one layer up.
+
+**Probable cause:** the convention asks for one check ("is the claim measured?") and there are two. A measured symptom plus an unexamined attribution reads exactly like a well-evidenced bug report, because every number in it is real.
+
+**Severity:** high — all three proposed fixes encoded the mis-attribution, and two of them were actively harmful: Option B re-enumerated project ids, reintroducing what `6f261da9` had removed. A session following the file would have written a `.gitignore` glob and closed the ticket, leaving the actual defect shipping.
+
+**Status:** fixed-verified — re-diagnosed in `feb4c4e4`, measured in `fccdd95b`, root cause fixed in `c0bdeec7`, all on `experiments`.
+
+**Fix idea / Pointer:** the template's premise line should ask for two things, not one — what measured the *symptom*, and what read the *mechanism*. `docs/issues/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md` carries the full re-diagnosis.
+
+## F-25 — Recommended a fix as "strictly better", then falsified it with a six-line experiment after the user had already approved it
+
+**Observed:** 2026-08-08, reviewing PR #11 and then executing the resulting task #43.
+
+**Expected:** having caught F-24's mis-attribution by reading the code, the replacement recommendation would be held to the same standard.
+
+**Got:** two unmeasured claims in one round, both mine.
+
+1. **The diagnosis.** I proposed that the VDI's 8 entries came from workspace-root misresolution — sibling repos enumerated as sub-projects — and wrote it into the bug file's addendum as the mechanism. Two `memory()` calls later it was plainly a bad `project_id` on one host, no misresolution involved. Recorded as *hypothesis 4, withdrawn* rather than deleted.
+2. **The fix.** I recommended the structural `.gitignore` pattern running in `~/personal` as "strictly better than Options A/B/C", told the user to apply it, and they approved it as task #43. Executing it, a throwaway repo with a real fixture project and a phantom side by side gave: `git check-ignore` reports the phantom's `memories/zz-probe.md` as **NOT ignored** — identically to a real project's memory file. A phantom's `memories/` is structurally identical to a real one's, so no glob can hide one and keep the other. The pattern's only real effect is ignoring non-`memories` content under `projects/<id>/`, and this repo has none.
+
+**Probable cause:** the pattern was *observed in production* in a sibling repo, which felt like evidence. It was evidence that the pattern works — for what that repo needed. Nothing checked it against the symptom here, and the two differ in exactly the way that matters.
+
+**Severity:** med — caught before landing, and the correction (`927d75c0`) records the experiment so it is not re-tried. Had it landed it would have been worse than a no-op: a rule that reads as though the litter were handled.
+
+**Status:** fixed-verified — task #43 narrowed to the comment correction alone; `.gitignore` now carries the check-ignore result and a do-not-retry note.
+
+**Fix idea / Pointer:** "it works in another repo of ours" is a hypothesis about *this* repo. For a `.gitignore` rule the test is six lines and thirty seconds: throwaway repo, both populations, `git check-ignore -v`.
+
+## F-26 — A fixture declared a sub-project it never created, and the bug under test made the assertion pass anyway
+
+**Observed:** 2026-08-08, running `cargo test --lib memory::` after adding validation for unknown `project_id` (`c0bdeec7`).
+
+**Expected:** a green suite, or a failure in the new tests.
+
+**Got:** `memory_write_accepts_project_alias_for_project_id` failed — `No project 'mcp-server'. — hint: Valid project ids: .tmpXh0H7C`. Its fixture wrote `mcp-server/package.json` as `{}`, which is too empty for discovery to register a project, so the `mcp-server` its own comment claimed to create ("Multi-project: root gradle project + mcp-server sub-project") never existed. Its assertion — that the write lands in `.codescout/projects/mcp-server/memories/` — was satisfied **entirely by the defect**, because an unknown id produced exactly that path.
+
+**Probable cause:** the assertion cannot distinguish the two worlds. Under the bug, a real sub-project and an invented one route to the same path, so the test passed either way and never demonstrated what its name claims. The sibling `memory_write_routes_to_project_dir` has the same blind spot; it still passes because its manifest happens to be substantive.
+
+**Severity:** med — the test was not protecting the routing behaviour it is named for. No production impact, but a regression in discovery would not have been caught here.
+
+**Status:** fixed-verified — manifest now matches the sibling fixture (`{"scripts":{"build":"tsc"}}`), so the alias is tested against a project that exists. The new tests' `hint.contains("mcp-server")` assertions are the first thing in the suite that can tell a discovered project from an invented one.
+
+**Fix idea / Pointer:** third instance of F-21's shape in two rounds (F-21, F-24, F-26) — an assertion written in the one form where the defect is invisible. The tell is an assertion whose expected value the *bug* also produces. `src/tools/memory/tests.rs`.
+
+## W-17 — Running the thing beat reasoning about it, four times in one session
+
+**Observed:** 2026-08-08, across PR #9, PR #11, and task #43.
+
+**Pattern:** when a claim is about behaviour and the behaviour is cheap to invoke, invoke it. Four instances, four different tools:
+
+1. **PR #9's secret-guard.** Its own suite was 12/12 green on Node 26. A nine-case probe written against the same extension returned **9 of 9 divergent** — six bypasses (one nine characters long) and three false blocks.
+2. **PR #11's mechanism.** Two `memory()` calls settled what an addendum had asserted from reading, and inverted the attribution.
+3. **The read path.** A second probe — "does `read` also create the directory?" — found the worse symptom, invisible to `git status`.
+4. **The `.gitignore` glob.** `git check-ignore -v` in a throwaway repo falsified a fix I had already recommended and had approved.
+
+**Counterfactual:** without (1) the PR merges with a documented one-token bypass and an `AGENTS.md` asserting "hard gate" into every Pi session. Without (2) the fix lands one layer too low. Without (3) the worse of the two symptoms ships unrecorded. Without (4) a no-op `.gitignore` rule lands reading as though the litter were handled.
+
+**Confirming data points:** W-5 (invoking the tool under test found five defects reading had missed), W-12 (the live-tree call is a distinct verification step), W-13 (every bug premise checked was wrong; four fell to one command each), and now four more in a single session.
+
+**Impact:** high.
+
+**Promote-when:** already at promotion threshold. The rule to promote is narrow enough to be actionable: *before recommending a fix whose effect is observable in under a minute — a glob, a regex, a guard, a CLI flag — observe it.* Candidate home is CLAUDE.md alongside the premise-check convention.
+
+**Status:** validated.
+
+## W-18 — Asking which other callers reach the same line found a worse bug than the one reported
+
+**Observed:** 2026-08-08, probing the unvalidated `project_id`.
+
+**Pattern:** after confirming a defect on the path a report names, enumerate the *other* callers of the same line and probe one. Here the report was about litter from `memory(write)`. `references(from_dir)` showed five call sites — `write`, `read`, two list paths, `delete` — all constructing `MemoryStore::from_dir`, which `create_dir_all`s in its constructor. Probing `read` produced: `available_topics: []` and the hint *"no memory topics exist yet"* for a project that does not exist.
+
+**Counterfactual:** probing only `write` would have shipped a fix that closed the litter and left the misleading read in place — arguably the worse half, since litter is noise you eventually notice while a confident empty answer is acted on immediately, and the read leaves no `??` behind to hint anything went wrong. It also would have left the read/write asymmetry unexplained, and that asymmetry is the entire reason this host showed 2 phantoms and the VDI showed 8. Two hosts would have looked like two configurations instead of two traffic patterns.
+
+**Confirming data points:** R-17 (spot-check sibling callers of a just-fixed shared helper), R-47 (enumerate the delegate's callers too — the report walked one call path). This is the same lesson arriving through a constructor side effect rather than a delegate.
+
+**Impact:** high — changed both the symptom ranking and the causal account.
+
+**Promote-when:** a third instance where a sibling caller of a shared constructor carried a distinct symptom. At that point the rule generalises past helpers to *any* shared construction with a side effect in it.
+
+**Status:** validated.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

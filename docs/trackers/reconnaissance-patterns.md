@@ -1672,6 +1672,32 @@ this probe lived in those two artifacts, and both were readable in under a minut
 
 ---
 
+
+## R-55 — Miss: a host-specific symptom accepted as the norm without sweeping the other hosts
+
+**Verdict:** miss (caught by a later sweep, not by the scout that should have run first)
+
+2026-08-08, reviewing a bug file that reported 8 permanent `??` entries under `.codescout/projects/` and framed them as "the normal state for the cross-project flows CLAUDE.md documents". The framing was accepted long enough to build a re-diagnosis on top of it.
+
+The cheap check was a sweep of the population the claim generalises over. `~/.config/librarian/workspace.toml` declares 10 `[[roots]]` plus two umbrellas — 15 paths. Nine of those repos have a `.codescout/projects/` tree; **all nine had zero untracked entries**, via three different mechanisms (nothing generated lands there; a structural allow-list; a blanket `.codescout/` ignore). The reported host was an outlier, not the baseline.
+
+**The trap that made "zero" misleading in the other direction:** two of the nine *did* carry phantom `projects/<id>/` directories for ids that are not subdirectories — `claude-plugins/…/mcp-server`, `eduplanner-site/…/optaplanner` (a *sibling*, not a child). Both were **empty**, and git cannot see an empty directory. So a clean `git status` was not evidence the mechanism was absent; `find -type d` was needed to see it at all.
+
+**Rule:** when a report's evidence is `git status` on one machine, (a) sweep the other members of whatever population the claim generalises over before accepting the framing, and (b) do not read a clean `git status` as absence — an empty directory is invisible to git, so census the filesystem, not the index.
+
+**Promote-when:** a second instance where a single-host symptom was generalised without a sweep. Pairs with R-38 (a concurrent session had already measured it) — both are "widen the evidence base before theorising".
+
+## R-56 — Hit: a shared constructor with a side effect makes every caller a distinct seam
+
+**Verdict:** hit
+
+2026-08-08, tracing why an unvalidated `project_id` produced directory litter. The reported path was `memory(write)`. `references(from_dir)` returned five call sites — `write`, `read`, two list paths, `delete` — all constructing `MemoryStore::from_dir`, and that constructor calls `create_dir_all` on the path it is handed.
+
+Probing the *non*-reported caller (`read`) surfaced a second, worse symptom the report never mentioned: `available_topics: []` plus the hint "no memory topics exist yet" for a project that does not exist — an absent project reported as merely empty. It also explained an asymmetry two hosts had made look like a configuration difference: `write` leaves a file (visible `??`), `read` leaves an empty directory (invisible), so the same defect presents as 8 entries on one machine and 2 silent ones on another.
+
+**Rule:** when a side effect lives in a *constructor* rather than in the operation, the seam is not the reported call path — it is every caller of the constructor. `references()` the constructor, then probe at least one caller that the report did not name. Reading the constructor is not enough; the interesting variation is in what each caller does *after* it (write a file vs. list an empty dir), and that is what determines the observable symptom.
+
+**Promote-when:** a third instance (R-17 and R-47 are the first two, both via delegates rather than constructors). At three, the SKILL.md seam-class list earns an entry: *a shared construction with a side effect in it — enumerate callers, probe an unreported one*.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
