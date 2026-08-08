@@ -30,131 +30,107 @@ tags:
 Every other task (#15-#32) is complete. Do not re-derive the backlog from this log — the task list is
 authoritative and each entry carries its evidence.
 
-### Round 22 addendum (2026-08-08) — CURRENT. Read this before the git-state section below.
-
-Supersedes the round-19 and round-20 addenda. Their numbers survive inside F-20…F-29, where
-they are history rather than instructions.
+### Round 23 addendum (2026-08-08) — CURRENT. Supersedes round 22; read only this one.
 
 #### Two things not to get wrong
 
-1. **`TaskList` first.** Everything below is context for it, not a substitute.
+1. **First action is `TaskList`.** Do not re-derive the backlog from this file.
 2. **`#14` is on a deliberate hold.** The operator postponed the `experiments` → `master`
-   fast-forward on 2026-08-08 for "a couple of days to test it properly before releasing".
-   It is not blocked and not forgotten. **Do not run it.**
+   fast-forward on 2026-08-08 to test it properly before releasing. It is not blocked and
+   not forgotten. **Do not run it.**
 
 #### The promotion is a FAST-FORWARD, not a cherry-pick
 
-Settled by the operator on 2026-08-08, and it dissolves a whole class of pending
-bookkeeping. A fast-forward moves `master` onto the exact commits, so **every `experiments`
-SHA cited anywhere already IS the master SHA** the moment #14 runs. There is no second SHA
-to record.
+`git rev-list --left-right --count master...experiments` → `0  534`. A zero on the left
+means `master` is a strict ancestor, so promotion moves it onto these exact commits. The
+`experiments` SHA in every bug file **is** the master SHA. There is no second SHA to
+record afterwards.
 
-**Do not go hunting.** 24 archived bug files carry a line telling you to re-cite the master
-SHA after cherry-pick. Those were written when cherry-pick was the assumed path; under a
-fast-forward they are satisfied by the promotion itself. Stale instructions, not open debt.
-`CLAUDE.md` § Git Workflow and `docs/issues/_TEMPLATE.md` now scope the rule to
-cherry-picks explicitly (`980318c2`), and `docs/RELEASE.md` § *Large-Cohort Promotion* was
-already correct and is unchanged.
+**Do not go hunting.** ~24 archived bug files carry a "pending master SHA" line written
+before the path was settled as fast-forward. They are stale instructions, not open debt —
+the SHA already in each is correct.
 
-#### Git state
+#### Git state — re-derive it, do not trust this
 
-Tip `c551f19b`. **Re-derive rather than trusting a number here** —
-`git rev-list --left-right --count master...experiments`. Local `master` has not been
-touched this session; the operator settled that **local `master` is the reference**, not
-`origin/master`. Closed — do not re-raise.
+At the time of writing: tip `6b97db0b`, **0 behind / 534 ahead**, working tree clean apart
+from the two tracker files this entry is being written into. CI was **in progress** on
+`6b97db0b` (run 31270950804) — **check its verdict before anything else**, because the
+previous two runs were *cancelled mid-flight* by the concurrency group as pushes landed,
+and a cancelled run is not a green one. Runs on `4d83a64f` and `a6bdfb63` show `cancelled`
+for that reason, not failure.
 
-**The running binary is current.** The operator rebuilt and reconnected after each fix, and
-all three of this round's were probed live against it (see below). If you change source,
-assume the running server is stale again until `cargo rb` + `/mcp`.
+#### What shipped this round — ten commits, all mine
 
-#### What shipped this round
+`15fa5692` researcher bug relocated + `edit_markdown` frontmatter defect filed ·
+`cb96aa47` metadata-header defect filed · `2bc0f9f0` **the header fix** · `7c1d026e` the
+A/B null result · `e8da12e3` the server-stack finding · `feac9539` **the index-probe fix**
+· `72f56144` archive · `ecf3e461` **the server-stack CI lane** · `4d83a64f` archive ·
+`a6bdfb63` chunker file reconciled · `6b97db0b` **the feature-lane guard**.
 
-| commit | |
-|---|---|
-| `7928ea79` | the six `split_whitespace` helpers tokenize like the shell; two falsified doc comments corrected |
-| `70ce45f2` | tokenizer bug archived; **seven** citations re-pointed, two of them in `src/**` |
-| `a775a474` | the fast-forward correction — no master-side SHAs to record |
-| `980318c2` | `CLAUDE.md` + bug template scope the pending-SHA rule to cherry-picks |
-| `aaebe4cf` | machine-specific config leaves the committed files |
-| `6942c73a` | a bug file that had silently left the ledger, repaired; cause filed |
-| `ca4b7f0d` | `artifact` `extra` key collision — two guards |
-| `514348fc` | `edit_code(rename)` stops reporting a partial rename as success |
-| `c551f19b` | `edit_code(remove)` gains the verification it never had; `SyntaxBroken` verdict |
+Six bug files archived. `docs/issues/` is down to the pre-existing set.
 
-Also `0b9e7238` — **not mine**. Another session committed a bug file on this shared checkout
-mid-round; it went out with my push because my work sat on top of it.
+#### Measured, not assumed — the numbers a later session should not re-derive
 
-#### Live-probed, not just unit-tested
-
-Each fix was exercised against the rebuilt binary:
-
-- `artifact(create, extra={"kind":"bug"})` → refused, clash named, **no file created**
-- `edit_code(remove)` on a real symbol → `ok`, siblings intact, file still parses (the
-  false-positive control)
-- `edit_code(replace)` breaking syntax while every name survives → **refused and rolled
-  back**, file byte-identical. This is the arm that matters: the pre-existing name-set
-  checks would have said `Clean`
+- **AST header A/B: 26/75 → 25/75.** Five of 25 cases moved, two up and three down, all by
+  one point. Churn. **No measured retrieval benefit and no measured harm.** Kept by
+  maintainer decision on the strength of the restored contract, *not* on retrieval
+  grounds. Full account in `docs/research/2026-05-06-retrieval-stack-benchmark.md`
+  § *AST metadata header A/B — NULL RESULT*. **Do not cite the header fix as a retrieval
+  improvement.**
+- **Chunker, post-`index --force`:** single-line 11.8% → **6.3%**; ≤5-line 34.3% → **29.0%**;
+  empty sparse vectors 7.7% → **0 of 2,000 sampled**. The residual 6.3% is by design.
+- **Only codescout's corpus is rebuilt.** `backend-kotlin-single-stage` still sits at
+  11.7% single-line. Chunk ids are content-addressed, so a normal sync skips every
+  unchanged chunk by id — a chunker or embed-text change reaches a corpus **only** through
+  `index --force`.
+- **`cargo test --features server-stack`: 3586 passed, 0 failed** — first green run of the
+  configuration `cargo rb` actually ships.
 
 #### Open, with owners
 
-- **`#14`** — operator's, on hold (above).
-- **`#42`** — PR #9 routing. Two reviews posted; the build order lives in claude-plugins.
-  Closing a contributor's PR is a social act, so it is the operator's call. **Do not merge
-  PR #9 into codescout.**
-- **`#46`** — `mirela/backend-kotlin` has 13 `worktree_scoped_row` rows pending merge, 4 of
-  them collisions needing `graft`, not `reseat`. Different repo; its own focused pass.
-- **PR #12** — the other session's, and it is good. Review posted 2026-08-08 with two
-  blockers: CI red on **one line** (a citation missing `archive/`), and its claim that the
-  `codescout-ecosystem` umbrella does not exist, which is false on this host and measured
-  (F-29). Needs a rebase — `CLAUDE.md`'s umbrella section was rewritten under it.
-- **Nine open bugs**, none blocking the merge. Query rather than trusting a count:
-  `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`.
-  Run `librarian(action="reindex")` first.
-- **Two follow-ups left in fixed bugs' Resume sections**, both deliberate: `RangeRepair`'s
-  warning names only the END line adjusted (the START was the damaging one, and its silence
-  is why the corruption needed a read-back to find), and the Kotlin LSP returning zero
-  cross-file references for a top-level `object` in a tree that compiles green.
+- **#14** — the fast-forward merge. **Maintainer's, on hold.**
+- **#42** — route PR #9. **Maintainer's** (closing a contributor's PR is a social act).
+- **#46** — `mirela/backend-kotlin`'s 13 pending `worktree_scoped_row` merges; 4 collisions
+  need `graft`, not `reseat`.
+- **10 open bugs** across the umbrella: 8 codescout, 1 researcher, 1 claude-plugins. None
+  blocks the merge.
 
 #### Do not re-do these
 
-- **Do not rebase PR #10's lineage.** Merged; a rebase orphans SHA citations a third time.
-- **Do not "fix" the local-vs-origin master gap.** Decided; local master is the reference.
-- **Do not re-review PR #10.** Four lenses, five blockers, all fixed and merged (W-15).
-- **Do not scrub absolute paths from `docs/issues/archive/`, `docs/superpowers/plans/` or
-  `docs/usage-reports/`.** ~140 files, deliberately left: there a path is *evidence* — what
-  was observed, on which machine, on which date — not guidance. Only surfaces that
-  *instruct* were de-machined.
-- **Do not widen `edit_code(rename)` to rename its textual matches.** Considered and
-  rejected: `kind` classifies the FILE, so a comment mentioning the name is `kind: "source"`.
-- **Do not rank `SyntaxBroken` above the name-set checks.** Tried; an integration test
-  caught it (W-21). A vanished symbol is the cause, the broken parse its consequence.
-- **Do not re-derive the umbrella from committed docs.** Per-machine. Read
-  `memory(topic="local-environment", private=true)`, or run a `scope="umbrella"` query and
-  read the returned `scope` block.
+1. **The AST-header benchmark.** Run, null, recorded. Re-running the same file-level suite
+   cannot answer the open question, which is chunk-level discrimination — that needs a
+   different instrument, not another run.
+2. **`.worktrees/bench`.** A 174 MB orphan; `git worktree list` does not know it. The
+   benchmark script still defaults to it. Point `CODESCOUT_PROJECT_PATH` at the main
+   checkout instead — and note its `project_id` is *discovered*, so indexing it could
+   resolve to `codescout` and make `stream_index`'s delete pass wipe the real index.
+3. **Reverting the AST header.** Considered and declined: it buys a measured zero for
+   another full re-embed.
+4. **Raising `FIRST_PROBE_TIMEOUT`.** Considered and rejected — the value that "works" is a
+   function of the largest corpus anyone points at it.
+5. **A naive every-feature-has-a-lane check.** It flags nine features on day one. The
+   shipped guard (`tests/feature_lanes.rs`) resolves `default`'s closure and scans
+   `--features` arguments rather than raw text; `dashboard` and `local-embed-dynamic` got
+   a real `feature-check` job rather than an exemption.
+6. **Exempting a feature to make the guard land green.** Explicitly rejected: a guard whose
+   first act is to hide two real gaps is the failure it exists to prevent.
 
 #### The one lesson this round is actually about
 
-**A bug file's Root cause is a hypothesis until you open the function.** Three bug files
-worked back to back; all three Root causes were wrong in a way that changed the fix, and
-twice the proposed fix would have made things worse — renaming the union rewrites comments,
-and the "refuse and require opt-in" option was unavailable because the writes are already
-committed when the check runs.
+A green suite is not evidence a contract holds. Ask whether the test **can** fail. Three
+mechanisms were live in this repo on one afternoon: a test **deleted with its consumer**
+(`embed_text_format_includes_metadata_prefix` went with `embed::index` in `66db4c70`, so
+nothing failed when the surviving path turned out not to implement the contract); a test
+**asserting a subset** under a name claiming all of it (`payload_roundtrip_preserves_fields`,
+4 of 11 fields); and a test **never compiled** (`server-stack` in no lane). Written up as
+the buddy memory `tests-that-cannot-fail`, and as R-70.
 
-The reason it keeps happening is structural, not careless. A bug file **presents as prior
-reconnaissance**: Root cause section, mechanism in mechanism-language, file paths, line
-numbers. It looks like the scout already happened. It usually did not — the file was
-written at the moment of discovery by someone who had just lost work and wanted it recorded
-before moving on. That is the right trade at capture time, and it makes the artifact's
-confident register misleading later.
+The corollary that did the work all round: mutation-verify. Every fix this round was
+confirmed by reintroducing the defect and watching the specific test die — and, more
+informatively, by noting *which other tests stayed green*. Seven siblings passed while the
+metadata-header guard failed. That number is the size of the blind spot, measured rather
+than asserted.
 
-The sharpest instance: the rename bug file said, in its own text, *"inferred from the
-response payload — the rename implementation was not read."* Honest, prominent, and it
-still did not prevent a fix being planned around the inference, because the surrounding
-detail was specific enough to feel scouted.
-
-Full table in F-28; the recon-side proposal is R-59. The corollary, from the same round: **a
-grep count finds candidates, it does not decide.** `grep -c '^kind:'` returned 2 for a
-corrupted file and 2 for a healthy one whose second match sat inside a fenced example.
 ### THE MERGE IS STILL THE MAINTAINER'S TO RUN
 
 `#14` is the only open task. Everything gating it is satisfied. Do not run it.
@@ -1259,6 +1235,8 @@ Ranked by what to do first.
 | F-26 | 2026-08-08 | med | test-design | fixed-verified | `memory_write_accepts_project_alias_for_project_id` wrote `mcp-server/package.json` as `{}` — too empty for discovery — so the sub-project its own comment claimed to create never existed, and its path assertion was satisfied entirely by the defect under test. Third instance of F-21's shape in two rounds |
 | F-28 | 2026-08-08 | med | process | fixed-verified | Three bug files worked back to back, three wrong Root causes, each changing the fix: a grep count that cannot distinguish a corrupted frontmatter block from a fenced example; a rename file whose BOTH proposed fixes were unsafe once read (`kind` classifies the file not the occurrence; the writes are already committed); and a remove file assuming `CorruptionVerdict` ran and declined when `do_remove` had no verification at all. Two of the three flagged their own uncertainty in the text and it still did not stop a fix being planned around it. Promoted as R-59 |
 | F-29 | 2026-08-08 | med | process | fixed-verified | PR #12 deleted `CLAUDE.md`'s umbrella section as fictional; measured here, the umbrella exists with exactly the four members named and resolves live. `~/.config/librarian/workspace.toml` is per-machine — the same per-machine-ness that PR is about — so a per-machine observation was committed as a repo-wide doc correction, one layer up from the error it documents. Host values moved to a gitignored private memory; `contrib/pi/README.md`, which ships to crates.io, was telling strangers to use someone else's home directory |
+| F-30 | 2026-08-08 | med | process | fixed-verified | A bug file's *state* rots silently even when its numbers are maintained. The AST-chunker file was corrected twice — the "~2h" re-embed to 8.06 min, the 12% single-line claim corroborated from a second direction — by sessions that never opened `src/embed/ast_chunker.rs`. Every correction was right. The fix had shipped two days earlier in `ca442498` and the file still read "Not yet implemented — needs a decision". Distinct from F-28, which is a wrong *root cause*: here the analysis was sound and the world moved underneath it. Countermeasure is R-69 |
+| F-31 | 2026-08-08 | high | tooling | fixed-verified | The build that ships was the one build CI never compiled. `.cargo/config.toml` aliases `cargo rb` to `--features server-stack` and CLAUDE.md mandates `cargo rb` for the live MCP binary, but no lane named that feature — so every `#[cfg(feature = "server-stack")]` test was skipped silently, indistinguishable from a test that does not exist. `payload_roundtrip_preserves_fields` had never run, and also asserted 4 of 11 fields under a name claiming all of them. First execution of the lane failed immediately on a real defect. Fixed by a `test-server-stack` job, a `feature-check` job for the two other unlaned features, and `tests/feature_lanes.rs` |
 | F-27 | 2026-08-08 | med | process | fixed-verified | `posix_tokenize`'s doc comment — written the day before under task #37, whose purpose was correcting a false safety claim — asserted that `is_dangerous_command` splits with `split_whitespace`. It does not tokenize at all; it regexes the raw string. The six `split_whitespace` readers are elsewhere. Real shape: FOUR models of the same string, and the only one matching the executing shell had zero callers, so no single call site could have fixed it. `audit_doc_refs` does not scan `src/**`, so nothing would have flagged the prose |
 
 ## Wins Index
@@ -1277,6 +1255,8 @@ Ranked by what to do first.
 | W-19 | 2026-08-08 | high | Read the named symbols before implementing a bug file's prescribed fix — including, especially, when you wrote the bug file | The prescription said "wire `posix_tokenize` into `is_dangerous_command`, which uses `split_whitespace`". It does not. Implementing it literally means forcing a tokenizer into a regex matcher and REPLACING raw matching, which silently loses catches. Recon turned it into a deliberate union. Third datapoint for R-49, first where the stale prescription was self-authored and one day old | validated |
 | W-20 | 2026-08-08 | high | Put the negative control at the BOUNDARY of the rule being added — if it passes first run, suspect it is too far away to be evidence | Both controls failed first and neither was a test bug. One exposed that the raw pass had always flagged `grep 'rm -rf' x`, so the test asserted a behaviour that never existed; the other rejected `contains('$')` because `awk '{print $0}' @cmd_x` is single-quoted and never expanded — which would have shipped a usability regression on the documented `@ref` workflow, training the operator to reach for `acknowledge_risk` habitually. `echo hello` would have caught neither | validated |
 | W-21 | 2026-08-08 | med | Run the WHOLE suite before believing a new branch in a shared decision function is right, and read the failure text | Unit tests for the new `SyntaxBroken` verdict were green; an integration test I had not looked at failed, and its message was the argument — ranking it first answered a body-only `replace` with "the range overshot into adjacent code" instead of "body must be the complete declaration". The edit was refused either way, so this was never a correctness bug, which is exactly why no other gate could see it: a diagnosis-quality regression is invisible except to a test that asserts on the message | validated |
+| W-22 | 2026-08-08 | high | When a null result comes with a convenient explanation, check whether the explanation actually applies before using it | The AST-header A/B returned 26/75 → 25/75. Two exculpatory readings were sitting there: "markdown is 60% of the corpus and gets no header, so the suite cannot see the change", and "coverage must be patchy". Both were checked and both were false — the suite is code-weighted (15 code-only TCs, 9 mixed) and **all five movers were code-targeted**, and 13,087 of 13,326 rust chunks carried headers post-rebuild. Using either would have produced "inconclusive, needs a better instrument" and kept a change with no evidence behind it. The limit that DID survive checking (file-level scoring is structurally blind to a chunk-level effect) went into the benchmark doc as a stated limit rather than an excuse | validated |
+| W-23 | 2026-08-08 | high | A two-occurrence match is a question, not an inconvenience — identical text is not identical intent | `edit_file` reported `with_payload(true)` found twice in `src/retrieval/qdrant.rs`; the reflex is `replace_all`. The two scrolls read **different** keys. A shared `file_path`-only selector would have emptied every `chunk_id` in `scroll_chunk_refs` — which `unwrap_or_default()` turns into `""`, which the `if !chunk_id.is_empty()` guard then skips — so the function returns nothing, `stream_index` concludes the server holds no chunks, and re-embeds the entire corpus on every sync while deleting nothing. Silent, expensive, and green. The tell was the tool saying "found 2 times"; the fix was looking at the second one instead of reaching for the flag that makes the message go away | validated |
 | W-15 | 2026-08-08 | high | Fan out a review by LENS not by file, brief each with the refs + established-facts-marked-challengeable, and mandate refute-before-reporting | Four lenses on PR #10 (19 files, no prior reviews) found five blockers; three landed twice independently (`summary.total` partition, dead `posix_tokenize`, the job-assignment race). The refutation passes killed real candidates including one of the controller's own seeded premises, and one reviewer corrected two premises in its own brief | validated |
 | W-14 | 2026-08-07 | high | The first measurement after idle is a warm-up artifact — take the second one, and in a benchmark discard iteration one and say so | Three instances in one session: SPLADE sparse embed read 146.8 ms cold vs 16.8 ms warm (8.7x, and it feeds the reranker latency comparison in task #20); the audit_doc_refs tally migrates by up to 69 refs cold but is byte-identical warm; and `resolve_file_symbol` returns `SymbolMissing` for symbols that exist when the server answers before finishing indexing — the same trap promoted from a latency error into a false claim about the code | validated |
 | W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
