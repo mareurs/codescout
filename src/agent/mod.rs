@@ -1740,7 +1740,7 @@ impl Agent {
         self.memory_embedder
             .get_or_try_init(|| async {
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-                let emb = crate::retrieval::embedder::HttpDenseEmbedder::new(client.embedder);
+                let emb = crate::retrieval::embedder::CodeDenseAdapter(client.embedder);
                 anyhow::Ok(Arc::new(emb) as Arc<dyn crate::retrieval::embedder::DenseEmbedder>)
             })
             .await

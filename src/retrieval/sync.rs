@@ -312,7 +312,7 @@ impl crate::retrieval::client::RetrievalClient {
             project_id,
             &collection,
             &server,
-            &self.embedder,
+            &*self.embedder,
             self.code_store.as_ref(),
             opts.force_reindex,
             chunk_target,
@@ -770,7 +770,11 @@ mod tests {
     fn test_retrieval_client(store: impl CodeVectorStore + 'static) -> RetrievalClient {
         RetrievalClient {
             code_store: Arc::new(store),
-            embedder: EmbedderHttp::new("http://unused.invalid", "http://unused.invalid", 3),
+            embedder: std::sync::Arc::new(EmbedderHttp::new(
+                "http://unused.invalid",
+                "http://unused.invalid",
+                3,
+            )),
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),

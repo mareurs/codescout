@@ -1,6 +1,6 @@
 use crate::retrieval::code_store::{CodeVectorStore, VectorBackend};
 use crate::retrieval::config::RetrievalConfig;
-use crate::retrieval::embedder::EmbedderHttp;
+use crate::retrieval::embedder::{CodeEmbedder, EmbedderHttp};
 #[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
 use crate::retrieval::reranker::RerankerHttp;
@@ -13,7 +13,7 @@ pub struct RetrievalClient {
     /// sibling `search`/`sync` modules can reach it without exposing it outside
     /// the crate. See `docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
     pub(crate) code_store: Arc<dyn CodeVectorStore>,
-    pub embedder: EmbedderHttp,
+    pub embedder: Arc<dyn CodeEmbedder>,
     pub reranker: RerankerHttp,
     pub config: RetrievalConfig,
     /// True for the daemon-free lite stack (sqlite-vec backend): dense-only, no
@@ -37,12 +37,14 @@ impl RetrievalClient {
         // The lite stack has no sparse server; also skip the sparse leg whenever
         // sparse is disabled (the vector isn't used → don't pay for it).
         let dense_only = lite || config.disable_sparse;
-        let embedder = EmbedderHttp::new(
-            &config.embedder_url,
-            &config.sparse_embedder_url,
-            config.model_dim,
-        )
-        .dense_only(dense_only);
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(
+            EmbedderHttp::new(
+                &config.embedder_url,
+                &config.sparse_embedder_url,
+                config.model_dim,
+            )
+            .dense_only(dense_only),
+        );
         let reranker = RerankerHttp::new(&config.reranker_url);
         Ok(Self {
             code_store,
@@ -75,11 +77,11 @@ impl RetrievalClient {
     /// Always the Qdrant (hybrid) shape; the lite stack is constructed via
     /// `from_env` with `CODESCOUT_VECTOR_BACKEND=sqlite-vec`.
     pub fn from_config_only(config: RetrievalConfig) -> Self {
-        let embedder = EmbedderHttp::new(
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(EmbedderHttp::new(
             &config.embedder_url,
             &config.sparse_embedder_url,
             config.model_dim,
-        );
+        ));
         let reranker = RerankerHttp::new(&config.reranker_url);
         let client = qdrant_client::Qdrant::from_url(&config.qdrant_url)
             .timeout(std::time::Duration::from_secs(120))

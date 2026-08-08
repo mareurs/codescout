@@ -93,7 +93,7 @@ impl RetrievalClient {
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
         let mut timer = crate::perf::PhaseTimer::start("semantic_search");
-        let q = self.embedder.embed(query).await?;
+        let q = self.embedder.embed_one(query).await?;
         timer.lap("embed");
         let candidates = self
             .code_store

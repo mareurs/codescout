@@ -27,6 +27,45 @@ pub trait BatchEmbedder: Send + Sync {
     async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>>;
 }
 
+/// Query-side embedding seam for code search and memory recall.
+///
+/// `BatchEmbedder` covers the indexing path; this adds the two query shapes the
+/// search and memory paths need. Held as `Arc<dyn CodeEmbedder>` on
+/// [`crate::retrieval::client::RetrievalClient`], mirroring the
+/// `Arc<dyn CodeVectorStore>` seam that made the lite stack possible.
+///
+/// Deliberately does NOT have `DenseEmbedder` as a supertrait: that trait's
+/// `embed` collides by name with `EmbedderHttp`'s inherent `embed`, where
+/// inherent resolution would silently win. Use [`CodeDenseAdapter`] to bridge.
+#[async_trait::async_trait]
+pub trait CodeEmbedder: BatchEmbedder {
+    /// Full query embedding (dense + sparse when the impl has sparse).
+    async fn embed_one(&self, text: &str) -> anyhow::Result<EmbedOutput>;
+    /// Dense-only query embedding, for consumers that never rank on sparse.
+    async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+}
+
+#[async_trait::async_trait]
+impl CodeEmbedder for EmbedderHttp {
+    async fn embed_one(&self, text: &str) -> anyhow::Result<EmbedOutput> {
+        self.embed(text).await
+    }
+    async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.dense_query(text).await
+    }
+}
+
+/// Bridges an `Arc<dyn CodeEmbedder>` into the `DenseEmbedder` seam the memory
+/// path holds, so memory recall and code search share one embedder instance.
+pub struct CodeDenseAdapter(pub std::sync::Arc<dyn CodeEmbedder>);
+
+#[async_trait::async_trait]
+impl DenseEmbedder for CodeDenseAdapter {
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.0.embed_dense_one(text).await
+    }
+}
+
 #[async_trait::async_trait]
 impl BatchEmbedder for EmbedderHttp {
     async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>> {
@@ -738,6 +777,39 @@ mod tests {
             "must flag a connect failure so the classifier can route it; got: {msg}"
         );
     }
+
+    /// The trait object must expose both query shapes. If `EmbedderHttp` ever stops
+    /// satisfying `CodeEmbedder`, this fails to compile — which is the point.
+    ///
+    /// `embed_one` races the dense and sparse legs via `tokio::try_join!`; on this
+    /// host the sparse leg's connect refusal consistently wins the race, and its
+    /// error is wrapped with `.context("embed sparse")`, whose `Display`/`to_string()`
+    /// shows only the outermost context (anyhow's `Display` never walks the chain —
+    /// that's `Debug`'s job). So the URL check reads the `Debug` chain, which does
+    /// include the reqwest error's own message (and, for connect errors, the URL).
+    #[tokio::test]
+    async fn embedder_http_is_usable_as_a_code_embedder_trait_object() {
+        let e: std::sync::Arc<dyn CodeEmbedder> = std::sync::Arc::new(EmbedderHttp::with_config(
+            "http://127.0.0.1:1",
+            "http://127.0.0.1:1",
+            768,
+            "m",
+            "",
+        ));
+        // Connect refusal is expected; we assert the call is dispatchable and that
+        // the error names the URL, not that it succeeds.
+        let err = format!("{:?}", e.embed_one("hello").await.unwrap_err());
+        assert!(
+            err.contains("127.0.0.1:1"),
+            "error should name the dense URL, got: {err}"
+        );
+        let err2 = e.embed_dense_one("hello").await.unwrap_err().to_string();
+        assert!(
+            err2.contains("127.0.0.1:1"),
+            "dense-one error should name the dense URL, got: {err2}"
+        );
+    }
+
     /// Mid-chunk empties must not shift sparse vectors onto the wrong dense
     /// position — the re-expansion iterator has to skip exactly the empty
     /// slots and nothing else. Each non-empty input gets a uniquely
