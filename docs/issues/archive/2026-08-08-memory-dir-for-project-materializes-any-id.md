@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- workspace
+- memory
+- validation
+- repo-hygiene
+closed: 2026-08-08
 opened: 2026-08-08
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [workspace, memory, validation, repo-hygiene]
-kind: bug
+severity: medium
 ---
 
 # BUG: an unvalidated `project_id` resolves to a fresh per-project memory directory, so any typo or stale id gets its own tree

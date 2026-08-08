@@ -2532,7 +2532,7 @@ pre-commit gate as a conditional step — *if the diff touches `#[cfg(windows)]`
 
 **Status:** fixed-verified — re-diagnosed in `feb4c4e4`, measured in `fccdd95b`, root cause fixed in `c0bdeec7`, all on `experiments`.
 
-**Fix idea / Pointer:** the template's premise line should ask for two things, not one — what measured the *symptom*, and what read the *mechanism*. `docs/issues/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md` carries the full re-diagnosis.
+**Fix idea / Pointer:** the template's premise line should ask for two things, not one — what measured the *symptom*, and what read the *mechanism*. `docs/issues/archive/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md` carries the full re-diagnosis.
 
 ## F-25 — Recommended a fix as "strictly better", then falsified it with a six-line experiment after the user had already approved it
 

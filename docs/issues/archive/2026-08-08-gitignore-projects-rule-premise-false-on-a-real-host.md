@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- gitignore
+- repo-hygiene
+- workspace
+closed: 2026-08-08
 opened: 2026-08-08
-closed:
-severity: low
 owner: marius
 related: []
-tags: [gitignore, repo-hygiene, workspace]
-kind: bug
+severity: low
 ---
 
 # BUG: the `/.codescout/projects/` ignore comment's "no untracked content" clause holds only in a fresh clone or CI — and the dirs behind it come from an unvalidated project id

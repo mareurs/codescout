@@ -479,7 +479,7 @@ impl Workspace {
     /// typo silently earned its own `projects/<id>/memories` tree, and how `read`
     /// came to answer "no memory topics exist yet" for a project that never
     /// existed. Measured 2026-08-08; see
-    /// `docs/issues/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
+    /// `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
     pub fn has_project(&self, project_id: &str) -> bool {
         self.projects.iter().any(|p| p.discovered.id == project_id)
     }
@@ -523,7 +523,7 @@ impl Workspace {
     /// co-mingling bug for a directory-littering one plus a `read` that reports a
     /// non-existent project as merely empty. Validation now lives in
     /// `resolve_memory_dir`; see
-    /// `docs/issues/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
+    /// `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
     pub fn memory_dir_for_project(&self, project_id: &str) -> PathBuf {
         let is_root = self
             .projects

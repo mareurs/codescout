@@ -117,6 +117,5 @@ are rare.
 ## References
 
 - `src/tools/core/write_ack.rs` — ack storage/lookup
-- `docs/issues/2026-08-08-memory-dir-for-project-materializes-any-id.md` — the work
+- `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md` — the work
   this was found during
-
