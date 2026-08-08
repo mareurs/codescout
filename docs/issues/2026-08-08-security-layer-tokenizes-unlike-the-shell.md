@@ -73,7 +73,7 @@ string, and the only model that matches the shell that will execute it is the un
 A fourth model lives next door: `OutputBuffer`'s buffer-only classifier has its own
 path-likeness heuristic, and a command it judges buffer-only skips the dangerous-command
 gate outright — tracked separately in
-`docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
+`docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
 
 So this is not "one function tokenizes wrongly", and it cannot be fixed by correcting one
 call. **There is no shared notion of what a command's tokens are**, which is why the
@@ -177,7 +177,7 @@ helpers inspect *head tokens and flags*, so quote-awareness changes which token 
 head — a behaviour change per helper, not a union that can only add.
 
 The fourth model — `OutputBuffer`'s path-likeness heuristic — is fixed under
-`docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`, including the
+`docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`, including the
 discovery that it existed in two already-diverged copies.
 ## Tests added
 
@@ -230,5 +230,5 @@ Do not close this on the `is_dangerous_command` change alone; that is why the st
 - `src/util/path_security.rs` — `is_dangerous_command`
 - PR #10 review, 2026-08-08 — found independently by the platform/security and
   test-rigor reviewers
-- `docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` — sibling defect in
+- `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` — sibling defect in
   the same layer: the `is_buffer_only` path heuristic, which gates this check

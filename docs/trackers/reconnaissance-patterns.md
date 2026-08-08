@@ -1743,7 +1743,7 @@ were actually asking about.
 **Verdict:** hit
 
 2026-08-08, fixing the buffer-only classifier's path-likeness rule
-(`docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`). The bug file named
+(`docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`). The bug file named
 one site: the closure inside `OutputBuffer::resolve_refs`. Editing it looked complete.
 
 A `grep buffer_only` run to find a test harness surfaced a **second** implementation —

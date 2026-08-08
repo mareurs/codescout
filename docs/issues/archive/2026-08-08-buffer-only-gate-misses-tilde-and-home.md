@@ -147,9 +147,12 @@ correctly and takes the normal gate. The gate is also reachable deliberately via
 
 ## Resume
 
-Fixed and green. Remaining: confirm CI on `experiments` at the commit containing this
-change, then archive via `artifact(action="move", …)` — never a bare `git mv`. Label the
-SHA `experiments`; the master-side SHA still needs recording after cherry-pick.
+Archived 2026-08-08. Fix landed in `dbaeb78b` (**`experiments`** — an `experiments` SHA
+orphans on rebase, so treat it as provisional). CI green on that commit: run
+`31258919924`, all 15 jobs.
+
+**Still to record:** the master-side SHA, after `experiments` → `master` (task #14, on hold
+as of 2026-08-08). Come back and replace the SHA above with the one that lands on `master`.
 
 The sibling bug (`docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`) is
 only **mitigated** — six `split_whitespace` helpers in `path_security.rs` are still on the
