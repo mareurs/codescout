@@ -30,31 +30,85 @@ tags:
 Every other task (#15-#32) is complete. Do not re-derive the backlog from this log — the task list is
 authoritative and each entry carries its evidence.
 
-### Round 16 addendum (2026-08-08) — read this before the git-state section below
+### Round 17 addendum (2026-08-08) — CURRENT. Read this before the git-state section below.
 
-Round 9's tip **`f244ad17` FAILED CI** on `Audit Doc Refs`, after this Resume was written.
-Cause: archiving three bug files on 2026-08-07 (`9886773e`, `2feeabf5`) moved their paths and
-left **25 dangling citations across 15 files**; one of them was in the published manual, which
-gates at full severity. Fixed in **`e20b3a04`** — 12 live surfaces re-pointed, 13 historical
-ones deliberately left. See **F-20**.
+Rounds 16 and 17 both landed on 2026-08-08. This block is round 17 and carries the current
+state; round 16's numbers (tip `e20b3a04`, 6 open bugs) are superseded and kept only in F-20.
 
-Current state, verified 2026-08-08:
+**Current state, verified 2026-08-08 — not remembered:**
 
-- tip **`e20b3a04`**, **475 ahead / 0 behind** `master` — still a clean fast-forward
-- CI run `31219510777` on that exact SHA: **green, all 15 jobs**, `Audit Doc Refs` included
-- **open bugs are now 6, not 5.** The new one is
-  `docs/issues/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md` —
-  `DEFAULT_AUDIT_GLOBS` is an allow-list and `CHANGELOG.md` / `CONTRIBUTING.md` are outside
-  it, hiding 18 broken refs and 8 high findings from every CI run. **Does not block the
-  merge** (it is a coverage gap, not a regression), and deliberately not fixed on the eve of
-  the promotion: its 8 highs are in released-version sections describing a module layout
-  that was correct when it shipped, so it needs a severity story for changelog history
-  before the glob widens.
-- `docs/trackers/pr-review-session-log.md` is still the concurrent session's — never stage it.
+- tip **`88316ac9`**, local == remote. **496 ahead / 0 behind local `master`** — still a clean
+  fast-forward.
+- CI run **`31249753080`: green, all 15 jobs**, on that exact SHA. The tip has not moved since.
+- **PR #10 was merged into `experiments`** (merge commit `9be2ede4`) — option (b) of the
+  promotion choice. Merged with `--merge`, deliberately: `--rebase`/`--squash` would have
+  re-minted 18 SHAs and re-orphaned the citations repaired hours earlier (F-22).
+- **Two masters.** Local `master` = `5a8b1469`; `origin/master` = `eca9902e`, 139 commits
+  behind local. All 139 are contained in `experiments`, and `origin/master` IS an ancestor of
+  `experiments`, so both hops are genuine fast-forwards — the push moves the remote 635
+  commits, not 496. **Decided 2026-08-08: local `master` is the reference**, and
+  `docs/RELEASE.md` is deliberately NOT changed. Do not re-raise this.
+- `docs/trackers/pr-review-session-log.md` remains the concurrent session's. Never stage it.
 
-**The gate rule is unchanged and this round is the proof of it:** a green run on whatever the
-tip is *at that moment*, never a SHA from this log. Round 9 handed over a tip that had not
-finished its run; it went red.
+### THE MERGE IS STILL THE MAINTAINER'S TO RUN
+
+`#14` is the only open task. Everything gating it is satisfied. Do not run it.
+
+```
+git checkout master
+git merge --ff-only experiments
+git push
+```
+
+The gate is a green run on **whatever the tip is at that moment**, never a SHA from this log —
+and note F-23: that rule is a **push**-event rule. A `pull_request` run tests
+`refs/pull/N/merge`, a synthetic commit on no branch, which answers a different question.
+
+### Open bugs — 10, and none blocks the merge
+
+Three were filed today from the PR #10 review and are the newest:
+
+- `feb6a21337316dfb` — the dangerous-command gate tokenizes with `split_whitespace` while
+  commands execute under a POSIX shell; `posix_tokenize` was written for this and has **zero
+  production callers**.
+- `14f61fb867874a5b` — **the sharpest one.** `is_buffer_only` only recognises `/`-bearing
+  words, so `cat @cmd_x && rm -rf ~` classifies as buffer-only and skips the dangerous-command
+  gate *and* the source-file block entirely. Verified at the bytes
+  (`output_buffer.rs:618`, `inner.rs:288`). Pre-existing on Unix; PR #10 makes it live on
+  Windows by replacing `cmd.exe`, where `~` was literal.
+- `f95e6841030e4e9c` — doctor's outside-roots sample is an unranked prefix and the 281 elided
+  rows are unreachable by any parameter (`limit=100` accepted, silently ignored, byte-identical
+  result).
+
+All three were filed rather than fixed on purpose: the first two change a **security gate's**
+behaviour and belong in a change whose reviewers are looking at that gate; the third changes an
+output contract.
+
+**A reindex was needed to see them.** Bug files created with `create_file` (rather than
+`artifact(action="create")`) are not catalogued, so `artifact(find, kind="bug")` reported 7
+open when there were 10. Run `librarian(action="reindex")` before trusting any "what's open?"
+count that follows a session which wrote bug files by hand.
+
+### Do NOT re-do — settled or falsified on 2026-08-08
+
+- **Do not rebase PR #10's lineage.** It is merged. A rebase would orphan the SHA citations a
+  third time (F-22).
+- **Do not "fix" the local-vs-origin master gap.** Decided; local master is the reference.
+- **Do not re-review PR #10.** Four lenses, five blockers, all fixed and merged (W-15).
+- **Do not trust a `#[cfg(windows)]` test as evidence on Linux.** It is not compiled there.
+  `cargo check --target x86_64-pc-windows-gnu --tests` is ~6 s warm (W-16).
+- **Do not read a fixture that spells both sides the way the code spells them as coverage**
+  (F-21).
+- The `docs/PROGRESSIVE_DISCOVERABILITY.md` filename has no `DISCLOSURE` variant; the audit
+  will not catch the wrong one inside `docs/issues/` because that surface drops one severity
+  band.
+
+### Post-merge debts
+
+- master-side SHAs for bug files archived carrying `experiments` SHAs
+  (`grep -rl <sha> docs/issues/`, including `archive/`).
+- Unreleased callouts come off at **release**, not at merge.
+- A fast-forward mints no SHAs, so every citation repaired today survives the promotion intact.
 ### THE MERGE IS UNBLOCKED AND IS THE MAINTAINER'S TO RUN
 
 This inverts round 8's header. The deferral was *"no merge yet until we solve all issues"*; that
@@ -1069,6 +1123,9 @@ Ranked by what to do first.
 | F-18 | 2026-08-07 | high | process | mitigated | A routine `/mcp` killed a running rebuild 4 min in, because `run_command` children inherit the MCP server's lifetime — and took both `@bg_*` buffers with it; second time in one session that server-side state died with a reconnect, the first being the very argument used in the #16 decision. Long jobs must be `setsid`-detached and log to a file |
 | F-19 | 2026-08-07 | med | process | mitigated | Three `pgrep`/`pkill -f` process checks matched their own argv: one falsely reported an indexer running (the exact safety precondition it was checking), one made a poll loop unable to ever exit, and one killed the command running it. `ps -C <binary>` cannot self-match because the checker is not named after the binary |
 | F-20 | 2026-08-08 | high | process | fixed-verified | Archiving three bug files moved their paths and left 25 dangling citations across 15 files; the one in the published manual failed `Audit Doc Refs` on `f244ad17` — the exact commit handed over as merge-ready. Archiving is a bug file's normal end state, so every `docs/issues/<slug>.md` citation is a scheduled break. Reading the audit's severity policy (drops key on the CITING document) rather than only its verdict is what sized the fix correctly: 12 live surfaces re-pointed, 13 historical ones deliberately left. Prevention shipped in the archive flow (`get_guide("tracker-conventions")`); fixed in `e20b3a04` |
+| F-21 | 2026-08-08 | high | testing | fixed-verified | A test named `resolve_git_bash_never_selects_the_wsl_launcher` passed because it injected `PATH=C:\Windows\System32` — the spelling the CODE constructs — while Windows setup writes `C:\Windows\system32`, and `Path` equality folds case only on the drive-letter prefix. The exclusion never fired on a real host, so every `run_command` would run under the WSL launcher, silently. A fixture written from the code rather than the environment cannot discriminate. Fixed by `platform::windows_dir_eq` + a four-spelling sweep + a positive control (`6f261da9`) |
+| F-22 | 2026-08-08 | med | process | mitigated | A rebase onto `f244ad17` orphaned every SHA PR #10's bug files cited — `git cat-file -t` resolved none of `b5c8bbb0`, `94a63c32`, `d564c9bb`, `20d12b5f`; a sweep found 14 dead 8-hex tokens (5 PR-introduced, 9 pre-existing). The hazard `docs/issues/_TEMPLATE.md` documents, realized, and ungated: `audit_doc_refs` checks paths and symbols, not SHAs. Merging with `--rebase`/`--squash` would have re-orphaned them an hour after repair, so `--merge` became load-bearing |
+| F-23 | 2026-08-08 | med | process | fixed-verified | Predicted PR #10's CI would fail on a break inherited from its merge-base; it passed. `actions/checkout` on a `pull_request` event checks out `refs/pull/N/merge` — a synthetic merge commit on no branch, which already contained the fix. The session's "green run on whatever the tip is" rule is a PUSH-event rule; a PR run answers *is the merge result good*, not *is this commit good* |
 
 ## Wins Index
 
@@ -1080,6 +1137,8 @@ Ranked by what to do first.
 | W-4 | 2026-08-06 | med | A duplicate closure states its own falsification test | `Windows-gnu cross` stayed the one red cell with no known cause; the diff collapsed 4 cells into 1 bug and predicted its green | validated |
 | W-8 | 2026-08-06 | high | Read the fallback gate before building the harness a bug file asks for | Every signal pointed at LSP warming, including the source's own comment; one line (`matches.is_empty()`) proved a 0-match implies tree-sitter also found nothing, so server readiness cannot cause it — the harness would have measured the wrong variable | validated |
 | W-6 | 2026-08-06 | high | Mechanise the decidable half first; the residue is the judgement, and its size is the estimate you should have had | Sample of 11 sized a class that was 156 across 62 files and included a tracker the sample missed; ~300 tool calls avoided, and a live tracker's "Active bug files" label pointing at the archive became visible only once the paths were right | validated |
+| W-16 | 2026-08-08 | med | Cross-compile `#[cfg(windows)]` tests before pushing them — `cargo check --target x86_64-pc-windows-gnu --tests` | `cargo test` on Linux never compiles them, so a type error first appears as a red CI leg ~6 min out; the cross-check costs ~6 s with deps warm because `rust-toolchain.toml` already pins the target. Returned green — a verification step is not paid for only by the times it fires | validated |
+| W-15 | 2026-08-08 | high | Fan out a review by LENS not by file, brief each with the refs + established-facts-marked-challengeable, and mandate refute-before-reporting | Four lenses on PR #10 (19 files, no prior reviews) found five blockers; three landed twice independently (`summary.total` partition, dead `posix_tokenize`, the job-assignment race). The refutation passes killed real candidates including one of the controller's own seeded premises, and one reviewer corrected two premises in its own brief | validated |
 | W-14 | 2026-08-07 | high | The first measurement after idle is a warm-up artifact — take the second one, and in a benchmark discard iteration one and say so | Three instances in one session: SPLADE sparse embed read 146.8 ms cold vs 16.8 ms warm (8.7x, and it feeds the reranker latency comparison in task #20); the audit_doc_refs tally migrates by up to 69 refs cold but is byte-identical warm; and `resolve_file_symbol` returns `SymbolMissing` for symbols that exist when the server answers before finishing indexing — the same trap promoted from a latency error into a false claim about the code | validated |
 | W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
 | W-12 | 2026-08-07 | high | Run the fix against the real tree as a step distinct from the gate — a green suite says the branches you wrote tests for work, not that the output is useful | Seven tests passed and clippy was clean, yet the shipped `grep` warning read ".buddy/, .cargo/, .claude/, .env, .env.amd and 11 more" — alphabetical truncation cut `.github/`, the entry the whole fix existed to surface. Every fixture had one hidden entry; the repo has 16 | promoted-to-permanent-docs |
@@ -2277,6 +2336,182 @@ was caught rather than merged red.
 unbuilt version: teach `resolve_file_path` to try `<dir>/archive/<basename>` before reporting
 `Missing`, which would make the whole class self-healing — noted here rather than filed,
 because it trades a true-positive signal (the citation *is* stale) for silence.
+## F-21 — A test asserted the guarantee in the one spelling that made the bug invisible
+
+**Observed:** 2026-08-08, reviewing PR #10 after its author had already fixed the CI-visible
+half of the review findings.
+
+**When:** Reading `resolve_git_bash` (`src/platform/windows.rs`), which picks the shell
+`run_command` executes through on Windows.
+
+**Expected:** The `%SystemRoot%\System32` exclusion — the load-bearing step of the whole
+resolution order, because that directory's `bash.exe` is the WSL launcher — was documented,
+implemented, and covered by a test literally named
+`resolve_git_bash_never_selects_the_wsl_launcher`.
+
+**Got:** The exclusion never fired. `if dir == system32` compares `PathBuf`s, and `Path`
+equality folds case only on the drive-letter prefix — normal components compare byte-exactly.
+Windows setup writes the system PATH entry as `C:\Windows\system32`, while
+`%SystemRoot%`.join("System32") produces `C:\Windows\System32`. The test injected
+`PATH=C:\Windows\System32`, the **constructed** spelling, so the comparison matched, the skip
+fired, and the test passed against a guard that does nothing on a real host.
+
+**Probable cause:** The fixture was written from the code rather than from the environment.
+Both sides of the comparison were spelled the way the code spells them — precisely the input
+that cannot discriminate.
+
+**Impact:** On a WSL host with Git installed outside the three probed roots, every
+`run_command` would run in the WSL namespace: different `$HOME`, different toolchain, project
+reachable only via `/mnt/c`. As the function's own doc says, "it would not fail loudly."
+
+**Severity:** high — silent wrong-shell execution, wearing a passing test named after the
+guarantee it did not provide. Strictly worse than no test: a reviewer greps for WSL coverage,
+finds it, and stops.
+
+**Status:** fixed-verified — `platform::windows_dir_eq` (folds ASCII case, either separator,
+one trailing separator; same-directory, never a prefix test). The test now sweeps four
+spellings including the lowercase one, with `|_| true` as the probe so only the exclusion can
+reject, plus `resolve_git_bash_still_accepts_a_non_system32_path_entry` as the positive
+control — without it, "never selects the wrong shell" and "never selects a shell" are the same
+assertion. Shipped `6f261da9`, merged `9be2ede4`.
+
+**Fix idea / Pointer:** Generalised as R-67. Placement mattered as much as the fix:
+`windows_dir_eq` lives in `platform/mod.rs`, not `windows.rs`, because that module is
+`#[cfg(windows)]` and anything asserted there is verified on one CI leg of four — which is how
+the original passed. Clippy then rejected `pub(crate)` as dead on Linux; `pub` matches the
+file's siblings (`posix_tokenize`, `shell_path_str`) for the same reason.
+
+## F-22 — A rebase orphaned twelve SHA citations, and the merge method then became load-bearing
+
+**Observed:** 2026-08-08, while repairing a stale `## Resume` in one of PR #10's bug files.
+
+**When:** The branch had been rebased onto `f244ad17` between 00:13 and 00:21 that night —
+committer dates 00:13-00:21 against author dates 12:43-20:27 is the signature.
+
+**Expected:** The bug files' `## Fix` sections cite their fix commits, so the audit trail
+resolves.
+
+**Got:** `git cat-file -t` resolved **none** of `b5c8bbb0`, `94a63c32`, `d564c9bb`,
+`20d12b5f`. A sweep of every 8-hex token across the PR's docs found **14 dead** — 5
+PR-introduced, 9 pre-existing (WIN-2..WIN-17, dated 2026-06-09).
+
+**Probable cause:** Exactly the hazard `docs/issues/_TEMPLATE.md` documents — *"an
+`experiments` SHA orphans on rebase, and nothing re-reads `archive/` to repair it"* —
+realized. Nothing gates it: `audit_doc_refs` checks paths, symbols, anchors and line numbers,
+not commit SHAs.
+
+**Consequence for the merge:** `--rebase` or `--squash` on PR #10 would have re-minted all 18
+SHAs and orphaned the citations a second time, an hour after repairing them. `gh pr merge
+--merge` preserved them — `6f261da9` and `d8eddb7b` are still reachable from `9be2ede4`.
+
+**Severity:** med — no code defect, but the entire audit trail of four bug files pointed at
+nothing, and the repair window was one merge-method flag wide.
+
+**Status:** mitigated — the 5 PR-introduced SHAs remapped by commit subject to `a8253b62`,
+`e4b86447`, `b142a514`, `bc94e67f` in `6f261da9`, and the artifact-move `## Resume` now states
+they are pre-merge SHAs that a further rebase re-orphans. The 9 pre-existing ones are untouched
+and still dead.
+
+**Fix idea / Pointer:** The sweep is cheap and mechanical — extract 8-hex tokens, `git
+cat-file -t` each, report the misses. Candidate for the ship sequence, or for `audit_doc_refs`
+as a `ref_kind: commit_sha`. Until then the rule is: **once a commit's SHA is cited in a
+durable doc, the merge method stops being cosmetic.**
+
+## F-23 — Predicted a PR's CI would fail on an inherited break; `pull_request` tests the merge ref, not the tip
+
+**Observed:** 2026-08-08, checking PR #10 before reviewing it.
+
+**When:** The branch's merge-base was `f244ad17` — the commit whose `Audit Doc Refs` failure
+had been fixed on `experiments` in `e20b3a04`, which the branch did not contain.
+
+**Expected (my claim, stated to the user):** the PR's CI would fail `Audit Doc Refs` with the
+same single high finding, since `retrieval-stack.md:275` on the branch still carried the
+pre-archive citation — which I had verified against the branch tree.
+
+**Got:** `Audit Doc Refs` **passed**. `actions/checkout` on a `pull_request` event checks out
+`refs/pull/N/merge`: a synthetic "Merge \<head\> into \<base\>" commit existing on no branch.
+Fetching it settled it — `a42f124b`, contains `e20b3a04`, and line 275 reads the corrected
+`archive/` path.
+
+**Probable cause:** This session's own rule — *"the gate is a green run on whatever the tip is
+at that moment"* — is correct for **push** events, where `GITHUB_SHA` is the pushed commit.
+For **pull_request** events the tested SHA is the merge result, regenerated whenever either
+side moves. A push-event rule was applied to a PR run.
+
+**Severity:** med — wrong in the user-facing direction (it argued for an unnecessary rebase),
+and caught only by fetching the merge ref instead of reasoning from the branch tree.
+
+**Status:** fixed-verified — corrected in the same session, before anything was done about it.
+
+**Fix idea / Pointer:** Two events, two questions. A push run says *this commit is good*; a PR
+run says *the result of merging is good*. When a branch is behind its base, the PR run is the
+more useful of the two and its greenness already accounts for the gap.
+
+## W-15 — A four-lens adversarial fan-out found five blockers; three landed twice independently
+
+**Observed:** 2026-08-08, reviewing PR #10 (19 files, +1468/-123, zero prior reviews) at the
+user's explicit request for a multi-agent review.
+
+**Pattern:** Split by **lens, not by file** — platform/security, librarian correctness, test
+rigor under a mutation frame, docs/conventions — and brief each with three things: (a) the
+refs, because the working tree was the BASE and not the PR, so `symbols`/`grep` would have
+reviewed pre-PR bytes; (b) what the controller already established, explicitly marked
+challengeable; (c) a mandate to try to REFUTE each finding before reporting it, and to list
+what was dropped.
+
+**Counterfactual:** The two highest-severity findings are not ones a single-pass read
+produces. `summary.total` no longer partitioning `by_check` requires holding three line
+numbers (200, 217, 272) at once; the untested `'` fixture requires asking *what mutation
+survives this suite?* rather than *is there a test?*. Both landed **twice, independently** —
+as did `posix_tokenize` having no production callers. That corroboration is what made them
+actionable without re-deriving each from scratch.
+
+**Confirming data points:**
+1. Three findings duplicated across independent reviewers (`summary.total`, dead
+   `posix_tokenize`, the job-assignment race).
+2. The refutation passes killed real candidates — including one of the controller's own seeded
+   premises (the `temp_path_strings` form mismatch: `shell_words` strips quotes, so the match
+   survives) and "the doctor count is computed from the truncated rows" (false — only `total`
+   was).
+3. The docs reviewer corrected two premises in its own brief: 3 promoted memory rules not 2,
+   and rows WIN-32..35 not WIN-30/31.
+
+**Impact:** high — five blockers on a PR that had no other reviewer, two of them regressions of
+fixes made two days earlier.
+
+**Promote-when:** A second fan-out of this shape yields ≥1 finding no single lens would have.
+At two datapoints, promote the briefing template — refs + established-facts-marked-challengeable
++ refute-first — to a reusable skill or a CLAUDE.md note.
+
+**Status:** validated — single datapoint; all five blockers fixed and merged in `9be2ede4`.
+
+## W-16 — Cross-compiling the tests before pushing found nothing, and that is the point
+
+**Observed:** 2026-08-08, immediately before pushing `6f261da9` to PR #10.
+
+**Pattern:** Two of the six fixes were `#[cfg(windows)]` tests. `cargo test` on Linux does not
+compile them at all, so a type error would have made its first appearance as a red CI leg
+~6 minutes out. `cargo check --target x86_64-pc-windows-gnu --tests` compiles them locally in
+~6 s with deps warm, because `rust-toolchain.toml` already pins that target (W-9's fix).
+
+**Counterfactual:** One typo in either test = one red CI run, one fixup commit or force-push,
+and a review cycle spent on a mechanical error on someone else's PR. It returned green, which
+is what makes it worth keeping: **a verification step is not paid for only by the times it
+fires.**
+
+**Confirming data points:**
+1. This session — nothing found, one command, ~6 s.
+2. W-9 is the same shape one layer out: running CI's own toolchain locally during a provider
+   outage caught a red-CI-in-waiting.
+
+**Impact:** med — bounded, but it closes the one gap where the local gate is structurally blind
+(F-5's third skew: code the host platform never compiles).
+
+**Promote-when:** A cross-target check catches a real error. Then promote to CLAUDE.md's
+pre-commit gate as a conditional step — *if the diff touches `#[cfg(windows)]` code, also run
+`cargo check --target x86_64-pc-windows-gnu --tests`.*
+
+**Status:** validated — awaiting a second datapoint.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

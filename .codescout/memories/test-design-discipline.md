@@ -13,6 +13,18 @@ the guard deleted (the error then came from cite-resolution failure). Assert on 
 cause (message substring / error variant / field), and ask: "would this test still pass if
 the code it targets were deleted or inverted?"
 
+### Corollary: a composite fixture cannot pin the one character that matters
+
+2026-08-08 (F-21's sibling, PR #10). `tee_path_is_safe` allowlists the characters permitted in
+a tee target that is then interpolated **single-quoted** into a shell command. That quoting is
+unescapable only while `'` is excluded — so `'`-exclusion is the whole invariant. The suite's
+only `'`-bearing fixture was `"/tmp/x'; rm -rf /; echo '"`, which also carries `;` and a
+space: admit `'` to the allowlist and all eleven assertions stay green, because that string is
+still rejected on `;`. The PR under review was the one widening that allowlist.
+
+Rule: when a test rejects a *class*, add one fixture per member whose individual exclusion is
+load-bearing, isolated from every other reason to reject.
+
 ## One test per branch; both sides of every condition
 
 Each new `if` / `match`-arm / `Some`-vs-`None` branch needs a test that REACHES that branch.
@@ -61,6 +73,57 @@ for the invariant, one for at least one specific member's placement, chosen as t
 whose misplacement would be most consequential. And prefer an **exhaustive `match` with no
 wildcard arm** over any test: adding a variant then fails to compile until it is handled. A
 test asserts a partition; an exhaustive match *is* one.
+
+**It recurred within 48 hours, with the halves swapped.** 2026-08-08: `doctor`'s new
+`abs_path_outside_managed_roots` cap built `by_check` above the truncation and read `"total"`
+from `all_violations.len()` below it, so the two disagreed in the same `summary` object
+whenever the cap fired — 311 vs 30 on the live catalog. That cap shipped WITH a member test
+(`by_check == 25`), which stays green under the defect; the invariant twin was the missing one
+this time. Fixed in `6f261da9` by taking both numbers above the truncation and adding
+`summary_total_partitions_by_check`, which also asserts `total > shown` so the fixture cannot
+silently stop exercising the truncation branch (the cap corollary above). Two occurrences in
+one repo in two days: treat "a count and its breakdown in the same object" as a standing
+review trigger.
+
+### Corollary: a fixture spelled the way the code spells it cannot discriminate
+
+2026-08-08 (F-21). `resolve_git_bash_never_selects_the_wsl_launcher` asserted that a
+`bash.exe` under `%SystemRoot%\System32` — the WSL launcher — is never selected. It passed,
+and the exclusion it tested never fired on any real host.
+
+The production code built the excluded directory as `%SystemRoot%`.join("System32"); the test
+injected `PATH=C:\Windows\System32`, the same spelling; `Path` equality folds case only on the
+drive-letter prefix, so the byte-exact compare matched. Windows setup writes that PATH entry
+as `C:\Windows\system32`, lowercase, where it does not.
+
+The fixture was derived from the code instead of from the environment — precisely the input
+that cannot discriminate. This generalises well past paths: any test whose input is produced
+by the same expression as the code under test (a shared constant, a helper both sides call, a
+value copied out of the implementation) verifies self-consistency, not behaviour.
+
+Ask: **where does this fixture's value come from, and would the real caller produce it?** For
+a normalizing comparison specifically, feed every spelling the environment actually emits, and
+add the positive control — "never selects the wrong one" and "never selects one at all" are
+the same assertion until something pins the accepting case.
+
+### Corollary: a `#[cfg]`-gated test is not evidence on the platform that never compiles it
+
+2026-08-08 (W-16). `src/platform/windows.rs` is `#[cfg(windows)]`, so its tests are not built
+by `cargo test` on Linux at all: a type error surfaces as a red CI leg minutes out, and a
+logic error surfaces only on the one leg of four that runs it. That is the substrate which let
+F-21's fixture survive.
+
+Two cheap responses, both applied there:
+
+- Put the pure, platform-independent half of the logic in the facade module that compiles
+  everywhere (`platform/mod.rs`) and test it there. `windows_dir_eq`'s case-folding is
+  asserted on all four legs; only the resolver consuming it is asserted on one.
+- Before pushing `#[cfg]`-gated test code, run `cargo check --target <target> --tests` — ~6 s
+  warm, and `rust-toolchain.toml` already pins `x86_64-pc-windows-gnu`.
+
+Clippy consequence worth knowing: a helper whose only caller sits inside `#[cfg(windows)]` is
+dead code on Linux under `-D warnings`. `pub` rather than `pub(crate)` is the resolution the
+module already uses for `posix_tokenize` and `shell_path_str`.
 
 ### Corollary: a first measurement is a warm-up artifact until a second one agrees
 
