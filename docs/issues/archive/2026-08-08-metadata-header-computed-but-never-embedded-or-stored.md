@@ -167,7 +167,9 @@ the Qdrant path's history before this file calls it a regression.
 
 ## Fix
 
-Implemented 2026-08-08 on `experiments`. Four changes, all in the retrieval path.
+Implemented in **`2bc0f9f0`** (`experiments`, 2026-08-08). Four changes, all in the
+retrieval path. Promotion to `master` is by fast-forward, so this SHA *is* the master
+SHA — there is no second one to record later.
 
 1. **`embed_text` is the named home for the decision** (`src/retrieval/payload.rs`).
    It returns `{ast_header}\n{content}` when the header is present and bare content
@@ -193,7 +195,13 @@ Implemented 2026-08-08 on `experiments`. Four changes, all in the retrieval path
 `check --no-default-features --all-targets`, `test --no-default-features` (2643),
 `test --features local-embed --no-default-features` (2644) — all green.
 
-**Not done, and deliberately:** the retrieval benchmark has NOT run. Prepending a
+**Benchmark: run 2026-08-08, null result.** 26/75 → 25/75, five single-point moves in
+both directions. Kept by maintainer decision on the strength of the restored contract,
+not on retrieval grounds — see § Resume and the benchmark doc. The paragraph below is
+preserved as written *before* the measurement, because it is the standard the change
+was held to and it was met.
+
+**Written pre-measurement:** the retrieval benchmark has NOT run. Prepending a
 header to every chunk is not free — it adds tokens to short chunks and may dilute
 body signal. Validate against `docs/research/2026-05-06-retrieval-stack-benchmark.md`
 before this is promoted. Nothing here should be read as evidence the change improves
@@ -234,26 +242,26 @@ route around; queries that name a symbol still match its body text.
 
 ## Resume
 
-The code defect is closed; the corpus is not. Two operational steps remain, in order:
+N/A — closed 2026-08-08.
 
-1. **Run the retrieval benchmark** against
-   `docs/research/2026-05-06-retrieval-stack-benchmark.md` with headers on. This is a
-   gate, not a formality — if the header dilutes short-chunk signal, the honest
-   outcome is to keep `embed_text` and change what it composes.
-2. **`index --force` per project.** Chunk ids are content-addressed and content is
-   unchanged, so a normal sync **skips** every existing chunk by id and will never
-   update its vector or payload. Only `--force` re-embeds. Measured cost on codescout
-   2026-08-07: 8.06 min.
+The benchmark gate that this file held itself open for has run, and it came back
+**null**: 26/75 before, 25/75 after, on the same 25-TC suite against the same corpus
+with only the stored vectors differing. Five cases moved, two up and three down, every
+one by a single point. No measured benefit and no measured harm. Full A/B, including
+why the result is neither a doc-blindness artifact nor a coverage failure, is recorded
+in `docs/research/2026-05-06-retrieval-stack-benchmark.md` § *AST metadata header A/B
+(2026-08-08) — NULL RESULT*.
 
-Do not archive this file until step 1 has run. The fix is verified as *code*; the
-claim it improves retrieval is unmeasured, and archiving would file that claim as
-settled.
+**Maintainer decision 2026-08-08: keep the header.** It restores a contract the field's
+own doc comment declares, costs nothing further (codescout's corpus is rebuilt; other
+projects pick it up only on their next `--force`), and makes `ast_header` a real
+populated field — which is what made this defect findable in the first place. Reverting
+would buy a measured zero for another full re-embed.
 
-One question left open from § Root cause, unchanged: whether the Qdrant path ever
-embedded the header (regression) or never did while the legacy path carried it. The
-discovery that `CodeChunk.metadata`'s own doc comment reads *"Searchable header
-prepended before embedding"* proves the contract was **declared** and violated; it
-does not prove which path violated it first.
+**Do not let a later session cite this fix as a retrieval improvement.** It is not one,
+and the measurement saying so is one document away. The one open question is
+chunk-level discrimination, which the file-level suite is structurally unable to see;
+that needs a new instrument, not a re-run.
 ## References
 
 - `src/retrieval/sync.rs:83-100` — `flush_pending`, embeds content only

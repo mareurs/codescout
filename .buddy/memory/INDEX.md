@@ -10,6 +10,7 @@
 - [platform-law-leaks-at-call-sites](architecture-snow-lion/platform-law-leaks-at-call-sites.md) — any "eliminate subprocess X" law (replace with a library binding OR env-derivation; platform builders, libgit2, go-env) leaks at out-of-file sibling call sites (Drop impls, hot + cold paths); grep the whole tree, convert all siblings in one pass
 
 - [codescout-observability-three-layers](architecture-snow-lion/codescout-observability-three-layers.md) — three composable observability layers (usage.db→analyze-usage, llm-proxy/Langfuse+JSONL→claude-traces, Arize→arize-logs); route to the owner, don't build a fourth; claude-traces is the Headroom trial's analysis surface
+- [tests-that-cannot-fail](architecture-snow-lion/tests-that-cannot-fail.md) — a green suite isn't evidence a contract holds; ask whether the test *can* fail (deleted-with-consumer, subset-assertion, no-lane)
 - [repair-and-continue-input-law](architecture-snow-lion/repair-and-continue-input-law.md) — deterministic input mistakes are repaired + noted, not errored (saves the retry LLM call); RecoverableError only for missing/ambiguous; writes never auto-guessed
 ## docs-lotus-frog
 
