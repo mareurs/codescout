@@ -200,6 +200,23 @@ So the two populations are not "fixtures vs. foreign workspaces". They are "real
 sub-projects" and "directories conjured by an unvalidated id". The second should not exist
 at all, which is why no glob can cleanly describe it.
 
+### Measured 2026-08-08 — both populations reproduce on one host
+
+The mechanism above was inferred when this addendum was first written. It has since been
+reproduced directly, on `experiments` at `9cbe4002`, with no misresolution involved:
+
+- `memory(action="write", topic="…", project_id="zz-definitely-not-a-project")` → `"ok"`,
+  directory count 9 → 10, one new `?? .codescout/projects/zz-definitely-not-a-project/`.
+  **This is the VDI's eight.**
+- `memory(action="read", topic="…", project_id="zz-read-path-probe")` → creates the directory
+  and leaves it **empty**, so the count goes 10 → 11 while `git status` still shows one `??`.
+  **This is this host's two.**
+
+So the difference between the hosts is read-vs-write traffic against a bad `project_id`, not
+configuration and not workspace-root misresolution — the review pass's own first guess, which
+was wrong in the same way the original report was. Tree restored afterwards: count back to 9,
+`git status --porcelain .codescout/projects` empty. Full transcript in the sibling bug file.
+
 ### Two corrections to the report above
 
 - `## Environment` claims the eight are "four repos in the `codescout-ecosystem` umbrella
