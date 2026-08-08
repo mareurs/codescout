@@ -1,7 +1,7 @@
 ---
 id: '63279f39570cd44a'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact `extra` writes a key that collides with a canonical frontmatter key, and the duplicate silently drops the artifact out of its own kind'
 tags:
 - librarian
@@ -9,7 +9,7 @@ tags:
 - frontmatter
 - silent-failure
 - bookkeeping
-closed: null
+closed: 2026-08-08
 opened: 2026-08-08
 owner: marius
 related: []
@@ -141,28 +141,75 @@ list that is simply one shorter. There is no surface on which this looks wrong.
 
 ## Fix
 
-Not implemented. Two independent guards, and the second matters more than the first:
+**Implemented on `experiments`.** Two guards, at the two ends, because either alone
+leaves a hole:
 
-1. **Reject the collision at the input boundary.** `artifact(create|update)` should return
-   a `RecoverableError` when an `extra` key names a canonical frontmatter field, listing
-   the reserved set and pointing at the dedicated parameter (`kind=` / `status=` / …). This
-   is the *repair-and-continue* class only if the value matches what the canonical field
-   already holds; otherwise it is genuinely ambiguous and must error.
-2. **Never write frontmatter that does not re-parse.** After serializing, parse the block
-   back before the write lands. This catches the whole family — including collisions no
-   allowlist anticipates — and turns a silent misclassification into a failed call.
+**1. Input boundary — refuse the collision.** `reject_reserved_extra_keys`
+(`src/librarian/tools/create.rs`) returns a `RecoverableError` naming every clashing key
+and pointing at the parameter that owns it. Called from `create` before the file is
+written, and from `update`'s `call` before any of the three frontmatter-touching branches
+— sited there rather than in `apply_frontmatter_patch`, which all three share and which is
+infallible by design.
 
-A `doctor` check is the third layer: report artifacts whose on-disk frontmatter fails to
-parse, rather than letting them fall through to glob classification. Today a parse failure
-and a genuinely unclassified file are indistinguishable in the reindex report — this one
-counted as `unknown_count: 0`.
+Refused rather than repaired, even when the values agree. Repair-and-continue is for input
+whose intent is unambiguous; here the caller has said the same thing through two channels
+and the right correction — drop the `extra` entry, or drop the typed parameter — is a
+question about intent, not a typo. On `update` a `null` value is refused too: it would be
+an RFC-7396 delete, which is a no-op for these keys, and answering a mistaken repair
+attempt with an error that names the right parameter beats answering it with silence.
 
+**2. Emitter — never write frontmatter that cannot be read back.**
+`crate::librarian::frontmatter::write` now skips any `extra` key in `RESERVED_KEYS`. The
+typed field above already carries that key with the catalog-indexed value, so dropping the
+duplicate preserves meaning; emitting both destroys the whole block. This keeps `write`
+infallible (it returns `String`, and panicking in a serializer is not an option) while
+making the bad document unreachable from any caller, including internal ones that never
+pass through guard 1.
+
+`RESERVED_KEYS` and `reserved_keys_in_extra` live in `frontmatter.rs` beside the
+`Frontmatter` struct, so adding a typed field without adding it to the list is a visible
+omission rather than a silent re-opening.
+
+**Not implemented: the `doctor` check.** Reporting artifacts whose on-disk frontmatter
+fails to parse is still worth having — it would catch families these two guards do not
+anticipate, and today a parse failure is indistinguishable from a genuinely unclassified
+file in the reindex report. Left as its own change; with both guards in place nothing new
+can reach that state through the tool surface.
 ## Tests added
 
-None yet — not fixed. When fixed: a create with `extra={"kind": …}` must error rather than
-write; and a round-trip test asserting emitted frontmatter re-parses to the same field set
-for every canonical key.
+Four, and the first is the reproduction:
 
+- `a_reserved_key_in_extra_is_not_emitted_twice` (`src/librarian/frontmatter.rs`) — builds
+  the exact shape (`extra` carrying `kind` alongside a legitimate custom key), writes, and
+  **parses the result back**. The `kind:`-appears-once assertion alone would only say the
+  symptom is gone; the round-trip says the document still means something. Also asserts
+  the non-reserved key survives, and that `parse` routes `kind` to the typed field rather
+  than to `extra`.
+- `reserved_keys_in_extra_reports_every_clash_and_nothing_else` — the helper reports all
+  clashes, in list order, and stays silent on a custom key.
+- `create_rejects_an_extra_key_that_names_a_frontmatter_field` — refuses, names the clash,
+  points at the right channel, **and leaves no file behind** for a later reindex to
+  classify from a glob.
+- `update_rejects_an_extra_key_that_names_a_frontmatter_field` — the other way in, with
+  the file asserted byte-identical afterwards, plus the `null`-is-also-refused case.
+
+**Discrimination measured, not assumed.** The emitter guard was disabled and the suite
+re-run: `a_reserved_key_in_extra_is_not_emitted_twice` failed, printing the corruption
+verbatim —
+
+```
+---
+kind: bug
+status: open
+kind: bug
+severity: low
+---
+```
+
+— the same shape as the live casualty. Guard restored, suite green.
+
+Gate: `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 3574
+passed / 0 failed / 44 ignored.
 ## Workarounds
 
 Do not put canonical keys in `extra`. For bug files the canonical set is `kind`, `status`,
@@ -175,14 +222,17 @@ misclassified.
 
 ## Resume
 
-Implement guard 2 first (re-parse before write) — it subsumes guard 1 and needs no
-maintained list of reserved names. Site it next to the frontmatter serializer in the
-librarian write path; find it with `references()` on the emit function rather than grepping
-for `kind:`, per *Root cause*.
+Fixed on `experiments`. Remaining:
 
-Before closing, re-run the scan in *Evidence* — it is cheap and it is the only thing that
-would catch a second casualty created in the meantime.
+1. **Confirm CI**, then archive via `artifact(action="move", …)` — never a bare `git mv`.
+   No master-side SHA to record: this cohort promotes by **fast-forward**, so the
+   `experiments` SHA is the master SHA (`docs/RELEASE.md` § *Large-Cohort Promotion*).
+2. **Optional follow-up, not required to close this:** the `doctor` check described at the
+   end of *Fix*. It is a different guarantee — detecting an already-corrupt file on disk,
+   whatever wrote it — rather than more of the same one.
 
+Before closing, re-run the scan in *Evidence*. It is cheap, and it is the only thing that
+would surface a casualty created between the diagnosis and the fix.
 ## References
 
 - `docs/issues/archive/2026-08-06-artifact-create-bug-defaults-to-invalid-draft-status.md`
@@ -191,4 +241,3 @@ would catch a second casualty created in the meantime.
 - `docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
   (`a99388a299352d21`) — the casualty, repaired in this same commit
 - `get_guide("librarian")` § *artifact(action="create")* — where `extra` is specified
-

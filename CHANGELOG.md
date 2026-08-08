@@ -218,6 +218,18 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **`artifact`'s `extra` can no longer silently unclassify the artifact it writes.**
+  `extra` is for frontmatter keys the schema does not model, but nothing stopped it naming
+  one that it does. Because the writer emits the typed fields first and then appends
+  `extra` verbatim, `extra={"kind": "bug"}` produced **two `kind:` lines in one YAML
+  mapping** — which does not parse, so the artifact lost its kind, status, title, owners
+  and tags together and dropped out of `artifact(find, kind=…)` entirely. The file still
+  read correctly to a human and no gate noticed; one bug file sat outside the ledger for a
+  working day. `create` and `update` now refuse an `extra` key that names a modelled field
+  and name the parameter that owns it, and the writer additionally drops such a key rather
+  than emitting a document that cannot be read back. See
+  `docs/issues/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+
 - **The `run_command` safety layer now reads a command the way the shell will run it.**
   Since the switch to executing through a POSIX shell on both platforms (`sh -c`, Git Bash
   `bash -c`), the gates still split on whitespace and matched raw substrings, so quoting or

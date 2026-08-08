@@ -37,6 +37,46 @@ pub struct Frontmatter {
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
+/// The frontmatter keys [`Frontmatter`] models as typed fields.
+///
+/// Kept beside the struct so the two cannot drift: adding a field above without
+/// adding it here re-opens the hole below.
+///
+/// **Why this list has to exist.** `extra` is `#[serde(flatten)]`, so on the PARSE
+/// side serde routes any of these keys to its typed field — `extra` can never
+/// legitimately hold one. Nothing enforced the same on the WRITE side, where
+/// [`write`] emits the typed fields via `serde_yml` and then appends each `extra`
+/// pair as a raw line. An `extra` entry named `kind` therefore emitted a **second**
+/// `kind:` line into the same mapping, and a duplicate key makes the whole block
+/// unparseable — at which point the artifact loses its kind, status, title, owners
+/// and tags in one step and silently drops out of its own ledger.
+///
+/// See `docs/issues/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+pub const RESERVED_KEYS: &[&str] = &[
+    "id",
+    "kind",
+    "status",
+    "title",
+    "owners",
+    "tags",
+    "topic",
+    "time_scope",
+];
+
+/// Reserved keys present in an `extra` map, in [`RESERVED_KEYS`] order.
+///
+/// Empty is the healthy case. A non-empty result is always a caller error — see
+/// [`RESERVED_KEYS`] for why parsing can never produce one.
+pub fn reserved_keys_in_extra(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Vec<&'static str> {
+    RESERVED_KEYS
+        .iter()
+        .copied()
+        .filter(|k| extra.contains_key(*k))
+        .collect()
+}
+
 pub fn parse(doc: &str) -> Result<(Option<Frontmatter>, &str)> {
     let looks_like_fm = doc.starts_with("---\n") || doc.starts_with("---\r\n");
     if !looks_like_fm {
@@ -81,6 +121,15 @@ pub fn write(fm: &Frontmatter, body: &str) -> String {
         yaml.clear();
     }
     for (k, v) in &extra {
+        // A reserved key here would emit a SECOND line for a key `serde_yml` already
+        // wrote above, and a duplicate key makes the entire block unparseable — which
+        // costs every field, not just this one. Dropping it is the safe direction: the
+        // typed field above already carries that key with the catalog-indexed value.
+        // Callers are refused at the input boundary (`artifact(create|update)`); this is
+        // the backstop for internal ones, and it is why `write` can stay infallible.
+        if RESERVED_KEYS.contains(&k.as_str()) {
+            continue;
+        }
         match v {
             serde_json::Value::String(s) if scalar_can_be_bare(s) => {
                 yaml.push_str(&format!("{k}: {s}\n"));
@@ -231,6 +280,64 @@ mod tests {
         assert_eq!(parsed.extra.get("branch"), fm.extra.get("branch"));
         // And the first-class fields survive alongside the flattened map.
         assert_eq!(parsed.kind.as_deref(), Some("tracker"));
+    }
+
+    #[test]
+    fn a_reserved_key_in_extra_is_not_emitted_twice() {
+        // The defect: `extra` carrying a key the struct already models emitted that key
+        // a SECOND time into the same mapping. A duplicate key makes the whole block
+        // unparseable, so the artifact lost kind, status, title, owners and tags
+        // together and silently left its own ledger — one live casualty
+        // (`docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`),
+        // invisible for a working day because the file reads fine to a human.
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert("kind".to_string(), serde_json::json!("bug"));
+        extra.insert("severity".to_string(), serde_json::json!("low"));
+        let fm = Frontmatter {
+            kind: Some("bug".into()),
+            status: Some("open".into()),
+            extra,
+            ..Default::default()
+        };
+
+        let doc = write(&fm, "\nbody\n");
+        assert_eq!(
+            doc.matches("kind:").count(),
+            1,
+            "`kind:` emitted more than once:\n{doc}"
+        );
+
+        // The assertion that actually matters. The count above only says the symptom is
+        // gone; this says the document still means something. A duplicate key is not a
+        // cosmetic blemish — it costs every field in the block at once.
+        let (parsed, body) = parse(&doc).expect("emitted frontmatter must re-parse");
+        let parsed = parsed.expect("frontmatter present");
+        assert_eq!(parsed.kind.as_deref(), Some("bug"));
+        assert_eq!(parsed.status.as_deref(), Some("open"));
+        assert_eq!(
+            parsed.extra.get("severity"),
+            Some(&serde_json::json!("low")),
+            "a non-reserved extra key must still survive the round trip"
+        );
+        assert!(
+            !parsed.extra.contains_key("kind"),
+            "parse routes a modelled key to its typed field, never to `extra`"
+        );
+        assert_eq!(body, "\nbody\n");
+    }
+
+    #[test]
+    fn reserved_keys_in_extra_reports_every_clash_and_nothing_else() {
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert("severity".to_string(), serde_json::json!("low"));
+        assert!(
+            reserved_keys_in_extra(&extra).is_empty(),
+            "a custom key is what `extra` is for"
+        );
+
+        extra.insert("kind".to_string(), serde_json::json!("bug"));
+        extra.insert("owners".to_string(), serde_json::json!(["marius"]));
+        assert_eq!(reserved_keys_in_extra(&extra), vec!["kind", "owners"]);
     }
 
     #[test]
