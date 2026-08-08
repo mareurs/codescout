@@ -1776,6 +1776,44 @@ grep after `references()` came back complete. Closely related to the codescout m
 `platform-law-leaks-at-call-sites` ("grep the whole tree for the OLD pattern, not the
 declaring module") — this is that law applied to a heuristic rather than a subprocess
 call, where the tell is a code shape rather than a syscall string.
+
+## R-59 — Miss ×3: implementing from a bug file is a seam, and its Root cause is someone else's unverified reading
+
+**Observed:** 2026-08-08. Three bug files worked back to back
+(`63279f39570cd44a`, `9f823aabb84378a0`, `0fad8145011692a9`). All three Root cause
+sections were wrong in a way that changed the fix. Full table in F-28,
+`docs/trackers/release-promotion-session-log.md`.
+
+**Why recon did not fire.** The skill's *When to Use* covers "before editing code whose
+shape you have not verified" — which this was, every time. It did not read as a seam
+because a bug file **presents as prior reconnaissance**: it has a Root cause section, a
+mechanism in mechanism-language, file paths, sometimes line numbers. It looks like the
+scout already happened. It usually did not: a bug file is written at the moment of
+discovery, from the response payload and the symptom, by someone who has just lost work.
+That is the right trade at capture time and it makes the artifact's confident register
+misleading later.
+
+The sharpest instance: the rename bug file said, in its own text, *"inferred from the
+response payload — the rename implementation was not read."* It was honest, it was
+prominent, and reading it still did not prevent planning a fix around the inference — the
+surrounding detail was specific enough to feel scouted.
+
+**Proposal.** Add to *When to Use*: **"Before implementing a fix from a bug file, plan, or
+spec someone else wrote."** Its Root cause is a hypothesis unless it cites a command and a
+date. Read the function the fix will change, then compare — the comparison is Phase 2, and
+in all three cases it produced a different fix, twice a safer one:
+
+- proposed "rename the union" → unsafe: `kind` classifies the FILE, so it rewrites comments
+- proposed "refuse and require opt-in" → unavailable: writes are already committed
+- assumed "the check ran and declined" → the check did not exist on that path
+
+**Also: a grep count finds candidates, it does not decide.** `grep -c '^kind:'` returned 2
+for the corrupted file **and** 2 for a healthy one whose second match sat inside a fenced
+example. Whatever the count says, read the block.
+
+**Verdict:** miss — three in one session, cited as F-28. Proposal pending; promote-when is
+one more instance of a bug-file Root cause being falsified by reading, at which point it
+is four and belongs in `SKILL.md` rather than here.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
