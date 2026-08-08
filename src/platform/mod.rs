@@ -129,33 +129,35 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
 /// Shared by both platforms because both now execute through a POSIX shell
 /// (`sh -c` on Unix, Git Bash `bash -c` on Windows).
 ///
-/// **This is not on any security path today.** An earlier version of this
-/// comment said it fed the dangerous-command and pipeline checks. It does not:
-/// [`shell_tokenize`] is its only caller and has no production call sites.
+/// **This is on the security path.** Two callers in
+/// `src/util/path_security.rs` consume it, and they consume it differently:
 ///
-/// The security layer holds *three* different models of the same string, and
-/// this one — the only model that matches the shell that will execute it — is
-/// the unused one:
+/// * `shell_normalized` — rejoins the tokens and runs the dangerous-pattern
+///   regexes over that form *in addition to* the raw string. A union, so it can
+///   only add catches.
+/// * `shell_tokens` — the token source for `stage_trims`, `grep_is_counting`,
+///   `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern` and
+///   `check_source_file_access`. A replacement, not a union: those helpers read
+///   head tokens and flags, so quote-awareness changes their answers. It swallows
+///   the `Err` below and falls back to `split_whitespace` — an unclosed quote must
+///   never let a check be skipped entirely.
 ///
-/// * `is_dangerous_command` (`src/util/path_security.rs`) does not tokenize at
-///   all. It runs regexes over the RAW command string.
-/// * Six helpers in that file tokenize with quote-blind `split_whitespace`:
-///   `stage_trims`, `grep_is_counting`, `is_unbounded_lhs`,
-///   `has_recursive_flag`, `extract_grep_pattern`, `check_source_file_access`.
-/// * `OutputBuffer`'s buffer-only classifier carries its own path-likeness
-///   heuristic (`src/tools/output_buffer.rs`), and a command it judges
-///   buffer-only skips the dangerous-command gate entirely.
+/// What still does NOT agree with the shell: `is_dangerous_command`'s raw-string
+/// pass (deliberate — it is the other half of the union), `OutputBuffer`'s
+/// path-likeness heuristic in `src/tools/output_buffer.rs`, and
+/// `il3_offending_lead`, which splits a pipeline on a bare `|` and so hands
+/// `stage_trims` fragments with unbalanced quotes.
 ///
-/// Corrected 2026-08-08: a previous revision of this note asserted that
-/// `is_dangerous_command` itself splits with `split_whitespace`. It does not —
-/// that was written without reading its body. The hazard is real and broader
-/// than the wrong version claimed: the layer has no shared notion of what a
-/// command's tokens are, so no single place can be fixed to make it agree with
-/// the shell. The cmd.exe -> Git Bash switch made the divergence live on
-/// Windows and nothing has closed it. See
-/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` and
-/// `docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
-/// Do not restore the claim without first wiring this into that layer.
+/// History, because this comment has been wrong twice in opposite directions.
+/// It first claimed to feed the security checks when nothing called it. That was
+/// corrected on 2026-08-08 to say it had no production callers — and the very
+/// next commit gave it one without updating this text, so the correction was
+/// false within the hour. Before changing this paragraph, run
+/// `references(symbol="posix_tokenize")` and describe what is actually there.
+/// See `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+///
+/// Note `shell_tokenize` — the per-platform wrapper below — still has no
+/// production callers; both consumers reach for this function directly.
 ///
 /// Pure + cross-platform so its tests run on every CI target, not just Windows.
 pub fn posix_tokenize(cmd: &str) -> Result<Vec<String>, String> {

@@ -567,6 +567,30 @@ fn shell_normalized(command: &str) -> Option<String> {
     (joined != command).then_some(joined)
 }
 
+/// Tokens of `cmd` under the rules of the shell that will execute it.
+///
+/// Wraps [`crate::platform::posix_tokenize`] with the one policy every caller on
+/// the safety path needs: **when tokenization fails, fall back to
+/// `split_whitespace` rather than skipping the check.** An unclosed quote must
+/// never be a way to make a helper answer "nothing to see here". The fallback is
+/// exactly the model these helpers used before conversion, so anything the old
+/// model caught, the new one still catches.
+///
+/// That path is not hypothetical. [`il3_offending_lead`] splits a pipeline on a
+/// bare `|`, so [`stage_trims`] is routinely handed fragments with unbalanced
+/// quotes — `grep 'a|b' f` yields the stage `b' f`. Those fail to tokenize by
+/// construction and land in the fallback on every call.
+///
+/// **Unlike [`shell_normalized`], this REPLACES the old token source rather than
+/// unioning with it.** The union argument that makes `is_dangerous_command` safe
+/// by construction does not transfer: these callers read *head tokens and flags*,
+/// so quote-awareness changes which token is the head. Each conversion is a real
+/// behaviour change, documented on the helper it applies to.
+fn shell_tokens(cmd: &str) -> Vec<String> {
+    crate::platform::posix_tokenize(cmd)
+        .unwrap_or_else(|_| cmd.split_whitespace().map(str::to_string).collect())
+}
+
 /// Check if a command matches a dangerous pattern.
 ///
 /// Returns the matched pattern description if dangerous, `None` if safe.
@@ -576,13 +600,18 @@ fn shell_normalized(command: &str) -> Option<String> {
 /// leave the raw string unmatchable while the shell still executes the destructive
 /// command; the normalized pass reads it the way the shell will.
 ///
-/// This is `posix_tokenize`'s first production call site. Before this, the tokenizer
-/// written for exactly this job had none, and the security layer and the executing
-/// shell disagreed about what a command said — live on Windows since the
-/// cmd.exe -> Git Bash switch. See
-/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`; the six
-/// `split_whitespace` helpers in this file are still on the old model and are the
-/// remainder of that bug.
+/// The union is deliberate and is what makes the second pass safe by construction:
+/// the raw string catches shapes a token list does not, so matching only the
+/// normalized form would LOSE catches. Every command this rejected before the
+/// normalized pass existed, it still rejects — pinned by
+/// `raw_only_matches_are_still_caught`. The sibling helpers in this file cannot use
+/// that argument and do not: see [`shell_tokens`].
+///
+/// This was `posix_tokenize`'s first production call site; the second is
+/// [`shell_tokens`]. Before them the tokenizer written for exactly this job had
+/// none, and the security layer and the executing shell disagreed about what a
+/// command said — live on Windows since the cmd.exe -> Git Bash switch. See
+/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
 pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Option<String> {
     if config.profile == SecurityProfile::Root {
         return None;
@@ -803,10 +832,16 @@ fn il3_offending_lead(segment: &str) -> Option<&str> {
 /// opposite of the trim IL3 guards against. Everything that shows a *subset*
 /// (`head`, `tail`, plain `grep`, `less`) or reshapes line-by-line (`sed`,
 /// `awk`, `cut`, `sort`, `uniq`, `tr`, `fmt`) is a trimmer.
+///
+/// Tokenizes with [`shell_tokens`], so `'head' -50` is recognised as `head`.
+/// This is also the helper that exercises the tokenizer's fallback in normal
+/// operation: its caller [`il3_offending_lead`] splits on a bare `|`, so a
+/// stage arrives with unbalanced quotes whenever the pipeline had a quoted
+/// `|` in it.
 fn stage_trims(stage: &str) -> bool {
-    // `split_whitespace` already skips leading whitespace, so no pre-trim needed.
-    let head = match stage.split_whitespace().next() {
-        Some(h) => h,
+    let tokens = shell_tokens(stage);
+    let head = match tokens.first() {
+        Some(h) => h.as_str(),
         None => return false,
     };
     match head {
@@ -823,8 +858,13 @@ fn stage_trims(stage: &str) -> bool {
 
 /// True when a `grep` stage carries a count flag (`-c` / `--count`, including
 /// bundled short flags like `-ic`), making it an aggregator rather than a filter.
+///
+/// Tokenizes with [`shell_tokens`]. This conversion makes the gate *less*
+/// restrictive, which is the correct direction: a quoted `-c` used to be
+/// invisible here, so a counting grep read as a trimmer and IL3 blocked a pipe
+/// it is meant to allow. `grep '-c' p f` now reads as counting.
 fn grep_is_counting(stage: &str) -> bool {
-    stage.split_whitespace().any(|tok| {
+    shell_tokens(stage).iter().any(|tok| {
         tok == "--count" || (tok.starts_with('-') && !tok.starts_with("--") && tok.contains('c'))
     })
 }
@@ -833,10 +873,19 @@ fn grep_is_counting(stage: &str) -> bool {
 /// IL3 purposes. Conservative: when shape parsing is ambiguous, treat as
 /// bounded (allow the pipe) — false negatives cost a buffer dance, false
 /// positives cost user friction.
+///
+/// Tokenizes with [`shell_tokens`], which changes two things. The head is now
+/// the head the shell sees, so `'cargo' test` is unbounded (it used to read as
+/// the unknown command `'cargo'` and fall through to bounded). And `-maxdepth`
+/// is matched as a token rather than as the substring `" -maxdepth "`, so a
+/// tab-separated or quoted flag is found. The token form has one pathological
+/// false-bounded case the substring form did not — `find . -name -maxdepth`,
+/// a file literally named `-maxdepth` — which is accepted: IL3 governs output
+/// size, not safety, and the cost is one unbuffered pipe.
 fn is_unbounded_lhs(lhs: &str) -> bool {
-    let trimmed = lhs.trim();
-    let head = match trimmed.split_whitespace().next() {
-        Some(h) => h,
+    let tokens = shell_tokens(lhs);
+    let head = match tokens.first() {
+        Some(h) => h.as_str(),
         None => return false,
     };
 
@@ -852,12 +901,14 @@ fn is_unbounded_lhs(lhs: &str) -> bool {
 
     // grep is bounded by its file args unless promoted to recursive.
     if head == "grep" {
-        return has_recursive_flag(trimmed);
+        return has_recursive_flag(lhs);
     }
 
     // find defaults to recursive; -maxdepth bounds it.
     if head == "find" {
-        return !trimmed.contains(" -maxdepth ") && !trimmed.contains(" -maxdepth=");
+        return !tokens
+            .iter()
+            .any(|tok| tok == "-maxdepth" || tok.starts_with("-maxdepth="));
     }
 
     false
@@ -865,8 +916,14 @@ fn is_unbounded_lhs(lhs: &str) -> bool {
 
 /// True if the command line carries a `-r` / `-R` / `--recursive` flag as a
 /// standalone token (avoids matching `-rich` or paths containing `-r`).
+///
+/// Tokenizes with [`shell_tokens`], so a quoted flag counts. `grep '-r' p .` is
+/// recursive to the shell that runs it; before the conversion the token was
+/// `'-r'` with the quotes attached, matched nothing, and quoting was a way to
+/// hide a recursive grep from the IL3 unbounded check.
 fn has_recursive_flag(cmd: &str) -> bool {
-    cmd.split_whitespace()
+    shell_tokens(cmd)
+        .iter()
         .any(|tok| tok == "-r" || tok == "-R" || tok == "--recursive")
 }
 
@@ -946,9 +1003,18 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 /// Extracts the pattern argument from a grep shell segment.
 /// Skips the command name, any flag tokens (starting with `-`), and numeric
 /// arguments that immediately follow value-taking flags like `-A`, `-B`, `-C`, `-m`.
-fn extract_grep_pattern(segment: &str) -> Option<&str> {
+///
+/// Tokenizing with [`shell_tokens`] is what removes the quotes now. The
+/// hand-rolled `trim_matches('"').trim_matches('\'')` this used to end with
+/// stripped one character off each end of the first whitespace-delimited word,
+/// so `grep "foo bar" f` yielded `foo` — half a pattern, and the half that
+/// decides whether the caller is offered the symbol ladder or the generic hint.
+///
+/// Returns an owned `String` because the tokenizer produces owned tokens; the
+/// borrow into `segment` is no longer available.
+fn extract_grep_pattern(segment: &str) -> Option<String> {
     let mut skip_next = false;
-    for token in segment.split_whitespace().skip(1) {
+    for token in shell_tokens(segment).into_iter().skip(1) {
         if skip_next {
             skip_next = false;
             continue;
@@ -961,7 +1027,7 @@ fn extract_grep_pattern(segment: &str) -> Option<&str> {
             }
             continue;
         }
-        return Some(token.trim_matches('"').trim_matches('\''));
+        return Some(token);
     }
     None
 }
@@ -973,6 +1039,13 @@ fn extract_grep_pattern(segment: &str) -> Option<&str> {
 /// present in the command string. Use codescout tools instead:
 /// - `read_file`, `symbols` for reading
 /// - `grep` for regex extraction
+///
+/// The command name is matched against the segment's first token as the *shell* sees
+/// it ([`shell_tokens`]). This closes a bypass: `'cat' src/main.rs` used to yield the
+/// first token `'cat'` — quotes attached — which matched no blocked command name, so
+/// the block was skipped while the shell happily ran `cat`. The same applies to
+/// `\cat` and `c"at"`. The extension half still scans the whole raw segment, on
+/// purpose, so quoted paths like `cat "src/main.rs"` stay caught.
 ///
 /// Known limits:
 /// - Variable expansion (`cat $FILE`) is undetectable at parse time — accepted.
@@ -1002,8 +1075,8 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
         // Matching against the first token (not the full segment string) prevents
         // false positives from quoted arguments containing command names, e.g.:
         //   git commit -m "feat: tail-50 of log, output_buffer.rs"
-        let first_token = seg.split_whitespace().next().unwrap_or("");
-        if !cmd_re.is_match(first_token) {
+        let first_token = shell_tokens(seg).into_iter().next().unwrap_or_default();
+        if !cmd_re.is_match(&first_token) {
             return false;
         }
         // Check the full segment for a source extension so that quoted file paths
@@ -1012,12 +1085,15 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
     })?;
 
     // Derive the hint from the specific command that triggered the block.
-    let first_cmd = blocked.split_whitespace().next().unwrap_or("");
-    let hint: String = match first_cmd {
+    let first_cmd = shell_tokens(blocked.as_str())
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let hint: String = match first_cmd.as_str() {
         "grep" => {
-            let pat = extract_grep_pattern(blocked.as_str()).unwrap_or("");
-            if is_identifier_pattern(pat) {
-                let name = pat.split('|').next().unwrap_or(pat);
+            let pat = extract_grep_pattern(blocked.as_str()).unwrap_or_default();
+            if is_identifier_pattern(&pat) {
+                let name = pat.split('|').next().unwrap_or(pat.as_str());
                 format!(
                     "use symbols(name='{name}') for declarations, \
                      references(symbol='{name}') for direct callers, \
@@ -1756,6 +1832,162 @@ mod tests {
             is_dangerous_command(r#"rm -rf /tmp/x "unterminated"#, &config).is_some(),
             "raw pass must still fire when normalization is unavailable"
         );
+    }
+
+    // ---- The six `split_whitespace` -> `shell_tokens` conversions ----
+    //
+    // Every assertion marked "was: ..." fails on the pre-conversion code. That is
+    // the bar here. Unlike the `is_dangerous_command` union — which could only add
+    // catches, so a passing old test proved it safe — these REPLACE the token
+    // source, so a test that passes before and after says nothing about the change.
+
+    #[test]
+    fn a_quoted_recursive_flag_is_seen() {
+        // `grep '-r' p .` runs a recursive grep. The old token was `'-r'` with the
+        // quotes attached and matched nothing, so quoting hid an unbounded LHS
+        // from IL3.
+        assert!(has_recursive_flag("grep '-r' pattern ."), "was: false");
+        assert!(has_recursive_flag(r"grep -\r pattern ."), "was: false");
+
+        // Unchanged — bare flags, and the lookalikes the doc comment promises.
+        assert!(has_recursive_flag("grep -r pattern ."));
+        assert!(has_recursive_flag("cp --recursive a b"));
+        assert!(!has_recursive_flag("ls -rich"));
+        assert!(!has_recursive_flag("cat some-r-file"));
+    }
+
+    #[test]
+    fn a_quoted_count_flag_makes_grep_an_aggregator_again() {
+        // The one conversion that RELAXES a check, and the relaxation is the
+        // correct direction: a counting grep collapses output to a summary, so
+        // IL3 is meant to allow the pipe. Quoting used to make it read as a
+        // trimmer and blocked a legitimate command.
+        assert!(grep_is_counting("grep '-c' pattern file"), "was: false");
+        assert!(
+            grep_is_counting(r#"grep "--count" pattern file"#),
+            "was: false"
+        );
+
+        // Unchanged.
+        assert!(grep_is_counting("grep -c pattern file"));
+        assert!(grep_is_counting("grep -ic pattern file"));
+        assert!(!grep_is_counting("grep -i pattern file"));
+    }
+
+    #[test]
+    fn a_quoted_multiword_grep_pattern_survives_whole() {
+        // `trim_matches` stripped one quote character off each end of the first
+        // whitespace-delimited word, so this came back as `foo` — half a pattern,
+        // and the half that decides whether the caller is handed the symbol ladder
+        // (`foo` looks like an identifier) or the generic grep hint.
+        assert_eq!(
+            extract_grep_pattern(r#"grep "foo bar" src/main.rs"#).as_deref(),
+            Some("foo bar"),
+            "was: Some(\"foo\")"
+        );
+
+        // Unchanged.
+        assert_eq!(
+            extract_grep_pattern("grep WriteMemory src/tools/memory.rs").as_deref(),
+            Some("WriteMemory")
+        );
+        assert_eq!(
+            extract_grep_pattern("grep 'WriteMemory|ReadMemory' src/x.rs").as_deref(),
+            Some("WriteMemory|ReadMemory")
+        );
+        assert_eq!(
+            extract_grep_pattern("grep -A 3 WriteMemory src/x.rs").as_deref(),
+            Some("WriteMemory")
+        );
+    }
+
+    #[test]
+    fn a_quoted_head_still_names_the_command() {
+        // `is_unbounded_lhs` and `stage_trims` both key off the head token, so
+        // both inherit the same evasion and the same fix.
+        assert!(is_unbounded_lhs("'cargo' test"), "was: false");
+        assert!(is_unbounded_lhs(r"\git log"), "was: false");
+        assert!(stage_trims("'head' -50"), "was: false");
+        assert!(stage_trims(r#""tail" -n 20"#), "was: false");
+
+        // Unchanged.
+        assert!(is_unbounded_lhs("cargo test"));
+        assert!(!is_unbounded_lhs("ls -la"));
+        assert!(stage_trims("head -50"));
+        assert!(!stage_trims("wc -l"));
+    }
+
+    #[test]
+    fn maxdepth_is_matched_as_a_token_not_a_substring() {
+        // The substring form needed a literal `" -maxdepth "`; a tab or a quote
+        // hid it and the `find` read as unbounded.
+        assert!(
+            !is_unbounded_lhs("find . '-maxdepth' 2 -name '*.rs'"),
+            "was: true"
+        );
+        assert!(!is_unbounded_lhs("find .\t-maxdepth\t2"), "was: true");
+
+        // Unchanged.
+        assert!(!is_unbounded_lhs("find . -maxdepth 2"));
+        assert!(!is_unbounded_lhs("find . -maxdepth=2"));
+        assert!(is_unbounded_lhs("find . -name '*.rs'"));
+
+        // KNOWN AND ACCEPTED, not missed: a file named `-maxdepth` now reads as
+        // the flag. Pinned so the next reader sees a decision rather than a gap.
+        // IL3 governs output size, not safety; the cost is one unbuffered pipe.
+        assert!(!is_unbounded_lhs("find . -name -maxdepth"));
+    }
+
+    #[test]
+    fn quoting_the_command_name_no_longer_bypasses_the_source_file_block() {
+        // The security-relevant conversion. Each of these reads the file when the
+        // shell runs it, and each used to produce a first token the blocked-command
+        // regex did not match, so the block was skipped entirely.
+        assert!(
+            check_source_file_access("'cat' src/main.rs").is_some(),
+            "was: None"
+        );
+        assert!(
+            check_source_file_access(r"\cat src/main.rs").is_some(),
+            "was: None"
+        );
+        assert!(
+            check_source_file_access(r#"c"at" src/main.rs"#).is_some(),
+            "was: None"
+        );
+    }
+
+    #[test]
+    fn an_unclosed_quote_falls_back_instead_of_skipping_the_check() {
+        // The load-bearing control. If `shell_tokens` propagated the tokenize
+        // error — returning an empty list, or the helpers bailing to their
+        // permissive branch — an unclosed quote would be a universal bypass of
+        // every check converted above. It must behave as the old model did.
+        assert!(check_source_file_access("cat 'src/main.rs").is_some());
+        assert!(has_recursive_flag("grep -r 'pattern ."));
+        assert!(stage_trims("head -50 'x"));
+        assert!(is_unbounded_lhs("cargo test 'x"));
+    }
+
+    #[test]
+    fn shell_tokens_never_returns_nothing_for_a_command_with_words() {
+        // The property the fallback exists to guarantee: whatever the quoting, a
+        // command with words yields at least one token. No caller can be handed an
+        // empty list and conclude there is no command here.
+        for cmd in [
+            "cat src/main.rs",
+            "cat 'src/main.rs",
+            r#"cat "src/main.rs"#,
+            "'cat' src/main.rs",
+            r"\cat src/main.rs",
+        ] {
+            assert!(
+                !shell_tokens(cmd).is_empty(),
+                "empty token list for {cmd:?}"
+            );
+        }
+        // Whitespace-only is genuinely no command, and stays that way.
+        assert!(shell_tokens("   ").is_empty());
     }
 
     #[test]

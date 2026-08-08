@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: mitigated
+status: fixed
 tags:
 - security
 - run_command
@@ -17,13 +17,18 @@ severity: medium
 
 ## Summary
 
-`run_command` now executes every command through a POSIX shell on both platforms
-(`sh -c` on Unix, Git Bash `bash -c` on Windows, since WIN-32). The safety layer that
-decides whether a command is dangerous still reads it with `split_whitespace()`. The
-POSIX tokenizer written to close that gap — `crate::platform::posix_tokenize`, reached
-through `platform::shell_tokenize` — has **zero production call sites**. So the layer
-that judges a command and the shell that runs it can disagree about where the words are.
+`run_command` executes every command through a POSIX shell on both platforms (`sh -c` on
+Unix, Git Bash `bash -c` on Windows, since WIN-32). The safety layer that decides whether
+a command is dangerous read it with `split_whitespace()`, and the POSIX tokenizer written
+to close that gap — `crate::platform::posix_tokenize` — had **zero production call
+sites**. So the layer that judged a command and the shell that ran it could disagree about
+where the words are.
 
+**Fixed 2026-08-08**, in two commits: `is_dangerous_command` gained a normalized second
+pass (a union, so it can only add catches), and the six `split_whitespace` helpers were
+moved onto `shell_tokens` (a replacement, so each conversion is a real behaviour change
+with its own discriminating test). See *Fix* for the per-helper direction, and *The
+seventh site* for what this work uncovered and handed to its own bug file.
 ## Symptom (Effect)
 
 No user-visible failure is filed against this. It is a latent divergence, and it is
@@ -131,8 +136,9 @@ fragments is not the same token the gate inspected.
 
 ## Fix
 
-**Partial — status `mitigated`, not `fixed`.** One of the four string models now agrees
-with the shell; the six `split_whitespace` helpers do not.
+**Complete — status `fixed` as of 2026-08-08.** All four string models named in *Root
+cause* now agree with the shell, or diverge on purpose with the reason written down. The
+work landed in two commits: the dangerous-pattern union first, the six helpers second.
 
 ### Landed on `experiments`
 
@@ -168,17 +174,48 @@ demonstrated case, not a plausible one.
 
 ### Still open — what keeps this `mitigated`
 
-The six `split_whitespace` readers in `src/util/path_security.rs` are untouched:
-`stage_trims`, `grep_is_counting`, `is_unbounded_lhs`, `has_recursive_flag`,
-`extract_grep_pattern`, `check_source_file_access`. They gate IL3 pipeline policy and the
-source-file block, and they still read commands the way the shell will not. Converting
-them is the remainder, and it needs a decision the dangerous-pattern fix did not: those
-helpers inspect *head tokens and flags*, so quote-awareness changes which token is the
-head — a behaviour change per helper, not a union that can only add.
+*(Section kept under its original heading so the citations that point at it still
+resolve. Nothing here is open any more.)*
+
+The six `split_whitespace` readers — `stage_trims`, `grep_is_counting`, `is_unbounded_lhs`,
+`has_recursive_flag`, `extract_grep_pattern`, `check_source_file_access` — now take their
+tokens from `shell_tokens`, a thin wrapper over `posix_tokenize` that falls back to
+`split_whitespace` when tokenization fails. **The fallback is the load-bearing part:** an
+unclosed quote must never be a way to make a check answer "nothing to see here", so the
+fallback reproduces exactly the pre-conversion model.
+
+This was a REPLACEMENT, not a union, and the union's safety-by-construction argument does
+not transfer — these helpers read head tokens and flags, so quote-awareness changes their
+answers. Each conversion therefore carries a test that fails on the pre-conversion code.
+What each one changed:
+
+| helper | direction | what it closes |
+|---|---|---|
+| `check_source_file_access` | stricter | `'cat' src/main.rs`, `\cat …`, `c"at" …` read the file; the first token used to carry its quotes, match no blocked name, and skip the block outright |
+| `has_recursive_flag` | stricter | `grep '-r' p .` is recursive to the shell; quoting hid an unbounded LHS from IL3 |
+| `is_unbounded_lhs` | stricter | `'cargo' test` read as an unknown command and fell through to bounded |
+| `stage_trims` | stricter | `'head' -50` read as an unknown command and was not a trimmer |
+| `extract_grep_pattern` | correctness | `grep "foo bar" f` yielded `foo` — half a pattern, and the half that decides symbol-ladder vs generic hint. Returns `Option<String>` now; the tokenizer owns its output |
+| `grep_is_counting` | **looser** | a quoted `-c` made a counting grep read as a trimmer and blocked a pipe IL3 is meant to allow |
+
+`is_unbounded_lhs` also stopped matching `-maxdepth` as the substring `" -maxdepth "` and
+now matches it as a token, so a tab-separated or quoted flag is found. That trades one
+pathological case in the other direction — a file literally named `-maxdepth` — which is
+pinned by an assertion so the next reader sees a decision rather than a gap.
 
 The fourth model — `OutputBuffer`'s path-likeness heuristic — is fixed under
 `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`, including the
 discovery that it existed in two already-diverged copies.
+
+### The seventh site, found while fixing the six
+
+The list of six was never the whole layer. `il3_offending_lead` splits a pipeline with a
+bare `segment.split('|')`, so a quoted `|` fabricates stages the shell will never create.
+Measured on `2b1c9ec6`: `git log --grep='fix|head foo'` — a command with **no pipe** — is
+reported as an IL3 violation, and the remediation the error prints back is an unterminated
+fragment. Filed as `docs/issues/2026-08-08-il3-splits-pipeline-on-quoted-pipe.md`; it is
+not a regression from this work (the split predates it), and it is scoped narrowly enough
+to stand on its own rather than hold this bug open.
 ## Tests added
 
 Four, in `src/util/path_security.rs`:
@@ -198,7 +235,31 @@ Four, in `src/util/path_security.rs`:
 - `unclosed_quote_still_gets_the_raw_pass` — a tokenizer error must fall back to the raw
   pass, never *skip* the gate. Recorded as a decision rather than incidental behaviour.
 
-Gate: `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 3562
+Eight more for the six-helper conversion, in the same file, under the comment banner
+`The six split_whitespace -> shell_tokens conversions`:
+
+- `a_quoted_recursive_flag_is_seen`, `a_quoted_count_flag_makes_grep_an_aggregator_again`,
+  `a_quoted_multiword_grep_pattern_survives_whole`, `a_quoted_head_still_names_the_command`,
+  `maxdepth_is_matched_as_a_token_not_a_substring`,
+  `quoting_the_command_name_no_longer_bypasses_the_source_file_block` — one per conversion.
+  Every assertion that pins a behaviour change is labelled with its old answer
+  (`"was: false"`, `"was: None"`), so the failure message names the delta.
+- `an_unclosed_quote_falls_back_instead_of_skipping_the_check` and
+  `shell_tokens_never_returns_nothing_for_a_command_with_words` — the controls for the
+  fallback. Without them, returning an empty token list on a tokenize error would be a
+  universal bypass of all six checks and every other test here would still pass.
+
+**The discrimination was measured, not assumed.** `shell_tokens` was temporarily reverted
+to `split_whitespace` and the suite re-run: 7 failures, one in each of the six
+conversion tests, each panicking on its labelled assertion. (The seventh was a
+pre-existing test the probe disturbed, since the probe does not restore
+`extract_grep_pattern`'s old `trim_matches` — probe noise, not a finding.) The two control
+tests correctly did not fail; they assert unchanged behaviour. One assertion is reasoned
+rather than probed: the tab case in `maxdepth_is_matched_as_a_token_not_a_substring`
+discriminates against the old `contains(" -maxdepth ")` substring form, which the
+tokenizer-only probe does not restore.
+
+Gate: `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 3570
 passed / 0 failed / 44 ignored.
 ## Workarounds
 
@@ -208,22 +269,32 @@ verbs are still caught regardless of word boundaries.
 
 ## Resume
 
-Keep open at `mitigated`. The remainder is the six `split_whitespace` helpers.
+Fixed and green; the remainder this section used to describe is done. Remaining
+bookkeeping, in order:
 
-Before converting them, settle the question the first half did not have to: those helpers
-read *head tokens and flags*, so switching to `posix_tokenize` changes which token is the
-head when quoting is involved. That is a behaviour change per helper, not a union that can
-only add catches — so each needs its own before/after test, and `check_source_file_access`
-in particular decides whether a command is blocked outright.
+1. **Confirm CI on `experiments`** at the commit carrying the six-helper conversion, then
+   archive via `artifact(action="move", …)` — never a bare `git mv`, which orphans the
+   catalog row (`id = sha256(abs_path)`).
+   **Re-point the inbound citations in the same commit as the move.** This file is cited
+   from `CHANGELOG.md` (`[Unreleased]` → Fixed), from
+   `docs/issues/2026-08-08-il3-splits-pipeline-on-quoted-pipe.md`, and from the doc comment
+   on `posix_tokenize` in `src/platform/mod.rs` — note that last one is **source**, which
+   `audit_doc_refs` does not scan, so the gate will not catch it.
+   `grep -rl 'security-layer-tokenizes-unlike-the-shell' . ` before moving.
+2. **Label the fix SHA `experiments`.** An `experiments` SHA orphans on rebase, so the
+   master-side SHA still needs recording after cherry-pick (task #14, on the operator's
+   hold as of 2026-08-08).
 
-Suggested order, cheapest and least behavioural first: `has_recursive_flag`,
-`grep_is_counting`, `extract_grep_pattern`, `is_unbounded_lhs`, `stage_trims`,
-`check_source_file_access`. Consider whether a shared `tokens_or_fallback(cmd) ->
-Vec<String>` helper (tokenize, fall back to `split_whitespace` on error — never skip)
-belongs next to `shell_normalized` so the fallback rule is written once.
+Do **not** reopen this for the pipeline-splitting defect found during the fix — that is
+`docs/issues/2026-08-08-il3-splits-pipeline-on-quoted-pipe.md`, filed separately and
+scoped to `il3_offending_lead` alone.
 
-Do not close this on the `is_dangerous_command` change alone; that is why the status is
-`mitigated`.
+If a future session wants to keep unifying this layer, the honest statement of what is
+left is in that file plus the doc comment on `posix_tokenize` in `src/platform/mod.rs`,
+which now enumerates what agrees with the shell and what deliberately does not. That
+comment has been wrong twice in opposite directions; it asks you to run
+`references(symbol="posix_tokenize")` before editing it, and that instruction is there
+because it was earned.
 ## References
 
 - `src/platform/mod.rs` — `posix_tokenize`, and the corrected comment pointing here

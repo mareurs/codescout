@@ -218,6 +218,25 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **The `run_command` safety layer now reads a command the way the shell will run it.**
+  Since the switch to executing through a POSIX shell on both platforms (`sh -c`, Git Bash
+  `bash -c`), the gates still split on whitespace and matched raw substrings, so quoting or
+  escaping could hide what a command actually does. `is_dangerous_command` now matches
+  every pattern against the raw string **and** a shell-normalized form — a union, so
+  nothing it caught before slips through — closing evasions such as `r''m -rf /tmp/x` and
+  `rm -r\f /tmp/x`. The six pipeline and source-file helpers (`stage_trims`,
+  `grep_is_counting`, `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern`,
+  `check_source_file_access`) now tokenize the same way, closing the sharper bypass:
+  `'cat' src/main.rs` used to skip the source-file block entirely, because the quoted
+  command name matched no blocked command.
+
+  **This can flag commands that previously ran.** A flag is not a refusal — re-invoke with
+  the returned `@ack_*` handle. One check got *looser* in the same pass: a quoted `-c` no
+  longer makes a counting `grep` look like a log-trimmer, so `… | grep '-c' pattern` is
+  allowed again. See
+  `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` and
+  `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
+
 - **`librarian` path matching could never succeed on Windows.** `containing_root` compared
   a catalog `abs_path` (stored forward-slashed and `//?/`-prefixed) against a root spelled
   with backslashes, so `artifact(action="move")` and `artifact(action="delete")` answered
