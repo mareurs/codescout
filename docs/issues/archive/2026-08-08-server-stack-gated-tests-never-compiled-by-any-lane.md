@@ -102,7 +102,10 @@ production actually produces.
 
 ## Fix
 
-**Implemented on `experiments`.** A dedicated `test-server-stack` job in
+**Implemented in `ecf3e461` (`experiments`).** Promotion is by fast-forward, so this SHA
+*is* the master SHA — there is no second one to record later.
+
+A dedicated `test-server-stack` job in
 `.github/workflows/ci.yml`, running `clippy --features server-stack --all-targets
 -- -D warnings` and `cargo test --features server-stack`.
 
