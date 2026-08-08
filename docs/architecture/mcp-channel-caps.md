@@ -253,7 +253,12 @@ in `__probe_description_cap__`'s description.
 ## Proxy debug aid
 
 The local `llm-proxy` strips tool definitions to a `tool_names` list
-before logging to Langfuse (`/home/marius/agents/llm-proxy/src/passthrough.rs::build_langfuse_input`).
+before logging to Langfuse, in the `build_langfuse_input` function of `llm-proxy`'s
+passthrough module. `llm-proxy` is a sibling repo whose checkout path is per-machine —
+resolve it from the librarian umbrella (`scope="umbrella"`) rather than hardcoding a path
+here. Written without a `file.rs::symbol` token on purpose: that form resolves against
+*this* repo, so a de-machined cross-repo reference in that shape reads as a broken local
+one to `audit_doc_refs`.
 For this investigation the function was patched to optionally emit a
 `tools_full` array (full schemas) and a `tools_digest` per-tool
 record (`name`, `description_len`, `description_head`,

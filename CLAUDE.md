@@ -34,26 +34,42 @@ archiving a tracker/bug. The one-page index of every ID prefix
 
 Two living trackers capture observations from real sessions. Keep them current — they feed
 prompt improvements and skill refactors.
-### Cross-project scope — the `codescout-ecosystem` umbrella
+### Cross-project scope — librarian umbrellas
 
-`codescout`, `prompt-engineering`, `claude-plugins`, and `llm-proxy` share a
-librarian **umbrella** named `codescout-ecosystem`, declared globally in
-`~/.config/librarian/workspace.toml`. Pass `scope="umbrella"` to
-`artifact(find/context/…)` to query trackers and artifacts across all four —
-e.g. surface codescout bug files from a `prompt-engineering` session, or the
-reverse.
+An **umbrella** groups several repos so that `scope="umbrella"` on
+`artifact(find/context/…)` queries trackers and artifacts across all of them — e.g.
+surface codescout bug files from a sibling repo's session, or the reverse. Membership
+resolves by path-prefix (`abs_path.starts_with(member)`).
 
-**`prompt-engineering`** (a.k.a. prompt-tdd) is the prompt-eval harness that
-puts codescout's own skills/prompts under TDD against headless `claude -p`
-sessions. Trackers of note there: `skill-eval-log`, `skill-eval-playbook`, and
+**Umbrella ≠ workspace.** Cross-repo grouping belongs in an `[[umbrella]]`. A repo's
+`.codescout/workspace.toml` `[[project]]` entries are its own **sub-projects**, with
+roots relative to that repo — never sibling repos. Getting this wrong is silent: that
+file is gitignored (`.gitignore:28`), so a mis-rooted entry redirects every per-project
+memory write into the wrong repo with no review able to catch it.
+
+A project may declare its own `[[umbrella]]` in `.codescout/workspace.toml`; a
+**project-local umbrella takes precedence** over the global registry (the hub-and-spoke
+case, where a main project owns its dependency set). The global registry is for
+cross-linked peers with no single owner.
+
+**Umbrella names, member lists, and registry paths are per-machine and are deliberately
+NOT recorded in this file.** They live in `~/.config/librarian/workspace.toml`, which
+sits outside every repo and differs per host — so committing them makes this file read
+as *false* to anyone standing on a different machine. That is not hypothetical: it is
+what PR #12 concluded, correctly for its host and wrongly for the repo. Two ways to find
+out what actually resolves, both better than any doc:
+
+- run a `scope="umbrella"` query and read the returned `scope` block — it reports what
+  resolved, not what was intended;
+- `memory(action="read", topic="local-environment", private=true)` — this host's values.
+  Gitignored (`.gitignore:32`), and **not** shown by `memory(action="list")` unless you
+  pass `include_private=true`.
+
+**Related repo:** `prompt-engineering` (a.k.a. prompt-tdd) is the prompt-eval harness
+that puts codescout's own skills/prompts under TDD against headless `claude -p` sessions.
+Trackers of note there: `skill-eval-log`, `skill-eval-playbook`, and
 `prompt-tdd-harness-backlog` (harness gaps the evals surfaced — several are
 codescout-adjacent, e.g. the `AnthropicMcpRegistry` setup-file parity fix).
-
-Umbrella membership resolves by path-prefix (`abs_path.starts_with(member)`).
-A project may also declare its own `[[umbrella]]` in its
-`.codescout/workspace.toml`; a **project-local umbrella takes precedence** over
-the global registry (for the hub-and-spoke case where a main project owns its
-dependency set). The global file is for cross-linked peers with no single owner.
 ### Skill Frictions — `docs/trackers/skill-frictions.md`
 
 Rough edges found while using project skills (`/claude-traces`, `/analyze-usage`, etc.).

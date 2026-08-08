@@ -19,10 +19,10 @@ AGENTS.md documents the tool-map for the model.
 
 ## Prerequisites
 - Node >= 23.6 (`node -v`).
-- A codescout release binary. `mcp.json` points at an ABSOLUTE path
-  (`/home/marius/.cargo/bin/codescout`) because `~/.cargo/bin` is not on PATH
-  on this machine (F-2). Adjust the `command` in `mcp.json` to your binary
-  location if different.
+- A codescout release binary. `mcp.json`'s `command` must be an **absolute path** —
+  `~` is not expanded there, and `~/.cargo/bin` is not necessarily on PATH for the
+  process that spawns the server (F-2). Set it to your own binary:
+  `command -v codescout`, or `"$(cargo metadata --format-version 1 | jq -r .target_directory)/release/codescout"`.
 - `mcp.json` is gitignored (it holds API keys for the `researcher` server) —
   copy it from `mcp.json.example` before installing:
 
