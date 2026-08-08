@@ -74,6 +74,10 @@ impl RetrievalClient {
     /// Constructs without connecting to Qdrant — for tests and config validation.
     /// Always the Qdrant (hybrid) shape; the lite stack is constructed via
     /// `from_env` with `CODESCOUT_VECTOR_BACKEND=sqlite-vec`.
+    ///
+    /// The no-connection claim holds only because the compatibility probe is
+    /// disarmed below — under qdrant-client's default it would block on a health
+    /// check inside `build()`. Drop that call and this doc comment becomes false.
     pub fn from_config_only(config: RetrievalConfig) -> Self {
         let embedder = EmbedderHttp::new(
             &config.embedder_url,
@@ -83,6 +87,9 @@ impl RetrievalClient {
         let reranker = RerankerHttp::new(&config.reranker_url);
         let client = qdrant_client::Qdrant::from_url(&config.qdrant_url)
             .timeout(std::time::Duration::from_secs(120))
+            // See `QdrantWrap::connect` for why this is disarmed at every
+            // construction site: the probe `println!`s onto stdout and blocks.
+            .skip_compatibility_check()
             .build()
             .expect("invalid qdrant url");
         let code_store: Arc<dyn CodeVectorStore> = Arc::new(QdrantWrap { client });

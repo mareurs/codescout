@@ -47,6 +47,15 @@ impl QdrantWrap {
             tokio::task::spawn_blocking(move || {
                 Qdrant::from_url(&owned_url)
                     .timeout(std::time::Duration::from_secs(120))
+                    // Disarm qdrant-client's version probe. It is not just
+                    // redundant work: on failure it `println!`s onto OUR
+                    // stdout (qdrant-client 1.17 `qdrant_client/mod.rs:143`),
+                    // which prepends prose to every `--json` CLI envelope
+                    // whenever Qdrant is unreachable — and it blocks on a
+                    // health check inside the very `build()` this function
+                    // already wraps to survive. Both failure modes, one knob.
+                    // docs/issues/2026-08-08-qdrant-compat-check-printlns-to-stdout.md
+                    .skip_compatibility_check()
                     .build()
                     .context("qdrant connect")
             }),

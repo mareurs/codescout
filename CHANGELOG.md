@@ -218,6 +218,21 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **The shipped build could prepend a dependency's diagnostic to `--json` output.**
+  `qdrant-client`'s version-compatibility probe is on by default, and when it cannot
+  reach a server it reports that with `println!` — onto codescout's **stdout**, ahead
+  of the JSON envelope. Every `--json` CLI command that builds the librarian tool
+  context was affected whenever Qdrant was down (Qdrant is the default artifact backend
+  on a `server-stack` build): a correct payload, a zero exit code, and output no parser
+  accepts. The librarian's own degradation path was never at fault — it catches the
+  unreachable-Qdrant error and reports it through `tracing`; the `println!` fires inside
+  the dependency, before any of our error handling exists to intercept it. The probe is
+  now disarmed at both client-construction sites, which also removes a blocking health
+  check from a call already wrapped in `spawn_blocking` + `timeout` to survive blocking.
+  Only `cargo rb` — the configuration we ship, and the one no CI lane compiled until this
+  cohort — was affected; the `server-stack` lane added in this cohort caught it on its
+  first run. See
+  `docs/issues/2026-08-08-qdrant-compat-check-printlns-to-stdout.md`.
 - **The chunk metadata header reached neither the embedder nor the payload.**
   `build_metadata_header` computes an identity line for every chunk —
   `src/foo.rs :: impl Bar :: fn baz(…)` — and has nine tests pinning its shape, yet
