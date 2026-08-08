@@ -64,6 +64,11 @@ impl DenseEmbedder for CodeDenseAdapter {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         self.0.embed_dense_one(text).await
     }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[async_trait::async_trait]
@@ -733,6 +738,17 @@ impl EmbedderHttp {
 #[async_trait::async_trait]
 pub trait DenseEmbedder: Send + Sync {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+
+    /// Test-only downcast seam. Lets a test recover the concrete impl behind
+    /// `Arc<dyn DenseEmbedder>` — e.g. downcasting to [`CodeDenseAdapter`] to
+    /// reach its inner `Arc<dyn CodeEmbedder>` and prove instance identity
+    /// (`Arc::ptr_eq`) against a specific `RetrievalClient.embedder`, rather
+    /// than only asserting on behaviour. Not a default method: a default body
+    /// here would coerce an unsized `Self` (`&Self -> &dyn Any` requires
+    /// `Self: Sized`, which a trait default can't assume), so every impl
+    /// provides its own trivial `{ self }` body instead.
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
@@ -753,6 +769,11 @@ impl DenseEmbedder for HttpDenseEmbedder {
         // Dense-only: no sparse leg. Memory recall (and the lite stack) rank on
         // the dense vector alone, so skip the sparse HTTP round-trip entirely.
         self.inner.dense_query(text).await
+    }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

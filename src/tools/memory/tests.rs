@@ -262,6 +262,11 @@ async fn memory_remember_then_recall_e2e_via_test_seams() {
         async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
             Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         }
+
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
     ctx.agent
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
@@ -350,6 +355,11 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
         async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
             Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         }
+
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
     ctx.agent
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
@@ -408,6 +418,11 @@ async fn memory_recall_signals_has_more_when_capped() {
     impl DenseEmbedder for FixedEmbedder {
         async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
             Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        }
+
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
     ctx.agent

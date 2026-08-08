@@ -78,6 +78,18 @@ pub struct Agent {
     /// retrieval stack.
     pub(crate) memory_embedder:
         Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>>,
+    /// Test-only capture of the `RetrievalClient.embedder` seen by the single
+    /// `RetrievalClient::from_env()` call inside `memory_embedder()`, taken at
+    /// the exact point that `Arc` is about to be moved into `CodeDenseAdapter`.
+    /// Exists solely so
+    /// `memory_embedder_is_built_from_the_shared_code_embedder` can
+    /// `Arc::ptr_eq` it against the embedder the returned `CodeDenseAdapter`
+    /// actually wraps — proving the memory path shares the code-search
+    /// embedder INSTANCE from that construction, not merely one with
+    /// equivalent behaviour. Never read or written outside `#[cfg(test)]`.
+    #[cfg(test)]
+    pub(crate) test_seen_client_embedder:
+        Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::CodeEmbedder>>>,
 }
 
 pub struct AgentInner {
@@ -491,6 +503,8 @@ impl Agent {
             active_sync_abort: Arc::new(std::sync::Mutex::new(None)),
             semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
+            #[cfg(test)]
+            test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
 
@@ -1744,6 +1758,8 @@ impl Agent {
         self.memory_embedder
             .get_or_try_init(|| async {
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                #[cfg(test)]
+                let _ = self.test_seen_client_embedder.set(client.embedder.clone());
                 let emb = crate::retrieval::embedder::CodeDenseAdapter(client.embedder);
                 anyhow::Ok(Arc::new(emb) as Arc<dyn crate::retrieval::embedder::DenseEmbedder>)
             })
@@ -2171,22 +2187,40 @@ mod tests {
     /// Memory recall must ride the same embedder instance code search uses. If this
     /// regresses, memory silently keeps its own HTTP embedder and a local model
     /// configured for code search would not reach memory at all.
+    ///
+    /// Proves INSTANCE identity, not merely equivalent behaviour. `memory_embedder()`
+    /// performs exactly one `RetrievalClient::from_env()` call; `Agent::test_seen_client_embedder`
+    /// (test-only) captures a clone of `client.embedder` at the exact point it is about
+    /// to be moved into `CodeDenseAdapter` — see `memory_embedder`'s body. If
+    /// `memory_embedder` is ever changed to build its own independent `EmbedderHttp`
+    /// instead of using `client.embedder`, the two `Arc`s diverge and `Arc::ptr_eq`
+    /// below catches it. (Verified by sabotage: temporarily swapping the
+    /// `CodeDenseAdapter(client.embedder)` line for
+    /// `CodeDenseAdapter(Arc::new(EmbedderHttp::new(...)))` makes this test fail;
+    /// reverting makes it pass again.)
     #[tokio::test]
     async fn memory_embedder_is_built_from_the_shared_code_embedder() {
-        use crate::retrieval::embedder::{CodeDenseAdapter, CodeEmbedder, EmbedderHttp};
-        let shared: std::sync::Arc<dyn CodeEmbedder> = std::sync::Arc::new(
-            EmbedderHttp::with_config("http://127.0.0.1:1", "http://127.0.0.1:1", 384, "m", ""),
+        use crate::retrieval::embedder::{CodeDenseAdapter, DenseEmbedder};
+
+        let agent = Agent::new(None).await.unwrap();
+        let mem: std::sync::Arc<dyn DenseEmbedder> = agent.memory_embedder().await.unwrap();
+
+        let seen_client_embedder = agent
+            .test_seen_client_embedder
+            .get()
+            .expect("memory_embedder must capture client.embedder before returning")
+            .clone();
+
+        let adapter = mem
+            .as_any()
+            .downcast_ref::<CodeDenseAdapter>()
+            .expect("memory_embedder must return a CodeDenseAdapter");
+
+        assert!(
+            std::sync::Arc::ptr_eq(&adapter.0, &seen_client_embedder),
+            "memory_embedder's returned adapter must wrap the SAME embedder Arc the \
+             RetrievalClient it built holds — got two different instances"
         );
-        let adapter = CodeDenseAdapter(shared.clone());
-        // Two Arc handles to ONE embedder.
-        assert_eq!(std::sync::Arc::strong_count(&shared), 2);
-        let err = format!(
-            "{:?}",
-            crate::retrieval::embedder::DenseEmbedder::embed(&adapter, "x")
-                .await
-                .unwrap_err()
-        );
-        assert!(err.contains("127.0.0.1:1"), "got: {err}");
     }
 
     #[tokio::test]
