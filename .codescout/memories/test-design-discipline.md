@@ -125,6 +125,27 @@ Clippy consequence worth knowing: a helper whose only caller sits inside `#[cfg(
 dead code on Linux under `-D warnings`. `pub` rather than `pub(crate)` is the resolution the
 module already uses for `posix_tokenize` and `shell_path_str`.
 
+### Corollary: a test whose discriminating power comes from the environment passes everywhere you run it
+
+2026-08-08 (F-32). The `cli_artifact` round-trip tests parse the CLI's `--json` stdout — the
+right assertion, and the one that eventually caught a real defect. They could only ever fail
+on a host with **no** Qdrant listening on 6334, because `qdrant-client`'s compatibility probe
+`println!`s onto stdout only when it cannot reach a server. Every developer machine running
+the stack passed them; CI, which runs no Qdrant, was the sole place they failed — and the
+feature gate meant CI had never compiled them either.
+
+This is a fourth way a test can be unable to fail, and the one that reading the test cannot
+reveal: the assertion is correct in isolation. The other three are *deleted with its consumer*,
+*asserts a subset under a name claiming all*, and *never compiled by any lane*.
+
+Ask: **what in the environment, rather than in the code, decides whether this test can fail?**
+A service that happens to be up, a file that happens to exist, a clock, a locale, a network
+that resolves. Then pin that thing in the fixture — here, one line pinning
+`CODESCOUT_QDRANT_URL` to an unreachable port, which is also what made the fix
+mutation-verifiable. Pin toward the *failing* condition, not away from it: forcing
+`CODESCOUT_ARTIFACT_BACKEND=sqlite-vec` would have made the tests equally hermetic and
+permanently incapable of catching the bug.
+
 ### Corollary: a first measurement is a warm-up artifact until a second one agrees
 
 Not a test-design rule strictly, but it fails the same way — a number that looks legitimate
