@@ -485,6 +485,36 @@ async fn resolve_memory_dir(
         None => inner.default_workspace(),
     };
     if let Some(ws) = ws {
+        // Validate the CALLER-SUPPLIED id, and only that one. `ws.focused` is
+        // seeded from `ws.projects` by `Workspace::new` and re-checked by
+        // `set_focused`, so it is always a real id; the `ROOT_PROJECT_ID` last
+        // resort is deliberately left untouched so the no-argument path stays
+        // byte-identical.
+        //
+        // Without this check an unknown id reached `memory_dir_for_project`,
+        // whose lookup miss is indistinguishable from a known non-root project.
+        // A typo therefore got its own `projects/<id>/memories` tree, and `read`
+        // answered "no memory topics exist yet" with `available_topics: []` for a
+        // project that never existed — an empty answer a caller acts on.
+        if let Some(id) = project_param.as_deref() {
+            if !ws.has_project(id) {
+                let mut ids = ws.project_ids();
+                ids.sort();
+                let hint = if ids.is_empty() {
+                    "This workspace has no projects — omit project_id.".to_string()
+                } else {
+                    format!(
+                        "Valid project ids: {}. Omit project_id to use the focused project.",
+                        ids.join(", ")
+                    )
+                };
+                return Err(super::RecoverableError::with_hint(
+                    format!("No project '{id}'."),
+                    hint,
+                )
+                .into());
+            }
+        }
         let project_id = project_param
             .or_else(|| ws.focused.clone())
             .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string());

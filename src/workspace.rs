@@ -471,9 +471,27 @@ impl Workspace {
         self.projects.iter_mut().find(|p| p.discovered.id == id)
     }
 
+    /// Whether `project_id` names a project of this workspace.
+    ///
+    /// `memory_dir_for_project` cannot answer this — a lookup miss and a known
+    /// non-root project both take its `else` branch — so any caller that accepts
+    /// an id from tool input must check here FIRST. Skipping the check is how a
+    /// typo silently earned its own `projects/<id>/memories` tree, and how `read`
+    /// came to answer "no memory topics exist yet" for a project that never
+    /// existed. Measured 2026-08-08; see
+    /// `docs/issues/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
+    pub fn has_project(&self, project_id: &str) -> bool {
+        self.projects.iter().any(|p| p.discovered.id == project_id)
+    }
+
     /// Switch focus to a project by ID.
+    ///
+    /// Rejects an unknown id. That, plus `Workspace::new` seeding `focused` from
+    /// `projects`, is what makes `self.focused` always a real project id — and it
+    /// is why `resolve_memory_dir` validates only the caller-supplied id and
+    /// leaves the `focused` fallback alone.
     pub fn set_focused(&mut self, project_id: &str) -> anyhow::Result<()> {
-        if self.projects.iter().any(|p| p.discovered.id == project_id) {
+        if self.has_project(project_id) {
             self.focused = Some(project_id.to_string());
             Ok(())
         } else {
@@ -494,11 +512,18 @@ impl Workspace {
 
     /// Memory directory for a project. Root project -> workspace-level, sub-projects -> per-project.
     ///
-    /// An unknown `project_id` is treated as a sub-project (returns a per-project
-    /// subdirectory under `projects/<id>/`). Previously defaulted to the root
-    /// memory dir on unknown ID, which silently co-mingled memories from typos
-    /// or stale IDs with the workspace root's memories — a bug that would go
-    /// unnoticed until a user noticed crossed-over memories.
+    /// PRECONDITION: `project_id` must name a real project — check `has_project`
+    /// first. This function cannot enforce it. A lookup miss and a known non-root
+    /// project both take the `else` branch, so an unknown id resolves to a
+    /// plausible-looking `projects/<id>/memories` path that no project owns, and
+    /// `MemoryStore::from_dir` then creates it on read as well as on write.
+    ///
+    /// An earlier fix stopped unknown ids from co-mingling into the root memory
+    /// dir — right, but it routed them here instead of rejecting them, trading a
+    /// co-mingling bug for a directory-littering one plus a `read` that reports a
+    /// non-existent project as merely empty. Validation now lives in
+    /// `resolve_memory_dir`; see
+    /// `docs/issues/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
     pub fn memory_dir_for_project(&self, project_id: &str) -> PathBuf {
         let is_root = self
             .projects
@@ -948,6 +973,83 @@ mod tests {
             languages: vec![],
             manifest: None,
         }
+    }
+
+    /// The discriminating case `memory_dir_for_project` collapses: an id that is
+    /// absent and an id that is present-but-not-root both take its `else` branch,
+    /// so only `has_project` can tell them apart. A mutation flipping either arm
+    /// of `has_project` must fail here.
+    #[test]
+    fn has_project_distinguishes_unknown_id_from_known_non_root_project() {
+        let dir = tempdir().unwrap();
+        let ws = Workspace::new(
+            dir.path().to_path_buf(),
+            vec![
+                Project::new_dormant(make_project(ROOT_PROJECT_ID, ".")),
+                Project::new_dormant(make_project("mcp-server", "mcp-server")),
+            ],
+        );
+
+        assert!(ws.has_project(ROOT_PROJECT_ID), "root project is a project");
+        assert!(
+            ws.has_project("mcp-server"),
+            "declared sub-project is a project"
+        );
+        assert!(
+            !ws.has_project("mcp-serverr"),
+            "a typo is NOT a project — this is the whole point"
+        );
+        assert!(!ws.has_project(""), "empty id is not a project");
+
+        // The collapse being guarded against: both of these produce a
+        // `projects/<id>/memories` path, and the paths are indistinguishable in
+        // shape, so a caller cannot use the return value to detect the typo.
+        let known = ws.memory_dir_for_project("mcp-server");
+        let typo = ws.memory_dir_for_project("mcp-serverr");
+        assert!(known.starts_with(dir.path().join(".codescout").join("projects")));
+        assert!(typo.starts_with(dir.path().join(".codescout").join("projects")));
+        assert_ne!(known, typo);
+
+        // And the root project does NOT land under projects/ — the branch that
+        // makes the `else` arm reachable for everything else.
+        assert_eq!(
+            ws.memory_dir_for_project(ROOT_PROJECT_ID),
+            dir.path().join(".codescout").join("memories")
+        );
+    }
+
+    /// `focused` is the reason `resolve_memory_dir` validates only the
+    /// caller-supplied id. If either of these ever fails, that narrowing is
+    /// wrong and the `focused` fallback needs validating too.
+    #[test]
+    fn focused_is_always_a_real_project_id() {
+        let dir = tempdir().unwrap();
+        let mut ws = Workspace::new(
+            dir.path().to_path_buf(),
+            vec![
+                Project::new_dormant(make_project(ROOT_PROJECT_ID, ".")),
+                Project::new_dormant(make_project("mcp-server", "mcp-server")),
+            ],
+        );
+
+        let seeded = ws.focused.clone().expect("new() seeds focus");
+        assert!(
+            ws.has_project(&seeded),
+            "Workspace::new must seed focus from projects, got {seeded}"
+        );
+
+        assert!(
+            ws.set_focused("nope").is_err(),
+            "unknown id must be refused"
+        );
+        assert_eq!(
+            ws.focused.as_deref(),
+            Some(seeded.as_str()),
+            "a refused set_focused must not mutate focus"
+        );
+
+        ws.set_focused("mcp-server").unwrap();
+        assert_eq!(ws.focused.as_deref(), Some("mcp-server"));
     }
 
     #[test]

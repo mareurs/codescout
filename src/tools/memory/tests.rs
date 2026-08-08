@@ -1319,6 +1319,120 @@ async fn memory_write_routes_to_project_dir() {
         .unwrap();
     assert!(!project_mem_path.exists(), "memory should be deleted");
 }
+
+/// Root gradle project plus a real `mcp-server` sub-project, so `project_ids()` is
+/// non-empty and an unknown id is genuinely unknown rather than merely unlisted.
+///
+/// Worth noting why this fixture is needed: under the pre-fix code a BOGUS id also
+/// resolved to `.codescout/projects/<id>/memories`, so
+/// `memory_write_routes_to_project_dir`'s path assertion passes whether or not
+/// `mcp-server` is actually discovered. The hint assertions below are the first
+/// thing in the suite that can tell the difference.
+async fn multi_project_ctx() -> (tempfile::TempDir, ToolContext) {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let mcp = root.join("mcp-server");
+    std::fs::create_dir_all(&mcp).unwrap();
+    std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    (
+        dir,
+        ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        },
+    )
+}
+
+#[tokio::test]
+async fn memory_write_with_unknown_project_id_errors_and_leaves_no_directory() {
+    let (dir, ctx) = multi_project_ctx().await;
+    let phantom = dir.path().join(".codescout/projects/zz-not-a-project");
+
+    let err = Memory
+        .call(
+            json!({
+                "action": "write",
+                "topic": "conventions",
+                "content": "should never land",
+                "project_id": "zz-not-a-project"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("an unknown project_id is a correctable input mistake, not a bail");
+    assert!(
+        rec.message.contains("zz-not-a-project"),
+        "message must name the offending id; got: {}",
+        rec.message
+    );
+    let hint = rec
+        .hint()
+        .expect("expected Hint guidance listing the real ids");
+    assert!(
+        hint.contains("mcp-server"),
+        "hint must list the workspace's real project ids; got: {hint}"
+    );
+
+    // The half a response-only test would miss. The error and the litter are
+    // separate failures, and a fix could close one without the other.
+    assert!(
+        !phantom.exists(),
+        "a rejected write must not create {phantom:?}"
+    );
+}
+
+#[tokio::test]
+async fn memory_read_with_unknown_project_id_says_no_such_project_not_no_topics() {
+    let (dir, ctx) = multi_project_ctx().await;
+    let phantom = dir.path().join(".codescout/projects/zz-not-a-project");
+
+    let err = Memory
+        .call(
+            json!({ "action": "read", "topic": "conventions", "project_id": "zz-not-a-project" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("unknown project_id on read is also a correctable input mistake");
+    assert!(
+        rec.message.contains("zz-not-a-project"),
+        "message must name the absent project; got: {}",
+        rec.message
+    );
+
+    // The exact regression: a read against a non-existent project used to report
+    // it as merely EMPTY — "no memory topics exist yet", available_topics: [] —
+    // which a caller acts on. Absent and empty must not read the same.
+    let combined = format!("{} {}", rec.message, rec.hint().unwrap_or_default());
+    assert!(
+        !combined.contains("no memory topics exist yet"),
+        "a non-existent project must not be reported as empty; got: {combined}"
+    );
+
+    assert!(
+        !phantom.exists(),
+        "a rejected read must not create {phantom:?}"
+    );
+}
+
 #[tokio::test]
 async fn memory_write_accepts_project_alias_for_project_id() {
     use crate::agent::Agent;
@@ -1331,7 +1445,13 @@ async fn memory_write_accepts_project_alias_for_project_id() {
     std::fs::write(root.join("build.gradle.kts"), "").unwrap();
     let mcp = root.join("mcp-server");
     std::fs::create_dir_all(&mcp).unwrap();
-    std::fs::write(mcp.join("package.json"), "{}").unwrap();
+    // Substantive manifest: an empty `{}` is NOT enough for discovery to register
+    // a project, so this fixture used to declare an `mcp-server` that did not
+    // exist — and the assertions below passed anyway, because an unknown
+    // project_id silently got its own `projects/<id>/memories` tree. Matching the
+    // sibling fixture's content makes the sub-project real, so the alias is now
+    // tested against a project that is actually there.
+    std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
     std::fs::create_dir_all(root.join(".codescout")).unwrap();
 
     let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
