@@ -218,6 +218,20 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **`edit_code(action="rename")` no longer reports a partial rename as a success.** When
+  the language server resolves no reference outside the declaration file — measured and
+  reproducible on Kotlin for a top-level `object`, in a tree that compiled green — the
+  rename edited only that file and returned `status: "ok"`. The call sites it missed were
+  already in the same response under `textual_matches`, neither edited nor flagged, and
+  `verify_hint` pointed the wrong way: it warned about over-reach *in changed files* while
+  the failure was under-reach in *unchanged* ones. The rename now returns
+  `status: "incomplete"` with `completeness_warning` and `uncovered_source_files` whenever
+  the LSP reached only the declaration while other source files still name the symbol —
+  the same disagreement check `references` already performed on the read path. The compact
+  output is also corrected: it summed renamed and un-renamed occurrences into one "sites"
+  figure, so a rename that changed 2 sites and missed 45 displayed as `47 sites`. See
+  `docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+
 - **`artifact`'s `extra` can no longer silently unclassify the artifact it writes.**
   `extra` is for frontmatter keys the schema does not model, but nothing stopped it naming
   one that it does. Because the writer emits the typed fields first and then appends

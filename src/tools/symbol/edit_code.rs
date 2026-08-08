@@ -164,6 +164,36 @@ impl Tool for EditCode {
 }
 
 impl EditCode {
+    /// Did the rename reach only the declaration, while other source files still name the
+    /// symbol?
+    ///
+    /// True is the disagreement, not a certainty: the LSP resolving nothing outside the
+    /// declaration file means either the symbol genuinely has no external users, or the
+    /// language server did not resolve its cross-file references. `text_sweep` cannot tell
+    /// those apart — but it can say that other *source* files spell the name, which in the
+    /// second case is a tree that no longer builds.
+    ///
+    /// Two things this deliberately does NOT do, each of which was considered:
+    ///
+    /// * It does not fire on source matches alone. `TextualMatch::kind` classifies the FILE,
+    ///   not the occurrence, so a comment mentioning the name inside a `.rs` file is
+    ///   `kind: "source"` (`text_sweep_finds_matches_in_comments_and_docs`). Gating on that
+    ///   would refuse a rename because a docstring says the word.
+    /// * It does not widen the rename to cover them. Renaming every `kind: "source"` match
+    ///   would rewrite comments and any unrelated symbol sharing the name — a silent
+    ///   over-reach in place of a silent under-reach.
+    ///
+    /// The rule is `references`' own `completeness_warning` (`src/tools/symbol/references.rs`)
+    /// applied to the write path, which had strictly more information and said nothing.
+    /// See `docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+    pub(super) fn rename_under_reached(
+        lsp_files: &std::collections::HashSet<PathBuf>,
+        declaration: &std::path::Path,
+        textual: &[crate::symbol::edit::TextualMatch],
+    ) -> bool {
+        lsp_files.iter().all(|p| p == declaration) && textual.iter().any(|m| m.kind == "source")
+    }
+
     async fn do_rename(
         &self,
         ctx: &ToolContext,
@@ -405,6 +435,40 @@ impl EditCode {
 
         let textual_total: usize = textual.iter().map(|m| m.occurrence_count).sum();
         let textual_shown = textual.len();
+
+        // Did the rename actually reach the callers?
+        //
+        // The LSP resolving nothing outside the declaration file means one of two things:
+        // the symbol genuinely has no external users, or the language server does not
+        // resolve cross-file references for it — measured and reproducible on Kotlin for a
+        // top-level `object`, with the tree compiling green in the same session. The sweep
+        // cannot tell those apart. It CAN tell that other *source* files name the symbol,
+        // and in the second case those files no longer compile.
+        //
+        // This is the rule `references` already applies on the read path (its
+        // `completeness_warning`, `src/tools/symbol/references.rs`). The write path had
+        // strictly more information in hand — the sweep, already classified — and returned
+        // a bare `status: "ok"`. Porting the rule, not inventing one.
+        //
+        // Deliberately NOT gated on "any source match": `kind` classifies the FILE, not the
+        // occurrence, so a comment mentioning the name in a .rs file is `kind: "source"`
+        // (see `text_sweep_finds_matches_in_comments_and_docs`). Gating on that would fire
+        // on a docstring. The narrow signal is the *disagreement*: LSP reached nothing
+        // outside the declaration while source files say otherwise.
+        //
+        // Nor is the rename widened to cover them. Same reason: renaming every
+        // `kind: "source"` match would rewrite comments and any unrelated symbol that
+        // happens to share the name — trading a silent under-reach for a silent over-reach.
+        // The writes below already landed; what was wrong was calling that a success.
+        //
+        // See `docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+        let under_reached = Self::rename_under_reached(&lsp_files, &full_path, &textual);
+        let uncovered_sources: Vec<String> = textual
+            .iter()
+            .filter(|m| m.kind == "source")
+            .map(|m| m.file.clone())
+            .collect();
+
         let textual_json: Vec<Value> = textual
             .into_iter()
             .map(|m| {
@@ -419,7 +483,7 @@ impl EditCode {
             .collect();
 
         let mut result = json!({
-            "status": "ok",
+            "status": if under_reached { "incomplete" } else { "ok" },
             "old_name": old_name_str,
             "new_name": new_name,
             "files_changed": files_changed,
@@ -430,8 +494,44 @@ impl EditCode {
             "textual_files_total": textual_files_total,
             "textual_files_truncated": textual_files_total > textual_shown,
             "sweep_skipped": sweep_skipped,
-            "verify_hint": "LSP rename may match occurrences inside string literals, comments, or macro arguments. Verify each changed file is still valid (e.g. cargo check / tsc --noEmit).",
+            // The old hint pointed only at OVER-reach — string literals and comments inside
+            // the files that changed. The failure that actually breaks a build is the
+            // opposite one, in the files that did NOT change, and a caller following the
+            // old text verifies the single edited file and concludes the rename is sound.
+            // Name the under-reach first when it is present.
+            "verify_hint": if under_reached {
+                "INCOMPLETE: the rename edited only the declaration file, but source files listed \
+                 in `completeness_warning` still reference the old name — they will not compile. \
+                 Rename those occurrences too, then build. (The usual caution about over-reach \
+                 into string literals and comments still applies to the file that did change.)"
+            } else {
+                "LSP rename may match occurrences inside string literals, comments, or macro arguments. Verify each changed file is still valid (e.g. cargo check / tsc --noEmit)."
+            },
         });
+        if under_reached {
+            let shown = uncovered_sources
+                .iter()
+                .take(4)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = uncovered_sources.len().saturating_sub(4);
+            result["completeness_warning"] = json!(format!(
+                "the LSP resolved no reference outside the declaration file, so only that file \
+                 was renamed — but `{old_name_str}` appears as a whole word in {n} other source \
+                 file(s): {shown}{extra}. Either the symbol is genuinely unused and those are \
+                 comments, or the language server under-reported and the tree no longer builds. \
+                 Check with grep / call_graph(direction='callers') before treating this rename \
+                 as done.",
+                n = uncovered_sources.len(),
+                extra = if more > 0 {
+                    format!(" (+{more} more)")
+                } else {
+                    String::new()
+                },
+            ));
+            result["uncovered_source_files"] = json!(uncovered_sources);
+        }
         if !corruption_hints.is_empty() {
             result["corruption_warning"] = json!(
                 "new_name appears immediately after an alphanumeric character in the files \

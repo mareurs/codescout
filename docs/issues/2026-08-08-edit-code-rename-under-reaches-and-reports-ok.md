@@ -1,12 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- edit-code
+- rename
+- lsp
+- kotlin
+- write-path
+- silent-failure
+closed: 2026-08-08
 opened: 2026-08-08
-closed:
-severity: high
 owner: marius
 related: []
-tags: [edit-code, rename, lsp, kotlin, write-path, silent-failure]
-kind: bug
+severity: high
 ---
 
 # BUG: `edit_code(action="rename")` renames only the declaration and returns `status: "ok"` — call sites are left behind, and the response's own payload already names them
@@ -121,22 +127,79 @@ Quoted under *Reproduction*. Two consecutive calls, identical output — rules o
 
 ## Fix
 
-Proposal, not implemented.
+**Implemented on `experiments`.** The implementation was read before choosing, and reading
+it **falsified both of the options this section originally proposed**. Recorded here rather
+than quietly substituted, because the reasoning is the useful part.
 
-**Primary — make the write path honour the disagreement it already computes.** When the textual sweep yields `kind: "source"` occurrences outside the LSP edit set, `rename` must not return a bare `status: "ok"`. Either:
-- **(a)** refuse, returning the un-covered files and requiring an explicit opt-in to proceed (consistent with how other destructive paths gate on an `@ack_*` handle); or
-- **(b)** complete the rename over the union (LSP edits + `kind: "source"` textual matches) and report which came from which.
+### What reading changed
 
-(a) is the safer default; (b) matches what a caller almost always wants and what a human doing this by hand would do. Either beats silence.
+**(b) — rename the union — is unsafe.** `TextualMatch::kind` classifies the **file**, not
+the occurrence. A comment mentioning the name inside a `.rs` file is `kind: "source"` —
+pinned by the pre-existing `text_sweep_finds_matches_in_comments_and_docs`. Renaming every
+`kind: "source"` match would rewrite comments and any unrelated symbol that happens to
+share the name: a silent **over**-reach traded for a silent under-reach.
 
-**Secondary — fix `verify_hint`'s direction.** It should name under-reach first when un-covered `kind: "source"` matches exist: *"N source files matched textually but were not renamed — verify or re-run."* Its current text is actively misleading in exactly the case that hurts.
+**(a) — refuse and require an opt-in — is not available where the check lands.** The LSP
+edits are committed with `std::fs::write` **before** the sweep runs (`edit_code.rs`, writes
+at the `plan` loop, sweep ~80 lines later). Refusing would mean rolling back a successful
+multi-file write on a heuristic. The rollback machinery exists (`PlannedWrite::pre_image`)
+but is there for a *failed* write, and firing it on a guess is a worse trade than reporting
+accurately.
 
-**Separate concern — Kotlin cross-file reference resolution.** Worth its own investigation (`/usr/bin/kotlin-lsp` returning zero cross-file refs for a top-level `object`), but the primary fix must not depend on it: any language server can under-report, and the write path should be robust to that regardless.
+**Gating on "any source match" is also wrong** — same reason as (b). It would refuse a
+rename because a docstring says the word.
 
+### What landed instead
+
+The rename that happened is correct as far as it goes. What was wrong is that it was
+**reported as complete**. So: turn a silent under-reach into a loud one, and leave the
+writes alone.
+
+**1. `EditCode::rename_under_reached`** — the decision, extracted as a pure function so it
+is testable without a language server. It is the `references` rule ported to the write
+path, not a new invention: *the LSP reached nothing outside the declaration file* **and**
+*other source files spell the name*. Narrow by construction — it stays silent whenever the
+LSP did resolve cross-file references, which is the common case.
+
+**2. `status: "incomplete"`** instead of `"ok"`, plus `completeness_warning` naming the
+files and `uncovered_source_files` listing them.
+
+**3. `verify_hint` direction corrected.** When under-reach is present it now names it
+first. The old text warned only about over-reach *in changed files*, so a caller following
+it verified the one file that was edited and concluded the rename was sound — actively
+misleading in exactly the case that hurts.
+
+**4. `format_rename_symbol` — a defect this bug file had not found, and the worse one.**
+The compact renderer **summed** `total_edits + textual_match_count` and called the result
+"sites". Those are opposites: the first counts occurrences the rename rewrote, the second
+counts occurrences it did not (the sweep excludes every LSP-edited file). The reported
+case rendered as `→ SchedulingDateUtils · 47 sites` — 2 renamed, 45 missed, displayed as a
+larger success, **on the surface an agent actually reads**. It now reports what was
+renamed, and says INCOMPLETE with a count when the gate fires.
+
+**Still separate — Kotlin cross-file reference resolution.** Untouched, as this section
+originally argued: any language server can under-report and the write path must be robust
+regardless. Now it is.
 ## Tests added
 
-None — not yet fixed. A regression test should assert that a rename whose textual sweep finds un-covered `kind: "source"` matches does **not** return `status: "ok"`. That test does not need a real LSP failure: stub the reference resolver to return only the declaration and assert the response shape.
+Two, both pure and both control-bearing:
 
+- `rename_under_reach_fires_only_on_the_lsp_disagreement` — the measured failure, plus
+  **three controls** that are the real content. Cross-file LSP edits present → silent (a
+  leftover source match there is a comment, not an under-reach; without this clause the
+  gate fires on most healthy renames). Documentation and config matches only → silent (a
+  genuinely unused symbol; nothing to break). Nothing anywhere → silent.
+- `rename_compact_output_does_not_add_unrenamed_matches_to_renamed_ones` — asserts the
+  summed figure is gone (`!out.contains("47")`), that what was renamed is reported, that
+  the incomplete state is legible, and — the control — that a clean rename still renders
+  exactly `→ Renamed · 9 sites · 3 files`, so the warning cannot become ambient noise.
+
+Not covered by a test: the end-to-end `do_rename` path, which needs a live language server
+reproducing the under-report. The decision it turns on is fully covered above; what is not
+is the wiring between them.
+
+Gate: `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 3576
+passed / 0 failed / 44 ignored.
 ## Workarounds
 
 After **every** `edit_code(action="rename")`, grep the old name to zero before trusting the result:
@@ -151,8 +214,20 @@ Renaming a class in a file-per-class language also needs `git mv` for the file i
 
 ## Resume
 
-Decide between fix (a) and (b) above, then locate where `rename` assembles its edit set and where the textual sweep result is attached to the response — the two are already adjacent, since `sweep_skipped` and `textual_matches` ride on the same payload. Port the disagreement check that `references` already performs (it produces the "LSP returned 0 references outside the definition file, but X appears as a whole word in N other source file(s)" warning) onto the rename path, upgraded from a warning to a gate. Separately, file the Kotlin cross-file resolution failure as its own issue if it is not already tracked.
+Fixed on `experiments`. Remaining:
 
+1. **Confirm CI**, then archive via `artifact(action="move", …)`. No master-side SHA to
+   record — this cohort promotes by fast-forward (`docs/RELEASE.md` § *Large-Cohort
+   Promotion*).
+2. **File the Kotlin cross-file resolution failure separately** if it is not already
+   tracked — `/usr/bin/kotlin-lsp` returning zero cross-file references for a top-level
+   `object` in a tree that compiles green. It is a genuine second defect; this fix only
+   makes the write path survive it.
+
+A related surface left alone deliberately: the sweep is skipped entirely for names shorter
+than 4 characters (`old_name_str.len() < 4`), so a short symbol gets no under-reach check
+at all. That is a pre-existing cap on the sweep, not part of this defect, and narrowing it
+needs its own noise/benefit measurement.
 ## References
 
 - Encountered in EDU-Planner `backend-kotlin`, branch `optaplanner-removal`, commit `5279e8eb` ("refactor(p5d): rename Stage1DateUtils -> SchedulingDateUtils") — that commit message records the same finding from the caller's side.
