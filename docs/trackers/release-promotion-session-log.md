@@ -49,18 +49,21 @@ they are history rather than instructions.
 
 #### Git state
 
-Tip at time of writing: `dbaeb78b`, CI green 15/15 (run `31258919924`). This tracker commit
-moves the tip, so **re-derive rather than trusting a number here** —
+Tip at time of writing: `9fbb9e81` (round 20). CI green on `7c70e3d1` (run `31259881754`,
+15/15); `9fbb9e81` was pushed after it and its own run is in flight. Every commit here moves
+the tip, so **re-derive rather than trusting a number here** —
 `git rev-list --left-right --count master...experiments`. Local `master` has not been
 touched this session; the operator settled on 2026-08-08 that **local `master` is the
 reference**, not `origin/master`. That is closed — do not re-raise it.
 
-**The running MCP binary predates every fix in this session.** `target/release/codescout`
-was built at 12:45; `c0bdeec7` landed at 15:02. So the validation and the two security
-fixes are on disk and in CI but **not in the server this session talks to**. `cargo rb`
-then `/mcp` is the outstanding live-surface step, and the cheapest confirmation is two
-calls: `memory(action="write", topic="x", project_id="zz-not-a-project")` must now be
-rejected rather than creating a directory.
+**The running MCP binary predates every fix in this session — half-resolved in round 20.**
+`cargo rb` has now run: `target/release/codescout` was rebuilt at 16:39 and
+`~/.cargo/bin/codescout` still symlinks to it. What remains is the `/mcp` reconnect, which
+only the operator can trigger — **the running process is still the 12:45 image**, so today's
+validation and both security fixes sit on disk and in CI but not in the server this session
+talks to. Task **#47** carries the two confirming calls: `memory(action="write", topic="x",
+project_id="zz-not-a-project")` must be rejected rather than create a directory, and a
+backslash-escaped destructive command beside a `@cmd_` ref must now reach the gate.
 
 #### What shipped this round
 
@@ -75,6 +78,8 @@ rejected rather than creating a directory.
 | `9afa9042` | phantom-directory claim corrected (R-57) |
 | `2e39ac75` | security layer has **four** string models, not one bad tokenizer |
 | `dbaeb78b` | `posix_tokenize` gets its first production caller; buffer-only rule unified |
+| `7c70e3d1` | round 19 trackers |
+| `9fbb9e81` | buffer-only bug archived (CI-green gate met); its four citations re-pointed |
 
 Also: `claude-plugins` `8fc78c9` — the full build order for secret-guard, filed there as
 `docs/issues/2026-08-08-build-secret-guard-fail-closed.md` (`e01357bc2898153f`). It is
@@ -89,7 +94,7 @@ written to be buildable without PR #9 or the conversation.
 - **`#46`** — `mirela/backend-kotlin` has 13 `worktree_scoped_row` rows pending merge, 4 of
   them collisions needing `graft`, not `reseat`. Different repo. The operator confirmed the
   owning session finished, so it is safe to act — but do it as its own focused pass.
-- **The six-helper conversion** — the remainder of
+- **`#48`, the six-helper conversion** — the remainder of
   `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` (status
   **`mitigated`**, deliberately not `fixed`). `stage_trims`, `grep_is_counting`,
   `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern`,
