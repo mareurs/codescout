@@ -30,26 +30,110 @@ tags:
 Every other task (#15-#32) is complete. Do not re-derive the backlog from this log — the task list is
 authoritative and each entry carries its evidence.
 
-### Round 17 addendum (2026-08-08) — CURRENT. Read this before the git-state section below.
+### Round 19 addendum (2026-08-08) — CURRENT. Read this before the git-state section below.
 
-Rounds 16 and 17 both landed on 2026-08-08. This block is round 17 and carries the current
-state; round 16's numbers (tip `e20b3a04`, 6 open bugs) are superseded and kept only in F-20.
+Rounds 16–19 all landed on 2026-08-08. This block is round 19 and supersedes the round-17
+addendum it replaced; earlier rounds' numbers survive inside their own F-N entries, where
+they are history rather than instructions.
 
-**Current state, verified 2026-08-08 — not remembered:**
+#### Two things not to get wrong
 
-- tip **`88316ac9`**, local == remote. **496 ahead / 0 behind local `master`** — still a clean
-  fast-forward.
-- CI run **`31249753080`: green, all 15 jobs**, on that exact SHA. The tip has not moved since.
-- **PR #10 was merged into `experiments`** (merge commit `9be2ede4`) — option (b) of the
-  promotion choice. Merged with `--merge`, deliberately: `--rebase`/`--squash` would have
-  re-minted 18 SHAs and re-orphaned the citations repaired hours earlier (F-22).
-- **Two masters.** Local `master` = `5a8b1469`; `origin/master` = `eca9902e`, 139 commits
-  behind local. All 139 are contained in `experiments`, and `origin/master` IS an ancestor of
-  `experiments`, so both hops are genuine fast-forwards — the push moves the remote 635
-  commits, not 496. **Decided 2026-08-08: local `master` is the reference**, and
-  `docs/RELEASE.md` is deliberately NOT changed. Do not re-raise this.
-- `docs/trackers/pr-review-session-log.md` remains the concurrent session's. Never stage it.
+1. **Run `TaskList` first.** The task list is the live state, not this block.
+2. **`#14` is on a deliberate hold.** The operator postponed the `experiments` → `master`
+   fast-forward on 2026-08-08 for "a couple of days to test it properly before releasing".
+   It is not blocked and not forgotten. **Do not run it.** When it resumes: re-verify CI on
+   whatever the tip is *at that moment* (a **push**-event run — F-23: a `pull_request` run
+   tests the merge ref, not the tip), then fast-forward **without a checkout**:
+   `git fetch . experiments:master`. That refuses non-fast-forward and leaves the working
+   tree and HEAD alone.
 
+#### Git state
+
+Tip at time of writing: `dbaeb78b`, CI green 15/15 (run `31258919924`). This tracker commit
+moves the tip, so **re-derive rather than trusting a number here** —
+`git rev-list --left-right --count master...experiments`. Local `master` has not been
+touched this session; the operator settled on 2026-08-08 that **local `master` is the
+reference**, not `origin/master`. That is closed — do not re-raise it.
+
+**The running MCP binary predates every fix in this session.** `target/release/codescout`
+was built at 12:45; `c0bdeec7` landed at 15:02. So the validation and the two security
+fixes are on disk and in CI but **not in the server this session talks to**. `cargo rb`
+then `/mcp` is the outstanding live-surface step, and the cheapest confirmation is two
+calls: `memory(action="write", topic="x", project_id="zz-not-a-project")` must now be
+rejected rather than creating a directory.
+
+#### What shipped this round
+
+| commit | |
+|---|---|
+| `8f724171` | PR #11 merged (`--merge`, SHAs preserved) |
+| `c0bdeec7` | unknown `project_id` rejected; `Workspace::has_project`; 5 tests |
+| `927d75c0` | `.gitignore` clause corrected; the structural-pattern "fix" withdrawn as a no-op |
+| `333bf2b0` | round 18 trackers |
+| `5dfea4ba` | both project-id bugs archived; 3 live citations re-pointed |
+| `ec034a46` | the other session's PR #9 review committed — it is the better one |
+| `9afa9042` | phantom-directory claim corrected (R-57) |
+| `2e39ac75` | security layer has **four** string models, not one bad tokenizer |
+| `dbaeb78b` | `posix_tokenize` gets its first production caller; buffer-only rule unified |
+
+Also: `claude-plugins` `8fc78c9` — the full build order for secret-guard, filed there as
+`docs/issues/2026-08-08-build-secret-guard-fail-closed.md` (`e01357bc2898153f`). It is
+written to be buildable without PR #9 or the conversation.
+
+#### Open, with owners
+
+- **`#14`** — operator's, on hold (above).
+- **`#42`** — PR #9 routing. Two reviews posted; the build order lives in claude-plugins.
+  Closing a contributor's PR is a social act, so it is the operator's call. **Do not merge
+  PR #9 into codescout** — both reviews concluded wrong repo *and* broken control.
+- **`#46`** — `mirela/backend-kotlin` has 13 `worktree_scoped_row` rows pending merge, 4 of
+  them collisions needing `graft`, not `reseat`. Different repo. The operator confirmed the
+  owning session finished, so it is safe to act — but do it as its own focused pass.
+- **The six-helper conversion** — the remainder of
+  `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` (status
+  **`mitigated`**, deliberately not `fixed`). `stage_trims`, `grep_is_counting`,
+  `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern`,
+  `check_source_file_access` still read commands the way the shell will not. **This is not a
+  union like the `is_dangerous_command` fix** — they inspect head tokens and flags, so
+  quote-awareness changes which token is the head. Behaviour change per helper; each needs
+  its own before/after test. Ordered plan is in that file's Resume.
+- **Bug ledger** — query it, do not trust a count from this block:
+  `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`.
+  Run `librarian(action="reindex")` first if any session wrote a bug file with `create_file`
+  rather than `artifact(action="create")` — that is how a count read 7 when it was 10.
+
+#### Do not re-do these
+
+1. **The `.gitignore` structural pattern.** Tested and falsified: under
+   `/.codescout/projects/*/*` + `!/.codescout/projects/*/memories/`, `git check-ignore`
+   reports a phantom's memory file as NOT ignored, identically to a real one's. No glob can
+   separate them; source-side validation was the only available fix (F-25).
+2. **The two "phantom" directories.** One (`claude-plugins/…/mcp-server`) was a **real**
+   sub-project rooted at `session-bridge/mcp-server`; the other is undetermined. The test
+   that produced the claim was invalid (R-57).
+3. **The VDI `project_status` comparison.** No longer load-bearing — a plain bad
+   `project_id` reproduces both host populations. Only worth doing if the eight entries
+   persist *after* `c0bdeec7` reaches that checkout.
+4. **`origin/master` vs local `master`.** Settled; local is the reference.
+5. **NUL-substitution in `shell_normalized`.** Written, then removed — no case could be
+   constructed where it changed the outcome. Needs a demonstrated case, not a plausible one.
+6. **The reproduction for the unvalidated `project_id`.** Done, transcript in the archived
+   bug file, tree cleaned afterwards.
+
+#### The one lesson this round is actually about
+
+Five misattributions in one day, four of them mine, each with the same grammar: **a
+compound claim whose first clause was measured and whose second inherited its authority.**
+"`shell_tokenize` has no callers (grepped), **and** `is_dangerous_command` splits with
+`split_whitespace` (never opened)." "`ls -d <repo>/<id>` returns not-found (ran it),
+**therefore** the id names no project (the path was derived, not looked up)."
+
+The habit that catches it is one question: *what did I run, and what am I concluding from
+it?* Every instance was one read away, and three of them were in documents written to
+correct someone else's version of the same error. F-24 names the shape; F-25, F-27 and R-57
+are the instances; W-19 and W-20 are what worked — read the code before implementing your
+own bug file's prescription, and put the negative control where the rule is most likely to
+be wrong.
 ### THE MERGE IS STILL THE MAINTAINER'S TO RUN
 
 `#14` is the only open task. Everything gating it is satisfied. Do not run it.
@@ -1129,6 +1213,7 @@ Ranked by what to do first.
 | F-24 | 2026-08-08 | high | process | fixed-verified | A bug file measured its symptom correctly and mis-attributed its cause: 8 `??` dirs blamed on foreign-workspace registration, when `memory_dir_for_project` derives the path from `self.root` so a foreign workspace cannot write under another repo's root. Sweep of all 15 registered roots — 9 repos with the tree, 0 untracked entries. All three proposed fixes encoded the mis-attribution; Option B reintroduced what `6f261da9` removed. The premise convention asks "is the claim measured?" and there are two questions |
 | F-25 | 2026-08-08 | med | process | fixed-verified | Recommended the `~/personal` structural `.gitignore` pattern as "strictly better than A/B/C" and had it approved as a task; `git check-ignore` in a throwaway repo then reported the phantom's `memories/` file NOT ignored — identically to a real one's. Also proposed VDI workspace-root misresolution as the mechanism before two `memory()` calls falsified it (recorded as hypothesis 4, withdrawn) |
 | F-26 | 2026-08-08 | med | test-design | fixed-verified | `memory_write_accepts_project_alias_for_project_id` wrote `mcp-server/package.json` as `{}` — too empty for discovery — so the sub-project its own comment claimed to create never existed, and its path assertion was satisfied entirely by the defect under test. Third instance of F-21's shape in two rounds |
+| F-27 | 2026-08-08 | med | process | fixed-verified | `posix_tokenize`'s doc comment — written the day before under task #37, whose purpose was correcting a false safety claim — asserted that `is_dangerous_command` splits with `split_whitespace`. It does not tokenize at all; it regexes the raw string. The six `split_whitespace` readers are elsewhere. Real shape: FOUR models of the same string, and the only one matching the executing shell had zero callers, so no single call site could have fixed it. `audit_doc_refs` does not scan `src/**`, so nothing would have flagged the prose |
 
 ## Wins Index
 
@@ -1143,6 +1228,8 @@ Ranked by what to do first.
 | W-16 | 2026-08-08 | med | Cross-compile `#[cfg(windows)]` tests before pushing them — `cargo check --target x86_64-pc-windows-gnu --tests` | `cargo test` on Linux never compiles them, so a type error first appears as a red CI leg ~6 min out; the cross-check costs ~6 s with deps warm because `rust-toolchain.toml` already pins the target. Returned green — a verification step is not paid for only by the times it fires | validated |
 | W-17 | 2026-08-08 | high | Run the thing rather than reason about it, whenever the behaviour is cheap to invoke | Four in one session: PR #9's 12/12-green guard gave 9-of-9 divergence under a nine-case probe; two `memory()` calls inverted a diagnosis; a second probe found a worse symptom on the read path; `git check-ignore` falsified a fix already recommended and approved. Joins W-5, W-12, W-13 — at promotion threshold | validated |
 | W-18 | 2026-08-08 | high | When a side effect lives in a CONSTRUCTOR, every caller is a distinct seam — `references()` it and probe a caller the report did not name | `MemoryStore::from_dir` calls `create_dir_all` in its constructor; 5 call sites. The report named `write`; probing `read` found `available_topics: []` for a non-existent project — the worse symptom, and the thing that explained why one host showed 8 `??` entries and another 2 invisible ones | validated |
+| W-19 | 2026-08-08 | high | Read the named symbols before implementing a bug file's prescribed fix — including, especially, when you wrote the bug file | The prescription said "wire `posix_tokenize` into `is_dangerous_command`, which uses `split_whitespace`". It does not. Implementing it literally means forcing a tokenizer into a regex matcher and REPLACING raw matching, which silently loses catches. Recon turned it into a deliberate union. Third datapoint for R-49, first where the stale prescription was self-authored and one day old | validated |
+| W-20 | 2026-08-08 | high | Put the negative control at the BOUNDARY of the rule being added — if it passes first run, suspect it is too far away to be evidence | Both controls failed first and neither was a test bug. One exposed that the raw pass had always flagged `grep 'rm -rf' x`, so the test asserted a behaviour that never existed; the other rejected `contains('$')` because `awk '{print $0}' @cmd_x` is single-quoted and never expanded — which would have shipped a usability regression on the documented `@ref` workflow, training the operator to reach for `acknowledge_risk` habitually. `echo hello` would have caught neither | validated |
 | W-15 | 2026-08-08 | high | Fan out a review by LENS not by file, brief each with the refs + established-facts-marked-challengeable, and mandate refute-before-reporting | Four lenses on PR #10 (19 files, no prior reviews) found five blockers; three landed twice independently (`summary.total` partition, dead `posix_tokenize`, the job-assignment race). The refutation passes killed real candidates including one of the controller's own seeded premises, and one reviewer corrected two premises in its own brief | validated |
 | W-14 | 2026-08-07 | high | The first measurement after idle is a warm-up artifact — take the second one, and in a benchmark discard iteration one and say so | Three instances in one session: SPLADE sparse embed read 146.8 ms cold vs 16.8 ms warm (8.7x, and it feeds the reranker latency comparison in task #20); the audit_doc_refs tally migrates by up to 69 refs cold but is byte-identical warm; and `resolve_file_symbol` returns `SymbolMissing` for symbols that exist when the server answers before finishing indexing — the same trap promoted from a latency error into a false claim about the code | validated |
 | W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
@@ -2603,6 +2690,59 @@ pre-commit gate as a conditional step — *if the diff touches `#[cfg(windows)]`
 **Impact:** high — changed both the symptom ranking and the causal account.
 
 **Promote-when:** a third instance where a sibling caller of a shared constructor carried a distinct symptom. At that point the rule generalises past helpers to *any* shared construction with a side effect in it.
+
+**Status:** validated.
+
+## F-27 — A doc comment written to correct a false safety claim carried a false claim of its own
+
+**Observed:** 2026-08-08, starting Phase B (the security-layer cluster) by reading the code the two open bug files describe.
+
+**Expected:** `is_dangerous_command` splits with `split_whitespace` — stated by both bug files and by `posix_tokenize`'s doc comment in `src/platform/mod.rs`, which *I* wrote the day before under task #37, whose entire purpose was correcting a false safety claim on that same function.
+
+**Got:** it does not tokenize at all. `symbols(name="is_dangerous_command", include_body=true)` shows regexes run over the **raw** command string. The six `split_whitespace` readers are elsewhere in the file — `stage_trims`, `grep_is_counting`, `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern`, `check_source_file_access` — none inside the function named.
+
+The real shape is worse than the claim: **four** models of the same string, and the only one matching the executing shell (`posix_tokenize`) had zero callers. So the defect could not be fixed at one call site, which is why both bug files' prescriptions would have missed.
+
+**Probable cause:** the sentence was a compound — "`shell_tokenize` has no production call sites, **and** `is_dangerous_command` still splits with `split_whitespace`". The first clause was measured by grep. The second rode on its credibility and was never checked. Writing a correction is not the same as verifying the thing being corrected.
+
+**Severity:** med — no runtime effect (the comment is prose), but it is load-bearing prose: it is the note a future session reads before touching the security layer, it sat in `src/`, and `audit_doc_refs` does not scan `src/**`, so nothing would have flagged it.
+
+**Status:** fixed-verified — `2e39ac75` corrects the doc comment and the bug file's Root cause, with the original kept in a `<details>` block.
+
+**Fix idea / Pointer:** fourth instance of F-24's shape in one day, third of them mine. The grammatical tell is now explicit enough to act on: **a compound claim where the first clause was measured and the second inherited its authority.** Split the sentence and ask which half you ran.
+
+## W-19 — Reading the code before implementing a bug file's prescribed fix, when I wrote the bug file
+
+**Observed:** 2026-08-08, Phase B, before writing any security-layer code.
+
+**Pattern:** a bug file's `## Fix` section is a hypothesis, including — especially — when you wrote it. Read the named symbols this session before implementing the prescription.
+
+**Counterfactual:** the prescription was "wire `posix_tokenize` into `is_dangerous_command`, which currently uses `split_whitespace`". Implementing that literally means opening the function, finding no `split_whitespace`, and either (a) forcing a tokenizer into a regex matcher that does not tokenize — replacing raw matching and *losing catches* — or (b) discovering mid-edit that the plan does not describe the code, with an edit half-applied to a security gate. The reconnaissance turned it into a design decision made deliberately: union rather than replacement, which is safe by construction.
+
+**Confirming data points:** R-49 ("your own bug file is a hypothesis; re-scout it before implementing its fix") — this is that rule firing, and paying, on a file written 24 hours earlier by the same author. F-11 and W-11 are the earlier pair.
+
+**Impact:** high — the difference between a union that cannot lose catches and a replacement that silently could, on the dangerous-command gate.
+
+**Status:** validated — R-49 already carries the rule; this is its third datapoint and the first where the stale prescription was self-authored and one day old.
+
+## W-20 — Both control tests failed first, and each caught a defect in the design under test
+
+**Observed:** 2026-08-08, implementing the two security fixes (`dbaeb78b`).
+
+**Pattern:** write the negative control at the **boundary of the rule being added**, not at a comfortable distance from it. A control that cannot fail proves the harness runs; a control near the boundary proves the rule is the right shape.
+
+Both failed on first run, and neither was a test bug:
+
+1. `normalization_does_not_flag_benign_commands` rejected `grep 'rm -rf' notes.txt`. Investigating showed the **raw** pass had always flagged it — a pre-existing false positive, and my test asserted a behaviour that never existed. Outcome: the false-positive class is now documented and asserted (`quoted_dangerous_text_is_flagged_and_the_raw_pass_did_it_first`) instead of being discovered later by a user.
+2. `is_buffer_only_still_true_for_genuine_ref_only_commands` rejected `awk '{print $0}' @cmd_x` — the `$0` is single-quoted, so the shell never expands it, but my `contains('$')` rule flagged it. `grep '.*ERROR' @cmd_x` failed the same way on `contains('*')`. Outcome: the rule narrowed from *contains* to *begins with*, which is both correct and the reason the documented `@ref` pipelines keep working.
+
+**Counterfactual:** the obvious controls — `echo hello`, `wc -l @cmd_abc` — pass under every version of both rules and would have caught neither. Fix 2 would have shipped breaking `awk` and `grep` over buffer refs, which is the workflow the classifier exists to serve, and the friction would have trained the operator to reach for `acknowledge_risk` habitually. That is the same failure this session criticised in PR #9 four hours earlier: routine false positives making the override reflexive, and the override being the bypass.
+
+**Confirming data points:** F-26 (an assertion whose expected value the bug also produces), and PR #9's `"allow: non-bash tool calls are ignored"` case, which returns `undefined` without invoking the handler and therefore cannot fail.
+
+**Impact:** high — caught two shipping defects, one of them a usability regression on a core workflow.
+
+**Promote-when:** already at three datapoints across two codebases. The rule to promote is narrow: *place the negative control where the rule you are adding is most likely to be wrong — if it passes on the first run, suspect it is too far from the boundary to be evidence.*
 
 **Status:** validated.
 ## Template for new entries

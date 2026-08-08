@@ -1737,6 +1737,45 @@ invented for the purpose, and that evidence never depended on these two.
 Pairs with R-26 (a grep line-match locates a symbol, it does not confirm a mechanism) — same
 family: a real observation at a location you chose, mistaken for evidence about the thing you
 were actually asking about.
+
+## R-58 — Hit: before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure
+
+**Verdict:** hit
+
+2026-08-08, fixing the buffer-only classifier's path-likeness rule
+(`docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`). The bug file named
+one site: the closure inside `OutputBuffer::resolve_refs`. Editing it looked complete.
+
+A `grep buffer_only` run to find a test harness surfaced a **second** implementation —
+`OutputBuffer::is_buffer_only`, a public function with its own copy of the same rule. The
+two had already diverged:
+
+| copy | splitter | `../` |
+|---|---|---|
+| `resolve_refs` closure | `shell_words` (quote-aware) | **no** |
+| `is_buffer_only` | `split_whitespace` (quote-blind) | yes |
+
+So the gate answered differently depending on which entry point asked, and fixing only
+the named site would have left the public one — the one other modules call — unfixed and
+still quote-blind.
+
+**Why the usual tools miss this.** `references(symbol)` finds callers of a *named* symbol.
+An inlined closure has no name, so a duplicated rule expressed as a closure in one place
+and a function body in another is invisible to caller enumeration in both directions. The
+only detector is a text grep for the *rule's distinguishing tokens* — here
+`starts_with('/')`, `contains('/')`, or the concept name `buffer_only`.
+
+**Rule:** when a bug names one site of a *heuristic* (as opposed to a function call),
+grep the tree for the rule's distinguishing literals before editing, and treat any second
+copy as already-diverged until diffed. Then extract the predicate so the copies cannot
+drift again — two copies of one rule is duplication, not two implementations, so
+rule-of-three does not apply and extraction is earned immediately.
+
+**Promote-when:** a second instance where a duplicated *inline* rule was found by literal
+grep after `references()` came back complete. Closely related to the codescout memory
+`platform-law-leaks-at-call-sites` ("grep the whole tree for the OLD pattern, not the
+declaring module") — this is that law applied to a heuristic rather than a subprocess
+call, where the tell is a code shape rather than a syscall string.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
