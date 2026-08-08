@@ -52,10 +52,21 @@ Status field semantics:
 Archive trigger: move the file into docs/issues/archive/ once the fix is
 verified on experiments — gate green plus a regression test. Reaching
 master is NOT required; experiments is never deleted.
-When archiving an experiments-only fix the file must carry (a) the fix SHA
-labelled experiments, and (b) a Resume line saying the master-side SHA
-still needs recording after cherry-pick — an experiments SHA orphans on
-rebase, and nothing re-reads archive/ to repair it.
+When archiving an experiments-only fix the file must carry the fix SHA
+labelled experiments.
+
+Whether it ALSO needs a pending-master-SHA line depends on how the fix will
+reach master. Only one of the two paths needs it:
+  cherry-pick  — YES. A new SHA is minted on master and the experiments-side
+                 original orphans on the next rebase; nothing re-reads
+                 archive/ to repair it. Add the Resume line.
+  fast-forward — NO. master moves onto the exact commits, so the experiments
+                 SHA already IS the master SHA. Writing the line sends a
+                 later session hunting for a SHA that will never exist.
+Check which path applies before writing it:
+  git rev-list --left-right --count master...experiments
+A 0 on the left means master is a strict ancestor and fast-forward is
+available. Both paths are specified in docs/RELEASE.md.
 Check where a SHA lives with:
   git branch --contains <fix-sha>
 Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")

@@ -14,7 +14,8 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 Two behaviors are load-bearing and easy to skip:
 
 - **Capture on notice** — add the bug file the moment a bug is noticed (wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools), not at task end.
-- **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. When archiving an experiments-only fix, label the SHA `experiments` and keep a `## Resume` line saying the master-side SHA still needs recording after cherry-pick (an `experiments` SHA orphans on rebase). Archive via `artifact(action="move", …)`, never a bare `git mv`.
+- **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. Archive via `artifact(action="move", …)`, never a bare `git mv`.
+- **The pending-master-SHA line is for cherry-picks only.** If the fix will reach `master` by *cherry-pick*, label the SHA `experiments` and keep a `## Resume` line saying the master-side SHA still needs recording — the original orphans on the next rebase, and nothing re-reads `archive/` to repair it. If the promotion is a *fast-forward*, do **not** write that line: there is no second SHA, and the instruction sends a later session hunting for one that will never exist. (Measured 2026-08-08: 24 archived bug files carry the cherry-pick form, written before the cohort's path was settled as fast-forward. They are stale instructions, not open debt — the SHA in each is already correct.)
 
 **Open a bug file for ANY bug noticed during work** — including incidental bugs we won't fix and tool quirks/misbehaviors. *Not* for pure typos (commit message suffices) or feature ideas/refactors (→ `docs/trackers/` or `docs/plans/`). Don't append to retired surfaces (`docs/archive/old-trackers/*`) — open a new `docs/issues/<date>-<slug>.md`.
 ## Session Intelligence Trackers
@@ -158,7 +159,9 @@ all three.
 
 ## Git Workflow
 
-**`master` is protected** — all experimental work on `experiments`; cherry-pick to `master` only after tests + clippy + MCP verify; `experiments` is never deleted; never commit in-progress work directly to `master`.
+**`master` is protected** — all experimental work on `experiments`; promote to `master` only after tests + clippy + MCP verify; `experiments` is never deleted; never commit in-progress work directly to `master`.
+
+**Two promotion paths, and the difference decides how you cite SHAs.** *Cherry-pick* (single fixes) mints a **new** SHA on `master`, and the `experiments`-side original orphans on the following rebase — so the master SHA must be recorded afterwards. *Fast-forward* (large cohorts) moves `master` onto the **exact** commits: no new SHAs, the `experiments` SHA already **is** the master SHA, nothing to re-cite. Check which one you are in before recording any SHA — `git rev-list --left-right --count master...experiments`, a `0` on the left means fast-forward is available.
 
 Full release cycle, standard ship sequence, after-cherry-pick master-SHA rule, chained-git state-check, and concurrent-work reset safety → **`docs/RELEASE.md`**. SHA-citation + cross-repo `<repo>:<sha>` prefix discipline → memory `gotchas`. Commit style → memory `conventions`.
 ## Design Principles
