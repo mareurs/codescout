@@ -1681,7 +1681,9 @@ this probe lived in those two artifacts, and both were readable in under a minut
 
 The cheap check was a sweep of the population the claim generalises over. `~/.config/librarian/workspace.toml` declares 10 `[[roots]]` plus two umbrellas — 15 paths. Nine of those repos have a `.codescout/projects/` tree; **all nine had zero untracked entries**, via three different mechanisms (nothing generated lands there; a structural allow-list; a blanket `.codescout/` ignore). The reported host was an outlier, not the baseline.
 
-**The trap that made "zero" misleading in the other direction:** two of the nine *did* carry phantom `projects/<id>/` directories for ids that are not subdirectories — `claude-plugins/…/mcp-server`, `eduplanner-site/…/optaplanner` (a *sibling*, not a child). Both were **empty**, and git cannot see an empty directory. So a clean `git status` was not evidence the mechanism was absent; `find -type d` was needed to see it at all.
+**The trap that made "zero" misleading in the other direction:** two of the nine carried `projects/<id>/` directories that were **empty**, and git cannot see an empty directory — so a clean `git status` was not evidence about their contents either way; `find -type d` was needed to see them at all. That part of the lesson holds.
+
+**Corrected 2026-08-08 — those two were labelled "phantoms" on a bad test.** See R-57. `claude-plugins/…/mcp-server` is a **legitimate** sub-project directory (`root: session-bridge/mcp-server`); `eduplanner-site/…/optaplanner` is undetermined. The rule above survives because it rests on empty-directory invisibility, not on those two being defects; the illustration was wrong, the rule was not.
 
 **Rule:** when a report's evidence is `git status` on one machine, (a) sweep the other members of whatever population the claim generalises over before accepting the framing, and (b) do not read a clean `git status` as absence — an empty directory is invisible to git, so census the filesystem, not the index.
 
@@ -1698,6 +1700,43 @@ Probing the *non*-reported caller (`read`) surfaced a second, worse symptom the 
 **Rule:** when a side effect lives in a *constructor* rather than in the operation, the seam is not the reported call path — it is every caller of the constructor. `references()` the constructor, then probe at least one caller that the report did not name. Reading the constructor is not enough; the interesting variation is in what each caller does *after* it (write a file vs. list an empty dir), and that is what determines the observable symptom.
 
 **Promote-when:** a third instance (R-17 and R-47 are the first two, both via delegates rather than constructors). At three, the SKILL.md seam-class list earns an entry: *a shared construction with a side effect in it — enumerate callers, probe an unreported one*.
+
+## R-57 — Miss: an identifier's shape says nothing about whether the thing exists — check its declared root
+
+**Verdict:** miss (caught by an unrelated tool response an hour after the claim was committed and published)
+
+2026-08-08. Investigating unvalidated `project_id`, two directories were classified as phantoms
+by this test:
+
+```
+ls -d <repo>/<id>     # not found  =>  "<id> is not a project"
+```
+
+The test is invalid, and not merely unlucky. **A sub-project's id is its directory basename, not
+its path.** A project declared at `session-bridge/mcp-server` gets the id `mcp-server`, so
+`ls -d <repo>/mcp-server` fails while the project is entirely real. The check carries no
+information about existence.
+
+It surfaced by accident: `workspace(action="activate", path=claude-plugins)` prints its project
+list, and there it was — `{id: "mcp-server", root: "session-bridge/mcp-server", languages:
+["rust"]}`. One call, available from the start, never made.
+
+**Rule:** to decide whether an id names a real project, read its **declared root** —
+`project_status`, or the `workspace` array that `workspace(action="activate")` already returns.
+Never infer existence from where the id would sit if the naming scheme were positional. More
+generally: when a claim is "identifier X does not correspond to anything", the evidence must come
+from the registry that owns X, not from a filesystem probe at a path you derived yourself — the
+derivation is the assumption under test.
+
+**Cost:** a wrong claim in a committed bug file, two tracker entries, and a public PR comment;
+two empty directories deleted on a wrong premise (harmless — one regenerates, the other was
+already inert). The underlying bug was never in doubt: it was reproduced directly with ids
+invented for the purpose, and that evidence never depended on these two.
+
+**Promote-when:** immediately, if a second existence-claim is made from a self-derived path.
+Pairs with R-26 (a grep line-match locates a symbol, it does not confirm a mechanism) — same
+family: a real observation at a location you chose, mistaken for evidence about the thing you
+were actually asking about.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

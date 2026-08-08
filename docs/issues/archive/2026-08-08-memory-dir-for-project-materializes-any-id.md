@@ -70,8 +70,42 @@ That asymmetry explains both observed populations without any host difference:
 
 | origin | on disk | `git status` | observed as |
 |---|---|---|---|
-| read with a bad id | empty dir | invisible | the two phantoms on this host — `claude-plugins/…/mcp-server`, `eduplanner-site/…/optaplanner` |
+| read with a bad id | empty dir | invisible | see the correction below — the two directories cited here were mis-attributed |
 | write with a bad id | dir + file | `??` | the eight on the VDI |
+
+### Correction 2026-08-08 — the two pre-existing directories were mis-attributed
+
+The probe evidence above stands: `zz-definitely-not-a-project` and `zz-read-path-probe`
+were created on demand, observed, and cleaned up. That is the bug, and it does not depend
+on anything else.
+
+What does not stand is the claim that two directories already on this host were instances
+of it.
+
+- **`claude-plugins/.codescout/projects/mcp-server/` was NOT a phantom.** `mcp-server` is a
+  real sub-project of that workspace, rooted at `session-bridge/mcp-server`, which exists.
+  `workspace(action="activate", path=claude-plugins)` lists it outright:
+  `{id: "mcp-server", root: "session-bridge/mcp-server", languages: ["rust"]}`. Its
+  per-project memory directory was correctly placed and merely empty.
+- **`mirela/eduplanner-site/.codescout/projects/optaplanner/` is undetermined.** That repo has
+  no `.codescout/workspace.toml`, and nothing matching `optaplanner*` exists within two levels
+  of its root — so it may be a genuine phantom, or a formerly-discovered project whose
+  directory has since been removed. There is no evidence either way and none was gathered.
+
+**The test was wrong in kind, not merely in result.** It checked `ls -d <repo>/<id>` — whether
+the id names a *top-level* subdirectory. A sub-project's id is its directory **basename**, not
+its path, so a nested project like `session-bridge/mcp-server` gets the id `mcp-server` and
+fails that check while being entirely legitimate. "The id is not a top-level subdirectory"
+carries no information about whether the project exists. The check that answers it is
+`relative_root`, from `project_status` or the workspace listing — one call, available the
+whole time.
+
+Both directories were deleted during cleanup. Harmless in both cases: they were empty, and a
+real sub-project's memory directory is recreated on next use. But the deletion was performed
+on a wrong premise, which is worth recording separately from its (nil) consequence.
+
+This is the third instance in one day of the shape F-24 names — a real measurement paired with
+a wrong attribution. The `ls -d` output was accurate; what it was taken to prove was not.
 ## Reproduction
 
 Fully reproducible. Two calls, on any workspace, no fixture setup. Measured 2026-08-08 on
