@@ -52,17 +52,58 @@ the divergence predates the PR on Unix; the PR makes it live on Windows by repla
 
 ## Root cause
 
-Two independent readers of the same string, neither aware of the other:
+**Corrected 2026-08-08 — the original text below named the wrong subject, and the real
+shape is worse.** It said `is_dangerous_command` "splits on whitespace". It does not
+tokenize at all: it runs regexes over the **raw** command string (`src/util/path_security.rs`,
+read this session). The `split_whitespace` readers are elsewhere in the same file.
 
-- `src/util/path_security.rs` — `is_dangerous_command` and its helpers split on
-  whitespace and run substring regexes over the raw command.
-- `src/platform/mod.rs` — `posix_tokenize` implements quote/escape-aware splitting,
-  and `shell_tokenize` exposes it per-platform. Nothing consumes either.
+The accurate statement: the security layer holds **three** different models of the same
+string, and the only model that matches the shell that will execute it is the unused one.
 
-**measured 2026-08-08:** `git grep -n 'shell_tokenize\|posix_tokenize'` over
-`refs/pull/10/merge` returned definitions, two delegations and 6 tests — no production
-call site. Confirmed independently by two reviewers in the PR #10 review.
+| reader | model | on the security path? |
+|---|---|---|
+| `is_dangerous_command` | regexes over the raw string, no tokens | yes |
+| `stage_trims`, `grep_is_counting`, `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern`, `check_source_file_access` | quote-blind `split_whitespace` | yes |
+| `posix_tokenize` / `shell_tokenize` (`src/platform/mod.rs`) | quote- and escape-aware, matches `sh -c` / Git Bash `bash -c` | **no callers** |
 
+A fourth model lives next door: `OutputBuffer`'s buffer-only classifier has its own
+path-likeness heuristic, and a command it judges buffer-only skips the dangerous-command
+gate outright — tracked separately in
+`docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
+
+So this is not "one function tokenizes wrongly", and it cannot be fixed by correcting one
+call. **There is no shared notion of what a command's tokens are**, which is why the
+sibling bug file states the same defect in different words ("the heuristic answers *does
+this word look like a path to a reader*, when the question that matters is *will the shell
+turn this word into a path*"). Both are instances of: safety is decided by reading the
+command as text, while the shell decides what runs. Every gap between those two models is
+a hole.
+
+**measured 2026-08-08:** `grep -n 'split_whitespace' src/util/path_security.rs` → six
+production sites at lines 755, 774, 785, 816, 898, 952/962, none inside
+`is_dangerous_command`; `symbols(name="is_dangerous_command", include_body=true)` → pure
+regex body, no tokenization. `git grep -n 'shell_tokenize\|posix_tokenize'` → definitions,
+two delegations, six tests, no production call site (first measured on
+`refs/pull/10/merge`, re-confirmed on `experiments`).
+
+<details><summary>Original text, kept for the record</summary>
+
+> Two independent readers of the same string, neither aware of the other:
+>
+> - `src/util/path_security.rs` — `is_dangerous_command` and its helpers split on
+>   whitespace and run substring regexes over the raw command.
+> - `src/platform/mod.rs` — `posix_tokenize` implements quote/escape-aware splitting,
+>   and `shell_tokenize` exposes it per-platform. Nothing consumes either.
+>
+> **measured 2026-08-08:** `git grep -n 'shell_tokenize\|posix_tokenize'` over
+> `refs/pull/10/merge` returned definitions, two delegations and 6 tests — no production
+> call site. Confirmed independently by two reviewers in the PR #10 review.
+
+The `posix_tokenize`-has-no-callers half was correct and measured. The
+`is_dangerous_command`-splits-on-whitespace half was asserted without reading the body,
+and `src/platform/mod.rs`'s own doc comment repeated it — corrected there in the same pass.
+
+</details>
 ## Evidence
 
 ### The gate itself is NOT trivially evadable

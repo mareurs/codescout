@@ -131,13 +131,30 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
 ///
 /// **This is not on any security path today.** An earlier version of this
 /// comment said it fed the dangerous-command and pipeline checks. It does not:
-/// [`shell_tokenize`] is its only caller and has no production call sites, and
-/// `is_dangerous_command` (`src/util/path_security.rs`) still splits with
-/// `split_whitespace`. The claim is recorded here rather than deleted because
-/// it named a real hazard — the security layer and the executing shell
-/// disagreeing about tokenization — which the cmd.exe -> Git Bash switch made
-/// live on Windows and which nothing has closed. See
-/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+/// [`shell_tokenize`] is its only caller and has no production call sites.
+///
+/// The security layer holds *three* different models of the same string, and
+/// this one — the only model that matches the shell that will execute it — is
+/// the unused one:
+///
+/// * `is_dangerous_command` (`src/util/path_security.rs`) does not tokenize at
+///   all. It runs regexes over the RAW command string.
+/// * Six helpers in that file tokenize with quote-blind `split_whitespace`:
+///   `stage_trims`, `grep_is_counting`, `is_unbounded_lhs`,
+///   `has_recursive_flag`, `extract_grep_pattern`, `check_source_file_access`.
+/// * `OutputBuffer`'s buffer-only classifier carries its own path-likeness
+///   heuristic (`src/tools/output_buffer.rs`), and a command it judges
+///   buffer-only skips the dangerous-command gate entirely.
+///
+/// Corrected 2026-08-08: a previous revision of this note asserted that
+/// `is_dangerous_command` itself splits with `split_whitespace`. It does not —
+/// that was written without reading its body. The hazard is real and broader
+/// than the wrong version claimed: the layer has no shared notion of what a
+/// command's tokens are, so no single place can be fixed to make it agree with
+/// the shell. The cmd.exe -> Git Bash switch made the divergence live on
+/// Windows and nothing has closed it. See
+/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` and
+/// `docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
 /// Do not restore the claim without first wiring this into that layer.
 ///
 /// Pure + cross-platform so its tests run on every CI target, not just Windows.
