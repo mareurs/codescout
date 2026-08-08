@@ -80,6 +80,8 @@ backslash-escaped destructive command beside a `@cmd_` ref must now reach the ga
 | `dbaeb78b` | `posix_tokenize` gets its first production caller; buffer-only rule unified |
 | `7c70e3d1` | round 19 trackers |
 | `9fbb9e81` | buffer-only bug archived (CI-green gate met); its four citations re-pointed |
+| `2b1c9ec6` | round 20 trackers |
+| `7928ea79` | the six helpers tokenize like the shell; two falsified doc comments corrected; the seventh site filed |
 
 Also: `claude-plugins` `8fc78c9` — the full build order for secret-guard, filed there as
 `docs/issues/2026-08-08-build-secret-guard-fail-closed.md` (`e01357bc2898153f`). It is
@@ -94,19 +96,19 @@ written to be buildable without PR #9 or the conversation.
 - **`#46`** — `mirela/backend-kotlin` has 13 `worktree_scoped_row` rows pending merge, 4 of
   them collisions needing `graft`, not `reseat`. Different repo. The operator confirmed the
   owning session finished, so it is safe to act — but do it as its own focused pass.
-- **`#48`, the six-helper conversion** — the remainder of
-  `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` (status
-  **`mitigated`**, deliberately not `fixed`). `stage_trims`, `grep_is_counting`,
-  `is_unbounded_lhs`, `has_recursive_flag`, `extract_grep_pattern`,
-  `check_source_file_access` still read commands the way the shell will not. **This is not a
-  union like the `is_dangerous_command` fix** — they inspect head tokens and flags, so
-  quote-awareness changes which token is the head. Behaviour change per helper; each needs
-  its own before/after test. Ordered plan is in that file's Resume.
+- **`b86d81f12983f566`** — `docs/issues/2026-08-08-il3-splits-pipeline-on-quoted-pipe.md`,
+  opened in round 21. `il3_offending_lead` splits a pipeline on a bare `|`, so a quoted
+  pipe fabricates stages the shell never creates and IL3 blocks a command with no pipe in
+  it. Measured, not inferred. Unowned; the fix plan and the two open questions (`||`
+  reachability, the `Option<&str>` → `Option<String>` change) are in the file.
 - **Bug ledger** — query it, do not trust a count from this block:
   `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`.
   Run `librarian(action="reindex")` first if any session wrote a bug file with `create_file`
   rather than `artifact(action="create")` — that is how a count read 7 when it was 10.
 
+**Closed since this block was written:** `#47` (the `/mcp` reconnect — all three fixes
+confirmed live against the running server) and `#48` (the six-helper conversion, `7928ea79`,
+CI green 15/15 on run `31261050802`).
 #### Do not re-do these
 
 1. **The `.gitignore` structural pattern.** Tested and falsified: under

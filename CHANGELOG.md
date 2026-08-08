@@ -234,7 +234,7 @@ All notable changes to codescout are documented here.
   the returned `@ack_*` handle. One check got *looser* in the same pass: a quoted `-c` no
   longer makes a counting `grep` look like a log-trimmer, so `… | grep '-c' pattern` is
   allowed again. See
-  `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` and
+  `docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` and
   `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
 
 - **`librarian` path matching could never succeed on Windows.** `containing_root` compared

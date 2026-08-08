@@ -154,7 +154,7 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
 /// next commit gave it one without updating this text, so the correction was
 /// false within the hour. Before changing this paragraph, run
 /// `references(symbol="posix_tokenize")` and describe what is actually there.
-/// See `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+/// See `docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
 ///
 /// Note `shell_tokenize` — the per-platform wrapper below — still has no
 /// production callers; both consumers reach for this function directly.

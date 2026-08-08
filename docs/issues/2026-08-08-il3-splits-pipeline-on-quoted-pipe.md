@@ -164,8 +164,7 @@ question first — read `pipeline_segments` and decide whether to rely on it or 
 - `src/util/path_security.rs` — `il3_offending_lead` (the naive split),
   `check_source_file_access` (the quote-aware sibling), `shell_tokens` (the fallback that
   makes both fragments answer confidently)
-- `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` — the parent bug;
+- `docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` — the parent bug;
   its six named helpers are fixed, and this is the site that outlived the list
 - `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` — the fourth
   model, fixed
-

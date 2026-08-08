@@ -611,7 +611,7 @@ fn shell_tokens(cmd: &str) -> Vec<String> {
 /// [`shell_tokens`]. Before them the tokenizer written for exactly this job had
 /// none, and the security layer and the executing shell disagreed about what a
 /// command said — live on Windows since the cmd.exe -> Git Bash switch. See
-/// `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+/// `docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
 pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Option<String> {
     if config.profile == SecurityProfile::Root {
         return None;

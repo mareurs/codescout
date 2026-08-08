@@ -154,13 +154,16 @@ orphans on rebase, so treat it as provisional). CI green on that commit: run
 **Still to record:** the master-side SHA, after `experiments` → `master` (task #14, on hold
 as of 2026-08-08). Come back and replace the SHA above with the one that lands on `master`.
 
-The sibling bug (`docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`) is
-only **mitigated** — six `split_whitespace` helpers in `path_security.rs` are still on the
-old string model. Do not close it on this fix.
+The sibling bug
+(`docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`) was
+**mitigated** when this file was written and is now **fixed and archived** — its six
+`split_whitespace` helpers were converted in `7928ea79`. A seventh site outlived that
+bug's list and is tracked separately in
+`docs/issues/2026-08-08-il3-splits-pipeline-on-quoted-pipe.md`.
 ## References
 
 - `src/tools/output_buffer.rs:618` — the heuristic
 - `src/tools/run_command/inner.rs:288`, `:306` — the two gates it skips
-- `docs/issues/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` — sibling defect
+- `docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md` — sibling defect
   in the same layer: the gate's tokenizer does not match the executing shell's
 - PR #10 review, 2026-08-08
