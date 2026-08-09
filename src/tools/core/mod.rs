@@ -1,5 +1,6 @@
 pub mod guards;
 pub mod params;
+pub(crate) mod path_strip;
 pub mod types;
 pub mod write_ack;
 
