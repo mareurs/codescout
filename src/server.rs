@@ -2593,22 +2593,45 @@ mod tests {
         // The PATH_KEYS allowlist in src/tools/core/path_strip.rs is a co-change
         // contract. This gate is what enforces it: a tool emitting paths under a
         // key nobody added fails here instead of silently costing tokens forever.
+        //
+        // Liveness guard: four of these five cases are vacuous *today* — `read_file`
+        // and `read_markdown` never echo a path key at all, `symbols` pre-relativizes
+        // inside the tool, and `tree` is masked by its own `common_path_prefix`. Only
+        // `grep` can actually fail the negative assertion below right now. That is
+        // fine — this gate is a forward-looking canary for keys added later — but a
+        // canary with only a negative assertion cannot report its own death: if a
+        // case stops reaching its tool (error envelope, empty text, wrong branch),
+        // `!joined.contains(&needle)` passes silently and the gate advertises safety
+        // it no longer provides. Each case therefore also asserts a positive token
+        // that only appears if the tool actually ran and rendered real content.
         let (dir, server) = make_server().await;
         let root_fwd = to_forward_slash(dir.path());
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.rs"), "pub fn a() {}\n").unwrap();
         std::fs::write(dir.path().join("notes.md"), "# Notes\n\nbody\n").unwrap();
 
-        let cases: Vec<(&str, serde_json::Value)> = vec![
-            ("tree", serde_json::json!({ "path": "." })),
-            ("grep", serde_json::json!({ "pattern": "pub fn" })),
-            ("read_file", serde_json::json!({ "path": "src/lib.rs" })),
-            ("read_markdown", serde_json::json!({ "path": "notes.md" })),
-            ("symbols", serde_json::json!({ "path": "src/lib.rs" })),
+        let cases: Vec<(&str, serde_json::Value, &str)> = vec![
+            ("tree", serde_json::json!({ "path": "." }), "notes.md"),
+            ("grep", serde_json::json!({ "pattern": "pub fn" }), "pub fn"),
+            (
+                "read_file",
+                serde_json::json!({ "path": "src/lib.rs" }),
+                "pub fn a",
+            ),
+            (
+                "read_markdown",
+                serde_json::json!({ "path": "notes.md" }),
+                "Notes",
+            ),
+            (
+                "symbols",
+                serde_json::json!({ "path": "src/lib.rs" }),
+                "Function",
+            ),
         ];
 
         let needle = format!("{root_fwd}/");
-        for (tool, input) in cases {
+        for (tool, input, expect_token) in cases {
             let req = CallToolRequestParams::new(tool)
                 .with_arguments(serde_json::from_value(input).unwrap());
             let result = server
@@ -2621,6 +2644,14 @@ mod tests {
                 .filter_map(|c| c.as_text().map(|t| t.text.clone()))
                 .collect::<Vec<_>>()
                 .join("\n");
+            assert!(
+                joined.contains(expect_token),
+                "tool `{tool}` did not render its expected content (`{expect_token}`) — \
+                 this case has stopped exercising the tool (error envelope, empty \
+                 output, or wrong branch), so the absence check below would pass \
+                 silently and the gate would advertise safety it no longer provides. \
+                 Output:\n{joined}"
+            );
             assert!(
                 !joined.contains(&needle),
                 "tool `{tool}` leaked an absolute project path. Either its path key \
