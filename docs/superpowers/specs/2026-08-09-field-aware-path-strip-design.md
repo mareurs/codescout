@@ -28,26 +28,30 @@ implemented per §§ 5, 8, 9, 10 below; enforced at build time by the corpus gat
 
 ## 1. Problem
 
-`post_process` (`src/server.rs:527`) strips the project root from **all** text in a tool
-result, using a one-character lookbehind to guess whether an occurrence is a path value
-(`strip_prefix_from_text`, `src/server.rs:1702`). It runs *after* the tool's typed
-`serde_json::Value` has been rendered to text, so the only signal left is that lookbehind.
-It is not enough, and the transform fails in both directions:
+**Historical problem statement.** This section describes the code as it stood *before*
+this design shipped — it is why the design exists, not a description of HEAD. As of this
+spec's `status: active`, `post_process` and the text strip it carried no longer exist
+(see §10. Deletions); read this section in the past tense.
 
-- **Over-strips.** A quoted path literal inside file content is preceded by `"` — a value
-  boundary — so it is rewritten. An edit keyed on the displayed text then fails, and the
-  error's "Nearest content" hint is filtered through the same transform, making the
-  mismatch unfalsifiable from inside the session.
-- **Under-strips.** In a serialized buffer envelope a newline is the two literal characters
-  `\` `n`; the lookbehind sees `n`, calls it a path character, and skips. 85% of measured
-  leaks are this.
-- **Erases.** The bare-root branch (added for `tree`) makes a value that *equals* the root
-  collapse to `""` — measured 136 times across 12 sessions in `workspace.project_root` and
-  the librarian's `scope.abs_path` / `scope.git_root`.
+`post_process` (`src/server.rs:537`) used to strip the project root from **all** text in
+a tool result, using a one-character lookbehind to guess whether an occurrence was a path
+value (`strip_prefix_from_text`, `src/server.rs:1702`). It ran *after* the tool's typed
+`serde_json::Value` had been rendered to text, so the only signal left was that
+lookbehind. It was not enough, and the transform failed in both directions:
 
-Full symptom/evidence/measurement record lives in the bug file. This document decides
+- **Over-stripped.** A quoted path literal inside file content was preceded by `"` — a
+  value boundary — so it was rewritten. An edit keyed on the displayed text then failed,
+  and the error's "Nearest content" hint was filtered through the same transform, making
+  the mismatch unfalsifiable from inside the session.
+- **Under-stripped.** In a serialized buffer envelope a newline is the two literal
+  characters `\` `n`; the lookbehind saw `n`, called it a path character, and skipped.
+  85% of measured leaks were this.
+- **Erased.** The bare-root branch (added for `tree`) made a value that *equalled* the
+  root collapse to `""` — measured 136 times across 12 sessions in
+  `workspace.project_root` and the librarian's `scope.abs_path` / `scope.git_root`.
+
+Full symptom/evidence/measurement record lives in the bug file. This document decided
 what to build.
-
 ## 2. Why keep stripping at all
 
 Measured on 51 transcripts (117,717 lines, 16,083 tool results, 21.7 MB of output):
@@ -128,8 +132,8 @@ says centralisation is earned rather than guessed:
    **benign**: every path it emits is a hardcoded relative string
    (`".codescout/tmp/onboarding-prompt.md"`, `format!(".codescout/tmp/{}", file_name)`).
    It opts out and loses nothing.
-3. **`route_tool_error`** (defined `src/server.rs:1129`, invoked from the result-assembly
-   arm at `src/server.rs:794`) — errors never produce a `Value`. See §5.3.
+3. **`route_tool_error`** (defined `src/server.rs:1136`, invoked from the result-assembly
+   arm at `src/server.rs:781`) — errors never produce a `Value`. See §5.3.
 
 The chokepoint has what it needs: `ToolContext` carries both `agent` and
 `workspace_override`, so the root resolves as
@@ -181,9 +185,20 @@ mechanism — the exact failure this project has already paid for three times.
 
 The allowlist is a co-change contract; prose will not hold it. Add a test that runs a
 fixture set of tool calls and asserts **no absolute project root appears in any rendered
-output**, except `run_command` and error results. A forgotten path key then fails CI
-instead of quietly costing tokens, and the same fixture pins the §5.4 ordering by
-exercising both the inline and the buffered path.
+output**, except `run_command` and error results, and the same fixture pins the §5.4
+ordering by exercising both the inline and the buffered path.
+
+**Actual scope, as shipped.** The corpus gate's fixture set is five file tools
+(`tree`, `grep`, `read_file`, `read_markdown`, `symbols`) — no librarian tool is in
+it, so the six path keys librarian emits (`deleted_abs_path`, `main_path`,
+`new_abs_path`, `new_path`, `old_abs_path`, `targets`) are not exercised by this gate
+at all; they are covered only by synthetic-`Value` unit tests in
+`src/tools/core/path_strip.rs` / `src/tools/core/tests.rs`. Of the nine keys the gate's fixture *can* reach, only a
+forgotten key on `grep` currently fails CI — the other cases are masked by
+tool-specific rendering (see the per-case liveness guard on
+`no_absolute_project_paths_in_rendered_output`). A forgotten or unexercised key costs
+tokens; it does not corrupt output — corruption was `post_process`'s failure mode, not
+this one's.
 
 This is the mechanism the three stale doc comments in §9 prove is necessary: each was an
 accurate statement of intent that nothing enforced.
@@ -204,6 +219,15 @@ One per proven failure, plus the two invariants:
 | edit-failure "Nearest content" reproduces the file's real bytes | §5.3 |
 | corpus gate: no absolute roots in any rendered output | §6 |
 
+
+**This table is the design-time list, not a shipped-state audit.** Two rows are not
+backed by a real-tool test: `workspace(activate).project_root is absolute` and
+`artifact(find) scope.abs_path / git_root are absolute` are each covered only by a
+synthetic-`Value` unit test in `src/tools/core/path_strip.rs` / `src/tools/core/tests.rs`, not by a call through the
+actual `workspace` or `artifact` tool. For what actually shipped — the real file names
+and test names, per source — see the bug file's `## Tests added` section
+(`docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`,
+`ece908f37854e557`).
 ## 8. Key inventory — discharged 2026-08-09
 
 Run during planning (`grep`/AST sweep of `src/tools/**` and `src/librarian/tools/**`
@@ -270,3 +294,20 @@ the deferred residual in
 `docs/issues/archive/2026-05-21-run-command-strips-project-root-from-path-literals.md`
 § Resume, recorded 80 days earlier in an archived file — a surface nothing re-reads. That
 carry-forward failure is itself the argument for §6: the fix was known and unenforced.
+
+
+## 12. Consequences
+
+**The buffering threshold now measures post-strip bytes.** `exceeds_inline_limit`
+(`src/tools/core/types.rs:43`) runs against `json = serde_json::to_string(&val)` inside
+`Tool::call_content` — and `strip_paths_in_value` now runs *before* that serialization,
+per §5.4's ordering. Before this change the size check ran on the pre-strip `Value`.
+Relativizing paths only ever shortens them, so a result that used to just clear
+`MAX_INLINE_TOKENS` can now land under it and come back inline instead of buffered —
+the effective buffering threshold moved, in the more-inline direction, by however many
+bytes the stripped prefixes freed. This is the correct measurement (the budget should
+reflect what the agent actually receives, not an intermediate absolute-path form it
+never sees), but it is a visible behavior change that shipped undocumented and
+surprised a task implementer mid-plan. §7's tests pin the *ordering* (stripping before
+serialization) but nothing pins the threshold shift itself as an observable consequence
+— this section is that record.

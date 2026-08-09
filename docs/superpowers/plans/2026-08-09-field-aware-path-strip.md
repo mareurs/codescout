@@ -1,7 +1,7 @@
 ---
 id: '8ac062511ae99092'
 kind: plan
-status: draft
+status: done
 title: Field-aware path stripping — implementation plan
 owners:
 - marius

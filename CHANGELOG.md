@@ -218,6 +218,28 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **Project-root stripping is now field-aware, not a text-level guess.** Tool results
+  used to have their absolute project root stripped by `post_process`
+  (`strip_prefix_from_text`) — a one-character lookbehind run *after* the tool's typed
+  `Value` had already been rendered to text. That guess over-stripped quoted path
+  literals inside file content (breaking any edit keyed on the displayed text, since
+  the "Nearest content" hint was filtered through the same transform), under-stripped
+  85% of measured leaks hidden inside serialized `\n` escapes, and collapsed
+  root-valued fields — `workspace(activate).project_root`, the librarian's
+  `scope.abs_path` / `scope.git_root` — to `""`, measured 136 times across 12 sessions.
+  Stripping now runs on the typed `Value` inside `Tool::call_content`, keyed by an
+  allowlist of path-carrying JSON keys (`PATH_KEYS`) plus a separate keys-that-stay-
+  absolute list (`ROOT_KEYS`) — see `src/tools/core/path_strip.rs`. A new CI corpus
+  gate (`no_absolute_project_paths_in_rendered_output`) catches a forgotten path key
+  on the file-tool surface (`tree`/`grep`/`read_file`/`read_markdown`/`symbols`); it
+  does not reach librarian-emitted path keys, which remain covered only by unit tests
+  against synthetic `Value`s. **Side effect:** stripping now runs before the
+  inline-vs-buffered size check, so that check measures the shorter, already-relative
+  form — a result that used to just clear the buffering threshold can now come back
+  inline instead of buffered. See
+  `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md` and
+  `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`.
+
 - **The shipped build could prepend a dependency's diagnostic to `--json` output.**
   `qdrant-client`'s version-compatibility probe is on by default, and when it cannot
   reach a server it reports that with `println!` — onto codescout's **stdout**, ahead

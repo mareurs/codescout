@@ -549,10 +549,10 @@ impl CodeScoutServer {
 
         // Novelty-gated: emit only the FIRST eligible response since server
         // start or the last `activate_project`. `call_tool_inner` resets the
-        // flag right before this very call, for a successful
-        // `workspace(activate)` request, so the reset can never lag behind
-        // this method's own read of it. See
-        // [`path_note_emitted_since_activation`].
+        // flag right before this very call, for any `workspace(activate)`
+        // request — matched on request shape only, regardless of whether the
+        // call actually succeeds — so the reset can never lag behind this
+        // method's own read of it. See [`path_note_emitted_since_activation`].
         let already_emitted = self
             .path_note_emitted_since_activation
             .swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -2524,7 +2524,16 @@ mod tests {
     #[tokio::test]
     async fn call_tool_strips_project_root_from_output() {
         let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
+        // Canonicalize like `Agent::new` does (src/agent/mod.rs:389) before any
+        // path is rendered. On macOS `tempfile::tempdir()` returns a `/var/...`
+        // path while production renders the canonicalized `/private/var/...`
+        // form, so a needle built from the raw tempdir path can never match —
+        // making `!text.contains(&root)` vacuously true. See the `canonical`
+        // helper documented at src/agent/mod.rs:1775-1777.
+        let root = std::fs::canonicalize(dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
 
         let req = CallToolRequestParams::new("tree")
             .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
@@ -2560,7 +2569,13 @@ mod tests {
     #[tokio::test]
     async fn call_tool_strips_bare_project_root_from_list_dir_output() {
         let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
+        // Canonicalize like `Agent::new` does (src/agent/mod.rs:389) — see the
+        // sibling test above for why a needle built from the raw tempdir path
+        // is vacuous on macOS.
+        let root = std::fs::canonicalize(dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         std::fs::write(dir.path().join("visible.txt"), "hello").unwrap();
 
         let req = CallToolRequestParams::new("tree")
@@ -2605,7 +2620,13 @@ mod tests {
         // it no longer provides. Each case therefore also asserts a positive token
         // that only appears if the tool actually ran and rendered real content.
         let (dir, server) = make_server().await;
-        let root_fwd = to_forward_slash(dir.path());
+        // Canonicalize before building the needle, matching `Agent::new`
+        // (src/agent/mod.rs:389) — production always renders paths derived
+        // from the canonicalized root, so the needle must be built the same
+        // way or this gate is structurally inert on macOS (tempdir() yields
+        // `/var/...` there while production renders `/private/var/...`; see
+        // src/agent/mod.rs:1772-1777 and the `canonical` test helper).
+        let root_fwd = to_forward_slash(&std::fs::canonicalize(dir.path()).unwrap());
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.rs"), "pub fn a() {}\n").unwrap();
         std::fs::write(dir.path().join("notes.md"), "# Notes\n\nbody\n").unwrap();
@@ -2664,7 +2685,11 @@ mod tests {
     #[tokio::test]
     async fn read_file_and_grep_show_a_path_literal_in_content_verbatim() {
         let (dir, server) = make_server().await;
-        let root_fwd = to_forward_slash(dir.path());
+        // Canonicalize before building the needle-adjacent literal — see
+        // `no_absolute_project_paths_in_rendered_output` above for why the
+        // raw tempdir path is the wrong thing to render from (macOS
+        // /var/... vs production's canonicalized /private/var/...).
+        let root_fwd = to_forward_slash(&std::fs::canonicalize(dir.path()).unwrap());
         let literal = format!("REPO = \"{root_fwd}/.worktrees/single-stage\"");
         std::fs::write(dir.path().join("probe.txt"), format!("{literal}\n")).unwrap();
 
@@ -3096,8 +3121,9 @@ mod tests {
         // post_process, then the later reset re-armed it in the same breath, so
         // the very next ordinary response fired the banner again — two banners
         // per activation. Fixed by resetting the gate inside call_tool_inner,
-        // right before ITS OWN post_process call, whenever the call itself is a
-        // successful `workspace(activate)` request. This test goes through
+        // right before ITS OWN post_process call, whenever the call itself is
+        // a `workspace(activate)` request (matched on request shape only,
+        // regardless of outcome). This test goes through
         // call_tool_inner (not post_process directly, unlike the test above) so
         // it actually exercises that ordering.
         let (dir, server) = make_server().await;

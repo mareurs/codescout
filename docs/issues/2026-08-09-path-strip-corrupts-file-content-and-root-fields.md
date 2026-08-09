@@ -288,8 +288,10 @@ archiving this file, which per this project's bug-tracking discipline happens af
 the whole-branch review, not before.
 
 ## References
-- Strip sites: `src/server.rs:527` (`post_process`), `src/server.rs:1662`
-  (`strip_project_root_from_result`), `src/server.rs:1702` (`strip_prefix_from_text`).
+- Strip sites (pre-fix, now deleted per §10 of the design spec except
+  `post_process`'s surviving annotation banner): `src/server.rs:537`
+  (`post_process`), `src/server.rs:1662` (`strip_project_root_from_result`,
+  removed), `src/server.rs:1702` (`strip_prefix_from_text`, removed).
 - Chokepoint for the fix: `src/tools/core/types.rs:546` (`Tool::call_content`).
 - Diagnostic that shares the transform: `src/tools/edit_file/mod.rs:196`.
 - Origin of the deferred residual:
