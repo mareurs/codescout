@@ -239,6 +239,7 @@ design (`docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`, no
 `PATH_KEYS`, so raw shell bytes are left verbatim by the allowlist itself rather than
 by a tool-name branch. Errors are never stripped (unaffected — they never routed
 through the deleted functions' text path in a way the allowlist now touches).
+
 ## Tests added
 
 - `src/tools/core/path_strip.rs` (unit): `relativizes_a_path_key`,
@@ -266,6 +267,7 @@ through the deleted functions' text path in a way the allowlist now touches).
   corpus gate), hardened with a per-case liveness guard in `358113ff`.
 
 `cargo test` on `experiments` at `358113ff`: 3596 passed / 0 failed / 44 ignored.
+
 ## Workarounds
 - Treat any path shown by a non-`run_command` codescout tool as **possibly** stripped;
   a string that reads as relative may be absolute on disk, and an empty string may be
@@ -278,13 +280,12 @@ through the deleted functions' text path in a way the allowlist now touches).
   empty — read the root from `run_command "pwd"` instead.
 
 ## Resume
-Implement the accepted design. First concrete action: enumerate the path-key inventory —
-`grep -n '"file"\|"path"\|"rel_path"\|"abs_path"' src/tools/**/*.rs` and the librarian
-adapter — to establish the allowlist, since the design's effort estimate is explicitly
-pending that inventory. Then move the strip into `Tool::call_content`
-(`src/tools/core/types.rs:546`), noting the single override at
-`src/tools/onboarding.rs:294` (benign — it emits only hardcoded relative paths, so it
-opts out losing nothing).
+
+N/A — fixed and verified. Implemented across `1a30e91e..358113ff` (commit-by-commit
+breakdown in `## Fix` above); documentation on all three stale prompt/doc surfaces
+corrected in `2aecc0bf`. Nothing left to resume here — the only remaining step is
+archiving this file, which per this project's bug-tracking discipline happens after
+the whole-branch review, not before.
 
 ## References
 - Strip sites: `src/server.rs:527` (`post_process`), `src/server.rs:1662`

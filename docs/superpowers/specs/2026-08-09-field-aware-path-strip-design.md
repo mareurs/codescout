@@ -19,7 +19,9 @@ topic: path-display-and-output-fidelity
 
 **Bug:** `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`
 (`ece908f37854e557`)
-**Status:** draft — design accepted 2026-08-09, not yet implemented.
+**Status:** active — shipped `40fbf565..2aecc0bf` on `experiments`. Design
+implemented per §§ 5, 8, 9, 10 below; enforced at build time by the corpus gate
+`src/server.rs::no_absolute_project_paths_in_rendered_output`.
 
 > **Reading this file through codescout's own tools will corrupt the absolute paths in
 > it.** That is the defect being fixed. Verify literals with `run_command`.
