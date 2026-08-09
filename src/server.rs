@@ -2589,6 +2589,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn no_absolute_project_paths_in_rendered_output() {
+        // The PATH_KEYS allowlist in src/tools/core/path_strip.rs is a co-change
+        // contract. This gate is what enforces it: a tool emitting paths under a
+        // key nobody added fails here instead of silently costing tokens forever.
+        let (dir, server) = make_server().await;
+        let root_fwd = to_forward_slash(dir.path());
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "pub fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("notes.md"), "# Notes\n\nbody\n").unwrap();
+
+        let cases: Vec<(&str, serde_json::Value)> = vec![
+            ("tree", serde_json::json!({ "path": "." })),
+            ("grep", serde_json::json!({ "pattern": "pub fn" })),
+            ("read_file", serde_json::json!({ "path": "src/lib.rs" })),
+            ("read_markdown", serde_json::json!({ "path": "notes.md" })),
+            ("symbols", serde_json::json!({ "path": "src/lib.rs" })),
+        ];
+
+        let needle = format!("{root_fwd}/");
+        for (tool, input) in cases {
+            let req = CallToolRequestParams::new(tool)
+                .with_arguments(serde_json::from_value(input).unwrap());
+            let result = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            let joined: String = result
+                .content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                !joined.contains(&needle),
+                "tool `{tool}` leaked an absolute project path. Either its path key \
+                 is missing from PATH_KEYS in src/tools/core/path_strip.rs, or it \
+                 introduced a new one. Output:\n{joined}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_and_grep_show_a_path_literal_in_content_verbatim() {
+        let (dir, server) = make_server().await;
+        let root_fwd = to_forward_slash(dir.path());
+        let literal = format!("REPO = \"{root_fwd}/.worktrees/single-stage\"");
+        std::fs::write(dir.path().join("probe.txt"), format!("{literal}\n")).unwrap();
+
+        for (tool, input) in [
+            ("read_file", serde_json::json!({ "path": "probe.txt" })),
+            (
+                "grep",
+                serde_json::json!({ "pattern": "REPO", "path": "probe.txt" }),
+            ),
+        ] {
+            let req = CallToolRequestParams::new(tool)
+                .with_arguments(serde_json::from_value(input).unwrap());
+            let result = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            let joined: String = result
+                .content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains(&literal),
+                "`{tool}` must show the file's path literal verbatim — an edit keyed \
+                 on this text has to match the bytes on disk. Got:\n{joined}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn call_tool_inner_honors_workspace_override_for_security_config() {
         // BUG (sibling of the edit_code write-path pin bug): check_tool_access
         // ran BEFORE ctx.workspace_override was even extracted from the input,
