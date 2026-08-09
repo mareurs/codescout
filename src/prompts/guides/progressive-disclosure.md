@@ -51,16 +51,20 @@ the handle to acknowledge and proceed.
 
 ## Path-relative annotation
 
-Every non-`run_command` tool response that contains paths under the
-active project root carries a trailing `[codescout] paths are relative
-to <root>` note. Paths in the response body are project-relative;
-prepend `<root>` mentally for absolute resolution. `run_command` output
-is exempt (raw shell bytes; stripping would corrupt path literals) and
-never carries the annotation. The catalog stores absolute paths;
-the strip layer is a display-time transform — when verifying tool
-output against catalog state, prefer reading the buffer directly
-(`read_file(@tool_xxx, json_path=...)`) on a known-absolute field.
+Paths in tool responses are project-relative. The response to each
+`activate_project` call carries a trailing `[codescout] paths are relative
+to <root>` note naming the root they resolve against; every later response
+in that activation window omits it, because the same fact lives in the
+`Active project` line of `server_instructions`.
 
+Relativization is **field-aware**: it applies to path-valued JSON fields
+only, never to file content, shell output, prose, or error text — all of
+which are byte-faithful. Root-valued fields (`project_root`, `git_root`,
+`cwd`) stay absolute: they are the anchor the rest resolve against.
+
+To check a path against catalog state, read the value straight from the
+response — path fields are relative, root fields absolute, and content is
+verbatim. `run_command` output is raw shell bytes and is never rewritten.
 ## Anti-patterns
 
 - **Re-running a tool because the result was "too long".** Query the

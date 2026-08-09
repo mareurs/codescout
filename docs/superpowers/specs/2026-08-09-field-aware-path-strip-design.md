@@ -1,7 +1,7 @@
 ---
 id: '464dce7fe5cd6a3c'
 kind: spec
-status: draft
+status: active
 title: Design — Field-aware project-root stripping at the call_content chokepoint
 owners:
 - marius

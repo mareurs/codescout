@@ -19,9 +19,10 @@ project to the given root. The call has these side effects, in order:
 3. **Prewarms LSP** for the project's languages (background — does not
    block the response).
 4. **Auto-registers dependencies** for cross-project navigation.
-5. **Re-arms the path-relative banner** — so the next
-   non-`run_command` tool response that contains the new root re-emits
-   `[codescout] paths are relative to <root>`.
+5. **Re-arms the path-relative banner** — resets the novelty gate so
+   this `activate_project` call's own response carries
+   `[codescout] paths are relative to <root>`; later responses in the
+   same activation window omit it.
 
 The response includes `project_hints` (primary language, manifest,
 entry points, build commands) so the model has orientation context
@@ -48,24 +49,24 @@ Activation clears these per-session sets:
 | State | Behavior |
 |---|---|
 | `guide_hints_emitted` | Cleared on every activation **and on `workspace(post_compact=true)`** (compaction re-arm); **persisted per session**, so it survives `/mcp` restarts within one conversation instead of re-injecting guide bodies the conversation already holds. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a hint-carrying tool — one shared keyspace, so either path suppresses the other's re-emit. After a clear, the next of either re-emits. |
-| path-relative banner | Cleared on every activation. Next stripped response re-emits it. |
+| path-relative banner | Cleared on every activation. The activation's own response re-emits it; later responses in the same window omit it. |
 | section-read tracking | NOT cleared. Persists across activations. |
 | Output buffers (`@tool_*`, `@cmd_*`) | NOT cleared. Buffers from before the switch remain readable. |
 
 ## Path-relative annotation
 
-Every non-`run_command` tool response that contains paths under the
-active project root is stripped to project-relative form. The first
-stripped response since activation carries a trailing note:
+Paths in tool responses are project-relative. The response to each
+`activate_project` call carries a trailing `[codescout] paths are relative
+to <root>` note naming the root they resolve against; every later response
+in that activation window omits it, because the same fact lives in the
+`Active project` line of `server_instructions`.
 
-```
-[codescout] paths are relative to /home/user/<project>
-```
+Relativization is **field-aware**: it applies to path-valued JSON fields
+only, never to file content, shell output, prose, or error text — all of
+which are byte-faithful. Root-valued fields (`project_root`, `git_root`,
+`cwd`) stay absolute: they are the anchor the rest resolve against.
 
-Subsequent stripped responses in the same activation window do NOT
-re-emit the note (novelty-gated). `run_command` output is exempt —
-raw shell bytes, stripping would corrupt path literals.
-
+See `get_guide("progressive-disclosure")` for the full mechanics.
 ## Cross-project workflow pattern
 
 When you need to work in a sibling project briefly:

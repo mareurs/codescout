@@ -1,7 +1,7 @@
 ---
 id: ece908f37854e557
 kind: bug
-status: open
+status: fixed
 title: post_process strips the project root from file CONTENT and collapses root-valued fields to ""
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - data-loss
 - memory-corruption
 - design-needed
-closed: null
+closed: 2026-08-09
 opened: 2026-08-09
 related:
 - docs/issues/archive/2026-05-21-run-command-strips-project-root-from-path-literals.md
@@ -205,21 +205,67 @@ path `strip_project_root_from_result`'s own doc comment confirms is stripped too
    root pinned. Low volume; does not change the design.
 
 ## Fix
-Design accepted 2026-08-09 — see
-`docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`. Summary: move the
-strip out of `post_process` into a field-aware walk of the tool's `serde_json::Value`
-inside `Tool::call_content`, ordered strictly before `format_compact`/buffering;
-allowlist of path keys only (an unknown key stays absolute — verbose, never corrupt);
-root-valued keys stay absolute; errors are never stripped; the global bare-root branch
-is deleted and `tree` relativizes its own common-prefix header.
 
-Not yet implemented. Status stays `open`.
+Implemented across commits `1a30e91e`..`358113ff` on `experiments`, per the accepted
+design (`docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`, now
+`status: active`):
 
+- `1a30e91e` — added `src/tools/core/path_strip.rs`: `PATH_KEYS` (allowlist of
+  path-valued fields) and `ROOT_KEYS` (root-valued fields that stay absolute), plus
+  `strip_paths_in_value`, a pure recursive walker over `serde_json::Value`.
+- `91757be4` — hardened the new module's tests, restored a prefix-contract assertion.
+- `cfd2c44e` — wired `strip_paths_in_value` into `Tool::call_content`
+  (`src/tools/core/types.rs:564`), strictly before `exceeds_inline_limit` / the
+  `@tool_*` buffer payload / `format_compact`, so every downstream consumer sees
+  already-relative values.
+- `8ddce9bf` — asserted the buffered `@tool_*` payload is itself stripped, not just
+  the inline response.
+- `93565509` — reduced `post_process` to the once-per-activation banner only; deleted
+  its text-rewriting responsibility (and, with it, `strip_project_root_from_result`
+  and `strip_prefix_from_text` — the two stale doc comments named in Root Cause and
+  in E4 are gone with their functions).
+- `7da8d1e2` — fixed a double-banner regression (the novelty gate was reset after
+  `call_tool_inner`'s own `post_process` call rather than before it). Net effect: the
+  `activate_project` response itself — not the next ordinary call — carries the
+  banner, exactly once per activation.
+- `74156e99` — added the corpus gate (`no_absolute_project_paths_in_rendered_output`)
+  that fails CI when a tool's absolute project path reaches rendered output outside
+  `run_command`/errors.
+- `358113ff` — gave that corpus gate a per-case liveness guard, so a case that stops
+  exercising the tool (error envelope, empty output, wrong branch) fails loudly
+  instead of the absence check passing silently.
+
+`run_command` needs no special case any more: its `stdout` key is simply absent from
+`PATH_KEYS`, so raw shell bytes are left verbatim by the allowlist itself rather than
+by a tool-name branch. Errors are never stripped (unaffected — they never routed
+through the deleted functions' text path in a way the allowlist now touches).
 ## Tests added
-None yet — the design specifies them (corpus gate asserting no absolute root appears in
-any rendered output except `run_command` and errors; strip-before-format ordering test;
-one regression per proven failure in this file).
 
+- `src/tools/core/path_strip.rs` (unit): `relativizes_a_path_key`,
+  `leaves_file_content_untouched`, `never_produces_an_empty_string`,
+  `root_keys_stay_absolute`,
+  `scope_block_abs_path_survives_while_item_abs_path_relativizes`,
+  `relativizes_an_array_of_paths`, `recurses_into_nested_objects_and_arrays`,
+  `unknown_key_keeps_its_absolute_path`, `empty_prefix_is_a_no_op`,
+  `a_path_outside_the_root_is_untouched`,
+  `a_sibling_directory_sharing_the_root_as_a_prefix_is_untouched`,
+  `a_root_key_prunes_recursion_beneath_it`,
+  `a_path_key_whose_value_contains_the_root_mid_string_is_untouched`.
+- `src/tools/core/tests.rs` (through `call_content`):
+  `call_content_relativizes_path_keys_but_not_content`,
+  `call_content_buffered_summary_is_built_from_the_stripped_value`.
+- `src/server.rs` (regression coverage for `post_process` + the banner):
+  `post_process_annotates_against_the_pinned_root_without_mutating_text`,
+  `responses_emit_paths_relative_annotation_once_per_activation`,
+  `activation_and_the_next_two_calls_carry_the_banner_exactly_once`,
+  `edit_failure_hint_reproduces_the_files_real_bytes` (closes E3 — the
+  not-found diagnostic no longer shares its victim's transform, because there is no
+  transform left to share), `read_file_and_grep_show_a_path_literal_in_content_verbatim`
+  (closes S1, the originally reported case).
+- `src/server.rs` (CI gate): `no_absolute_project_paths_in_rendered_output` (the
+  corpus gate), hardened with a per-case liveness guard in `358113ff`.
+
+`cargo test` on `experiments` at `358113ff`: 3596 passed / 0 failed / 44 ignored.
 ## Workarounds
 - Treat any path shown by a non-`run_command` codescout tool as **possibly** stripped;
   a string that reads as relative may be absolute on disk, and an empty string may be
@@ -252,4 +298,3 @@ opts out losing nothing).
 - Pin-mismatch class this fix makes unrepresentable:
   `docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`.
 - Design: `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`.
-
