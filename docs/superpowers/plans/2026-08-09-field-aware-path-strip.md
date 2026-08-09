@@ -325,6 +325,36 @@ is the point. Not wired in yet."
 
 ---
 
+### Task 1 amendment — what actually shipped (2026-08-09)
+
+The Opus task review found that three of the tests authored above **cannot fail**. The
+human ruled that the findings govern over this plan text. Commits `1a30e91e..91757be4`.
+The shipped `src/tools/core/path_strip.rs` is the source of truth; do not re-derive the
+tests from the block above.
+
+1. `leaves_file_content_untouched` embedded the root **mid-string**, but `relativize`
+   uses `strip_prefix`, which matches at offset 0 only — so it passed even with the
+   `PATH_KEYS` gate deleted. Fixed by adding a value that *begins* with the root
+   (`"stdout": "/home/u/proj/src/lib.rs\n"`).
+2. `root_keys_stay_absolute` never exercised `ROOT_KEYS`: those keys are absent from
+   `PATH_KEYS`, so deleting the `continue` guard left it green. Added
+   `a_root_key_prunes_recursion_beneath_it`, which pins the guard's only live effect —
+   skipping the whole subtree under a root key.
+3. The trailing-slash contract was asserted only where the empty-string guard also held,
+   so neither single mutation was detectable. Added
+   `a_sibling_directory_sharing_the_root_as_a_prefix_is_untouched`
+   (`/home/u/projX/file.rs` against root `/home/u/proj/`) — the `<root>-backup/foo` hazard
+   the replaced code named.
+4. Restored `debug_assert!(root_prefix.ends_with('/'), …)`, which the code being replaced
+   carried and this plan dropped. Callers MUST pass a slash-terminated prefix.
+5. `#[allow(dead_code)]` → `#[expect(dead_code, reason = "wired in by Task 2…")]` on all
+   four items, below each doc comment. `#[expect]` errors once the item is used, so Task 2
+   cannot forget to remove them.
+
+Each of 1–3 was mutation-verified: the mutation applied, the named test observed failing,
+the mutation reverted. Known deferred minor: four `unfulfilled_lint_expectation` warnings
+under `cargo test` (the `#[cfg(test)]` module uses the items). `cargo clippy -- -D warnings`
+is clean; Task 2 deletes the attributes, so the noise lasts exactly one task.
 ## Task 2: Wire the walker into `Tool::call_content`
 
 **Files:**
