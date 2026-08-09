@@ -544,7 +544,25 @@ pub trait Tool: Send + Sync {
     /// `docs/trackers/prompt-guide-refactor-session-log.md`); V2 closes that
     /// gap by delivering the content directly.
     async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
-        let val = self.call(input, ctx).await?;
+        let mut val = self.call(input, ctx).await?;
+
+        // Field-aware project-root stripping. Runs HERE, on the typed Value,
+        // and therefore BEFORE `exceeds_inline_limit`, the `@tool_*` buffer
+        // payload, and `format_compact` — the ordering is load-bearing: a
+        // summary built from an unstripped Value leaks absolute paths through
+        // the serialized envelope, which is how 85% of the pre-fix leaks
+        // escaped. The root resolves from the same `ctx` the tool body used,
+        // so a `workspace=` pin cannot be mismatched here the way it could
+        // when `post_process` had to be handed the pin separately
+        // (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md).
+        let root_prefix = ctx
+            .agent
+            .project_root_for(ctx.workspace_override.as_deref())
+            .await
+            .map(|p| format!("{}/", crate::util::fs::to_forward_slash(&p)))
+            .unwrap_or_default();
+        crate::tools::core::path_strip::strip_paths_in_value(&mut val, &root_prefix);
+        let val = val;
         let form = self.output_form();
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
