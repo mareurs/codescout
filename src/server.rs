@@ -109,17 +109,25 @@ pub struct CodeScoutServer {
     /// has been emitted since the last activation. Replaces the per-session cap
     /// (`_path_note_count`) that the U-23 fix removed.
     ///
-    /// Gate logic (`post_process`): emit only on the FIRST stripped response
-    /// since (a) server start or (b) a successful `activate_project`. The
-    /// activation reset is wired in the `is_activate` branch of `call_tool`
-    /// alongside `refresh_resources` / `refresh_instructions`.
+    /// Gate logic (`post_process`): emit only on the FIRST eligible response
+    /// (tool is not `run_command` and a project root resolves) since (a)
+    /// server start or (b) a successful `activate_project`. The activation
+    /// reset is wired into `call_tool_inner`, immediately before THAT SAME
+    /// call's own `post_process` invocation — not into the `is_activate`
+    /// branch of `call_tool` (which runs `refresh_resources` /
+    /// `refresh_instructions` after `call_tool_inner` returns, i.e. after
+    /// this same activate response already went through `post_process`).
+    /// Resetting there instead of here doubled the banner: the activate
+    /// response would consume the gate, then that later reset would re-arm
+    /// it in the same breath, so the very next ordinary response fired the
+    /// banner again.
     ///
     /// Why a per-activation gate, not the U-23 "every-call" cadence: the
     /// cold-reader signal U-23 protected (later tools rewriting paths look
     /// like raw catalog data) is now carried by the **Active project** +
     /// **Worktree** lines in `build_server_instructions`, which compaction
     /// preserves as system-prompt content. The per-response annotation
-    /// becomes redundant after the first stripped call. See U-25 in
+    /// becomes redundant after the first eligible call. See U-25 in
     /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
     /// `docs/issues/2026-05-28-path-annotation-spam.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
@@ -540,9 +548,11 @@ impl CodeScoutServer {
         };
 
         // Novelty-gated: emit only the FIRST eligible response since server
-        // start or the last `activate_project`. `call_tool` resets the flag in
-        // its `is_activate` branch so the next activation re-announces the new
-        // root. See [`path_note_emitted_since_activation`].
+        // start or the last `activate_project`. `call_tool_inner` resets the
+        // flag right before this very call, for a successful
+        // `workspace(activate)` request, so the reset can never lag behind
+        // this method's own read of it. See
+        // [`path_note_emitted_since_activation`].
         let already_emitted = self
             .path_note_emitted_since_activation
             .swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -780,6 +790,23 @@ impl CodeScoutServer {
             "tool_done"
         );
 
+        // A `workspace(activate)` request resets the path-annotation novelty
+        // gate HERE, right before this same call's own `post_process` below —
+        // not afterward, in `call_tool`'s `is_activate` branch (the old
+        // location). Resetting afterward meant this activate response would
+        // consume the gate via `post_process`, then get it re-armed one line
+        // later in the caller, so the very next ordinary response fired the
+        // banner again — two banners per activation. Detected from
+        // `input_for_record` rather than `req.arguments` because the latter
+        // was already moved into `input` above; `input_for_record` is the
+        // untouched clone `record_content` only borrowed.
+        if req.name == "workspace"
+            && input_for_record.get("action").and_then(|v| v.as_str()) == Some("activate")
+        {
+            self.path_note_emitted_since_activation
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+
         let call_result = self
             .post_process(call_result, &req.name, ctx.workspace_override.as_deref())
             .await;
@@ -982,12 +1009,15 @@ impl ServerHandler for CodeScoutServer {
             self.refresh_resources().await;
             self.refresh_instructions().await;
 
-            // Reset the path-annotation novelty gate so the next stripped
-            // response re-emits `[codescout] paths are relative to <root>`
-            // with the new project's root. Pairs with the bool's docstring
-            // on `path_note_emitted_since_activation`.
-            self.path_note_emitted_since_activation
-                .store(false, std::sync::atomic::Ordering::Relaxed);
+            // The path-annotation novelty-gate reset for this activation
+            // already happened inside `call_tool_inner`, right before ITS OWN
+            // `post_process` call — not here. Resetting here (after
+            // `call_tool_inner` had already returned, i.e. after this same
+            // activate response had already been through `post_process`)
+            // used to double-fire the banner: once on the activate response,
+            // then again on the very next ordinary response once this line
+            // re-armed the gate. See the docstring on
+            // `path_note_emitted_since_activation`.
         }
 
         Ok(result)
@@ -2853,8 +2883,8 @@ mod tests {
     async fn responses_emit_paths_relative_annotation_once_per_activation() {
         // Novelty-gated annotation (replaces the U-23 "every-call" cadence):
         // post_process emits `[codescout] paths are relative to <root>` only on
-        // the FIRST stripped response since server start or the last
-        // `activate_project`. Subsequent stripped responses skip the
+        // the FIRST eligible response since server start or the last
+        // `activate_project`. Subsequent eligible responses skip the
         // annotation — the agent already carries the signal via the
         // `Active project` line in `build_server_instructions`, which
         // compaction preserves in the system-prompt slot.
@@ -2882,7 +2912,7 @@ mod tests {
             ))])
         };
 
-        // First stripped response — annotation MUST appear.
+        // First eligible response — annotation MUST appear.
         let first = server.post_process(make_payload(), "read_file", None).await;
         let joined: String = first
             .content
@@ -2892,10 +2922,10 @@ mod tests {
             .join("\n");
         assert!(
             joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
-            "first stripped response must carry the annotation, got:\n{joined}"
+            "first eligible response must carry the annotation, got:\n{joined}"
         );
 
-        // Subsequent stripped responses across multiple tool names — annotation
+        // Subsequent eligible responses across multiple tool names — annotation
         // MUST NOT re-appear within the same activation window.
         for tool_name in ["read_file", "tree", "symbols", "librarian", "grep"] {
             let processed = server.post_process(make_payload(), tool_name, None).await;
@@ -2914,8 +2944,8 @@ mod tests {
         // Negative case: run_command is exempt from stripping, so the
         // annotation must NOT be appended even when its payload happens to
         // contain the project root. Independent of the novelty gate — the
-        // run_command branch in post_process skips the strip+annotate path
-        // entirely.
+        // run_command branch in post_process returns immediately, before the
+        // gate or the banner are ever consulted.
         let processed = server
             .post_process(make_payload(), "run_command", None)
             .await;
@@ -2930,8 +2960,9 @@ mod tests {
             "run_command must not get the annotation (its raw stdout is left unstripped), got:\n{joined}"
         );
 
-        // Activation reset: flipping the gate manually (as `call_tool` does in
-        // its `is_activate` branch) must restore single-shot emission.
+        // Activation reset: flipping the gate manually (as `call_tool_inner` does,
+        // right before its own `post_process` call, for a `workspace(activate)`
+        // request) must restore single-shot emission.
         server
             .path_note_emitted_since_activation
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -2944,7 +2975,87 @@ mod tests {
             .join("\n");
         assert!(
             joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
-            "post-activation reset: next stripped response must re-emit the annotation, got:\n{joined}"
+            "post-activation reset: next eligible response must re-emit the annotation, got:\n{joined}"
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_and_the_next_two_calls_carry_the_banner_exactly_once() {
+        // Regression (fix round 1 on the field-aware-path-strip Task 3 review):
+        // the novelty gate used to get reset AFTER call_tool_inner returned, in
+        // call_tool's `is_activate` branch — which runs after THIS SAME activate
+        // response had already been through call_tool_inner's own post_process
+        // call. That let the activate response consume the gate via
+        // post_process, then the later reset re-armed it in the same breath, so
+        // the very next ordinary response fired the banner again — two banners
+        // per activation. Fixed by resetting the gate inside call_tool_inner,
+        // right before ITS OWN post_process call, whenever the call itself is a
+        // successful `workspace(activate)` request. This test goes through
+        // call_tool_inner (not post_process directly, unlike the test above) so
+        // it actually exercises that ordering.
+        let (dir, server) = make_server().await;
+
+        let activate_req = CallToolRequestParams::new("workspace").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "activate",
+                "path": dir.path().to_string_lossy(),
+            }))
+            .unwrap(),
+        );
+        let activate_result = server
+            .call_tool_inner(
+                activate_req,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let tree_req_1 = CallToolRequestParams::new("tree")
+            .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
+        let tree_result_1 = server
+            .call_tool_inner(
+                tree_req_1,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let tree_req_2 = CallToolRequestParams::new("tree")
+            .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
+        let tree_result_2 = server
+            .call_tool_inner(
+                tree_req_2,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let banner = "[codescout] paths are relative to";
+        let carries_banner = |r: &CallToolResult| {
+            r.content
+                .iter()
+                .any(|c| c.as_text().is_some_and(|t| t.text.contains(banner)))
+        };
+        let flags = [
+            carries_banner(&activate_result),
+            carries_banner(&tree_result_1),
+            carries_banner(&tree_result_2),
+        ];
+
+        assert_eq!(
+            flags.iter().filter(|f| **f).count(),
+            1,
+            "exactly one of the activate response and the next two ordinary \
+             responses must carry the banner; activate={}, tree_1={}, tree_2={}",
+            flags[0],
+            flags[1],
+            flags[2],
         );
     }
 

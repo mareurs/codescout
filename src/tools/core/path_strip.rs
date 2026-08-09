@@ -163,6 +163,16 @@ mod tests {
     }
 
     #[test]
+    fn a_path_key_whose_value_contains_the_root_mid_string_is_untouched() {
+        // `relativize` must be ANCHORED. An unanchored substring removal would
+        // rewrite this to "/other/src/lib.rs". Deleting the old
+        // strip_prefix_not_inside_longer_path left this contract homeless.
+        let mut v = json!({ "file": "/other/home/u/proj/src/lib.rs" });
+        strip_paths_in_value(&mut v, ROOT);
+        assert_eq!(v["file"], "/other/home/u/proj/src/lib.rs");
+    }
+
+    #[test]
     fn root_keys_stay_absolute() {
         let mut v = json!({
             "project_root": "/home/u/proj",
