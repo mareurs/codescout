@@ -1053,4 +1053,24 @@ async fn call_content_buffered_summary_is_built_from_the_stripped_value() {
         !text.contains(&format!("{root_fwd}/src/")),
         "no absolute project path may survive into the buffered envelope: {text}"
     );
+
+    // The envelope alone isn't enough: a mutation that strips the summary but
+    // leaves the *stored* @tool_* payload unstripped would pass every
+    // assertion above, since the payload itself never appears in `text`. Read
+    // the buffer back and check the payload directly — this is the one
+    // surface the legacy `server::post_process` text-level strip never
+    // covered, so it has no fallback if this wiring regresses.
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("envelope must be JSON");
+    let output_id = parsed["output_id"]
+        .as_str()
+        .expect("envelope must carry output_id");
+    let buffered_payload = ctx
+        .output_buffer
+        .get(output_id)
+        .expect("output_id must resolve in the buffer")
+        .stdout;
+    assert!(
+        !buffered_payload.contains(&format!("{root_fwd}/")),
+        "the stored @tool_* payload must itself be stripped, not just the envelope: {buffered_payload}"
+    );
 }
