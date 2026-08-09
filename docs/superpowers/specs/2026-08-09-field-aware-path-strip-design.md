@@ -19,12 +19,20 @@ topic: path-display-and-output-fidelity
 
 **Bug:** `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`
 (`ece908f37854e557`)
-**Status:** active — shipped `40fbf565..2aecc0bf` on `experiments`. Design
-implemented per §§ 5, 8, 9, 10 below; enforced at build time by the corpus gate
-`src/server.rs::no_absolute_project_paths_in_rendered_output`.
+**Status:** active — shipped on `experiments` in the cohort beginning `40fbf565`
+(see `CHANGELOG.md` § Unreleased for the entry; the closing commits are docs and
+test hardening, so no end SHA is pinned here — one would go stale the moment a
+follow-up landed, which is the failure mode this design exists to remove).
+Implemented per §§ 5, 8, 9, 10 below. Enforced at build time by the corpus gate
+`src/server.rs::no_absolute_project_paths_in_rendered_output`, whose real scope is
+stated in § 6 — it covers the file-tool surface only.
 
-> **Reading this file through codescout's own tools will corrupt the absolute paths in
-> it.** That is the defect being fixed. Verify literals with `run_command`.
+> **This file used to carry a warning that codescout's own tools would corrupt the
+> absolute paths quoted below.** That warning was true when it was written and is
+> false now: file content is never stripped, which is exactly what this design
+> delivered. The literals here read verbatim through `read_file`, `grep`, and
+> `read_markdown`. Kept as a note rather than deleted, because the warning outliving
+> its defect would have been the same drift this document was written to end.
 
 ## 1. Problem
 

@@ -23,10 +23,14 @@ severity: high
 
 # BUG: post_process strips the project root from file CONTENT and collapses root-valued fields to ""
 
-> **Reading this file through codescout's own tools will corrupt it.** The absolute
-> paths quoted below are displayed stripped by `read_markdown` / `read_file` / `grep` —
-> that is the bug documenting itself. Verify any literal here with
-> `run_command` (exempt from stripping), e.g. `grep -n "home/marius" <this file>`.
+> **This warning is retained as history.** While the bug was live, reading this file
+> through codescout's own tools corrupted it — the absolute paths quoted below were
+> displayed stripped by `read_markdown` / `read_file` / `grep`, the bug documenting
+> itself. **That is fixed at HEAD:** file content is never stripped, so the literals
+> below now read verbatim. One caveat while promoting: a session whose MCP server
+> process predates the fix still runs the old binary and will still show the
+> corruption until `cargo rb` plus an `/mcp` reconnect. Cross-check with
+> `run_command` (`grep -n "home/marius" <this file>`) if in doubt.
 
 ## Summary
 `server::post_process` strips the `<project_root>` prefix from **all** text in a
