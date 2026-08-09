@@ -12,7 +12,6 @@
 
 use serde_json::Value;
 
-#[allow(dead_code)] // wired in by Task 2 (Tool::call_content)
 /// Keys whose values are paths to be rendered relative to the project root.
 ///
 /// **This is an ALLOWLIST and must stay one.** A key that is absent keeps its
@@ -22,6 +21,7 @@ use serde_json::Value;
 /// come back absolute, add its key here; the corpus gate in `src/server.rs`
 /// (`no_absolute_project_paths_in_rendered_output`) is what makes the omission
 /// visible.
+#[expect(dead_code, reason = "wired in by Task 2 (Tool::call_content)")]
 pub(crate) const PATH_KEYS: &[&str] = &[
     "abs_path",
     "deleted_abs_path",
@@ -40,11 +40,11 @@ pub(crate) const PATH_KEYS: &[&str] = &[
     "targets",
 ];
 
-#[allow(dead_code)] // wired in by Task 2 (Tool::call_content)
 /// Keys whose value IS a root rather than a path under one. These stay
 /// ABSOLUTE: a root is the anchor every other path is relative to, and
 /// relativizing one yields the empty string — measured 136 times across 12
 /// sessions before this change.
+#[expect(dead_code, reason = "wired in by Task 2 (Tool::call_content)")]
 pub(crate) const ROOT_KEYS: &[&str] = &[
     "cwd",
     "git_root",
@@ -55,7 +55,6 @@ pub(crate) const ROOT_KEYS: &[&str] = &[
     "root",
 ];
 
-#[allow(dead_code)] // wired in by Task 2 (Tool::call_content)
 /// Relativize every allowlisted path value in `val`, in place.
 ///
 /// `root_prefix` must end with `/`; pass `""` when no project is active and
@@ -63,10 +62,16 @@ pub(crate) const ROOT_KEYS: &[&str] = &[
 /// stops a value that *equals* the root (stored bare) from matching, which is
 /// how the same key name can mean "file path" on one node and "root" on
 /// another without the walker needing path context.
+#[expect(dead_code, reason = "wired in by Task 2 (Tool::call_content)")]
 pub(crate) fn strip_paths_in_value(val: &mut Value, root_prefix: &str) {
     if root_prefix.is_empty() {
         return;
     }
+    debug_assert!(
+        root_prefix.ends_with('/'),
+        "root_prefix must end with '/' — a slash-less prefix yields leading-slash \
+         values that the empty-string guard does not catch"
+    );
     match val {
         Value::Object(map) => {
             for (key, child) in map.iter_mut() {
@@ -88,9 +93,9 @@ pub(crate) fn strip_paths_in_value(val: &mut Value, root_prefix: &str) {
     }
 }
 
-#[allow(dead_code)] // wired in by Task 2 (Tool::call_content)
 /// Relativize a value sitting under a path key: a string, or an array of
 /// strings (`tree`'s `entries`, `reindex`'s `targets`).
+#[expect(dead_code, reason = "wired in by Task 2 (Tool::call_content)")]
 fn relativize(val: &mut Value, root_prefix: &str) {
     match val {
         Value::String(s) => {
@@ -129,10 +134,15 @@ mod tests {
     fn leaves_file_content_untouched() {
         // The reported bug: a quoted path literal inside content must survive.
         let src = "REPO = \"/home/u/proj/.worktrees/single-stage\"";
-        let mut v = json!({ "content": src, "stdout": src, "body": src, "text": src });
+        // The realistic corruption shape: a value that *begins* with the root.
+        // `relativize` only ever runs under PATH_KEYS, so `strip_prefix` never
+        // even sees this — but if the gate were gone, offset-0 matching would
+        // make this the actual failure mode (unlike the mid-string case above).
+        let leading = "/home/u/proj/src/lib.rs\n";
+        let mut v = json!({ "content": src, "stdout": leading, "body": src, "text": src });
         strip_paths_in_value(&mut v, ROOT);
         assert_eq!(v["content"], src);
-        assert_eq!(v["stdout"], src);
+        assert_eq!(v["stdout"], leading);
         assert_eq!(v["body"], src);
         assert_eq!(v["text"], src);
     }
@@ -145,6 +155,15 @@ mod tests {
         strip_paths_in_value(&mut v, ROOT);
         assert_eq!(v["path"], "/home/u/proj");
         assert_eq!(v["abs_path"], "/home/u/proj/");
+    }
+    #[test]
+    fn a_sibling_directory_sharing_the_root_as_a_prefix_is_untouched() {
+        // With the trailing slash, "/home/u/projX/..." cannot match "/home/u/proj/".
+        // Without it, strip_prefix("/home/u/proj") matches and yields "X/file.rs" —
+        // non-empty, so the empty-string guard would NOT catch the corruption.
+        let mut v = json!({ "abs_path": "/home/u/projX/file.rs" });
+        strip_paths_in_value(&mut v, ROOT);
+        assert_eq!(v["abs_path"], "/home/u/projX/file.rs");
     }
 
     #[test]
@@ -160,6 +179,13 @@ mod tests {
         assert_eq!(v["git_root"], "/home/u/proj");
         assert_eq!(v["root"], "/home/u/proj");
         assert_eq!(v["cwd"], "/home/u/proj");
+    }
+    #[test]
+    fn a_root_key_prunes_recursion_beneath_it() {
+        // The ROOT_KEYS `continue` skips the whole subtree, not just the scalar.
+        let mut v = json!({ "root": { "file": "/home/u/proj/a.rs" } });
+        strip_paths_in_value(&mut v, ROOT);
+        assert_eq!(v["root"]["file"], "/home/u/proj/a.rs");
     }
 
     #[test]
