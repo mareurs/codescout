@@ -103,8 +103,15 @@ which is precisely why it had to guess.
 allowlist exceeds roughly a dozen names with no shared naming convention — that would mean
 the keys are not a real category and the boundary is drawn on a false distinction.
 
-**Confidence:** high on boundary placement and the failure-direction inversion (§5.1);
-**medium on effort**, pending the key inventory (§8).
+**Also entailed (surfaced during planning, 2026-08-09):** `post_process` currently learns
+"something was stripped" from the strip function's return value. With the strip gone the
+banner loses its trigger, so it must fire on the first non-`run_command` response after
+activation instead. And the `run_command` strip exemption becomes **unnecessary** rather
+than preserved: `stdout` is not an allowlisted key, so raw shell output is protected by
+the allowlist itself instead of by a tool-name branch. The May 2026 fix is subsumed.
+
+**Confidence:** high — boundary placement, the failure-direction inversion (§5.1), and
+now effort too: the §8 key inventory was discharged during planning.
 
 ## 4. Chokepoint integrity
 
@@ -195,22 +202,38 @@ One per proven failure, plus the two invariants:
 | edit-failure "Nearest content" reproduces the file's real bytes | §5.3 |
 | corpus gate: no absolute roots in any rendered output | §6 |
 
-## 8. Open work — the key inventory
+## 8. Key inventory — discharged 2026-08-09
 
-**Not yet verified:** that path-keyed fields use consistent names across all tools. `grep`'s
-were inferred from a single leak sample, not enumerated. Establishing the allowlist is real
-work with a method, not a known quantity:
+Run during planning (`grep`/AST sweep of `src/tools/**` and `src/librarian/tools/**`
+for JSON keys whose value expression is a path). Result:
 
-```
-grep -n '"file"\|"path"\|"rel_path"\|"abs_path"\|"dir"' src/tools/**/*.rs
-```
-plus the librarian adapter (`src/librarian/adapter.rs`), which routes `artifact` &co
-through the default `call_content`.
+**Path keys (strip):** `abs_path`, `deleted_abs_path`, `directory`, `entries`, `file`,
+`file_path`, `main_path`, `new_abs_path`, `new_path`, `old_abs_path`, `path`,
+`prompt_path`, `rel_path`, `synthesis_prompt_path`, `targets`.
 
-If that inventory turns up more than ~a dozen distinct key names with no convention, the
-Revisit-when trigger in §3 has fired and the boundary should be re-examined before
-implementation.
+**Root keys (never strip):** `cwd`, `git_root`, `new_root`, `old_root`, `project_root`,
+`repo_root`, `root`.
 
+Two findings changed the design:
+
+- **Some path values are arrays of bare strings, not objects.** `tree`'s `entries` is
+  `["<root>/src/", …]` (`src/tools/tree.rs:265`) and `reindex`'s `targets` likewise. The
+  walker must relativize an array under a path key, not only a scalar. It also means
+  `format_list_dir` needs **no change**: given already-relative entries, its
+  `common_path_prefix` produces a relative header on its own, so the bare-root branch
+  can be deleted outright.
+- **`abs_path` is a path key on an artifact item and a ROOT key inside `scope`.** Same
+  name, two meanings, unresolvable by name alone. It resolves itself: roots are stored
+  **bare** and the prefix ends in `/`, so `"/…/codescout"` never matches
+  `"/…/codescout/"`. The trailing slash is the discriminator — and it gives §6 its exact
+  predicate (no `<root>/`; a bare `<root>` is a legitimate anchor).
+
+**Revisit-when check.** The list is 15 names, above the "roughly a dozen" figure in §3 —
+but that trigger requires *both* size **and** the absence of a shared convention. A
+convention holds: eleven of the fifteen are `*_path`/`path`, and the remainder are
+`file`, `file_path`, and the two collection keys `entries`/`targets` plus `directory`.
+The keys are a real category, so the boundary stands. Re-evaluate if a future entry
+fits none of those shapes.
 ## 9. Documentation corrections
 
 Three surfaces currently assert the opposite of the code. All are load-bearing — each is a
