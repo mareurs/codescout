@@ -70,6 +70,48 @@ const BUG_STATUSES: &[&str] = &[
     "zombie",
 ];
 
+/// Refuse an `extra` map that names a field the frontmatter already models.
+///
+/// `extra` exists for keys the schema does not know. Passing a known one — most
+/// plausibly `kind`, because bug files carry `kind: bug` and it is natural to
+/// restate it — used to emit that key twice into one YAML mapping. A duplicate key
+/// makes the block unparseable, and an unparseable block does not fail loudly: the
+/// artifact falls back to glob classification and loses its kind, status, title,
+/// owners and tags together. One live casualty, invisible for a working day.
+///
+/// Refused rather than repaired, even when the values agree. Repair-and-continue is
+/// for input whose intent is unambiguous; here the caller has said the same thing
+/// twice through two channels, and the right correction — drop it, or drop the
+/// typed parameter — is a question about what they meant, not a typo to fix.
+/// [`crate::librarian::frontmatter::write`] additionally drops these on the way out
+/// so an internal caller cannot write an unreadable file either.
+///
+/// See `docs/issues/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+pub(crate) fn reject_reserved_extra_keys(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Result<()> {
+    let clashes = crate::librarian::frontmatter::reserved_keys_in_extra(extra);
+    if clashes.is_empty() {
+        return Ok(());
+    }
+    Err(RecoverableError::with_hint(
+        format!(
+            "extra must not contain frontmatter field(s) the schema already models: {}",
+            clashes.join(", ")
+        ),
+        format!(
+            "pass {} as its own parameter instead. Reserved: {}. `extra` is for keys \
+             outside the schema (opened, closed, severity, owner, related, …).",
+            clashes
+                .iter()
+                .map(|k| format!("`{k}=`"))
+                .collect::<Vec<_>>()
+                .join(" / "),
+            crate::librarian::frontmatter::RESERVED_KEYS.join(", ")
+        ),
+    ))
+}
+
 /// Resolve the `status` for a new artifact, defaulting **per kind**.
 ///
 /// The two vocabularies are disjoint and the default used to ignore `kind`, so
@@ -160,6 +202,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         std::fs::create_dir_all(parent)?;
     }
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
+    reject_reserved_extra_keys(&a.extra)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
     let fm = Frontmatter {
         id: Some(id.clone()),
@@ -614,6 +657,43 @@ mod tests {
         assert_eq!(
             fm.extra.get("branch"),
             Some(&serde_json::json!("feature/x"))
+        );
+    }
+
+    #[tokio::test]
+    async fn create_rejects_an_extra_key_that_names_a_frontmatter_field() {
+        // `kind` is the one a caller reaches for by reflex — a bug file carries
+        // `kind: bug`, so restating it in `extra` looks like belt-and-braces. It used to
+        // write the key twice and cost the file its entire frontmatter.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "issues/x.md",
+                "kind": "bug",
+                "title": "X",
+                "body": "",
+                "extra": {"kind": "bug", "opened": "2026-08-08"}
+            }),
+        )
+        .await
+        .expect_err("a reserved key in `extra` must be refused, not written");
+
+        let msg = err.to_string();
+        assert!(msg.contains("kind"), "the error must name the clash: {msg}");
+        assert!(
+            msg.contains("own parameter"),
+            "the hint must point at the right channel: {msg}"
+        );
+
+        // Refused means refused: no half-written file left behind for a later reindex
+        // to classify from a glob.
+        assert!(
+            !tmp.path().join("issues/x.md").exists(),
+            "the artifact must not be created"
         );
     }
 

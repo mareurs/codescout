@@ -349,6 +349,31 @@ pub enum CorruptionVerdict {
     /// The post-edit AST could not be re-extracted, so NEITHER check could run.
     /// The edit stands, but it is UNVERIFIED and must never be reported as clean.
     Unverified,
+    /// The file parsed before the edit and does not parse after it — caller must roll
+    /// back. Ranked FIRST because it catches damage the name-set checks structurally
+    /// cannot see: dropping a closing delimiter loses no symbol name, so a file left
+    /// syntactically invalid was reported `Clean`.
+    SyntaxBroken,
+}
+
+/// Did this edit turn a file that parsed into one that does not?
+///
+/// The symbol-level checks in [`corruption_verdict`] compare *name sets*, so they cannot
+/// see damage that drops no name. A removal that overshot by two lines and took the
+/// closing `)` and `}` of the preceding function left the file syntactically invalid while
+/// every symbol name survived — verdict `Clean`, `status: "ok"`, no rollback. Closing
+/// delimiters are not symbols. See
+/// `docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
+///
+/// **Gated on the pre-image parsing.** Without that clause every edit to an
+/// already-broken file would be refused, which is exactly when someone is trying to
+/// repair it. The claim made here is narrow and attributable: *this edit* broke it.
+///
+/// [`crate::ast::has_syntax_errors`] returns `false` for languages with no grammar, so an
+/// unsupported file yields `false` here and nothing is refused on a guess.
+pub fn syntax_regressed(pre_source: &str, post_source: &str, lang: &str) -> bool {
+    !crate::ast::has_syntax_errors(pre_source, lang)
+        && crate::ast::has_syntax_errors(post_source, lang)
 }
 
 /// Decide the post-edit corruption verdict by comparing the pre- and post-write ASTs.
@@ -364,14 +389,51 @@ pub enum CorruptionVerdict {
 ///
 /// A failure to re-extract is now its own verdict (`Unverified`) rather than being
 /// laundered into `Clean`.
+///
+/// **Ordering is deliberate: most specific diagnosis first.** The name-set checks run
+/// ahead of `syntax_regressed` because when a symbol actually vanished, that is the
+/// cause and the broken parse is its consequence — and their messages say something
+/// actionable ("body must be the complete declaration"), where `SyntaxBroken`'s says
+/// "the range overshot", which would be a wrong diagnosis for a body-only replace.
+/// `SyntaxBroken` is the net for damage the name checks structurally CANNOT see, so it
+/// sits after them and before `Unverified`: a file that stopped parsing is often *why*
+/// re-extraction failed, and reporting only "unverified" would understate it.
 pub fn corruption_verdict(
     pre_count: usize,
     pre_set: Option<&std::collections::HashSet<String>>,
     target_ast_name_path: Option<&str>,
     counted_name_path: &str,
     post_ast: Option<&[SymbolInfo]>,
+    syntax_regressed: bool,
 ) -> CorruptionVerdict {
-    let Some(post) = post_ast else {
+    if let Some(post) = post_ast {
+        if pre_count > 0
+            && crate::symbol::query::count_symbols_by_name_path(post, counted_name_path) == 0
+        {
+            return CorruptionVerdict::TargetDropped;
+        }
+
+        if let Some(pre) = pre_set {
+            let post_set = collect_all_name_paths(post);
+            let mut dropped: Vec<String> = pre
+                .difference(&post_set)
+                .filter(|np| target_ast_name_path != Some(np.as_str()))
+                .cloned()
+                .collect();
+            if !dropped.is_empty() {
+                // HashSet::difference yields in arbitrary order; sort so the
+                // "would have dropped sibling symbols: ..." message is stable.
+                dropped.sort();
+                return CorruptionVerdict::SiblingsDropped(dropped);
+            }
+        }
+    }
+
+    if syntax_regressed {
+        return CorruptionVerdict::SyntaxBroken;
+    }
+
+    if post_ast.is_none() {
         // If the PRE-edit AST was unavailable too (e.g. unsupported language), then
         // neither check could ever have run and nothing was silently skipped — the
         // edit is as verified as it was always going to be.
@@ -380,27 +442,6 @@ pub fn corruption_verdict(
         } else {
             CorruptionVerdict::Clean
         };
-    };
-
-    if pre_count > 0
-        && crate::symbol::query::count_symbols_by_name_path(post, counted_name_path) == 0
-    {
-        return CorruptionVerdict::TargetDropped;
-    }
-
-    if let Some(pre) = pre_set {
-        let post_set = collect_all_name_paths(post);
-        let mut dropped: Vec<String> = pre
-            .difference(&post_set)
-            .filter(|np| target_ast_name_path != Some(np.as_str()))
-            .cloned()
-            .collect();
-        if !dropped.is_empty() {
-            // HashSet::difference yields in arbitrary order; sort so the
-            // "would have dropped sibling symbols: ..." message is stable.
-            dropped.sort();
-            return CorruptionVerdict::SiblingsDropped(dropped);
-        }
     }
 
     CorruptionVerdict::Clean
@@ -819,7 +860,7 @@ mod tests {
         // exactly when the file was most suspicious. A failed re-extraction must be
         // its own verdict, never laundered into Clean.
         let pre = set(&["foo", "bar"]);
-        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", None);
+        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", None, false);
         assert_eq!(
             verdict,
             CorruptionVerdict::Unverified,
@@ -832,15 +873,90 @@ mod tests {
         // If the PRE-edit AST was unavailable too (unsupported language), neither
         // check could ever have run — nothing was silently skipped, so this is not
         // an "unverified" regression, it is the normal no-AST path.
-        let verdict = corruption_verdict(0, None, None, "foo", None);
+        let verdict = corruption_verdict(0, None, None, "foo", None, false);
         assert_eq!(verdict, CorruptionVerdict::Clean);
+    }
+
+    #[test]
+    fn syntax_regression_is_the_net_under_the_name_checks_not_over_them() {
+        let pre = set(&["foo", "bar"]);
+        let survived = [sym("foo"), sym("bar")];
+
+        // The case the name-set checks structurally cannot reach: an edit that drops a
+        // closing delimiter loses no symbol NAME, so every check above returns Clean
+        // while the file no longer compiles. This is what `SyntaxBroken` exists for.
+        assert_eq!(
+            corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&survived), true),
+            CorruptionVerdict::SyntaxBroken,
+        );
+
+        // Ahead of `Unverified`: a file that stopped parsing is often WHY re-extraction
+        // failed, and "could not verify" would understate it.
+        assert_eq!(
+            corruption_verdict(1, Some(&pre), Some("foo"), "foo", None, true),
+            CorruptionVerdict::SyntaxBroken,
+        );
+
+        // But BEHIND the name checks — an ordering an existing integration test caught
+        // after the first attempt put `SyntaxBroken` first. A body-only `replace` both
+        // drops the target AND breaks the parse; reporting the syntax break tells the
+        // caller "the range overshot", which is the wrong diagnosis. `TargetDropped`
+        // tells them the body must be the complete declaration, which is the mistake
+        // they actually made.
+        let target_gone = [sym("bar")];
+        assert_eq!(
+            corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&target_gone), true),
+            CorruptionVerdict::TargetDropped,
+            "a vanished target is the cause; the broken parse is its consequence"
+        );
+        let sibling_gone = [sym("foo")];
+        assert_eq!(
+            corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&sibling_gone), true),
+            CorruptionVerdict::SiblingsDropped(vec!["bar".to_string()]),
+            "naming the lost sibling beats naming the symptom"
+        );
+
+        // Control: same inputs, syntax intact — must stay Clean, or the new check would
+        // refuse every healthy edit.
+        assert_eq!(
+            corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&survived), false),
+            CorruptionVerdict::Clean,
+        );
+    }
+
+    #[test]
+    fn syntax_regressed_blames_only_the_edit_that_broke_it() {
+        let good = "fn a() {}\nfn b() {}\n";
+        let broken = "fn a() {\nfn b() {}\n";
+
+        assert!(
+            syntax_regressed(good, broken, "rust"),
+            "parsed before, does not parse after — this edit did it"
+        );
+
+        // The control that keeps the guard usable: a file that was ALREADY broken must
+        // not have every subsequent edit refused. That is precisely when someone is
+        // repairing it.
+        assert!(
+            !syntax_regressed(broken, broken, "rust"),
+            "already-broken input must not be blamed on this edit"
+        );
+        assert!(
+            !syntax_regressed(broken, good, "rust"),
+            "an edit that FIXES the syntax is not a regression"
+        );
+        assert!(!syntax_regressed(good, good, "rust"));
+
+        // No grammar for the language → `has_syntax_errors` is false either way, so
+        // nothing is ever refused on a guess.
+        assert!(!syntax_regressed(good, broken, "brainfuck"));
     }
 
     #[test]
     fn target_dropped_when_symbol_vanishes_from_post_ast() {
         let pre = set(&["foo"]);
         let post = [sym("bar")]; // foo is gone
-        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post));
+        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post), false);
         assert_eq!(verdict, CorruptionVerdict::TargetDropped);
     }
 
@@ -852,7 +968,8 @@ mod tests {
         // the resulting error message is deterministic.
         let pre = set(&["target", "zeta", "alpha", "mid"]);
         let post = [sym("target")];
-        let verdict = corruption_verdict(1, Some(&pre), Some("target"), "target", Some(&post));
+        let verdict =
+            corruption_verdict(1, Some(&pre), Some("target"), "target", Some(&post), false);
         assert_eq!(
             verdict,
             CorruptionVerdict::SiblingsDropped(vec![
@@ -867,7 +984,7 @@ mod tests {
     fn clean_when_target_and_siblings_all_survive() {
         let pre = set(&["foo", "bar"]);
         let post = [sym("foo"), sym("bar")];
-        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post));
+        let verdict = corruption_verdict(1, Some(&pre), Some("foo"), "foo", Some(&post), false);
         assert_eq!(verdict, CorruptionVerdict::Clean);
     }
 

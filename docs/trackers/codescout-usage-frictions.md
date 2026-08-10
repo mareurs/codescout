@@ -868,6 +868,18 @@ future false-positive shape.
 
 ### U-23 — MCP server `strip_project_root_from_result` rewrites path strings, easy to misread as catalog data
 
+> **Citation note (2026-08-09):** `strip_project_root_from_result` (cited below at
+> old `src/server.rs:351`, later `:1662`) was deleted in the field-aware-path-strip
+> rework (Task 3, commit `93565509`). The mechanism it describes is historical: it
+> was a blanket textual rewrite; current stripping lives in
+> `src/tools/core/path_strip.rs`, an allowlist-driven walk over the typed `Value`
+> (`PATH_KEYS`/`ROOT_KEYS`), invoked inside `Tool::call_content` before any
+> rendering. `post_process` now only appends the once-per-activation banner —
+> on the `activate_project` response itself, not "every tool response except
+> `run_command`" as described below. See
+> `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md` and
+> `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`.
+
 **When:** Stability backlog task #69 (`librarian doctor`) extensive
 smoke-test phase, session 2026-05-25 (this conversation). Discovered
 when verifying the doctor output against the live catalog post-rebuild.
@@ -946,6 +958,17 @@ behavior does Y" cases.
 
 
 ### U-24 — `strip_project_root_from_result` docstring lies about how buffer content is covered
+
+> **Citation note (2026-08-09):** `strip_project_root_from_result` and
+> `strip_prefix_from_text` (cited below at old `src/server.rs:1311-1313`/`:352`,
+> later `:1662`/`:1702`) were both deleted in the field-aware-path-strip rework
+> (Task 3, commit `93565509`) — the docstring this entry corrects no longer exists
+> to be wrong. Current stripping is field-aware and allowlist-driven, in
+> `src/tools/core/path_strip.rs`; buffer re-reads (`read_file(@tool_xxx, ...)`,
+> `grep ... @tool_xxx`) already see already-relativized values because the walk
+> runs once, inside `Tool::call_content`, before the buffer payload is built —
+> not because a second pass re-strips them on read. See
+> `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`.
 
 **When:** 2026-05-25 verify-open recon pass after the U-23 fix shipped.
 Investigating the question "does the annotation survive @tool buffer

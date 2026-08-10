@@ -916,3 +916,161 @@ mod availability_tests {
         assert!(Availability::Always.is_available(&off));
     }
 }
+
+async fn rooted_ctx(root: &std::path::Path) -> ToolContext {
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    ToolContext {
+        agent: crate::agent::Agent::new(Some(root.to_path_buf()))
+            .await
+            .unwrap(),
+        lsp: crate::lsp::LspManager::new_arc(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    }
+}
+
+/// Like `EchoTool`, but its compact summary is DERIVED from the result it is
+/// handed. `EchoTool::format_compact` ignores its `_result` argument and
+/// returns a stored string, so it cannot detect whether the value was stripped
+/// before or after the summary was built — which is exactly the ordering this
+/// test exists to pin.
+struct SummarizingEchoTool {
+    result: serde_json::Value,
+}
+
+#[async_trait::async_trait]
+impl Tool for SummarizingEchoTool {
+    fn name(&self) -> &str {
+        "summarizing_echo_tool"
+    }
+    fn description(&self) -> &str {
+        "test"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(self.result.clone())
+    }
+    fn format_compact(&self, result: &serde_json::Value) -> Option<String> {
+        let first = result["matches"][0]["file"].as_str().unwrap_or("?");
+        Some(format!("200 matches\n\nfirst: {first}"))
+    }
+}
+
+#[tokio::test]
+async fn call_content_relativizes_path_keys_but_not_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let ctx = rooted_ctx(&root).await;
+    let root_fwd = crate::util::fs::to_forward_slash(&root);
+
+    let literal = format!("REPO = \"{root_fwd}/.worktrees/single-stage\"");
+    let tool = EchoTool {
+        result: serde_json::json!({
+            "file": format!("{root_fwd}/src/lib.rs"),
+            "content": literal,
+            "project_root": root_fwd,
+        }),
+        user_summary: None,
+    };
+
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+
+    assert!(
+        text.contains("\"src/lib.rs\""),
+        "path key must relativize: {text}"
+    );
+    // Substring-match against the raw rendered text won't work here: `literal`
+    // contains embedded `"` characters, and JSON string encoding always
+    // backslash-escapes those in the serialized text, so the raw bytes of
+    // `literal` never appear verbatim in `text` even when the value is
+    // perfectly preserved. Parse back and compare the Value instead — that's
+    // what "byte-identical content" actually means for a JSON-carried string.
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("primary block must be JSON");
+    assert_eq!(
+        parsed["content"].as_str(),
+        Some(literal.as_str()),
+        "file CONTENT must survive byte-identical: {text}"
+    );
+    assert!(
+        text.contains(&format!("\"project_root\": \"{root_fwd}\"")),
+        "root-valued field must stay absolute, never \"\": {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_content_buffered_summary_is_built_from_the_stripped_value() {
+    // Pins the ordering invariant: strip runs BEFORE format_compact builds the
+    // buffer summary. Reversed, absolute paths escape through the serialized
+    // envelope — 85% of the leaks measured before this change.
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let ctx = rooted_ctx(&root).await;
+    let root_fwd = crate::util::fs::to_forward_slash(&root);
+
+    // 500, not the 200 an unstripped-size estimate would suggest: the whole
+    // point of this test is that `exceeds_inline_limit` now runs on the
+    // ALREADY-STRIPPED json, so the item count must be big enough to clear
+    // the 10 KB threshold using short relative paths, not long absolute ones
+    // (a tmp dir under a short `/tmp` mount makes 200 fall back under budget).
+    let items: Vec<serde_json::Value> = (0..500)
+        .map(|i| serde_json::json!({ "file": format!("{root_fwd}/src/f_{i}.rs"), "line": i }))
+        .collect();
+    let tool = SummarizingEchoTool {
+        result: serde_json::json!({ "matches": items }),
+    };
+
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+
+    assert!(
+        text.contains("@tool_"),
+        "test data must exceed the inline budget: {text}"
+    );
+    assert!(
+        text.contains("first: src/f_0.rs"),
+        "format_compact must have observed the STRIPPED value: {text}"
+    );
+    assert!(
+        !text.contains(&format!("{root_fwd}/src/")),
+        "no absolute project path may survive into the buffered envelope: {text}"
+    );
+
+    // The envelope alone isn't enough: a mutation that strips the summary but
+    // leaves the *stored* @tool_* payload unstripped would pass every
+    // assertion above, since the payload itself never appears in `text`. Read
+    // the buffer back and check the payload directly — this is the one
+    // surface the legacy `server::post_process` text-level strip never
+    // covered, so it has no fallback if this wiring regresses.
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("envelope must be JSON");
+    let output_id = parsed["output_id"]
+        .as_str()
+        .expect("envelope must carry output_id");
+    let buffered_payload = ctx
+        .output_buffer
+        .get(output_id)
+        .expect("output_id must resolve in the buffer")
+        .stdout;
+    assert!(
+        !buffered_payload.contains(&format!("{root_fwd}/")),
+        "the stored @tool_* payload must itself be stripped, not just the envelope: {buffered_payload}"
+    );
+}

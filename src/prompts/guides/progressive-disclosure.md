@@ -51,15 +51,31 @@ the handle to acknowledge and proceed.
 
 ## Path-relative annotation
 
-Every non-`run_command` tool response that contains paths under the
-active project root carries a trailing `[codescout] paths are relative
-to <root>` note. Paths in the response body are project-relative;
-prepend `<root>` mentally for absolute resolution. `run_command` output
-is exempt (raw shell bytes; stripping would corrupt path literals) and
-never carries the annotation. The catalog stores absolute paths;
-the strip layer is a display-time transform — when verifying tool
-output against catalog state, prefer reading the buffer directly
-(`read_file(@tool_xxx, json_path=...)`) on a known-absolute field.
+Paths in tool responses are project-relative. The response to each
+`activate_project` call carries a trailing `[codescout] paths are relative
+to <root>` note naming the root they resolve against; every later response
+in that activation window omits it, because the same fact lives in the
+`Active project` line of `server_instructions`. The gate also fires on the
+first eligible response after **server start**, not only after an explicit
+`activate_project` call — launching codescout with `--project <path>`
+(`src/main.rs:23-25`) activates a project before any tool call, so that
+first response carries the banner too.
+
+Relativization is **field-aware and allowlist-driven**: only keys in a
+fixed list of path-valued JSON fields (`PATH_KEYS`) are relativized — a
+key outside that allowlist keeps its absolute path by design (verbose,
+never corrupt; do not assume every path-looking field in a response is
+relative). It never touches file content, shell output, prose, or error
+text — all byte-faithful. Root-valued fields (`ROOT_KEYS`: `cwd`,
+`git_root`, `new_root`, `old_root`, `project_root`, `repo_root`, `root`)
+stay absolute — they are the anchor the rest resolve against. The catalog
+itself always stores absolute paths; this is a display-time transform,
+not a change to what's on disk.
+
+To check a path against catalog state, read the value straight from the
+response — an allowlisted path field is relative, a root field absolute,
+and content is verbatim. `run_command` output is raw shell bytes and is
+never rewritten.
 
 ## Anti-patterns
 

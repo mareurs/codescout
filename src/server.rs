@@ -11,7 +11,7 @@ use axum::response::IntoResponse;
 use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, Content, ListToolsResult, PaginatedRequestParams,
-        RawContent, ServerCapabilities, ServerInfo, Tool as McpTool,
+        ServerCapabilities, ServerInfo, Tool as McpTool,
     },
     service::RequestContext,
     ErrorData as McpError, Peer, RoleServer, ServerHandler, ServiceExt,
@@ -109,17 +109,25 @@ pub struct CodeScoutServer {
     /// has been emitted since the last activation. Replaces the per-session cap
     /// (`_path_note_count`) that the U-23 fix removed.
     ///
-    /// Gate logic (`post_process`): emit only on the FIRST stripped response
-    /// since (a) server start or (b) a successful `activate_project`. The
-    /// activation reset is wired in the `is_activate` branch of `call_tool`
-    /// alongside `refresh_resources` / `refresh_instructions`.
+    /// Gate logic (`post_process`): emit only on the FIRST eligible response
+    /// (tool is not `run_command` and a project root resolves) since (a)
+    /// server start or (b) a successful `activate_project`. The activation
+    /// reset is wired into `call_tool_inner`, immediately before THAT SAME
+    /// call's own `post_process` invocation — not into the `is_activate`
+    /// branch of `call_tool` (which runs `refresh_resources` /
+    /// `refresh_instructions` after `call_tool_inner` returns, i.e. after
+    /// this same activate response already went through `post_process`).
+    /// Resetting there instead of here doubled the banner: the activate
+    /// response would consume the gate, then that later reset would re-arm
+    /// it in the same breath, so the very next ordinary response fired the
+    /// banner again.
     ///
     /// Why a per-activation gate, not the U-23 "every-call" cadence: the
     /// cold-reader signal U-23 protected (later tools rewriting paths look
     /// like raw catalog data) is now carried by the **Active project** +
     /// **Worktree** lines in `build_server_instructions`, which compaction
     /// preserves as system-prompt content. The per-response annotation
-    /// becomes redundant after the first stripped call. See U-25 in
+    /// becomes redundant after the first eligible call. See U-25 in
     /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
     /// `docs/issues/2026-05-28-path-annotation-spam.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
@@ -510,70 +518,49 @@ impl CodeScoutServer {
         }
     }
 
-    /// Strip the absolute project root from all output to reduce token usage.
-    /// Agents work exclusively within the project directory; relative paths
-    /// carry all necessary information. The full root (e.g. /home/user/project)
-    /// is a long repeated prefix that appears in every "file" field and error
-    /// message. `run_command` is exempt — its stdout is raw shell output where
-    /// stripping would corrupt path literals (see the path-literals bug file),
-    /// so @tool_xxx buffer content surfaced via run_command is left verbatim.
+    /// Append the once-per-activation `[codescout] paths are relative to <root>`
+    /// banner.
     ///
-    /// `workspace_override` MUST be the same pin the tool body resolved against.
-    /// Stripping against the session-default root while the tool emitted paths
-    /// under a *pinned* root strips nothing and annotates the wrong root — a
-    /// cross-workspace absolute-path leak (see
-    /// `docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
-    /// finding 2).
+    /// This method no longer transforms result text. Project-root stripping is
+    /// field-aware and happens upstream, on the typed `Value`, inside
+    /// `Tool::call_content` — see `src/tools/core/path_strip.rs`. Doing it here,
+    /// on rendered text, meant guessing from a one-character lookbehind: it
+    /// stripped path literals out of file content and collapsed root-valued
+    /// fields to `""`
+    /// (docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md).
+    ///
+    /// `run_command` needs no special case any more. Its payload is
+    /// `{"exit_code", "stdout", ...}` and `stdout` is not an allowlisted path
+    /// key, so raw shell bytes are left verbatim by the allowlist itself
+    /// rather than by a tool-name branch. It is excluded here only from the
+    /// banner, which would be noise on raw shell output.
     async fn post_process(
         &self,
-        call_result: CallToolResult,
+        mut call_result: CallToolResult,
         tool_name: &str,
         workspace_override: Option<&std::path::Path>,
     ) -> CallToolResult {
-        let root_prefix = self
-            .agent
-            .project_root_for(workspace_override)
-            .await
-            .map(|p| format!("{}/", to_forward_slash(&p)))
-            .unwrap_or_default();
-
-        // `run_command` returns raw, byte-faithful shell stdout. Stripping the
-        // project-root prefix there silently rewrites absolute path *literals*
-        // (e.g. `readlink`, `ls -l <symlink>`, `realpath`, `pwd` output) into
-        // strings that read as relative, changing their meaning — see
-        // docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md.
-        // Restrict stripping to tools whose output is codescout's own structured
-        // content (file/path fields, error messages), where the prefix is
-        // genuinely redundant noise.
-        let should_strip = tool_name != "run_command";
-        let (mut call_result, stripped) = if should_strip {
-            strip_project_root_from_result(call_result, &root_prefix)
-        } else {
-            (call_result, false)
+        if tool_name == "run_command" {
+            return call_result;
+        }
+        let Some(root) = self.agent.project_root_for(workspace_override).await else {
+            return call_result;
         };
 
-        // Novelty-gated annotation — emit only the FIRST stripped response since
-        // server start or the last `activate_project`. Replaces the per-call
-        // cadence the U-23 fix introduced. Subsequent stripped responses skip
-        // the annotation; the agent already has the "paths are relative to
-        // <root>" signal from the `Active project` line in server_instructions
-        // (built by `build_server_instructions`), which survives compaction
-        // because it lives in the system-prompt slot, not in tool output.
-        //
-        // Reset point: `call_tool` flips the bool back to false in the
-        // `is_activate` branch so the next activation re-emits the banner with
-        // the new root. See [`path_note_emitted_since_activation`] for the
-        // full rationale.
-        if stripped {
-            let already_emitted = self
-                .path_note_emitted_since_activation
-                .swap(true, std::sync::atomic::Ordering::Relaxed);
-            if !already_emitted {
-                let root = root_prefix.trim_end_matches('/');
-                call_result.content.push(Content::text(format!(
-                    "\n[codescout] paths are relative to {root}"
-                )));
-            }
+        // Novelty-gated: emit only the FIRST eligible response since server
+        // start or the last `activate_project`. `call_tool_inner` resets the
+        // flag right before this very call, for any `workspace(activate)`
+        // request — matched on request shape only, regardless of whether the
+        // call actually succeeds — so the reset can never lag behind this
+        // method's own read of it. See [`path_note_emitted_since_activation`].
+        let already_emitted = self
+            .path_note_emitted_since_activation
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        if !already_emitted {
+            let root = to_forward_slash(&root);
+            call_result.content.push(Content::text(format!(
+                "\n[codescout] paths are relative to {root}"
+            )));
         }
         call_result
     }
@@ -803,6 +790,23 @@ impl CodeScoutServer {
             "tool_done"
         );
 
+        // A `workspace(activate)` request resets the path-annotation novelty
+        // gate HERE, right before this same call's own `post_process` below —
+        // not afterward, in `call_tool`'s `is_activate` branch (the old
+        // location). Resetting afterward meant this activate response would
+        // consume the gate via `post_process`, then get it re-armed one line
+        // later in the caller, so the very next ordinary response fired the
+        // banner again — two banners per activation. Detected from
+        // `input_for_record` rather than `req.arguments` because the latter
+        // was already moved into `input` above; `input_for_record` is the
+        // untouched clone `record_content` only borrowed.
+        if req.name == "workspace"
+            && input_for_record.get("action").and_then(|v| v.as_str()) == Some("activate")
+        {
+            self.path_note_emitted_since_activation
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+
         let call_result = self
             .post_process(call_result, &req.name, ctx.workspace_override.as_deref())
             .await;
@@ -1005,12 +1009,15 @@ impl ServerHandler for CodeScoutServer {
             self.refresh_resources().await;
             self.refresh_instructions().await;
 
-            // Reset the path-annotation novelty gate so the next stripped
-            // response re-emits `[codescout] paths are relative to <root>`
-            // with the new project's root. Pairs with the bool's docstring
-            // on `path_note_emitted_since_activation`.
-            self.path_note_emitted_since_activation
-                .store(false, std::sync::atomic::Ordering::Relaxed);
+            // The path-annotation novelty-gate reset for this activation
+            // already happened inside `call_tool_inner`, right before ITS OWN
+            // `post_process` call — not here. Resetting here (after
+            // `call_tool_inner` had already returned, i.e. after this same
+            // activate response had already been through `post_process`)
+            // used to double-fire the banner: once on the activate response,
+            // then again on the very next ordinary response once this line
+            // re-armed the gate. See the docstring on
+            // `path_note_emitted_since_activation`.
         }
 
         Ok(result)
@@ -1626,122 +1633,6 @@ pub async fn run(
     }
 }
 
-/// Strips the absolute project root prefix from all text content blocks in a
-/// `CallToolResult`. This normalises tool output to relative paths, reducing
-/// token usage — the prefix (e.g. `"/home/user/work/project/"`) is identical
-/// in every response and carries no information since agents always operate
-/// within the project directory.
-///
-/// `root_prefix` must end with `/`. Pass an empty string when no project is
-/// active; the replace becomes a no-op.
-///
-/// Returns `(result, stripped)` where `stripped` is true when at least one
-/// content block was modified. The caller appends a disambiguation note to
-/// every stripped response (see `post_process`) so agents can tell stripped
-/// absolute paths apart from genuine relative path values in tool content.
-///
-/// **Stripping heuristic**: only occurrences preceded by a non-path character
-/// (e.g. `"`, ` `, `:`, `\n`) or at the very start of the text are replaced.
-/// This avoids mangling embedded path literals inside file content where the
-/// project root happens to appear mid-string (e.g. inside a test assertion).
-///
-/// Note: values like `"project_root": "/abs/path"` in `activate_project` /
-/// `get_config` responses are intentionally not stripped — they use a bare
-/// absolute path without a trailing slash, so they do not match `root_prefix`
-/// and pass through unchanged.
-///
-/// Buffer content (`@tool_xxx` refs) is covered automatically: every
-/// non-`run_command` tool's output passes through `post_process`, which
-/// strips and annotates — including subsequent `read_file(@tool_xxx, ...)`,
-/// `grep PATTERN @tool_xxx`, or any other tool that re-reads the buffer
-/// content. `run_command @tool_xxx` is the only re-read path that bypasses
-/// stripping, by design (its output is raw shell bytes; see the
-/// path-literals bug file). The buffer FILE itself contains raw
-/// unstripped content — that's intentional (the file is an internal
-/// artifact, not user-facing output).
-fn strip_project_root_from_result(
-    mut result: CallToolResult,
-    root_prefix: &str,
-) -> (CallToolResult, bool) {
-    if root_prefix.is_empty() {
-        return (result, false);
-    }
-    debug_assert!(
-        root_prefix.ends_with('/'),
-        "root_prefix must end with '/' to avoid stripping partial path components"
-    );
-    let mut stripped = false;
-    for block in &mut result.content {
-        if let RawContent::Text(ref mut t) = block.raw {
-            let new_text = strip_prefix_from_text(&t.text, root_prefix);
-            if new_text != t.text {
-                stripped = true;
-                t.text = new_text;
-            }
-        }
-    }
-    (result, stripped)
-}
-
-/// Replace occurrences of `prefix` in `text` only when they appear in a
-/// path-value context — i.e. preceded by a non-path character or at the start
-/// of the string. This avoids stripping the prefix when it appears embedded
-/// inside longer strings such as code literals or comments.
-///
-/// A "path character" here means anything that could legitimately precede a
-/// path component: `/`, alphanumerics, `-`, `_`, `.`. Everything else (quotes,
-/// spaces, colons, brackets, newlines…) signals a value boundary.
-///
-/// Also strips the BARE root (no trailing slash) — the shape `format_list_dir`
-/// emits when the project root is the sole common prefix of a listing, which
-/// the slash-suffixed match below can never see at all. The bare form needs an
-/// explicit RIGHT-boundary check that the slash-suffixed form gets for free
-/// from its own trailing `/`: without it, `<root>` would also match the start
-/// of an unrelated longer path that merely shares it as a prefix, e.g.
-/// `<root>-backup/foo`.
-fn strip_prefix_from_text(text: &str, prefix: &str) -> String {
-    let bare = prefix.trim_end_matches('/');
-    if bare.is_empty() {
-        return text.to_string();
-    }
-    let mut result = String::with_capacity(text.len());
-    let mut last = 0;
-    for (pos, _) in text.match_indices(bare) {
-        // A longer slash-suffixed match earlier in the loop may have already
-        // consumed past this position (`bare` is a substring of `prefix`, so
-        // match_indices(bare) can report an occurrence that starts inside an
-        // already-stripped slash-suffixed match).
-        if pos < last {
-            continue;
-        }
-        let is_left_boundary = pos == 0
-            || {
-                // SAFETY: pos is a byte offset from match_indices, so text[..pos] is valid UTF-8.
-                // next_back() returns the last char before the match.
-                let prev = text[..pos].chars().next_back();
-                !matches!(prev, Some(c) if c == '/' || c == '.' || c == '-' || c == '_' || c.is_ascii_alphanumeric())
-            };
-        if !is_left_boundary {
-            continue;
-        }
-        let match_len = if text[pos..].starts_with(prefix) {
-            prefix.len()
-        } else {
-            let after = pos + bare.len();
-            let next_is_path_char = text[after..].chars().next().is_some_and(|c| {
-                c == '/' || c == '.' || c == '-' || c == '_' || c.is_ascii_alphanumeric()
-            });
-            if next_is_path_char {
-                continue;
-            }
-            bare.len()
-        };
-        result.push_str(&text[last..pos]);
-        last = pos + match_len;
-    }
-    result.push_str(&text[last..]);
-    result
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2633,7 +2524,16 @@ mod tests {
     #[tokio::test]
     async fn call_tool_strips_project_root_from_output() {
         let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
+        // Canonicalize like `Agent::new` does (src/agent/mod.rs:389) before any
+        // path is rendered. On macOS `tempfile::tempdir()` returns a `/var/...`
+        // path while production renders the canonicalized `/private/var/...`
+        // form, so a needle built from the raw tempdir path can never match —
+        // making `!text.contains(&root)` vacuously true. See the `canonical`
+        // helper documented at src/agent/mod.rs:1775-1777.
+        let root = std::fs::canonicalize(dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
 
         let req = CallToolRequestParams::new("tree")
             .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
@@ -2657,18 +2557,25 @@ mod tests {
             "Expected absolute root to be stripped, but found it in output:\n{text}"
         );
     }
-    /// Regression (2026-07-18-tree-strip-bare-root-not-stripped): when the
+    /// Regression (2026-07-18-tree-strip-bare-root-not-stripped): when a
     /// listing's sole common prefix IS the project root, `format_list_dir`
-    /// displays it WITHOUT a trailing slash (`dir_display =
-    /// prefix.trim_end_matches('/')`) — a shape `call_tool_strips_project_root_
-    /// from_output` above never exercises because `make_server`'s tempdir has
-    /// no visible top-level entries (only the hidden `.codescout/`), so that
-    /// listing short-circuits to "(empty directory)" before the bare-root
-    /// prefix ever renders.
+    /// renders that prefix WITHOUT a trailing slash. The old text strip needed
+    /// a dedicated bare-root branch to catch that shape; field-aware stripping
+    /// does not, because `entries` is allowlisted, so `common_path_prefix` runs
+    /// over already-relative names and `dir_display` collapses to ".". This
+    /// test guards the rendered outcome, which is unchanged — `make_server`'s
+    /// tempdir needs a visible top-level entry or the listing short-circuits to
+    /// "(empty directory)" and exercises nothing.
     #[tokio::test]
     async fn call_tool_strips_bare_project_root_from_list_dir_output() {
         let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
+        // Canonicalize like `Agent::new` does (src/agent/mod.rs:389) — see the
+        // sibling test above for why a needle built from the raw tempdir path
+        // is vacuous on macOS.
+        let root = std::fs::canonicalize(dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         std::fs::write(dir.path().join("visible.txt"), "hello").unwrap();
 
         let req = CallToolRequestParams::new("tree")
@@ -2694,6 +2601,123 @@ mod tests {
             "Expected absolute root to be stripped even in its bare (no trailing \
              slash) form, but found it in output:\n{text}"
         );
+    }
+
+    #[tokio::test]
+    async fn no_absolute_project_paths_in_rendered_output() {
+        // The PATH_KEYS allowlist in src/tools/core/path_strip.rs is a co-change
+        // contract. This gate is what enforces it: a tool emitting paths under a
+        // key nobody added fails here instead of silently costing tokens forever.
+        //
+        // Liveness guard: four of these five cases are vacuous *today* — `read_file`
+        // and `read_markdown` never echo a path key at all, `symbols` pre-relativizes
+        // inside the tool, and `tree` is masked by its own `common_path_prefix`. Only
+        // `grep` can actually fail the negative assertion below right now. That is
+        // fine — this gate is a forward-looking canary for keys added later — but a
+        // canary with only a negative assertion cannot report its own death: if a
+        // case stops reaching its tool (error envelope, empty text, wrong branch),
+        // `!joined.contains(&needle)` passes silently and the gate advertises safety
+        // it no longer provides. Each case therefore also asserts a positive token
+        // that only appears if the tool actually ran and rendered real content.
+        let (dir, server) = make_server().await;
+        // Canonicalize before building the needle, matching `Agent::new`
+        // (src/agent/mod.rs:389) — production always renders paths derived
+        // from the canonicalized root, so the needle must be built the same
+        // way or this gate is structurally inert on macOS (tempdir() yields
+        // `/var/...` there while production renders `/private/var/...`; see
+        // src/agent/mod.rs:1772-1777 and the `canonical` test helper).
+        let root_fwd = to_forward_slash(&std::fs::canonicalize(dir.path()).unwrap());
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "pub fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("notes.md"), "# Notes\n\nbody\n").unwrap();
+
+        let cases: Vec<(&str, serde_json::Value, &str)> = vec![
+            ("tree", serde_json::json!({ "path": "." }), "notes.md"),
+            ("grep", serde_json::json!({ "pattern": "pub fn" }), "pub fn"),
+            (
+                "read_file",
+                serde_json::json!({ "path": "src/lib.rs" }),
+                "pub fn a",
+            ),
+            (
+                "read_markdown",
+                serde_json::json!({ "path": "notes.md" }),
+                "Notes",
+            ),
+            (
+                "symbols",
+                serde_json::json!({ "path": "src/lib.rs" }),
+                "Function",
+            ),
+        ];
+
+        let needle = format!("{root_fwd}/");
+        for (tool, input, expect_token) in cases {
+            let req = CallToolRequestParams::new(tool)
+                .with_arguments(serde_json::from_value(input).unwrap());
+            let result = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            let joined: String = result
+                .content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains(expect_token),
+                "tool `{tool}` did not render its expected content (`{expect_token}`) — \
+                 this case has stopped exercising the tool (error envelope, empty \
+                 output, or wrong branch), so the absence check below would pass \
+                 silently and the gate would advertise safety it no longer provides. \
+                 Output:\n{joined}"
+            );
+            assert!(
+                !joined.contains(&needle),
+                "tool `{tool}` leaked an absolute project path. Either its path key \
+                 is missing from PATH_KEYS in src/tools/core/path_strip.rs, or it \
+                 introduced a new one. Output:\n{joined}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_and_grep_show_a_path_literal_in_content_verbatim() {
+        let (dir, server) = make_server().await;
+        // Canonicalize before building the needle-adjacent literal — see
+        // `no_absolute_project_paths_in_rendered_output` above for why the
+        // raw tempdir path is the wrong thing to render from (macOS
+        // /var/... vs production's canonicalized /private/var/...).
+        let root_fwd = to_forward_slash(&std::fs::canonicalize(dir.path()).unwrap());
+        let literal = format!("REPO = \"{root_fwd}/.worktrees/single-stage\"");
+        std::fs::write(dir.path().join("probe.txt"), format!("{literal}\n")).unwrap();
+
+        for (tool, input) in [
+            ("read_file", serde_json::json!({ "path": "probe.txt" })),
+            (
+                "grep",
+                serde_json::json!({ "pattern": "REPO", "path": "probe.txt" }),
+            ),
+        ] {
+            let req = CallToolRequestParams::new(tool)
+                .with_arguments(serde_json::from_value(input).unwrap());
+            let result = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            let joined: String = result
+                .content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains(&literal),
+                "`{tool}` must show the file's path literal verbatim — an edit keyed \
+                 on this text has to match the bytes on disk. Got:\n{joined}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2747,24 +2771,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_process_strips_and_annotates_against_the_pinned_root() {
-        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
-        // finding 2): post_process resolved the strip prefix via the plain,
-        // unpinned project_root(). Under a `workspace=` pin the tool body emits
-        // paths under workspace A, but post_process stripped against the
-        // session-default B — so A's ABSOLUTE paths survived into the response
-        // (a cross-workspace path leak) and the "paths are relative to" banner
-        // named the wrong root.
+    async fn post_process_annotates_against_the_pinned_root_without_mutating_text() {
+        // post_process no longer strips — stripping moved to Tool::call_content.
+        // What survives here is the banner, which must still name the PINNED
+        // root rather than the session default.
         let dir_a = tempdir().unwrap();
         let (_dir_b, server) = make_server().await;
         std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
         let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
         let root_a_fwd = to_forward_slash(&root_a);
 
-        // A payload shaped like a pinned tool's output: paths under workspace A.
-        let payload = CallToolResult::success(vec![Content::text(format!(
-            "{{\"file\": \"{root_a_fwd}/src/lib.rs\"}}"
-        ))]);
+        let literal = format!("REPO = \"{root_a_fwd}/.worktrees/x\"");
+        let payload = CallToolResult::success(vec![Content::text(literal.clone())]);
 
         let processed = server
             .post_process(payload, "read_file", Some(&root_a))
@@ -2777,17 +2795,12 @@ mod tests {
             .join("\n");
 
         assert!(
-            !joined.contains(&format!("{root_a_fwd}/src/lib.rs")),
-            "the PINNED root must be stripped from the response; A's absolute \
-             path leaked through: {joined}"
-        );
-        assert!(
-            joined.contains("\"file\": \"src/lib.rs\""),
-            "path must be rewritten relative to the pinned root A; got: {joined}"
+            joined.contains(&literal),
+            "post_process must not mutate result text at all; got: {joined}"
         );
         assert!(
             joined.contains(&format!("paths are relative to {root_a_fwd}")),
-            "the banner must name the PINNED root A, not the session default; got: {joined}"
+            "the banner must name the PINNED root A; got: {joined}"
         );
     }
 
@@ -2999,11 +3012,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stripped_responses_emit_paths_relative_annotation_once_per_activation() {
+    async fn responses_emit_paths_relative_annotation_once_per_activation() {
         // Novelty-gated annotation (replaces the U-23 "every-call" cadence):
         // post_process emits `[codescout] paths are relative to <root>` only on
-        // the FIRST stripped response since server start or the last
-        // `activate_project`. Subsequent stripped responses skip the
+        // the FIRST eligible response since server start or the last
+        // `activate_project`. Subsequent eligible responses skip the
         // annotation — the agent already carries the signal via the
         // `Active project` line in `build_server_instructions`, which
         // compaction preserves in the system-prompt slot.
@@ -3031,7 +3044,7 @@ mod tests {
             ))])
         };
 
-        // First stripped response — annotation MUST appear.
+        // First eligible response — annotation MUST appear.
         let first = server.post_process(make_payload(), "read_file", None).await;
         let joined: String = first
             .content
@@ -3041,10 +3054,10 @@ mod tests {
             .join("\n");
         assert!(
             joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
-            "first stripped response must carry the annotation, got:\n{joined}"
+            "first eligible response must carry the annotation, got:\n{joined}"
         );
 
-        // Subsequent stripped responses across multiple tool names — annotation
+        // Subsequent eligible responses across multiple tool names — annotation
         // MUST NOT re-appear within the same activation window.
         for tool_name in ["read_file", "tree", "symbols", "librarian", "grep"] {
             let processed = server.post_process(make_payload(), tool_name, None).await;
@@ -3063,8 +3076,8 @@ mod tests {
         // Negative case: run_command is exempt from stripping, so the
         // annotation must NOT be appended even when its payload happens to
         // contain the project root. Independent of the novelty gate — the
-        // run_command branch in post_process skips the strip+annotate path
-        // entirely.
+        // run_command branch in post_process returns immediately, before the
+        // gate or the banner are ever consulted.
         let processed = server
             .post_process(make_payload(), "run_command", None)
             .await;
@@ -3079,8 +3092,9 @@ mod tests {
             "run_command must not get the annotation (its raw stdout is left unstripped), got:\n{joined}"
         );
 
-        // Activation reset: flipping the gate manually (as `call_tool` does in
-        // its `is_activate` branch) must restore single-shot emission.
+        // Activation reset: flipping the gate manually (as `call_tool_inner` does,
+        // right before its own `post_process` call, for a `workspace(activate)`
+        // request) must restore single-shot emission.
         server
             .path_note_emitted_since_activation
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -3093,7 +3107,88 @@ mod tests {
             .join("\n");
         assert!(
             joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
-            "post-activation reset: next stripped response must re-emit the annotation, got:\n{joined}"
+            "post-activation reset: next eligible response must re-emit the annotation, got:\n{joined}"
+        );
+    }
+
+    #[tokio::test]
+    async fn activation_and_the_next_two_calls_carry_the_banner_exactly_once() {
+        // Regression (fix round 1 on the field-aware-path-strip Task 3 review):
+        // the novelty gate used to get reset AFTER call_tool_inner returned, in
+        // call_tool's `is_activate` branch — which runs after THIS SAME activate
+        // response had already been through call_tool_inner's own post_process
+        // call. That let the activate response consume the gate via
+        // post_process, then the later reset re-armed it in the same breath, so
+        // the very next ordinary response fired the banner again — two banners
+        // per activation. Fixed by resetting the gate inside call_tool_inner,
+        // right before ITS OWN post_process call, whenever the call itself is
+        // a `workspace(activate)` request (matched on request shape only,
+        // regardless of outcome). This test goes through
+        // call_tool_inner (not post_process directly, unlike the test above) so
+        // it actually exercises that ordering.
+        let (dir, server) = make_server().await;
+
+        let activate_req = CallToolRequestParams::new("workspace").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "action": "activate",
+                "path": dir.path().to_string_lossy(),
+            }))
+            .unwrap(),
+        );
+        let activate_result = server
+            .call_tool_inner(
+                activate_req,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let tree_req_1 = CallToolRequestParams::new("tree")
+            .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
+        let tree_result_1 = server
+            .call_tool_inner(
+                tree_req_1,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let tree_req_2 = CallToolRequestParams::new("tree")
+            .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
+        let tree_result_2 = server
+            .call_tool_inner(
+                tree_req_2,
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let banner = "[codescout] paths are relative to";
+        let carries_banner = |r: &CallToolResult| {
+            r.content
+                .iter()
+                .any(|c| c.as_text().is_some_and(|t| t.text.contains(banner)))
+        };
+        let flags = [
+            carries_banner(&activate_result),
+            carries_banner(&tree_result_1),
+            carries_banner(&tree_result_2),
+        ];
+
+        assert_eq!(
+            flags.iter().filter(|f| **f).count(),
+            1,
+            "exactly one of the activate response and the next two ordinary \
+             responses must carry the banner; activate={}, tree_1={}, tree_2={}",
+            flags[0],
+            flags[1],
+            flags[2],
         );
     }
 
@@ -3143,6 +3238,58 @@ mod tests {
         stdout.contains(&abs),
         "run_command stdout must keep the absolute project path verbatim.\n  expected substring: {abs}\n  actual stdout: {stdout}"
     );
+    }
+
+    #[tokio::test]
+    async fn edit_failure_hint_reproduces_the_files_real_bytes() {
+        // The "Nearest content" hint (src/tools/edit_file/mod.rs:196) embeds RAW
+        // file bytes. Before this change it returned through the same strip as
+        // read_file, so a path literal was rewritten identically in both and the
+        // mismatch could not be falsified from inside the session.
+        let (dir, server) = make_server().await;
+        let root_fwd = to_forward_slash(dir.path());
+        let literal = format!("REPO = \"{root_fwd}/.worktrees/single-stage\"");
+        // A leading anchor line is required: `nearest_window_hint` only surfaces
+        // a window when at least one of its lines matches `old_string` exactly
+        // (after trimming) — a probe file of just the `literal` line scores zero
+        // against a deliberately-mismatched `old_string` and yields no window at
+        // all, which would make this test unable to observe the hint's bytes
+        // regardless of stripping.
+        std::fs::write(dir.path().join("probe.txt"), format!("MARKER\n{literal}\n")).unwrap();
+
+        let req = CallToolRequestParams::new("edit_file").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "path": "probe.txt",
+                "old_string": "MARKER\nREPO = \".worktrees/single-stage\"",
+                "new_string": "x",
+            }))
+            .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("");
+
+        // Parse the JSON response and inspect `error` directly, the same way
+        // `run_command_output_keeps_absolute_project_paths` does — a raw
+        // substring check against `text` would compare `literal`'s bare `"`
+        // bytes against the `\"` two-byte escape `route_tool_error`'s
+        // `to_string_pretty` produces for the same quote inside a JSON string,
+        // which never matches regardless of whether stripping happened.
+        let parsed: serde_json::Value =
+            serde_json::from_str(text).expect("edit_file failure should be JSON");
+        let error_msg = parsed["error"].as_str().unwrap_or("");
+
+        assert!(
+            error_msg.contains(&literal),
+            "the failure must quote the file's REAL bytes so the caller can see \
+             why the match failed; got: {error_msg}"
+        );
     }
 
     #[tokio::test]
@@ -3198,80 +3345,6 @@ mod tests {
             !marker.exists(),
             "marker file {marker:?} exists — sleep child was NOT killed by cancel"
         );
-    }
-
-    #[test]
-    fn strip_project_root_removes_prefix_from_text_content() {
-        let prefix = "/home/user/myproject/";
-        let result = CallToolResult::success(vec![Content::text(
-            r#"{"file":"/home/user/myproject/src/foo.rs","line":1}"#,
-        )]);
-        let (stripped, did_strip) = strip_project_root_from_result(result, prefix);
-        assert!(did_strip, "should report that stripping occurred");
-        assert_eq!(extract_text(&stripped), r#"{"file":"src/foo.rs","line":1}"#);
-        // Note is NOT appended by this function — call_tool_inner does that
-        // with the session-capped logic. Verify only 1 content block here.
-        assert_eq!(stripped.content.len(), 1);
-    }
-
-    #[test]
-    fn strip_project_root_no_op_when_prefix_empty() {
-        let result = CallToolResult::success(vec![Content::text("some output")]);
-        let (stripped, did_strip) = strip_project_root_from_result(result, "");
-        assert!(!did_strip);
-        assert_eq!(extract_text(&stripped), "some output");
-    }
-
-    #[test]
-    fn strip_project_root_no_op_when_prefix_absent() {
-        let prefix = "/home/user/myproject/";
-        let result = CallToolResult::success(vec![Content::text("no paths here")]);
-        let (stripped, did_strip) = strip_project_root_from_result(result, prefix);
-        assert!(!did_strip);
-        assert_eq!(extract_text(&stripped), "no paths here");
-        assert_eq!(stripped.content.len(), 1);
-    }
-
-    #[test]
-    fn strip_prefix_only_at_value_boundary() {
-        // Prefix preceded by a quote (JSON string value) — should strip.
-        let prefix = "/home/user/proj/";
-        assert_eq!(
-            strip_prefix_from_text("\"/home/user/proj/src/lib.rs\"", prefix),
-            "\"src/lib.rs\""
-        );
-        // Prefix at start of string — should strip.
-        assert_eq!(
-            strip_prefix_from_text("/home/user/proj/src/lib.rs", prefix),
-            "src/lib.rs"
-        );
-        // Prefix after a space (error message) — should strip.
-        assert_eq!(
-            strip_prefix_from_text("could not open /home/user/proj/foo.rs", prefix),
-            "could not open foo.rs"
-        );
-        // Prefix after newline — should strip.
-        assert_eq!(
-            strip_prefix_from_text("files:\n/home/user/proj/a.rs\n/home/user/proj/b.rs", prefix),
-            "files:\na.rs\nb.rs"
-        );
-    }
-
-    #[test]
-    fn strip_prefix_not_inside_longer_path() {
-        // Prefix embedded after another path component — should NOT strip.
-        // e.g. a symlink or nested repo that happens to share the suffix.
-        let prefix = "/home/user/proj/";
-        let text = "/other/home/user/proj/src/lib.rs";
-        assert_eq!(strip_prefix_from_text(text, prefix), text);
-    }
-
-    #[test]
-    fn strip_prefix_not_inside_code_string_preceded_by_path_char() {
-        // Prefix after an alphanumeric character — not a boundary, should NOT strip.
-        let prefix = "/home/user/proj/";
-        let text = "foo/home/user/proj/bar";
-        assert_eq!(strip_prefix_from_text(text, prefix), text);
     }
 
     #[tokio::test]
@@ -3441,14 +3514,6 @@ mod tests {
             info.capabilities.resources.is_some(),
             "server must advertise resources capability"
         );
-    }
-
-    fn extract_text(result: &CallToolResult) -> String {
-        result
-            .content
-            .iter()
-            .find_map(|c| c.as_text().map(|t| t.text.clone()))
-            .unwrap_or_default()
     }
 
     #[tokio::test]

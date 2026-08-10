@@ -22,6 +22,16 @@ fn run_cmd(tmp: &TempDir) -> Command {
     // and make no-embedder assertions env-dependent. Point CODESCOUT_ENV_FILE
     // at a path that does not exist so load_startup_env is a no-op.
     cmd.env("CODESCOUT_ENV_FILE", tmp.path().join("no-startup.env"));
+    // Regression guard: pin an unreachable Qdrant so the Qdrant-down path runs
+    // on EVERY machine. qdrant-client's compatibility probe `println!`s onto
+    // stdout when it cannot reach a server, prepending prose to the `--json`
+    // envelopes these tests parse; with a live Qdrant on the default port the
+    // probe succeeds silently, so the bug is invisible anywhere the stack is
+    // running and only surfaces in CI. Do NOT make this hermetic by forcing
+    // CODESCOUT_ARTIFACT_BACKEND=sqlite-vec instead — that skips the Qdrant path
+    // entirely and could never catch the bug again.
+    // docs/issues/2026-08-08-qdrant-compat-check-printlns-to-stdout.md
+    cmd.env("CODESCOUT_QDRANT_URL", "http://127.0.0.1:1");
     cmd
 }
 

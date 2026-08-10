@@ -415,9 +415,16 @@ enum HintScenario {
 
 /// Best-effort Qdrant probe: does this project have any chunks indexed?
 ///
-/// Returns `false` when the retrieval stack is offline or the scroll fails.
+/// Returns `false` when the retrieval stack is offline or the probe fails.
 /// Used by `build_activation_response` to populate the `index.status` field —
 /// callers treat `false` as "not indexed" and surface a build hint.
+///
+/// Asks `project_has_chunks`, NOT `project_index_stats`. The latter enumerates
+/// every chunk in the project to count distinct files, which cannot finish inside
+/// `FIRST_PROBE_TIMEOUT` on a real corpus — so this reported every large project as
+/// unindexed and, because a timeout is deliberately not cached, repeated the whole
+/// scan on every activation. See
+/// `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
 ///
 /// `_project_root` is accepted for forward-compat in case future probes need
 /// to consult on-disk artefacts alongside Qdrant.
@@ -426,9 +433,8 @@ async fn check_has_index(project_id: &str, _project_root: &std::path::Path) -> b
         Ok(client) => {
             let coll = client.config.collection("code_chunks");
             client
-                .project_index_stats(&coll, project_id)
+                .project_has_chunks(&coll, project_id)
                 .await
-                .map(|(chunks, _files)| chunks > 0)
                 .unwrap_or(false)
         }
         Err(_) => false,

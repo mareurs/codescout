@@ -2631,6 +2631,108 @@ fn text_sweep_uses_word_boundary() {
     assert!(matches[0].previews[0].contains("// FooHandler docs"));
 }
 
+/// Build a `TextualMatch` with only the fields the under-reach decision reads.
+fn sweep_match(file: &str, kind: &'static str) -> crate::symbol::edit::TextualMatch {
+    crate::symbol::edit::TextualMatch {
+        file: file.to_string(),
+        lines: vec![1],
+        previews: vec![],
+        occurrence_count: 1,
+        kind,
+    }
+}
+
+#[test]
+fn rename_under_reach_fires_only_on_the_lsp_disagreement() {
+    use crate::tools::symbol::edit_code::EditCode;
+    let decl = std::path::PathBuf::from("/p/src/Decl.kt");
+    let only_decl: std::collections::HashSet<_> = [decl.clone()].into_iter().collect();
+    let cross_file: std::collections::HashSet<_> =
+        [decl.clone(), std::path::PathBuf::from("/p/src/Caller.kt")]
+            .into_iter()
+            .collect();
+
+    // The measured failure: the LSP reached nothing outside the declaration, yet other
+    // source files spell the name. That tree does not build, and it used to report `ok`.
+    assert!(
+        EditCode::rename_under_reached(
+            &only_decl,
+            &decl,
+            &[sweep_match("src/Caller.kt", "source")]
+        ),
+        "LSP reached only the declaration while source files still name the symbol"
+    );
+
+    // Control 1 — the LSP DID resolve cross-file references. A leftover source match here
+    // is a comment or an unrelated same-named symbol, not an under-reach. Without this
+    // clause the gate would fire on most healthy renames.
+    assert!(
+        !EditCode::rename_under_reached(
+            &cross_file,
+            &decl,
+            &[sweep_match("src/Other.kt", "source")]
+        ),
+        "cross-file LSP edits mean the rename reached its callers"
+    );
+
+    // Control 2 — genuinely unused symbol. Docs and config naming it are not code, so
+    // there is nothing to break and nothing to warn about.
+    assert!(
+        !EditCode::rename_under_reached(
+            &only_decl,
+            &decl,
+            &[
+                sweep_match("README.md", "documentation"),
+                sweep_match("app.toml", "config"),
+            ]
+        ),
+        "documentation and config matches are not a broken build"
+    );
+
+    // Control 3 — nothing anywhere else.
+    assert!(!EditCode::rename_under_reached(&only_decl, &decl, &[]));
+}
+
+#[test]
+fn rename_compact_output_does_not_add_unrenamed_matches_to_renamed_ones() {
+    use crate::tools::symbol::display::format_rename_symbol;
+
+    // `total_edits` counts what the rename REWROTE; `textual_match_count` counts what it
+    // did NOT (the sweep excludes every file the LSP edited). Summing them reported the
+    // real 2-renamed/45-missed case as `47 sites` — an under-reach rendered as a bigger
+    // success, on the surface an agent actually reads.
+    let incomplete = serde_json::json!({
+        "status": "incomplete",
+        "new_name": "SchedulingDateUtils",
+        "files_changed": 1,
+        "total_edits": 2,
+        "textual_match_count": 45,
+        "uncovered_source_files": ["a.kt", "b.kt", "c.kt", "d.kt"],
+    });
+    let out = format_rename_symbol(&incomplete);
+    assert!(
+        !out.contains("47"),
+        "renamed and un-renamed counts must not be summed: {out}"
+    );
+    assert!(out.contains("2 sites"), "report what was renamed: {out}");
+    assert!(
+        out.contains("INCOMPLETE"),
+        "the state must be legible: {out}"
+    );
+    assert!(out.contains('4'), "name how many files were missed: {out}");
+
+    // A clean rename stays terse — the warning must not become ambient noise.
+    let clean = serde_json::json!({
+        "status": "ok",
+        "new_name": "Renamed",
+        "files_changed": 3,
+        "total_edits": 9,
+        "textual_match_count": 0,
+    });
+    let out = format_rename_symbol(&clean);
+    assert_eq!(out, "→ Renamed · 9 sites · 3 files");
+}
+
 // ── write_lines / splice edge cases ────────────────────────────────────
 
 #[test]

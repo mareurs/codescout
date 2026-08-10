@@ -129,8 +129,7 @@ fn payload_roundtrip_preserves_fields() {
         language: "rust".into(),
         start_line: 10,
         end_line: 42,
-        ast_kind: "fn".into(),
-        ast_header: "fn main()".into(),
+        ast_header: "src/lib.rs :: fn main()".into(),
         content: "fn main() {}".into(),
         content_hash: "h1".into(),
         last_indexed_commit: "abc".into(),
@@ -138,8 +137,55 @@ fn payload_roundtrip_preserves_fields() {
     };
     let map = payload_to_map(&p);
     let back = map_to_payload(&map).expect("decode");
+
+    // Every field, not a sample. This test asserted 4 of 11 while its name claimed
+    // all of them, so `ast_header` could round-trip as garbage — or not at all —
+    // without failing anything.
     assert_eq!(back.project_id, p.project_id);
-    assert_eq!(back.start_line, p.start_line);
-    assert_eq!(back.content_hash, p.content_hash);
     assert_eq!(back.file_path, p.file_path);
+    assert_eq!(back.language, p.language);
+    assert_eq!(back.start_line, p.start_line);
+    assert_eq!(back.end_line, p.end_line);
+    assert_eq!(back.ast_header, p.ast_header);
+    assert_eq!(back.content, p.content);
+    assert_eq!(back.content_hash, p.content_hash);
+    assert_eq!(back.last_indexed_commit, p.last_indexed_commit);
+    assert_eq!(back.chunk_id, p.chunk_id);
+}
+
+/// `embed_text` is the single home for "what does a chunk look like to the embedder".
+/// Before it existed, that decision was the residue of a struct literal in another
+/// module, which is how the AST header stopped being embedded without a failing test.
+///
+/// Deliberately NOT gated behind `server-stack`. That feature is in neither `default`
+/// nor any CI workflow, so every test carrying the gate — including
+/// `payload_roundtrip_preserves_fields` right above — is never compiled and cannot
+/// fail. `embed_text` and `CodePayload` are both ungated, so this one runs.
+#[test]
+fn embed_text_prepends_the_ast_header_and_omits_it_when_absent() {
+    use codescout::retrieval::payload::{embed_text, CodePayload};
+
+    let mut p = CodePayload {
+        project_id: "codescout".into(),
+        file_path: "src/lib.rs".into(),
+        language: "rust".into(),
+        start_line: 1,
+        end_line: 1,
+        ast_header: "src/lib.rs :: fn main()".into(),
+        content: "fn main() {}".into(),
+        content_hash: "h1".into(),
+        last_indexed_commit: "abc".into(),
+        chunk_id: "id1".into(),
+    };
+
+    assert_eq!(
+        embed_text(&p),
+        "src/lib.rs :: fn main()\nfn main() {}",
+        "the header is a newline-separated prefix, and the body is preserved verbatim"
+    );
+
+    // Markdown and plain text have no AST header; they must embed as bare content
+    // rather than as a leading blank line.
+    p.ast_header = String::new();
+    assert_eq!(embed_text(&p), "fn main() {}");
 }

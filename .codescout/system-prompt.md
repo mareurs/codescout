@@ -18,7 +18,7 @@
 
 ## Search Tips
 
-- Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_project_root"
+- Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_paths_in_value"
 - codescout-embed: "Embedder trait backend", "chunk_size_for_model", "RemoteEmbedder batching"
 - Librarian: "FilterNode compile SQL", "artifact find hidden statuses", "audit_doc_refs"
 - Avoid: "tool", "error", "file" (too broad)

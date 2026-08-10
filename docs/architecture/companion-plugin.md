@@ -49,7 +49,7 @@ The Bash branch of `pre-tool-guard.sh` no longer allows a `cd`-escape. **All nat
 ```
 workspace(action="activate", path="/path/to/sibling", read_only=false)
 # ...do the work...
-workspace(action="activate", path="/home/marius/work/claude/codescout", read_only=false)
+workspace(action="activate", path="<absolute path of THIS repo>", read_only=false)
 ```
 
 ## Concurrent multi-workspace: one server, one active project

@@ -66,6 +66,22 @@ pub trait CodeVectorStore: Send + Sync {
         collection: &str,
         project_id: &str,
     ) -> Result<(usize, usize)>;
+
+    /// Does this project have any indexed chunks at all?
+    ///
+    /// Deliberately separate from [`CodeVectorStore::project_index_stats`], which
+    /// counts distinct files and therefore has to enumerate the project — O(corpus).
+    /// Callers that only need existence must not pay that: the activation probe is
+    /// bounded at two seconds and used to call `project_index_stats`, so on any real
+    /// corpus it timed out, reported the project unindexed, and (by design) declined
+    /// to cache the timeout — re-running the whole scan on every activation.
+    ///
+    /// Required rather than defaulted on purpose. A default delegating to
+    /// `project_index_stats` would make that exact defect the behaviour a new backend
+    /// inherits by not thinking about it.
+    ///
+    /// See `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
+    async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool>;
 }
 /// Which code-vector backend the retrieval client uses.
 ///
@@ -183,6 +199,10 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
     ) -> Result<(usize, usize)> {
         crate::retrieval::qdrant::QdrantWrap::project_index_stats(self, collection, project_id)
             .await
+    }
+
+    async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool> {
+        crate::retrieval::qdrant::QdrantWrap::project_has_chunks(self, collection, project_id).await
     }
 }
 
@@ -311,6 +331,11 @@ mod tests {
                 .collect();
             Ok((chunks, files.len()))
         }
+
+        async fn project_has_chunks(&self, _collection: &str, project_id: &str) -> Result<bool> {
+            let store = self.chunks.lock();
+            Ok(store.iter().any(|(p, _)| p.project_id == project_id))
+        }
     }
 
     fn payload(id: &str, project: &str, file: &str, lang: &str, hash: &str) -> CodePayload {
@@ -320,7 +345,6 @@ mod tests {
             language: lang.into(),
             start_line: 1,
             end_line: 2,
-            ast_kind: String::new(),
             ast_header: String::new(),
             content: format!("content of {id}"),
             content_hash: hash.into(),
@@ -425,6 +449,43 @@ mod tests {
             store.project_index_stats("c", "proj").await.unwrap(),
             (1, 1)
         );
+    }
+
+    /// `project_has_chunks` must agree with `project_index_stats().0 > 0` in every
+    /// state. It exists to answer that question WITHOUT enumerating the project, so
+    /// the two can drift apart silently — this pins them together.
+    ///
+    /// The cost property itself is structural, not asserted here: the Qdrant impl
+    /// scrolls `limit(1)` with no payload, sqlite uses `SELECT EXISTS`, and the trait
+    /// method is required rather than defaulted so a new backend cannot inherit the
+    /// enumerate-everything behaviour by omission.
+    #[tokio::test]
+    async fn contract_has_chunks_agrees_with_stats_and_costs_nothing_extra() {
+        let store = InMemoryCodeStore::default();
+
+        // Empty project: both say "nothing here".
+        assert!(!store.project_has_chunks("c", "p1").await.unwrap());
+        assert_eq!(store.project_index_stats("c", "p1").await.unwrap().0, 0);
+
+        store
+            .upsert_chunks(
+                "c",
+                &[(
+                    payload("p1:a.rs:h1", "p1", "a.rs", "rust", "h1"),
+                    embed(vec![1.0, 0.0]),
+                )],
+            )
+            .await
+            .unwrap();
+
+        // Populated: both say "something here".
+        assert!(store.project_has_chunks("c", "p1").await.unwrap());
+        assert!(store.project_index_stats("c", "p1").await.unwrap().0 > 0);
+
+        // Scoped to the project, not the collection — a different project's chunks
+        // must not make this one look indexed. That confusion is exactly what the
+        // activation probe would surface as a wrong `index.status`.
+        assert!(!store.project_has_chunks("c", "p2").await.unwrap());
     }
 
     #[tokio::test]

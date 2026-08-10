@@ -92,6 +92,70 @@ jobs:
           echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       - run: cargo test ${{ matrix.config.flags }}
 
+  # The configuration `cargo rb` actually ships.
+  #
+  # `.cargo/config.toml` defines `rb = "build --release --features server-stack"`,
+  # and that is the command CLAUDE.md mandates for the live MCP release binary. Until
+  # 2026-08-08 no lane compiled it, so the build everyone runs was the one build CI
+  # never built — and every `#[cfg(feature = "server-stack")]` test was skipped
+  # silently, which is indistinguishable from a test that does not exist. When the
+  # lane was finally run it failed immediately, on a real defect
+  # (docs/issues/archive/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md).
+  #
+  # Linux-only on purpose: `cargo rb` is the Linux dev-box build, and the matrix above
+  # already covers default/lean across three OSes. The point is that SOME lane compiles
+  # this, not that every platform does.
+  #
+  # No Qdrant service container is needed — the tests are hermetic. `check_has_index`
+  # returns false when the stack is unreachable, and the cache test drives
+  # `resolve_first_probe` directly rather than performing a live probe. If a future test
+  # here needs a live stack, give it a service container rather than making this lane
+  # depend on ambient reachability.
+  test-server-stack:
+    name: Test (server-stack — the build cargo rb ships)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ubuntu-latest-server-stack
+      # server-stack sits on top of the default feature set, so `librarian` is on and
+      # build_tool_context needs a workspace file — same seeding as the matrix job.
+      - name: Seed empty librarian workspace
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/codescout-ci"
+          touch "${{ runner.temp }}/codescout-ci/workspace.toml"
+          echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
+      - run: cargo clippy --features server-stack --all-targets -- -D warnings
+      - run: cargo test --features server-stack
+
+  # Compile-only lanes for the opt-in features nothing else builds.
+  #
+  # `dashboard` and `local-embed-dynamic` are in neither `default` nor any other lane,
+  # so until 2026-08-08 they were bit-rot candidates for the same reason `server-stack`
+  # was — nothing compiled them, and nothing said so. A `cargo check` is enough: these
+  # are opt-in build configurations, and the question is whether they still compile, not
+  # whether their behaviour is covered.
+  #
+  # tests/feature_lanes.rs enforces that every feature is either built somewhere,
+  # reached through `default`, or explicitly exempt with a reason. Adding a feature
+  # without doing one of those fails that test — which is the point.
+  feature-check:
+    name: Feature check (opt-in build configs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ubuntu-latest-feature-check
+      - run: cargo check --features dashboard --all-targets
+      - run: cargo check --features local-embed-dynamic --all-targets
+
   windows-gnu:
     name: Windows-gnu cross (MinGW + wine)
     runs-on: ubuntu-latest

@@ -236,6 +236,49 @@ plus model-specific `CODESCOUT_EMBEDDER_URL` / `_PROTOCOL` / `_MODEL_NAME`.
 - **jina-v2-small-en:** dominated by bge-small. Drop from defaults.
 - **Reranker:** not re-evaluated post chunk-tuning. Re-test before committing to it for default.
 
+## AST metadata header A/B (2026-08-08) — NULL RESULT
+
+Measured the change in `2bc0f9f0`, which restored the per-chunk AST identity line
+(`src/foo.rs :: impl Bar :: fn baz(…)`) to the embedding input after finding it had
+reached neither the embedder nor the payload for the entire corpus
+(`docs/issues/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`).
+
+**Both arms: same 25-TC suite, same corpus (the main `codescout` checkout at
+`2bc0f9f0`), same config** — CodeRankEmbed 768d, `bm25_boost=3.0`, sparse on,
+reranker live, `amd` profile. Only the stored vectors differ; the second arm follows
+an `index --force` (506 s, 33,764 chunks).
+
+| arm | score | p50 | p95 |
+|---|---|---|---|
+| headers absent (pre-fix vectors) | **26 / 75** | 997 ms | 1013 ms |
+| headers embedded | **25 / 75** | 1010 ms | 1034 ms |
+
+Five of 25 test cases moved, **two up and three down, every one by a single point**
+(TC-07 1→2, TC-25 2→3; TC-03 2→1, TC-12 1→0, TC-21 1→0). That distribution is churn,
+not a regression — and it is equally not evidence of benefit. **The header produces no
+measurable retrieval improvement on this suite.**
+
+Two things this result is *not*, both checked rather than assumed:
+
+- **Not a doc-blindness artifact.** Markdown is 60% of codescout's corpus (20,124 of
+  33,764 chunks) and receives no header by design — `CodeChunk.metadata` is `None` for
+  non-AST chunks. But the suite is code-weighted: 15 TCs expect only code files, 9 are
+  mixed, 1 is doc-only, and **all five movers are code-targeted**. The change reached
+  the population it was supposed to reach.
+- **Not a coverage failure.** Post-rebuild, 13,087 of 13,326 rust chunks carry a header
+  (98.2%), as do all typescript and kotlin chunks and 55 of 60 python. The 239
+  header-less rust chunks and the shell/toml populations are the whole-file fallback
+  path, which produces no metadata.
+
+**The honest limit of this instrument.** Scoring is file-level (hit@5 / hit@10 over
+expected *files*). The header's theorised benefit is chunk-level — helping a tiny chunk
+be retrievable at all, or the right chunk within a file rank up. A file already
+retrieved via some other chunk scores the same either way. So this result rules out a
+*file-level* improvement, which is what the suite measures and what was claimed; it
+does not address chunk-level discrimination. Settling that needs a different
+instrument, not a re-run of this one — and until someone builds it, "the header
+improves retrieval" is an unsupported claim.
+
 ## Open follow-ups
 
 1. CPU bm25_boost sweep on bs_c1200 — confirm CPU default lands ≥28/60.

@@ -7,7 +7,7 @@ src/
   server.rs          — CodeScoutServer (MCP ServerHandler), tool registry, request dispatch
   agent/             — Agent, ActiveProject, project state, write locking, per-project config
   tools/
-    core/            — Tool trait, ToolContext, OutputGuard, RecoverableError
+    core/            — Tool trait, ToolContext, OutputGuard, RecoverableError, path_strip (PATH_KEYS/ROOT_KEYS allowlist walker)
     symbols.rs       — symbol navigation (LSP + tree-sitter)
     references.rs    — find all references via LSP
     call_graph.rs    — transitive call graph (BFS, configurable direction + depth)
@@ -36,7 +36,9 @@ src/
 - **`CodeScoutServer`** (`server.rs`) — MCP `ServerHandler` impl; owns the tool registry;
   all `CallToolRequest`s flow through `call_tool_inner()`
 - **`Tool` trait + `ToolContext`** (`tools/core/types.rs`) — every tool implements `call()`;
-  `call_content()` is the MCP entry point (handles output buffer routing)
+  `call_content()` is the MCP entry point (handles output buffer routing, and — since the
+  2026-08-09 field-aware-path-strip work — the `PATH_KEYS`/`ROOT_KEYS` allowlist walk over
+  the typed `Value`, strictly before buffering/formatting)
 - **`Agent` / `ActiveProject`** (`agent/mod.rs`) — project state (config, memory, write lock);
   tools access it via `with_project(|p| ...)`
 - **`OutputGuard`** (`tools/output.rs`) — enforces two-mode progressive disclosure:
@@ -50,11 +52,14 @@ src/
 2. `call_tool_inner()` resolves tool by name, checks access, parses JSON
 3. Builds `ToolContext` (Agent, LspManager, output buffer, progress reporter)
 4. Acquires write guard if mutating
-5. Calls `tool.call_content()` → `tool.call()` + buffer routing
+5. Calls `tool.call_content()` → `tool.call()`, then the `PATH_KEYS`/`ROOT_KEYS` allowlist
+   walk over the result `Value` (`src/tools/core/path_strip.rs`), then buffer routing —
+   every downstream consumer sees already-relative values
 6. Success → `CallToolResult::success`; Error → `route_tool_error()`:
    - `RecoverableError` → `isError: false` with structured JSON guidance
    - Other errors → `isError: true`
-7. Post-process: strip project root prefixes, log duration
+7. Post-process: append the once-per-activation `[codescout] paths are relative to <root>`
+   banner (no text rewriting any more — that moved to step 5), log duration
 
 ## Prompt Surfaces
 

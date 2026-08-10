@@ -10,7 +10,6 @@ tags:
 - write-guard
 - ack
 - misleading-error
-kind: bug
 opened: 2026-08-08
 severity: low
 ---

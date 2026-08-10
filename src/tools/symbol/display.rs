@@ -460,14 +460,35 @@ pub(super) fn format_insert_code(result: &Value) -> String {
 pub(super) fn format_rename_symbol(result: &Value) -> String {
     let total_edits = result["total_edits"].as_u64().unwrap_or(0);
     let textual = result["textual_match_count"].as_u64().unwrap_or(0);
-    let total = total_edits + textual;
     let new_name = result["new_name"].as_str().unwrap_or("?");
     let files = result["files_changed"].as_u64().unwrap_or(0);
-    if files <= 1 {
-        format!("→ {new_name} · {total} sites")
+
+    // `total_edits` and `textual_match_count` are opposites, not addends: the first counts
+    // occurrences this rename REWROTE, the second counts occurrences it did NOT — the sweep
+    // excludes every file the LSP edited. Summing them into one "sites" figure reported an
+    // under-reach as a larger success: a rename that changed 2 sites and left 45 behind
+    // rendered as `47 sites`. That is the number an agent sees, since this is the compact
+    // surface. See docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md.
+    let head = if files > 1 {
+        format!("→ {new_name} · {total_edits} sites · {files} files")
     } else {
-        format!("→ {new_name} · {total} sites · {files} files")
+        format!("→ {new_name} · {total_edits} sites")
+    };
+
+    if result["status"].as_str() == Some("incomplete") {
+        let n = result["uncovered_source_files"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
+        return format!(
+            "{head}\n\nINCOMPLETE — {n} other source file(s) still name the old symbol and were \
+             not renamed. See `completeness_warning` / `uncovered_source_files`."
+        );
     }
+    if textual > 0 {
+        return format!("{head} · {textual} unrenamed textual match(es)");
+    }
+    head
 }
 
 #[cfg(test)]

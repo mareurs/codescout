@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: AST chunker has no minimum chunk size — 12% of chunks are single lines (the "~2h re-embed" in the original title measured 8.06 min on 2026-08-07; deferred by decision)'
 tags:
 - indexer
@@ -8,7 +8,7 @@ tags:
 - retrieval
 - performance
 - embedding-cost
-closed: null
+closed: 2026-08-08
 opened: 2026-07-27
 owner: marius
 related:
@@ -19,55 +19,56 @@ severity: high
 # BUG: AST chunker has no minimum chunk size — 12% of chunks are single lines, inflating re-embed to ~2h
 
 ## Summary
-> **Title corrected 2026-08-07.** It claimed single-line chunks inflate re-embedding to ~2 h. A
-> full `index --force` on this project that day took **483,729 ms = 8.06 min** — off by roughly 15x.
-> The likely source of the error is recorded in `src/retrieval/embedder.rs`, whose own comment says
-> the throughput sweep those numbers came from was *"taken while four duplicate indexers were
-> competing for the same GPU"* — i.e. contaminated by
-> `docs/issues/2026-07-25-concurrent-index-no-project-lock`, the very bug whose precondition this
-> file's Resume tells you to check first.
->
-> The 12% single-line figure itself is **corroborated**, from an independent direction: with sparse
-> re-enabled, 7.7% of a 2000-point sample carried an EMPTY sparse vector, and a single line is
-> exactly the input SPLADE yields no terms for. Two measurements of the same population.
->
-> So the defect is real and the cost is not what was written. Re-embed time is no longer an argument
-> for fixing it; the argument that survives is retrieval quality — those chunks are dense-only in
-> RRF, so 7.7% of the corpus is invisible to the sparse leg.
-> **DEFERRED 2026-08-07 by maintainer decision — stays `open`, no work scheduled.** Both candidate
-> fixes were on the table (minimum chunk size + sibling merge, or skip trivial declarations) and
-> neither was chosen, for two reasons:
->
-> 1. **This file's own ordering.** It puts the embedder-batch-concurrency work first, and that has
->    not happened.
-> 2. **Sequencing against the reindex.** Chunk ids are content-addressed, so any chunker change
->    moves boundaries and invalidates every vector. The `index --force` rebuild (~2h) is already
->    owed for the *previous* `ast_chunker` change. Landing a chunker fix now means rebuilding
->    twice; deferring means one rebuild serves both. Deferring is therefore strictly cheaper as
->    long as the current chunker output is tolerable, and it is.
->
-> **New evidence supporting the 12% figure, from an independent direction (2026-08-07).** With the
-> sparse leg re-enabled, a 2000-point sample of the live `code_chunks` collection shows **7.7% of
-> chunks carry an EMPTY sparse vector** — SPLADE produced no terms for them. A single-line chunk is
-> exactly the input that yields no terms, so 7.7% empty-sparse and 12% single-line are the same
-> population measured two different ways. That is a second, cheaper confirmation of this bug's
-> central claim than re-running the chunk-size histogram.
->
-> It also adds a consequence this file did not have: those chunks are **dense-only in RRF**, so the
-> chunker defect is not merely wasted embedding cost — it silently removes 7.7% of the corpus from
-> the sparse leg's reach. Worth folding into the motivation whenever this is picked up.
->
-> **Re-open for scheduling when:** the embedder-batch-concurrency work lands, or a retrieval
-> measurement attributes a score loss to single-line chunks. Do it BEFORE the next `index --force`,
-> not after, so one rebuild covers both.
 
-`nodes_to_chunks` emits one chunk per inner declaration "regardless of size",
-with no floor. On a Kotlin codebase this produces 5,133 single-line chunks and
-14,926 chunks of ≤5 lines out of 43,582 — despite a configured `chunk_target` of
-1200 characters. The corpus is several times larger than the target implies, and
-because chunk ids are content-addressed, any chunker change re-embeds all of it.
-That is the direct cause of the ~2.5-hour index the user flagged.
+> **FIXED — and this file spent a day saying otherwise.** Candidate 1 (`AST_CHUNK_MIN`
+> plus sibling coalescing) shipped in **`ca442498`** on 2026-08-06. Candidate 3 (the
+> container-recursion overlap) shipped the same day in **`45669701`**. The "DEFERRED,
+> neither candidate was chosen" text below was written on 2026-08-07 — *a day after the
+> fix* — by a session that corrected this file's numbers carefully and never opened
+> `src/embed/ast_chunker.rs`. Every correction it made was to the measurements, and the
+> measurements were all still true; the thing that had changed was the code.
+>
+> **Measured 2026-08-08, after a full `index --force` on the fixed chunker:**
+>
+> | | pre-fix | post-fix (codescout) |
+> |---|---|---|
+> | single-line chunks | 11.8% | **6.3%** (2,113 / 33,735) |
+> | ≤5-line chunks | 34.3% | **29.0%** |
+> | empty sparse vectors | 7.7% | **0 of 2,000 sampled** |
+>
+> The empty-sparse figure is the one that matters, because it was this file's last live
+> argument: single-line chunks yield no SPLADE terms, so they were dense-only in RRF and
+> invisible to the sparse leg. A 2,000-point sample of the rebuilt corpus finds **zero**
+> empty sparse vectors (min 2 terms, max 285, mean 125). That argument is now falsified,
+> not deferred.
+>
+> The residual 6.3% is **by design**, not leftover defect. The coalescer merges *runs of
+> contiguous undersized declarations*; lone small declarations, gap chunks, and the
+> whole-file fallback path are deliberately excluded — see `ca442498`'s rationale for why
+> admitting gap chunks collapsed a single-method impl into a whole-file chunk.
+>
+> **Candidates 2 (skip trivial declarations) and 4 (reconsider markdown granularity) were
+> never shipped and are now unmotivated** — the retrieval-quality argument that justified
+> them is the one the measurement just closed. They remain available if a future
+> measurement revives them; nothing currently points at them.
+>
+> **Not reindexed elsewhere.** `backend-kotlin-single-stage` still sits at 11.7%
+> single-line / 33.6% ≤5-line — statistically this file's original numbers, preserved.
+> The code fix reaches a corpus only through `index --force`, because chunk ids are
+> content-addressed and a normal sync skips every unchanged chunk by id.
 
+> **Title corrected 2026-08-07.** It claimed single-line chunks inflate re-embedding to
+> ~2 h. A full `index --force` that day took **483,729 ms = 8.06 min** — off by roughly
+> 15x. The likely source of the error is recorded in `src/retrieval/embedder.rs`, whose
+> own comment says the throughput sweep those numbers came from was *"taken while four
+> duplicate indexers were competing for the same GPU"* — i.e. contaminated by
+> `docs/issues/archive/2026-07-25-concurrent-index-no-project-lock.md`, the very bug whose
+> precondition this file's Resume told you to check first.
+
+`nodes_to_chunks` emitted one chunk per inner declaration "regardless of size", with no
+floor. On a Kotlin codebase that produced 5,133 single-line chunks and 14,926 chunks of
+≤5 lines out of 43,582 — despite a configured `chunk_target` of 1200 characters. That is
+the defect; `AST_CHUNK_MIN = 250` plus `coalesce_small_chunks` is the fix.
 ## Symptom (Effect)
 
 `project_id=backend-kotlin`, measured live 2026-07-27:
@@ -182,6 +183,37 @@ forces a full re-embed of the corpus.
 
 ## Evidence
 
+### 2026-08-08 — post-fix measurement, after a full `index --force`
+
+Method, so this is re-runnable rather than quoted. Chunk-size distribution: scroll the
+whole `code_chunks` collection for `start_line`/`end_line`/`project_id`/`language` and
+histogram `end_line - start_line + 1`. 579,311 points, 21 project ids.
+
+```
+project                     chunks   1-line       %    <=5line       %
+codescout                    33735     2113     6.3%      9798    29.0%
+backend-kotlin-single-stage  48560     5672    11.7%     16306    33.6%
+```
+
+`codescout` was rebuilt on the fixed chunker (`index --force`, 506 s, 33,764 chunks,
+`last_indexed_commit: 2bc0f9f0`). `backend-kotlin-single-stage` has not been reindexed
+since, and still carries this file's original 11.8% / 34.3% figures — which is the
+cleanest available demonstration that the code fix reaches a corpus only through
+`--force`.
+
+Empty-sparse re-measurement, mirroring the 2026-08-07 method (2,000-point sample of the
+live collection, this time scoped to `codescout` and asking for the sparse vector):
+
+```
+sampled: 2000   empty-sparse: 0   = 0%
+sparse terms per chunk: min=2 max=285 mean=125
+```
+
+Zero, against 7.7% before. The path was verified on a sample point rather than trusted —
+a wrong jq path here would have reported *every* point as empty, not none, so the failure
+mode is discriminable from the result.
+
+
 `split_file`, `src/embed/ast_chunker.rs:844-886` — target used only as a ceiling:
 
 ```rust
@@ -255,31 +287,36 @@ let target = chunk_size.min(AST_CHUNK_TARGET);
 > candidate 2 (skip trivial declarations) is the narrower alternative.
 ## Fix
 
-Not yet implemented — needs a decision, and re-tuning invalidates the whole
-corpus (every boundary change re-embeds everything, so batch it with any other
-chunker change).
+**Candidate 1, implemented in `ca442498` (`experiments`, 2026-08-06).** Promotion is by
+fast-forward, so that SHA *is* the master SHA.
 
-Candidates, cheapest first:
+`AST_CHUNK_MIN = 250` (`src/embed/ast_chunker.rs:546`) is the floor to `AST_CHUNK_TARGET`'s
+ceiling; `coalesce_small_chunks` (`:572`, wired in at `:778`) merges runs of adjacent,
+contiguous, undersized declarations into one chunk. Only *contiguous* chunks merge, which
+is what keeps reconstruction exact. Gap chunks are excluded from runs — admitting either
+bracketing gap collapsed a single-method impl into a whole-file chunk and dropped the
+method's own name from its metadata. Seven tests (`:2267`–`:2392`), both behaviours
+mutation-verified.
 
-1. **Minimum chunk size with sibling merge.** Introduce `AST_CHUNK_MIN` (~200-300
-   chars) and coalesce consecutive inner declarations below it into one chunk,
-   keeping the container header. Directly removes the 12% single-line and much of
-   the 34% ≤5-line population.
-2. **Skip trivial declarations.** Do not emit standalone chunks for enum members,
-   plain property declarations, or import groups — fold them into the container
-   header chunk.
-3. **Reconcile the overlap with the documented intent.** Either stop emitting the
-   container header when it duplicates the first inner chunk's leading lines, or
-   update `split_file`'s doc comment, which currently claims zero overlap.
-4. **Reconsider markdown.** 17,067 of 43,582 chunks (39%) are `.md`, one session
-   log alone producing 429. Worth deciding whether `docs/` belongs in the code
-   corpus at this granularity.
+**Candidate 3, implemented in `45669701`** (same day): the container recursion was handed
+the whole file with `prev_end` reset to 0, duplicating every line before the container
+and — contrary to this file's own note — every line after it, to EOF. Both gap branches
+are now bounded by an explicit line window.
 
-Any of these should be validated against the retrieval benchmark
-(`docs/research/2026-05-06-retrieval-stack-benchmark.md`) before landing — smaller
-chunks were chosen deliberately for precision, so a floor trades recall sharpness
-for cost and must be measured, not assumed.
+**Candidates 2 and 4 not implemented, and no longer motivated.** See § Summary: the
+retrieval-quality argument they rested on was closed by measurement on 2026-08-08.
 
+The original candidate list is preserved below for the record, because the reasoning
+about *why* smaller chunks were chosen deliberately is still the right context for anyone
+reopening this area.
+
+1. **Minimum chunk size with sibling merge.** ✅ shipped — `ca442498`.
+2. **Skip trivial declarations.** Not shipped; unmotivated as of 2026-08-08.
+3. **Reconcile the overlap with the documented intent.** ✅ shipped — `45669701`.
+4. **Reconsider markdown.** Not shipped. Markdown is still 60% of codescout's corpus
+   (20,124 of 33,764 chunks). Worth noting it is *not* a chunk-size problem: markdown
+   chunks carry no AST header at all (`CodeChunk.metadata` is `None` for non-AST
+   languages), so this is a different question from the one this file asks.
 ## Tests added
 
 None yet. Two worth adding: a chunk-size distribution assertion over a fixture
@@ -299,35 +336,19 @@ caught the 8× file.
 
 ## Resume
 
-**Clean baseline obtained 2026-07-27** (this step is done). All four concurrent indexers
-were killed and the coverage probe re-run on an idle GPU. Result is identical to the
-mid-run measurement:
+N/A — fixed 2026-08-08, verified by measurement rather than by reading the fix.
 
-```
-mean coverage factor            : 1.27x   (unchanged)
-files with >1.05x coverage      : 1047 / 1963  (53.3%)
-keys with 2+ distinct end_lines : 1877  (4.1%)
-worst: 8.01x Stage1Assertions.kt · 5.53x PreSolveDataValidation.kt · 5.41x SolverExplainabilityTables.kt
-```
+**If you reopen this area, reindex first.** Only codescout's corpus reflects the fixed
+chunker. Other projects carry pre-fix distributions until someone runs `index --force`
+on them — chunk ids are content-addressed, so a normal sync skips every unchanged chunk
+by id and will never update it. `backend-kotlin-single-stage` is the clearest example, at
+11.7% single-line today.
 
-So the overlap is **structural to the chunker**, not an artifact of concurrent writers or
-of measuring mid-run. Hypothesis 2's "partially rejected" verdict now rests on clean data.
-
-**Important context added 2026-07-27:** part of the observed index *duration* was never
-this bug. Four `codescout index` processes were running concurrently on the same project
-(see [[2026-07-25-concurrent-index-no-project-lock]]). That inflated wall-clock time but
-not chunk counts or coverage — the corpus numbers in this file stand.
-
-Next action: decide between fix candidates 1 (minimum chunk size + sibling merge) and 2
-(skip trivial declarations), and measure against
-`docs/research/2026-05-06-retrieval-stack-benchmark.md`. Note the ordering decision already
-taken: the throughput work
-([[../superpowers/specs/2026-07-27-embedder-batch-concurrency-design]]) lands first because
-it leaves vectors byte-identical and needs no score re-validation, whereas this change does.
-Re-measure index duration after that ships to see how much of this bug's cost survives.
-
-When a re-index is next run, use `codescout index --force` — its delete pass clears the
-4.1% of superseded chunks that accumulated from the interrupted runs.
+**The lesson this file is the exhibit for:** it was corrected twice, carefully, by
+sessions that never opened `src/embed/ast_chunker.rs`. Both corrections were to numbers,
+both numbers were right, and the code had moved underneath. Before working any bug file
+older than the last commit touching its subject, run `git log -- <the file the bug names>`.
+One command, and it would have caught this on 2026-08-07.
 ## References
 
 - `src/embed/ast_chunker.rs:828` — `AST_CHUNK_TARGET`

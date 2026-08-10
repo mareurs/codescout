@@ -218,6 +218,102 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **Project-root stripping is now field-aware, not a text-level guess.** Tool results
+  used to have their absolute project root stripped by `post_process`
+  (`strip_prefix_from_text`) — a one-character lookbehind run *after* the tool's typed
+  `Value` had already been rendered to text. That guess over-stripped quoted path
+  literals inside file content (breaking any edit keyed on the displayed text, since
+  the "Nearest content" hint was filtered through the same transform), under-stripped
+  85% of measured leaks hidden inside serialized `\n` escapes, and collapsed
+  root-valued fields — `workspace(activate).project_root`, the librarian's
+  `scope.abs_path` / `scope.git_root` — to `""`, measured 136 times across 12 sessions.
+  Stripping now runs on the typed `Value` inside `Tool::call_content`, keyed by an
+  allowlist of path-carrying JSON keys (`PATH_KEYS`) plus a separate keys-that-stay-
+  absolute list (`ROOT_KEYS`) — see `src/tools/core/path_strip.rs`. A new CI corpus
+  gate (`no_absolute_project_paths_in_rendered_output`) catches a forgotten path key
+  on the file-tool surface (`tree`/`grep`/`read_file`/`read_markdown`/`symbols`); it
+  does not reach librarian-emitted path keys, which remain covered only by unit tests
+  against synthetic `Value`s. **Side effect:** stripping now runs before the
+  inline-vs-buffered size check, so that check measures the shorter, already-relative
+  form — a result that used to just clear the buffering threshold can now come back
+  inline instead of buffered. See
+  `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md` and
+  `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`.
+
+- **The shipped build could prepend a dependency's diagnostic to `--json` output.**
+  `qdrant-client`'s version-compatibility probe is on by default, and when it cannot
+  reach a server it reports that with `println!` — onto codescout's **stdout**, ahead
+  of the JSON envelope. Every `--json` CLI command that builds the librarian tool
+  context was affected whenever Qdrant was down (Qdrant is the default artifact backend
+  on a `server-stack` build): a correct payload, a zero exit code, and output no parser
+  accepts. The librarian's own degradation path was never at fault — it catches the
+  unreachable-Qdrant error and reports it through `tracing`; the `println!` fires inside
+  the dependency, before any of our error handling exists to intercept it. The probe is
+  now disarmed at both client-construction sites, which also removes a blocking health
+  check from a call already wrapped in `spawn_blocking` + `timeout` to survive blocking.
+  Only `cargo rb` — the configuration we ship, and the one no CI lane compiled until this
+  cohort — was affected; the `server-stack` lane added in this cohort caught it on its
+  first run. See
+  `docs/issues/archive/2026-08-08-qdrant-compat-check-printlns-to-stdout.md`.
+- **The chunk metadata header reached neither the embedder nor the payload.**
+  `build_metadata_header` computes an identity line for every chunk —
+  `src/foo.rs :: impl Bar :: fn baz(…)` — and has nine tests pinning its shape, yet
+  nothing outside the chunker consumed it: `flush_pending` embedded `payload.content`
+  alone and `stream_index` wrote `ast_header` as `String::new()`. Measured against the
+  live collection: empty on **579,311 of 579,311** points, across every project and
+  language. The legacy `embed::index` path *did* prepend it — its migration comment
+  reads *"searchable header prepended before embedding"* — and the test pinning
+  `{metadata}\n{content}` was deleted along with that module in `66db4c70`, so nothing
+  failed when the surviving path turned out not to implement the contract. What a chunk
+  looks like to the embedder is now `embed_text`'s decision and no one else's. Fixing it
+  surfaced a second defect it would have shipped: the chunker was handed the *absolute*
+  file path, so prepending the header as-was would have embedded the machine's checkout
+  location into every vector — it now carries the same forward-slashed relative path the
+  payload stores, which is what all 31 of the chunker's own call sites already passed.
+  Reaching an existing corpus needs `index --force`: chunk ids are content-addressed and
+  content is unchanged, so a normal sync skips every chunk by id. The retrieval benchmark
+  has **not** been run — this restores a declared contract and is not yet evidence of
+  better retrieval. See
+  `docs/issues/archive/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`.
+
+- **`edit_code(action="remove")` now verifies what it wrote, and rolls back an edit that
+  breaks the file.** `remove` — the one action whose entire purpose is deleting a range —
+  had **no post-edit verification at all**: it wrote and returned `status: "ok"`, while
+  `replace` next door checked for dropped symbols and rolled back. A removal whose range
+  overshot by two lines took the closing `)` and `}` of the *preceding* function with it
+  and reported success; the file was left syntactically invalid. `remove` now runs the same
+  check as `replace`, and both gained a `SyntaxBroken` verdict for damage the symbol-level
+  checks structurally cannot see — dropping a delimiter loses no symbol *name*, so the file
+  was reported clean. The check only fires when the file parsed **before** the edit, so
+  editing an already-broken file is never refused. See
+  `docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
+
+- **`edit_code(action="rename")` no longer reports a partial rename as a success.** When
+  the language server resolves no reference outside the declaration file — measured and
+  reproducible on Kotlin for a top-level `object`, in a tree that compiled green — the
+  rename edited only that file and returned `status: "ok"`. The call sites it missed were
+  already in the same response under `textual_matches`, neither edited nor flagged, and
+  `verify_hint` pointed the wrong way: it warned about over-reach *in changed files* while
+  the failure was under-reach in *unchanged* ones. The rename now returns
+  `status: "incomplete"` with `completeness_warning` and `uncovered_source_files` whenever
+  the LSP reached only the declaration while other source files still name the symbol —
+  the same disagreement check `references` already performed on the read path. The compact
+  output is also corrected: it summed renamed and un-renamed occurrences into one "sites"
+  figure, so a rename that changed 2 sites and missed 45 displayed as `47 sites`. See
+  `docs/issues/archive/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+
+- **`artifact`'s `extra` can no longer silently unclassify the artifact it writes.**
+  `extra` is for frontmatter keys the schema does not model, but nothing stopped it naming
+  one that it does. Because the writer emits the typed fields first and then appends
+  `extra` verbatim, `extra={"kind": "bug"}` produced **two `kind:` lines in one YAML
+  mapping** — which does not parse, so the artifact lost its kind, status, title, owners
+  and tags together and dropped out of `artifact(find, kind=…)` entirely. The file still
+  read correctly to a human and no gate noticed; one bug file sat outside the ledger for a
+  working day. `create` and `update` now refuse an `extra` key that names a modelled field
+  and name the parameter that owns it, and the writer additionally drops such a key rather
+  than emitting a document that cannot be read back. See
+  `docs/issues/archive/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+
 - **The `run_command` safety layer now reads a command the way the shell will run it.**
   Since the switch to executing through a POSIX shell on both platforms (`sh -c`, Git Bash
   `bash -c`), the gates still split on whitespace and matched raw substrings, so quoting or
@@ -300,6 +396,11 @@ All notable changes to codescout are documented here.
   field values are searchable instead of collapsing to one line.
 
 ### Removed
+
+- `CodePayload::ast_kind`. Declared, serialized, deserialized — and written as `""` at
+  every construction site in the tree. It had no producer anywhere, so populating it
+  would have meant inventing a value; a permanently-empty payload field is worse than no
+  field. Points written before 2026-08-08 still carry the key and it is no longer read.
 
 - **Benchmark matrix scaffolding** — `docker-compose.matrix.yml` and
   `scripts/chunk-model-matrix.py`. The tuned defaults they produced (chunk

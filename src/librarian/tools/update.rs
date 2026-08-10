@@ -275,6 +275,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
 
+    // Checked once here rather than inside `apply_frontmatter_patch`, which all three
+    // frontmatter-touching branches below call and which is infallible by design.
+    //
+    // Rejected whatever the value, including `null`. A null would be an RFC-7396 delete,
+    // which is a no-op for these keys — parsing routes them to typed fields, so `extra`
+    // never holds one to delete — and answering a mistaken repair attempt with an error
+    // that names the right parameter beats answering it with silence.
+    if let Some(extra) = &patch.extra {
+        super::create::reject_reserved_extra_keys(extra)?;
+    }
+
     let body_changing = patch.body.is_some() || patch.body_edits.is_some();
     // Headings destroyed by an opted-in `replace` + `include_subsections: true`.
     // Surfaced in the response and the `field_patch` payload so a section-level
@@ -904,6 +915,57 @@ mod tests {
             !after_merge.contains_key("origin_session_id"),
             "null deletes the key"
         );
+    }
+
+    #[tokio::test]
+    async fn update_rejects_an_extra_key_that_names_a_frontmatter_field() {
+        // The create path is not the only way in: an update carrying the same
+        // colliding key would corrupt an artifact that was created correctly.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "custom.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let abs = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        let before = std::fs::read_to_string(&abs).unwrap();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"status": "done"}}}),
+        )
+        .await
+        .expect_err("a reserved key in `extra` must be refused");
+        let msg = err.to_string();
+        assert!(msg.contains("status"), "must name the clash: {msg}");
+
+        // Refused before any write: a partially-applied patch that leaves the file
+        // unparseable is the exact failure this guards against.
+        assert_eq!(
+            std::fs::read_to_string(&abs).unwrap(),
+            before,
+            "the file must be untouched"
+        );
+
+        // And a null value is refused too — it would be a no-op delete (parse routes
+        // reserved keys to typed fields, so `extra` never holds one), and answering
+        // a mistaken repair with an error that names the right parameter beats
+        // answering it with silence.
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"kind": null}}}),
+        )
+        .await
+        .expect_err("a reserved key is refused whatever its value");
     }
 
     #[tokio::test]
