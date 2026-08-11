@@ -82,9 +82,13 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
     // of what the directory path contains, so the chunk size is fixed,
     // never derived by substring-matching the path string (a path like
     // ".../models--nomic-ai--nomic-embed-text-v1.5" would otherwise match
-    // the 8192-token branch below and massively over-chunk).
+    // the 8192-token branch below and massively over-chunk). Delegates to
+    // the `local:` arm below rather than restating its literal, so the two
+    // cannot silently disagree if that table entry ever changes. Cannot
+    // recurse: the delegated string takes the `local:` arm on the next
+    // call, which returns before this check is reached again.
     if model_spec.starts_with("local-dir:") {
-        return from_tokens(256);
+        return chunk_size_for_model("local:AllMiniLML6V2Q");
     }
 
     // Local fastembed models use their documented sequence lengths.
@@ -182,9 +186,12 @@ pub async fn create_embedder_with_config(
     //     Must be its own arm: "local-dir:/x".strip_prefix("local:") is None
     //     (byte 5 is `-`, not `:`), so `local:` below does NOT capture it —
     //     confirmed by deleting this arm and observing arm 2 miss it. Without
-    //     this arm, a local-dir: string falls through every other prefix,
-    //     fails to parse as a bare registry name at step 6, and dead-ends in
-    //     the generic "Unknown model" bail — never reaching `from_dir`.
+    //     this arm (verified by actually deleting it and running the missing-
+    //     weights case with local-embed on, no remote-embed): the string is
+    //     caught by the un-cfg-gated "Local embedding requires the
+    //     'local-embed' feature" bail below (its `local-dir:` check has no
+    //     #[cfg], so it fires whether or not the feature is compiled) —
+    //     never reaching the unknown-model bail, and never reaching `from_dir`.
     #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
     if let Some(path) = model.strip_prefix("local-dir:") {
         return Ok(Box::new(
