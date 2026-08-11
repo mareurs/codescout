@@ -26,6 +26,8 @@ topic: pr-review
 | F-2 | 2026-07-20 | high | plan-prose | open | PR #8's description covers ~4 items; diff silently includes a 627-line indexer.rs rewrite + 2 more undisclosed fixes |
 | F-3 | 2026-07-20 | med | codescout-tool | fixed-verified | Initial PR #7 review declared "no blocking correctness issues"; independent clippy run found one |
 | F-4 | 2026-08-07 | high | plan-prose | open | PR #9 discloses two narrow limitations; 10 of 11 adversarial variants bypass the control, none of them via a disclosed route |
+| F-5 | 2026-08-11 | high | plan-code | open | PR #13's plan called fastembed's `embed()` with `&self`; the same workspace already documents it as `&mut self`, and no lane the PR ran compiles the file |
+| F-6 | 2026-08-11 | med | plan-prose | open | PR #13's summary claims `semantic_search`/`memory(recall)` work sidecar-free; nothing in the diff constructs the embedder (plan Tasks 4-6 absent) |
 
 ## Wins Index
 
@@ -34,6 +36,7 @@ topic: pr-review
 | W-1 | 2026-07-20 | high | Diff PR's claimed file list against `gh`'s actual file list before reading hunks | Would likely have missed or badly delayed the scope-mismatch finding (F-2) by reading hunks in file order instead | validated |
 | W-2 | 2026-07-20 | high | Independent fmt/clippy/test run in an isolated worktree, not trusting PR self-reports | Would have pushed a broken `clippy -D warnings` gate onto `experiments` | validated |
 | W-3 | 2026-08-07 | high | Execute a newly-added security control against adversarial inputs instead of reading its patterns | Would have shipped ~2 confident findings and hedged the rest, deferring to the PR's own stated scope | validated |
+| W-4 | 2026-08-11 | high | On a third-party-API compile error, grep the whole workspace for an existing in-repo user of that type before designing the fix | Both reflex fixes (`&mut self` on the trait; `#[derive(Debug)]`) are impossible, and each costs a full `--features local-embed-dynamic` build to disprove | validated |
 
 ---
 
@@ -202,6 +205,123 @@ Plus 2 false positives: `EGRESS` matches `\bnc\b` and `\bssh\b` as bare words, s
 **Status:** validated
 
 ---
+## F-5 — PR #13's plan called fastembed's `embed()` with `&self`; the same workspace already documents it as `&mut self`
+
+**Observed:** 2026-08-11, reviewing open PRs. PR #13 (`feat/local-onnx-embedder`)
+shows 16 green checks and one red: `Feature check (opt-in build configs)`.
+
+**When:** Reading the failing job log (run 31377316509) before proposing any fix.
+
+**Expected (plan + branch code):**
+`docs/superpowers/plans/2026-08-08-local-onnx-embedder.md:403` specifies
+`fn embed_texts(&self, texts: Vec<String>)` calling `self.model.embed(texts, None)`.
+`src/retrieval/local_onnx.rs:81` transcribes it verbatim.
+
+**Got (scouted reality):** `fastembed-5.13.4/src/text_embedding/impl.rs:447` —
+`pub fn embed<S>(&mut self, …)`. `cargo check --features local-embed-dynamic
+--all-targets` fails E0596. The answer was already in this workspace, in a
+comment: `crates/codescout-embed/src/local.rs:13` holds
+`Arc<Mutex<fastembed::TextEmbedding>>` and line 82 reads *"fastembed 5 changed
+embed() to &mut self — Mutex serializes access across spawn_blocking tasks"*.
+Second error, same file: `local_onnx.rs:153` uses `.unwrap_err()`, which needs
+`Self: Debug` — and `TextEmbedding` (`init.rs:127`) has no `Debug` impl, so the
+reflex `#[derive(Debug)]` cannot compile either.
+
+**Probable cause:** two independent gaps, both at the plan stage.
+(a) The plan was written without grepping the workspace for existing users of
+the same third-party type — one `grep TextEmbedding crates/` away.
+(b) `src/retrieval/mod.rs:11` gates the module on `local-embed-dynamic` alone.
+No CI *test* lane and no command in the PR's own 5-line test plan enables it;
+only `cargo check --features local-embed-dynamic --all-targets`
+(`.github/workflows/ci.yml:157`) compiles the file at all. The author did attempt
+that exact command locally — `docs/issues/2026-08-08-cyberark-epm-blocks-ort-sys-build-script.md`
+records it dying inside `ort-sys`'s build script (`os error 5`, CyberArk EPM)
+before ever reaching codescout's own crate. So the file had been compiled
+nowhere before CI.
+
+**Severity:** high — the branch does not compile under the one feature that
+reaches its new module, while the PR body reports 5 green commands and 3396
+passing tests, none of which touched it.
+
+**Status:** open
+
+**Fix idea:** mirror `codescout-embed`'s shape — `model: Arc<Mutex<TextEmbedding>>`
+plus `tokio::task::spawn_blocking` per call. That keeps the `&self` signature
+`BatchEmbedder`/`CodeEmbedder` require (`src/retrieval/embedder.rs:26,41`) and
+keeps CPU-bound ONNX inference off the async executor, which the plan never
+addressed. Replace `.unwrap_err()` with `let Err(e) = … else { panic!() }`. Add
+`--features local-embed-dynamic` to the branch's own verify list.
+
+## F-6 — PR #13's summary claims an outcome its diff cannot produce: nothing constructs the embedder
+
+**Observed:** 2026-08-11, same review pass.
+
+**When:** Checking whether the new type is reachable, after the compile errors.
+
+**Expected (PR body):** "Adds an in-process ONNX embedder … so `semantic_search`
+and `memory(recall)` work without a remote embedder sidecar."
+
+**Got:** `git grep LocalOnnxEmbedder origin/feat/local-onnx-embedder` finds the
+type constructed only inside its own `#[cfg(test)]` module. The plan's Task 4
+(*Selection via `CODESCOUT_EMBEDDER_MODEL`*, plan line 551) is absent; the sole
+`CODESCOUT_EMBEDDER_MODEL` hit anywhere in `src/` is the pre-existing
+`CODESCOUT_EMBEDDER_MODEL_NAME` at `src/retrieval/embedder.rs:246`. Tasks 5
+(honest `workspace(status)`) and 6 (migration runbook) are absent too. The
+branch delivers Tasks 1-3 of 6.
+
+**Probable cause:** PR opened at a task boundary; the body was written from the
+plan's goal statement rather than from the diff.
+
+**Severity:** med — the compile errors block merge regardless, but merged as-is
+the branch ships a type nothing constructs, plus `dep:fastembed` and an
+ONNX-binary download added to the `local-embed` feature (`Cargo.toml:206`) that
+compiles no user of it, since `mod.rs:11` gates the module on
+`local-embed-dynamic` only.
+
+**Status:** open
+
+**Fix idea:** land Task 4 on the branch, or retitle the PR to what it delivers
+("`CodeEmbedder` trait object + `LocalOnnxEmbedder` type; selection follows").
+Same class as F-2, mirrored: F-2 was diff ⊃ description, this is description ⊃ diff.
+
+## W-4 — Grepping the workspace for an existing user of the same third-party type gave the fix shape and killed two wrong ones
+
+**Observed:** 2026-08-11, after CI named two compile errors in PR #13's
+`local_onnx.rs`, before writing any fix.
+
+**Pattern:** When a compile error comes from a third-party API's
+`&self`/`&mut self`/ownership shape, grep the whole workspace for existing users
+of that type before designing the fix. `grep TextEmbedding crates/` →
+`codescout-embed/src/local.rs`, a working in-repo solution to the identical
+constraint, comment included.
+
+**Counterfactual:** the two reflex fixes are both impossible, and each costs a
+full `--features local-embed-dynamic` build to disprove (~28 s on CI's runner;
+minutes locally once `ort` is in the graph).
+1. Change `embed_texts` to `&mut self` — blocked: `BatchEmbedder` and
+   `CodeEmbedder` declare `&self` (`src/retrieval/embedder.rs:26,41`) and
+   `RetrievalClient.embedder` is `Arc<dyn CodeEmbedder>`, so the change would
+   have to propagate through the trait, the `Arc`, and both `EmbedderHttp` impls.
+2. `#[derive(Debug)]` for the E0277 — blocked: `TextEmbedding`
+   (`fastembed-5.13.4/src/text_embedding/init.rs:127`) has no `Debug` impl, so
+   the derive fails on the field it wraps.
+The scout produced the one shape that satisfies both (`Arc<Mutex<…>>` +
+`spawn_blocking`) and, unprompted, the executor-blocking answer the plan omitted.
+
+**Confirming data points:**
+1. This session — two candidate fixes eliminated by reading one sibling file.
+2. Kin: R-17 (spot-check sibling callers of a just-fixed shared helper).
+
+**Impact:** high — replaces two build-and-fail cycles on the slowest-to-compile
+feature config with one grep.
+
+**Promote-when:** a second case where in-repo prior art for a third-party API
+decides a fix shape. At 2 datapoints, promote to the reconnaissance skill's
+Phase 1 as "grep the workspace for existing users of a third-party type before
+writing code that calls it."
+
+**Status:** validated
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
