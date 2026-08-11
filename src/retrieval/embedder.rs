@@ -1604,3 +1604,147 @@ mod tests {
         sparse_mock.assert_async().await;
     }
 }
+
+/// Bridges a `codescout_embed::Embedder` into the retrieval traits.
+///
+/// Dense-only by construction: local ONNX backends produce no sparse vector,
+/// so `sparse` is always empty and callers must run with `dense_only` set.
+///
+/// The crate reports *what happened* (`anyhow`, naming the path or file); this
+/// adapter adds *what to do* (`RecoverableError` with the operator remedy).
+/// `RecoverableError` lives in the root crate only — do not push it down.
+pub struct CodeEmbedderAdapter {
+    inner: Box<dyn codescout_embed::Embedder>,
+    /// `None` — the model is the authority. `Some(n)` — the operator pinned a
+    /// dimension and a mismatch is an error rather than a discovery.
+    expected_dim: Option<usize>,
+}
+
+impl CodeEmbedderAdapter {
+    pub fn new(inner: Box<dyn codescout_embed::Embedder>, expected_dim: Option<usize>) -> Self {
+        Self {
+            inner,
+            expected_dim,
+        }
+    }
+
+    /// The dimension downstream callers should build collections with.
+    pub fn dimensions(&self) -> usize {
+        self.expected_dim.unwrap_or_else(|| self.inner.dimensions())
+    }
+
+    fn check_dim(&self, produced: usize) -> anyhow::Result<()> {
+        let Some(expected) = self.expected_dim else {
+            return Ok(());
+        };
+        if produced == expected {
+            return Ok(());
+        }
+        Err(crate::tools::RecoverableError::with_hint(
+            format!(
+                "local embedder dim mismatch: model produced {produced}, configured {expected}"
+            ),
+            format!(
+                "Set CODESCOUT_MODEL_DIM={produced} (or remove it and let the model decide), \
+                 then delete the code index and reindex — the vector table bakes the dimension \
+                 in at creation and cannot migrate in place."
+            ),
+        )
+        .into())
+    }
+
+    fn wrap(&self, dense: Vec<f32>) -> EmbedOutput {
+        EmbedOutput {
+            dense,
+            sparse: SparseVector {
+                indices: vec![],
+                values: vec![],
+            },
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl BatchEmbedder for CodeEmbedderAdapter {
+    async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>> {
+        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let dense = self.inner.embed(&refs).await?;
+        if let Some(first) = dense.first() {
+            self.check_dim(first.len())?;
+        }
+        Ok(dense.into_iter().map(|d| self.wrap(d)).collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl CodeEmbedder for CodeEmbedderAdapter {
+    async fn embed_one(&self, text: &str) -> anyhow::Result<EmbedOutput> {
+        let dense = self.embed_dense_one(text).await?;
+        Ok(self.wrap(dense))
+    }
+
+    async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        let mut out = self.inner.embed(&[text]).await?;
+        let v = out
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("local embedder returned no vector"))?;
+        self.check_dim(v.len())?;
+        Ok(v)
+    }
+}
+
+#[cfg(test)]
+mod adapter_tests {
+    use super::*;
+
+    struct FakeEmbedder(usize);
+
+    #[async_trait::async_trait]
+    impl codescout_embed::Embedder for FakeEmbedder {
+        fn dimensions(&self) -> usize {
+            self.0
+        }
+        async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+            Ok(texts.iter().map(|_| vec![0.5_f32; self.0]).collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_yields_dense_with_empty_sparse() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), None);
+        let out = a.embed_one("hello").await.unwrap();
+        assert_eq!(out.dense.len(), 384);
+        assert!(
+            out.sparse.indices.is_empty(),
+            "local backends have no sparse"
+        );
+        assert!(out.sparse.values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn adapter_errors_when_pinned_dim_disagrees_with_the_model() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(768));
+        let err = a.embed_one("hello").await.unwrap_err().to_string();
+        assert!(
+            err.contains("384"),
+            "must name the produced dim, got: {err}"
+        );
+        assert!(
+            err.contains("768"),
+            "must name the configured dim, got: {err}"
+        );
+        assert!(
+            err.contains("reindex") || err.contains("rebuild"),
+            "must tell the operator the index cannot migrate, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn adapter_batches_preserve_order_and_arity() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(3)), None);
+        let texts = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let out = a.embed_batch_dyn(&texts).await.unwrap();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|o| o.dense.len() == 3));
+    }
+}
