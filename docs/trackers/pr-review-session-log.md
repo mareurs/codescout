@@ -26,8 +26,8 @@ topic: pr-review
 | F-2 | 2026-07-20 | high | plan-prose | open | PR #8's description covers ~4 items; diff silently includes a 627-line indexer.rs rewrite + 2 more undisclosed fixes |
 | F-3 | 2026-07-20 | med | codescout-tool | fixed-verified | Initial PR #7 review declared "no blocking correctness issues"; independent clippy run found one |
 | F-4 | 2026-08-07 | high | plan-prose | open | PR #9 discloses two narrow limitations; 10 of 11 adversarial variants bypass the control, none of them via a disclosed route |
-| F-5 | 2026-08-11 | high | plan-code | open | PR #13's plan called fastembed's `embed()` with `&self`; the same workspace already documents it as `&mut self`, and no lane the PR ran compiles the file |
-| F-6 | 2026-08-11 | med | plan-prose | open | PR #13's summary claims `semantic_search`/`memory(recall)` work sidecar-free; nothing in the diff constructs the embedder (plan Tasks 4-6 absent) |
+| F-5 | 2026-08-11 | high | plan-code | fixed-verified | PR #13's plan called fastembed's `embed()` with `&self`; the same workspace already documents it as `&mut self`, and no lane the PR ran compiles the file |
+| F-6 | 2026-08-11 | med | plan-prose | fixed-verified | PR #13's summary claims `semantic_search`/`memory(recall)` work sidecar-free; nothing in the diff constructs the embedder (plan Tasks 4-6 absent) |
 
 ## Wins Index
 
@@ -243,7 +243,12 @@ nowhere before CI.
 reaches its new module, while the PR body reports 5 green commands and 3396
 passing tests, none of which touched it.
 
-**Status:** open
+**Status:** fixed-verified — superseded by branch `feat/local-onnx-query-path` (32 commits,
+`b9a67d1d..cde42860`), whose Task 1 deletes `src/retrieval/local_onnx.rs` entirely and whose
+Task 2 rebuilds the capability in `codescout-embed` beside the `Arc<Mutex<TextEmbedding>>`
+that already encodes the `&mut self` constraint. `cargo check --features local-embed-dynamic
+--all-targets` verified green by the controller after Task 1. Spec:
+`docs/superpowers/specs/2026-08-11-local-onnx-embedding-query-path-design.md`.
 
 **Fix idea:** mirror `codescout-embed`'s shape — `model: Arc<Mutex<TextEmbedding>>`
 plus `tokio::task::spawn_blocking` per call. That keeps the `&self` signature
@@ -278,7 +283,12 @@ ONNX-binary download added to the `local-embed` feature (`Cargo.toml:206`) that
 compiles no user of it, since `mod.rs:11` gates the module on
 `local-embed-dynamic` only.
 
-**Status:** open
+**Status:** fixed-verified — the superseding branch implements the missing Tasks 4-6 as its own
+Tasks 4, 7 and 9. The final whole-branch review traced the spec's promise end to end and
+confirmed it holds on the lite build; on `server-stack` it requires either
+`CODESCOUT_VECTOR_BACKEND=sqlite-vec` or `CODESCOUT_DISABLE_SPARSE=1`, now documented in
+`docs/manual/src/concepts/local-embedding-offline.md`. Execution record:
+`docs/trackers/local-onnx-embedding-session-log.md`.
 
 **Fix idea:** land Task 4 on the branch, or retitle the PR to what it delivers
 ("`CodeEmbedder` trait object + `LocalOnnxEmbedder` type; selection follows").
