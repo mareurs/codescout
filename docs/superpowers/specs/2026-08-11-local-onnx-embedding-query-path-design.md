@@ -217,15 +217,33 @@ backend fixes `memory(recall)` without a second selection path.
 **Repair-and-continue: cache-root paths.** `local-dir:` pointed at the cache
 root rather than the snapshot directory is the mistake this layout invites.
 When the given directory contains exactly one `snapshots/<hash>/` holding the
-expected files, descend into it, load, and attach a `corrections` note.
-Exactly one correct reading, and it is a read — the write-path caveat does not
-apply.
+expected files, descend into it and load. Exactly one correct reading, and it is
+a read — the write-path caveat does not apply. Two candidates is not one correct
+reading, so it is left alone.
+
+**Corrected 2026-08-11 (ruling during planning):** an earlier draft called for an
+MCP `corrections` note here. `corrections` rides on tool responses, and the
+repair happens during embedder construction, which is not a tool-response
+boundary — surfacing it would mean threading an advisory out of
+`RetrievalClient::from_env` through every caller. The repair emits
+`tracing::info!` naming the given and resolved paths instead. If the note is
+wanted later, the honest shape is a general advisory channel for client
+construction, not an ad-hoc one for this case.
 
 **Dimension defaulting.** `model_dim` defaults to `768` today, which is wrong
 by construction for a local AllMiniLM user. Explicitly set → unchanged, it *is*
 the contract. Unset → discovered from `Embedder::dimensions()` and used for
 both `ensure_collection` and validation. A model switch against an existing
-index is caught by Unit 6 at startup, naming both dimensions.
+index is caught by Unit 6, naming both dimensions.
+
+**Corrected 2026-08-11 (ruling during planning):** an earlier draft placed that
+check at client construction. `SqliteVecCodeStore::conn_for`
+(`src/retrieval/sqlite_code_store.rs:70`) keys on **`project_id`**, which
+`RetrievalClient::from_env` does not have — the store is per-project and the
+client is not. The guard therefore runs at the entry to `sync_project` and
+`search_in`, the first points where `project_id` exists. Same check, same
+message, one call later. `collection_dim` takes `(collection, project_id)` for
+the same reason.
 
 ## Testing
 
