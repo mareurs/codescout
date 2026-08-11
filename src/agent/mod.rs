@@ -1680,57 +1680,66 @@ impl Agent {
     pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
         use crate::retrieval::code_store::VectorBackend;
         self.semantic_memory
-            .get_or_try_init(|| async {
-                match VectorBackend::resolve() {
-                    VectorBackend::SqliteVec => {
-                        let store =
-                            crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
-                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
-                    }
-                    #[cfg(feature = "server-stack")]
-                    VectorBackend::Qdrant => {
-                        let config = crate::retrieval::config::RetrievalConfig::from_env()?;
-                        let qdrant =
-                            crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
-                        let collection = config.collection("memories");
-                        let dim = config
-                            .model_dim
-                            .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM)
-                            as u64;
-                        // `QdrantSemanticMemoryStore::new` bootstraps the collection
-                        // (a real network round trip) — bound it so a reachable-but-hung
-                        // Qdrant fails fast instead of blocking up to the 120s operation
-                        // timeout. Timeout is treated exactly like a connect error: it
-                        // flows out as an `Err`, so `get_or_try_init` leaves the cell
-                        // uninitialized and retries on the next call once Qdrant recovers.
-                        let store = match tokio::time::timeout(
-                            crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
-                            crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                                qdrant, collection, dim,
-                            ),
-                        )
-                        .await
-                        {
-                            Ok(result) => result?,
-                            Err(_) => anyhow::bail!(
-                                "timed out bootstrapping Qdrant memories collection after {:?} \
+                .get_or_try_init(|| async {
+                    match VectorBackend::resolve() {
+                        VectorBackend::SqliteVec => {
+                            let store =
+                                crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
+                            anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                        }
+                        #[cfg(feature = "server-stack")]
+                        VectorBackend::Qdrant => {
+                            // Same project root `memory_embedder` resolves — without this,
+                            // a project.toml-only [embeddings] config would make
+                            // memory_embedder project-aware while this stayed env-only,
+                            // a split env-only config could not produce (review round-1
+                            // I-3).
+                            let root = self.project_root().await;
+                            let config =
+                                crate::retrieval::config::RetrievalConfig::from_env_and_project(
+                                    root.as_deref(),
+                                )?;
+                            let qdrant =
+                                crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
+                            let collection = config.collection("memories");
+                            let dim = config
+                                .model_dim
+                                .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM)
+                                as u64;
+                            // `QdrantSemanticMemoryStore::new` bootstraps the collection
+                            // (a real network round trip) — bound it so a reachable-but-hung
+                            // Qdrant fails fast instead of blocking up to the 120s operation
+                            // timeout. Timeout is treated exactly like a connect error: it
+                            // flows out as an `Err`, so `get_or_try_init` leaves the cell
+                            // uninitialized and retries on the next call once Qdrant recovers.
+                            let store = match tokio::time::timeout(
+                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
+                                crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                                    qdrant, collection, dim,
+                                ),
+                            )
+                            .await
+                            {
+                                Ok(result) => result?,
+                                Err(_) => anyhow::bail!(
+                                    "timed out bootstrapping Qdrant memories collection after {:?} \
                                  (Qdrant reachable but unresponsive?); semantic memory \
                                  unavailable this session — will retry on next use",
-                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
-                            ),
-                        };
-                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
-                    }
-                    #[cfg(not(feature = "server-stack"))]
-                    VectorBackend::Qdrant => anyhow::bail!(
-                        "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
+                                    crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
+                                ),
+                            };
+                            anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                        }
+                        #[cfg(not(feature = "server-stack"))]
+                        VectorBackend::Qdrant => anyhow::bail!(
+                            "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
                          feature. Rebuild with `--features server-stack`, or use the lean lite \
                          stack with CODESCOUT_VECTOR_BACKEND=sqlite-vec."
-                    ),
-                }
-            })
-            .await
-            .cloned()
+                        ),
+                    }
+                })
+                .await
+                .cloned()
     }
 
     /// Test seam: pre-populate the OnceCell with a stub store so tests don't

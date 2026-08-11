@@ -66,6 +66,73 @@ fn config_from_env_reads_overrides() {
     );
 }
 
+#[test]
+fn config_from_env_and_project_prefers_project_toml_when_env_silent() {
+    // Composition-level regression for review round-1 mutation α: the
+    // root -> ProjectConfig::load_or_default -> merge chain inside
+    // `RetrievalConfig::from_env_and_project` must actually reach the
+    // project's [embeddings] values, not just each merge field in isolation.
+    //
+    // Needs BOTH env-var families neutralized: CODESCOUT_EMBEDDER_* (what
+    // RetrievalConfig itself reads) AND CODESCOUT_EMBED_MODEL/_URL (a
+    // DIFFERENT, pre-existing family `ProjectConfig::load_or_default` applies
+    // internally, unconditionally, before RetrievalConfig ever sees the
+    // result) — this machine exports both, and a test that only controlled
+    // the first family would silently read the second family's ambient value
+    // instead of the project.toml's.
+    temp_env::with_vars_unset(
+        [
+            "CODESCOUT_EMBEDDER_URL",
+            "CODESCOUT_EMBEDDER_MODEL",
+            "EMBED_API_KEY",
+            "CODESCOUT_MODEL_DIM",
+            "CODESCOUT_EMBED_MODEL",
+            "CODESCOUT_EMBED_URL",
+        ],
+        || {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            std::fs::write(
+                dir.path().join(".codescout/project.toml"),
+                "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"local-dir:/weights\"\nurl = \"http://from-toml:9\"\n",
+            )
+            .unwrap();
+            let cfg = RetrievalConfig::from_env_and_project(Some(dir.path())).expect("loads");
+            assert_eq!(cfg.model, "local-dir:/weights");
+            assert_eq!(cfg.embedder_url.as_deref(), Some("http://from-toml:9"));
+        },
+    );
+}
+
+#[test]
+fn config_from_env_and_project_env_wins_over_project_toml() {
+    // Same composition seam as above, but with CODESCOUT_EMBEDDER_* populated
+    // too — a precedence inversion that only manifests once the real
+    // `load_or_default` call is wired in (rather than in a pure
+    // merge-function-level test alone) would slip past `merge_tests` in
+    // src/retrieval/config.rs but not this one. No need to neutralize
+    // CODESCOUT_EMBED_MODEL/_URL here: env must win regardless of what that
+    // other layer resolves the project side to.
+    temp_env::with_vars(
+        [
+            ("CODESCOUT_EMBEDDER_URL", Some("http://from-env:8")),
+            ("CODESCOUT_EMBEDDER_MODEL", Some("local:BGESmallENV15")),
+        ],
+        || {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            std::fs::write(
+                dir.path().join(".codescout/project.toml"),
+                "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"local-dir:/weights\"\nurl = \"http://from-toml:9\"\n",
+            )
+            .unwrap();
+            let cfg = RetrievalConfig::from_env_and_project(Some(dir.path())).expect("loads");
+            assert_eq!(cfg.model, "local:BGESmallENV15");
+            assert_eq!(cfg.embedder_url.as_deref(), Some("http://from-env:8"));
+        },
+    );
+}
+
 #[cfg(feature = "server-stack")]
 #[test]
 
