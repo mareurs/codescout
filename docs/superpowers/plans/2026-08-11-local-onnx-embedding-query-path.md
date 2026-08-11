@@ -502,6 +502,15 @@ a pass."
 - Consumes: `LocalEmbedder::from_dir` (Task 2).
 - Produces: model string `local-dir:<path>` accepted by `create_embedder_with_config`.
 
+**Added 2026-08-11 during execution (Task 4 review finding F2).** `chunk_size_for_model`
+(same file, `lib.rs:45-107`) is the grammar's OTHER consumer and has a `local:` arm with no
+`local-dir:` arm — so a `local-dir:` spec falls through to substring-matching on the
+filesystem PATH. Measured: `local-dir:/opt/weights` → 1305 chars and a HuggingFace cache
+path naming nomic → 20889 chars, where 652 is the only correct answer because `from_dir` is
+hardcoded to AllMiniLM-L6-v2-Q. The consumer caps at 4096, so that last case ships 4096-char
+chunks to a model truncating at 512 tokens — two-thirds of every chunk silently discarded.
+This task must add the `local-dir:` arm. Same hub-vs-dir parity class Task 3 closed.
+
 - [ ] **Step 1: Write the failing test**
 
 ```rust
@@ -544,7 +553,12 @@ In `create_embedder_with_config`, immediately **before** the existing `// 2. loc
 
 ```rust
     // 2a. local-dir: prefix — weights from a directory, never the network.
-    //     Checked before `local:` because that prefix would otherwise swallow it.
+    //     (Corrected 2026-08-11: an earlier draft of this plan claimed the `local:`
+    //     arm would otherwise swallow it. That is FALSE and was disproved by
+    //     mutation during Task 4's review — `"local-dir:/x".strip_prefix("local:")`
+    //     is None, because byte 5 is `-`, not `:`. The arm is needed because
+    //     without it `local-dir:` dead-ends in the bare-name fallback and the
+    //     catch-all bail, never reaching `from_dir`. Write THAT as the comment.)
     #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
     if let Some(path) = model.strip_prefix("local-dir:") {
         return Ok(Box::new(
