@@ -469,4 +469,31 @@ mod dim_guard_tests {
             "error should name both the stored (768) and the embedder's real (384) dims, got: {msg}"
         );
     }
+
+    /// Review round-2 C2: closes the coverage hole that let a real regression
+    /// through. Every existing test of `effective_model_dim` either had the
+    /// embedder answer `known_dim()` with `Some(_)`, or had `config.model_dim`
+    /// pinned to `Some(_)` — so `.or(self.config.model_dim).unwrap_or(fallback)`
+    /// never actually reached its `unwrap_or` arm, and a
+    /// `.unwrap_or(fallback) -> .unwrap_or(0)` mutation survived undetected.
+    /// This is the case where NEITHER the embedder nor the config pin can
+    /// answer — a remote/HTTP backend (`known_dim()` is always `None`) with no
+    /// `CODESCOUT_MODEL_DIM` set — so the caller's `fallback` must be the
+    /// value that comes out.
+    #[tokio::test]
+    async fn effective_model_dim_falls_back_when_nothing_is_known() {
+        let store = Arc::new(DimReportingStore::default());
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(EmbedderHttp::new(
+            "http://unused.invalid",
+            "http://unused.invalid",
+            3,
+        ));
+        let client = client_with_store_and_embedder(store, embedder, /* model_dim */ None);
+        assert_eq!(
+            client.effective_model_dim(999),
+            999,
+            "with neither the embedder nor a config pin able to answer, the caller's \
+             fallback must come through unchanged"
+        );
+    }
 }

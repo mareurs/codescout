@@ -1767,10 +1767,26 @@ impl CodeEmbedder for CodeEmbedderAdapter {
     }
 
     fn known_dim(&self) -> Option<usize> {
-        // Local backends self-describe at construction; `dimensions()` is
-        // already guaranteed to agree with any operator pin (`new` validated
-        // that), so there is nothing further to reconcile here.
-        Some(self.dimensions())
+        // NOT every backend routed through this adapter is local. `build_embedder`
+        // (`client.rs`) selects `CodeEmbedderAdapter` whenever no `embedder_url`
+        // is configured — broader than `backend_is_local`'s `local:`/`local-dir:`
+        // prefix check, since `codescout_embed::create_embedder_with_config`'s
+        // resolution order also routes bare `ollama:`/`openai:` model strings
+        // (no url) through here, both backed by `codescout_embed::RemoteEmbedder`,
+        // not `LocalEmbedder`.
+        //
+        // Only `LocalEmbedder` (the true `local:`/`local-dir:` backend)
+        // self-describes its dimension synchronously at construction —
+        // `dimensions()` there is always non-zero. `RemoteEmbedder::dimensions()`
+        // returns 0 as a "not yet known" sentinel until the first successful
+        // `embed()` call populates its cache (its own doc comment: "test for 0
+        // and treat it as unknown"). Filtering it out here is required, not
+        // defensive: review round-2 C2 found that an unfiltered `Some(0)`
+        // permanently wedged both `search_in` and `sync_project` for any
+        // `openai:`/`ollama:`-without-url configuration — `effective_model_dim`'s
+        // `.or(self.config.model_dim)` never even reaches the operator's pin,
+        // because `Some(0)` already satisfied the `Option` chain.
+        Some(self.dimensions()).filter(|d| *d > 0)
     }
 }
 
@@ -1891,6 +1907,32 @@ mod adapter_tests {
     async fn dimensions_reports_the_models_value_with_an_agreeing_pin() {
         let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(384)).unwrap();
         assert_eq!(a.dimensions(), 384);
+    }
+
+    /// Review round-2 C2: `CodeEmbedderAdapter` also wraps `RemoteEmbedder`
+    /// (any `openai:`/`ollama:` model string with no `embedder_url`), whose
+    /// `dimensions()` returns 0 — a "not yet known" sentinel, not a real
+    /// dimension — until the first successful `embed()` populates its cache.
+    /// `FakeEmbedder(0)` stands in for that pre-first-embed state.
+    /// `known_dim()` must filter it out rather than pass it through as
+    /// `Some(0)`, which previously let a bogus "known" dimension of zero
+    /// short-circuit `effective_model_dim`'s `.or(self.config.model_dim)`
+    /// before it ever reached the operator's pin.
+    #[tokio::test]
+    async fn known_dim_is_none_for_a_backend_reporting_zero() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(0)), None).unwrap();
+        assert_eq!(
+            a.known_dim(),
+            None,
+            "a 0-dimension report (RemoteEmbedder's 'not yet known' sentinel) must not \
+             be treated as a known dimension"
+        );
+    }
+
+    #[tokio::test]
+    async fn known_dim_reports_a_real_nonzero_dimension() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), None).unwrap();
+        assert_eq!(a.known_dim(), Some(384));
     }
 
     #[tokio::test]

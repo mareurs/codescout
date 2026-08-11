@@ -297,9 +297,11 @@ impl RetrievalClient {
     /// can default to whatever it's being compared against.
     ///
     /// Priority: the embedder's own report (`CodeEmbedder::known_dim`) when it
-    /// has one — always true for a local backend, since it self-describes at
-    /// construction — then the operator's `CODESCOUT_MODEL_DIM` pin, then
-    /// `fallback`.
+    /// has one — true for a `local:`/`local-dir:` backend (self-describes at
+    /// construction), false for `EmbedderHttp` and false for a
+    /// `CodeEmbedderAdapter` wrapping `RemoteEmbedder` (`ollama:`/`openai:`
+    /// with no url) until its first successful embed populates its cache —
+    /// then the operator's `CODESCOUT_MODEL_DIM` pin, then `fallback`.
     ///
     /// This is the fix for a real defect found in review: the previous
     /// `guard_index_dim` compared against `self.config.model_dim.unwrap_or(index_dim)`
