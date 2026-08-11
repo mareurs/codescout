@@ -43,6 +43,20 @@ pub trait CodeEmbedder: BatchEmbedder {
     async fn embed_one(&self, text: &str) -> anyhow::Result<EmbedOutput>;
     /// Dense-only query embedding, for consumers that never rank on sparse.
     async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+
+    /// This embedder's own dense dimension, when it can answer synchronously
+    /// and without a network round trip — always `Some` for a local backend
+    /// (self-describing at construction), always `None` for a remote/HTTP
+    /// backend. Lets a caller holding an already-built `Arc<dyn CodeEmbedder>`
+    /// (e.g. `RetrievalClient.embedder`) validate or size an index against the
+    /// model's real dimension at zero extra cost — no new model load, unlike
+    /// `RetrievalClient::resolve_model_dim`, which exists only for callers
+    /// (`Agent::semantic_memory_store`) with no already-built embedder to ask.
+    ///
+    /// Deliberately has no default: a backend that silently inherited `None`
+    /// would fall back to trusting a config value that can default to
+    /// whatever it's being compared against, defeating the point of asking.
+    fn known_dim(&self) -> Option<usize>;
 }
 
 #[async_trait::async_trait]
@@ -52,6 +66,12 @@ impl CodeEmbedder for EmbedderHttp {
     }
     async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         self.dense_query(text).await
+    }
+
+    fn known_dim(&self) -> Option<usize> {
+        // A remote/HTTP model's dimension isn't knowable without embedding a
+        // probe string over the network — never synchronous.
+        None
     }
 }
 
@@ -1744,6 +1764,13 @@ impl CodeEmbedder for CodeEmbedderAdapter {
         let v = self.inner.embed_query(text).await?;
         self.check_dim(v.len())?;
         Ok(v)
+    }
+
+    fn known_dim(&self) -> Option<usize> {
+        // Local backends self-describe at construction; `dimensions()` is
+        // already guaranteed to agree with any operator pin (`new` validated
+        // that), so there is nothing further to reconcile here.
+        Some(self.dimensions())
     }
 }
 

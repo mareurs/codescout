@@ -220,9 +220,21 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
     async fn collection_dim(&self, collection: &str, _project_id: &str) -> Result<Option<u64>> {
         // Qdrant collections are shared across projects, so project_id is unused
         // here — the dimension is a property of the collection itself.
+        //
+        // Fail-open by design, not just for the missing-collection case:
+        // `collection_info` returning any `Err` (missing collection, a
+        // transient network blip, an auth hiccup) maps to `Ok(None)`, which
+        // disables `guard_index_dim` for this call rather than surfacing a
+        // spurious failure on an unrelated transient error. This mirrors the
+        // brief's own stance on this backend ("Qdrant rejects a wrong-dimension
+        // upsert server-side anyway, so this backend loses less by abstaining
+        // than sqlite does") — matching specifically on a gRPC NotFound status
+        // would need `tonic` as a new direct dependency (it's currently only
+        // transitive, via `qdrant-client`) to name the status code, for a
+        // narrower guarantee this backend doesn't need: any error here already
+        // has a legible server-side fallback at upsert time.
         match self.client.collection_info(collection).await {
             Ok(info) => Ok(dense_vector_size(&info)),
-            // A missing collection is "nothing indexed yet", not an error.
             Err(_) => Ok(None),
         }
     }
@@ -592,5 +604,105 @@ mod tests {
         // "m" excluded by language, "x" excluded by project → only "a"
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].chunk_id, "a");
+    }
+
+    /// Review round-2 I4: `dense_vector_size` is a pure function over plain
+    /// prost structs, constructible without a real Qdrant — as shipped it had
+    /// zero coverage, so a `"dense"` → other-key typo, or a
+    /// `.get("dense")` → `.values().next()` mutation, was invisible. Four
+    /// cases: the named-map shape our collections actually use, the unnamed
+    /// single-vector shape handled for completeness, a map present but with
+    /// no `"dense"` key, and a missing `result` (mirrors a not-found
+    /// collection).
+    #[cfg(feature = "server-stack")]
+    mod dense_vector_size_tests {
+        use super::super::dense_vector_size;
+        use qdrant_client::qdrant::{
+            vectors_config, CollectionConfig, CollectionInfo, CollectionParams,
+            GetCollectionInfoResponse, VectorParams, VectorParamsMap, VectorsConfig,
+        };
+        use std::collections::HashMap;
+
+        fn response_with(config: Option<vectors_config::Config>) -> GetCollectionInfoResponse {
+            GetCollectionInfoResponse {
+                result: Some(CollectionInfo {
+                    config: Some(CollectionConfig {
+                        params: Some(CollectionParams {
+                            vectors_config: Some(VectorsConfig { config }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn walks_the_named_dense_vector_out_of_a_params_map() {
+            let mut map = HashMap::new();
+            map.insert(
+                "dense".to_string(),
+                VectorParams {
+                    size: 384,
+                    ..Default::default()
+                },
+            );
+            map.insert(
+                "sparse".to_string(),
+                VectorParams {
+                    size: 999,
+                    ..Default::default()
+                },
+            );
+            let info = response_with(Some(vectors_config::Config::ParamsMap(VectorParamsMap {
+                map,
+            })));
+            assert_eq!(
+                dense_vector_size(&info),
+                Some(384),
+                "must read the \"dense\" key specifically, not any entry in the map \
+                 (a .values().next() mutation would wrongly return 999 or 384 by luck \
+                 of HashMap iteration order)"
+            );
+        }
+
+        #[test]
+        fn a_map_with_no_dense_key_is_none_not_some_other_entry() {
+            let mut map = HashMap::new();
+            map.insert(
+                "sparse".to_string(),
+                VectorParams {
+                    size: 999,
+                    ..Default::default()
+                },
+            );
+            let info = response_with(Some(vectors_config::Config::ParamsMap(VectorParamsMap {
+                map,
+            })));
+            assert_eq!(
+                dense_vector_size(&info),
+                None,
+                "no \"dense\" key must be None — a .values().next() mutation would \
+                 wrongly return 999 here"
+            );
+        }
+
+        #[test]
+        fn handles_the_unnamed_single_vector_shape() {
+            let info = response_with(Some(vectors_config::Config::Params(VectorParams {
+                size: 1536,
+                ..Default::default()
+            })));
+            assert_eq!(dense_vector_size(&info), Some(1536));
+        }
+
+        #[test]
+        fn a_missing_result_is_none() {
+            // Mirrors what `collection_info` returns for a not-found collection.
+            let info = GetCollectionInfoResponse::default();
+            assert_eq!(dense_vector_size(&info), None);
+        }
     }
 }

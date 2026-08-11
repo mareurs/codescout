@@ -276,8 +276,8 @@ impl RetrievalClient {
         else {
             return Ok(());
         };
-        let model_dim = self.config.model_dim.unwrap_or(index_dim as usize);
-        if model_dim as u64 == index_dim {
+        let model_dim = self.effective_model_dim(index_dim as usize);
+        if model_dim == index_dim {
             return Ok(());
         }
         Err(crate::tools::RecoverableError::with_hint(
@@ -292,6 +292,58 @@ impl RetrievalClient {
         .into())
     }
 
+    /// The dimension to validate or size an index against, for the embedder
+    /// this client actually holds (`self.embedder`) — not a config value that
+    /// can default to whatever it's being compared against.
+    ///
+    /// Priority: the embedder's own report (`CodeEmbedder::known_dim`) when it
+    /// has one — always true for a local backend, since it self-describes at
+    /// construction — then the operator's `CODESCOUT_MODEL_DIM` pin, then
+    /// `fallback`.
+    ///
+    /// This is the fix for a real defect found in review: the previous
+    /// `guard_index_dim` compared against `self.config.model_dim.unwrap_or(index_dim)`
+    /// directly — when unpinned (the common case; `RetrievalConfig.model_dim`'s
+    /// own doc calls `None` "the model is the authority"), `model_dim` *became*
+    /// `index_dim` by construction and the comparison could never fail. That is
+    /// silently inert in exactly the scenario this plan exists to enable: an
+    /// index built at 768 by a remote model, switched to an unpinned
+    /// `local:AllMiniLML6V2Q` (384) — the guard passed, and the mismatch surfaced
+    /// only later, mid-operation. Reading the embedder's own `known_dim()` first
+    /// fixes this for local backends without paying a second model load: unlike
+    /// `resolve_model_dim` (which callers with no already-built embedder use, at
+    /// the cost of constructing a throwaway one), this reads the *live*
+    /// `self.embedder` this client already holds.
+    ///
+    /// For a remote backend (`known_dim()` is `None`, genuinely unknowable
+    /// without a network round trip), this keeps the historical pin-or-`fallback`
+    /// behaviour — callers pass `index_dim` as `fallback` (trust the index when
+    /// nothing else is known, avoiding a false positive against a correctly
+    /// configured but unpinned, non-`DEFAULT_MODEL_DIM` remote model) or
+    /// `DEFAULT_MODEL_DIM` (the compatibility constant, for sizing a fresh
+    /// collection where there is no index to trust yet).
+    ///
+    /// `pub(crate)`, not private: `sync_project`'s body lives in the sibling
+    /// `sync` module, and Rust's method privacy is module-scoped, not
+    /// type-scoped — a bare `fn` here would not compile from there.
+    pub(crate) fn effective_model_dim(&self, fallback: usize) -> u64 {
+        self.embedder
+            .known_dim()
+            .or(self.config.model_dim)
+            .unwrap_or(fallback) as u64
+    }
+
+    // `server-stack` is not a default feature (Cargo.toml `default = [...]` omits
+    // it), so a bare `cargo clippy -- -D warnings` compiles this crate WITHOUT it —
+    // and this function's only production caller (`Agent::semantic_memory_store`'s
+    // Qdrant branch) is itself `#[cfg(feature = "server-stack")]`. Without the
+    // `test` arm here, that default-features build reports `resolve_model_dim` as
+    // dead code and the mandated gate (CLAUDE.md; `.github/workflows/ci.yml:50`)
+    // fails on every commit, not just an unusual feature combination. The `test`
+    // arm keeps the function AND its tests compiling — and, critically, *executing*
+    // — under `cargo test --workspace --features local-embed` (no `server-stack`),
+    // which is the actual test-running gate command.
+    #[cfg(any(feature = "server-stack", test))]
     /// The dimension to size a *fresh* Qdrant collection with when no
     /// `CODESCOUT_MODEL_DIM` pin exists.
     ///
@@ -311,6 +363,20 @@ impl RetrievalClient {
     ///
     /// A remote (HTTP) backend cannot self-report a dimension without a network
     /// round trip, so it keeps the existing pin-or-default fallback.
+    ///
+    /// Policy note (minor, review round-2): unlike `CodeEmbedderAdapter::new`,
+    /// this does NOT treat a local model's real dimension disagreeing with
+    /// `config.model_dim` as a hard error — it just reports the model's own
+    /// value and moves on. That's deliberate, not an oversight: this function
+    /// only sizes a *fresh* collection before any real embedder has been
+    /// constructed. The same disagreement is still caught, as a hard
+    /// `RecoverableError`, the moment a real embedder IS built —
+    /// `Agent::memory_embedder()` → `RetrievalClient::build_embedder` →
+    /// `CodeEmbedderAdapter::new` — which happens on the very next
+    /// remember/recall call (`src/tools/memory/mod.rs` calls
+    /// `memory_embedder()` before `semantic_memory_store()`). So a wrong pin
+    /// is never silently accepted; it's validated a moment later, on the path
+    /// that actually enforces it.
     pub(crate) async fn resolve_model_dim(config: &RetrievalConfig) -> Result<usize> {
         if !Self::backend_is_local(config) {
             return Ok(config

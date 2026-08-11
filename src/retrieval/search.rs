@@ -222,7 +222,9 @@ mod dim_guard_tests {
     use crate::retrieval::code_store::CodeVectorStore;
     use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    use crate::retrieval::embedder::{EmbedOutput, EmbedderHttp, SparseVector};
+    use crate::retrieval::embedder::{
+        BatchEmbedder, CodeEmbedder, EmbedOutput, EmbedderHttp, SparseVector,
+    };
     use crate::retrieval::payload::CodePayload;
     use crate::retrieval::reranker::RerankerHttp;
     use async_trait::async_trait;
@@ -282,21 +284,48 @@ mod dim_guard_tests {
         }
     }
 
-    fn client_with_store(store: Arc<dyn CodeVectorStore>, model_dim: usize) -> RetrievalClient {
+    /// A `CodeEmbedder` fake standing in for `CodeEmbedderAdapter` (a local
+    /// backend that self-describes its dimension) without a real ONNX load.
+    /// Every method but `known_dim` is unreachable — these tests only exercise
+    /// `guard_index_dim`/`RetrievalClient::effective_model_dim`, which never
+    /// call embed.
+    struct FixedDimEmbedder(usize);
+
+    #[async_trait]
+    impl BatchEmbedder for FixedDimEmbedder {
+        async fn embed_batch_dyn(&self, _texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+    }
+
+    #[async_trait]
+    impl CodeEmbedder for FixedDimEmbedder {
+        async fn embed_one(&self, _text: &str) -> Result<EmbedOutput> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+        async fn embed_dense_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+        fn known_dim(&self) -> Option<usize> {
+            Some(self.0)
+        }
+    }
+
+    fn client_with_store_and_embedder(
+        store: Arc<dyn CodeVectorStore>,
+        embedder: Arc<dyn CodeEmbedder>,
+        model_dim: Option<usize>,
+    ) -> RetrievalClient {
         RetrievalClient {
             code_store: store,
-            embedder: Arc::new(EmbedderHttp::new(
-                "http://unused.invalid",
-                "http://unused.invalid",
-                3,
-            )),
+            embedder,
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),
                 embedder_url: Some("http://unused.invalid".into()),
                 sparse_embedder_url: "http://unused.invalid".into(),
                 reranker_url: "http://unused.invalid".into(),
-                model_dim: Some(model_dim),
+                model_dim,
                 model: "local:AllMiniLML6V2Q".into(),
                 api_key: None,
                 profile: "cpu".into(),
@@ -309,15 +338,49 @@ mod dim_guard_tests {
         }
     }
 
+    fn client_with_store(store: Arc<dyn CodeVectorStore>, model_dim: usize) -> RetrievalClient {
+        client_with_store_and_embedder(
+            store,
+            Arc::new(EmbedderHttp::new(
+                "http://unused.invalid",
+                "http://unused.invalid",
+                3,
+            )),
+            Some(model_dim),
+        )
+    }
+
+    /// Asserts the error is `RecoverableError` (isError: false — sibling
+    /// parallel tool calls survive) carrying the reindex remedy, not merely
+    /// some error with the right numbers in its `Display`. Review round-2 I2:
+    /// `RecoverableError`'s `Display` appends the hint text, so a prior
+    /// version of these tests that asserted only on `format!("{err:#}")`
+    /// stayed green even if the guard's `RecoverableError::with_hint(...)`
+    /// were replaced wholesale with a bare `anyhow::anyhow!(...)` — dropping
+    /// the hint AND flipping the MCP contract from `isError: false` to `true`.
+    fn assert_dim_guard_error(err: &anyhow::Error) {
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false) so sibling parallel tool calls \
+             survive a dimension mismatch; got: {err:#}"
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Delete the code index"),
+            "must carry the reindex remedy, got: {msg}"
+        );
+    }
+
     /// Call-site mutation target for `guard_index_dim`'s wiring into
     /// `search_in`. The store reports an existing index at dim 999 against a
     /// configured `model_dim` of 3; absent the
     /// `self.guard_index_dim(collection, project_id).await?;` line at the top
     /// of `search_in`, this call would instead proceed to embed the query
     /// (against `http://unused.invalid`, which errors for an unrelated reason)
-    /// and then query the store. Asserting BOTH the specific error wording AND
-    /// that the store was never queried distinguishes "the guard fired first"
-    /// from "something else failed downstream".
+    /// and then query the store. Asserting BOTH the specific error AND that
+    /// the store was never queried distinguishes "the guard fired first" from
+    /// "something else failed downstream".
     #[tokio::test]
     async fn search_in_fails_fast_on_a_dim_mismatch_without_querying_the_store() {
         let store = Arc::new(DimReportingStore {
@@ -329,6 +392,7 @@ mod dim_guard_tests {
             .search_code("proj", "query text", SearchOpts::new(5))
             .await
             .expect_err("a stored dim of 999 must fail against the configured model_dim of 3");
+        assert_dim_guard_error(&err);
         let msg = format!("{err:#}");
         assert!(
             msg.contains("999") && msg.contains('3'),
@@ -358,6 +422,7 @@ mod dim_guard_tests {
             .guard_index_dim("code_chunks", "proj")
             .await
             .expect_err("configured 3 vs stored 999 must error");
+        assert_dim_guard_error(&err);
         assert!(format!("{err:#}").contains("999"));
 
         let smaller_index = Arc::new(DimReportingStore {
@@ -369,6 +434,39 @@ mod dim_guard_tests {
             .guard_index_dim("code_chunks", "proj")
             .await
             .expect_err("configured 999 vs stored 3 must error");
+        assert_dim_guard_error(&err);
         assert!(format!("{err:#}").contains('3'));
+    }
+
+    /// Review round-2 I1: the guard used to compare against
+    /// `self.config.model_dim.unwrap_or(index_dim)` — when `CODESCOUT_MODEL_DIM`
+    /// is unset (the common, documented case: "the model is the authority"),
+    /// `model_dim` *became* `index_dim` by construction and the comparison
+    /// could never fail. That's exactly the plan's headline migration: an
+    /// index built at 768 by a remote model, switched to an unpinned local
+    /// model that is actually 384-dimensional. Here `model_dim: None` and the
+    /// embedder reports 384 via `known_dim()` — the guard must use THAT, not
+    /// silently agree with whatever the store says.
+    #[tokio::test]
+    async fn guard_index_dim_catches_an_unpinned_local_model_switch() {
+        let store = Arc::new(DimReportingStore {
+            dim: Some(768),
+            ..Default::default()
+        });
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(FixedDimEmbedder(384));
+        let client = client_with_store_and_embedder(store, embedder, /* model_dim */ None);
+        let err = client
+            .guard_index_dim("code_chunks", "proj")
+            .await
+            .expect_err(
+                "an unpinned local embedder reporting 384 must fail against a 768-d index — \
+                 unwrap_or(index_dim) would wrongly treat this as a match",
+            );
+        assert_dim_guard_error(&err);
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("768") && msg.contains("384"),
+            "error should name both the stored (768) and the embedder's real (384) dims, got: {msg}"
+        );
     }
 }

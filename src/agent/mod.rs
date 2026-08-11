@@ -1702,32 +1702,46 @@ impl Agent {
                             let qdrant =
                                 crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
                             let collection = config.collection("memories");
-                            // Resolve the model's own dimension rather than trusting an
-                            // absent-or-wrong CODESCOUT_MODEL_DIM pin — see
-                            // `RetrievalClient::resolve_model_dim` for why this can't
-                            // reuse `memory_embedder()`'s already-built instance.
-                            let dim =
-                                crate::retrieval::client::RetrievalClient::resolve_model_dim(&config)
-                                    .await? as u64;
-                            // `QdrantSemanticMemoryStore::new` bootstraps the collection
-                            // (a real network round trip) — bound it so a reachable-but-hung
-                            // Qdrant fails fast instead of blocking up to the 120s operation
-                            // timeout. Timeout is treated exactly like a connect error: it
-                            // flows out as an `Err`, so `get_or_try_init` leaves the cell
-                            // uninitialized and retries on the next call once Qdrant recovers.
+                            // Both the dimension resolution AND the collection bootstrap
+                            // are bound by ONE timeout (review round-2 I3). Resolving the
+                            // model's own dimension (below) can, for a local backend,
+                            // trigger a first-time ONNX weights download from the HF hub —
+                            // that used to sit entirely outside any timeout, reachable from
+                            // `main.rs`/`prompts::builders`/the memory tool's `forget` path,
+                            // none of which call `memory_embedder()` first to warm the
+                            // cache. Bounding it here means a slow/absent download fails
+                            // fast and retries on next use, exactly like the Qdrant-hang
+                            // case below already did — same fail-soft contract, one timeout
+                            // covering both causes.
                             let store = match tokio::time::timeout(
                                 crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
-                                crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                                    qdrant, collection, dim,
-                                ),
+                                async {
+                                    // Resolve the model's own dimension rather than trusting an
+                                    // absent-or-wrong CODESCOUT_MODEL_DIM pin — see
+                                    // `RetrievalClient::resolve_model_dim` for why this can't
+                                    // reuse `memory_embedder()`'s already-built instance.
+                                    let dim = crate::retrieval::client::RetrievalClient::resolve_model_dim(
+                                        &config,
+                                    )
+                                    .await? as u64;
+                                    crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                                        qdrant, collection, dim,
+                                    )
+                                    .await
+                                },
                             )
                             .await
                             {
+                                // Treated exactly like a connect error: it flows out as an
+                                // `Err`, so `get_or_try_init` leaves the cell uninitialized
+                                // and retries on the next call once the cause (a hung Qdrant,
+                                // or a slow/absent model download) clears.
                                 Ok(result) => result?,
                                 Err(_) => anyhow::bail!(
                                     "timed out bootstrapping Qdrant memories collection after {:?} \
-                                 (Qdrant reachable but unresponsive?); semantic memory \
-                                 unavailable this session — will retry on next use",
+                                 (Qdrant reachable but unresponsive, or the configured \
+                                 embedding model is still downloading/loading?); semantic \
+                                 memory unavailable this session — will retry on next use",
                                     crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
                                 ),
                             };
@@ -2185,6 +2199,17 @@ mod tests {
 
         let _backend = EnvGuard::set("CODESCOUT_VECTOR_BACKEND", "qdrant");
         let _url = EnvGuard::set("CODESCOUT_QDRANT_URL", format!("http://{addr}"));
+        // Review round-2 I3: pin the embedder to a remote/HTTP backend so
+        // `resolve_model_dim` (now wrapped in the SAME timeout this test
+        // measures — see `semantic_memory_store`) takes its instant,
+        // zero-I/O branch regardless of ambient `[embeddings]`/env config.
+        // Without this, a host with a local model configured would make
+        // this test perform a real ONNX load (or fail if weights are
+        // absent) before ever reaching the black-hole Qdrant listener —
+        // `result.is_err()` would still pass, but for the wrong reason,
+        // and the timeout guard this test exists to pin would silently
+        // stop being exercised.
+        let _embedder_url = EnvGuard::set("CODESCOUT_EMBEDDER_URL", "http://unused.invalid");
 
         let agent = Agent::new(None).await.unwrap();
         let start = std::time::Instant::now();
