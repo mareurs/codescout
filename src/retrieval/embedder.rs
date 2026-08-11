@@ -323,6 +323,16 @@ impl EmbedderHttp {
         self
     }
 
+    /// Test-only accessor for the resolved bearer token. Named distinctly
+    /// from the `api_key` builder setter above (same name, different
+    /// signature, can't coexist) — lets a test bind the cleartext-HTTP guard
+    /// to the actual constructed `EmbedderHttp`, not a copy of the guard
+    /// logic. See `RetrievalClient::build_http_embedder`.
+    #[cfg(test)]
+    pub(crate) fn api_key_for_test(&self) -> Option<&str> {
+        self.api_key.as_deref()
+    }
+
     /// Inject the `CODESCOUT_EMBED_BATCH` override directly. Builder-style;
     /// `new()` reads it from process env, mirroring `api_key`. Tests use this to
     /// set (`Some("4".into())`) or explicitly clear (`None`) the override without

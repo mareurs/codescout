@@ -9,13 +9,23 @@ use serde_json::{json, Value};
 /// Patterns are checked in order of specificity: collection-missing first
 /// (most common after first-time setup), then dim-mismatch (model/index
 /// drift), then TEI errors (dense embedding service unhealthy), then
-/// embedder-connect (client-side: dense/sparse endpoint unreachable), then
-/// transport (stack went away), then a generic fallback.
+/// embedder-connect (client-side: dense/sparse endpoint unreachable via
+/// `EmbedderHttp`), then the resolver-path embedder bucket (client-side:
+/// `ollama:`/`openai:`/etc. via `RemoteEmbedder`, reached with no
+/// `embedder_url` configured), then transport (stack went away), then a
+/// generic fallback.
 ///
 /// The embedder-connect bucket must precede transport: a client-side connect
 /// failure's message carries reqwest's "Connection refused", which would
 /// otherwise be misrouted to the qdrant-oriented transport hint
 /// (docs/issues/2026-07-13-semantic-search-misleading-stack-error-on-missing-env.md).
+/// The resolver-path bucket exists for the same reason: `RemoteEmbedder`'s
+/// failure shapes ("embedding server unavailable after N attempts", "HTTP
+/// {status} from embedding server", `crates/codescout-embed/src/remote.rs`)
+/// match neither the TEI bucket's "tei status" wording nor the
+/// `EmbedderHttp`-specific bucket's "embed connect failed"/"openai send"/
+/// "embed sparse" wording, and would otherwise fall all the way to the
+/// generic qdrant-oriented fallback — the identical misrouting class.
 pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     if err_str.contains("doesn't exist")
         || err_str.contains("not found")
@@ -55,6 +65,19 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
          (don't check qdrant logs). Verify CODESCOUT_EMBEDDER_URL / \
          CODESCOUT_SPARSE_EMBEDDER_URL point at the running embedder, then \
          `./scripts/retrieval-stack.sh ps`."
+            .to_string()
+    } else if err_str.contains("embedding server") {
+        // The no-url resolver path (`ollama:`/`openai:`, wired in
+        // src/retrieval/client.rs::build_embedder) constructs a
+        // `RemoteEmbedder` whose failures carry this wording, not
+        // "embed connect failed" — same client-side class as the bucket
+        // above, distinct wording, so it needs its own match.
+        "The configured embedding model's server is unreachable or returned an \
+         error. This is an embedder problem, NOT a Qdrant issue (don't check \
+         qdrant logs). Verify [embeddings].model (or CODESCOUT_EMBEDDER_MODEL) \
+         names a reachable server — e.g. `ollama list` / `OLLAMA_HOST` for an \
+         `ollama:` model, or your OpenAI-compatible endpoint's status for \
+         `openai:`."
             .to_string()
     } else if err_str.contains("Connection refused")
         || err_str.contains("transport error")
@@ -520,6 +543,40 @@ mod classify_search_error_tests {
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "a dense send failure must route to the embedder bucket, not the generic fallback: {hint}"
+        );
+    }
+
+    #[test]
+    fn resolver_path_retry_exhaustion_routes_to_embedder_hint_not_qdrant() {
+        // RemoteEmbedder's retry-exhaustion wording (reached via the no-url
+        // resolver path an `ollama:`/`openai:` model takes, `remote.rs`'s
+        // `anyhow!("embedding server unavailable after {MAX_RETRIES}
+        // attempts")`) is distinct from `EmbedderHttp`'s "embed connect
+        // failed" and must not fall through to the generic qdrant-oriented
+        // fallback — same misrouting class as the 2026-07-13 bug.
+        let err = "could not build the 'ollama:nomic-embed-text' embedder: \
+                   embedding server unavailable after 3 attempts";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            hint.contains("[embeddings].model") || hint.contains("CODESCOUT_EMBEDDER_MODEL"),
+            "hint must point at the model config: {hint}"
+        );
+        assert!(
+            !hint.contains("docker logs codescout-qdrant")
+                && !hint.contains("Stack reachable but query failed"),
+            "must NOT route a resolver-path failure to the qdrant-logs fallback: {hint}"
+        );
+    }
+
+    #[test]
+    fn resolver_path_http_status_failure_does_not_hit_generic_fallback() {
+        let err = "could not build the 'openai:text-embedding-3-small' embedder: \
+                   HTTP 401 from embedding server: invalid api key";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            !hint.contains("Stack reachable but query failed"),
+            "an embedding-server HTTP failure must route to the resolver-path \
+             embedder bucket, not the generic fallback: {hint}"
         );
     }
 }

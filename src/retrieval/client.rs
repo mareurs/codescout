@@ -40,15 +40,20 @@ impl RetrievalClient {
     }
 
     /// A local backend emits no sparse vector. Silently dropping to dense would
-    /// show up as degraded recall and never as a failure, so it is an error.
+    /// show up as degraded recall and never as a failure, so it is an error —
+    /// but an expected, operator-fixable one (a config conflict, not a bug),
+    /// so `RecoverableError` (isError: false, sibling parallel calls survive)
+    /// rather than `anyhow::bail!` (isError: true, aborts siblings).
     pub(crate) fn guard_sparse(config: &RetrievalConfig, lite: bool) -> Result<()> {
         if Self::backend_is_local(config) && !lite && !config.disable_sparse {
-            anyhow::bail!(
+            return Err(crate::tools::RecoverableError::with_hint(
                 "the local embedding backend produces no sparse vector, but the hybrid \
-                 sparse leg is enabled.\n\
-                 Either set CODESCOUT_DISABLE_SPARSE=1 to run dense-only, or configure \
-                 an embedder url that serves both dense and sparse."
-            );
+                 sparse leg is enabled."
+                    .to_string(),
+                "Either set CODESCOUT_DISABLE_SPARSE=1 to run dense-only, or configure \
+                 an embedder url that serves both dense and sparse.",
+            )
+            .into());
         }
         Ok(())
     }
@@ -85,46 +90,52 @@ impl RetrievalClient {
         }
     }
 
-    pub async fn from_env(root: Option<&std::path::Path>) -> Result<Self> {
-        let config = RetrievalConfig::from_env_and_project(root)?;
-        // Backend selection (server Qdrant vs daemon-free sqlite-vec lite stack).
-        // sqlite-vec never touches the network — no Qdrant connect probe.
-        let backend = VectorBackend::resolve();
-        let lite = matches!(backend, VectorBackend::SqliteVec);
-        let code_store: Arc<dyn CodeVectorStore> = match backend {
-            VectorBackend::SqliteVec => {
-                Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::from_env()?)
-            }
-            VectorBackend::Qdrant => Self::qdrant_code_store(&config).await?,
-        };
-        Self::guard_sparse(&config, lite)?;
-        let dense_only = Self::dense_only(&config, lite);
-        // A configured url always selects the HTTP backend, regardless of
-        // model — `create_embedder_with_config` would resolve `RemoteEmbedder`
-        // for a url too, but routing through `EmbedderHttp` here keeps the
-        // connect-error marker `src/tools/semantic/semantic_search.rs` matches
-        // on. No url means the model names the backend: the codescout-embed
-        // resolver picks `local-dir:` / `local:` / `ollama:` / `openai:`.
-        let embedder: Arc<dyn CodeEmbedder> = if let Some(url) = config.embedder_url.as_deref() {
-            let http = EmbedderHttp::new(
-                url,
-                &config.sparse_embedder_url,
-                config
-                    .model_dim
-                    .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM),
-            )
-            .dense_only(dense_only);
-            // `[embeddings].api_key` is a separate, project-aware key from the
-            // legacy `EMBED_API_KEY` env var that `EmbedderHttp::new` already
-            // reads. When set (and not dropped by the cleartext-HTTP guard),
-            // it wins; otherwise `new()`'s own env-derived key, if any, stands
-            // untouched — `guarded_api_key` returning `None` must never be
-            // read as "clear the key".
-            let http = match Self::guarded_api_key(url, config.api_key.as_deref()) {
-                Some(key) => http.api_key(Some(key)),
-                None => http,
-            };
-            Arc::new(http)
+    /// Build the HTTP-backed embedder for a configured `embedder_url`. Split
+    /// out of `build_embedder` (which erases to `Arc<dyn CodeEmbedder>`) so a
+    /// test can inspect the constructed `EmbedderHttp`'s resolved `api_key`
+    /// directly — on the exact code path `build_embedder`/`from_env` run, not
+    /// a copy of it.
+    fn build_http_embedder(url: &str, config: &RetrievalConfig, dense_only: bool) -> EmbedderHttp {
+        let http = EmbedderHttp::new(
+            url,
+            &config.sparse_embedder_url,
+            config
+                .model_dim
+                .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM),
+        )
+        .dense_only(dense_only);
+        // `[embeddings].api_key` is a separate, project-aware key from the
+        // legacy `EMBED_API_KEY` env var that `EmbedderHttp::new` already
+        // reads. When set (and not dropped by the cleartext-HTTP guard), it
+        // wins; otherwise `new()`'s own env-derived key, if any, stands
+        // untouched — `guarded_api_key` returning `None` must never be read
+        // as "clear the key".
+        match Self::guarded_api_key(url, config.api_key.as_deref()) {
+            Some(key) => http.api_key(Some(key)),
+            None => http,
+        }
+    }
+
+    /// Select and build the query-side embedder from `config`: a configured
+    /// url always selects the HTTP backend regardless of model —
+    /// `create_embedder_with_config` would resolve `RemoteEmbedder` for a url
+    /// too, but routing through `EmbedderHttp` here keeps the connect-error
+    /// marker `src/tools/semantic/semantic_search.rs` matches on. No url
+    /// means the model names the backend: the codescout-embed resolver picks
+    /// `local-dir:` / `local:` / `ollama:` / `openai:`.
+    ///
+    /// Calls `guard_sparse` itself (rather than leaving that to each caller)
+    /// so every caller of this function — not just `from_env` — gets the
+    /// sparse conflict check for free; `from_env` no longer needs to call it
+    /// separately.
+    pub(crate) async fn build_embedder(
+        config: &RetrievalConfig,
+        lite: bool,
+    ) -> Result<Arc<dyn CodeEmbedder>> {
+        Self::guard_sparse(config, lite)?;
+        let dense_only = Self::dense_only(config, lite);
+        if let Some(url) = config.embedder_url.as_deref() {
+            Ok(Arc::new(Self::build_http_embedder(url, config, dense_only)))
         } else {
             let inner = codescout_embed::create_embedder_with_config(
                 &config.model,
@@ -145,11 +156,25 @@ impl RetrievalClient {
                      present but not permitted to execute.",
                 )
             })?;
-            Arc::new(crate::retrieval::embedder::CodeEmbedderAdapter::new(
-                inner,
-                config.model_dim,
-            )?)
+            Ok(Arc::new(
+                crate::retrieval::embedder::CodeEmbedderAdapter::new(inner, config.model_dim)?,
+            ))
+        }
+    }
+
+    pub async fn from_env(root: Option<&std::path::Path>) -> Result<Self> {
+        let config = RetrievalConfig::from_env_and_project(root)?;
+        // Backend selection (server Qdrant vs daemon-free sqlite-vec lite stack).
+        // sqlite-vec never touches the network — no Qdrant connect probe.
+        let backend = VectorBackend::resolve();
+        let lite = matches!(backend, VectorBackend::SqliteVec);
+        let code_store: Arc<dyn CodeVectorStore> = match backend {
+            VectorBackend::SqliteVec => {
+                Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::from_env()?)
+            }
+            VectorBackend::Qdrant => Self::qdrant_code_store(&config).await?,
         };
+        let embedder = Self::build_embedder(&config, lite).await?;
         let reranker = RerankerHttp::new(&config.reranker_url);
         Ok(Self {
             code_store,
@@ -360,6 +385,47 @@ mod selection_tests {
         assert_eq!(
             RetrievalClient::guarded_api_key("http://embed.example.com", None),
             None
+        );
+    }
+
+    #[test]
+    fn build_http_embedder_never_sends_a_configured_key_over_plaintext_http() {
+        // Binds `guarded_api_key` to the call site inside `build_http_embedder`
+        // (the code `build_embedder`/`from_env` actually run), not just to the
+        // pure function in isolation. Mutating the call site to
+        // `config.api_key.clone()` (skipping the guard) makes this assert
+        // `Some("secret")` instead of `None` — dies.
+        let mut c = cfg_with(Some("http://embed.example.com"), "local-dir:/weights");
+        c.api_key = Some("secret".to_string());
+        let http = RetrievalClient::build_http_embedder("http://embed.example.com", &c, false);
+        assert_eq!(
+            http.api_key_for_test(),
+            None,
+            "a configured api_key must never reach a non-loopback plaintext HTTP embedder"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_embedder_errors_for_a_local_backend_with_sparse_still_enabled() {
+        // Binds `guard_sparse` to the call site inside `build_embedder` (what
+        // `from_env` actually runs), not just to the pure function in
+        // isolation. Deleting the `Self::guard_sparse(config, lite)?;` call
+        // lets execution fall through to the resolver, which fails for an
+        // unrelated reason (no weights at "/weights") — an error that does
+        // NOT contain "sparse". Asserting the specific cause, not just
+        // `is_err()`, is what makes this discriminate between the two.
+        //
+        // `Arc<dyn CodeEmbedder>` (the Ok type) isn't `Debug`, so
+        // `unwrap_err()`/`expect_err()` don't compile here — match instead.
+        let mut c = cfg_with(None, "local-dir:/weights");
+        c.disable_sparse = false;
+        let err = match RetrievalClient::build_embedder(&c, /* lite */ false).await {
+            Ok(_) => panic!("expected an error for a local backend with sparse enabled"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("sparse"),
+            "must name sparse as the conflict, got: {err}"
         );
     }
 }
