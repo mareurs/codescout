@@ -4,6 +4,37 @@ use super::super::format::format_overflow;
 use super::super::{optional_u64_param, parse_bool_param, Tool, ToolContext};
 use serde_json::{json, Value};
 
+/// Map a `RetrievalClient::from_env` error into what `SemanticSearch::call`
+/// returns to its caller.
+///
+/// A `RecoverableError` (e.g. `build_embedder`'s `guard_sparse` conflict — a
+/// local backend with the hybrid sparse leg still enabled) already carries
+/// its own accurate message and hint; passed through unchanged here, rather
+/// than relabelled below, is what keeps a config conflict from being
+/// reported as a down service. Anything else (a genuine connect/build
+/// failure) gets the "retrieval stack offline" framing, tailored to the
+/// active backend — the lite stack has no local daemon to start; its
+/// failure mode is an unreachable remote embedding endpoint, not a down
+/// Qdrant/sparse/reranker service.
+pub(crate) fn map_from_env_error(
+    e: anyhow::Error,
+    backend: crate::retrieval::code_store::VectorBackend,
+) -> anyhow::Error {
+    if e.downcast_ref::<crate::tools::RecoverableError>().is_some() {
+        return e;
+    }
+    let hint = match backend {
+        crate::retrieval::code_store::VectorBackend::SqliteVec => {
+            "Lite stack: verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY — \
+             the remote embedding endpoint is unreachable (no local daemon to start)."
+        }
+        crate::retrieval::code_store::VectorBackend::Qdrant => {
+            "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack."
+        }
+    };
+    crate::tools::RecoverableError::with_hint(format!("retrieval stack offline: {e}"), hint).into()
+}
+
 /// Map a qdrant/search error string to an actionable recovery hint.
 ///
 /// Patterns are checked in order of specificity: collection-missing first
@@ -250,22 +281,7 @@ impl Tool for SemanticSearch {
         let client = crate::retrieval::client::RetrievalClient::from_env(root.as_deref())
             .await
             .map_err(|e| {
-                // Tailor the hint to the active backend — the lite stack has no
-                // local daemon to start; its failure mode is an unreachable remote
-                // embedding endpoint, not a down Qdrant/sparse/reranker service.
-                let hint = match crate::retrieval::code_store::VectorBackend::resolve() {
-                    crate::retrieval::code_store::VectorBackend::SqliteVec => {
-                        "Lite stack: verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY — \
-                         the remote embedding endpoint is unreachable (no local daemon to start)."
-                    }
-                    crate::retrieval::code_store::VectorBackend::Qdrant => {
-                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack."
-                    }
-                };
-                crate::tools::RecoverableError::with_hint(
-                    format!("retrieval stack offline: {e}"),
-                    hint,
-                )
+                map_from_env_error(e, crate::retrieval::code_store::VectorBackend::resolve())
             })?;
         let opts = crate::retrieval::search::SearchOpts {
             limit,
@@ -577,6 +593,57 @@ mod classify_search_error_tests {
             !hint.contains("Stack reachable but query failed"),
             "an embedding-server HTTP failure must route to the resolver-path \
              embedder bucket, not the generic fallback: {hint}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod map_from_env_error_tests {
+    use super::map_from_env_error;
+    use crate::retrieval::code_store::VectorBackend;
+    use crate::tools::RecoverableError;
+
+    #[test]
+    fn a_recoverable_error_passes_through_without_the_stack_offline_headline() {
+        // I3(b): a `RecoverableError` from `from_env` (e.g. `build_embedder`'s
+        // `guard_sparse` sparse-conflict guard) must reach the caller with its
+        // own message intact, not relabelled "retrieval stack offline" — that
+        // headline points at a restart script that cannot fix a config
+        // conflict.
+        let original = RecoverableError::with_hint(
+            "the local embedding backend produces no sparse vector, but the \
+             hybrid sparse leg is enabled.",
+            "Either set CODESCOUT_DISABLE_SPARSE=1 to run dense-only, or \
+             configure an embedder url that serves both dense and sparse.",
+        );
+        let original_msg = original.to_string();
+        let mapped = map_from_env_error(original.into(), VectorBackend::Qdrant);
+        assert!(
+            mapped.downcast_ref::<RecoverableError>().is_some(),
+            "must remain a RecoverableError: {mapped}"
+        );
+        assert_eq!(
+            mapped.to_string(),
+            original_msg,
+            "must pass through unchanged, not acquire a new headline"
+        );
+        assert!(
+            !mapped.to_string().contains("retrieval stack offline"),
+            "a config conflict must not be reported as a down service: {mapped}"
+        );
+    }
+
+    #[test]
+    fn a_non_recoverable_error_gets_the_stack_offline_headline() {
+        let original = anyhow::anyhow!("connection refused");
+        let mapped = map_from_env_error(original, VectorBackend::Qdrant);
+        assert!(
+            mapped.to_string().contains("retrieval stack offline"),
+            "a genuine connect failure must still get the stack-offline headline: {mapped}"
+        );
+        assert!(
+            mapped.downcast_ref::<RecoverableError>().is_some(),
+            "must still be RecoverableError so sibling calls survive: {mapped}"
         );
     }
 }

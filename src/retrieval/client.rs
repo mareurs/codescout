@@ -305,12 +305,21 @@ mod selection_tests {
     fn local_backend_with_sparse_expected_is_an_error() {
         let mut c = cfg_with(None, "local-dir:/weights");
         c.disable_sparse = false; // explicit field override — ambient env cannot leak in
-        let err = RetrievalClient::guard_sparse(&c, /* lite */ false)
-            .unwrap_err()
-            .to_string();
+        let err = RetrievalClient::guard_sparse(&c, /* lite */ false).unwrap_err();
+        // Class, not just message: `anyhow::bail!` with equivalent wording
+        // would pass a `.to_string().contains("sparse")` check too (measured:
+        // the full suite stays green under that revert) but produces
+        // `isError: true`, aborting sibling parallel tool calls for what is
+        // an expected, operator-fixable config conflict.
         assert!(
-            err.contains("sparse"),
-            "must name sparse as the conflict, got: {err}"
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false), not anyhow::bail!; got: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("sparse"),
+            "must name sparse as the conflict, got: {msg}"
         );
     }
 
@@ -421,11 +430,22 @@ mod selection_tests {
         c.disable_sparse = false;
         let err = match RetrievalClient::build_embedder(&c, /* lite */ false).await {
             Ok(_) => panic!("expected an error for a local backend with sparse enabled"),
-            Err(e) => e.to_string(),
+            Err(e) => e,
         };
+        // Class, not just message — see the sibling pure-function test's
+        // comment: an `anyhow::bail!` with equivalent wording passes the
+        // message check too, but the wrong error class is a bug on its own
+        // (isError: true aborts sibling parallel tool calls for a config
+        // conflict that should be retryable).
         assert!(
-            err.contains("sparse"),
-            "must name sparse as the conflict, got: {err}"
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false), not anyhow::bail!; got: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("sparse"),
+            "must name sparse as the conflict, got: {msg}"
         );
     }
 }
