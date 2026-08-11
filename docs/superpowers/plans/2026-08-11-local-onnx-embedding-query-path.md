@@ -35,7 +35,15 @@ topic: embedding-backend-selection
 - **Never gate a new test on `local-embed-dynamic`.** No test lane enables it (`.github/workflows/ci.yml:157` runs `cargo check` only). New tests belong under `local-embed`, which runs on ubuntu, macOS, and windows (`ci.yml:62`). This is the exact mechanism that let PR #13 reach CI with two compile errors.
 - **`RecoverableError` is not available in `codescout-embed`.** It is `crate::tools::RecoverableError` in the root crate only. The crate reports *what happened* via `anyhow` with the concrete path/file in the message; the root wraps it with *what to do* via `RecoverableError::with_hint`. Do not add a codescout dependency to the crate to get around this.
 - **`#[async_trait::async_trait]`** on every trait and impl used as `dyn` — native `async fn` in traits is not dyn-compatible.
-- **Env-mutating tests** use `EnvGuard` + `#[serial]` (project convention; memory `conventions`).
+- **Do NOT write env-mutating tests.** ~~Env-mutating tests use `EnvGuard` + `#[serial]`.~~
+  **Corrected 2026-08-11 during Task 6:** that pattern is banned crate-wide by
+  `docs/conventions/test-env-isolation.md` (post-`a656f8cec220d347`). An earlier draft of this
+  plan mandated it in three places. Test precedence and parsing as **pure functions** taking
+  their inputs as arguments — e.g. `merge_env_over_project(env, project)` and
+  `parse_model_dim(raw)` — so no test touches process env at all. This is not pedantry: the
+  dev machine used for this branch has ambient `CODESCOUT_EMBEDDER_URL` /
+  `CODESCOUT_EMBED_MODEL` / `CODESCOUT_EMBED_URL` set, which produced a real false start
+  before the convention was found.
 - **Default cargo features do not change.** `local-embed` stays opt-in.
 - **Two paths in this plan do not exist in `experiments` and are deliberately
   written without code spans** — `audit_doc_refs` resolves refs against the
