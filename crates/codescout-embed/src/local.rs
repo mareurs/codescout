@@ -1,8 +1,15 @@
 //! Local CPU embedding via fastembed-rs (ONNX Runtime).
 //!
-//! Model strings use fastembed's `EmbeddingModel` variant names directly,
-//! e.g. `local:JinaEmbeddingsV2BaseCode` or `local:BGESmallENV15Q`.
-//! Models are downloaded on first use to `~/.cache/huggingface/hub/`.
+//! Two ways to get weights:
+//! - [`LocalEmbedder::new`] / [`LocalEmbedder::new_blocking`]: model strings
+//!   use fastembed's `EmbeddingModel` variant names directly, e.g.
+//!   `local:JinaEmbeddingsV2BaseCode` or `local:BGESmallENV15Q`. Models are
+//!   downloaded on first use to `~/.cache/huggingface/hub/` — requires
+//!   network on that first use.
+//! - [`LocalEmbedder::from_dir`]: loads AllMiniLM-L6-v2-Q weights already
+//!   present on disk — no hf-hub, no network, works offline. See
+//!   [`MODEL_FILE`] for the expected on-disk layout and its model-identity
+//!   caveat.
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -13,6 +20,16 @@ use crate::Embedding;
 /// Weights layout expected by [`LocalEmbedder::from_dir`]. Values match
 /// fastembed's own registry entry for AllMiniLM-L6-v2 (quantized) — wrong
 /// values here yield plausible, silently wrong vectors.
+///
+/// `from_dir` assumes the directory holds AllMiniLM-L6-v2-Q weights
+/// specifically — nothing here checks model identity. A different model
+/// whose snapshot directory happens to use the same five filenames (e.g.
+/// `BAAI/bge-small-en-v1.5`, also a 384-dim BERT model, but wanting
+/// `Pooling::Cls` + `QuantizationMode::Static` instead of `Mean`/`Dynamic`)
+/// will load without error and produce silently wrong vectors. There is no
+/// cheap runtime discriminator for this — architecture/`hidden_size` checks
+/// cannot tell the two models apart. The real guard is a golden-vector
+/// assertion against known-good output, not a config.json check here.
 pub const MODEL_FILE: &str = "onnx/model_quantized.onnx";
 pub const REQUIRED_TOKENIZER_FILES: [&str; 4] = [
     "tokenizer.json",
@@ -29,11 +46,19 @@ fn holds_weights(dir: &Path) -> bool {
             .all(|f| dir.join(f).exists())
 }
 
-/// Repair-and-continue for the mistake this layout invites: pointing at the
-/// HuggingFace cache root rather than the snapshot directory four levels down.
-/// Descends only when there is EXACTLY ONE snapshot holding the expected files
-/// — two candidates is not one correct reading, so it is left alone and the
-/// caller gets the ordinary missing-file error naming the directory it was given.
+/// Repair-and-continue for the common mistake of pointing `from_dir` at a
+/// HuggingFace-style model-repo directory (`models--<org>--<name>/`) rather
+/// than the `snapshots/<hash>/` directory one level below it, where the
+/// actual weight files live. Descends exactly one `snapshots/<hash>` level
+/// from the directory it is given — it does NOT walk further down from a
+/// true HuggingFace cache root (`~/.cache/huggingface/hub/`, where
+/// `<root>/snapshots` does not exist); the caller must already point at the
+/// specific model-repo directory.
+///
+/// Descends only when there is EXACTLY ONE snapshot holding the expected
+/// files — two candidates is not one correct reading, so the given
+/// directory is left alone and the caller gets the ordinary missing-file
+/// error naming the directory it was given.
 pub fn resolve_weights_dir(dir: &Path) -> PathBuf {
     if holds_weights(dir) {
         return dir.to_path_buf();
@@ -47,16 +72,27 @@ pub fn resolve_weights_dir(dir: &Path) -> PathBuf {
         .map(|e| e.path())
         .filter(|p| holds_weights(p))
         .collect();
-    if candidates.len() == 1 {
-        let found = candidates.remove(0);
-        tracing::info!(
-            given = %dir.display(),
-            resolved = %found.display(),
-            "local weights: descended into the sole snapshot directory"
-        );
-        return found;
+    match candidates.len() {
+        1 => {
+            let found = candidates.remove(0);
+            tracing::info!(
+                given = %dir.display(),
+                resolved = %found.display(),
+                "local weights: descended into the sole snapshot directory"
+            );
+            found
+        }
+        0 => dir.to_path_buf(),
+        n => {
+            tracing::warn!(
+                given = %dir.display(),
+                candidate_count = n,
+                candidates = ?candidates,
+                "local weights: multiple snapshot directories hold the expected files — refusing to guess, using the given directory as-is"
+            );
+            dir.to_path_buf()
+        }
     }
-    dir.to_path_buf()
 }
 
 fn read_required(dir: &Path, rel: &str) -> Result<Vec<u8>> {
@@ -105,6 +141,11 @@ impl LocalEmbedder {
     /// the `snapshots/<ref>/` level, not the cache root (a cache root is
     /// repaired; see [`resolve_weights_dir`]). Never touches the network:
     /// `try_new_from_user_defined` builds the session from bytes read here.
+    ///
+    /// Assumes AllMiniLM-L6-v2-Q specifically — see [`MODEL_FILE`] for why a
+    /// different model with the same on-disk file layout would load without
+    /// error and silently produce wrong vectors; nothing here checks model
+    /// identity.
     pub async fn from_dir(dir: &Path) -> Result<Self> {
         let dir = dir.to_path_buf();
         tokio::task::spawn_blocking(move || Self::from_dir_blocking(&dir))
@@ -281,6 +322,42 @@ mod tests {
             }
         }
         // Two candidates is not "exactly one correct reading" — do not guess.
+        assert_eq!(resolve_weights_dir(tmp.path()), tmp.path());
+    }
+
+    #[test]
+    fn resolve_weights_dir_prefers_direct_weights_over_a_populated_snapshot() {
+        // The direct dir holds valid weights AND has a snapshot subdirectory
+        // that ALSO independently qualifies. If the early `holds_weights(dir)`
+        // return were deleted or negated, this would wrongly descend into the
+        // snapshot instead of stopping at `dir` — this is the discriminator a
+        // bare "no snapshots/ present" case (below) cannot provide, since that
+        // case returns the same `dir` value via the read_dir-error fallback
+        // regardless of whether the early return exists.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("onnx")).unwrap();
+        std::fs::write(tmp.path().join(MODEL_FILE), b"direct").unwrap();
+        for f in REQUIRED_TOKENIZER_FILES {
+            std::fs::write(tmp.path().join(f), b"{}").unwrap();
+        }
+        let snap = tmp.path().join("snapshots").join("deadbeef");
+        std::fs::create_dir_all(snap.join("onnx")).unwrap();
+        std::fs::write(snap.join(MODEL_FILE), b"nested").unwrap();
+        for f in REQUIRED_TOKENIZER_FILES {
+            std::fs::write(snap.join(f), b"{}").unwrap();
+        }
+        assert_eq!(resolve_weights_dir(tmp.path()), tmp.path());
+    }
+
+    #[test]
+    fn resolve_weights_dir_leaves_an_empty_snapshots_dir_alone() {
+        // `dir` does not hold weights directly, but `snapshots/` exists and
+        // has zero valid candidates inside. This must fall through to the
+        // ordinary "return dir unchanged" path without panicking — a
+        // `candidates.len() == 1` -> `<= 1` mutation would instead try
+        // `candidates.remove(0)` on an empty Vec here and panic.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("snapshots").join("empty")).unwrap();
         assert_eq!(resolve_weights_dir(tmp.path()), tmp.path());
     }
 }
