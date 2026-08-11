@@ -86,8 +86,14 @@ guessing.
 ## Switching models on an existing index
 
 The vector table bakes its dimension in at creation. Changing to a model with a
-different dimension makes codescout refuse at startup, naming both the
-dimension the index was built at and the dimension the newly configured model
-produces — rather than failing later with a confusing distance-calculation
-error. Fixing it requires deleting the index and reindexing; there is no
-in-place migration.
+different dimension makes codescout refuse the next time you index or search —
+not at startup, since that is the first point codescout knows which project's
+index to check — naming both the dimension the index was built at and the
+dimension the newly configured model produces, rather than failing later with
+a confusing distance-calculation error.
+
+Two ways out:
+
+- Delete the index and reindex with the new model.
+- Set `[embeddings].model` back to the model the index was built with, if you
+  changed it by accident — often the cheaper fix.

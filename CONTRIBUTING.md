@@ -38,8 +38,11 @@ Tuning knobs live in `.env.example` with matrix-validated defaults
 
 ## Local Embedding (ONNX) Tests
 
-If you enable the `local-embed` feature — `cargo test --features local-embed` — two
-tests exercise a real ONNX model against real weights
+The pre-commit hook's `cargo-test` runs bare `cargo test --lib`, without
+`local-embed`, so it never compiles these tests in and this section does not
+apply to it. It applies when *you* run a `--features local-embed` verification
+pass — `cargo test --features local-embed` — which then exercises a real ONNX
+model against real weights
 (`crates/codescout-embed/src/local.rs`: `from_dir_produces_a_stable_384d_vector` and
 `from_dir_matches_the_hub_path_for_the_same_model`). They skip only on an explicit
 opt-out, never on a merely-missing weights directory — a presence-keyed skip would be
