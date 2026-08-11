@@ -36,6 +36,30 @@ is offline rather than panicking.
 Tuning knobs live in `.env.example` with matrix-validated defaults
 (see `docs/research/2026-05-06-retrieval-stack-benchmark.md` for the empirical record).
 
+## Local Embedding (ONNX) Tests
+
+If you enable the `local-embed` feature — `cargo test --features local-embed` — two
+tests exercise a real ONNX model against real weights
+(`crates/codescout-embed/src/local.rs`: `from_dir_produces_a_stable_384d_vector` and
+`from_dir_matches_the_hub_path_for_the_same_model`). They skip only on an explicit
+opt-out, never on a merely-missing weights directory — a presence-keyed skip would be
+indistinguishable from a pass in CI, so absent weights fail loudly by design. On your
+first `cargo test --features local-embed` this reads as "the branch is broken"; it
+is not — it means neither escape below is set yet.
+
+Pick one:
+
+```bash
+# Point at a real five-file weights directory (see "Embedding without a server"
+# in the manual for the exact layout) and the tests actually run:
+export CODESCOUT_TEST_ONNX_DIR=/path/to/all-MiniLM-L6-v2
+
+# Or opt out deliberately — CI sets this; it is not the default:
+export CODESCOUT_SKIP_ONNX_TESTS=1
+```
+
+Without `local-embed`, neither variable matters — the two tests do not compile in.
+
 ## Dev Loop — Faster Live MCP Iteration
 
 The default workflow documented in `CLAUDE.md` is `cargo build --release` + `/mcp`

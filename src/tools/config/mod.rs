@@ -294,6 +294,46 @@ impl Tool for ProjectStatus {
             "libraries": { "count": lib_count, "indexed": lib_indexed },
         });
 
+        // --- Embedding backend section ---
+        // Names the backend the *effective* config would resolve to right
+        // now, plus which backends this binary was actually compiled with —
+        // so a lean build stops silently disagreeing with a config that
+        // names a backend it cannot load. `RetrievalConfig::from_env_and_project`
+        // only reads env + project.toml (no network), same as the existing
+        // Index section's `RetrievalClient::from_env` a few lines below.
+        let retrieval_config =
+            crate::retrieval::config::RetrievalConfig::from_env_and_project(Some(&root))?;
+
+        let mut compiled_in = Vec::new();
+        if cfg!(feature = "remote-embed") {
+            compiled_in.push("remote");
+        }
+        if cfg!(any(
+            feature = "local-embed",
+            feature = "local-embed-dynamic"
+        )) {
+            compiled_in.push("local-onnx");
+        }
+        let backend = if retrieval_config.embedder_url.is_some() {
+            "remote-http"
+        } else if compiled_in.contains(&"local-onnx") {
+            "local-onnx"
+        } else {
+            // The default config names a local model this binary cannot load.
+            // Saying so here is the whole point of this block.
+            "unavailable"
+        };
+
+        result["embedding_backend"] = json!(backend);
+        result["embedding_compiled_in"] = json!(compiled_in);
+        if backend == "unavailable" {
+            result["embedding_hint"] = json!(
+                "This binary has no local embedding backend compiled in, but the \
+                     configured model names one. Rebuild with --features local-embed, \
+                     or set [embeddings].url to an OpenAI-compatible endpoint."
+            );
+        }
+
         // --- Index section ---
         // Running state takes priority over DB stats.
         let indexing_state = ctx
