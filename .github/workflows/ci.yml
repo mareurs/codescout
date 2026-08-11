@@ -90,7 +90,56 @@ jobs:
           mkdir -p "${{ runner.temp }}/codescout-ci"
           touch "${{ runner.temp }}/codescout-ci/workspace.toml"
           echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
-      - run: cargo test ${{ matrix.config.flags }}
+      # The local-embed lane needs real AllMiniLM-L6-v2 weights on disk for
+      # from_dir_produces_a_stable_384d_vector and
+      # from_dir_matches_the_hub_path_for_the_same_model
+      # (crates/codescout-embed/src/local.rs) — the only tests that catch a
+      # correctly-shaped-but-silently-wrong vector (wrong tokenizer/pooling).
+      # Every other lane sets the explicit opt-out below instead, so the
+      # tests are skipped on purpose rather than failing on a lane that was
+      # never meant to carry the weights.
+      #
+      # Use ${{ runner.temp }} rather than bash $HOME: on Windows, bash $HOME
+      # is the Git Bash POSIX form (/c/Users/...), which Rust on Windows
+      # cannot read as a file path — the same reasoning as the
+      # librarian-workspace seed step above, and this path is consumed the
+      # same way (an env var that becomes a Rust PathBuf).
+      - name: Seed ONNX weights (local-embed lane only)
+        if: matrix.config.name == 'local-embed'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="${{ runner.temp }}/codescout-onnx/all-MiniLM-L6-v2"
+          mkdir -p "$DIR/onnx"
+          BASE="https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main"
+          curl -fsSL "$BASE/onnx/model_quantized.onnx" -o "$DIR/onnx/model_quantized.onnx"
+          for f in tokenizer.json config.json special_tokens_map.json tokenizer_config.json; do
+            curl -fsSL "$BASE/$f" -o "$DIR/$f"
+          done
+          echo "CODESCOUT_TEST_ONNX_DIR=$DIR" >> "$GITHUB_ENV"
+
+      - name: Cache ONNX weights
+        if: matrix.config.name == 'local-embed'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/codescout-onnx
+          key: onnx-all-minilm-l6-v2-q-v1
+
+      - name: Opt out of ONNX tests (non-local-embed lanes)
+        if: matrix.config.name != 'local-embed'
+        shell: bash
+        run: echo "CODESCOUT_SKIP_ONNX_TESTS=1" >> "$GITHUB_ENV"
+      # --workspace: without it, `cargo test` here only builds the default
+      # member of this non-virtual workspace (the root `codescout` package —
+      # see `default-members` in the Cargo reference). codescout-embed compiles
+      # as a dependency but its own `#[cfg(test)]` suite — chunker tests, the
+      # smoke test, and every local.rs test including the two added in this
+      # task — never runs. Verified empirically 2026-08-11: bare
+      # `cargo test --features local-embed --no-default-features` shows
+      # `codescout-embed` only in the Compiling lines, never in a `Running`
+      # line; adding `--workspace` makes it appear and all 27 of its tests
+      # execute, with 0 regressions across all three configs.
+      - run: cargo test --workspace ${{ matrix.config.flags }}
 
   # The configuration `cargo rb` actually ships.
   #

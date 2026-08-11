@@ -28,8 +28,14 @@ use crate::Embedding;
 /// `Pooling::Cls` + `QuantizationMode::Static` instead of `Mean`/`Dynamic`)
 /// will load without error and produce silently wrong vectors. There is no
 /// cheap runtime discriminator for this — architecture/`hidden_size` checks
-/// cannot tell the two models apart. The real guard is a golden-vector
-/// assertion against known-good output, not a config.json check here.
+/// cannot tell the two models apart. The real guard is
+/// `local::tests::from_dir_matches_the_hub_path_for_the_same_model`: it
+/// embeds the same text via `from_dir` and via the hub path
+/// (`LocalEmbedder::new`, which derives pooling/quantization from
+/// fastembed's own registry rather than from these constants) and asserts
+/// the vectors match — not a golden vector fixed at implementation time
+/// (which would only prove self-consistency), and not a config.json check
+/// here.
 pub const MODEL_FILE: &str = "onnx/model_quantized.onnx";
 pub const REQUIRED_TOKENIZER_FILES: [&str; 4] = [
     "tokenizer.json",
@@ -242,6 +248,8 @@ impl crate::Embedder for LocalEmbedder {
 mod tests {
     use super::*;
 
+    use crate::Embedder;
+
     #[test]
     fn parse_model_unknown_name_returns_error() {
         let err = parse_model("NotARealModel").unwrap_err().to_string();
@@ -284,6 +292,103 @@ mod tests {
         assert!(
             err.contains("does/not/exist") || err.contains("does\\not\\exist"),
             "error must name the directory, got: {err}"
+        );
+    }
+
+    /// The only test that catches a wrong tokenizer or wrong pooling: both produce
+    /// a correctly-shaped, silently-wrong vector.
+    ///
+    /// Skips ONLY on an explicit opt-out, never on a missing file. A skip keyed on
+    /// file presence is indistinguishable from a pass — which is how two tests in
+    /// this repo shipped unable to fail.
+    #[tokio::test]
+    async fn from_dir_produces_a_stable_384d_vector() {
+        if std::env::var("CODESCOUT_SKIP_ONNX_TESTS").is_ok() {
+            eprintln!("SKIP from_dir_produces_a_stable_384d_vector: opt-out is set");
+            return;
+        }
+        let dir = std::path::PathBuf::from(
+            std::env::var("CODESCOUT_TEST_ONNX_DIR")
+                .expect("set CODESCOUT_TEST_ONNX_DIR, or CODESCOUT_SKIP_ONNX_TESTS=1 to opt out"),
+        );
+        assert!(
+            dir.join(MODEL_FILE).exists() || dir.join("snapshots").exists(),
+            "no weights at {} — the CI seeding step did not run",
+            dir.display()
+        );
+        let e = LocalEmbedder::from_dir(&dir)
+            .await
+            .expect("weights must load");
+        let a = e.embed(&["fn main() {}"]).await.unwrap();
+        let b = e.embed(&["fn main() {}"]).await.unwrap();
+        assert_eq!(a[0].len(), 384, "AllMiniLM-L6-v2 is 384-dimensional");
+        assert_eq!(
+            e.dimensions(),
+            384,
+            "probe-derived dims must match the vector"
+        );
+        assert_eq!(a[0], b[0], "same input must give the same vector");
+        assert!(
+            a[0].iter().any(|x| *x != 0.0),
+            "an all-zero vector means the session ran but produced nothing usable"
+        );
+    }
+
+    /// Hub-vs-dir parity: `from_dir_blocking` hardcodes `Pooling::Mean` and
+    /// `QuantizationMode::Dynamic`, copied by hand from fastembed's own
+    /// registry entry for AllMiniLM-L6-v2-Q (see `MODEL_FILE`'s doc comment).
+    /// Nothing at runtime checks those two constants are right — a wrong value
+    /// yields a correctly-shaped, plausible, silently wrong vector, and every
+    /// other test above would still pass.
+    ///
+    /// The hub path (`LocalEmbedder::new`) derives pooling and quantization
+    /// from fastembed's own registry, not from our constants — confirmed by
+    /// reading fastembed's `get_default_pooling_method` /
+    /// `get_quantization_mode` (both keyed on `EmbeddingModel::AllMiniLML6V2Q`,
+    /// resolving to `Pooling::Mean` / `QuantizationMode::Dynamic`) and its
+    /// registry `model_code` for that variant (`Xenova/all-MiniLM-L6-v2`,
+    /// `onnx/model_quantized.onnx` — the exact repo and file this test's
+    /// `CODESCOUT_TEST_ONNX_DIR` is seeded from). So comparing hub output to
+    /// `from_dir` output proves our hardcoded constants equal what the
+    /// registry independently picks. A golden vector produced by our own
+    /// implementation would be circular here — it would only prove the
+    /// constants are consistent with themselves, not that they are correct.
+    ///
+    /// Skips ONLY on the explicit opt-out, never on a missing file — same
+    /// contract as `from_dir_produces_a_stable_384d_vector` above. Needs
+    /// network (hub path) AND the seeded dir, so it belongs in the same lane.
+    #[tokio::test]
+    async fn from_dir_matches_the_hub_path_for_the_same_model() {
+        if std::env::var("CODESCOUT_SKIP_ONNX_TESTS").is_ok() {
+            eprintln!("SKIP from_dir_matches_the_hub_path_for_the_same_model: opt-out is set");
+            return;
+        }
+        let dir = std::path::PathBuf::from(
+            std::env::var("CODESCOUT_TEST_ONNX_DIR")
+                .expect("set CODESCOUT_TEST_ONNX_DIR, or CODESCOUT_SKIP_ONNX_TESTS=1 to opt out"),
+        );
+        assert!(
+            dir.join(MODEL_FILE).exists() || dir.join("snapshots").exists(),
+            "no weights at {} — the CI seeding step did not run",
+            dir.display()
+        );
+
+        let text = "fn main() {}";
+        let hub = LocalEmbedder::new("AllMiniLML6V2Q")
+            .await
+            .expect("hub model must load");
+        let dir_embedder = LocalEmbedder::from_dir(&dir)
+            .await
+            .expect("dir weights must load");
+
+        let from_hub = hub.embed(&[text]).await.unwrap();
+        let from_dir = dir_embedder.embed(&[text]).await.unwrap();
+
+        assert_eq!(
+            from_hub[0], from_dir[0],
+            "from_dir's hardcoded Pooling::Mean + QuantizationMode::Dynamic must \
+             match what fastembed's own registry picks for the hub path — a \
+             mismatch means one of those two constants is wrong"
         );
     }
 
