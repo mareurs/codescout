@@ -27,15 +27,23 @@ use crate::Embedding;
 /// `BAAI/bge-small-en-v1.5`, also a 384-dim BERT model, but wanting
 /// `Pooling::Cls` + `QuantizationMode::Static` instead of `Mean`/`Dynamic`)
 /// will load without error and produce silently wrong vectors. There is no
-/// cheap runtime discriminator for this — architecture/`hidden_size` checks
-/// cannot tell the two models apart. The real guard is
-/// `local::tests::from_dir_matches_the_hub_path_for_the_same_model`: it
-/// embeds the same text via `from_dir` and via the hub path
-/// (`LocalEmbedder::new`, which derives pooling/quantization from
-/// fastembed's own registry rather than from these constants) and asserts
-/// the vectors match — not a golden vector fixed at implementation time
-/// (which would only prove self-consistency), and not a config.json check
-/// here.
+/// cheap runtime discriminator for this (architecture/`hidden_size` checks
+/// cannot tell the two models apart), and **no test in this file catches
+/// it either** — that residual risk is real and unguarded.
+///
+/// What the tests below DO guard, precisely:
+/// - `local::tests::from_dir_pooling_and_quantization_match_the_hub_registry`
+///   asserts the two hardcoded constants in `from_dir_blocking` equal what
+///   fastembed's own registry independently picks for `AllMiniLML6V2Q` — a
+///   drift-detector for *this file*, assuming the directory genuinely holds
+///   AllMiniLM-L6-v2-Q weights.
+/// - `local::tests::from_dir_matches_the_hub_path_for_the_same_model`
+///   additionally observes `Pooling` (only — not `QuantizationMode`) at
+///   runtime by comparing real embedding output between the hub and dir
+///   paths.
+///
+/// Neither test — nor any config.json check, per prior review — can see a
+/// wrong *model* sitting in the directory under a correct filename layout.
 pub const MODEL_FILE: &str = "onnx/model_quantized.onnx";
 pub const REQUIRED_TOKENIZER_FILES: [&str; 4] = [
     "tokenizer.json",
@@ -43,6 +51,22 @@ pub const REQUIRED_TOKENIZER_FILES: [&str; 4] = [
     "special_tokens_map.json",
     "tokenizer_config.json",
 ];
+
+/// Pooling + quantization `from_dir_blocking` applies, copied by hand from
+/// fastembed's own registry entry for AllMiniLM-L6-v2-Q. Factored out to a
+/// named constant — rather than inlined as a literal in the struct literal
+/// below — specifically so
+/// `local::tests::from_dir_pooling_and_quantization_match_the_hub_registry`
+/// can read the SAME value `from_dir_blocking` consumes and compare it
+/// against the registry's independently-computed answer. A test that
+/// instead hardcoded its own copy of `Some(Pooling::Mean)` would only
+/// re-assert the registry against itself — it would not notice if this
+/// constant were edited to something else, since it would never read this
+/// constant at all. (Caught by mutation-testing an earlier draft of that
+/// test: changing this line's value to `QuantizationMode::Static` left a
+/// registry-literal-based version of the test green.)
+const LOCAL_MODEL_POOLING: Option<fastembed::Pooling> = Some(fastembed::Pooling::Mean);
+const LOCAL_MODEL_QUANTIZATION: fastembed::QuantizationMode = fastembed::QuantizationMode::Dynamic;
 
 /// True when `dir` directly holds the five expected weight files.
 fn holds_weights(dir: &Path) -> bool {
@@ -172,11 +196,11 @@ impl LocalEmbedder {
             onnx_file,
             external_initializers: Vec::new(),
             tokenizer_files,
-            // Copied from fastembed's registry for AllMiniLM-L6-v2-Q. A wrong
-            // pooling or quantization here produces a correctly-shaped, wrong
-            // vector — which only the real-embed test in Task 3 can catch.
-            pooling: Some(fastembed::Pooling::Mean),
-            quantization: fastembed::QuantizationMode::Dynamic,
+            // See LOCAL_MODEL_POOLING / LOCAL_MODEL_QUANTIZATION doc comments
+            // for why these come from named constants rather than inline
+            // literals, and for which tests pin them and how.
+            pooling: LOCAL_MODEL_POOLING,
+            quantization: LOCAL_MODEL_QUANTIZATION,
             output_key: None,
         };
         let mut model = fastembed::TextEmbedding::try_new_from_user_defined(
@@ -334,25 +358,21 @@ mod tests {
         );
     }
 
-    /// Hub-vs-dir parity: `from_dir_blocking` hardcodes `Pooling::Mean` and
-    /// `QuantizationMode::Dynamic`, copied by hand from fastembed's own
-    /// registry entry for AllMiniLM-L6-v2-Q (see `MODEL_FILE`'s doc comment).
-    /// Nothing at runtime checks those two constants are right — a wrong value
-    /// yields a correctly-shaped, plausible, silently wrong vector, and every
-    /// other test above would still pass.
+    /// Hub-vs-dir **pooling** parity: `from_dir_blocking` hardcodes
+    /// `Pooling::Mean`, copied by hand from fastembed's own registry entry
+    /// for AllMiniLM-L6-v2-Q (see `MODEL_FILE`'s doc comment). This test
+    /// proves that constant matches what fastembed's own registry
+    /// independently picks, by observing it at runtime: the hub path
+    /// (`LocalEmbedder::new`) derives pooling from fastembed's registry, not
+    /// from our constant, so comparing hub output to `from_dir` output is
+    /// non-circular (a golden vector produced by our own implementation
+    /// would only prove self-consistency).
     ///
-    /// The hub path (`LocalEmbedder::new`) derives pooling and quantization
-    /// from fastembed's own registry, not from our constants — confirmed by
-    /// reading fastembed's `get_default_pooling_method` /
-    /// `get_quantization_mode` (both keyed on `EmbeddingModel::AllMiniLML6V2Q`,
-    /// resolving to `Pooling::Mean` / `QuantizationMode::Dynamic`) and its
-    /// registry `model_code` for that variant (`Xenova/all-MiniLM-L6-v2`,
-    /// `onnx/model_quantized.onnx` — the exact repo and file this test's
-    /// `CODESCOUT_TEST_ONNX_DIR` is seeded from). So comparing hub output to
-    /// `from_dir` output proves our hardcoded constants equal what the
-    /// registry independently picks. A golden vector produced by our own
-    /// implementation would be circular here — it would only prove the
-    /// constants are consistent with themselves, not that they are correct.
+    /// This test does NOT guard `QuantizationMode` — see
+    /// `from_dir_pooling_and_quantization_match_the_hub_registry` below for
+    /// why output comparison can never see a wrong quantization mode here
+    /// (single-text batches make `Dynamic`/`Static`/`None` byte-identical),
+    /// and for the test that actually pins it.
     ///
     /// Skips ONLY on the explicit opt-out, never on a missing file — same
     /// contract as `from_dir_produces_a_stable_384d_vector` above. Needs
@@ -384,11 +404,63 @@ mod tests {
         let from_hub = hub.embed(&[text]).await.unwrap();
         let from_dir = dir_embedder.embed(&[text]).await.unwrap();
 
+        // Guard against a degenerate pass: two identical all-zero (or
+        // wrong-length) vectors would satisfy the equality assert below
+        // without proving anything.
+        assert_eq!(from_hub[0].len(), 384, "AllMiniLM-L6-v2 is 384-dimensional");
+        assert!(
+            from_hub[0].iter().any(|x| *x != 0.0),
+            "an all-zero vector means the session ran but produced nothing usable"
+        );
+
         assert_eq!(
             from_hub[0], from_dir[0],
-            "from_dir's hardcoded Pooling::Mean + QuantizationMode::Dynamic must \
-             match what fastembed's own registry picks for the hub path — a \
-             mismatch means one of those two constants is wrong"
+            "from_dir's hardcoded Pooling::Mean must match what fastembed's \
+             own registry picks for the hub path — a mismatch means that \
+             constant is wrong"
+        );
+    }
+
+    /// Pins `from_dir_blocking`'s two constants (`LOCAL_MODEL_POOLING` /
+    /// `LOCAL_MODEL_QUANTIZATION`) directly against fastembed's own registry
+    /// for `AllMiniLML6V2Q` — no network, no weights, unskippable, and it
+    /// runs in every lane that compiles this module. This is what actually
+    /// guards `QuantizationMode`, which the runtime parity test above
+    /// cannot: fastembed's `TextEmbedding::transform` consumes
+    /// `quantization` at exactly one site, to pick a batch size (`Dynamic`
+    /// -> `texts.len()`, anything else -> `DEFAULT_BATCH_SIZE`), and
+    /// `LocalEmbedder::embed` always calls `.embed(_, None)` on a
+    /// single-text batch — so `Dynamic`, `Static`, and `None` all produce
+    /// one batch of one and byte-identical output. No output-comparison
+    /// test can ever see a wrong `QuantizationMode` here; only a direct
+    /// assertion against the registry can.
+    ///
+    /// Reads `LOCAL_MODEL_POOLING`/`LOCAL_MODEL_QUANTIZATION` — the same
+    /// constants `from_dir_blocking` consumes — rather than duplicating
+    /// their expected values as fresh literals here. Asserting two
+    /// independently-typed literals against the registry would only prove
+    /// the registry equals itself; it would not notice an edit to those
+    /// constants, since it would never read them. (This is not
+    /// hypothetical: an earlier draft of this test did exactly that and
+    /// stayed green under a `Dynamic` -> `Static` mutation of
+    /// `from_dir_blocking`'s quantization field.)
+    #[test]
+    fn from_dir_pooling_and_quantization_match_the_hub_registry() {
+        assert_eq!(
+            LOCAL_MODEL_POOLING,
+            fastembed::TextEmbedding::get_default_pooling_method(
+                &fastembed::EmbeddingModel::AllMiniLML6V2Q
+            ),
+            "LOCAL_MODEL_POOLING must match what fastembed's own registry \
+             picks for AllMiniLML6V2Q"
+        );
+        assert_eq!(
+            LOCAL_MODEL_QUANTIZATION,
+            fastembed::TextEmbedding::get_quantization_mode(
+                &fastembed::EmbeddingModel::AllMiniLML6V2Q
+            ),
+            "LOCAL_MODEL_QUANTIZATION must match what fastembed's own \
+             registry picks for AllMiniLML6V2Q"
         );
     }
 

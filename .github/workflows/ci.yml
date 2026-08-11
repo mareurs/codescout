@@ -48,6 +48,17 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -- -D warnings
+      # --workspace --all-targets --features local-embed: the bare command
+      # above only lints the root package's non-test targets with default
+      # features, which don't include local-embed — so codescout-embed's
+      # `local` module (cfg-gated on that feature) is never even compiled
+      # here, and nothing in it, tests included, is clippy-checked in CI.
+      # Same root cause as the `test` job's --workspace gap above, just one
+      # command over. Verified empirically 2026-08-11: `cargo clippy --
+      # -D warnings` shows `Checking codescout-embed` but that's the
+      # default-features build (no `local` module); this second pass is
+      # what actually reaches local.rs and its tests.
+      - run: cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 
   test:
     name: Test (${{ matrix.os }} / ${{ matrix.config.name }})
@@ -104,8 +115,21 @@ jobs:
       # cannot read as a file path — the same reasoning as the
       # librarian-workspace seed step above, and this path is consumed the
       # same way (an env var that becomes a Rust PathBuf).
-      - name: Seed ONNX weights (local-embed lane only)
+      #
+      # Cache restores BEFORE the download (not after) so a hit skips the
+      # curl entirely — key includes ${{ matrix.os }} (matching this file's
+      # own rust-cache key convention two steps up) so three OSes racing to
+      # save the same un-scoped key don't stomp each other's save.
+      - name: Cache ONNX weights
+        id: onnx-cache
         if: matrix.config.name == 'local-embed'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/codescout-onnx
+          key: ${{ matrix.os }}-onnx-all-minilm-l6-v2-q-v1
+
+      - name: Seed ONNX weights (local-embed lane only, cache miss)
+        if: matrix.config.name == 'local-embed' && steps.onnx-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -116,14 +140,22 @@ jobs:
           for f in tokenizer.json config.json special_tokens_map.json tokenizer_config.json; do
             curl -fsSL "$BASE/$f" -o "$DIR/$f"
           done
-          echo "CODESCOUT_TEST_ONNX_DIR=$DIR" >> "$GITHUB_ENV"
 
-      - name: Cache ONNX weights
+      # from_dir_matches_the_hub_path_for_the_same_model also builds an embedder
+      # via the hub path (LocalEmbedder::new), which pulls AllMiniLM-L6-v2-Q into
+      # fastembed's own cache — FASTEMBED_CACHE_DIR if set, else `.fastembed_cache`
+      # relative to CWD (Cargo runs codescout-embed's own test binary from that
+      # package's directory, not the workspace root — see the .gitignore fix in
+      # this same PR). Left unset, that's a second, uncached ~22MB download per
+      # job on three OSes, and an HF hiccup fails the lane on `.expect("hub model
+      # must load")`. Point it at a subdirectory of the same cached tree above so
+      # the one cache step covers both the from_dir weights and this download.
+      - name: Point env at the cached ONNX/fastembed dirs (local-embed lane only)
         if: matrix.config.name == 'local-embed'
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/codescout-onnx
-          key: onnx-all-minilm-l6-v2-q-v1
+        shell: bash
+        run: |
+          echo "CODESCOUT_TEST_ONNX_DIR=${{ runner.temp }}/codescout-onnx/all-MiniLM-L6-v2" >> "$GITHUB_ENV"
+          echo "FASTEMBED_CACHE_DIR=${{ runner.temp }}/codescout-onnx/fastembed-cache" >> "$GITHUB_ENV"
 
       - name: Opt out of ONNX tests (non-local-embed lanes)
         if: matrix.config.name != 'local-embed'
