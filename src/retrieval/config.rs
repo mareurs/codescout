@@ -208,15 +208,12 @@ fn non_empty(v: Option<String>) -> Option<String> {
 /// `http://127.0.0.1:43300/v1`). Without this, a project.toml `url` ending in
 /// `/v1` reached `EmbedderHttp` unnormalized and produced
 /// `.../v1/v1/embeddings` -> 404 instead of the intended endpoint.
+///
+/// The shape recognition itself lives in `codescout_embed::normalize_embeddings_base`
+/// — shared with `RemoteEmbedder::from_url`'s identical three-branch logic
+/// rather than duplicated here, so the two conventions cannot drift apart.
 fn normalize_embedder_url(url: &str) -> String {
-    let trimmed = url.trim_end_matches('/');
-    if let Some(base) = trimmed.strip_suffix("/v1/embeddings") {
-        base.to_string()
-    } else if let Some(base) = trimmed.strip_suffix("/v1") {
-        base.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    codescout_embed::normalize_embeddings_base(url).to_string()
 }
 
 /// `[embeddings]` in the project's config is the base; the resolved

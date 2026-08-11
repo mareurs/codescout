@@ -25,6 +25,28 @@ pub use embedder::{Embedder, Embedding};
 
 use anyhow::Result;
 
+/// Strip a trailing `/`, then a trailing `/v1/embeddings` or `/v1`, from an
+/// embedder base url — the one piece of URL-shape recognition shared by every
+/// caller that accepts either a bare host (`http://host:port`) or an
+/// already-`/v1`-suffixed API base (`http://host:port/v1`).
+///
+/// Deliberately unconditional (no `remote-embed` cfg gate): the root crate's
+/// `RetrievalConfig::normalize_embedder_url` calls this unconditionally too,
+/// and duplicating the branch logic in both crates is exactly what let them
+/// drift in the past — see `RemoteEmbedder::from_url`, which derives its own
+/// `/v1/embeddings`-suffixed endpoint from this same stripped base rather
+/// than repeating the suffix checks.
+pub fn normalize_embeddings_base(url: &str) -> &str {
+    let trimmed = url.trim_end_matches('/');
+    if let Some(base) = trimmed.strip_suffix("/v1/embeddings") {
+        base
+    } else if let Some(base) = trimmed.strip_suffix("/v1") {
+        base
+    } else {
+        trimmed
+    }
+}
+
 /// Returns the chunk size in characters appropriate for the given model spec.
 ///
 /// Derived from each model's documented maximum sequence length using a

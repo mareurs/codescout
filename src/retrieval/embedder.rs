@@ -81,7 +81,12 @@ impl BatchEmbedder for EmbedderHttp {
 /// `true` when `url` is `https://…` or targets a loopback host. Mirrors the
 /// codescout-embed `RemoteEmbedder` guard: keep local Ollama / llama.cpp working
 /// while never sending `EMBED_API_KEY` over plaintext HTTP on the network.
-fn is_https_or_loopback(url: &str) -> bool {
+///
+/// `pub(crate)` (not private) so `RetrievalClient::guarded_api_key`
+/// (`src/retrieval/client.rs`) can reapply the exact same guard to a key
+/// arriving from `[embeddings].api_key` in project.toml — one guard, two
+/// sources, rather than a second copy that could drift from this one.
+pub(crate) fn is_https_or_loopback(url: &str) -> bool {
     if url.starts_with("https://") {
         return true;
     }
