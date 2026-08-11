@@ -1615,22 +1615,54 @@ mod tests {
 /// `RecoverableError` lives in the root crate only — do not push it down.
 pub struct CodeEmbedderAdapter {
     inner: Box<dyn codescout_embed::Embedder>,
-    /// `None` — the model is the authority. `Some(n)` — the operator pinned a
-    /// dimension and a mismatch is an error rather than a discovery.
+    /// `None` — no operator pin. `Some(n)` — the operator pinned a dimension;
+    /// `new` validates it against the model's own report synchronously and
+    /// rejects a contradiction before any collection is created. Kept after
+    /// construction only so `check_dim` can re-check it against every
+    /// produced vector as defense in depth against backend self-inconsistency
+    /// (declared `dimensions()` disagreeing with what `embed` actually
+    /// returns) — not as an override of the model's authority.
     expected_dim: Option<usize>,
 }
 
 impl CodeEmbedderAdapter {
-    pub fn new(inner: Box<dyn codescout_embed::Embedder>, expected_dim: Option<usize>) -> Self {
-        Self {
+    /// Fails if `expected_dim` is `Some(n)` and disagrees with
+    /// `inner.dimensions()`. Both values are known synchronously at
+    /// construction, so the contradiction is caught here rather than
+    /// deferred to the first embed call, where it would have already baked a
+    /// vector table at a dimension the model will never produce.
+    pub fn new(
+        inner: Box<dyn codescout_embed::Embedder>,
+        expected_dim: Option<usize>,
+    ) -> anyhow::Result<Self> {
+        if let Some(expected) = expected_dim {
+            let actual = inner.dimensions();
+            if actual != expected {
+                return Err(crate::tools::RecoverableError::with_hint(
+                    format!(
+                        "local embedder dim mismatch: model produces {actual}, configured {expected}"
+                    ),
+                    format!(
+                        "Set CODESCOUT_MODEL_DIM={actual} (or remove it and let the model decide) \
+                         before creating the index — the vector table bakes the dimension in at \
+                         creation and cannot migrate in place, so this must be caught before any \
+                         index exists, not after."
+                    ),
+                )
+                .into());
+            }
+        }
+        Ok(Self {
             inner,
             expected_dim,
-        }
+        })
     }
 
-    /// The dimension downstream callers should build collections with.
+    /// The dimension downstream callers must build collections with: always
+    /// the model's own report. A pin cannot override this — `new` already
+    /// guarantees any `Some` pin agrees with it.
     pub fn dimensions(&self) -> usize {
-        self.expected_dim.unwrap_or_else(|| self.inner.dimensions())
+        self.inner.dimensions()
     }
 
     fn check_dim(&self, produced: usize) -> anyhow::Result<()> {
@@ -1669,6 +1701,12 @@ impl BatchEmbedder for CodeEmbedderAdapter {
     async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>> {
         let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
         let dense = self.inner.embed(&refs).await?;
+        anyhow::ensure!(
+            dense.len() == texts.len(),
+            "local embedder returned {} vectors for {} inputs",
+            dense.len(),
+            texts.len()
+        );
         if let Some(first) = dense.first() {
             self.check_dim(first.len())?;
         }
@@ -1684,10 +1722,11 @@ impl CodeEmbedder for CodeEmbedderAdapter {
     }
 
     async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        let mut out = self.inner.embed(&[text]).await?;
-        let v = out
-            .pop()
-            .ok_or_else(|| anyhow::anyhow!("local embedder returned no vector"))?;
+        // `embed_query` (not `embed`) — this is the query-side seam, and the
+        // crate's `embed_query` is precisely where a model applies its
+        // asymmetric query prefix (e.g. RemoteEmbedder's CodeRank prefix).
+        // Calling `embed` here would silently skip that prefix.
+        let v = self.inner.embed_query(text).await?;
         self.check_dim(v.len())?;
         Ok(v)
     }
@@ -1697,6 +1736,12 @@ impl CodeEmbedder for CodeEmbedderAdapter {
 mod adapter_tests {
     use super::*;
 
+    use crate::tools::RecoverableError;
+
+    /// Vector value is a function of the input's batch position, so tests can
+    /// catch reordering or duplication, not just arity — a fixed-value fake
+    /// like `vec![0.5; n]` for every input can't distinguish a correct batch
+    /// from a reversed one.
     struct FakeEmbedder(usize);
 
     #[async_trait::async_trait]
@@ -1705,13 +1750,52 @@ mod adapter_tests {
             self.0
         }
         async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
-            Ok(texts.iter().map(|_| vec![0.5_f32; self.0]).collect())
+            Ok(texts
+                .iter()
+                .enumerate()
+                .map(|(i, _)| vec![i as f32; self.0])
+                .collect())
+        }
+    }
+
+    /// Declared `dimensions()` disagrees with what `embed` actually produces —
+    /// a backend self-inconsistency bug. `new` validates the pin against
+    /// `dimensions()` at construction and would accept this embedder (the
+    /// declared dim agrees with the pin); `check_dim` is the only thing left
+    /// to catch the runtime divergence, which is exactly the defense-in-depth
+    /// role it plays post-construction.
+    struct DriftingEmbedder {
+        declared: usize,
+        actual: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl codescout_embed::Embedder for DriftingEmbedder {
+        fn dimensions(&self) -> usize {
+            self.declared
+        }
+        async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+            Ok(texts.iter().map(|_| vec![0.0_f32; self.actual]).collect())
         }
     }
 
     #[tokio::test]
+    async fn check_dim_still_catches_a_pinned_mismatch_the_model_produces_at_runtime() {
+        let a = CodeEmbedderAdapter::new(
+            Box::new(DriftingEmbedder {
+                declared: 384,
+                actual: 111,
+            }),
+            Some(384),
+        )
+        .unwrap();
+        let err = a.embed_one("hello").await.unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    #[tokio::test]
     async fn adapter_yields_dense_with_empty_sparse() {
-        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), None);
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), None).unwrap();
         let out = a.embed_one("hello").await.unwrap();
         assert_eq!(out.dense.len(), 384);
         assert!(
@@ -1722,29 +1806,140 @@ mod adapter_tests {
     }
 
     #[tokio::test]
-    async fn adapter_errors_when_pinned_dim_disagrees_with_the_model() {
-        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(768));
-        let err = a.embed_one("hello").await.unwrap_err().to_string();
-        assert!(
-            err.contains("384"),
-            "must name the produced dim, got: {err}"
-        );
+    async fn new_rejects_a_pin_that_disagrees_with_the_model() {
+        let err = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(768))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("384"), "must name the model's dim, got: {err}");
         assert!(
             err.contains("768"),
             "must name the configured dim, got: {err}"
         );
         assert!(
-            err.contains("reindex") || err.contains("rebuild"),
-            "must tell the operator the index cannot migrate, got: {err}"
+            err.contains("before creating the index"),
+            "must tell the operator to fix this before any index exists (nothing to \
+             reindex yet at construction time), got: {err}"
         );
     }
 
     #[tokio::test]
+    async fn new_rejects_a_pin_that_disagrees_with_the_model_recoverably() {
+        let err = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(768))
+            .err()
+            .unwrap();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "a mis-pinned dim must not abort sibling parallel tool calls, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn new_accepts_a_pin_that_agrees_with_the_model() {
+        assert!(CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(384)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn dimensions_reports_the_models_value_without_a_pin() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), None).unwrap();
+        assert_eq!(a.dimensions(), 384);
+    }
+
+    #[tokio::test]
+    async fn dimensions_reports_the_models_value_with_an_agreeing_pin() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(384)).unwrap();
+        assert_eq!(a.dimensions(), 384);
+    }
+
+    #[tokio::test]
     async fn adapter_batches_preserve_order_and_arity() {
-        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(3)), None);
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(3)), None).unwrap();
         let texts = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let out = a.embed_batch_dyn(&texts).await.unwrap();
         assert_eq!(out.len(), 3);
-        assert!(out.iter().all(|o| o.dense.len() == 3));
+        for (i, o) in out.iter().enumerate() {
+            assert_eq!(
+                o.dense,
+                vec![i as f32; 3],
+                "position {i} must carry the vector computed for its own input, not a reordered one"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_batches_handles_empty_input() {
+        let a = CodeEmbedderAdapter::new(Box::new(FakeEmbedder(3)), None).unwrap();
+        let out = a.embed_batch_dyn(&[]).await.unwrap();
+        assert!(out.is_empty());
+    }
+
+    /// Returns one fewer vector than requested — simulates a crate-side
+    /// accumulation bug (e.g. a chunked remote loop that drops a chunk).
+    /// `RemoteEmbedder::embed` accumulates across such a loop, so a short
+    /// response is a real failure mode, not a hypothetical one.
+    struct ShortEmbedder(usize);
+
+    #[async_trait::async_trait]
+    impl codescout_embed::Embedder for ShortEmbedder {
+        fn dimensions(&self) -> usize {
+            self.0
+        }
+        async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+            Ok(texts
+                .iter()
+                .enumerate()
+                .take(texts.len().saturating_sub(1))
+                .map(|(i, _)| vec![i as f32; self.0])
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_errors_on_a_short_response_instead_of_silently_truncating() {
+        let a = CodeEmbedderAdapter::new(Box::new(ShortEmbedder(3)), None).unwrap();
+        let texts = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let err = a.embed_batch_dyn(&texts).await.unwrap_err().to_string();
+        assert!(
+            err.contains("2 vectors"),
+            "must name the produced count, got: {err}"
+        );
+        assert!(
+            err.contains("3 inputs"),
+            "must name the requested count, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn query_embedding_uses_embed_query_not_the_document_path() {
+        // A model with an asymmetric query prefix (like RemoteEmbedder's
+        // CodeRank prefix) must have that prefix applied on the query side.
+        // FakeEmbedder doesn't override embed_query (so it can't catch this),
+        // hence this dedicated embedder that returns a distinct vector from
+        // embed_query vs embed — pins that embed_dense_one calls embed_query.
+        struct PrefixedEmbedder(usize);
+
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for PrefixedEmbedder {
+            fn dimensions(&self) -> usize {
+                self.0
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32; self.0]).collect())
+            }
+            async fn embed_query(&self, _text: &str) -> anyhow::Result<codescout_embed::Embedding> {
+                Ok(vec![9.0_f32; self.0])
+            }
+        }
+
+        let a = CodeEmbedderAdapter::new(Box::new(PrefixedEmbedder(2)), None).unwrap();
+        let dense = a.embed_dense_one("hello").await.unwrap();
+        assert_eq!(
+            dense,
+            vec![9.0, 9.0],
+            "embed_dense_one must call embed_query (and its prefix), not embed"
+        );
     }
 }
