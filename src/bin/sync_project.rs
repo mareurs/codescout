@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| root.file_name().unwrap().to_string_lossy().into_owned());
 
     eprintln!("Connecting to retrieval stack...");
-    let client = RetrievalClient::from_env().await?;
+    let client = RetrievalClient::from_env(Some(&root)).await?;
 
     let opts = SyncOpts {
         languages: None,

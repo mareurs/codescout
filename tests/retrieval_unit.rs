@@ -11,18 +11,28 @@ fn config_from_env_uses_defaults_when_unset() {
         [
             "CODESCOUT_QDRANT_URL",
             "CODESCOUT_EMBEDDER_URL",
+            "CODESCOUT_EMBEDDER_MODEL",
             "CODESCOUT_SPARSE_EMBEDDER_URL",
             "CODESCOUT_RERANKER_URL",
             "CODESCOUT_MODEL_DIM",
             "CODESCOUT_RETRIEVAL_PROFILE",
+            "EMBED_API_KEY",
         ],
         || {
             let cfg = RetrievalConfig::from_env().expect("defaults");
             assert_eq!(cfg.qdrant_url, "http://127.0.0.1:6334");
-            assert_eq!(cfg.embedder_url, "http://127.0.0.1:8081");
+            assert_eq!(
+                cfg.embedder_url, None,
+                "an unset url must mean 'resolve from the model', not 'assume 8081'"
+            );
             assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:8084");
             assert_eq!(cfg.reranker_url, "http://127.0.0.1:8083");
-            assert_eq!(cfg.model_dim, 768);
+            assert_eq!(
+                cfg.model_dim, None,
+                "an unpinned dim must let the model decide"
+            );
+            assert_eq!(cfg.model, "local:AllMiniLML6V2Q");
+            assert_eq!(cfg.api_key, None);
             assert_eq!(cfg.profile, "cpu");
         },
     );
@@ -36,16 +46,21 @@ fn config_from_env_reads_overrides() {
         [
             ("CODESCOUT_QDRANT_URL", Some("http://qd:1")),
             ("CODESCOUT_EMBEDDER_URL", Some("http://eb:2")),
+            ("CODESCOUT_EMBEDDER_MODEL", Some("local:BGESmallENV15")),
             ("CODESCOUT_SPARSE_EMBEDDER_URL", Some("http://eb-sparse:5")),
             ("CODESCOUT_RERANKER_URL", Some("http://rr:3")),
             ("CODESCOUT_MODEL_DIM", Some("4096")),
             ("CODESCOUT_RETRIEVAL_PROFILE", Some("gpu")),
+            ("EMBED_API_KEY", Some("sk-test")),
         ],
         || {
             let cfg = RetrievalConfig::from_env().expect("overrides");
             assert_eq!(cfg.qdrant_url, "http://qd:1");
+            assert_eq!(cfg.embedder_url.as_deref(), Some("http://eb:2"));
             assert_eq!(cfg.sparse_embedder_url, "http://eb-sparse:5");
-            assert_eq!(cfg.model_dim, 4096);
+            assert_eq!(cfg.model_dim, Some(4096));
+            assert_eq!(cfg.model, "local:BGESmallENV15");
+            assert_eq!(cfg.api_key.as_deref(), Some("sk-test"));
             assert_eq!(cfg.profile, "gpu");
         },
     );

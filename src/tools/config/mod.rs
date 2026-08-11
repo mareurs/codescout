@@ -327,13 +327,14 @@ impl Tool for ProjectStatus {
                     Ok(p.project_id().to_string())
                 })
                 .await?;
-            let qdrant_stats = match crate::retrieval::client::RetrievalClient::from_env().await {
-                Ok(client) => {
-                    let coll = client.config.collection("code_chunks");
-                    client.project_index_stats(&coll, &project_id).await.ok()
-                }
-                Err(_) => None,
-            };
+            let qdrant_stats =
+                match crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await {
+                    Ok(client) => {
+                        let coll = client.config.collection("code_chunks");
+                        client.project_index_stats(&coll, &project_id).await.ok()
+                    }
+                    Err(_) => None,
+                };
             match qdrant_stats {
                 Some((chunks, files)) if chunks > 0 => {
                     result["index"] = json!({
@@ -425,11 +426,8 @@ enum HintScenario {
 /// unindexed and, because a timeout is deliberately not cached, repeated the whole
 /// scan on every activation. See
 /// `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
-///
-/// `_project_root` is accepted for forward-compat in case future probes need
-/// to consult on-disk artefacts alongside Qdrant.
-async fn check_has_index(project_id: &str, _project_root: &std::path::Path) -> bool {
-    match crate::retrieval::client::RetrievalClient::from_env().await {
+async fn check_has_index(project_id: &str, project_root: &std::path::Path) -> bool {
+    match crate::retrieval::client::RetrievalClient::from_env(Some(project_root)).await {
         Ok(client) => {
             let coll = client.config.collection("code_chunks");
             client

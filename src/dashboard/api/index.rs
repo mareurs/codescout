@@ -11,7 +11,11 @@ use serde_json::{json, Value};
 /// is dropped; `get_drift` below returns a stub envelope for compatibility
 /// with the existing UI until the dashboard catches up.
 pub async fn get_index(State(state): State<DashboardState>) -> Json<Value> {
-    let client = match crate::retrieval::client::RetrievalClient::from_env().await {
+    let client = match crate::retrieval::client::RetrievalClient::from_env(Some(
+        &state.project_root,
+    ))
+    .await
+    {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(target: "dashboard", "retrieval stack offline: {e}");

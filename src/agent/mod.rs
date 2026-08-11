@@ -1504,7 +1504,7 @@ impl Agent {
 
     /// Spawn a background library indexing task if auto_index is enabled and library is not yet indexed.
     pub async fn maybe_auto_index_library(&self, lib_name: &str) {
-        let (should_index, _root, entry_path, max_index_bytes, ignore_patterns) = {
+        let (should_index, root, entry_path, max_index_bytes, ignore_patterns) = {
             let inner = self.inner.read().await;
             let Some(p) = inner.active_project() else {
                 return;
@@ -1592,7 +1592,8 @@ impl Agent {
             tracing::info!("Auto-indexing library '{}' in background...", name);
             crate::heartbeat::note_background_op(&format!("auto_index:{name}"));
             let result = async {
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let client =
+                    crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
                 let opts = crate::retrieval::sync::SyncOpts {
                     ignore_patterns: ignore_patterns.clone(),
                     ..Default::default()
@@ -1692,7 +1693,10 @@ impl Agent {
                         let qdrant =
                             crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
                         let collection = config.collection("memories");
-                        let dim = config.model_dim as u64;
+                        let dim = config
+                            .model_dim
+                            .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM)
+                            as u64;
                         // `QdrantSemanticMemoryStore::new` bootstraps the collection
                         // (a real network round trip) — bound it so a reachable-but-hung
                         // Qdrant fails fast instead of blocking up to the 120s operation
@@ -1757,7 +1761,9 @@ impl Agent {
     ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
         self.memory_embedder
             .get_or_try_init(|| async {
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let root = self.project_root().await;
+                let client =
+                    crate::retrieval::client::RetrievalClient::from_env(root.as_deref()).await?;
                 #[cfg(test)]
                 let _ = self.test_seen_client_embedder.set(client.embedder.clone());
                 let emb = crate::retrieval::embedder::CodeDenseAdapter(client.embedder);

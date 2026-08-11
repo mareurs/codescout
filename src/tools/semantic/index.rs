@@ -121,7 +121,7 @@ impl Tool for IndexProject {
             // Sync the library directory into Qdrant under its own
             // project_id namespace (`lib:<name>`). The retrieval stack
             // handles chunking, embedding, and incremental upsert/delete.
-            let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+            let client = crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
             let opts = crate::retrieval::sync::SyncOpts {
                 force_reindex: force,
                 ignore_patterns: crate::config::project::ProjectConfig::load_or_default(&lib_path)
@@ -311,7 +311,8 @@ impl Tool for IndexProject {
             crate::heartbeat::note_background_op(&format!("index:{project_id}"));
             let sync_result = async {
                 tracing::info!("constructing RetrievalClient::from_env");
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let client =
+                    crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
                 tracing::info!("RetrievalClient ready, calling sync_project");
                 let opts = crate::retrieval::sync::SyncOpts {
                     force_reindex: force,
@@ -407,7 +408,13 @@ impl Tool for IndexStatus {
         // the project has no chunks indexed, return a "not indexed" envelope
         // that callers can branch on the same way they did against the
         // legacy sqlite "no db" path.
-        let mut result = match crate::retrieval::client::RetrievalClient::from_env().await {
+        let root = ctx
+            .agent
+            .project_root_for(ctx.workspace_override.as_deref())
+            .await;
+        let mut result = match crate::retrieval::client::RetrievalClient::from_env(root.as_deref())
+            .await
+        {
             Ok(client) => {
                 let collection = client.config.collection("code_chunks");
                 match client.project_index_stats(&collection, &project_id).await {

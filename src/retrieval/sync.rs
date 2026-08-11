@@ -309,7 +309,12 @@ impl crate::retrieval::client::RetrievalClient {
         let started = std::time::Instant::now();
         let collection = self.config.collection("code_chunks");
         self.code_store
-            .ensure_collection(&collection, self.config.model_dim as u64)
+            .ensure_collection(
+                &collection,
+                self.config
+                    .model_dim
+                    .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM) as u64,
+            )
             .await?;
 
         // Fetch existing chunk refs (id + hash only — bounded) for drift diffing.
@@ -891,10 +896,12 @@ mod tests {
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),
-                embedder_url: "http://unused.invalid".into(),
+                embedder_url: Some("http://unused.invalid".into()),
                 sparse_embedder_url: "http://unused.invalid".into(),
                 reranker_url: "http://unused.invalid".into(),
-                model_dim: 3,
+                model_dim: Some(3),
+                model: "local:AllMiniLML6V2Q".into(),
+                api_key: None,
                 profile: "cpu".into(),
                 bm25_boost: 1.0,
                 disable_sparse: false,

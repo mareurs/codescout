@@ -220,7 +220,11 @@ impl Tool for SemanticSearch {
                     )
                 })?
         };
-        let client = crate::retrieval::client::RetrievalClient::from_env()
+        let root = ctx
+            .agent
+            .project_root_for(ctx.workspace_override.as_deref())
+            .await;
+        let client = crate::retrieval::client::RetrievalClient::from_env(root.as_deref())
             .await
             .map_err(|e| {
                 // Tailor the hint to the active backend — the lite stack has no

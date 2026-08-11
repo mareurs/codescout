@@ -399,7 +399,11 @@ async fn create_semantic_anchors(
     // embedder seam only covers the dense vector path. When the retrieval
     // stack is offline, search_code errors and the anchor-creation step is
     // skipped by the caller (logged at warn).
-    let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+    let root = ctx
+        .agent
+        .require_project_root_for(ctx.workspace_override.as_deref())
+        .await?;
+    let client = crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
 
     // Code chunk search via the retrieval stack. Overfetch so dedupe-by-file
     // has room to pick the best chunk per file.

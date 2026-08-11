@@ -7,6 +7,13 @@ use crate::retrieval::reranker::RerankerHttp;
 use anyhow::Result;
 use std::sync::Arc;
 
+/// Pre-Option `EmbedderHttp` construction default, preserved exactly. Task 6
+/// threads `[embeddings]` config through `RetrievalConfig` without selecting a
+/// backend from it; Task 7 replaces the `from_env` arm that uses this with
+/// real url-vs-model backend selection. `from_config_only` keeps using it
+/// unconditionally — see its doc comment.
+const FALLBACK_EMBEDDER_URL: &str = "http://127.0.0.1:8081";
+
 pub struct RetrievalClient {
     /// Code-chunk vector store behind the `CodeVectorStore` seam. Qdrant today;
     /// in-process sqlite-vec in the lite stack (Phase 2). `pub(crate)` so the
@@ -22,8 +29,8 @@ pub struct RetrievalClient {
 }
 
 impl RetrievalClient {
-    pub async fn from_env() -> Result<Self> {
-        let config = RetrievalConfig::from_env()?;
+    pub async fn from_env(root: Option<&std::path::Path>) -> Result<Self> {
+        let config = RetrievalConfig::from_env_and_project(root)?;
         // Backend selection (server Qdrant vs daemon-free sqlite-vec lite stack).
         // sqlite-vec never touches the network — no Qdrant connect probe.
         let backend = VectorBackend::resolve();
@@ -37,11 +44,21 @@ impl RetrievalClient {
         // The lite stack has no sparse server; also skip the sparse leg whenever
         // sparse is disabled (the vector isn't used → don't pay for it).
         let dense_only = lite || config.disable_sparse;
+        // Task 6 threads `[embeddings]` config through `RetrievalConfig` without
+        // selecting a backend from it yet — `embedder_url`/`model_dim` fall back
+        // to the exact same literals `from_env` fabricated unconditionally
+        // before this change. Task 7 replaces this arm with real url-vs-model
+        // backend selection.
         let embedder: Arc<dyn CodeEmbedder> = Arc::new(
             EmbedderHttp::new(
-                &config.embedder_url,
+                config
+                    .embedder_url
+                    .as_deref()
+                    .unwrap_or(FALLBACK_EMBEDDER_URL),
                 &config.sparse_embedder_url,
-                config.model_dim,
+                config
+                    .model_dim
+                    .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM),
             )
             .dense_only(dense_only),
         );
@@ -81,10 +98,18 @@ impl RetrievalClient {
     /// disarmed below — under qdrant-client's default it would block on a health
     /// check inside `build()`. Drop that call and this doc comment becomes false.
     pub fn from_config_only(config: RetrievalConfig) -> Self {
+        // Keep this constructor's old behaviour explicit rather than letting it
+        // inherit new url-vs-model selection semantics by accident — it is
+        // always the Qdrant/HTTP-embedder shape, unconditionally.
         let embedder: Arc<dyn CodeEmbedder> = Arc::new(EmbedderHttp::new(
-            &config.embedder_url,
+            config
+                .embedder_url
+                .as_deref()
+                .unwrap_or(FALLBACK_EMBEDDER_URL),
             &config.sparse_embedder_url,
-            config.model_dim,
+            config
+                .model_dim
+                .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM),
         ));
         let reranker = RerankerHttp::new(&config.reranker_url);
         let client = qdrant_client::Qdrant::from_url(&config.qdrant_url)

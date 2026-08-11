@@ -22,10 +22,19 @@ pub(crate) fn parse_rerank_opt_in(raw: Option<&str>) -> bool {
 
 pub struct RetrievalConfig {
     pub qdrant_url: String,
-    pub embedder_url: String,
+    /// `None` means "no url configured" — resolve the backend from `model`.
+    /// Previously defaulted to `http://127.0.0.1:8081`, which fabricated a
+    /// server that may never have existed. An explicit env value is untouched.
+    pub embedder_url: Option<String>,
     pub sparse_embedder_url: String,
     pub reranker_url: String,
-    pub model_dim: usize,
+    /// `None` means "the model is the authority". `Some(n)` is an operator pin.
+    pub model_dim: Option<usize>,
+    /// Model identifier in codescout-embed's grammar (`local:`, `local-dir:`,
+    /// `ollama:`, `openai:`, or a bare name sent to `embedder_url`).
+    pub model: String,
+    /// Embedding API key, used only when `embedder_url` is set.
+    pub api_key: Option<String>,
     pub profile: String,
     /// Multiplier for the sparse (BM25) prefetch candidate pool relative to dense.
     /// 1.0 = equal weight (default), 2.0 = BM25 gets 2× more candidates in RRF.
@@ -66,20 +75,43 @@ impl RetrievalConfig {
         format!("{}{}", self.collection_prefix, kind)
     }
 
+    /// Env-only construction. Equivalent to `from_env_and_project(None)`.
     pub fn from_env() -> Result<Self> {
+        Self::from_env_and_project(None)
+    }
+
+    /// `[embeddings]` in the project's config is the base; `CODESCOUT_*` env
+    /// vars override it. Benchmark matrix cells set env, so they are unaffected.
+    pub fn from_env_and_project(root: Option<&std::path::Path>) -> Result<Self> {
+        let embeddings = root
+            .and_then(|r| crate::config::project::ProjectConfig::load_or_default(r).ok())
+            .map(|c| c.embeddings);
+        let (cfg_model, cfg_url, cfg_key) = match embeddings {
+            Some(e) => (
+                Some(e.model),
+                e.url,
+                e.api_key.map(|k| k.as_str().to_string()),
+            ),
+            None => (None, None, None),
+        };
         Ok(Self {
             qdrant_url: std::env::var("CODESCOUT_QDRANT_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:6334".into()),
-            embedder_url: std::env::var("CODESCOUT_EMBEDDER_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8081".into()),
+            embedder_url: merge_env_over_project(
+                std::env::var("CODESCOUT_EMBEDDER_URL").ok(),
+                cfg_url,
+            ),
+            model: merge_env_over_project(
+                std::env::var("CODESCOUT_EMBEDDER_MODEL").ok(),
+                cfg_model,
+            )
+            .unwrap_or_else(crate::config::project::default_embed_model),
+            api_key: merge_env_over_project(std::env::var("EMBED_API_KEY").ok(), cfg_key),
+            model_dim: parse_model_dim(std::env::var("CODESCOUT_MODEL_DIM").ok()),
             sparse_embedder_url: std::env::var("CODESCOUT_SPARSE_EMBEDDER_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:8084".into()),
             reranker_url: std::env::var("CODESCOUT_RERANKER_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:8083".into()),
-            model_dim: std::env::var("CODESCOUT_MODEL_DIM")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(768),
             profile: std::env::var("CODESCOUT_RETRIEVAL_PROFILE").unwrap_or_else(|_| "cpu".into()),
             // Dense-vs-sparse fusion weight — corpus- and model-dependent by
             // construction, so 3.0 is a value that worked on OUR corpus and dense
@@ -101,6 +133,31 @@ impl RetrievalConfig {
                 .unwrap_or_default(),
         })
     }
+}
+
+/// Compatibility default for an unpinned `model_dim` at the few call sites that
+/// still need a concrete `usize` today (constructing `EmbedderHttp`, sizing a
+/// Qdrant collection) — Task 6 threads the `Option` through without yet
+/// selecting a backend from it, so those sites fall back to the same 768 that
+/// used to live inside `from_env` itself. A wrong value here means broken, not
+/// degraded (memory `conventions` § Environment-Agnostic Tuning classifies this
+/// as a compatibility constant, out of scope for that rule).
+pub(crate) const DEFAULT_MODEL_DIM: usize = 768;
+
+/// Env value wins over project config; both absent is a genuine "unset", not a
+/// fabricated default (see `RetrievalConfig::embedder_url`'s field doc). Pure
+/// fn over already-resolved values, not an inline env read, so the precedence
+/// is testable without `std::env::set_var` — same shape as `parse_rerank_opt_in`
+/// above, for the same reason (see its doc comment).
+fn merge_env_over_project(env_val: Option<String>, project_val: Option<String>) -> Option<String> {
+    env_val.or(project_val)
+}
+
+/// Parse `CODESCOUT_MODEL_DIM`. Absent or unparsable is `None` — "the model is
+/// the authority", never a fabricated 768. Pure fn for the same testability
+/// reason as `merge_env_over_project`.
+fn parse_model_dim(env_val: Option<String>) -> Option<usize> {
+    env_val.and_then(|s| s.parse().ok())
 }
 
 #[cfg(test)]
@@ -140,5 +197,98 @@ mod rerank_opt_in_tests {
                 "{raw:?} should enable the reranker"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    // `RetrievalConfig::from_env_and_project` reads real process env
+    // (CODESCOUT_EMBEDDER_URL/_MODEL/_DIM, EMBED_API_KEY) at its edge. Per
+    // docs/conventions/test-env-isolation.md, EnvGuard + #[serial] is NOT
+    // VIABLE for new tests: it does not coordinate with non-serial tests
+    // elsewhere in the suite that read the same vars, and `a656f8cec220d347`
+    // removed the pattern crate-wide for exactly that reason (measured
+    // 119 -> 0 `set_var`/`remove_var` occurrences in the default `cargo test`
+    // build). So these tests exercise the merge precedence as pure functions
+    // (`merge_env_over_project`, `parse_model_dim`) instead of mutating real
+    // env -- the same shape `parse_rerank_opt_in` above already uses, and for
+    // the same documented reason (see its doc comment).
+
+    #[test]
+    fn unset_url_no_longer_fabricates_8081() {
+        assert_eq!(
+            merge_env_over_project(None, None),
+            None,
+            "an unset url must mean 'resolve from the model', not 'assume 8081'"
+        );
+    }
+
+    #[test]
+    fn env_url_overrides_project_config() {
+        assert_eq!(
+            merge_env_over_project(
+                Some("http://from-env:8/v1".to_string()),
+                Some("http://from-toml:9/v1".to_string()),
+            ),
+            Some("http://from-env:8/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn project_model_reaches_retrieval_when_env_is_silent() {
+        // Exercise the real project.toml -> EmbeddingsSection load path (file
+        // I/O only, no env mutation). Uses `load_with_global_base` with an empty
+        // global layer rather than `load_or_default` -- the latter also applies
+        // `CODESCOUT_EMBED_MODEL`/`CODESCOUT_EMBED_URL` env overrides (a
+        // DIFFERENT var-name family than the CODESCOUT_EMBEDDER_* ones this
+        // module reads), which would make this test's outcome depend on
+        // whatever happens to be set in the ambient dev/CI environment -- same
+        // no-guard convention as the sibling `load_or_default_*` tests in
+        // config/project.rs, which use the same helper for the same reason.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout/project.toml"),
+            "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"local-dir:/weights\"\n",
+        )
+        .unwrap();
+        let empty_global = toml::Value::Table(toml::map::Map::new());
+        let cfg =
+            crate::config::project::ProjectConfig::load_with_global_base(dir.path(), empty_global)
+                .unwrap();
+        assert_eq!(cfg.embeddings.model, "local-dir:/weights");
+        assert_eq!(cfg.embeddings.url, None);
+
+        // With env silent, the merge must carry the project value straight through.
+        assert_eq!(
+            merge_env_over_project(None, Some(cfg.embeddings.model.clone())),
+            Some("local-dir:/weights".to_string())
+        );
+        assert_eq!(merge_env_over_project(None, cfg.embeddings.url), None);
+    }
+
+    #[test]
+    fn unset_model_dim_is_none_not_768() {
+        assert_eq!(
+            parse_model_dim(None),
+            None,
+            "an unpinned dim must let the model decide"
+        );
+    }
+
+    #[test]
+    fn model_dim_parses_a_set_value() {
+        assert_eq!(parse_model_dim(Some("4096".to_string())), Some(4096));
+    }
+
+    #[test]
+    fn from_env_and_project_none_root_has_no_embeddings_section() {
+        // No root -> no project.toml to load -> model falls back to the
+        // built-in default, url/api_key/dim stay unset (absent a matching env
+        // var). This is the real end-to-end path, not just the pure helpers.
+        let cfg = RetrievalConfig::from_env_and_project(None).unwrap();
+        assert_eq!(cfg.model, crate::config::project::default_embed_model());
     }
 }
