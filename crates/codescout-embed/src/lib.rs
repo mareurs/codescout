@@ -77,6 +77,16 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
         512
     }
 
+    // local-dir: always loads AllMiniLM-L6-v2-Q — from_dir (local.rs) is
+    // hardcoded to that model's tokenizer/pooling/quantization regardless
+    // of what the directory path contains, so the chunk size is fixed,
+    // never derived by substring-matching the path string (a path like
+    // ".../models--nomic-ai--nomic-embed-text-v1.5" would otherwise match
+    // the 8192-token branch below and massively over-chunk).
+    if model_spec.starts_with("local-dir:") {
+        return from_tokens(256);
+    }
+
     // Local fastembed models use their documented sequence lengths.
     // These are listed here rather than in local.rs to avoid a feature-gate
     // dependency (local.rs is #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]).
@@ -122,7 +132,8 @@ pub async fn embed_one(embedder: &dyn Embedder, text: &str) -> Result<Embedding>
 /// 3. `model` starts with `ollama:` → Ollama (errors loudly if unreachable)
 /// 4. `model` starts with `openai:` → OpenAI API
 /// 5. `model` starts with `custom:` → hard error with migration hint
-/// 6. No url, no prefix → default to local:AllMiniLML6V2Q
+/// 6. No url, no known prefix → try `model` as a bare local model name; else
+///    the unknown-model error (there is no silent default)
 pub async fn create_embedder_with_config(
     model: &str,
     url: Option<&str>,
@@ -135,6 +146,19 @@ pub async fn create_embedder_with_config(
     // 1. URL takes priority — any OpenAI-compatible endpoint
     #[cfg(feature = "remote-embed")]
     if let Some(url) = url {
+        // local-dir: forces an offline, in-process ONNX embedder; url forces
+        // a network client. The two are contradictory, not a precedence
+        // question — without this check the model string is sent verbatim
+        // to the server as a model name and fails later as an opaque
+        // server-side rejection instead of here, with a clear reason.
+        if model.starts_with("local-dir:") {
+            anyhow::bail!(
+                "Cannot combine url with a local-dir: model — url selects a \
+                     network client while local-dir: forces an offline, \
+                     in-process embedder.\n\
+                     Remove url to use local-dir:<path>, or drop local-dir: to use url."
+            );
+        }
         // Strip known routing prefixes so "ollama:nomic-embed-text" + url
         // sends "nomic-embed-text" as the model name in the HTTP request.
         let bare_model = model
@@ -155,7 +179,12 @@ pub async fn create_embedder_with_config(
     }
 
     // 2a. local-dir: prefix — weights from a directory, never the network.
-    //     Checked before `local:` because that prefix would otherwise swallow it.
+    //     Must be its own arm: "local-dir:/x".strip_prefix("local:") is None
+    //     (byte 5 is `-`, not `:`), so `local:` below does NOT capture it —
+    //     confirmed by deleting this arm and observing arm 2 miss it. Without
+    //     this arm, a local-dir: string falls through every other prefix,
+    //     fails to parse as a bare registry name at step 6, and dead-ends in
+    //     the generic "Unknown model" bail — never reaching `from_dir`.
     #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
     if let Some(path) = model.strip_prefix("local-dir:") {
         return Ok(Box::new(
@@ -259,6 +288,51 @@ mod smoke {
         assert!(
             err.contains("/no/such/weights") || err.contains("\\no\\such\\weights"),
             "error must name the directory it was given, got: {err}"
+        );
+        assert!(
+            err.contains("model_quantized.onnx"),
+            "error must come from the directory loader, not a fallthrough, got: {err}"
+        );
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn url_and_local_dir_together_is_a_hard_error() {
+        let err = crate::create_embedder_with_config(
+            "local-dir:/opt/weights",
+            Some("http://localhost:1234/v1"),
+            None,
+        )
+        .await
+        .err()
+        .expect("combining url with local-dir: must be a hard error")
+        .to_string();
+        assert!(
+            err.contains("url") && err.contains("local-dir:"),
+            "error must name both contradictory settings, got: {err}"
+        );
+    }
+
+    #[test]
+    fn chunk_size_pins_local_dir_to_the_all_minilm_budget() {
+        // from_dir is hardcoded to AllMiniLM-L6-v2-Q (see local.rs::MODEL_FILE),
+        // so this is the only correct chunk size for ANY local-dir: path —
+        // regardless of what the path string itself contains.
+        let expected = crate::chunk_size_for_model("local:AllMiniLML6V2Q");
+        assert_eq!(expected, 652, "sanity: the known-good baseline moved");
+        assert_eq!(
+            crate::chunk_size_for_model("local-dir:/opt/weights"),
+            expected,
+            "local-dir: must use the same budget as the hub AllMiniLM path, \
+             not fall through to substring-matching the filesystem path"
+        );
+        assert_eq!(
+            crate::chunk_size_for_model(
+                "local-dir:/root/.cache/huggingface/hub/models--nomic-ai--nomic-embed-text-v1.5"
+            ),
+            expected,
+            "a path that happens to contain another model's name must not \
+             change the chunk size — from_dir always loads AllMiniLM"
         );
     }
 
