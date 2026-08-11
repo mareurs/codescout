@@ -82,6 +82,18 @@ pub trait CodeVectorStore: Send + Sync {
     ///
     /// See `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
     async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool>;
+
+    /// Dense dimension this project's collection was created with, or `None`
+    /// when it does not exist yet.
+    ///
+    /// Takes `project_id` as well as `collection` because the sqlite-vec store
+    /// is per-project — `conn_for` keys on the project, not the collection.
+    ///
+    /// Deliberately has **no default implementation**: a backend that silently
+    /// inherited `Ok(None)` would disable the dim guard with no diagnostic.
+    /// Every implementor answers explicitly, so a new backend fails to compile
+    /// rather than failing quietly.
+    async fn collection_dim(&self, collection: &str, project_id: &str) -> Result<Option<u64>>;
 }
 /// Which code-vector backend the retrieval client uses.
 ///
@@ -203,6 +215,47 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
 
     async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool> {
         crate::retrieval::qdrant::QdrantWrap::project_has_chunks(self, collection, project_id).await
+    }
+
+    async fn collection_dim(&self, collection: &str, _project_id: &str) -> Result<Option<u64>> {
+        // Qdrant collections are shared across projects, so project_id is unused
+        // here — the dimension is a property of the collection itself.
+        match self.client.collection_info(collection).await {
+            Ok(info) => Ok(dense_vector_size(&info)),
+            // A missing collection is "nothing indexed yet", not an error.
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+/// Walk a Qdrant collection-info response down to the size of its dense
+/// ("dense") named vector. Confirmed against the vendored qdrant-client 1.17
+/// proto types: `GetCollectionInfoResponse.result -> CollectionInfo.config ->
+/// CollectionConfig.params -> CollectionParams.vectors_config ->
+/// VectorsConfig.config`, a oneof of either a single unnamed `VectorParams`
+/// (`Config::Params`) or a `VectorParamsMap` (`Config::ParamsMap`) — our
+/// collections always use the latter (`ensure_collection` names the dense leg
+/// "dense" alongside a sibling "sparse"), but `Config::Params` is handled too
+/// so an unnamed-vector collection (never created by this code, but not
+/// impossible to encounter) still resolves instead of silently returning
+/// `None`.
+#[cfg(feature = "server-stack")]
+fn dense_vector_size(info: &qdrant_client::qdrant::GetCollectionInfoResponse) -> Option<u64> {
+    use qdrant_client::qdrant::vectors_config::Config;
+    let vectors_config = info
+        .result
+        .as_ref()?
+        .config
+        .as_ref()?
+        .params
+        .as_ref()?
+        .vectors_config
+        .as_ref()?
+        .config
+        .as_ref()?;
+    match vectors_config {
+        Config::Params(p) => Some(p.size),
+        Config::ParamsMap(m) => m.map.get("dense").map(|p| p.size),
     }
 }
 
@@ -335,6 +388,14 @@ mod tests {
         async fn project_has_chunks(&self, _collection: &str, project_id: &str) -> Result<bool> {
             let store = self.chunks.lock();
             Ok(store.iter().any(|(p, _)| p.project_id == project_id))
+        }
+
+        async fn collection_dim(
+            &self,
+            _collection: &str,
+            _project_id: &str,
+        ) -> Result<Option<u64>> {
+            Ok(None)
         }
     }
 

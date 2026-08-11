@@ -308,6 +308,7 @@ impl crate::retrieval::client::RetrievalClient {
 
         let started = std::time::Instant::now();
         let collection = self.config.collection("code_chunks");
+        self.guard_index_dim(&collection, project_id).await?;
         self.code_store
             .ensure_collection(
                 &collection,
@@ -432,6 +433,10 @@ mod tests {
         upsert_batches: Mutex<Vec<usize>>,
         upserted: Mutex<Vec<ChunkRef>>,
         deleted: Mutex<Vec<String>>,
+        /// Reported by `collection_dim`. `None` (the default) means "no index
+        /// yet" — a test overrides it to `Some(n)` to exercise `guard_index_dim`
+        /// against a pre-existing index at dimension `n`.
+        dim: Mutex<Option<u64>>,
     }
 
     #[async_trait::async_trait]
@@ -481,6 +486,10 @@ mod tests {
 
         async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
             Ok(false)
+        }
+
+        async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
+            Ok(*self.dim.lock().unwrap())
         }
     }
 
@@ -883,6 +892,10 @@ mod tests {
         async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
             Ok(false)
         }
+
+        async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
+            Ok(None)
+        }
     }
 
     fn test_retrieval_client(store: impl CodeVectorStore + 'static) -> RetrievalClient {
@@ -967,5 +980,37 @@ mod tests {
             .await
             .expect("spawned task must not panic")
             .expect("sync_project should still succeed once it completes");
+    }
+
+    /// Call-site mutation target for `guard_index_dim`'s wiring into
+    /// `sync_project`. `test_retrieval_client` pins `model_dim: Some(3)`; this
+    /// store reports an EXISTING index already baked at a different dim (999).
+    /// The project root is an empty tempdir (nothing to walk, nothing to
+    /// embed) and every other `RecordingStore` method trivially succeeds — so
+    /// absent the `self.guard_index_dim(&collection, project_id).await?;` line
+    /// in `sync_project`, this exact setup returns `Ok` with `added: 0`, not
+    /// an error. Deleting that line makes `unwrap_err()` below panic.
+    #[tokio::test]
+    async fn sync_project_fails_fast_on_a_dim_mismatch_before_touching_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        let store = RecordingStore {
+            dim: Mutex::new(Some(999)),
+            ..Default::default()
+        };
+        let client = test_retrieval_client(store);
+        let opts = SyncOpts {
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+        let err = client
+            .sync_project("dim-mismatch-project", dir.path(), opts)
+            .await
+            .expect_err("a stored dim of 999 must fail against the configured model_dim of 3");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("999") && msg.contains('3'),
+            "error should name both the stored and configured dims, got: {msg}"
+        );
     }
 }

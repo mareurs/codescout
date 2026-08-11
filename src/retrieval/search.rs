@@ -92,6 +92,7 @@ impl RetrievalClient {
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
+        self.guard_index_dim(collection, project_id).await?;
         let mut timer = crate::perf::PhaseTimer::start("semantic_search");
         let q = self.embedder.embed_one(query).await?;
         timer.lap("embed");
@@ -211,5 +212,163 @@ mod rerank_gate_tests {
             should_rerank(true, true, false, 20),
             "and with CODESCOUT_RERANK=1 it must actually run"
         );
+    }
+}
+
+#[cfg(test)]
+mod dim_guard_tests {
+    use super::*;
+    use crate::retrieval::client::RetrievalClient;
+    use crate::retrieval::code_store::CodeVectorStore;
+    use crate::retrieval::config::RetrievalConfig;
+    use crate::retrieval::drift::ChunkRef;
+    use crate::retrieval::embedder::{EmbedOutput, EmbedderHttp, SparseVector};
+    use crate::retrieval::payload::CodePayload;
+    use crate::retrieval::reranker::RerankerHttp;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// Reports a fixed stored dim and records whether `query` was ever reached,
+    /// so a test can prove `guard_index_dim` short-circuits `search_in` BEFORE
+    /// the store runs — not just that some error eventually surfaces.
+    #[derive(Default)]
+    struct DimReportingStore {
+        dim: Option<u64>,
+        queried: AtomicBool,
+    }
+
+    #[async_trait]
+    impl CodeVectorStore for DimReportingStore {
+        async fn ensure_collection(&self, _c: &str, _d: u64) -> Result<()> {
+            Ok(())
+        }
+        async fn chunk_refs(&self, _c: &str, _p: &str) -> Result<Vec<ChunkRef>> {
+            Ok(vec![])
+        }
+        async fn upsert_chunks(
+            &self,
+            _c: &str,
+            _chunks: &[(CodePayload, EmbedOutput)],
+        ) -> Result<()> {
+            Ok(())
+        }
+        async fn delete_chunks(&self, _c: &str, _p: &str, _ids: &[String]) -> Result<()> {
+            Ok(())
+        }
+        #[allow(clippy::too_many_arguments)]
+        async fn query(
+            &self,
+            _c: &str,
+            _p: &str,
+            _dense: &[f32],
+            _sparse: &SparseVector,
+            _limit: usize,
+            _bm25: f32,
+            _disable_sparse: bool,
+            _excl: &[String],
+        ) -> Result<Vec<Hit>> {
+            self.queried.store(true, Ordering::SeqCst);
+            Ok(vec![])
+        }
+        async fn project_index_stats(&self, _c: &str, _p: &str) -> Result<(usize, usize)> {
+            Ok((0, 0))
+        }
+        async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
+            Ok(false)
+        }
+        async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
+            Ok(self.dim)
+        }
+    }
+
+    fn client_with_store(store: Arc<dyn CodeVectorStore>, model_dim: usize) -> RetrievalClient {
+        RetrievalClient {
+            code_store: store,
+            embedder: Arc::new(EmbedderHttp::new(
+                "http://unused.invalid",
+                "http://unused.invalid",
+                3,
+            )),
+            reranker: RerankerHttp::new("http://unused.invalid"),
+            config: RetrievalConfig {
+                qdrant_url: "http://unused.invalid".into(),
+                embedder_url: Some("http://unused.invalid".into()),
+                sparse_embedder_url: "http://unused.invalid".into(),
+                reranker_url: "http://unused.invalid".into(),
+                model_dim: Some(model_dim),
+                model: "local:AllMiniLML6V2Q".into(),
+                api_key: None,
+                profile: "cpu".into(),
+                bm25_boost: 1.0,
+                disable_sparse: false,
+                rerank: false,
+                collection_prefix: String::new(),
+            },
+            lite: false,
+        }
+    }
+
+    /// Call-site mutation target for `guard_index_dim`'s wiring into
+    /// `search_in`. The store reports an existing index at dim 999 against a
+    /// configured `model_dim` of 3; absent the
+    /// `self.guard_index_dim(collection, project_id).await?;` line at the top
+    /// of `search_in`, this call would instead proceed to embed the query
+    /// (against `http://unused.invalid`, which errors for an unrelated reason)
+    /// and then query the store. Asserting BOTH the specific error wording AND
+    /// that the store was never queried distinguishes "the guard fired first"
+    /// from "something else failed downstream".
+    #[tokio::test]
+    async fn search_in_fails_fast_on_a_dim_mismatch_without_querying_the_store() {
+        let store = Arc::new(DimReportingStore {
+            dim: Some(999),
+            ..Default::default()
+        });
+        let client = client_with_store(store.clone(), 3);
+        let err = client
+            .search_code("proj", "query text", SearchOpts::new(5))
+            .await
+            .expect_err("a stored dim of 999 must fail against the configured model_dim of 3");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("999") && msg.contains('3'),
+            "error should name both the stored and configured dims, got: {msg}"
+        );
+        assert!(
+            !store.queried.load(Ordering::SeqCst),
+            "guard must short-circuit search_in before the store is ever queried"
+        );
+    }
+
+    /// Pins `==` as `guard_index_dim`'s comparison, not `>=` or `<=`. My first
+    /// draft of the call-site tests above only exercised the
+    /// pinned-dim-smaller-than-stored direction (3 vs 999), which an `>=`
+    /// mutation of the guard survives undetected (`3 >= 999` is false either
+    /// way — the mutation and the original agree by accident). Both
+    /// directions must error so a comparison-operator mutation in either
+    /// direction is caught.
+    #[tokio::test]
+    async fn guard_index_dim_errors_in_both_mismatch_directions() {
+        let bigger_index = Arc::new(DimReportingStore {
+            dim: Some(999),
+            ..Default::default()
+        });
+        let client = client_with_store(bigger_index, 3);
+        let err = client
+            .guard_index_dim("code_chunks", "proj")
+            .await
+            .expect_err("configured 3 vs stored 999 must error");
+        assert!(format!("{err:#}").contains("999"));
+
+        let smaller_index = Arc::new(DimReportingStore {
+            dim: Some(3),
+            ..Default::default()
+        });
+        let client = client_with_store(smaller_index, 999);
+        let err = client
+            .guard_index_dim("code_chunks", "proj")
+            .await
+            .expect_err("configured 999 vs stored 3 must error");
+        assert!(format!("{err:#}").contains('3'));
     }
 }

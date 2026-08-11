@@ -1702,10 +1702,13 @@ impl Agent {
                             let qdrant =
                                 crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
                             let collection = config.collection("memories");
-                            let dim = config
-                                .model_dim
-                                .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM)
-                                as u64;
+                            // Resolve the model's own dimension rather than trusting an
+                            // absent-or-wrong CODESCOUT_MODEL_DIM pin — see
+                            // `RetrievalClient::resolve_model_dim` for why this can't
+                            // reuse `memory_embedder()`'s already-built instance.
+                            let dim =
+                                crate::retrieval::client::RetrievalClient::resolve_model_dim(&config)
+                                    .await? as u64;
                             // `QdrantSemanticMemoryStore::new` bootstraps the collection
                             // (a real network round trip) — bound it so a reachable-but-hung
                             // Qdrant fails fast instead of blocking up to the 120s operation

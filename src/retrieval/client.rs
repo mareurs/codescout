@@ -263,6 +263,78 @@ impl RetrievalClient {
             .project_has_chunks(collection, project_id)
             .await
     }
+
+    /// Fail legibly when the configured embedder disagrees with what the index
+    /// already holds. Called at the entry to indexing and to search, which is
+    /// the first point `project_id` is known — client construction does not
+    /// have one (the sqlite store is per-project).
+    pub(crate) async fn guard_index_dim(&self, collection: &str, project_id: &str) -> Result<()> {
+        let Some(index_dim) = self
+            .code_store
+            .collection_dim(collection, project_id)
+            .await?
+        else {
+            return Ok(());
+        };
+        let model_dim = self.config.model_dim.unwrap_or(index_dim as usize);
+        if model_dim as u64 == index_dim {
+            return Ok(());
+        }
+        Err(crate::tools::RecoverableError::with_hint(
+            format!(
+                "code index was built at {index_dim} dimensions; the configured \
+                 embedder produces {model_dim}"
+            ),
+            "Delete the code index and reindex — the vector table bakes the dimension \
+             in at creation and cannot migrate in place. Or set [embeddings].model back \
+             to the model the index was built with.",
+        )
+        .into())
+    }
+
+    /// The dimension to size a *fresh* Qdrant collection with when no
+    /// `CODESCOUT_MODEL_DIM` pin exists.
+    ///
+    /// For a local embedding backend, `config.model_dim` is an optional
+    /// operator pin — leaving it unset (the common case; local model dims are
+    /// self-describing) previously meant [`crate::retrieval::config::DEFAULT_MODEL_DIM`]
+    /// (a bare compatibility constant, 768) was baked into a fresh collection
+    /// regardless of the model actually configured. `local:AllMiniLML6V2Q` is
+    /// 384-dimensional, so that combination created a `memories`/`code_chunks`
+    /// collection that rejected every upsert. Resolving the model's own report
+    /// is the only value that cannot be stale — the same resolution
+    /// `build_embedder`/`CodeEmbedderAdapter::new` perform, paid once more here
+    /// because callers of this function (e.g. `Agent::semantic_memory_store`)
+    /// have no shared construction path with `Agent::memory_embedder` / a
+    /// `RetrievalClient`: both are independently-lazy caches, so there's no
+    /// already-built embedder instance to read a dimension off of.
+    ///
+    /// A remote (HTTP) backend cannot self-report a dimension without a network
+    /// round trip, so it keeps the existing pin-or-default fallback.
+    pub(crate) async fn resolve_model_dim(config: &RetrievalConfig) -> Result<usize> {
+        if !Self::backend_is_local(config) {
+            return Ok(config
+                .model_dim
+                .unwrap_or(crate::retrieval::config::DEFAULT_MODEL_DIM));
+        }
+        let inner = codescout_embed::create_embedder_with_config(
+            &config.model,
+            None,
+            config.api_key.clone(),
+        )
+        .await
+        .map_err(|e| {
+            crate::tools::RecoverableError::with_hint(
+                format!(
+                    "could not build the '{}' embedder to size its collection: {e}",
+                    config.model
+                ),
+                "Rebuild with --features local-embed for in-process ONNX, or point \
+                         [embeddings].model at local-dir:/path/to/weights for an offline host.",
+            )
+        })?;
+        Ok(inner.dimensions())
+    }
 }
 
 #[cfg(test)]
@@ -446,6 +518,57 @@ mod selection_tests {
         assert!(
             msg.contains("sparse"),
             "must name sparse as the conflict, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_model_dim_uses_the_pin_or_default_for_a_remote_backend() {
+        // An HTTP backend cannot self-report a dimension without a network
+        // round trip, so `resolve_model_dim` must not attempt to build a local
+        // embedder for it — it should fall straight back to the
+        // pin-or-default path `ensure_collection` callers used before this
+        // function existed.
+        let mut pinned = cfg_with(Some("http://unused.invalid"), "some-remote-model");
+        pinned.model_dim = Some(42);
+        let dim = RetrievalClient::resolve_model_dim(&pinned).await.unwrap();
+        assert_eq!(
+            dim, 42,
+            "a remote backend's explicit pin must be honoured verbatim"
+        );
+
+        let mut unpinned = cfg_with(Some("http://unused.invalid"), "some-remote-model");
+        unpinned.model_dim = None;
+        let dim = RetrievalClient::resolve_model_dim(&unpinned).await.unwrap();
+        assert_eq!(
+            dim,
+            crate::retrieval::config::DEFAULT_MODEL_DIM,
+            "an unpinned remote backend keeps the compatibility default"
+        );
+    }
+
+    /// Regression for the memories-collection bug named in the task 8 brief:
+    /// with `CODESCOUT_MODEL_DIM` unset (the plan's own headline
+    /// configuration), the old fallback was `DEFAULT_MODEL_DIM` (768)
+    /// regardless of which model was actually configured — wrong for
+    /// `local:AllMiniLML6V2Q`, which is 384-dimensional, so a fresh
+    /// server-stack `memories` collection was created at the wrong size and
+    /// rejected every upsert. `resolve_model_dim` must report the model's own
+    /// value instead.
+    #[cfg(feature = "local-embed")]
+    #[tokio::test]
+    async fn resolve_model_dim_reports_the_local_models_own_dimension() {
+        if std::env::var("CODESCOUT_SKIP_ONNX_TESTS").is_ok() {
+            eprintln!(
+                "SKIP resolve_model_dim_reports_the_local_models_own_dimension: opt-out is set"
+            );
+            return;
+        }
+        let mut c = cfg_with(None, "local:AllMiniLML6V2Q");
+        c.model_dim = None;
+        let dim = RetrievalClient::resolve_model_dim(&c).await.unwrap();
+        assert_eq!(
+            dim, 384,
+            "must report the model's own dimension, not the 768 compatibility default"
         );
     }
 }
