@@ -117,7 +117,8 @@ pub async fn embed_one(embedder: &dyn Embedder, text: &str) -> Result<Embedding>
 ///
 /// Resolution order:
 /// 1. `url` set → RemoteEmbedder targeting that URL
-/// 2. `model` starts with `local:` → local ONNX via fastembed
+/// 2. `model` starts with `local-dir:` → local ONNX loaded from a directory, no network;
+///    or starts with `local:` → local ONNX via fastembed
 /// 3. `model` starts with `ollama:` → Ollama (errors loudly if unreachable)
 /// 4. `model` starts with `openai:` → OpenAI API
 /// 5. `model` starts with `custom:` → hard error with migration hint
@@ -151,6 +152,15 @@ pub async fn create_embedder_with_config(
             "Remote embedding requires the 'remote-embed' feature.\n\
              Rebuild with: cargo build --features remote-embed"
         );
+    }
+
+    // 2a. local-dir: prefix — weights from a directory, never the network.
+    //     Checked before `local:` because that prefix would otherwise swallow it.
+    #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
+    if let Some(path) = model.strip_prefix("local-dir:") {
+        return Ok(Box::new(
+            local::LocalEmbedder::from_dir(std::path::Path::new(path)).await?,
+        ));
     }
 
     // 2. local: prefix
@@ -203,12 +213,13 @@ pub async fn create_embedder_with_config(
         }
     }
 
-    // Helpful error for local: prefix without the feature
-    if model.starts_with("local:") {
+    // Helpful error for local: / local-dir: prefixes without the feature
+    if model.starts_with("local:") || model.starts_with("local-dir:") {
         anyhow::bail!(
             "Local embedding requires the 'local-embed' feature.\n\
              Rebuild with: cargo build --features local-embed\n\n\
-             Recommended: local:AllMiniLML6V2Q (384d, quantized, 22MB)"
+             Recommended: local:AllMiniLML6V2Q (384d, quantized, 22MB)\n\
+             Offline hosts: local-dir:/path/to/weights (no network at all)"
         );
     }
 
@@ -216,7 +227,8 @@ pub async fn create_embedder_with_config(
         "Unknown model '{}'. Options:\n\
          • Set url in [embeddings] to point at any OpenAI-compatible server\n\
          • Use local:AllMiniLML6V2Q for bundled ONNX (384d, 22MB, no server needed)\n\
-         • Use local:JinaEmbeddingsV2BaseCode for code-specialized ONNX",
+         • Use local:JinaEmbeddingsV2BaseCode for code-specialized ONNX\n\
+         • Use local-dir:/path/to/weights for an offline host (no network)",
         model
     )
 }
@@ -234,5 +246,32 @@ mod smoke {
     #[test]
     fn crate_builds() {
         assert_eq!(2 + 2, 4);
+    }
+
+    #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
+    #[tokio::test]
+    async fn local_dir_prefix_reports_the_directory_on_failure() {
+        let err = crate::create_embedder_with_config("local-dir:/no/such/weights", None, None)
+            .await
+            .err()
+            .expect("missing weights must error")
+            .to_string();
+        assert!(
+            err.contains("/no/such/weights") || err.contains("\\no\\such\\weights"),
+            "error must name the directory it was given, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_model_error_advertises_local_dir() {
+        let err = crate::create_embedder_with_config("banana", None, None)
+            .await
+            .err()
+            .expect("unknown model must error")
+            .to_string();
+        assert!(
+            err.contains("local-dir:"),
+            "the unknown-model error must advertise the offline form, got: {err}"
+        );
     }
 }
