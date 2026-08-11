@@ -36,13 +36,13 @@ model = "local:AllMiniLML6V2Q"   # 384d, INT8-quantized, ~22MB
 ```
 
 On first use this fetches the weights to the HuggingFace cache. **On the
-default lite build** (`cargo build --release`, no `server-stack` feature)
-nothing else is needed — leave `url` unset, and both `semantic_search` and
-`memory(recall)` will embed in-process.
+default lite build** (`cargo build --release --features local-embed`, no
+`server-stack` feature) nothing else is needed — leave `url` unset, and both
+`semantic_search` and `memory(recall)` will embed in-process.
 
-**On a `server-stack` build** (`cargo rb` — this project's own local build),
-that is not the whole story: `VectorBackend::resolve()` defaults to Qdrant
-instead of the in-process `sqlite-vec` store, and with the hybrid sparse leg
+**On a `server-stack` build** (`cargo rb --features local-embed` — this
+project's own local build), that is not the whole story: `VectorBackend::resolve()`
+defaults to Qdrant instead of the in-process `sqlite-vec` store, and with the hybrid sparse leg
 enabled a local embedder — which produces no sparse vector — fails at client
 construction instead of embedding in-process. Two ways to make a local model
 work on a `server-stack` build: set `CODESCOUT_VECTOR_BACKEND=sqlite-vec` to

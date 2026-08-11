@@ -327,12 +327,29 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
         .or_else(|| std::env::var("CODESCOUT_EMBED_URL").ok())
         .filter(|s| !s.is_empty())
         .is_some();
+    // Effective model, derived independently of the implementation with the
+    // same precedence `RetrievalConfig::from_env_and_project` uses:
+    // `CODESCOUT_EMBEDDER_MODEL` first, then `CODESCOUT_EMBED_MODEL`, else the
+    // built-in default. The fresh tempdir has no project.toml, so no
+    // file-based layer is in play. This ladder must NOT call
+    // `backend_is_local` itself -- that would make the check a tautology
+    // against the implementation it's supposed to independently verify.
+    let effective_model = std::env::var("CODESCOUT_EMBEDDER_MODEL")
+        .ok()
+        .or_else(|| std::env::var("CODESCOUT_EMBED_MODEL").ok())
+        .unwrap_or_else(|| "local:AllMiniLML6V2Q".to_string());
+    let model_is_local =
+        effective_model.starts_with("local:") || effective_model.starts_with("local-dir:");
     let expected_backend = if embedder_url_set {
         "remote-http"
-    } else if expected_compiled_in.contains(&"local-onnx") {
-        "local-onnx"
+    } else if model_is_local {
+        if expected_compiled_in.contains(&"local-onnx") {
+            "local-onnx"
+        } else {
+            "unavailable"
+        }
     } else {
-        "unavailable"
+        "remote-http"
     };
     assert_eq!(
         result["embedding_backend"],
