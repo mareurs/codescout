@@ -340,6 +340,82 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
         "must name the backend this config actually resolves to, not a fixed string"
     );
 }
+/// I1 (final whole-branch review): the old rule computed `backend` purely
+/// from "is local-onnx compiled in", never looking at the configured model
+/// string. That misreports two real configurations: a lean build (no
+/// `local-embed`) with an `ollama:`/`openai:` model and no url reported
+/// `"unavailable"` even though the config works fine over the network,
+/// and a `local-embed` build with the same model reported `"local-onnx"`
+/// even though the live backend is `RemoteEmbedder` over Ollama, never
+/// `LocalEmbedder`. `backend_is_local` (`client.rs:37-40`) is documented as
+/// the single source of truth for exactly this question — this test varies
+/// the *model string*, not just env, so it fails against the old
+/// compiled-in-only rule regardless of which optional backends this
+/// binary happens to have compiled in.
+#[tokio::test]
+async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join(".codescout/project.toml"),
+        "[project]\nname = \"test\"\n\n[embeddings]\nmodel = \"ollama:nomic-embed-text\"\n",
+    )
+    .unwrap();
+
+    // Two ambient env layers can override the model this test just set on
+    // disk (see the sibling test above) — if either is present on this
+    // machine, the ground truth this test asserts no longer holds, so skip
+    // rather than assert a premise that isn't true here.
+    if std::env::var("CODESCOUT_EMBEDDER_MODEL").is_ok()
+        || std::env::var("CODESCOUT_EMBED_MODEL").is_ok()
+    {
+        eprintln!(
+            "skipping status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends: \
+                 CODESCOUT_EMBEDDER_MODEL/CODESCOUT_EMBED_MODEL ambient override present"
+        );
+        return;
+    }
+    let embedder_url_set = std::env::var("CODESCOUT_EMBEDDER_URL")
+        .ok()
+        .or_else(|| std::env::var("CODESCOUT_EMBED_URL").ok())
+        .filter(|s| !s.is_empty())
+        .is_some();
+    if embedder_url_set {
+        eprintln!(
+            "skipping status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends: \
+                 an ambient embedder url is set, which always wins over the model"
+        );
+        return;
+    }
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
+
+    // Ground truth: an `ollama:` model with no url is never
+    // `backend_is_local` (it doesn't start with `local:`/`local-dir:`), so
+    // it must report `"remote-http"` regardless of which backends this
+    // binary happens to have compiled in.
+    assert_eq!(
+        result["embedding_backend"],
+        json!("remote-http"),
+        "an ollama: model with no url must report remote-http regardless of \
+             compiled-in backends, got: {:?}",
+        result["embedding_backend"]
+    );
+}
 
 #[tokio::test]
 async fn project_status_includes_memory_staleness() {

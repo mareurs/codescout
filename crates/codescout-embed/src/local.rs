@@ -138,6 +138,9 @@ pub struct LocalEmbedder {
 impl LocalEmbedder {
     /// Create a new local embedder.  The heavy ONNX session creation runs on
     /// `spawn_blocking` to keep the async executor responsive.
+    ///
+    /// Must be called from within a Tokio runtime — `spawn_blocking` requires
+    /// `Handle::current()` and panics outside one.
     pub async fn new(model_name: &str) -> Result<Self> {
         let model_name = model_name.to_string();
         tokio::task::spawn_blocking(move || Self::new_blocking(&model_name))
@@ -176,6 +179,9 @@ impl LocalEmbedder {
     /// different model with the same on-disk file layout would load without
     /// error and silently produce wrong vectors; nothing here checks model
     /// identity.
+    ///
+    /// Must be called from within a Tokio runtime — `spawn_blocking` requires
+    /// `Handle::current()` and panics outside one.
     pub async fn from_dir(dir: &Path) -> Result<Self> {
         let dir = dir.to_path_buf();
         tokio::task::spawn_blocking(move || Self::from_dir_blocking(&dir))

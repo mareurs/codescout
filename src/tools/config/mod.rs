@@ -314,14 +314,29 @@ impl Tool for ProjectStatus {
         )) {
             compiled_in.push("local-onnx");
         }
+        // Route through `backend_is_local` — the single source of truth
+        // `dense_only` and `guard_sparse` also read (`client.rs:37-40`) —
+        // rather than re-deriving "is this local" from which backends happen
+        // to be compiled in. The old rule ("url set? remote-http :
+        // (local-onnx compiled in? local-onnx : unavailable)") never looked at
+        // the model string at all, so an `ollama:`/`openai:` model with no url
+        // was misreported as "local-onnx" whenever `local-embed` happened to
+        // be compiled in (it is never local, regardless of that), and as
+        // "unavailable" when it wasn't (it works fine over the network
+        // either way).
         let backend = if retrieval_config.embedder_url.is_some() {
             "remote-http"
-        } else if compiled_in.contains(&"local-onnx") {
-            "local-onnx"
+        } else if crate::retrieval::client::RetrievalClient::backend_is_local(&retrieval_config) {
+            if compiled_in.contains(&"local-onnx") {
+                "local-onnx"
+            } else {
+                // The configured model genuinely names a local backend this
+                // binary cannot load. Saying so here is the whole point of
+                // this block.
+                "unavailable"
+            }
         } else {
-            // The default config names a local model this binary cannot load.
-            // Saying so here is the whole point of this block.
-            "unavailable"
+            "remote-http"
         };
 
         result["embedding_backend"] = json!(backend);

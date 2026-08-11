@@ -1672,10 +1672,20 @@ impl CodeEmbedderAdapter {
     ) -> anyhow::Result<Self> {
         if let Some(expected) = expected_dim {
             let actual = inner.dimensions();
-            if actual != expected {
+            // `actual == 0` is `RemoteEmbedder`'s "not yet known" sentinel (see
+            // `known_dim` below), not a real dimension. Not every backend
+            // routed through this adapter is local — `build_embedder`
+            // (`client.rs`) selects it whenever no `embedder_url` is
+            // configured, which also covers bare `ollama:`/`openai:` model
+            // strings backed by `RemoteEmbedder`. Comparing an operator's real
+            // pin against an unknown-yet 0 would permanently wedge that
+            // configuration: this guard runs before the first embed call ever
+            // has a chance to populate the real dimension, so it would trip on
+            // every construction, forever, for that configuration.
+            if actual != 0 && actual != expected {
                 return Err(crate::tools::RecoverableError::with_hint(
                     format!(
-                        "local embedder dim mismatch: model produces {actual}, configured {expected}"
+                        "embedder dim mismatch: model produces {actual}, configured {expected}"
                     ),
                     format!(
                         "Set CODESCOUT_MODEL_DIM={actual} (or remove it and let the model decide) \
@@ -1895,6 +1905,21 @@ mod adapter_tests {
     #[tokio::test]
     async fn new_accepts_a_pin_that_agrees_with_the_model() {
         assert!(CodeEmbedderAdapter::new(Box::new(FakeEmbedder(384)), Some(384)).is_ok());
+    }
+    /// C1 (final whole-branch review): `new()`'s own pin-validation branch had
+    /// zero coverage for the remote-with-pin case before this test. Mirrors
+    /// `known_dim_is_none_for_a_backend_reporting_zero` but for `new()`:
+    /// `RemoteEmbedder`'s "not yet known" 0-dimension sentinel must not be
+    /// compared against an operator's pin at construction time, or any
+    /// `openai:`/`ollama:` no-url configuration with `CODESCOUT_MODEL_DIM` set
+    /// would be permanently wedged before the first embed call ever runs.
+    #[tokio::test]
+    async fn new_accepts_a_pin_when_the_model_reports_the_zero_sentinel() {
+        assert!(
+            CodeEmbedderAdapter::new(Box::new(FakeEmbedder(0)), Some(768)).is_ok(),
+            "a 0-dimension report (RemoteEmbedder's 'not yet known' sentinel) must not be \
+             compared against the operator's pin"
+        );
     }
 
     #[tokio::test]
