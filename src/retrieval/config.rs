@@ -550,11 +550,27 @@ mod merge_tests {
     }
 
     #[test]
-    fn from_env_and_project_none_root_has_no_embeddings_section() {
-        // No root -> no project.toml to load -> model falls back to the
-        // built-in default, url/api_key/dim stay unset (absent a matching env
-        // var). This is the real end-to-end path, not just the pure helpers.
-        let cfg = RetrievalConfig::from_env_and_project(None).unwrap();
-        assert_eq!(cfg.model, crate::config::project::default_embed_model());
+    fn resolve_embed_fields_with_none_root_has_no_embeddings_section() {
+        // Round-2 review R2: the previous version of this test called the REAL
+        // `RetrievalConfig::from_env_and_project(None)`, which reads real
+        // process env via `EmbedEnv::from_real_env()` -- so it only passed on
+        // machines that happen not to export `CODESCOUT_EMBEDDER_MODEL`
+        // (true here, not true everywhere). Chose to express it against the
+        // pure seam rather than drop it: `merge_tests` already covers the
+        // merge-with-nothing-set assertion
+        // (`unset_everything_no_longer_fabricates_anything`), and
+        // `tests/retrieval_unit.rs::config_from_env_uses_defaults_when_unset`
+        // already covers the full `RetrievalConfig::from_env()` public path
+        // with real env properly neutralized via `temp_env` -- but neither
+        // one drives `resolve_embed_fields_with`'s OWN `root == None`
+        // short-circuit specifically. This does, with an explicit
+        // `EmbedEnv::default()` (never `from_real_env()`) as input: no
+        // ambient variable can decide the verdict, because no real env is
+        // read at all.
+        let (url, model, api_key, dim) = resolve_embed_fields_with(EmbedEnv::default(), None);
+        assert_eq!(model, default_embed_model());
+        assert_eq!(url, None);
+        assert_eq!(api_key, None);
+        assert_eq!(dim, None);
     }
 }

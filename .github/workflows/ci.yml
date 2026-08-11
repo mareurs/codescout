@@ -236,6 +236,15 @@ jobs:
           key: ubuntu-latest-feature-check
       - run: cargo check --features dashboard --all-targets
       - run: cargo check --features local-embed-dynamic --all-targets
+      # `retrieval-e2e` is EXEMPT (tests/feature_lanes.rs) from *running* — it needs a
+      # live Qdrant + TEI/Ollama stack no CI runner has. That justifies not running
+      # tests/retrieval_e2e.rs, not skipping compilation of it: a `cargo check` here
+      # is exactly the "enough to catch bit-rot" bar this job's own header comment
+      # describes, and tests/retrieval_e2e.rs previously rotted for a full review
+      # round (4 call sites broke under a `RetrievalClient::from_env` signature
+      # change with nothing here to catch it) — the same shape as the archived
+      # server-stack bit-rot (0863519e142b71bc) this job exists to prevent.
+      - run: cargo check --features retrieval-e2e --all-targets
 
   windows-gnu:
     name: Windows-gnu cross (MinGW + wine)
