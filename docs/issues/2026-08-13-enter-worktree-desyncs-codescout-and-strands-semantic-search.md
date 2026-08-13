@@ -14,17 +14,17 @@ kind: bug
 ## Summary
 
 Claude Code can switch the session into a linked git worktree (its `EnterWorktree`
-tool). codescout does not follow: its active project and cwd stay in the main
-checkout, so every subsequent codescout tool call reads and edits the **wrong
-tree**. Activating the worktree in codescout fixes the tree but loses semantic
-search, because the retrieval index is keyed per project and the worktree has no
-index of its own. Both halves are real, and the second is not obviously a defect
-— a worktree's contents diverge from main's, so serving main's vectors for a
-worktree query would return confidently stale results.
+tool). codescout does not follow, so its tools read the **main checkout** while
+native tools operate on the worktree. Activating the worktree corrects the tree
+and semantic search goes silent — it returns an empty result set with no hint,
+indistinguishable from a query that legitimately matched nothing.
 
-Two coupled problems, and they want different fixes: the first is a missing
-signal, the second is a missing design decision.
+The divergence is **three-part**, not two: the tree, the vector index, and the
+project's memory/sub-project topology all diverge independently.
 
+A harness-side signal **already exists and already fires** — a `PostToolUse` hook
+on `EnterWorktree` instructs the agent to activate and blocks codescout's *write*
+tools until it does. Reads are unguarded by design, which is the actual hole.
 ## Symptom (Effect)
 
 User-reported, 2026-08-13 (not yet reproduced by an agent in-session):
@@ -59,127 +59,233 @@ semantic_search(query="<something the corpus certainly contains>")
 
 ## Environment
 
-- codescout `experiments` @ `c5f434df`; v0.15.0.
-- Claude Code with the `codescout-companion` plugin active — native
+- codescout `experiments` is the target branch, but **every code citation below was
+  measured on `feat/local-onnx-query-path` @ `927feaf4`**, which is what the main
+  checkout was on. See *Branch caveat* under Root cause — this is not a footnote,
+  it changes how much the line numbers are worth.
+- Claude Code with the `codescout-companion` plugin active. Native
   `Read`/`Grep`/`Glob`/`Edit`/`Write` and all native `Bash` are hard-denied on
-  source files, so codescout's tools are the *only* path to source. That raises
-  the severity of half 1: there is no fallback that happens to be correct.
-- Worktrees under `<repo>/.worktrees/<name>` (the convention `doctor` and
-  `merge_worktree` already know).
-
+  source, so codescout's tools are the *only* path to source — there is no
+  fallback that happens to be correct.
+- **Worktree location is `<repo>/.claude/worktrees/<name>`** — Claude Code's own
+  convention, named after the branch. *Corrected: this file originally said
+  `<repo>/.worktrees/<name>`, the convention `doctor` and `merge_worktree` use.*
+  Harmless for detection (which is `.git`-pointer-based and convention-agnostic),
+  wrong for anything that scans directories by path pattern.
 ## Root cause
 
-**Unknown — under investigation.** Two independent leads, one of them measured.
+Known for half 2. Half 1 is known to be a *coverage* gap rather than a missing
+signal.
 
-### Lead 1 — no signal exists (mechanism not yet read)
+### Branch caveat — read before trusting a line number
 
-`EnterWorktree` is a Claude Code harness tool. codescout is an MCP server in a
-separate process; nothing in the MCP protocol pushes a cwd change to a server,
-and codescout's active project is set only by `workspace(action="activate")` or
-by its own startup resolution. So there is likely **no signal to miss** — the
-gap is architectural, not a dropped event. This is *inferred from the protocol
-shape and not yet verified against `src/librarian/current_project.rs`*, which is
-where activation resolves.
+The investigation ran against `feat/local-onnx-query-path` @ `927feaf4`, not
+`experiments`. `git diff --stat experiments HEAD` over the relevant paths:
+`retrieval/client.rs` +550, `retrieval/config.rs` +445, `retrieval/embedder.rs`
++543, `retrieval/search.rs` +286, `semantic_search.rs` +166, `tools/config/mod.rs`
++77 — 2,592 insertions across 12 files, on a branch whose stated purpose is
+reworking the local ONNX **query path**.
 
-This is squarely an **Agent-Agnostic Design** question (memory `conventions`):
-`EnterWorktree` is Claude-Code-specific, so the fix must not be a
-Claude-Code-specific hook in the server. The companion plugin is the
-harness-specific layer and is the more likely home.
+So: the *behavioural* findings are solid, because they were observed against a
+running server. The `path:line` **mechanism** claims are provisional and must be
+re-read on `experiments` before any fix is built on them.
 
-### Lead 2 — retrieval has no worktree concept at all (measured)
+### Half 2 — `project_id` is a directory basename, and the collection is global
 
-*Measured 2026-08-13:* `grep worktree src/**/*.rs` → 737 matches in 46 files,
-concentrated in the librarian (`librarian/catalog/worktree.rs`,
-`librarian/tools/merge_worktree.rs`, `librarian/current_project.rs`,
-`librarian/tools/doctor.rs`). The **entire** retrieval subsystem carries two
-matches, both in `src/retrieval/sync.rs` (107, 385), and both say only *"a file
-named `.git` is a worktree pointer, skip it"*.
+Measured 2026-08-13. The Qdrant collection is shared across every project
+(`retrieval/config.rs` — `collection()` is `collection_prefix + kind`, and the
+prefix comes only from `CODESCOUT_QDRANT_COLLECTION_PREFIX`), so **`project_id` is
+the sole discriminator**. And `project_id` is `project.name` from
+`.codescout/project.toml`, which falls back to the root directory's basename when
+that file is absent (`src/config/project.rs`).
 
-So the librarian grew a full worktree overlay — fork-on-first-write shadow rows,
-`worktree_of` lineage, `merge_worktree` — and the code-retrieval side grew none.
-A worktree activated as a project is, to retrieval, simply a project with no
-index. Whether that manifests as an empty result, a refusal, a hint, or a silent
-fallback to main's vectors is **not yet measured**, and the difference matters:
-the last of those would be the worst outcome and the easiest to ship by accident.
+`.codescout/project.toml` is **gitignored**, so no linked worktree ever has one,
+and activation does not create one. A worktree at `.claude/worktrees/peer-delegation`
+therefore resolves `project_id = "peer-delegation"`, which matches zero points.
+Hence a bare empty result — and `check_has_index` reporting `not_indexed` is
+*correct* there, not a false negative.
 
-The user's own reading — that refusing is *correct*, because a worktree's files
-diverge from main's — is the strongest constraint on any fix. Serving main's
-vectors for a worktree query is wrong in a way that looks right.
+The silence is the defect, not the emptiness.
 
+### Half 1 — the signal exists; it covers writes but not reads
+
+Measured 2026-08-13. `codescout-companion/hooks/hooks.json:141` registers
+`PostToolUse` matcher `"EnterWorktree"` → `worktree-activate.mjs`, which emits an
+`additionalContext` instruction to call `workspace(action="activate", …)` NOW,
+drops a `.cs-worktree-pending` marker, and pairs with `worktree-write-guard.mjs`
+to hard-deny `edit_code`/`edit_file`/`edit_markdown`/`create_file` until the
+marker clears.
+
+So writes are protected. `symbols`/`grep`/`read_file`/`references`/`semantic_search`
+are not, and silently read main until the agent complies with an *advisory*
+instruction. That — not "no signal exists" — is the defect.
+
+### Half 3 — memory set and sub-project topology also diverge (new, unreported)
+
+Measured 2026-08-13. The worktree activation listed **11** memory topics against
+main's **21**, and **9** sub-projects (every `tests/fixtures/*`) against main's
+**2**. Cause: `.codescout/memories/` is git-tracked, so a worktree serves *that
+commit's* memories; `.codescout/workspace.toml` is gitignored, so sub-project
+discovery falls back to auto-detect. CLAUDE.md already warns that a mis-rooted
+`workspace.toml` silently redirects per-project memory writes — a worktree hits
+the same class by **absence**.
 ## Evidence
 
-### The librarian/retrieval asymmetry
+All measured 2026-08-13 against a running server on `feat/local-onnx-query-path`
+@ `927feaf4`, using the pre-existing worktree `.claude/worktrees/peer-delegation`.
+No throwaway worktree was created; `.git/worktrees` was left unchanged.
 
-```
-$ grep worktree src/**/*.rs   (mode=files, 2026-08-13)
-148  src/librarian/tools/doctor.rs
- 84  src/librarian/tools/merge_worktree.rs
- 49  src/librarian/tools/worktree.rs
- 45  src/librarian/catalog/worktree.rs
- 39  src/librarian/current_project.rs
- ...
-  2  src/retrieval/sync.rs        ← the whole retrieval subsystem
-```
+### Silent empty, not a refusal
 
-```
-$ grep worktree src/retrieval/*.rs   (mode=content)
-sync.rs:107: /// Directory-only by design: a *file* named `.git` is a worktree pointer and a
-sync.rs:385: // A FILE named `.git` is a worktree pointer, not a state tree. Skipping it by
+Control in the main checkout: `semantic_search(query="OutputGuard cap_items", limit=3)`
+→ 3 hits from `src/tools/output.rs`; `workspace(status)` → `up_to_date, files 1416,
+chunks 34635`.
+
+After `workspace(action="activate", path=<worktree>, read_only=true)`, the identical
+call returned, verbatim and complete:
+
+```json
+{"results": [], "total": 0, "truncated": false}
 ```
 
-### Prior worktree bugs, all archived, all catalog-side
+No `RecoverableError`, no hint, no staleness note. Same result via the per-call
+`workspace=` pin, so it is not an activation artifact.
 
-`artifact(find, kind="bug", filter=worktree, scope="umbrella", include_archived=true)`
-returns 4, every one `fixed` and every one about the **librarian catalog**:
-`2026-06-13-linked-worktree-indexed-as-project-pollutes-catalog.md`,
-`2026-07-17-worktree-cites-refusal-materializes-shadow-fork.md`,
-`2026-05-28-path-annotation-spam.md`,
-`2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`.
-None covers activation desync or retrieval. This is not a rediscovery.
+### The stale-vectors outcome is one string away
 
-Worth noting that `2026-05-28-path-annotation-spam.md` closed with "activation +
-worktree state invisible" in its title — the visibility half of half 1 has been
-touched before, which is a lead for whether a surface already exists to extend.
+Pinned to the same worktree but with `project_id="codescout"` forced, the call
+returned **main's three chunks with main's file paths**. The only thing separating
+a worktree from main's vectors is that basename. Not today's default under Claude
+Code (worktrees are branch-named), but a worktree named `codescout` — or two
+sibling repos sharing a basename — lands there silently. This is a keying
+weakness, not a worktree-specific one.
 
+### The good error message exists and cannot fire
+
+`classify_search_error` has a message for precisely this case — *"Qdrant collection
+is missing for project `X`"* — but the collection is **shared and present**, so the
+branch is unreachable on this path. The explanatory machinery was built for a
+per-project-collection world.
+
+### Two shipped surfaces contradict each other
+
+`worktree-activate.mjs` says *"Do NOT run index in worktrees — the shared index is
+read-only here."* codescout's own activation response says *"Run
+index(action='build') to enable semantic_search."* Both fired in the same session.
+Whichever fix wins must resolve this.
+
+Relatedly, the hook's *"shared index"* intent is implemented by symlinking
+`.codescout/embeddings` — the **legacy sqlite store**, which both activations this
+session flagged as `legacy_semantic_index` needing `codescout migrate-memories`.
+The live stack is Qdrant, keyed by the `project.toml` that is precisely what does
+*not* get linked. **The sharing mechanism predates Qdrant and is now a no-op for
+semantic search.**
+
+### The server cannot compare its root to the caller's cwd
+
+`grep("CLAUDE_PROJECT_DIR|current_dir\\(\\)", src)` → 18 hits, **zero** for
+`CLAUDE_PROJECT_DIR`. The server's cwd is frozen at spawn. Per memory
+`claude-code-mcp-env`, MCP `roots` — the protocol feature that would push a
+workspace change — is **not supported client-side** (issue #57243, planned only).
+
+### A worktree-aware banner already exists, and is silent in the desync case
+
+`src/prompts/mod.rs` has `detect_worktree_info(root)` (filesystem-only, parses the
+`.git` pointer, three passing tests), `ProjectStatus.worktree`, and a rendered
+`- **Worktree:** branch \`X\` of \`Y\`` line refreshed on every activation — residue
+of `docs/issues/archive/2026-05-28-path-annotation-spam.md`, whose title ends
+*"activation + worktree state invisible"*. The lead paid off: detection is built.
+The gap is orientation — the banner fires when the *active project* is a worktree,
+and in half 1 the active project is **main**. It is silent exactly when needed.
+
+It is also convention-agnostic: `is_linked_worktree` only requires a `worktrees`
+component in the `gitdir:` pointer, so it already handles `.claude/worktrees/<name>`.
 ## Hypotheses tried
 
-1. **Hypothesis:** this is already filed and I am about to re-file it.
-   **Test:** umbrella-scoped bug query including archived, on `worktree`.
-   **Verdict:** rejected — 4 hits, all fixed, all catalog-side.
+1. **Hypothesis:** already filed; about to re-file.
+   **Test:** umbrella bug query incl. archived, on `worktree`; then a 12-id ledger
+   sweep during investigation.
+   **Verdict:** rejected — all `fixed`, all catalog-side. Nothing re-filed.
 
-2. **Hypothesis:** retrieval has partial worktree handling that merely has a gap.
-   **Test:** `grep worktree src/retrieval/*.rs`.
-   **Verdict:** rejected — two matches, both about skipping the `.git` pointer
-   file. There is no partial handling to extend; there is nothing.
+2. **Hypothesis:** retrieval has partial worktree handling with a gap.
+   **Verdict:** rejected — two matches, both about skipping the `.git` pointer file.
 
-3. **Hypothesis:** activating a worktree silently serves the main checkout's
-   vectors (worst case — confidently stale results).
-   **Verdict:** deferred — needs the call actually run. This is the single most
-   important thing to measure, because it decides whether the current behaviour
-   is merely unhelpful or actively wrong.
+3. **Hypothesis:** activating a worktree silently serves main's vectors (worst case).
+   **Test:** run it.
+   **Verdict:** **rejected as the default, confirmed as reachable.** Default is a
+   bare empty result. Forcing a colliding `project_id` does serve main's vectors
+   with main's paths. The worst case is one string away, so it is a live hazard
+   rather than a non-issue.
 
+4. **Hypothesis (mine, in this file's first draft):** there is likely no signal to
+   miss — the gap is architectural.
+   **Verdict:** **half falsified.** True that MCP pushes nothing to the server.
+   False that no signal exists: a `PostToolUse` hook fires today and instructs the
+   agent to activate. I inferred the absence of a mechanism from protocol shape
+   without reading the plugin that already implements one.
+
+5. **Hypothesis:** `index.status` from activation is a usable trigger for a fix.
+   **Verdict:** rejected. Both home activations reported `not_indexed` while
+   `workspace(status)` reported `up_to_date, 34635 chunks` and search worked.
+   Measured, not diagnosed — and `tools/config/mod.rs` is +77 on this branch, so
+   branch state is a likelier cause than the archived probe-cache bug
+   (`2026-07-12-activate-index-status-stale-probe-cache-false-negative.md`,
+   marked `fixed`). Probe `project_has_chunks` at query time instead of trusting
+   the field. **Re-measure on `experiments` before calling that bug a zombie.**
 ## Fix
 
-**Not yet decided — needs Lead 2 measured first.** The design space, recorded so
-the exploration has something to falsify rather than invent:
+Ranked, with the first draft's candidates marked where the findings killed them.
 
-*Half 1 — the desync.* Candidates: (a) the companion plugin detects the
-worktree switch and issues `workspace(activate)` itself, keeping the
-harness-specific knowledge in the harness-specific layer; (b) codescout notices
-that its resolved project root is not the caller's cwd and says so once, which is
-agent-agnostic and degrades to a warning rather than a silent wrong answer;
-(c) both. (b) is attractive because it fails loudly in *any* harness, including
-ones that have no worktree tool at all.
+### Half 1 — extend the existing hook; do not design a new mechanism
 
-*Half 2 — semantic search in a worktree.* Candidates: (a) refuse with a
-`RecoverableError` naming the main checkout and the cost of indexing the
-worktree — honest, and the current behaviour if it already refuses; (b) serve
-main's index with an explicit staleness annotation, bounded to files the worktree
-has not modified (`git diff --name-only <base>` is the exact discriminator);
-(c) index the worktree as its own project, correct but expensive per worktree.
-(b) is the interesting one and mirrors the shape the librarian already chose —
-overlay reads from main until the worktree writes.
+Keep it in the plugin: `EnterWorktree` is Claude-Code-specific and the server must
+not learn its name (Agent-Agnostic Design). Highest-value change is to **cover
+reads**, since writes are already hard-denied. `worktree-write-guard.mjs` already
+has the exact detection (`--git-common-dir != --git-dir`, plus the marker) — either
+widen its matcher to codescout's read tools, or make the pending marker produce a
+loud advisory on reads. No server change needed.
 
+- ~~(a) the companion plugin detects the switch and issues `workspace(activate)`~~ —
+  **already shipped**, including that exact instruction. Not a decision.
+- ~~(b) codescout notices its resolved root differs from the caller's cwd~~ —
+  **falsified as unimplementable.** There is no caller cwd available: spawn-frozen
+  `current_dir()`, `CLAUDE_PROJECT_DIR` never read (and also spawn-time), MCP
+  `roots` unsupported. The property that made it attractive — "fails loudly in any
+  harness" — is not obtainable this way. The achievable agent-agnostic version is
+  weaker and differently shaped: warn when the *active project* is a worktree,
+  which the `src/prompts/mod.rs` banner already does, and which says nothing about
+  whether the harness agrees.
+
+### Half 2 — decide the contract, then make one surface true
+
+The user's correctness argument is binding and the measurements support it: main's
+vectors *are* served under a colliding `project_id`, silently, with main's paths.
+So **do not ship "symlink `project.toml`"** — that is the confidently-stale outcome,
+not a fix.
+
+1. **Cheapest honest fix — make the empty result speak.** When
+   `project_has_chunks(project_id)` is false, `semantic_search` should return a hint
+   naming the resolved `project_id`, the fact that this is a worktree, and both
+   exits (index it, or use `symbols`/`grep`, which are correct here). Agent-agnostic,
+   cheap, and it addresses the actual complaint — the user's problem is *silence*,
+   not absence.
+2. **Resolve the contradiction:** either the hook stops saying "do NOT run index in
+   worktrees", or activation stops saying "run index(action='build')". Today both ship.
+3. ~~(a) refuse with a `RecoverableError` — "the current behaviour if it already
+   refuses"~~ — **falsified.** It does not refuse; it returns silent empty.
+4. **(b) serve main's index with a staleness bound** — survives, and is closer to
+   shipped than the first draft assumed. But the naive version *is* the stale-vectors
+   outcome, so `git diff --name-only <base>` is not a refinement of this design, it
+   **is** the design.
+5. ~~(c) index the worktree as its own project~~ — still available, still expensive
+   per worktree, and now clearly the wrong default given (1) is nearly free.
+
+### Half 3 — memory/topology divergence
+
+Undecided, and deliberately not bundled. Needs its own think: git-tracked memories
+serving a stale commit is arguably correct behaviour for a worktree, while
+`workspace.toml` falling back to auto-detect is arguably not. Splitting to its own
+bug file is likely right once halves 1–2 land.
 ## Tests added
 
 None yet — not fixed. When it is, the guard has to run *in* a worktree, which
@@ -190,32 +296,40 @@ guard. A worktree fixture must be created by the test, not assumed present.
 
 ## Workarounds
 
-Two, both manual:
+**Confirmed measured 2026-08-13**, which upgrades this from advice to a finding:
+`grep(pattern="fn cap_items", path="src/tools/output.rs")` pinned to the worktree
+returned 5 correct matches from the worktree's own files.
 
-- Stay in the main checkout for codescout work; do the worktree's editing there
-  and let git move it. Loses the isolation `EnterWorktree` was for.
-- Or activate the worktree in codescout and accept no semantic search, using
-  `symbols` / `grep` / `references` instead — all of which are computed live from
-  the filesystem and therefore correct in a worktree. Only the vector index is
-  stale-by-construction.
+So — **losing semantic search is not losing code intelligence.** Filesystem-computed
+tools (`symbols`, `grep`, `references`, `read_file`) all follow the worktree
+correctly. Only the vector index is stale-by-construction, because only it is
+precomputed and keyed per project.
 
-The second is the better one, and worth knowing: **losing semantic search is not
-losing code intelligence.** Symbol and reference navigation still work.
-
+Activate the worktree, accept no semantic search, and navigate by symbol and
+reference. The alternative — staying in main and letting git move the work — loses
+the isolation `EnterWorktree` was for.
 ## Resume
 
-Measure Lead 2 before touching any code, because it decides the whole shape:
+Half 2's mechanism is measured; what is *not* settled is whether it holds on the
+branch we ship.
 
-1. Create a throwaway worktree, `workspace(action="activate")` it, and run
-   `semantic_search(query=...)`. Record the **verbatim** response. Refusal,
-   empty, hint, or main's results? If it silently returns main's results, that is
-   a second, worse bug and gets its own file.
-2. Read `src/librarian/current_project.rs` for how activation resolves a worktree
-   root, and whether a project_id is derived per-worktree or shared with main.
-3. Read `src/tools/config/mod.rs::check_has_index` and the `project_id` used by
-   `semantic_search` to confirm the keying.
-4. Only then decide between the Fix candidates above.
-
+1. **Re-read the keying on `experiments`.** Every `path:line` above came from
+   `feat/local-onnx-query-path`, which carries 2,592 insertions across the retrieval
+   query path. Confirm on `experiments`: `project_id` = `project.name` →
+   basename fallback; collection global; `.codescout/project.toml` gitignored.
+   If the feature branch changed any of that, this file needs re-deriving, not
+   patching.
+2. **Re-measure hypothesis 5 on `experiments`** — the `not_indexed` vs `up_to_date`
+   discrepancy — before treating
+   `2026-07-12-activate-index-status-stale-probe-cache-false-negative.md` as a zombie.
+3. Then implement Fix half-2 (1), the speaking empty result. It is the smallest
+   change that resolves the reported symptom and it is agent-agnostic.
+4. Separately, widen the plugin's read-tool coverage for half 1.
+5. Update `docs/architecture/companion-plugin.md`: every hook it names as `.sh` is
+   now `.mjs` invoked via `node` (only `il3-deny-hook.sh`, `detect-tools.sh`, and
+   `*.test.sh` remain shell), and its "symlinks `.codescout/` into the worktree"
+   claim is incomplete — the real-dir fallback links only `embeddings`, which is
+   what actually happened here.
 ## References
 
 - `src/retrieval/sync.rs:107,385` — retrieval's only worktree mentions.
