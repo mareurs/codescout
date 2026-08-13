@@ -38,6 +38,13 @@ pub fn diff_chunks(server: &[ChunkRef], local: &[ChunkRef]) -> DriftAction {
 /// One chunk as it exists on disk right now.
 #[derive(Debug, Clone)]
 pub struct LocalChunk {
+    /// Forward-slashed, project-relative -- identical in form to
+    /// `ChunkRef.file_path`. `dirty_paths` compares this by exact string
+    /// equality against `ChunkRef.file_path`; a platform-separator or
+    /// absolute-path value here would make every file compare unequal, so the
+    /// whole worktree is classified dirty AND the resulting `exclude_paths`
+    /// match nothing in main's payloads -- main keeps serving stale chunks
+    /// alongside the delta's fresh ones instead of failing cleanly.
     pub file_path: String,
     pub content_hash: String,
 }
@@ -54,10 +61,14 @@ pub struct DirtySet {
 
 /// Derive the worktree's dirty set by content, not by git.
 ///
-/// A path is dirty when any of its chunks differs from the main index, when it is
-/// absent from main entirely, or when main holds it and disk does not. A file is
-/// served by exactly one source -- main or the delta -- never both and never
-/// neither, so a partially-changed file is embedded whole.
+/// A path is dirty when any of its `(file_path, content_hash)` pairs is on one
+/// side and not the other -- present locally but not in main (added/modified),
+/// or present in main but not locally (deleted). The check is symmetric on
+/// purpose: a path-only check on the main side would miss a file that keeps one
+/// surviving chunk while losing a sibling, since the surviving chunk's path is
+/// still present on disk even though that exact chunk is gone. A file is served
+/// by exactly one source -- main or the delta -- never both and never neither,
+/// so a partially-changed file is embedded whole.
 ///
 /// `main_refs` must come from `chunk_refs(collection, main_project_id)`; comparison
 /// is on `(file_path, content_hash)` so it needs no base commit and inherits no
@@ -73,7 +84,10 @@ pub fn dirty_paths(main_refs: &[ChunkRef], local: &[LocalChunk]) -> DirtySet {
         .iter()
         .map(|r| (r.file_path.as_str(), r.content_hash.as_str()))
         .collect();
-    let local_paths: HashSet<&str> = local.iter().map(|c| c.file_path.as_str()).collect();
+    let local_pairs: HashSet<(&str, &str)> = local
+        .iter()
+        .map(|c| (c.file_path.as_str(), c.content_hash.as_str()))
+        .collect();
 
     let mut paths: BTreeSet<String> = BTreeSet::new();
 
@@ -83,10 +97,16 @@ pub fn dirty_paths(main_refs: &[ChunkRef], local: &[LocalChunk]) -> DirtySet {
             paths.insert(c.file_path.clone());
         }
     }
-    // A path main holds but disk does not: exclude it, embed nothing. Skip refs
-    // with an empty file_path -- unknown, not deleted (see doc comment above).
+    // Any main ref whose exact bytes are not on disk dirties its file too -- this
+    // is the symmetric check. A path-only check here (main path present on disk?)
+    // is not enough: it misses a surviving chunk's sibling being deleted from the
+    // same file, since the path alone can't tell that hB vanished while hA stayed.
+    // Skip refs with an empty file_path -- unknown, not deleted (see doc comment
+    // above).
     for r in main_refs {
-        if !r.file_path.is_empty() && !local_paths.contains(r.file_path.as_str()) {
+        if !r.file_path.is_empty()
+            && !local_pairs.contains(&(r.file_path.as_str(), r.content_hash.as_str()))
+        {
             paths.insert(r.file_path.clone());
         }
     }
@@ -175,6 +195,29 @@ mod dirty_tests {
             d.to_embed,
             vec![0, 1],
             "a partially-changed file must be embedded whole"
+        );
+    }
+
+    #[test]
+    fn deleted_sibling_chunk_dirties_the_file_even_when_a_chunk_survives() {
+        // Mismatched granularity: main holds two chunks of the same file; the
+        // worktree deletes the trailing symbol, leaving only the first chunk's
+        // exact bytes on disk. A path-only check on the main side sees
+        // "src/a.rs" still present locally and stops there -- it never notices
+        // that main's second chunk (h2) has no counterpart on disk. That is the
+        // "confidently stale" outcome this design exists to prevent: main would
+        // keep serving the deleted symbol's chunk with full confidence.
+        let main = [r("src/a.rs", "h1"), r("src/a.rs", "h2")];
+        let local = [l("src/a.rs", "h1")];
+        let d = dirty_paths(&main, &local);
+        assert!(
+            d.paths.contains("src/a.rs"),
+            "a file missing one of main's chunks must be dirty even though another chunk survives"
+        );
+        assert_eq!(
+            d.to_embed,
+            vec![0],
+            "the surviving local chunk must be re-embedded into the delta"
         );
     }
 
