@@ -34,9 +34,64 @@ impl RetrievalClient {
     /// A local backend is selected when no url is configured and the model
     /// names one. Keep this the single source of truth — `dense_only` and the
     /// sparse guard both read it.
+    ///
+    /// Note the `is_none()`: this answers "is the local backend SELECTED", so it
+    /// is false precisely when a url also exists. `guard_local_model_with_url`
+    /// therefore cannot reuse it — it must see the model's intent through the url
+    /// that overrides it.
     pub(crate) fn backend_is_local(config: &RetrievalConfig) -> bool {
         config.embedder_url.is_none()
             && (config.model.starts_with("local:") || config.model.starts_with("local-dir:"))
+    }
+
+    /// A url and a `local-dir:` model are contradictory: the url selects a network
+    /// client, the prefix forces in-process ONNX against on-disk weights.
+    /// `codescout-embed` already treats the combination as fatal
+    /// (`create_embedder_with_config`, crates/codescout-embed/src/lib.rs), but
+    /// `build_embedder` short-circuits on the url before ever reaching that
+    /// resolver — so without this guard the model is discarded in silence and
+    /// embedding goes over the network.
+    ///
+    /// That silence is the whole defect: `local-dir:` exists so a restricted host
+    /// embeds WITHOUT touching the network, and a stale url (this repo's own
+    /// `~/.config/codescout/.env` supplies one) turned that guarantee into its
+    /// opposite with exit 0 and no warning. Fail closed, not open.
+    ///
+    /// **`local:` is deliberately NOT covered.** `default_embed_model()` is
+    /// `"local:AllMiniLML6V2Q"` (src/config/project.rs), so "url set, model unset"
+    /// — an ordinary remote deployment — resolves to a `local:` model that the
+    /// operator never chose. Rejecting that would break every such deployment, and
+    /// the config carries no provenance that would distinguish it from a deliberate
+    /// `local:`. `local-dir:` has no default, so it is unambiguously intent. Covering
+    /// `local:` too would require threading "was this the default?" through
+    /// `merge_embed_config` into `RetrievalConfig`; until then a url still silently
+    /// wins over an explicitly-chosen `local:` model.
+    /// (Learned the hard way: the wider guard failed
+    /// `agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`, which
+    /// builds from a root-less config and so gets exactly that default.)
+    ///
+    /// `RecoverableError` for the same reason as `guard_sparse`: an operator-fixable
+    /// config conflict, not a bug — isError: false, so sibling parallel calls survive.
+    pub(crate) fn guard_local_model_with_url(config: &RetrievalConfig) -> Result<()> {
+        if let Some(url) = config.embedder_url.as_deref() {
+            if config.model.starts_with("local-dir:") {
+                return Err(crate::tools::RecoverableError::with_hint(
+                    format!(
+                        "embedder url '{url}' is configured alongside the offline model \
+                         '{}', but a url selects a network client while local-dir: \
+                         forces in-process ONNX against on-disk weights.",
+                        config.model
+                    ),
+                    "Drop the url to use the local weights (CODESCOUT_EMBEDDER_URL= , or \
+                     remove [embeddings].url), or drop the local-dir: prefix to use the \
+                     url. Note that a url may arrive from the startup dotenv at \
+                     ~/.config/codescout/.env even when it is absent from your shell — \
+                     set CODESCOUT_ENV_FILE to a nonexistent path to rule that out.",
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     /// A local backend emits no sparse vector. Silently dropping to dense would
@@ -117,12 +172,18 @@ impl RetrievalClient {
     }
 
     /// Select and build the query-side embedder from `config`: a configured
-    /// url always selects the HTTP backend regardless of model —
-    /// `create_embedder_with_config` would resolve `RemoteEmbedder` for a url
-    /// too, but routing through `EmbedderHttp` here keeps the connect-error
-    /// marker `src/tools/semantic/semantic_search.rs` matches on. No url
-    /// means the model names the backend: the codescout-embed resolver picks
-    /// `local-dir:` / `local:` / `ollama:` / `openai:`.
+    /// url selects the HTTP backend for any model that does not name a local
+    /// backend — `create_embedder_with_config` would resolve `RemoteEmbedder`
+    /// for a url too, but routing through `EmbedderHttp` here keeps the
+    /// connect-error marker `src/tools/semantic/semantic_search.rs` matches on.
+    /// No url means the model names the backend: the codescout-embed resolver
+    /// picks `local-dir:` / `local:` / `ollama:` / `openai:`.
+    ///
+    /// A url combined with a `local:` / `local-dir:` model is neither of those
+    /// cases but a contradiction, and is rejected by `guard_local_model_with_url`
+    /// before the url branch is reached. It used to be silently resolved in the
+    /// url's favour, which defeated the offline guarantee the prefix exists to
+    /// provide.
     ///
     /// Calls `guard_sparse` itself (rather than leaving that to each caller)
     /// so every caller of this function — not just `from_env` — gets the
@@ -132,6 +193,10 @@ impl RetrievalClient {
         config: &RetrievalConfig,
         lite: bool,
     ) -> Result<Arc<dyn CodeEmbedder>> {
+        // Must precede the url branch below: that branch takes the HTTP backend
+        // regardless of model, which is exactly what silently discards a local
+        // model. Checking after it would be unreachable.
+        Self::guard_local_model_with_url(config)?;
         Self::guard_sparse(config, lite)?;
         let dense_only = Self::dense_only(config, lite);
         if let Some(url) = config.embedder_url.as_deref() {
@@ -586,6 +651,94 @@ mod selection_tests {
         assert!(
             msg.contains("sparse"),
             "must name sparse as the conflict, got: {msg}"
+        );
+    }
+
+    /// Binds `guard_local_model_with_url` to its call site inside `build_embedder`.
+    ///
+    /// This is the regression test for the defect itself, so it has to discriminate
+    /// against the exact behaviour that shipped: deleting the
+    /// `Self::guard_local_model_with_url(config)?;` line does NOT make this an
+    /// `is_err()` failure — execution falls through to the url branch, which builds
+    /// an `EmbedderHttp` successfully and returns `Ok`. So the mutation kills this
+    /// test at the `Ok(_) => panic!` arm, which is the whole point: asserting
+    /// `is_err()` on a config that "looks wrong" would have passed against the buggy
+    /// code too, because nothing errored — it silently embedded over the network.
+    #[tokio::test]
+    async fn build_embedder_rejects_a_url_combined_with_a_local_dir_model() {
+        let c = cfg_with(Some("http://127.0.0.1:8081/v1"), "local-dir:/weights");
+        let err = match RetrievalClient::build_embedder(&c, /* lite */ true).await {
+            Ok(_) => panic!(
+                "a url alongside a local-dir: model must be rejected, not silently \
+                 resolved in the url's favour — that is the offline guarantee failing open"
+            ),
+            Err(e) => e,
+        };
+        // Class, not just message: a config conflict must stay retryable
+        // (isError: false) so sibling parallel tool calls are not aborted.
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false), not anyhow::bail!; got: {err}"
+        );
+        let msg = err.to_string();
+        // Both operands must appear, or the operator cannot tell WHICH url is
+        // fighting WHICH model — the url in particular may have come from the
+        // startup dotenv rather than anything they typed.
+        assert!(
+            msg.contains("local-dir:/weights"),
+            "must name the offending model, got: {msg}"
+        );
+        assert!(
+            msg.contains("http://127.0.0.1:8081/v1"),
+            "must name the url it conflicts with, got: {msg}"
+        );
+    }
+
+    /// The complement of the guard, and a regression test for a real break this
+    /// fix caused before it was narrowed: `default_embed_model()` is
+    /// `"local:AllMiniLML6V2Q"`, so "url configured, model left unset" — an
+    /// ordinary remote deployment — arrives here as a `local:` model the operator
+    /// never chose. An earlier draft of `guard_local_model_with_url` covered
+    /// `local:` too and took down
+    /// `agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`,
+    /// which builds from a root-less config and so gets exactly that default.
+    ///
+    /// Widening the guard to `local:` must therefore fail this test until the
+    /// config can distinguish a defaulted model from a chosen one.
+    #[tokio::test]
+    async fn build_embedder_accepts_a_url_with_the_defaulted_local_model() {
+        assert_eq!(
+            crate::config::project::default_embed_model(),
+            "local:AllMiniLML6V2Q",
+            "this test's premise is that the default model carries a local: prefix; \
+             if the default changes, re-derive whether the guard can widen"
+        );
+        let c = cfg_with(
+            Some("http://127.0.0.1:8081/v1"),
+            &crate::config::project::default_embed_model(),
+        );
+        assert!(
+            RetrievalClient::build_embedder(&c, /* lite */ true)
+                .await
+                .is_ok(),
+            "a url with the DEFAULT local: model is the ordinary remote deployment — \
+             rejecting it would break every setup that configures a url and no model"
+        );
+    }
+
+    /// The guard must not over-fire: a url with an ordinary remote model is the
+    /// normal production configuration and has to keep working. Without this,
+    /// widening the predicate to "any url + any model" would pass the two tests
+    /// above while breaking every remote deployment.
+    #[tokio::test]
+    async fn build_embedder_still_accepts_a_url_with_an_ordinary_model() {
+        let c = cfg_with(Some("http://127.0.0.1:8081/v1"), "CodeRankEmbed");
+        assert!(
+            RetrievalClient::build_embedder(&c, /* lite */ true)
+                .await
+                .is_ok(),
+            "a url with a non-local model is the ordinary remote setup and must build"
         );
     }
 

@@ -16,4 +16,11 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # gives the full hybrid retrieval path. Plain `cargo build --release` stays lean
 # (sqlite-vec lite default) — which is what repo cloners get. Harmless on master:
 # it only adds a command; nothing invokes it unless you type `cargo rb`.
-rb = "build --release --features server-stack"
+#
+# `local-embed` rides along because the alias IS the live-MCP build: without it
+# `~/.cargo/bin/codescout` (a symlink to target/release/codescout) cannot resolve
+# a `local:` / `local-dir:` model at all, and a rebuild silently removes the
+# capability from a running setup. Costs ~21MB of binary (39M -> 60M) and the
+# ort/fastembed compile; changes nothing at runtime unless a local model is
+# actually configured.
+rb = "build --release --features server-stack,local-embed"
