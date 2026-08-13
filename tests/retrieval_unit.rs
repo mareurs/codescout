@@ -160,6 +160,8 @@ fn cr(id: &str, hash: &str) -> ChunkRef {
     ChunkRef {
         chunk_id: id.into(),
         content_hash: hash.into(),
+        // diff_chunks only reads chunk_id; file_path is irrelevant to these tests.
+        file_path: String::new(),
     }
 }
 

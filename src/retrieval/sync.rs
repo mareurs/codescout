@@ -465,6 +465,7 @@ mod tests {
                 u.push(ChunkRef {
                     chunk_id: p.chunk_id.clone(),
                     content_hash: p.content_hash.clone(),
+                    file_path: p.file_path.clone(),
                 });
             }
             Ok(())

@@ -29,8 +29,8 @@ pub trait CodeVectorStore: Send + Sync {
     /// (+ a sparse vector on hybrid backends). Idempotent.
     async fn ensure_collection(&self, collection: &str, dim: u64) -> Result<()>;
 
-    /// `(chunk_id, content_hash)` for every chunk already stored for `project_id`.
-    /// Drives incremental drift detection in `sync_project`.
+    /// `(chunk_id, content_hash, file_path)` for every chunk already stored for
+    /// `project_id`. Drives incremental drift detection in `sync_project`.
     async fn chunk_refs(&self, collection: &str, project_id: &str) -> Result<Vec<ChunkRef>>;
 
     /// Upsert code chunks with their dense (+ optional sparse) embeddings. The
@@ -314,6 +314,7 @@ mod tests {
                 .map(|(p, _)| ChunkRef {
                     chunk_id: p.chunk_id.clone(),
                     content_hash: p.content_hash.clone(),
+                    file_path: p.file_path.clone(),
                 })
                 .collect())
         }
@@ -521,6 +522,31 @@ mod tests {
         assert_eq!(
             store.project_index_stats("c", "proj").await.unwrap(),
             (1, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn contract_chunk_refs_carry_file_path() {
+        // The dirty-set derivation needs main's PATH list to notice files deleted in
+        // a worktree. chunk_id cannot be parsed for it (project_id may contain colons
+        // -- see sqlite_code_store.rs:538), so ChunkRef must carry file_path directly.
+        let store = InMemoryCodeStore::default();
+        store
+            .upsert_chunks(
+                "c",
+                &[(
+                    payload("a", "proj", "src/a.rs", "rust", "h1"),
+                    embed(vec![1.0, 0.0]),
+                )],
+            )
+            .await
+            .unwrap();
+
+        let refs = store.chunk_refs("c", "proj").await.unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(
+            refs[0].file_path, "src/a.rs",
+            "chunk_refs must expose file_path, not require parsing chunk_id"
         );
     }
 

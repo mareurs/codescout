@@ -148,13 +148,15 @@ impl CodeVectorStore for SqliteVecCodeStore {
     async fn chunk_refs(&self, _collection: &str, project_id: &str) -> Result<Vec<ChunkRef>> {
         let conn = self.conn_for(project_id)?;
         let conn = conn.lock();
-        let mut stmt =
-            conn.prepare("SELECT chunk_id, content_hash FROM code_chunk WHERE project_id = ?1")?;
+        let mut stmt = conn.prepare(
+            "SELECT chunk_id, content_hash, file_path FROM code_chunk WHERE project_id = ?1",
+        )?;
         let rows = stmt
             .query_map(rusqlite::params![project_id], |row| {
                 Ok(ChunkRef {
                     chunk_id: row.get(0)?,
                     content_hash: row.get(1)?,
+                    file_path: row.get(2)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<ChunkRef>>>()?;
@@ -504,8 +506,11 @@ mod tests {
             (2, 2)
         );
 
-        let refs = store.chunk_refs("c", "proj").await.unwrap();
+        let mut refs = store.chunk_refs("c", "proj").await.unwrap();
+        refs.sort_by(|a, b| a.chunk_id.cmp(&b.chunk_id));
         assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].file_path, "a.rs");
+        assert_eq!(refs[1].file_path, "m.md");
 
         // markdown excluded → only the rust chunk
         let hits = store

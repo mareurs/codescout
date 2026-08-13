@@ -4,6 +4,10 @@ use std::collections::HashSet;
 pub struct ChunkRef {
     pub chunk_id: String,
     pub content_hash: String,
+    /// Forward-slashed project-relative path, as stored in the payload's
+    /// `file_path`. Present so the dirty-set derivation can find paths that exist
+    /// in an index but not on disk without parsing `chunk_id`.
+    pub file_path: String,
 }
 
 #[derive(Debug, Default)]

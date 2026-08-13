@@ -121,11 +121,15 @@ impl QdrantWrap {
         loop {
             let mut builder = ScrollPointsBuilder::new(collection)
                 .filter(filter.clone())
-                // Only these two keys are read below. `with_payload(true)` pulled
+                // Only these three keys are read below. `with_payload(true)` pulled
                 // every chunk's `content` over the wire — on every sync, since
                 // `stream_index` diffs against this — to compare two hashes.
                 .with_payload(qdrant_client::qdrant::PayloadIncludeSelector {
-                    fields: vec!["chunk_id".to_string(), "content_hash".to_string()],
+                    fields: vec![
+                        "chunk_id".to_string(),
+                        "content_hash".to_string(),
+                        "file_path".to_string(),
+                    ],
                 })
                 .with_vectors(false)
                 .limit(1000u32);
@@ -151,10 +155,16 @@ impl QdrantWrap {
                     .as_str()
                     .map(|s| s.as_str().to_owned())
                     .unwrap_or_default();
+                let file_path = pt
+                    .get("file_path")
+                    .as_str()
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default();
                 if !chunk_id.is_empty() {
                     refs.push(crate::retrieval::drift::ChunkRef {
                         chunk_id,
                         content_hash,
+                        file_path,
                     });
                 }
             }
