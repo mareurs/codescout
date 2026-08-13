@@ -254,14 +254,19 @@ pub(crate) fn main_reindexed_after_worktree(
 /// cheaply, since this string is already being constructed -- the residual gap
 /// Task 6 left open: `sync_worktree` writes its sidecar fail-soft *after*
 /// upserting delta chunks, so a disk error mid-write can leave a non-empty but
-/// stale `dirty_paths`. That combination isn't detectable without scrolling the
-/// delta's full chunk list on every query (too expensive for a read path), so it
-/// is named here rather than checked.
+/// INCOMPLETE `dirty_paths`. The symptom is not mere staleness: if the sidecar
+/// is missing a path, main is never told to exclude it, so that file's chunks
+/// come back from BOTH main and the delta -- a double-serve, the exact hazard
+/// class this whole design exists to prevent. Not caught by the `Suspect`
+/// check (the list isn't empty) and not fixed here: the complete check needs
+/// the delta's full chunk list, too expensive to scroll on a read path -- so
+/// it is named here rather than checked.
 pub(crate) fn worktree_main_ahead_note() -> &'static str {
     "Note: the main checkout was re-indexed after this worktree's delta was built, so results \
      for unchanged files may reflect main's newer content. Re-run index(action=\"build\") here \
-     to refresh. (The delta's own dirty-path record can also lag behind a partially-failed \
-     sync — a non-empty dirty set is evidence of freshness, not a guarantee of it.)"
+     to refresh. (The worktree's own dirty-path record can also lag behind a partially-failed \
+     sync: a path missing from it is never excluded from main, so that file's chunks can come \
+     back from BOTH main and the delta — a double-serve, not just staleness.)"
 }
 
 /// `(main_exclude_paths, delta_exclude_paths)` for the two-source worktree query.
@@ -273,6 +278,114 @@ pub(crate) fn worktree_main_ahead_note() -> &'static str {
 /// serving what it should have excluded.
 pub(crate) fn worktree_query_exclusions(dirty_paths: &[String]) -> (Vec<String>, Vec<String>) {
     (dirty_paths.to_vec(), Vec::new())
+}
+
+/// State-condition note for `main_project_id` having no indexed chunks at
+/// all (pinned requirement 6's "main never indexed" arm). Surfaced in the
+/// response payload, never as a `RecoverableError` -- the query still ran
+/// and the delta's results (if any) are real; this only explains why main
+/// contributed nothing.
+pub(crate) fn worktree_main_never_indexed_note(main_id: &str) -> String {
+    format!(
+        "Main project `{main_id}` has no indexed chunks yet. Results below come only \
+         from this worktree's delta -- main's own code is not represented. Run \
+         index(action=\"build\") in the main checkout to populate it."
+    )
+}
+
+/// Every decision the worktree branch needs once it has already committed to
+/// proceeding (`classification != NotIndexed`): which paths each of the two
+/// queries excludes, and which state-condition notes (if any) the response
+/// carries. Fields, not statements -- a caller wires each straight into the
+/// two `SearchOpts` and the response `Value` with nothing left to swap by
+/// accident; see `worktree_search_opts` and `apply_worktree_plan_notes`.
+///
+/// Deliberately takes no store/client reference -- `delta_has_chunks` (via
+/// `classification`, already decided) and `main_has_chunks` are supplied by
+/// the caller, which is the only thing that talks to the store. The one
+/// filesystem read this function itself performs (`read_index_state` on
+/// `main_repo`, for the drift note) is not a store call, so every branch is
+/// fixturable with a plain `tempfile::tempdir()` and no live index -- see
+/// `worktree_query_plan_tests`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorktreeQueryPlan {
+    pub main_id: String,
+    pub delta_id: String,
+    pub main_exclude: Vec<String>,
+    pub delta_exclude: Vec<String>,
+    pub warning: Option<String>,
+    pub main_never_indexed_note: Option<String>,
+    pub drift_note: Option<String>,
+}
+
+pub(crate) fn worktree_query_plan(
+    main_repo: &std::path::Path,
+    main_id: &str,
+    delta_id: &str,
+    classification: WorktreeIndexState,
+    dirty_paths: &[String],
+    worktree_last_indexed_at: &str,
+    main_has_chunks: bool,
+) -> WorktreeQueryPlan {
+    let (main_exclude, delta_exclude) = worktree_query_exclusions(dirty_paths);
+
+    let warning =
+        (classification == WorktreeIndexState::Suspect).then(|| worktree_suspect_note(delta_id));
+
+    let main_never_indexed_note =
+        (!main_has_chunks).then(|| worktree_main_never_indexed_note(main_id));
+
+    let drift_note = crate::retrieval::index_state::read_index_state(main_repo)
+        .filter(|main_state| {
+            main_reindexed_after_worktree(&main_state.last_indexed_at, worktree_last_indexed_at)
+        })
+        .map(|_| worktree_main_ahead_note().to_string());
+
+    WorktreeQueryPlan {
+        main_id: main_id.to_string(),
+        delta_id: delta_id.to_string(),
+        main_exclude,
+        delta_exclude,
+        warning,
+        main_never_indexed_note,
+        drift_note,
+    }
+}
+
+/// The two `SearchOpts` the worktree branch queries with, built from a
+/// shared base plus the plan's exclusions. This is the exact assignment
+/// requirement 2's hazard lives in -- "does main get the dirty list, or does
+/// the delta" -- turned into a value a test can assert on, rather than a
+/// pair of statements only an integration test could observe.
+pub(crate) fn worktree_search_opts(
+    base: &crate::retrieval::search::SearchOpts,
+    plan: &WorktreeQueryPlan,
+) -> (
+    crate::retrieval::search::SearchOpts,
+    crate::retrieval::search::SearchOpts,
+) {
+    let mut main_opts = base.clone();
+    main_opts.exclude_paths = plan.main_exclude.clone();
+    let mut delta_opts = base.clone();
+    delta_opts.exclude_paths = plan.delta_exclude.clone();
+    (main_opts, delta_opts)
+}
+
+/// Copies whichever of the plan's notes are present onto the response
+/// `Value`. The other half of the same "value, not statements" treatment as
+/// `worktree_search_opts`: deleting the human-ruled `Suspect` warning, or
+/// the drift note, now breaks this function's own test rather than only
+/// being observable end-to-end.
+pub(crate) fn apply_worktree_plan_notes(out: &mut Value, plan: &WorktreeQueryPlan) {
+    if let Some(warning) = &plan.warning {
+        out["worktree_state_warning"] = serde_json::json!(warning);
+    }
+    if let Some(note) = &plan.main_never_indexed_note {
+        out["main_never_indexed_note"] = serde_json::json!(note);
+    }
+    if let Some(note) = &plan.drift_note {
+        out["drift_note"] = serde_json::json!(note);
+    }
 }
 
 pub struct SemanticSearch;
@@ -443,24 +556,10 @@ impl Tool for SemanticSearch {
                 let worktree_root = root
                     .clone()
                     .expect("main_repo only resolves from a Some(root)");
-                // Same derivation Task 6's sync_worktree call site uses
-                // (src/tools/semantic/index.rs) -- must match exactly, or the
-                // delta id computed here names a project nothing was ever
-                // written under.
-                let main_project_id =
-                    crate::config::project::ProjectConfig::load_or_default(&main_repo)
-                        .map(|c| c.project.name)
-                        .unwrap_or_else(|_| {
-                            main_repo
-                                .file_name()
-                                .map(|s| s.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| "main".to_string())
-                        });
-                let wt_dir = worktree_root
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "worktree".to_string());
-                let delta_id = crate::retrieval::sync::delta_project_id(&main_project_id, &wt_dir);
+                // Single shared derivation -- see `worktree_ids`'s doc comment.
+                // Task 6's producer side goes through the exact same function.
+                let (main_project_id, delta_id) =
+                    crate::retrieval::sync::worktree_ids(&main_repo, &worktree_root);
                 let collection = client.config.collection("code_chunks");
 
                 let state = crate::retrieval::index_state::read_index_state(&worktree_root);
@@ -493,17 +592,40 @@ impl Tool for SemanticSearch {
                 if let Some(hint) =
                     worktree_hint_for(classification != WorktreeIndexState::NotIndexed, &delta_id)
                 {
-                    return Ok(serde_json::json!({
-                        "results": [], "total": 0, "truncated": false, "hint": hint
-                    }));
+                    let mut out = search_response(&[], limit);
+                    out["hint"] = serde_json::json!(hint);
+                    return Ok(out);
                 }
 
                 let state =
                     state.expect("classification other than NotIndexed implies a parsed sidecar");
-                let (main_exclude, delta_exclude) = worktree_query_exclusions(&state.dirty_paths);
 
-                let mut main_opts = opts.clone();
-                main_opts.exclude_paths = main_exclude;
+                // Requirement 6's "main never indexed" arm: one additional
+                // remote call, only in this already-worktree-specific branch
+                // that is about to query main anyway -- never unconditional on
+                // every search.
+                let main_has_chunks = client
+                    .project_has_chunks(&collection, &main_project_id)
+                    .await
+                    .map_err(|e| {
+                        let hint = classify_search_error(&e.to_string(), &main_project_id);
+                        crate::tools::RecoverableError::with_hint(
+                            format!("stack search failed: {e}"),
+                            hint,
+                        )
+                    })?;
+
+                let plan = worktree_query_plan(
+                    &main_repo,
+                    &main_project_id,
+                    &delta_id,
+                    classification,
+                    &state.dirty_paths,
+                    &state.last_indexed_at,
+                    main_has_chunks,
+                );
+                let (main_opts, delta_opts) = worktree_search_opts(&opts, &plan);
+
                 let main_hits = client
                     .search_code(&main_project_id, query, main_opts)
                     .await
@@ -515,8 +637,6 @@ impl Tool for SemanticSearch {
                         )
                     })?;
 
-                let mut delta_opts = opts.clone();
-                delta_opts.exclude_paths = delta_exclude;
                 let delta_hits = client
                     .search_code(&delta_id, query, delta_opts)
                     .await
@@ -529,42 +649,8 @@ impl Tool for SemanticSearch {
                     })?;
 
                 let merged = crate::retrieval::search::merge_hits(main_hits, delta_hits, limit);
-                let result_items: Vec<serde_json::Value> = merged
-                    .iter()
-                    .map(|h| {
-                        format_search_result_item(
-                            &h.file_path,
-                            h.start_line as usize,
-                            h.end_line as usize,
-                            "stack",
-                            h.content.clone(),
-                        )
-                    })
-                    .collect();
-                let count = result_items.len();
-                let truncated = count >= limit;
-                let mut out = serde_json::json!({
-                    "results": result_items, "total": count, "truncated": truncated
-                });
-                if truncated {
-                    out["truncated_hint"] = serde_json::json!(
-                            "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
-                        );
-                }
-                if classification == WorktreeIndexState::Suspect {
-                    out["worktree_state_warning"] =
-                        serde_json::json!(worktree_suspect_note(&delta_id));
-                }
-                if let Some(main_state) =
-                    crate::retrieval::index_state::read_index_state(&main_repo)
-                {
-                    if main_reindexed_after_worktree(
-                        &main_state.last_indexed_at,
-                        &state.last_indexed_at,
-                    ) {
-                        out["drift_note"] = serde_json::json!(worktree_main_ahead_note());
-                    }
-                }
+                let mut out = search_response(&merged, limit);
+                apply_worktree_plan_notes(&mut out, &plan);
                 return Ok(out);
             }
         }
@@ -576,30 +662,7 @@ impl Tool for SemanticSearch {
                 let hint = classify_search_error(&e.to_string(), &project_id);
                 crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
-        let result_items: Vec<serde_json::Value> = hits
-            .iter()
-            .map(|h| {
-                format_search_result_item(
-                    &h.file_path,
-                    h.start_line as usize,
-                    h.end_line as usize,
-                    "stack",
-                    h.content.clone(),
-                )
-            })
-            .collect();
-        let count = result_items.len();
-        // KNN over a large index: a full page almost always means more relevant
-        // chunks exist. Signal it rather than let `total` read as complete.
-        let truncated = count >= limit;
-        let mut out =
-            serde_json::json!({ "results": result_items, "total": count, "truncated": truncated });
-        if truncated {
-            out["truncated_hint"] = serde_json::json!(
-                    "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
-                );
-        }
-        Ok(out)
+        Ok(search_response(&hits, limit))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -629,6 +692,39 @@ pub(crate) fn format_search_result_item(
     map.insert("content".into(), json!(content));
     Value::Object(map)
 }
+
+/// Shape the final `{results, total, truncated, truncated_hint?}` envelope
+/// from a score-ordered hit list. Used by both the worktree branch (on the
+/// merged hits) and the plain path (on `search_code`'s hits directly) so a
+/// field added to one response shape can't land in only one -- the exact bug
+/// class that hit `format_semantic_search` one function over.
+fn search_response(hits: &[crate::retrieval::search::Hit], limit: usize) -> Value {
+    let result_items: Vec<Value> = hits
+        .iter()
+        .map(|h| {
+            format_search_result_item(
+                &h.file_path,
+                h.start_line as usize,
+                h.end_line as usize,
+                "stack",
+                h.content.clone(),
+            )
+        })
+        .collect();
+    let count = result_items.len();
+    // KNN over a large index: a full page almost always means more relevant
+    // chunks exist. Signal it rather than let `total` read as complete.
+    let truncated = count >= limit;
+    let mut out =
+        serde_json::json!({ "results": result_items, "total": count, "truncated": truncated });
+    if truncated {
+        out["truncated_hint"] = serde_json::json!(
+            "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
+        );
+    }
+    out
+}
+
 pub(crate) fn format_semantic_search(val: &Value) -> String {
     let results = match val["results"].as_array() {
         Some(arr) => arr,
@@ -636,12 +732,47 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
     };
     let total = val["total"].as_u64().unwrap_or(results.len() as u64);
 
+    // State-condition fields (worktree not-indexed hint, drift/suspect/main-
+    // never-indexed notes, the pre-existing truncated_hint) are built FIRST
+    // and placed ahead of everything else, for two reasons:
+    //
+    // 1. They must reach the `results: []` case too. The worktree
+    //    "NotIndexed" response is the ONE place `hint` is ever set, and it
+    //    always has zero results -- built after the early return below (as a
+    //    prior version of this function did), it can never be reached: the
+    //    exact "0 results, no hint" shape this whole task exists to
+    //    eliminate, reproduced one layer up.
+    // 2. `truncate_compact` (src/tools/core/types.rs) cuts everything AFTER
+    //    its budget from the string's TAIL, keeping only the prefix -- and
+    //    `call_content`'s overflow path uses this function's OUTPUT,
+    //    verbatim, as the only summary the caller ever sees. Placed ahead of
+    //    the result rows, these fields survive that cut regardless of how
+    //    many/how large the rows are; placed after them, a summary that
+    //    merely exceeds the hard cap silently drops every one of them along
+    //    with the rows -- see `format_semantic_search_keeps_state_fields_above_the_truncation_cap`.
+    let mut state_lines = String::new();
+    for (field, label) in [
+        ("hint", "Hint"),
+        ("worktree_state_warning", "Warning"),
+        ("main_never_indexed_note", "Note"),
+        ("drift_note", "Note"),
+        ("truncated_hint", "Note"),
+    ] {
+        if let Some(text) = val[field].as_str() {
+            state_lines.push('\n');
+            state_lines.push_str(&format!("\n  {label}: {text}"));
+        }
+    }
+
     if results.is_empty() {
-        return "0 results".to_string();
+        let mut out = "0 results".to_string();
+        out.push_str(&state_lines);
+        return out;
     }
 
     let result_word = if total == 1 { "result" } else { "results" };
     let mut out = format!("{total} {result_word}\n");
+    out.push_str(&state_lines);
 
     // Build rows: (location, preview)
     let rows: Vec<(String, String)> = results
@@ -705,24 +836,6 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
         out.push('\n');
         out.push_str(&format_overflow(overflow));
-    }
-
-    // State-condition fields (worktree not-indexed hint, drift/suspect notes,
-    // the pre-existing truncated_hint) must survive into this compact summary:
-    // it is the ONLY thing the caller sees when the full JSON gets buffered
-    // (`call_content`'s overflow path uses this fn's output verbatim as the
-    // summary), so a field that lives only in `val` and never here is
-    // invisible on any query whose results happen to be large.
-    for (field, label) in [
-        ("hint", "Hint"),
-        ("worktree_state_warning", "Warning"),
-        ("drift_note", "Note"),
-        ("truncated_hint", "Note"),
-    ] {
-        if let Some(text) = val[field].as_str() {
-            out.push('\n');
-            out.push_str(&format!("\n  {label}: {text}"));
-        }
     }
 
     out
@@ -1062,6 +1175,264 @@ mod worktree_search_tests {
         );
     }
 
+    /// Writes a real `.codescout/index-state.json` sidecar under `root` with
+    /// an explicit `last_indexed_at`, so `worktree_query_plan`'s drift check
+    /// (a plain filesystem read, not a store call) has something real to
+    /// read. Used only by the tests below.
+    fn write_sidecar_at(root: &std::path::Path, last_indexed_at: &str) {
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let state = crate::retrieval::index_state::IndexState {
+            last_indexed_commit: String::new(),
+            last_indexed_at: last_indexed_at.to_string(),
+            schema_version: crate::retrieval::index_state::INDEX_STATE_SCHEMA_VERSION,
+            dirty_paths: Vec::new(),
+        };
+        std::fs::write(
+            root.join(".codescout").join("index-state.json"),
+            serde_json::to_string(&state).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn worktree_query_plan_excludes_dirty_paths_from_main_only() {
+        let dirty = vec!["src/a.rs".to_string()];
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main"); // no sidecar -> no drift note
+        std::fs::create_dir_all(&main_repo).unwrap();
+
+        let plan = worktree_query_plan(
+            &main_repo,
+            "main-id",
+            "main-id@wt",
+            WorktreeIndexState::Healthy,
+            &dirty,
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+        assert_eq!(
+            plan.main_exclude, dirty,
+            "main must exclude the dirty paths"
+        );
+        assert!(plan.delta_exclude.is_empty(), "delta must exclude nothing");
+        assert_eq!(plan.main_id, "main-id");
+        assert_eq!(plan.delta_id, "main-id@wt");
+    }
+
+    #[test]
+    fn worktree_query_plan_sets_warning_only_when_suspect() {
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        std::fs::create_dir_all(&main_repo).unwrap();
+
+        let healthy = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &[],
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+        assert!(healthy.warning.is_none(), "Healthy must carry no warning");
+
+        let suspect = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Suspect,
+            &[],
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+        assert!(
+            suspect.warning.is_some(),
+            "Suspect must carry the human-ruled warning"
+        );
+        assert!(suspect.warning.unwrap().contains("m@wt"));
+    }
+
+    #[test]
+    fn worktree_query_plan_sets_main_never_indexed_note_from_the_bool() {
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        std::fs::create_dir_all(&main_repo).unwrap();
+
+        let indexed = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &[],
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+        assert!(
+            indexed.main_never_indexed_note.is_none(),
+            "main_has_chunks=true must carry no note"
+        );
+
+        let not_indexed = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &[],
+            "2026-08-13T09:00:00+00:00",
+            false,
+        );
+        assert!(
+            not_indexed.main_never_indexed_note.is_some(),
+            "main_has_chunks=false must carry the requirement-6 note"
+        );
+        assert!(not_indexed.main_never_indexed_note.unwrap().contains('m'));
+    }
+
+    #[test]
+    fn worktree_query_plan_sets_drift_note_when_main_is_strictly_newer() {
+        // Real tmpdir fixture with an actual, asymmetric sidecar -- this is
+        // what catches an argument-order swap inside `worktree_query_plan`'s
+        // `main_reindexed_after_worktree` call. Main's real sidecar says
+        // 10:00; the worktree's timestamp passed in is 09:00. Swap the two
+        // arguments at the call site and this flips to `None`.
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        write_sidecar_at(&main_repo, "2026-08-13T10:00:00+00:00");
+
+        let plan = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &[],
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+        assert!(
+            plan.drift_note.is_some(),
+            "main's sidecar is strictly newer than the worktree's -- drift_note must fire"
+        );
+    }
+
+    #[test]
+    fn worktree_query_plan_no_drift_note_when_worktree_is_newer_or_equal() {
+        // The negative direction for the same argument-order hazard: if the
+        // swap flipped it the OTHER way, this test (not the one above) would
+        // catch it.
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        write_sidecar_at(&main_repo, "2026-08-13T09:00:00+00:00");
+
+        let plan = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &[],
+            "2026-08-13T10:00:00+00:00", // worktree's delta built AFTER main
+            true,
+        );
+        assert!(plan.drift_note.is_none());
+    }
+
+    #[test]
+    fn worktree_query_plan_no_drift_note_when_main_has_no_sidecar() {
+        // Undetectable drift is reported as silence, never as a false claim
+        // of freshness.
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        std::fs::create_dir_all(&main_repo).unwrap();
+
+        let plan = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &[],
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+        assert!(plan.drift_note.is_none());
+    }
+
+    #[test]
+    fn worktree_search_opts_gives_main_the_dirty_list_and_delta_nothing() {
+        // Targets the assignment hazard directly: `call()` no longer has raw
+        // `main_opts.exclude_paths = ...` / `delta_opts.exclude_paths = ...`
+        // statements to swap -- it just calls this function and uses the
+        // tuple. A swap now has exactly one place to hide, and this is the
+        // test that finds it there.
+        let base = crate::retrieval::search::SearchOpts::new(10);
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        std::fs::create_dir_all(&main_repo).unwrap();
+        let plan = worktree_query_plan(
+            &main_repo,
+            "m",
+            "m@wt",
+            WorktreeIndexState::Healthy,
+            &["src/a.rs".to_string()],
+            "2026-08-13T09:00:00+00:00",
+            true,
+        );
+
+        let (main_opts, delta_opts) = worktree_search_opts(&base, &plan);
+        assert_eq!(
+            main_opts.exclude_paths,
+            vec!["src/a.rs".to_string()],
+            "main must get the dirty list"
+        );
+        assert!(
+            delta_opts.exclude_paths.is_empty(),
+            "delta must get nothing"
+        );
+        // Base fields survive the clone untouched.
+        assert_eq!(main_opts.limit, 10);
+        assert_eq!(delta_opts.limit, 10);
+    }
+
+    #[test]
+    fn apply_worktree_plan_notes_sets_only_present_fields() {
+        let plan = WorktreeQueryPlan {
+            main_id: "m".to_string(),
+            delta_id: "m@wt".to_string(),
+            main_exclude: Vec::new(),
+            delta_exclude: Vec::new(),
+            warning: Some("SUSPECT-TEXT".to_string()),
+            main_never_indexed_note: None,
+            drift_note: Some("DRIFT-TEXT".to_string()),
+        };
+        let mut out = serde_json::json!({});
+        apply_worktree_plan_notes(&mut out, &plan);
+        assert_eq!(out["worktree_state_warning"], "SUSPECT-TEXT");
+        assert!(out.get("main_never_indexed_note").is_none());
+        assert_eq!(out["drift_note"], "DRIFT-TEXT");
+    }
+
+    #[test]
+    fn search_response_flags_truncated_only_at_the_limit() {
+        fn hit(id: &str) -> crate::retrieval::search::Hit {
+            crate::retrieval::search::Hit {
+                chunk_id: id.to_string(),
+                file_path: "src/a.rs".to_string(),
+                start_line: 1,
+                end_line: 1,
+                content: String::new(),
+                score: 1.0,
+                rerank_score: None,
+            }
+        }
+        let short = vec![hit("a")];
+        let resp = search_response(&short, 5);
+        assert_eq!(resp["truncated"], false);
+        assert!(resp.get("truncated_hint").is_none());
+
+        let full = vec![hit("a"), hit("b")];
+        let resp = search_response(&full, 2);
+        assert_eq!(resp["truncated"], true);
+        assert!(resp["truncated_hint"].as_str().is_some());
+    }
+
     #[test]
     fn format_semantic_search_surfaces_worktree_state_fields() {
         // These fields are only reachable this way when the response is small
@@ -1100,6 +1471,65 @@ mod worktree_search_tests {
         assert!(
             !out.contains("Warning:") && !out.contains("Note:") && !out.contains("Hint:"),
             "must not fabricate a label when the field is absent: {out}"
+        );
+    }
+
+    #[test]
+    fn format_semantic_search_surfaces_hint_even_with_zero_results() {
+        // The worktree "NotIndexed" response is the ONE place `hint` is ever
+        // set, and it always carries `results: []`. A version of this
+        // function that builds state fields AFTER an `if results.is_empty()`
+        // early return can never reach them for this tool's own hint --
+        // reproducing, one layer up, the exact "0 results, no explanation"
+        // shape the worktree feature exists to eliminate.
+        let val = serde_json::json!({
+            "results": [],
+            "total": 0,
+            "truncated": false,
+            "hint": "NOT-INDEXED-HINT",
+        });
+        let out = format_semantic_search(&val);
+        assert!(
+            out.contains("NOT-INDEXED-HINT"),
+            "hint must reach the summary even with zero results: {out}"
+        );
+    }
+
+    #[test]
+    fn format_semantic_search_keeps_state_fields_above_the_truncation_cap() {
+        // `call_content`'s overflow path shows the caller
+        // `truncate_compact(format_semantic_search(val), soft, hard)` and
+        // NOTHING else -- truncate_compact keeps only the PREFIX up to the
+        // last newline within the hard cap. A large-enough result set pushes
+        // this well past 3_000 bytes; state fields placed after the rows
+        // (as a prior version of this function did) would be cut away here.
+        let long_content = "x".repeat(200);
+        let results: Vec<serde_json::Value> = (0..80)
+            .map(|i| {
+                serde_json::json!({
+                    "file_path": format!("src/f_{i}.rs"),
+                    "start_line": 1,
+                    "end_line": 2,
+                    "content": long_content.clone(),
+                })
+            })
+            .collect();
+        let val = serde_json::json!({
+            "results": results,
+            "total": 80,
+            "truncated": true,
+            "worktree_state_warning": "SUSPECT-MARKER-MUST-SURVIVE",
+        });
+        let formatted = format_semantic_search(&val);
+        assert!(
+            formatted.len() > 3_000,
+            "fixture must actually exceed the hard cap to test anything: {} bytes",
+            formatted.len()
+        );
+        let truncated = crate::tools::core::types::truncate_compact(&formatted, 2_000, 3_000);
+        assert!(
+            truncated.contains("SUSPECT-MARKER-MUST-SURVIVE"),
+            "state field must survive truncation from the tail: {truncated}"
         );
     }
 }

@@ -323,15 +323,12 @@ impl Tool for IndexProject {
                 if let Some(main_repo) =
                     crate::prompts::detect_worktree_info(&root).and_then(|info| info.main_repo)
                 {
-                    let main_project_id =
-                        crate::config::project::ProjectConfig::load_or_default(&main_repo)
-                            .map(|c| c.project.name)
-                            .unwrap_or_else(|_| {
-                                main_repo
-                                    .file_name()
-                                    .map(|s| s.to_string_lossy().into_owned())
-                                    .unwrap_or_else(|| "main".to_string())
-                            });
+                    // Both ids derived together, once -- see `worktree_ids`'s doc
+                    // comment. `semantic_search`'s query-side branch must land on
+                    // the exact same `delta_id`, so this is the ONE call both
+                    // sides go through.
+                    let (main_project_id, delta_id) =
+                        crate::retrieval::sync::worktree_ids(&main_repo, &root);
                     let collection = client.config.collection("code_chunks");
                     tracing::info!(
                         main_repo = ?main_repo,
@@ -353,12 +350,6 @@ impl Tool for IndexProject {
                     // Report what the operator can't see from added/deleted alone:
                     // the delta's total chunk count and how many paths main is now
                     // excluded from serving.
-                    let wt_dir = root
-                        .file_name()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "worktree".to_string());
-                    let delta_id =
-                        crate::retrieval::sync::delta_project_id(&main_project_id, &wt_dir);
                     let (delta_chunks, _) = client
                         .project_index_stats(&collection, &delta_id)
                         .await

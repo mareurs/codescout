@@ -124,6 +124,48 @@ pub fn delta_project_id(main_project_id: &str, worktree_dir: &str) -> String {
     format!("{main_project_id}@{worktree_dir}")
 }
 
+/// The basename of a worktree root, with an `"worktree"` fallback when the
+/// path has none (e.g. `/`). MUST be the basename, never the full path -- see
+/// [`delta_project_id`]'s doc comment for why a divergence here makes a delta
+/// invisible with no error. This is the ONE place that decision is made;
+/// every caller that needs a worktree's basename (`sync_worktree` and
+/// [`worktree_ids`]) goes through this function so a future edit cannot
+/// change the rule in one place and miss another.
+fn worktree_basename(worktree_root: &Path) -> String {
+    worktree_root
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "worktree".to_string())
+}
+
+/// `(main_project_id, delta_id)` for a linked worktree, derived from the two
+/// real directories involved: `main_repo` (read via
+/// [`crate::config::project::ProjectConfig::load_or_default`], which already
+/// falls back to `main_repo`'s own basename when no `project.toml` exists --
+/// see that function's doc comment) and `worktree_root` (via
+/// [`worktree_basename`]).
+///
+/// This is the single derivation both the producer (`index`'s `sync_worktree`
+/// call site) and the consumer (`semantic_search`'s worktree query branch)
+/// must agree on -- collapses what used to be three independent copies
+/// (`sync.rs`, `index.rs`, `semantic_search.rs`) into one. `sync_worktree`
+/// itself cannot call this directly (it receives an already-resolved
+/// `main_project_id: &str`, not a `main_repo: &Path`), so it shares only the
+/// [`worktree_basename`] half.
+pub fn worktree_ids(main_repo: &Path, worktree_root: &Path) -> (String, String) {
+    let main_project_id = crate::config::project::ProjectConfig::load_or_default(main_repo)
+        .map(|c| c.project.name)
+        .unwrap_or_else(|_| {
+            main_repo
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "main".to_string())
+        });
+    let wt_dir = worktree_basename(worktree_root);
+    let delta_id = delta_project_id(&main_project_id, &wt_dir);
+    (main_project_id, delta_id)
+}
+
 /// Embed `pending`'s chunk content and upsert it, then clear `pending` so the
 /// content + embeddings are dropped — keeping peak memory at O(flush_batch).
 async fn flush_pending(
@@ -410,11 +452,9 @@ pub async fn sync_worktree(
     // `worktree_dir` MUST be a basename, never a path -- Task 7's query path
     // computes the same id from the same basename, and if the two disagree the
     // delta becomes invisible with no error (see `delta_project_id`'s doc
-    // comment).
-    let wt_dir = worktree_root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "worktree".to_string());
+    // comment). Shares `worktree_basename` with `worktree_ids` so this rule
+    // lives in exactly one place.
+    let wt_dir = worktree_basename(worktree_root);
     let delta_id = delta_project_id(main_project_id, &wt_dir);
 
     // Serialize delta syncs for THIS worktree -- see the doc comment above for
@@ -753,6 +793,60 @@ mod tests {
         assert_eq!(id, "codescout@peer-delegation");
         assert!(!id.contains(':'), "delta id must not introduce a colon");
         assert_ne!(id, "codescout", "delta must not alias the main project");
+    }
+
+    #[test]
+    fn worktree_ids_uses_the_worktree_basename_not_the_full_path() {
+        // Regression target: `worktree_root.file_name()` mutated to
+        // `worktree_root.to_string_lossy()` compiles and would smuggle the
+        // FULL PATH into the delta id -- exactly the hazard `delta_project_id`'s
+        // doc comment warns about, since `sync_worktree` (the producer) writes
+        // under the basename-derived id and would then disagree with a
+        // full-path-derived id computed here.
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main-project");
+        std::fs::create_dir_all(&main_repo).unwrap();
+        // Nested so `.to_string_lossy()` of the worktree root differs sharply
+        // from its basename.
+        let worktree_root = dir.path().join("nested").join("deeper").join("wt");
+        std::fs::create_dir_all(&worktree_root).unwrap();
+
+        let (main_id, delta_id) = worktree_ids(&main_repo, &worktree_root);
+        assert_eq!(
+            main_id, "main-project",
+            "no project.toml -> falls back to main_repo's basename"
+        );
+        assert_eq!(
+            delta_id, "main-project@wt",
+            "delta id must use the worktree's BASENAME only"
+        );
+        assert!(
+            !delta_id.contains("nested") && !delta_id.contains("deeper"),
+            "delta id must not leak any parent path segment: {delta_id}"
+        );
+    }
+
+    #[test]
+    fn worktree_ids_reads_a_real_project_toml_for_main_id() {
+        // Positive control: main_id is not ALWAYS just a basename -- when
+        // main_repo has a real project.toml naming it something else, that
+        // name must win. Guards against a regression that hardcodes the
+        // basename fallback and stops reading the config at all.
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("checkout-dir-name");
+        let codescout_dir = main_repo.join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"configured-main-name\"\n",
+        )
+        .unwrap();
+        let worktree_root = dir.path().join("wt");
+        std::fs::create_dir_all(&worktree_root).unwrap();
+
+        let (main_id, delta_id) = worktree_ids(&main_repo, &worktree_root);
+        assert_eq!(main_id, "configured-main-name");
+        assert_eq!(delta_id, "configured-main-name@wt");
     }
 
     #[test]
