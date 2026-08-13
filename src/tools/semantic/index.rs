@@ -309,18 +309,76 @@ impl Tool for IndexProject {
 
             tracing::info!("sync task entered");
             crate::heartbeat::note_background_op(&format!("index:{project_id}"));
-            let sync_result = async {
+            let sync_result: anyhow::Result<(crate::retrieval::sync::SyncReport, String)> = async {
                 tracing::info!("constructing RetrievalClient::from_env");
                 let client =
                     crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
-                tracing::info!("RetrievalClient ready, calling sync_project");
-                let opts = crate::retrieval::sync::SyncOpts {
-                    force_reindex: force,
-                    record_index_state: true,
-                    ignore_patterns: ignore_patterns.clone(),
-                    ..Default::default()
-                };
-                client.sync_project(&project_id, &root, opts).await
+
+                // A linked worktree gets its own delta sync: reuse main's vectors
+                // for byte-identical files, embed only what differs under
+                // `<main>@<worktree>`, and record the paths main must not be asked
+                // for. `sync_worktree` is reachable ONLY from this path -- never
+                // from `semantic_search`, which stays a pure read with no intent
+                // gate for an embedder failure to surface under.
+                if let Some(main_repo) =
+                    crate::prompts::detect_worktree_info(&root).and_then(|info| info.main_repo)
+                {
+                    let main_project_id =
+                        crate::config::project::ProjectConfig::load_or_default(&main_repo)
+                            .map(|c| c.project.name)
+                            .unwrap_or_else(|_| {
+                                main_repo
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "main".to_string())
+                            });
+                    let collection = client.config.collection("code_chunks");
+                    tracing::info!(
+                        main_repo = ?main_repo,
+                        main_project_id = %main_project_id,
+                        "worktree detected -- syncing delta against main instead of sync_project"
+                    );
+                    let report = crate::retrieval::sync::sync_worktree(
+                        client.code_store.as_ref(),
+                        &root,
+                        &main_project_id,
+                        &collection,
+                        &*client.embedder,
+                        &ignore_patterns,
+                    )
+                    .await?;
+
+                    // Report what the operator can't see from added/deleted alone:
+                    // the delta's total chunk count and how many paths main is now
+                    // excluded from serving.
+                    let wt_dir = root
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "worktree".to_string());
+                    let delta_id =
+                        crate::retrieval::sync::delta_project_id(&main_project_id, &wt_dir);
+                    let (delta_chunks, _) = client
+                        .project_index_stats(&collection, &delta_id)
+                        .await
+                        .unwrap_or((0, 0));
+                    let dirty_count = crate::retrieval::index_state::read_index_state(&root)
+                        .map(|s| s.dirty_paths.len())
+                        .unwrap_or(0);
+                    Ok((
+                        report,
+                        format!(" delta_chunks={delta_chunks} dirty_paths={dirty_count}"),
+                    ))
+                } else {
+                    tracing::info!("RetrievalClient ready, calling sync_project");
+                    let opts = crate::retrieval::sync::SyncOpts {
+                        force_reindex: force,
+                        record_index_state: true,
+                        ignore_patterns: ignore_patterns.clone(),
+                        ..Default::default()
+                    };
+                    let report = client.sync_project(&project_id, &root, opts).await?;
+                    Ok((report, String::new()))
+                }
             }
             .await;
 
@@ -328,11 +386,12 @@ impl Tool for IndexProject {
             {
                 let mut state = state_arc.lock().unwrap_or_else(|e| e.into_inner());
                 *state = match sync_result {
-                    Ok(report) => {
+                    Ok((report, extra_detail)) => {
                         tracing::info!(
                             added = report.added,
                             deleted = report.deleted,
                             elapsed_ms = report.elapsed_ms,
+                            extra_detail,
                             "sync task succeeded",
                         );
                         // Indexing succeeded — files are now fresh, clear the dirty set.
@@ -342,7 +401,7 @@ impl Tool for IndexProject {
                         IndexingState::Done {
                             files_indexed: report.added + report.updated,
                             files_deleted: report.deleted,
-                            detail: format!("elapsed_ms={}", report.elapsed_ms),
+                            detail: format!("elapsed_ms={}{extra_detail}", report.elapsed_ms),
                             // Total counts now live in Qdrant — IndexStatus
                             // re-route (task #91) will scroll the collection
                             // for these. For now leave 0 to avoid a sqlite

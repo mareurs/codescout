@@ -292,6 +292,245 @@ async fn stream_index(
     Ok((added, deleted))
 }
 
+/// Sync a linked worktree: reuse main's vectors for byte-identical files, embed
+/// only what differs under the worktree's delta project id, and record the paths
+/// main must not be asked for.
+///
+/// Called only from the `index` tool path -- `semantic_search` must never call
+/// this. A read tool that writes has no intent gate and surfaces embedder
+/// failures under the wrong operation.
+///
+/// Walks `worktree_root` TWICE, by design:
+///
+/// - Pass 1 hashes every chunk into a cheap [`crate::retrieval::drift::LocalChunk`]
+///   (file_path + hash; each chunk's content is read to hash it, then dropped
+///   immediately) so [`crate::retrieval::drift::dirty_paths`] gets one
+///   authoritative view of the whole tree. The dirty/clean decision itself lives
+///   entirely in `dirty_paths`, not here.
+/// - Pass 2 re-walks and materialises full chunk content only for files
+///   `dirty_paths` marked dirty, flushed through the same bounded-batch
+///   [`flush_pending`] path `stream_index` uses.
+///
+/// A single-pass design that keeps every chunk's content in memory until the
+/// dirty decision is known would reproduce the exact whole-tree materialisation
+/// that OOM-killed the host at 68 GB (docs/issues/2026-06-19-mcp-server-oom-68gb.md)
+/// -- the worktree delta's entire premise is that embedding cost is proportional
+/// to the diff, and that guarantee is worthless if peak memory still scales with
+/// the corpus. Re-walking is a second cheap (CPU-only, no network) filesystem
+/// pass, the same order of cost `stream_index` already pays once per sync.
+///
+/// Assumes `main_project_id`'s collection already exists (main has been indexed
+/// at least once) -- `ensure_collection` is deliberately not called here.
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_worktree(
+    store: &dyn crate::retrieval::code_store::CodeVectorStore,
+    worktree_root: &Path,
+    main_project_id: &str,
+    collection: &str,
+    embedder: &dyn crate::retrieval::embedder::BatchEmbedder,
+    ignore_patterns: &[String],
+) -> Result<SyncReport> {
+    use crate::embed::ast_chunker::split_file;
+    use crate::retrieval::drift::{dirty_paths, LocalChunk};
+    use crate::retrieval::payload::CodePayload;
+    use std::collections::HashSet;
+
+    const STACK_CHUNK_TARGET: usize = 1200;
+    let chunk_target: usize = std::env::var("CODESCOUT_CHUNK_TARGET")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(STACK_CHUNK_TARGET);
+    const DEFAULT_FLUSH_BATCH: usize = 256;
+    let flush_batch: usize = std::env::var("CODESCOUT_INDEX_FLUSH_BATCH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_FLUSH_BATCH);
+
+    let started = std::time::Instant::now();
+
+    // `worktree_dir` MUST be a basename, never a path -- Task 7's query path
+    // computes the same id from the same basename, and if the two disagree the
+    // delta becomes invisible with no error (see `delta_project_id`'s doc
+    // comment).
+    let wt_dir = worktree_root
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "worktree".to_string());
+    let delta_id = delta_project_id(main_project_id, &wt_dir);
+
+    let main_refs = store
+        .chunk_refs(collection, main_project_id)
+        .await
+        .unwrap_or_default();
+    let delta_refs = store
+        .chunk_refs(collection, &delta_id)
+        .await
+        .unwrap_or_default();
+    let delta_ids_present: HashSet<&str> = delta_refs.iter().map(|c| c.chunk_id.as_str()).collect();
+
+    // Pass 1: cheap hash-only walk over the whole worktree tree.
+    let mut local: Vec<LocalChunk> = Vec::new();
+    let ignore_matcher = crate::embed::build_ignore_matcher(worktree_root, ignore_patterns);
+    for entry in ignore::WalkBuilder::new(worktree_root)
+        .hidden(false)
+        .filter_entry(move |e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if e.file_name()
+                .to_str()
+                .is_some_and(|n| is_always_skipped(n, is_dir))
+            {
+                return false;
+            }
+            !ignore_matcher.matched(e.path(), is_dir).is_ignore()
+        })
+        .build()
+        .filter_map(|e| e.ok())
+    {
+        let Some(ft) = entry.file_type() else {
+            continue;
+        };
+        if !ft.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let Some(lang) = crate::embed::lang_for_ext(ext) else {
+            continue;
+        };
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let rel_path = path.strip_prefix(worktree_root).unwrap_or(path);
+        let rel_display = to_forward_slash(rel_path);
+        // An empty file_path is never a real path -- Task 2's dirty_paths
+        // treats it as "unknown", which would silently drop this chunk out of
+        // consideration rather than surfacing anything. Skip defensively.
+        if rel_display.is_empty() {
+            continue;
+        }
+        for c in split_file(&source, lang, Path::new(&rel_display), chunk_target) {
+            if c.content.trim().is_empty() {
+                continue;
+            }
+            local.push(LocalChunk {
+                file_path: rel_display.clone(),
+                content_hash: content_hash(&c.content),
+            });
+        }
+    }
+
+    // The one authoritative dirty/clean call -- see the doc comment above.
+    let dirty = dirty_paths(&main_refs, &local);
+
+    // Pass 2: re-walk, materialising full chunk content only for dirty files.
+    let mut pending: Vec<CodePayload> = Vec::new();
+    let mut local_delta_ids: HashSet<String> = HashSet::new();
+    let mut added = 0usize;
+    let ignore_matcher2 = crate::embed::build_ignore_matcher(worktree_root, ignore_patterns);
+    for entry in ignore::WalkBuilder::new(worktree_root)
+        .hidden(false)
+        .filter_entry(move |e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if e.file_name()
+                .to_str()
+                .is_some_and(|n| is_always_skipped(n, is_dir))
+            {
+                return false;
+            }
+            !ignore_matcher2.matched(e.path(), is_dir).is_ignore()
+        })
+        .build()
+        .filter_map(|e| e.ok())
+    {
+        let Some(ft) = entry.file_type() else {
+            continue;
+        };
+        if !ft.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let Some(lang) = crate::embed::lang_for_ext(ext) else {
+            continue;
+        };
+        let rel_path = path.strip_prefix(worktree_root).unwrap_or(path);
+        let rel_display = to_forward_slash(rel_path);
+        if rel_display.is_empty() || !dirty.paths.contains(&rel_display) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        for c in split_file(&source, lang, Path::new(&rel_display), chunk_target) {
+            if c.content.trim().is_empty() {
+                continue;
+            }
+            let hash = content_hash(&c.content);
+            let did = chunk_id(&delta_id, Path::new(&rel_display), &hash);
+            // Every dirty local chunk id participates in the delta's own
+            // delete-set diff below, even when it's already indexed and
+            // skipped for re-embedding.
+            local_delta_ids.insert(did.clone());
+            // The delta already has this exact content -- skip re-embedding,
+            // mirroring stream_index's own incremental skip.
+            if delta_ids_present.contains(did.as_str()) {
+                continue;
+            }
+            pending.push(CodePayload {
+                project_id: delta_id.clone(),
+                file_path: rel_display.clone(),
+                language: lang.into(),
+                start_line: c.start_line as i64,
+                end_line: c.end_line as i64,
+                ast_header: c.metadata.unwrap_or_default(),
+                content: c.content,
+                content_hash: hash,
+                last_indexed_commit: String::new(),
+                chunk_id: did,
+            });
+            if pending.len() >= flush_batch {
+                added += flush_pending(embedder, store, collection, &mut pending).await?;
+            }
+        }
+    }
+    if !pending.is_empty() {
+        added += flush_pending(embedder, store, collection, &mut pending).await?;
+    }
+
+    // Prune delta chunks that are no longer part of the current dirty set (a
+    // file went from dirty back to clean, or a dirty file's chunk boundaries
+    // shifted).
+    let to_delete: Vec<String> = delta_refs
+        .iter()
+        .filter(|c| !local_delta_ids.contains(c.chunk_id.as_str()))
+        .map(|c| c.chunk_id.clone())
+        .collect();
+    let deleted = to_delete.len();
+    if !to_delete.is_empty() {
+        store
+            .delete_chunks(collection, &delta_id, &to_delete)
+            .await?;
+    }
+
+    // Record the dirty set so the query path knows what main must not be asked
+    // for. MUST go through `write_index_state_with_dirty`, never plain
+    // `write_index_state` -- see the routing guard in `sync_project`.
+    let dirty_vec: Vec<String> = dirty.paths.iter().cloned().collect();
+    if let Err(e) =
+        crate::retrieval::index_state::write_index_state_with_dirty(worktree_root, &dirty_vec)
+    {
+        tracing::warn!(error = %e, "worktree index-state write failed");
+    }
+
+    Ok(SyncReport {
+        added,
+        deleted,
+        updated: 0,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+
 impl crate::retrieval::client::RetrievalClient {
     pub async fn sync_project(
         &self,
@@ -390,8 +629,25 @@ impl crate::retrieval::client::RetrievalClient {
         // (checkout/pull/HEAD move). Gated to *project* syncs — library syncs
         // leave record_index_state false so library checkouts aren't polluted.
         // Fail-soft: a sidecar write must never break the sync.
+        //
+        // MUST NOT call the plain `write_index_state` helper: it delegates to
+        // `write_index_state_with_dirty(root, &[])`, which would silently wipe a
+        // worktree's recorded dirty set if this ordinary project-sync path is
+        // ever invoked on a worktree's root -- e.g. the CLI binaries
+        // (`src/bin/sync_project.rs`, `src/main.rs`) call `sync_project` directly
+        // with no worktree awareness at all, and `sync_worktree` (the dedicated
+        // worktree path) is the only thing that is *supposed* to populate this
+        // list. Reading back whatever is currently on disk and re-writing it
+        // unchanged makes this path a no-op for an ordinary project (which never
+        // has a dirty set) and dirty-set-*preserving* for a worktree, regardless
+        // of why this path got called on one.
         if opts.record_index_state {
-            if let Err(e) = crate::retrieval::index_state::write_index_state(root) {
+            let existing_dirty = crate::retrieval::index_state::read_index_state(root)
+                .map(|s| s.dirty_paths)
+                .unwrap_or_default();
+            if let Err(e) =
+                crate::retrieval::index_state::write_index_state_with_dirty(root, &existing_dirty)
+            {
                 tracing::warn!(error = %e, "failed to write index-state sidecar");
             }
         }
@@ -498,13 +754,19 @@ mod tests {
         assert_eq!(delta, "codescout_peer-delegation");
     }
 
+    #[derive(Default)]
     /// Records every `upsert_chunks` batch size + the refs it upserted, so a test
     /// can assert the indexer flushes in bounded batches (regression guard for the
     /// 68 GB OOM: docs/issues/2026-06-19-mcp-server-oom-68gb.md).
-    #[derive(Default)]
     struct RecordingStore {
         upsert_batches: Mutex<Vec<usize>>,
         upserted: Mutex<Vec<ChunkRef>>,
+        /// `project_id` each entry in `upserted` was written under, same index
+        /// correspondence as `upserted`. Additive: existing tests only read
+        /// `upserted`/`upsert_batches` directly. Backs `chunk_refs`'s project
+        /// filter and the `upserted_project_ids`/`upserted_file_paths` helpers a
+        /// worktree-sync test uses to assert on what a sync itself wrote.
+        upserted_projects: Mutex<Vec<String>>,
         deleted: Mutex<Vec<String>>,
         /// Reported by `collection_dim`. `None` (the default) means "no index
         /// yet" — a test overrides it to `Some(n)` to exercise `guard_index_dim`
@@ -516,6 +778,13 @@ mod tests {
         /// the bare `config.model_dim.unwrap_or(DEFAULT_MODEL_DIM)` this sibling
         /// used to use, without needing to inspect a real Qdrant collection.
         ensured_dim: Mutex<Option<u64>>,
+        /// Baseline chunks seeded via `seeded_for_main`, standing in for "main's
+        /// index already has these bytes" before the call under test runs. Kept
+        /// separate from `upserted` so a worktree-sync test can assert on what
+        /// the sync ITSELF wrote without the seed polluting the answer.
+        /// `(project_id, ref)` pairs; `chunk_refs` unions this (filtered by the
+        /// queried project_id) with whatever `upsert_chunks` has recorded.
+        seeded: Mutex<Vec<(String, ChunkRef)>>,
     }
 
     #[async_trait::async_trait]
@@ -524,8 +793,27 @@ mod tests {
             *self.ensured_dim.lock().unwrap() = Some(d);
             Ok(())
         }
-        async fn chunk_refs(&self, _c: &str, _p: &str) -> Result<Vec<ChunkRef>> {
-            Ok(self.upserted.lock().unwrap().clone())
+        async fn chunk_refs(&self, _c: &str, p: &str) -> Result<Vec<ChunkRef>> {
+            // Union the seeded baseline (filtered to the queried project) with
+            // whatever `upsert_chunks` has actually recorded under that project
+            // -- see the `seeded` field's doc comment on why these stay separate.
+            let mut out: Vec<ChunkRef> = self
+                .seeded
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(proj, _)| proj == p)
+                .map(|(_, r)| r.clone())
+                .collect();
+            let refs = self.upserted.lock().unwrap();
+            let projs = self.upserted_projects.lock().unwrap();
+            out.extend(
+                refs.iter()
+                    .zip(projs.iter())
+                    .filter(|(_, proj)| proj.as_str() == p)
+                    .map(|(r, _)| r.clone()),
+            );
+            Ok(out)
         }
         async fn upsert_chunks(
             &self,
@@ -534,12 +822,14 @@ mod tests {
         ) -> Result<()> {
             self.upsert_batches.lock().unwrap().push(chunks.len());
             let mut u = self.upserted.lock().unwrap();
+            let mut up = self.upserted_projects.lock().unwrap();
             for (p, _) in chunks {
                 u.push(ChunkRef {
                     chunk_id: p.chunk_id.clone(),
                     content_hash: p.content_hash.clone(),
                     file_path: p.file_path.clone(),
                 });
+                up.push(p.project_id.clone());
             }
             Ok(())
         }
@@ -572,6 +862,62 @@ mod tests {
 
         async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
             Ok(*self.dim.lock().unwrap())
+        }
+    }
+
+    impl RecordingStore {
+        /// Seed the double as if `project`'s index already holds these files,
+        /// chunked and hashed exactly as a real sync would (via the same
+        /// `split_file` + `content_hash` a production walk uses), so a
+        /// worktree-sync test can set up "main already has these bytes" without
+        /// running a real sync first. Written into `seeded`, never `upserted` --
+        /// see that field's doc comment.
+        fn seeded_for_main(project: &str, files: &[(&str, &str)]) -> Self {
+            let store = Self::default();
+            let mut seeded = store.seeded.lock().unwrap();
+            for (path, content) in files {
+                let ext = Path::new(path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                let lang = crate::embed::lang_for_ext(ext).unwrap_or("text");
+                for c in crate::embed::ast_chunker::split_file(content, lang, Path::new(path), 1200)
+                {
+                    if c.content.trim().is_empty() {
+                        continue;
+                    }
+                    let hash = content_hash(&c.content);
+                    seeded.push((
+                        project.to_string(),
+                        ChunkRef {
+                            chunk_id: chunk_id(project, Path::new(path), &hash),
+                            content_hash: hash,
+                            file_path: path.to_string(),
+                        },
+                    ));
+                }
+            }
+            drop(seeded);
+            store
+        }
+
+        /// `project_id` each upserted chunk was written under, in upsert order.
+        /// Excludes anything set up via `seeded_for_main` -- this answers "what
+        /// did the call under test itself write", which is what a worktree-sync
+        /// test needs to assert it never wrote under main's project_id.
+        fn upserted_project_ids(&self) -> Vec<String> {
+            self.upserted_projects.lock().unwrap().clone()
+        }
+
+        /// `file_path` of each upserted chunk, in upsert order. Same exclusion of
+        /// seeded state as `upserted_project_ids`.
+        fn upserted_file_paths(&self) -> Vec<String> {
+            self.upserted
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|c| c.file_path.clone())
+                .collect()
         }
     }
 
@@ -927,6 +1273,73 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn worktree_sync_embeds_only_dirty_files_and_records_them() {
+        // Fixture is BUILT, never assumed: a worktree that exists only on the
+        // developer's machine is not a test. Pattern copied from
+        // src/prompts/mod.rs:774 (detect_worktree_info_identifies_linked_worktree).
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        let wt = tmp.path().join("wt");
+        let meta = main.join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&meta).unwrap();
+        std::fs::write(meta.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::create_dir_all(wt.join("src")).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", meta.display())).unwrap();
+
+        // main's index already holds src/same.rs with the SAME bytes the worktree
+        // has, src/gone.rs (which the worktree does not have at all), and
+        // src/changed.rs at an OLDER version than what's on disk in the worktree.
+        std::fs::write(wt.join("src").join("same.rs"), "fn same() {}\n").unwrap();
+        std::fs::write(wt.join("src").join("changed.rs"), "fn changed_v2() {}\n").unwrap();
+
+        let store = RecordingStore::seeded_for_main(
+            "codescout",
+            &[
+                ("src/same.rs", "fn same() {}\n"),
+                ("src/gone.rs", "fn gone() {}\n"),
+                ("src/changed.rs", "fn changed_v1() {}\n"),
+            ],
+        );
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+
+        sync_worktree(&store, &wt, "codescout", "coll", &emb, &[])
+            .await
+            .unwrap();
+
+        let upserted = store.upserted_project_ids();
+        assert!(
+            !upserted.is_empty(),
+            "the changed file must have produced at least one upsert"
+        );
+        assert!(
+            upserted.iter().all(|p| p == "codescout@wt"),
+            "a worktree sync must never write under main's project_id, got {upserted:?}"
+        );
+        let files = store.upserted_file_paths();
+        assert!(files.contains(&"src/changed.rs".to_string()));
+        assert!(
+            !files.contains(&"src/same.rs".to_string()),
+            "identical bytes must reuse main's vector, not be re-embedded"
+        );
+        assert!(
+            !files.contains(&"src/gone.rs".to_string()),
+            "a file absent from the worktree has nothing to embed"
+        );
+
+        let st = crate::retrieval::index_state::read_index_state(&wt).unwrap();
+        let dirty: std::collections::BTreeSet<_> = st.dirty_paths.iter().cloned().collect();
+        assert!(dirty.contains("src/changed.rs"));
+        assert!(
+            dirty.contains("src/gone.rs"),
+            "a file main holds and the worktree lacks must be excluded from main's results"
+        );
+        assert!(!dirty.contains("src/same.rs"));
+    }
+
     /// A `CodeVectorStore` whose `ensure_collection` sleeps briefly before
     /// returning. `sync_project` calls `ensure_collection` immediately after
     /// acquiring the index lock (before any real indexing work), so this gives
@@ -1206,6 +1619,54 @@ mod tests {
             Some(384),
             "must size the fresh collection from the unpinned local embedder's own \
              dimension (384), not the DEFAULT_MODEL_DIM compatibility constant (768)"
+        );
+    }
+
+    /// HUMAN RULING (Task 4 Important #2, carried forward into the worktree-sync
+    /// design): `sync_project`'s `record_index_state` write must never go through
+    /// the plain `write_index_state` helper, because that helper delegates to
+    /// `write_index_state_with_dirty(root, &[])` -- clearing any recorded dirty
+    /// set. `sync_worktree` is the only thing meant to populate that list, but
+    /// `sync_project` itself has no worktree awareness and is called directly by
+    /// the CLI binaries (`src/bin/sync_project.rs`, `src/main.rs`) with no
+    /// detection at all -- so the guard has to live in `sync_project`, not just
+    /// in the `index` tool's worktree branch. This test simulates a prior
+    /// worktree sync having already recorded a dirty set, then runs an ordinary
+    /// `sync_project` pass over the same root: the dirty set must survive.
+    /// Reverting the fix (using `write_index_state(root)` instead of reading back
+    /// and re-writing the existing `dirty_paths`) makes this assertion fail with
+    /// an empty vec.
+    #[tokio::test]
+    async fn sync_project_preserves_existing_dirty_paths_never_clears_via_plain_write_index_state()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        crate::retrieval::index_state::write_index_state_with_dirty(
+            dir.path(),
+            &["src/changed.rs".to_string()],
+        )
+        .unwrap();
+
+        let client = test_retrieval_client(RecordingStore::default());
+        let opts = SyncOpts {
+            record_index_state: true,
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+        client
+            .sync_project("some-project", dir.path(), opts)
+            .await
+            .expect("an empty project tree with an all-Ok store must sync cleanly");
+
+        let state = crate::retrieval::index_state::read_index_state(dir.path())
+            .expect("sidecar must still exist after the sync");
+        assert_eq!(
+            state.dirty_paths,
+            vec!["src/changed.rs".to_string()],
+            "an ordinary sync_project call must never clear a previously recorded \
+             dirty set -- it must route through write_index_state_with_dirty, \
+             never plain write_index_state"
         );
     }
 }
