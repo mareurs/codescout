@@ -18,8 +18,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-/// Bump when the on-disk shape changes. Consumers compare and degrade gracefully
-/// on a version they don't recognise.
+/// Bump when the on-disk shape changes. Purely informational today: no reader
+/// compares this value or branches on it -- a shape mismatch is silently
+/// tolerated (unknown JSON keys are ignored, missing ones default), not
+/// version-gated. See the `index-state.json` schema section of
+/// `docs/state-protocol.md`. If version-gated degradation is ever built, update
+/// this comment to describe the real mechanism rather than the aspiration.
 pub const INDEX_STATE_SCHEMA_VERSION: u32 = 2;
 
 /// The on-disk shape of `.codescout/index-state.json`.

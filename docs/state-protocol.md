@@ -89,7 +89,8 @@ now-frozen legacy `meta.last_indexed_commit`.
 {
   "last_indexed_commit": "<full git HEAD oid; empty string when the project root is not a git repo>",
   "last_indexed_at": "<RFC3339 timestamp>",
-  "schema_version": 1
+  "schema_version": 2,
+  "dirty_paths": ["<forward-slashed, project-relative path>", "..."]
 }
 ```
 
@@ -102,7 +103,19 @@ now-frozen legacy `meta.last_indexed_commit`.
   `git2::graph_ahead_behind`.
 - **Indeterminate freshness** (no sidecar, non-git root, recorded commit unresolvable) ⇒
   `git_sync` is omitted rather than reported as up-to-date.
-- `schema_version` lets consumers degrade gracefully on a shape they don't recognise.
+- `dirty_paths` (added in schema v2): project-relative paths this checkout's index
+  must NOT inherit from main's index — non-empty only for a worktree delta sync.
+  Forward-slashed, project-relative, identical in form to the `file_path` field on
+  an indexed chunk's payload (`src/retrieval/sync.rs::to_forward_slash`). A sidecar
+  written before this field existed has no `dirty_paths` key; readers treat an
+  absent key as an empty list (`#[serde(default)]` on the Rust struct), so a v1
+  sidecar keeps parsing rather than being read as "never indexed".
+- `schema_version` is **informational only** — no consumer compares it today. It
+  records the on-disk shape a sidecar was written under, but every known reader
+  (codescout's own `git_sync_status`, the companion session-start hook) reads
+  specific named fields directly and ignores unrecognised ones; none branches on
+  this value. If version-gated degradation is ever implemented, update this line
+  to describe the actual mechanism rather than the aspiration.
 
 > Covers *external* changes (checkout / pull / HEAD move) only; edits made *through*
 > codescout's own write tools are handled by the on-edit reindex
