@@ -707,6 +707,24 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
         out.push_str(&format_overflow(overflow));
     }
 
+    // State-condition fields (worktree not-indexed hint, drift/suspect notes,
+    // the pre-existing truncated_hint) must survive into this compact summary:
+    // it is the ONLY thing the caller sees when the full JSON gets buffered
+    // (`call_content`'s overflow path uses this fn's output verbatim as the
+    // summary), so a field that lives only in `val` and never here is
+    // invisible on any query whose results happen to be large.
+    for (field, label) in [
+        ("hint", "Hint"),
+        ("worktree_state_warning", "Warning"),
+        ("drift_note", "Note"),
+        ("truncated_hint", "Note"),
+    ] {
+        if let Some(text) = val[field].as_str() {
+            out.push('\n');
+            out.push_str(&format!("\n  {label}: {text}"));
+        }
+    }
+
     out
 }
 
@@ -1041,6 +1059,47 @@ mod worktree_search_tests {
         assert!(
             delta_exclude.is_empty(),
             "delta must exclude nothing -- it holds exactly the dirty files"
+        );
+    }
+
+    #[test]
+    fn format_semantic_search_surfaces_worktree_state_fields() {
+        // These fields are only reachable this way when the response is small
+        // enough to stay inline. When it's large enough to buffer,
+        // `call_content` builds its summary from THIS function's output, so a
+        // field this function doesn't mention is invisible to the caller even
+        // though it is sitting right there in the full JSON.
+        let val = serde_json::json!({
+            "results": [{"file_path": "src/a.rs", "start_line": 1, "end_line": 2, "content": "fn a() {}"}],
+            "total": 1,
+            "truncated": false,
+            "hint": "HINT-MARKER",
+            "worktree_state_warning": "SUSPECT-MARKER",
+            "drift_note": "DRIFT-MARKER",
+        });
+        let out = format_semantic_search(&val);
+        assert!(out.contains("HINT-MARKER"), "must surface hint: {out}");
+        assert!(
+            out.contains("SUSPECT-MARKER"),
+            "must surface worktree_state_warning: {out}"
+        );
+        assert!(
+            out.contains("DRIFT-MARKER"),
+            "must surface drift_note: {out}"
+        );
+    }
+
+    #[test]
+    fn format_semantic_search_omits_absent_state_fields() {
+        let val = serde_json::json!({
+            "results": [{"file_path": "src/a.rs", "start_line": 1, "end_line": 2, "content": "fn a() {}"}],
+            "total": 1,
+            "truncated": false,
+        });
+        let out = format_semantic_search(&val);
+        assert!(
+            !out.contains("Warning:") && !out.contains("Note:") && !out.contains("Hint:"),
+            "must not fabricate a label when the field is absent: {out}"
         );
     }
 }
