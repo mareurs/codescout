@@ -98,7 +98,12 @@ vec0 metadata column."* `exclude_paths` is the sibling field, not a new concept.
 - now harder: a worktree `index` walks and hashes the tree (what incremental sync
   already does — no embedding for unchanged content); sqlite's top-k stays
   approximate under exclusion, exactly as it already is for languages; `ChunkRef`
-  gains a field.
+  gains a field; and in the lite backend each worktree mints **a new database
+  file**, because `project_id` is the filename there (`sqlite_code_store.rs:70`).
+  That last one is small by volume but is duplication of a different *kind* than
+  approach A's — files rather than vectors — and it needs a cleanup story, since
+  Claude Code creates worktrees casually. See *Not in scope* for the adjacent open
+  bug about where such files land.
 
 **Change scenarios absorbed:** a third code store; per-branch or per-PR corpora;
 main's index lagging its own working tree.
@@ -308,6 +313,14 @@ Named so a reader does not read absence as oversight.
 - **Main's index lagging main's own working tree.** Pre-existing for every query
   against main. Content hashing means a worktree does not inherit it for clean
   paths, but this spec does not fix it for main itself.
+- **Where lite-backend database files are placed.**
+  `docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md` is open on
+  that subject and was filed independently of this design. This spec adds one DB
+  file per worktree in that backend, so read that bug before implementing the lite
+  half — it may constrain where the delta's DB may live, and it should be resolved
+  first rather than have this design multiply whatever it describes. Deleting a
+  worktree's delta (project drop / GC) is in scope for implementation but its
+  file-placement policy is that bug's to settle.
 
 ## References
 
