@@ -263,6 +263,7 @@ impl CodeVectorStore for SqliteVecCodeStore {
         _bm25_boost: f32,
         _disable_sparse: bool,
         exclude_languages: &[String],
+        exclude_paths: &[String],
     ) -> Result<Vec<Hit>> {
         let conn = self.conn_for(project_id)?;
         let conn = conn.lock();
@@ -277,24 +278,25 @@ impl CodeVectorStore for SqliteVecCodeStore {
         if !has_vec {
             return Ok(Vec::new());
         }
-        // KNN on the dense leg, then hydrate payload + filter language in Rust.
-        // `language` lives in the JOINed code_chunk, not the vec0 table, so the
-        // exclusion can't be pushed into the KNN (the server stack pre-filters it
-        // inside the search). vec0 returns exactly `k` nearest by distance, so when
-        // languages are excluded we widen `k` to give the post-filter headroom and
-        // avoid under-returning when excluded languages dominate the neighborhood.
-        // The caller (`SearchOpts`) already overfetches; this is extra cushion.
-        // Exact parity would require storing language as a vec0 metadata column.
-        let k = if exclude_languages.is_empty() {
+        // KNN on the dense leg, then hydrate payload + filter language/path in Rust.
+        // `language` and `file_path` live in the JOINed code_chunk, not the vec0
+        // table, so neither exclusion can be pushed into the KNN (the server stack
+        // pre-filters both inside the search). vec0 returns exactly `k` nearest by
+        // distance, so when either list is non-empty we widen `k` to give the
+        // post-filter headroom and avoid under-returning when excluded
+        // languages/paths dominate the neighborhood. The caller (`SearchOpts`)
+        // already overfetches; this is extra cushion. Exact parity would require
+        // storing language and file_path as vec0 metadata columns.
+        let k = if exclude_languages.is_empty() && exclude_paths.is_empty() {
             limit
         } else {
             limit.saturating_mul(4)
         };
         let mut stmt = conn.prepare(
             "SELECT v.distance, c.chunk_id, c.file_path, c.language, c.start_line, c.end_line, c.content
-               FROM code_vec v JOIN code_chunk c ON c.chunk_id = v.chunk_id
-              WHERE v.embedding MATCH vec_f32(?1) AND k = ?3 AND c.project_id = ?2
-              ORDER BY v.distance",
+                 FROM code_vec v JOIN code_chunk c ON c.chunk_id = v.chunk_id
+                WHERE v.embedding MATCH vec_f32(?1) AND k = ?3 AND c.project_id = ?2
+                ORDER BY v.distance",
         )?;
         let rows = stmt
             .query_map(
@@ -319,7 +321,9 @@ impl CodeVectorStore for SqliteVecCodeStore {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows
             .into_iter()
-            .filter(|(_, _, lang)| !exclude_languages.contains(lang))
+            .filter(|(_, hit, lang)| {
+                !exclude_languages.contains(lang) && !exclude_paths.contains(&hit.file_path)
+            })
             .map(|(_, hit, _)| hit)
             .collect())
     }
@@ -450,6 +454,7 @@ mod tests {
                 3.0,
                 true,
                 &[],
+                &[],
             )
             .await
             .unwrap();
@@ -523,6 +528,7 @@ mod tests {
                 3.0,
                 true,
                 &["markdown".to_string()],
+                &[],
             )
             .await
             .unwrap();
@@ -536,6 +542,120 @@ mod tests {
         assert_eq!(
             store.project_index_stats("c", "proj").await.unwrap(),
             (1, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn real_vec0_path_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecCodeStore::at(tmp.path().to_path_buf());
+        store
+            .upsert_chunks(
+                "c",
+                &[
+                    (
+                        payload("proj:a.rs:h1", "proj", "a.rs", "rust", "h1"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                    (
+                        payload("proj:b.rs:h2", "proj", "b.rs", "rust", "h2"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                ],
+            )
+            .await
+            .unwrap();
+
+        // "b.rs" excluded by path → only "a.rs" remains. Both directions matter: a
+        // guard asserted only in the negative direction passes whether or not it
+        // discriminates.
+        let hits = store
+            .query(
+                "c",
+                "proj",
+                &[1.0, 0.0],
+                &empty_sparse(),
+                10,
+                3.0,
+                true,
+                &[],
+                &["b.rs".to_string()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].file_path, "a.rs");
+    }
+
+    /// Pins the `k`-widening in `query`: vec0 returns exactly `k` nearest by raw
+    /// distance, so if the excluded chunk occupies one of the nearest `limit`
+    /// slots, a naive fetch of exactly `limit` candidates would post-filter down
+    /// to `limit - 1` even though enough non-excluded chunks exist to fill
+    /// `limit`. Widening `k` when `exclude_paths` is non-empty is what prevents
+    /// that under-return (sqlite_code_store.rs query, the `k` computation).
+    #[tokio::test]
+    async fn real_vec0_path_exclusion_does_not_starve_the_post_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecCodeStore::at(tmp.path().to_path_buf());
+
+        // 5 chunks at strictly increasing L2 distance from the query vector
+        // [1.0, 0.0]. "near.rs" is the single nearest neighbor.
+        store
+            .upsert_chunks(
+                "c",
+                &[
+                    (
+                        payload("p:near.rs:h0", "proj", "near.rs", "rust", "h0"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                    (
+                        payload("p:b.rs:h1", "proj", "b.rs", "rust", "h1"),
+                        embed(vec![0.9, 0.1]),
+                    ),
+                    (
+                        payload("p:c.rs:h2", "proj", "c.rs", "rust", "h2"),
+                        embed(vec![0.8, 0.2]),
+                    ),
+                    (
+                        payload("p:d.rs:h3", "proj", "d.rs", "rust", "h3"),
+                        embed(vec![0.7, 0.3]),
+                    ),
+                    (
+                        payload("p:e.rs:h4", "proj", "e.rs", "rust", "h4"),
+                        embed(vec![0.6, 0.4]),
+                    ),
+                ],
+            )
+            .await
+            .unwrap();
+
+        // Excluding the nearest neighbor must not shrink the result below what's
+        // actually available: 5 chunks total, 1 excluded, request 4 → 4 back.
+        let hits = store
+            .query(
+                "c",
+                "proj",
+                &[1.0, 0.0],
+                &empty_sparse(),
+                4,
+                3.0,
+                true,
+                &[],
+                &["near.rs".to_string()],
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            hits.iter().all(|h| h.file_path != "near.rs"),
+            "excluded path must not appear in results"
+        );
+        assert_eq!(
+            hits.len(),
+            4,
+            "4 non-excluded chunks exist and `limit` is 4 — a naive top-`limit` \
+         fetch (no k widening) would return only 3 because the excluded \
+         chunk occupies the nearest slot"
         );
     }
 
@@ -599,6 +719,7 @@ mod tests {
                 10,
                 3.0,
                 true,
+                &[],
                 &[],
             )
             .await

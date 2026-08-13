@@ -485,6 +485,7 @@ mod tests {
             _bm25: f32,
             _disable_sparse: bool,
             _excl: &[String],
+            _paths: &[String],
         ) -> Result<Vec<Hit>> {
             Ok(vec![])
         }
@@ -890,6 +891,7 @@ mod tests {
             _bm25: f32,
             _disable_sparse: bool,
             _excl: &[String],
+            _paths: &[String],
         ) -> Result<Vec<Hit>> {
             Ok(vec![])
         }

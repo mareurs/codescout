@@ -251,7 +251,7 @@ impl Tool for SemanticSearch {
             return Err(crate::tools::RecoverableError::with_hint(
                 "library scope is not yet supported by the Qdrant retrieval stack",
                 "Track L-12 in docs/trackers/2026-05-07-legacy-retrieval-removal.md; \
-                 use `symbols(name=...)` against the library project as a workaround.",
+             use `symbols(name=...)` against the library project as a workaround.",
             )
             .into());
         }
@@ -291,6 +291,7 @@ impl Tool for SemanticSearch {
                 "full" => Vec::new(),
                 _ => vec!["markdown".to_string()],
             },
+            exclude_paths: Vec::new(),
         };
         if let Some(p) = ctx.progress.as_ref() {
             p.report_text("searching").await;

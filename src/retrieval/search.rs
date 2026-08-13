@@ -45,6 +45,10 @@ pub struct SearchOpts {
     /// Payload `language` values to exclude (Qdrant `must_not` clause). Used by
     /// `semantic_search(mode="code")` to drop markdown noise. Empty = no filter.
     pub exclude_languages: Vec<String>,
+    /// Payload `file_path` values to exclude (Qdrant `must_not`; post-filtered in
+    /// the lite store). Set by worktree search to paths the worktree changed;
+    /// empty = no filter.
+    pub exclude_paths: Vec<String>,
 }
 
 impl SearchOpts {
@@ -54,6 +58,7 @@ impl SearchOpts {
             overfetch: limit * 2,
             rerank: true,
             exclude_languages: Vec::new(),
+            exclude_paths: Vec::new(),
         }
     }
 }
@@ -65,6 +70,7 @@ impl Default for SearchOpts {
             overfetch: 20,
             rerank: true,
             exclude_languages: Vec::new(),
+            exclude_paths: Vec::new(),
         }
     }
 }
@@ -107,6 +113,7 @@ impl RetrievalClient {
                 self.config.bm25_boost,
                 self.config.disable_sparse,
                 &opts.exclude_languages,
+                &opts.exclude_paths,
             )
             .await?;
         timer.lap("vector_query");
@@ -269,6 +276,7 @@ mod dim_guard_tests {
             _bm25: f32,
             _disable_sparse: bool,
             _excl: &[String],
+            _paths: &[String],
         ) -> Result<Vec<Hit>> {
             self.queried.store(true, Ordering::SeqCst);
             Ok(vec![])

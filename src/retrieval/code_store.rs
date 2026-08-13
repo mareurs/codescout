@@ -47,6 +47,9 @@ pub trait CodeVectorStore: Send + Sync {
 
     /// Query: hybrid dense+sparse RRF, or pure-dense ANN when `disable_sparse`.
     /// `exclude_languages` drops hits whose payload `language` is in the list.
+    /// `exclude_paths` drops hits whose payload `file_path` is in the list. Used by
+    /// worktree search to suppress main's chunks for files the worktree changed;
+    /// the worktree's delta project supplies those paths instead.
     #[allow(clippy::too_many_arguments)]
     async fn query(
         &self,
@@ -58,6 +61,7 @@ pub trait CodeVectorStore: Send + Sync {
         bm25_boost: f32,
         disable_sparse: bool,
         exclude_languages: &[String],
+        exclude_paths: &[String],
     ) -> Result<Vec<Hit>>;
 
     /// `(chunk_count, file_count)` for `project_id`.
@@ -190,6 +194,7 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
         bm25_boost: f32,
         disable_sparse: bool,
         exclude_languages: &[String],
+        exclude_paths: &[String],
     ) -> Result<Vec<Hit>> {
         self.hybrid_query(
             collection,
@@ -200,6 +205,7 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
             bm25_boost,
             disable_sparse,
             exclude_languages,
+            exclude_paths,
         )
         .await
     }
@@ -355,6 +361,7 @@ mod tests {
             _bm25_boost: f32,
             _disable_sparse: bool,
             exclude_languages: &[String],
+            exclude_paths: &[String],
         ) -> Result<Vec<Hit>> {
             let mut scored: Vec<(f32, CodePayload)> = self
                 .chunks
@@ -362,6 +369,7 @@ mod tests {
                 .iter()
                 .filter(|(p, _)| p.project_id == project_id)
                 .filter(|(p, _)| !exclude_languages.contains(&p.language))
+                .filter(|(p, _)| !exclude_paths.contains(&p.file_path))
                 .map(|(p, v)| (cosine(dense, v), p.clone()))
                 .collect();
             scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -469,6 +477,7 @@ mod tests {
                 10,
                 3.0,
                 true,
+                &[],
                 &[],
             )
             .await
@@ -624,12 +633,64 @@ mod tests {
                 3.0,
                 true,
                 &["markdown".to_string()],
+                &[],
             )
             .await
             .unwrap();
         // "m" excluded by language, "x" excluded by project → only "a"
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].chunk_id, "a");
+    }
+
+    #[tokio::test]
+    async fn contract_query_excludes_paths() {
+        // The worktree design serves main's vectors for every path EXCEPT the ones the
+        // worktree changed. That exclusion is a store-level contract, so both backends
+        // must honour it.
+        let store = InMemoryCodeStore::default();
+        store
+            .upsert_chunks(
+                "c",
+                &[
+                    (
+                        payload("keep", "proj", "src/keep.rs", "rust", "h1"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                    (
+                        payload("drop", "proj", "src/drop.rs", "rust", "h2"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let hits = store
+            .query(
+                "c",
+                "proj",
+                &[1.0, 0.0],
+                &SparseVector {
+                    indices: vec![],
+                    values: vec![],
+                },
+                10,
+                3.0,
+                true,
+                &[],
+                &["src/drop.rs".to_string()],
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            hits.iter().all(|h| h.file_path != "src/drop.rs"),
+            "excluded path must not appear in results"
+        );
+        assert!(
+            hits.iter().any(|h| h.file_path == "src/keep.rs"),
+            "exclusion must not empty the result set — the accepting case needs pinning too"
+        );
     }
 
     /// Review round-2 I4: `dense_vector_size` is a pure function over plain

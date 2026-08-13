@@ -415,6 +415,7 @@ async fn create_semantic_anchors(
         // unavailable.
         rerank: true,
         exclude_languages: vec!["markdown".to_string()],
+        exclude_paths: Vec::new(),
     };
     let hits = client.search_code(&project_id, content, opts).await?;
 

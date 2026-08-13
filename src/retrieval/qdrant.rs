@@ -310,7 +310,9 @@ impl QdrantWrap {
     /// 1.0 = equal weight; 2.0 = sparse fetches 2× more candidates before RRF.
     /// `disable_sparse` skips the sparse leg entirely → pure dense ANN ranking.
     /// `exclude_languages` adds a `must_not` clause on the payload `language`
-    /// field (empty = no filter). Used for `semantic_search(mode="code")`.
+    /// field (empty = no filter). `exclude_paths` adds a `must_not` clause on the
+    /// payload `file_path` field (empty = no filter). Used for
+    /// `semantic_search(mode="code")` and worktree search respectively.
     #[allow(clippy::too_many_arguments)]
     pub async fn hybrid_query(
         &self,
@@ -322,12 +324,18 @@ impl QdrantWrap {
         bm25_boost: f32,
         disable_sparse: bool,
         exclude_languages: &[String],
+        exclude_paths: &[String],
     ) -> Result<Vec<crate::retrieval::search::Hit>> {
         let must = vec![Condition::matches("project_id", project_id.to_string())];
-        let must_not: Vec<Condition> = exclude_languages
+        let mut must_not: Vec<Condition> = exclude_languages
             .iter()
             .map(|l| Condition::matches("language", l.clone()))
             .collect();
+        must_not.extend(
+            exclude_paths
+                .iter()
+                .map(|p| Condition::matches("file_path", p.clone())),
+        );
         let filter = Filter {
             must,
             must_not,
@@ -454,6 +462,93 @@ mod tests {
 
         // Idempotent — second call must not error.
         wrap.ensure_collection(coll, 384).await.expect("idempotent");
+
+        // Cleanup.
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
+
+    /// Full E2E test — requires a running Qdrant instance. `hybrid_query`'s
+    /// `must_not` clause has no coverage anywhere else in the suite (the
+    /// contract tests in code_store.rs run only against `InMemoryCodeStore`),
+    /// so this is what stands between a broken filter and a silent regression
+    /// on the backend most worktree-search users run.
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_hybrid_query_excludes_paths
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_hybrid_query_excludes_paths() {
+        use crate::retrieval::embedder::{EmbedOutput, SparseVector};
+        use crate::retrieval::payload::{payload_to_map, CodePayload};
+
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+
+        let coll = "test_hybrid_query_excludes_paths";
+
+        // Clean up from any previous run.
+        let _ = wrap.client.delete_collection(coll).await;
+        wrap.ensure_collection(coll, 2).await.expect("ensure");
+
+        let payload = |file: &str, chunk_id: &str| CodePayload {
+            project_id: "proj".into(),
+            file_path: file.into(),
+            language: "rust".into(),
+            start_line: 1,
+            end_line: 2,
+            ast_header: String::new(),
+            content: format!("content of {chunk_id}"),
+            content_hash: "h".into(),
+            last_indexed_commit: String::new(),
+            chunk_id: chunk_id.into(),
+        };
+        let embed = |dense: Vec<f32>| EmbedOutput {
+            dense,
+            sparse: SparseVector {
+                indices: vec![],
+                values: vec![],
+            },
+        };
+
+        let points = vec![
+            (
+                "keep".to_string(),
+                payload_to_map(&payload("src/keep.rs", "keep")),
+                embed(vec![1.0, 0.0]),
+            ),
+            (
+                "drop".to_string(),
+                payload_to_map(&payload("src/drop.rs", "drop")),
+                embed(vec![1.0, 0.0]),
+            ),
+        ];
+        wrap.upsert_points(coll, &points).await.expect("upsert");
+
+        let hits = wrap
+            .hybrid_query(
+                coll,
+                "proj",
+                &[1.0, 0.0],
+                &SparseVector {
+                    indices: vec![],
+                    values: vec![],
+                },
+                10,
+                3.0,
+                true,
+                &[],
+                &["src/drop.rs".to_string()],
+            )
+            .await
+            .expect("query");
+
+        assert!(
+            hits.iter().all(|h| h.file_path != "src/drop.rs"),
+            "excluded path must not appear in results"
+        );
+        assert!(
+            hits.iter().any(|h| h.file_path == "src/keep.rs"),
+            "exclusion must not empty the result set — the accepting case needs pinning too"
+        );
 
         // Cleanup.
         wrap.client.delete_collection(coll).await.unwrap();
