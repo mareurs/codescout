@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 /// Bump when the on-disk shape changes. Consumers compare and degrade gracefully
 /// on a version they don't recognise.
-pub const INDEX_STATE_SCHEMA_VERSION: u32 = 1;
+pub const INDEX_STATE_SCHEMA_VERSION: u32 = 2;
 
 /// The on-disk shape of `.codescout/index-state.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +31,17 @@ pub struct IndexState {
     /// RFC3339 timestamp of the sync completion that wrote this state.
     pub last_indexed_at: String,
     pub schema_version: u32,
+    /// Project-relative paths this checkout must NOT inherit from the main index.
+    /// Forward-slashed, project-relative -- identical in form to
+    /// [`crate::retrieval::drift::ChunkRef::file_path`] (the indexer writes it via
+    /// `to_forward_slash(rel_path)` at `src/retrieval/sync.rs:207`). Non-empty only
+    /// for a worktree delta sync.
+    ///
+    /// `#[serde(default)]` is load-bearing: without it, a sidecar written before
+    /// this field existed fails to parse, and [`read_index_state`] reads a failed
+    /// parse as "no sidecar" -- i.e. "never indexed" -- for the whole project.
+    #[serde(default)]
+    pub dirty_paths: Vec<String>,
 }
 
 fn state_path(root: &Path) -> PathBuf {
@@ -53,10 +64,18 @@ fn head_commit_full(root: &Path) -> Option<String> {
 /// log-and-continue. A non-git root records an empty commit, which
 /// [`git_sync_status`] reads as "freshness indeterminate".
 pub fn write_index_state(root: &Path) -> std::io::Result<()> {
+    write_index_state_with_dirty(root, &[])
+}
+
+/// As [`write_index_state`], additionally recording the paths a worktree's delta
+/// sync must not inherit from the main index. See the worktree sync mode in
+/// `sync.rs`.
+pub fn write_index_state_with_dirty(root: &Path, dirty: &[String]) -> std::io::Result<()> {
     let state = IndexState {
         last_indexed_commit: head_commit_full(root).unwrap_or_default(),
         last_indexed_at: chrono::Utc::now().to_rfc3339(),
         schema_version: INDEX_STATE_SCHEMA_VERSION,
+        dirty_paths: dirty.to_vec(),
     };
     std::fs::create_dir_all(root.join(".codescout"))?;
     let body = serde_json::to_string_pretty(&state).map_err(std::io::Error::other)?;
@@ -189,5 +208,33 @@ mod tests {
         commit(tmp.path(), "a.txt", "A", "first");
         // No write_index_state call → no sidecar on disk.
         assert!(git_sync_status(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn dirty_paths_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        write_index_state_with_dirty(root, &["src/a.rs".to_string()]).unwrap();
+        let st = read_index_state(root).expect("sidecar should exist");
+        assert_eq!(st.dirty_paths, vec!["src/a.rs".to_string()]);
+    }
+
+    #[test]
+    fn sidecar_written_before_dirty_paths_existed_still_parses() {
+        // Back-compat: an existing .codescout/index-state.json has no dirty_paths
+        // key. It must read as an empty list, not fail the whole parse and silently
+        // make every project look unindexed.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(
+            root.join(".codescout").join("index-state.json"),
+            r#"{"last_indexed_commit":"abc","last_indexed_at":"2026-08-01T00:00:00Z","schema_version":1}"#,
+        )
+        .unwrap();
+        let st = read_index_state(root).expect("old sidecar must still parse");
+        assert!(st.dirty_paths.is_empty());
+        assert_eq!(st.last_indexed_commit, "abc");
     }
 }
