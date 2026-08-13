@@ -56,6 +56,17 @@ pub struct DirtySet {
     /// Paths to pass as `exclude_paths` when querying main's `project_id`.
     pub paths: BTreeSet<String>,
     /// Indices into the `local` slice: the chunks to embed under the delta id.
+    ///
+    /// No production caller reads this today. `sync_worktree`
+    /// (`src/retrieval/sync.rs`) selects what to embed by testing
+    /// `paths.contains(rel_display)` against a re-walked file list instead --
+    /// its second pass re-visits files rather than holding the `local` slice
+    /// this field indexes into, so an index into a slice it never keeps
+    /// around would be meaningless there. This field is retained for a
+    /// caller that DOES hold `local` in memory (a single-pass design), for
+    /// which it is the cheaper selection: an index comparison instead of a
+    /// set-membership string lookup per chunk. Referenced only by this
+    /// module's own unit tests below.
     pub to_embed: Vec<usize>,
 }
 

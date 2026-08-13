@@ -344,7 +344,9 @@ impl Tool for IndexProject {
                         &main_project_id,
                         &collection,
                         &*client.embedder,
+                        force,
                         &ignore_patterns,
+                        None,
                     )
                     .await?;
 
