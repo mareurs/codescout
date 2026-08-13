@@ -1,7 +1,7 @@
 ---
 id: '2b33e87e487ea469'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a configured url silently discards a `local-dir:` model — the offline guarantee fails open, and the crate''s own hard-error guard is unreachable from the retrieval path'
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - config-precedence
 - guard-unbound
 topic: local-onnx-embedding
+closed: 2026-08-13
 ---
 
 ## Summary
@@ -180,27 +181,60 @@ created `FLOAT[384]`, stored 5 rows, 38 ms, no network.
 
 ## Fix
 
-Not yet implemented. Plan — the contradiction should be caught at the seam that
-actually decides, i.e. in `RetrievalClient::build_embedder` before the `url` branch:
+Fixed on `experiments`-track branch `feat/local-onnx-query-path` at **`38e0980b`**.
 
-Reject `url` + a `local:`/`local-dir:` model as a `RecoverableError` naming both
-values and how to resolve it (drop the url, or drop the prefix). `backend_is_local`
-(`src/retrieval/client.rs`) already recognizes exactly these two prefixes, so the
-predicate exists; it is only consulted by `guard_sparse`/`dense_only` today.
+`RetrievalClient::guard_local_model_with_url` (`src/retrieval/client.rs`) rejects a
+configured url alongside a `local-dir:` model as a `RecoverableError` naming both
+operands, and — because the url may well have arrived from the startup dotenv rather
+than anything the operator typed — the hint points at `~/.config/codescout/.env` and
+the `CODESCOUT_ENV_FILE` escape. It is called from `build_embedder` **before** the
+`if let Some(url)` branch; checking after it would be unreachable, which is the whole
+defect.
 
-Worth deciding alongside: whether a `local-dir:` model should make the startup
-dotenv's url *inapplicable* rather than merely conflicting, since the whole point
-of the prefix is a host that must not reach the network.
+**Scoped to `local-dir:` only — `local:` is deliberately excluded.** The first draft
+covered both prefixes and broke
+`agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`:
+`default_embed_model()` **is** `"local:AllMiniLML6V2Q"` (`src/config/project.rs:384-386`),
+so "url configured, model left unset" — an ordinary remote deployment — resolves to a
+`local:` model the operator never chose. Rejecting that would break every such
+deployment. `local-dir:` has no default, so it is unambiguously intent.
 
-A regression test must bind the guard to `build_embedder` itself — not to the pure
-predicate — mirroring `build_embedder_errors_for_a_local_backend_with_sparse_still_enabled`
-(`src/retrieval/client.rs:558-590`), which exists precisely because a guard tested
-only in isolation can be deleted from its call site with the suite green.
+The residual gap is recorded rather than hidden: **a url still silently wins over an
+explicitly-chosen `local:` model.** Closing it needs provenance ("was this model the
+default?") threaded from `merge_embed_config` (`src/retrieval/config.rs`) into
+`RetrievalConfig`. That is a separate change and is not attempted here.
 
+Note the original Fix plan in this file proposed reusing `backend_is_local`. That was
+wrong: `backend_is_local` requires `embedder_url.is_none()`, so it is false precisely
+when the conflict exists. Caught while reading the code, before writing it.
 ## Tests added
 
-None yet — bug filed on discovery, fix not started.
+All in `src/retrieval/client.rs`, module `selection_tests`:
 
+- `build_embedder_rejects_a_url_combined_with_a_local_dir_model` — the regression test.
+  Asserts the error **class** (`RecoverableError`, so isError: false keeps sibling
+  parallel tool calls alive) and that the message names **both** the url and the model.
+- `build_embedder_accepts_a_url_with_the_defaulted_local_model` — the complement, and a
+  regression guard for the break the first draft caused. It asserts its own premise
+  (`default_embed_model() == "local:AllMiniLML6V2Q"`) so that changing the default
+  forces a re-derivation rather than silently invalidating the reasoning.
+- `build_embedder_still_accepts_a_url_with_an_ordinary_model` — no-false-positive guard.
+
+**Mutation-verified.** Deleting the `Self::guard_local_model_with_url(config)?;` call
+site does **not** produce an `is_err()` failure — execution falls through to the url
+branch, builds an `EmbedderHttp`, and returns `Ok`. The test dies at its
+`Ok(_) => panic!` arm instead. This matters: an `is_err()`-only assertion would have
+passed against the buggy code, because the bug's signature was that **nothing errored**.
+Re-run under mutation 2026-08-13: exactly 1 of 19 `selection_tests` fails, the other two
+new tests survive (confirming they test the complement, not the same thing).
+
+End-to-end on the release binary, 2026-08-13:
+
+- the original silent invocation now exits 1 with the conflict error
+- the hermetic offline invocation still indexes 5 chunks in 39 ms at `FLOAT[384]`
+
+Full suite with real ONNX weights and no skip flag: 3704 passed, 0 failed, 49 ignored.
+Clippy clean on `--workspace --all-targets --features local-embed`.
 ## Workarounds
 
 - Set `CODESCOUT_ENV_FILE` to a nonexistent path when running an offline/local-dir
@@ -213,14 +247,16 @@ None yet — bug filed on discovery, fix not started.
 
 ## Resume
 
-Add the conflict check to `RetrievalClient::build_embedder` (`src/retrieval/client.rs:131-163`)
-ahead of the `if let Some(url)` branch, returning `RecoverableError` when
-`backend_is_local(config)` and `config.embedder_url.is_some()`. Then write the
-call-site-bound regression test next to
-`build_embedder_errors_for_a_local_backend_with_sparse_still_enabled` and verify it
-fails when the new check is deleted — a guard whose deletion leaves the suite green
-is the exact defect this bug reports.
+N/A for the filed defect — fixed and verified at `38e0980b`.
 
+One deliberate residual, if it is ever worth closing: a url still silently overrides an
+**explicitly-configured** `local:` model, because the config cannot distinguish that from
+the default. The change would be to have `merge_embed_config` (`src/retrieval/config.rs`)
+report whether the model came from env / project.toml or from `default_embed_model()`,
+carry that on `RetrievalConfig`, and widen the guard to
+`!model_was_defaulted && model_names_local_backend(...)`.
+`build_embedder_accepts_a_url_with_the_defaulted_local_model` will fail the moment the
+guard widens without that provenance — which is the intended tripwire, not an obstacle.
 ## References
 
 - `crates/codescout-embed/src/lib.rs:180-186` — the crate-level hard error
@@ -229,4 +265,3 @@ is the exact defect this bug reports.
 - `tests/cli_artifact.rs:18-24` — prior art documenting the dotenv trap
 - `docs/trackers/local-onnx-embedding-session-log.md` — F-1 / W-2, the guard-unbound pattern
 - `docs/superpowers/specs/2026-08-11-local-onnx-embedding-query-path-design.md` — Approach A
-
