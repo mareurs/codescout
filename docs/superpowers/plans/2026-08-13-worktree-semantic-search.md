@@ -285,7 +285,10 @@ pub fn dirty_paths(main_refs: &[ChunkRef], local: &[LocalChunk]) -> DirtySet {
         .iter()
         .map(|r| (r.file_path.as_str(), r.content_hash.as_str()))
         .collect();
-    let local_paths: HashSet<&str> = local.iter().map(|c| c.file_path.as_str()).collect();
+    let local_pairs: HashSet<(&str, &str)> = local
+        .iter()
+        .map(|c| (c.file_path.as_str(), c.content_hash.as_str()))
+        .collect();
 
     let mut paths: BTreeSet<String> = BTreeSet::new();
 
@@ -295,9 +298,24 @@ pub fn dirty_paths(main_refs: &[ChunkRef], local: &[LocalChunk]) -> DirtySet {
             paths.insert(c.file_path.clone());
         }
     }
-    // A path main holds but disk does not: exclude it, embed nothing.
+    // Any main chunk whose exact bytes are not on disk dirties its file.
+    //
+    // This is a PAIR check, not a path check, and the distinction is load-bearing:
+    // a chunk deleted from a file that still EXISTS would pass a path check and be
+    // classified clean, so main would keep serving the deleted code with full
+    // confidence — the exact outcome this design exists to prevent. It is reachable
+    // because `content_hash` is content-only (`src/retrieval/sync.rs:195`), so the
+    // surviving chunks of a shrunk file keep their hashes; deleting the last symbol
+    // of a file is sufficient.
+    //
+    // The pair check subsumes the whole-file-deleted case, so no separate path check
+    // is needed. An empty `file_path` means "unknown", never "deleted": the Qdrant
+    // read at `src/retrieval/qdrant.rs:158-162` uses `unwrap_or_default()`, and an
+    // empty path can never exist on disk, so classifying it as deleted would be wrong.
     for r in main_refs {
-        if !local_paths.contains(r.file_path.as_str()) {
+        if !r.file_path.is_empty()
+            && !local_pairs.contains(&(r.file_path.as_str(), r.content_hash.as_str()))
+        {
             paths.insert(r.file_path.clone());
         }
     }
@@ -1069,4 +1087,3 @@ Commit the plugin-repo changes separately in that repo, prefixed `codescout-comp
 **Deliberate gaps, named rather than hidden.** Task 6's walk/chunk/embed regions point at existing machinery instead of reproducing `stream_index` — reproducing it would invite a forked chunker, which is a worse failure than a plan that says "reuse this". Task 3's contract-test helpers are named as "read the neighbouring test and copy" because inventing helper signatures that do not exist is the placeholder this plan is trying to avoid.
 
 **Type consistency.** `ChunkRef.file_path`, `LocalChunk.file_path`, `Hit.file_path`, the Qdrant payload key and the sqlite column are all `file_path`. `DirtySet.paths` is `BTreeSet<String>` throughout and is converted to `Vec<String>` exactly once, at the `write_index_state_with_dirty` boundary. `exclude_paths` is `&[String]` at the trait and `Vec<String>` on `SearchOpts`, matching `exclude_languages` in both positions.
-
