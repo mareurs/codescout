@@ -181,7 +181,16 @@ created `FLOAT[384]`, stored 5 rows, 38 ms, no network.
 
 ## Fix
 
-Fixed on `experiments`-track branch `feat/local-onnx-query-path` at **`38e0980b`**.
+Fixed at **`38e0980b`**, merged to `experiments` at **`e6484b16`**.
+
+No pending-master-SHA line: this reached `experiments` by **merge**, not cherry-pick, so
+`38e0980b` is the real commit in `experiments`' history and does not orphan. (Promotion of
+`experiments` to `master` is a separate decision and has not happened.)
+
+Verified on the merged tree, not only on the branch: full suite 3704 passed / 0 failed with
+real ONNX weights, clippy clean, and the release binary rebuilt from `e6484b16` reproduces
+both behaviours — the offline path indexes at `FLOAT[384]` in 37 ms, and the url-conflict
+path exits 1 with the guard's message.
 
 `RetrievalClient::guard_local_model_with_url` (`src/retrieval/client.rs`) rejects a
 configured url alongside a `local-dir:` model as a `RecoverableError` naming both

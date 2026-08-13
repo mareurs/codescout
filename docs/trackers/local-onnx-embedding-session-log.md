@@ -1,7 +1,7 @@
 ---
 id: '20e3e2dd94bc242e'
 kind: tracker
-status: draft
+status: done
 title: Session Log — Local ONNX Embedding Query Path
 owners:
 - marius
@@ -269,10 +269,32 @@ artifact it produced, not its exit code.*
 
 ## Resume — where this stands (2026-08-11)
 
-> **Partially superseded 2026-08-13 by the verification pass below.** The integration
-> decision is still outstanding and still the human's; the test figures here have moved on.
+> **CLOSED 2026-08-13 — merged to `experiments` at `e6484b16`.** Everything below this line
+> is the historical record of an outstanding decision that has since been made. Read the
+> Verification pass and Integration sections for the current state.
+
+### Integration — 2026-08-13
+
+Merged into `experiments` at **`e6484b16`** (50 commits + merge). Not a fast-forward:
+`experiments` had diverged by 6 docs-only commits, four of which were cherry-picked copies of
+this branch's own spec, plan and trackers made *before* its execution corrections landed.
+
+Four conflicts, **all docs, zero source conflicts**. Every one resolved to the branch side
+after verifying it was a strict superset rather than assuming it — for
+`reconnaissance-patterns.md` the set difference against `experiments` was computed and came
+back empty, so nothing was dropped. Detail in the merge commit message.
+
+Gate on the **merged** tree (not the branch): 3704 passed / 0 failed / 49 ignored with real
+ONNX weights, clippy clean on `--workspace --all-targets --features local-embed`,
+`cargo fmt --check` clean. Release binary rebuilt from the merge and re-verified end to end.
+
+`experiments` is now **51 commits ahead of `origin/experiments`, unpushed**. Promotion to
+`master` is a separate decision and has not been made. PR #13
+(`feat/local-onnx-embedder` → `experiments`) is still open and now superseded by content
+that reached `experiments` without it — its disposition is undecided.
 
 **The branch is complete and unmerged. One decision is outstanding: how to integrate it.**
+*(historical — resolved above)*
 
 - Branch `feat/local-onnx-query-path`, 32 commits, `b9a67d1d..cde42860`. Working tree clean.
 - Upstream is `origin/feat/local-onnx-embedder` — PR #13's branch — because this branch was cut
