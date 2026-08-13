@@ -80,6 +80,11 @@ pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String
 
 /// Project id for a worktree's delta index: the changed files only.
 ///
+/// `worktree_dir` MUST be a basename (e.g. `"wt"`), not a path — Task 6 writes
+/// chunks under this id and Task 7 queries them; if either passes a path where
+/// the other passes a basename, the two disagree on the id and the delta
+/// becomes invisible with no error (main silently serves stale chunks).
+///
 /// `@` rather than `:` deliberately — [`chunk_id`] joins on `:`, and the
 /// `delete_chunks` comment at `sqlite_code_store.rs:234-238` (pinned by the
 /// regression test `delete_resolves_db_by_project_id_not_chunk_prefix` at
@@ -102,9 +107,19 @@ pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String
 /// than a filename, so `@` survives unchanged there and no file-level
 /// aliasing occurs at all.
 ///
-/// What that column-filtering argument depends on, on both backends, is that
-/// this string is never *equal* to a real project's id — see
-/// `delta_project_id_is_distinct_and_separator_is_not_a_colon` below.
+/// The column-filtering argument above depends on this string never being
+/// *equal* to a real project's id. `delta_project_id_is_distinct_and_separator_is_not_a_colon`
+/// below only pins inequality against `main_project_id` itself — it says
+/// nothing about an unrelated project's id. That gap is real:
+/// `ProjectSection.name` (`src/config/project.rs:26`) is a bare, unvalidated
+/// `String`, and `ActiveProject::project_id()` (`src/agent/mod.rs:311-313`)
+/// returns it verbatim, so a project hand-named literally `"codescout@wt"`
+/// produces an id byte-identical to this function's output for
+/// `("codescout", "wt")` — same file AND same column value, a genuine row
+/// merge. This is not a new hole: it is the exact exposure `lib:{name}` ids
+/// already carry today (a project could be named `"lib:foo"` to collide
+/// with library `foo`), and is accepted on the same basis — no charset
+/// validation exists on project names, and this function does not add one.
 pub fn delta_project_id(main_project_id: &str, worktree_dir: &str) -> String {
     format!("{main_project_id}@{worktree_dir}")
 }
@@ -469,10 +484,13 @@ mod tests {
 
     #[test]
     fn delta_db_file_is_distinct_from_mains() {
-        // The lite store maps project_id to a FILENAME (sqlite_code_store.rs:70 ->
-        // sqlite_vec_ext::sanitize_db_name), and that map is not injective: every
-        // non-alphanumeric char collapses to '_'. Pin that the delta still lands in
-        // its own file, because sharing main's file would silently merge the two.
+        // This delta/main pair happens to also land in separate DB files on the
+        // lite (sqlite-vec) store, which maps project_id to a FILENAME via
+        // sanitize_db_name (sqlite_code_store.rs:70 -> sqlite_vec_ext::sanitize_db_name).
+        // That is a locality nicety pinned here for this pair, NOT a safety
+        // property: row isolation comes from the *unsanitized* project_id column
+        // filter (see delta_project_id's doc comment above), not from file
+        // separation, which this sanitizer does not guarantee in general.
         use crate::sqlite_vec_ext::sanitize_db_name;
         let main = sanitize_db_name("codescout");
         let delta = sanitize_db_name(&delta_project_id("codescout", "peer-delegation"));
