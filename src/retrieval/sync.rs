@@ -78,6 +78,37 @@ pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String
     format!("{project_id}:{}:{content_hash}", to_forward_slash(rel_path))
 }
 
+/// Project id for a worktree's delta index: the changed files only.
+///
+/// `@` rather than `:` deliberately — [`chunk_id`] joins on `:`, and the
+/// `delete_chunks` comment at `sqlite_code_store.rs:234-238` (pinned by the
+/// regression test `delete_resolves_db_by_project_id_not_chunk_prefix` at
+/// `sqlite_code_store.rs:663`) documents a real regression from colon-bearing
+/// project ids — library ids are `lib:{name}`. `@` keeps the delta id
+/// unambiguous under that join.
+///
+/// The lite (sqlite-vec) store additionally maps a project id to a DB *file*
+/// stem via [`crate::sqlite_vec_ext::sanitize_db_name`], which is NOT
+/// injective: every character outside `[A-Za-z0-9_-]` — including `@` —
+/// collapses to `_`. So `{main}@{worktree_dir}` can land in the same file a
+/// real project literally named `{main}_{worktree_dir}` would use, exactly as
+/// `lib:{name}` already aliases the file `lib_{name}` would use. That file
+/// aliasing is harmless, not a bug: every sqlite read additionally filters
+/// rows on the *unsanitized* `project_id` column (`query`, `chunk_refs`,
+/// `project_index_stats`, `project_has_chunks` in `sqlite_code_store.rs`), so
+/// two logical projects sharing a file never share rows — the file is a
+/// locality partition, the column is the isolation boundary. On Qdrant,
+/// `project_id` is a payload filter value in one global collection rather
+/// than a filename, so `@` survives unchanged there and no file-level
+/// aliasing occurs at all.
+///
+/// What that column-filtering argument depends on, on both backends, is that
+/// this string is never *equal* to a real project's id — see
+/// `delta_project_id_is_distinct_and_separator_is_not_a_colon` below.
+pub fn delta_project_id(main_project_id: &str, worktree_dir: &str) -> String {
+    format!("{main_project_id}@{worktree_dir}")
+}
+
 /// Embed `pending`'s chunk content and upsert it, then clear `pending` so the
 /// content + embeddings are dropped — keeping peak memory at O(flush_batch).
 async fn flush_pending(
@@ -423,6 +454,30 @@ mod tests {
             chunk_id("proj", &posix, "deadbeef"),
             "proj:src/retrieval/sync.rs:deadbeef"
         );
+    }
+
+    #[test]
+    fn delta_project_id_is_distinct_and_separator_is_not_a_colon() {
+        // chunk_id joins on ':' (chunk_id() above), and sqlite_code_store.rs:234-238
+        // documents a real regression from colon-bearing project ids. '@' keeps the
+        // delta id unambiguous under that join.
+        let id = delta_project_id("codescout", "peer-delegation");
+        assert_eq!(id, "codescout@peer-delegation");
+        assert!(!id.contains(':'), "delta id must not introduce a colon");
+        assert_ne!(id, "codescout", "delta must not alias the main project");
+    }
+
+    #[test]
+    fn delta_db_file_is_distinct_from_mains() {
+        // The lite store maps project_id to a FILENAME (sqlite_code_store.rs:70 ->
+        // sqlite_vec_ext::sanitize_db_name), and that map is not injective: every
+        // non-alphanumeric char collapses to '_'. Pin that the delta still lands in
+        // its own file, because sharing main's file would silently merge the two.
+        use crate::sqlite_vec_ext::sanitize_db_name;
+        let main = sanitize_db_name("codescout");
+        let delta = sanitize_db_name(&delta_project_id("codescout", "peer-delegation"));
+        assert_ne!(main, delta);
+        assert_eq!(delta, "codescout_peer-delegation");
     }
 
     /// Records every `upsert_chunks` batch size + the refs it upserted, so a test
