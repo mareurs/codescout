@@ -146,6 +146,20 @@ mutation-verifiable. Pin toward the *failing* condition, not away from it: forci
 `CODESCOUT_ARTIFACT_BACKEND=sqlite-vec` would have made the tests equally hermetic and
 permanently incapable of catching the bug.
 
+2026-08-13 adds a blunter instance of the same family, worth knowing **before** touching
+retrieval. `src/retrieval/qdrant.rs:422` marks the **only** real-Qdrant test `#[ignore]`, so
+CI never runs it; sqlite's `real_vec0_*` tests (`:421,:482,:565`) are neither ignored nor
+feature-gated and do run, because sqlite-vec needs no daemon. So the backend most
+contributors actually run has no automatic coverage, and the one they mostly don't is
+verified — an asymmetry that is easy to invert in your head and get backwards.
+
+The consequence is a design constraint, not just a testing note: put every decision that
+can be wrong in a **pure function** that compiles and runs everywhere, and leave each
+backend holding only a mechanical, mirrored translation. `#[ignore]` is a third way a test
+cannot fail where you are, beside `#[cfg]`-never-compiled and
+environment-supplies-the-condition — and unlike those two it is invisible in a green
+`cargo test` summary except as a number nobody reads.
+
 ### Corollary: a first measurement is a warm-up artifact until a second one agrees
 
 Not a test-design rule strictly, but it fails the same way — a number that looks legitimate

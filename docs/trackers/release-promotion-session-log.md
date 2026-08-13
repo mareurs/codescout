@@ -30,107 +30,94 @@ tags:
 Every other task (#15-#32) is complete. Do not re-derive the backlog from this log — the task list is
 authoritative and each entry carries its evidence.
 
-### Round 23 addendum (2026-08-08) — CURRENT. Supersedes round 22; read only this one.
+### Round 24 addendum (2026-08-13) — CURRENT. Supersedes round 23; read only this one.
 
-#### Two things not to get wrong
+#### Read this first, before touching anything
 
-1. **First action is `TaskList`.** Do not re-derive the backlog from this file.
-2. **`#14` is on a deliberate hold.** The operator postponed the `experiments` → `master`
-   fast-forward on 2026-08-08 to test it properly before releasing. It is not blocked and
-   not forgotten. **Do not run it.**
+1. **Run `TaskList`.** #14 (merge `experiments` → `master`, fast-forward) is on the
+   **maintainer's explicit hold**. Do not run it, do not "prepare" it, do not
+   propose it.
+2. **The push is held, deliberately.** `experiments` is ~58 commits ahead of
+   `origin/experiments`, and **most of that is another session's merge** of
+   `feat/local-onnx-query-path` (`e6484b16`) plus its follow-ups. Every commit
+   carries the maintainer's git identity, so authorship cannot separate mine from
+   theirs. Publishing another session's unpushed merge is a decision, not a
+   mechanical step. **Ask before pushing.**
+3. **Check the branch before every commit.** `git branch --show-current`. This
+   checkout's branch moved twice mid-session (F-33) because concurrent sessions
+   switch it. Do not trust a branch you verified a turn ago.
+4. Promotion is **fast-forward**, so an `experiments` SHA already *is* the master
+   SHA. Do not go hunting for a second one, and do not write a
+   pending-master-SHA line. ~24 archived bug files carry the cherry-pick form;
+   they are stale instructions, not open debt.
 
-#### The promotion is a FAST-FORWARD, not a cherry-pick
+#### Git state — re-derive it, do not trust these numbers
 
-`git rev-list --left-right --count master...experiments` → `0  534`. A zero on the left
-means `master` is a strict ancestor, so promotion moves it onto these exact commits. The
-`experiments` SHA in every bug file **is** the master SHA. There is no second SHA to
-record afterwards.
+At writing: tip `2d3183b3` on `experiments`, `master...experiments` = `0 / 614+`.
+Re-derive with `git rev-list --left-right --count master...experiments` and
+`git status -sb`. A `0` on the left means fast-forward is still available.
 
-**Do not go hunting.** ~24 archived bug files carry a "pending master SHA" line written
-before the path was settled as fast-forward. They are stale instructions, not open debt —
-the SHA already in each is correct.
+#### What shipped this round
 
-#### Git state — re-derive it, do not trust this
-
-At the time of writing: tip `6b97db0b`, **0 behind / 534 ahead**, working tree clean apart
-from the two tracker files this entry is being written into. CI was **in progress** on
-`6b97db0b` (run 31270950804) — **check its verdict before anything else**, because the
-previous two runs were *cancelled mid-flight* by the concurrency group as pushes landed,
-and a cancelled run is not a green one. Runs on `4d83a64f` and `a6bdfb63` show `cancelled`
-for that reason, not failure.
-
-#### What shipped this round — ten commits, all mine
-
-`15fa5692` researcher bug relocated + `edit_markdown` frontmatter defect filed ·
-`cb96aa47` metadata-header defect filed · `2bc0f9f0` **the header fix** · `7c1d026e` the
-A/B null result · `e8da12e3` the server-stack finding · `feac9539` **the index-probe fix**
-· `72f56144` archive · `ecf3e461` **the server-stack CI lane** · `4d83a64f` archive ·
-`a6bdfb63` chunker file reconciled · `6b97db0b` **the feature-lane guard**.
-
-Six bug files archived. `docs/issues/` is down to the pre-existing set.
-
-#### Measured, not assumed — the numbers a later session should not re-derive
-
-- **AST header A/B: 26/75 → 25/75.** Five of 25 cases moved, two up and three down, all by
-  one point. Churn. **No measured retrieval benefit and no measured harm.** Kept by
-  maintainer decision on the strength of the restored contract, *not* on retrieval
-  grounds. Full account in `docs/research/2026-05-06-retrieval-stack-benchmark.md`
-  § *AST metadata header A/B — NULL RESULT*. **Do not cite the header fix as a retrieval
-  improvement.**
-- **Chunker, post-`index --force`:** single-line 11.8% → **6.3%**; ≤5-line 34.3% → **29.0%**;
-  empty sparse vectors 7.7% → **0 of 2,000 sampled**. The residual 6.3% is by design.
-- **Only codescout's corpus is rebuilt.** `backend-kotlin-single-stage` still sits at
-  11.7% single-line. Chunk ids are content-addressed, so a normal sync skips every
-  unchanged chunk by id — a chunker or embed-text change reaches a corpus **only** through
-  `index --force`.
-- **`cargo test --features server-stack`: 3586 passed, 0 failed** — first green run of the
-  configuration `cargo rb` actually ships.
+- **`6bd44274`** — the qdrant-client `println!` fix. `qdrant-client` 1.17's
+  compatibility probe writes to **stdout** when it cannot reach a server,
+  prepending prose to every `--json` CLI envelope. Disarmed with
+  `.skip_compatibility_check()` at both construction sites. **CI green, all 18
+  jobs** (run `31272317541`), including the `server-stack` lane that reported it.
+  Mutation-verified. Bug archived.
+- **`bc89c779`** — F-32, W-24, R-71; repaired R-69/R-70's malformed table rows;
+  added the ambient-dependency corollary to the `test-design-discipline` memory.
+- **`c5f434df`** — archived the stdout bug **and repaired four CHANGELOG
+  citations** pointing at already-archived bug files (three predating this round).
+  They rot silently because `audit_doc_refs` never scans `CHANGELOG.md` — its own
+  open bug. Every `[Unreleased]` citation was checked against the filesystem.
+- **`6cd114a2` + `266dc622`** — the worktree bug file, cherry-picked onto
+  `experiments` through a temporary worktree (W-25). Note these arrived **twice**,
+  also via the feature-branch merge; identical content, resolved cleanly.
+- **`e9ad5457` + `8c283c30`** — the approved design spec.
+- **`2d3183b3`** — the eight-task implementation plan.
 
 #### Open, with owners
 
-- **#14** — the fast-forward merge. **Maintainer's, on hold.**
-- **#42** — route PR #9. **Maintainer's** (closing a contributor's PR is a social act).
-- **#46** — `mirela/backend-kotlin`'s 13 pending `worktree_scoped_row` merges; 4 collisions
-  need `graft`, not `reseat`.
-- **10 open bugs** across the umbrella: 8 codescout, 1 researcher, 1 claude-plugins. None
-  blocks the merge.
+| Item | Owner | Note |
+|---|---|---|
+| #14 promotion | maintainer | explicit hold |
+| the push | maintainer | contains another session's merge |
+| execution mode for the worktree plan | maintainer | subagent-driven recommended; **plan is written, not started** |
+| #42 PR #9 routing | maintainer | |
+| #46 backend-kotlin's 13 `worktree_scoped_row` merges | maintainer | 4 collisions need `graft`, not `reseat` |
+| worktree bug halves 1 and 3 | unassigned | see below |
 
-#### Do not re-do these
+The worktree bug file covers **three** divergences. Half 2 (semantic search) has a
+spec and a plan. **Half 1** (read tools silently hit main; the plugin hook guards
+only writes) and **half 3** (memory set 11 vs 21 topics, sub-projects 9 vs 2,
+because `memories/` is git-tracked and `workspace.toml` is gitignored) are
+unaddressed. **Do not archive that bug file until halves 1 and 3 are split into
+their own files** — archiving it would retire two unfixed problems.
 
-1. **The AST-header benchmark.** Run, null, recorded. Re-running the same file-level suite
-   cannot answer the open question, which is chunk-level discrimination — that needs a
-   different instrument, not another run.
-2. **`.worktrees/bench`.** A 174 MB orphan; `git worktree list` does not know it. The
-   benchmark script still defaults to it. Point `CODESCOUT_PROJECT_PATH` at the main
-   checkout instead — and note its `project_id` is *discovered*, so indexing it could
-   resolve to `codescout` and make `stream_index`'s delete pass wipe the real index.
-3. **Reverting the AST header.** Considered and declined: it buys a measured zero for
-   another full re-embed.
-4. **Raising `FIRST_PROBE_TIMEOUT`.** Considered and rejected — the value that "works" is a
-   function of the largest corpus anyone points at it.
-5. **A naive every-feature-has-a-lane check.** It flags nine features on day one. The
-   shipped guard (`tests/feature_lanes.rs`) resolves `default`'s closure and scans
-   `--features` arguments rather than raw text; `dashboard` and `local-embed-dynamic` got
-   a real `feature-check` job rather than an exemption.
-6. **Exempting a feature to make the guard land green.** Explicitly rejected: a guard whose
-   first act is to hide two real gaps is the failure it exists to prevent.
+#### Do not re-do these — each was measured or falsified this round
 
-#### The one lesson this round is actually about
-
-A green suite is not evidence a contract holds. Ask whether the test **can** fail. Three
-mechanisms were live in this repo on one afternoon: a test **deleted with its consumer**
-(`embed_text_format_includes_metadata_prefix` went with `embed::index` in `66db4c70`, so
-nothing failed when the surviving path turned out not to implement the contract); a test
-**asserting a subset** under a name claiming all of it (`payload_roundtrip_preserves_fields`,
-4 of 11 fields); and a test **never compiled** (`server-stack` in no lane). Written up as
-the buddy memory `tests-that-cannot-fail`, and as R-70.
-
-The corollary that did the work all round: mutation-verify. Every fix this round was
-confirmed by reintroducing the defect and watching the specific test die — and, more
-informatively, by noting *which other tests stayed green*. Seven siblings passed while the
-metadata-header guard failed. That number is the size of the blind spot, measured rather
-than asserted.
-
+- **Do not re-measure the stdout defect.** Fixed, mutation-verified, CI-green,
+  archived. The knob is `skip_compatibility_check()`, *not* the
+  `check_compatibility=false` the error message names — that is a struct field.
+- **Do not re-derive the worktree keying.** `project_id` = `project.name` →
+  directory-basename fallback; collection is global; `.codescout/project.toml` is
+  gitignored so no worktree has one. Verified on `experiments` and cited in the
+  spec with line numbers.
+- **Do not propose symlinking `project.toml` into a worktree.** Measured: forcing
+  main's `project_id` from a worktree returns main's chunks with main's paths. That
+  is the confidently-stale outcome, not a fix.
+- **Do not propose that the server compare its resolved root to the caller's cwd.**
+  Falsified as unimplementable: `current_dir()` is spawn-frozen,
+  `CLAUDE_PROJECT_DIR` is never read (and is also spawn-time), and MCP `roots` is
+  unsupported client-side (issue #57243).
+- **Do not propose a per-worktree index built by copying main's vectors.**
+  Rejected: needs a new trait method, ~104 MB per worktree, and a GC obligation.
+- **Do not generalize `exclude_languages` + `exclude_paths` into a filter struct.**
+  Two axes stay two params; a *third* earns the extraction.
+- **Do not claim CI covers the Qdrant backend.** `src/retrieval/qdrant.rs:422` is
+  `#[ignore]`d, so the only real-Qdrant test never runs in CI. sqlite's
+  `real_vec0_*` tests do. The backend most users run has no automatic coverage.
 ### THE MERGE IS STILL THE MAINTAINER'S TO RUN
 
 `#14` is the only open task. Everything gating it is satisfied. Do not run it.
@@ -1239,6 +1226,10 @@ Ranked by what to do first.
 | F-31 | 2026-08-08 | high | tooling | fixed-verified | The build that ships was the one build CI never compiled. `.cargo/config.toml` aliases `cargo rb` to `--features server-stack` and CLAUDE.md mandates `cargo rb` for the live MCP binary, but no lane named that feature — so every `#[cfg(feature = "server-stack")]` test was skipped silently, indistinguishable from a test that does not exist. `payload_roundtrip_preserves_fields` had never run, and also asserted 4 of 11 fields under a name claiming all of them. First execution of the lane failed immediately on a real defect. Fixed by a `test-server-stack` job, a `feature-check` job for the two other unlaned features, and `tests/feature_lanes.rs` |
 | F-32 | 2026-08-08 | high | testing | fixed-verified | A test can assert exactly the right thing and still be unable to fail, because its discriminating power comes from the environment rather than from the code. The three `cli_artifact` round-trip tests parse the CLI's `--json` stdout — the correct assertion, and the one that eventually caught the bug. But they could only ever fail on a host with **no** Qdrant listening on 6334, because `qdrant-client`'s compatibility probe prints only when it cannot reach a server. Every developer machine running the stack passed them; CI, which runs no Qdrant, is the only place they fail. This is a **fourth** mechanism for a test that cannot fail, alongside the three named in R-70 (deleted with its consumer, subset assertion under a name claiming all, never compiled): **ambient dependency** — the environment supplies the condition that would trip the assertion, and the author's machine always satisfies it. Note it is not detectable by reading the test, which is what makes it distinct: the assertion is correct in isolation. Fixed by pinning `CODESCOUT_QDRANT_URL` to an unreachable port in the test helper, which is also what makes the guard mutation-verifiable at all |
 | F-27 | 2026-08-08 | med | process | fixed-verified | `posix_tokenize`'s doc comment — written the day before under task #37, whose purpose was correcting a false safety claim — asserted that `is_dangerous_command` splits with `split_whitespace`. It does not tokenize at all; it regexes the raw string. The six `split_whitespace` readers are elsewhere. Real shape: FOUR models of the same string, and the only one matching the executing shell had zero callers, so no single call site could have fixed it. `audit_doc_refs` does not scan `src/**`, so nothing would have flagged the prose |
+| F-33 | 2026-08-13 | high | process | fixed-verified | The checkout's branch moved between turns **twice**, and both times I learned it from `git commit`'s own output rather than from a check. The session resumed after a five-day gap onto `feat/local-onnx-query-path` (switched by another session on 08-11) while I believed `experiments`; then, after I had planned the relocation, a concurrent session *merged* that branch into `experiments` and switched back, so the next commit landed on `experiments` while I believed the feature branch. Neither was destructive. The second is the tell: I had just filed a bug about a stateful surface changing under an actor holding a cached belief, and I was the actor. Escalation of F-15 — same root, second sighting. Countermeasure is now a Global Constraint in the implementation plan: `git branch --show-current` immediately before **every** commit, not once per session |
+| F-34 | 2026-08-13 | high | dispatch | fixed-verified | Briefed a subagent with `experiments @ c5f434df` — five days stale. The checkout was on a feature branch carrying **+2,592 insertions across the retrieval query path**, the exact subsystem under investigation, so every `path:line` in the returned report silently described a different branch than the one I asked about. The agent caught it from inside the repo; the correction came from the substrate, not from me. The damage was not a wrong report but a re-pointed one — behavioural findings held (observed against a running server), mechanism citations moved. It also retro-explained the one thing the agent measured and could not diagnose (`index: not_indexed` against a live 34,635-chunk index): `tools/config/mod.rs` is +77 on that branch, so branch state beats the archived probe-cache bug it suspected. Promoted as R-72 |
+| F-35 | 2026-08-13 | high | process | fixed-verified | Inferred a mechanism's **absence** from architecture, twice in one session, and was wrong both times. (1) Filed "there is likely no signal to miss — the gap is architectural" as a bug-file lead, reasoning from MCP's protocol shape; `codescout-companion/hooks/hooks.json:141` registers a `PostToolUse` matcher on `EnterWorktree` that instructs the agent to activate and hard-denies codescout's write tools until it does. The mechanism had shipped. (2) Framed "how do we express an exclusion across two backends with different `project_id` semantics" as new design; `exclude_languages` was already that mechanism, contract-tested in both stores, with the backend divergence documented in-code. Architecture tells you what *can* exist, not what *does*. Both inferences were structurally sound and cost more than the grep that would have refuted them. Promoted as R-73 |
+| F-36 | 2026-08-13 | med | architecture | fixed-verified | Recommended a design after reading **one** implementation of a two-implementation trait. `qdrant.rs:317` builds a `must_not`, so "exclude at the filter level" looked free; `sqlite_code_store.rs:70` opens a database **file** per `project_id`, so `project_id IN (a, b)` is two files and the recommendation was inexpressible there. The trait signature `query(collection, project_id, …)` is what hides it — one parameter name, two meanings, and contract-tested for parity, so the tests would have stayed green while the backends diverged in behaviour. Caught only by applying architecture-snow-lion Self-Trap 2 (recommend against the code, not one module's shape). Countermeasure R-74 |
 
 ## Wins Index
 
@@ -1259,6 +1250,8 @@ Ranked by what to do first.
 | W-22 | 2026-08-08 | high | When a null result comes with a convenient explanation, check whether the explanation actually applies before using it | The AST-header A/B returned 26/75 → 25/75. Two exculpatory readings were sitting there: "markdown is 60% of the corpus and gets no header, so the suite cannot see the change", and "coverage must be patchy". Both were checked and both were false — the suite is code-weighted (15 code-only TCs, 9 mixed) and **all five movers were code-targeted**, and 13,087 of 13,326 rust chunks carried headers post-rebuild. Using either would have produced "inconclusive, needs a better instrument" and kept a change with no evidence behind it. The limit that DID survive checking (file-level scoring is structurally blind to a chunk-level effect) went into the benchmark doc as a stated limit rather than an excuse | validated |
 | W-23 | 2026-08-08 | high | A two-occurrence match is a question, not an inconvenience — identical text is not identical intent | `edit_file` reported `with_payload(true)` found twice in `src/retrieval/qdrant.rs`; the reflex is `replace_all`. The two scrolls read **different** keys. A shared `file_path`-only selector would have emptied every `chunk_id` in `scroll_chunk_refs` — which `unwrap_or_default()` turns into `""`, which the `if !chunk_id.is_empty()` guard then skips — so the function returns nothing, `stream_index` concludes the server holds no chunks, and re-embeds the entire corpus on every sync while deleting nothing. Silent, expensive, and green. The tell was the tool saying "found 2 times"; the fix was looking at the second one instead of reaching for the flag that makes the message go away | validated |
 | W-24 | 2026-08-08 | high | A lane added to close a blind spot paid out on its first execution, and the payout was a live defect rather than bit-rot | F-31 added `test-server-stack` earlier the same day on the argument that `cargo rb` ships a configuration no lane compiled. The prediction was that something would be broken in it; the expectation was stale fixtures. The first run instead failed on a shipped defect: `qdrant-client`'s compatibility probe `println!`s onto stdout, so every `--json` CLI command emitted output no parser accepts whenever Qdrant was unreachable — correct payload, zero exit code, unparseable bytes. Counterfactual: without the lane this promotes to `master` in this cohort, and the failure mode fires exactly when the stack is *down*, i.e. the moment a user most needs machine-readable output to diagnose it. The shape worth keeping: the lane's value was not "it still compiles" but "it runs somewhere the developer's machine is not" — the defect was invisible on every host with Qdrant up, which is every host anyone develops on | validated |
+| W-25 | 2026-08-13 | high | When a fix needs shared state mutated, look for the version that mutates a private copy | Two commits had landed on the wrong branch and needed moving to `experiments`. The reflex is `git checkout experiments && cherry-pick && git checkout -`. But `git status -sb` showed the feature branch **35 commits unpushed** and an untracked bug file I had not written — a concurrent session was actively working in that checkout. Switching its branch twice would have been me *causing* F-15 for someone else in the same hour I recorded it. Instead: `git worktree add <scratch> experiments`, cherry-pick via `git -C`, push, `git worktree remove`. The main checkout's branch never changed and `.git/worktrees` was left as found. The counterfactual is concrete rather than hypothetical — that session had work in flight and would have watched its tree change underneath it. Cost: three commands | validated |
+| W-26 | 2026-08-13 | med | Do the deferred verification even when you are confident the answer is boring | The spec deferred exactly one item — "confirm sqlite's filename sanitizer handles `@`" — and a plan may carry no open questions, so I read it. `sanitize_db_name` (`src/sqlite_vec_ext.rs:52-68`) maps every non-alphanumeric character to `_`. The expected answer ("yes, `@` is fine") was correct and worthless. The actual finding was that the function is **not injective**: `codescout@wt` and `codescout:wt` produce the same filename, so two distinct project ids can silently share one database in the lite backend. Our delta is safe and is now pinned by a test rather than assumed. The lesson is about the shape of cheap checks — the question you ask is rarely the most valuable thing the check answers, so "I already know" is not a reason to skip it | validated |
 | W-15 | 2026-08-08 | high | Fan out a review by LENS not by file, brief each with the refs + established-facts-marked-challengeable, and mandate refute-before-reporting | Four lenses on PR #10 (19 files, no prior reviews) found five blockers; three landed twice independently (`summary.total` partition, dead `posix_tokenize`, the job-assignment race). The refutation passes killed real candidates including one of the controller's own seeded premises, and one reviewer corrected two premises in its own brief | validated |
 | W-14 | 2026-08-07 | high | The first measurement after idle is a warm-up artifact — take the second one, and in a benchmark discard iteration one and say so | Three instances in one session: SPLADE sparse embed read 146.8 ms cold vs 16.8 ms warm (8.7x, and it feeds the reranker latency comparison in task #20); the audit_doc_refs tally migrates by up to 69 refs cold but is byte-identical warm; and `resolve_file_symbol` returns `SymbolMissing` for symbols that exist when the server answers before finishing indexing — the same trap promoted from a latency error into a false claim about the code | validated |
 | W-13 | 2026-08-07 | high | Verify a bug file's PREMISE before working it, with the cheapest measurement that could falsify it | Five bugs worked this session; all five had a false premise or a wrong prescription, and four were falsified by a single command — `ps -o ppid` killed "18 orphaned processes", `jcmd VM.flags` killed "spawns with no -Xmx", one `curl` replaced a Langfuse-span plan, and reading the test killed "replace the fixed wait with a bounded poll" | promoted-to-permanent-docs |
