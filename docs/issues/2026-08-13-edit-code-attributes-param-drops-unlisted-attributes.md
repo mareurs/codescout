@@ -1,12 +1,20 @@
 ---
-status: open
-opened: 2026-08-13
-closed:
-severity: medium
-owner: marius
-related: [ec39936568425950, 0aa3860453ea8053, dce1189f5b382c92]
-tags: [edit_code, mcp-tool, silent-data-loss, attributes, derive]
 kind: bug
+status: open
+tags:
+- edit_code
+- mcp-tool
+- silent-data-loss
+- attributes
+- derive
+closed: null
+opened: 2026-08-13
+owner: marius
+related:
+- ec39936568425950
+- '0aa3860453ea8053'
+- dce1189f5b382c92
+severity: high
 ---
 
 # BUG: edit_code's `attributes` parameter replaces the whole attribute list, so an incomplete list silently deletes the attributes you did not name
@@ -96,6 +104,17 @@ site cloned it, so the derive could vanish and both test lanes would stay green
 (3666 / 3675 passing). Task 6 is the first consumer, so the loss would have
 surfaced there as a confusing compile error one task downstream of its cause.
 
+### SECOND OCCURRENCE — same session, different symbol, different lost element
+
+**2026-08-13, SDD Task 6 fix round 1** (`.superpowers/sdd/2026-08-13-worktree-semantic-search/task-6-report.md`, "## Fix round 1"). While extracting a shared walk helper, an `edit_code(attributes=[...])` call **dropped a doc comment from `stream_index`** in `src/retrieval/sync.rs`. Caught by re-reading the symbol immediately after the edit, and fixed before proceeding.
+
+Three things this occurrence establishes that the first one did not:
+
+1. **It is not confined to `#[derive(...)]`.** The first occurrence lost a derive; this one lost a **doc comment**. That widens the blast radius to every attribute-adjacent element the tool rewrites, and it rhymes with the already-fixed sibling `0aa3860453ea8053` (`edit_code` structural replace dropping a doc comment after an AST range repair) — the same element is now reachable through a second parameter.
+2. **Care alone does not prevent it; it only catches it.** The agent that hit this had been warned about this exact footgun *by name, with this file path, in its dispatch prompt*, and instructed to pass the complete attribute list and re-read the symbol afterwards. It still triggered the drop. The re-read caught it. So the documented workaround is **effective as detection and useless as prevention** — which is the strongest available argument for fixing the tool rather than documenting around it.
+3. **Two independent hits in a single day, by two different agents, on ordinary edits.** This is not an exotic path. Both were on production Rust code in the same repo during routine structural edits.
+
+**Severity should be raised from `medium` to `high`.** The original rating assumed a single observation and leaned on the compiler as a backstop. Two occurrences in one session, plus the fact that the lost element can be a doc comment (no compile error) or `#[cfg(...)]` / `#[serde(...)]` / `#[allow(...)]` (no compile error, and a real behaviour change), means the compiler backstop covers only the `derive` case. The frontmatter still reads `medium`; treat this section as the argument for changing it.
 ## Hypotheses tried
 
 1. **Hypothesis:** this is a rediscovery of `ec39936568425950` (edit_code replace
