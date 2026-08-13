@@ -78,6 +78,18 @@ pub struct Agent {
     /// retrieval stack.
     pub(crate) memory_embedder:
         Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>>,
+    /// Test-only capture of the `RetrievalClient.embedder` seen by the single
+    /// `RetrievalClient::from_env()` call inside `memory_embedder()`, taken at
+    /// the exact point that `Arc` is about to be moved into `CodeDenseAdapter`.
+    /// Exists solely so
+    /// `memory_embedder_is_built_from_the_shared_code_embedder` can
+    /// `Arc::ptr_eq` it against the embedder the returned `CodeDenseAdapter`
+    /// actually wraps — proving the memory path shares the code-search
+    /// embedder INSTANCE from that construction, not merely one with
+    /// equivalent behaviour. Never read or written outside `#[cfg(test)]`.
+    #[cfg(test)]
+    pub(crate) test_seen_client_embedder:
+        Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::CodeEmbedder>>>,
 }
 
 pub struct AgentInner {
@@ -491,6 +503,8 @@ impl Agent {
             active_sync_abort: Arc::new(std::sync::Mutex::new(None)),
             semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
+            #[cfg(test)]
+            test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
 
@@ -1490,7 +1504,7 @@ impl Agent {
 
     /// Spawn a background library indexing task if auto_index is enabled and library is not yet indexed.
     pub async fn maybe_auto_index_library(&self, lib_name: &str) {
-        let (should_index, _root, entry_path, max_index_bytes, ignore_patterns) = {
+        let (should_index, root, entry_path, max_index_bytes, ignore_patterns) = {
             let inner = self.inner.read().await;
             let Some(p) = inner.active_project() else {
                 return;
@@ -1578,7 +1592,8 @@ impl Agent {
             tracing::info!("Auto-indexing library '{}' in background...", name);
             crate::heartbeat::note_background_op(&format!("auto_index:{name}"));
             let result = async {
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let client =
+                    crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
                 let opts = crate::retrieval::sync::SyncOpts {
                     ignore_patterns: ignore_patterns.clone(),
                     ..Default::default()
@@ -1665,54 +1680,83 @@ impl Agent {
     pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
         use crate::retrieval::code_store::VectorBackend;
         self.semantic_memory
-            .get_or_try_init(|| async {
-                match VectorBackend::resolve() {
-                    VectorBackend::SqliteVec => {
-                        let store =
-                            crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
-                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
-                    }
-                    #[cfg(feature = "server-stack")]
-                    VectorBackend::Qdrant => {
-                        let config = crate::retrieval::config::RetrievalConfig::from_env()?;
-                        let qdrant =
-                            crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
-                        let collection = config.collection("memories");
-                        let dim = config.model_dim as u64;
-                        // `QdrantSemanticMemoryStore::new` bootstraps the collection
-                        // (a real network round trip) — bound it so a reachable-but-hung
-                        // Qdrant fails fast instead of blocking up to the 120s operation
-                        // timeout. Timeout is treated exactly like a connect error: it
-                        // flows out as an `Err`, so `get_or_try_init` leaves the cell
-                        // uninitialized and retries on the next call once Qdrant recovers.
-                        let store = match tokio::time::timeout(
-                            crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
-                            crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                                qdrant, collection, dim,
-                            ),
-                        )
-                        .await
-                        {
-                            Ok(result) => result?,
-                            Err(_) => anyhow::bail!(
-                                "timed out bootstrapping Qdrant memories collection after {:?} \
-                                 (Qdrant reachable but unresponsive?); semantic memory \
-                                 unavailable this session — will retry on next use",
-                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
-                            ),
-                        };
-                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
-                    }
-                    #[cfg(not(feature = "server-stack"))]
-                    VectorBackend::Qdrant => anyhow::bail!(
-                        "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
+                .get_or_try_init(|| async {
+                    match VectorBackend::resolve() {
+                        VectorBackend::SqliteVec => {
+                            let store =
+                                crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
+                            anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                        }
+                        #[cfg(feature = "server-stack")]
+                        VectorBackend::Qdrant => {
+                            // Same project root `memory_embedder` resolves — without this,
+                            // a project.toml-only [embeddings] config would make
+                            // memory_embedder project-aware while this stayed env-only,
+                            // a split env-only config could not produce (review round-1
+                            // I-3).
+                            let root = self.project_root().await;
+                            let config =
+                                crate::retrieval::config::RetrievalConfig::from_env_and_project(
+                                    root.as_deref(),
+                                )?;
+                            let qdrant =
+                                crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
+                            let collection = config.collection("memories");
+                            // Both the dimension resolution AND the collection bootstrap
+                            // are bound by ONE timeout (review round-2 I3). Resolving the
+                            // model's own dimension (below) can, for a local backend,
+                            // trigger a first-time ONNX weights download from the HF hub —
+                            // that used to sit entirely outside any timeout, reachable from
+                            // `main.rs`/`prompts::builders`/the memory tool's `forget` path,
+                            // none of which call `memory_embedder()` first to warm the
+                            // cache. Bounding it here means a slow/absent download fails
+                            // fast and retries on next use, exactly like the Qdrant-hang
+                            // case below already did — same fail-soft contract, one timeout
+                            // covering both causes.
+                            let store = match tokio::time::timeout(
+                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
+                                async {
+                                    // Resolve the model's own dimension rather than trusting an
+                                    // absent-or-wrong CODESCOUT_MODEL_DIM pin — see
+                                    // `RetrievalClient::resolve_model_dim` for why this can't
+                                    // reuse `memory_embedder()`'s already-built instance.
+                                    let dim = crate::retrieval::client::RetrievalClient::resolve_model_dim(
+                                        &config,
+                                    )
+                                    .await? as u64;
+                                    crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                                        qdrant, collection, dim,
+                                    )
+                                    .await
+                                },
+                            )
+                            .await
+                            {
+                                // Treated exactly like a connect error: it flows out as an
+                                // `Err`, so `get_or_try_init` leaves the cell uninitialized
+                                // and retries on the next call once the cause (a hung Qdrant,
+                                // or a slow/absent model download) clears.
+                                Ok(result) => result?,
+                                Err(_) => anyhow::bail!(
+                                    "timed out bootstrapping Qdrant memories collection after {:?} \
+                                 (Qdrant reachable but unresponsive, or the configured \
+                                 embedding model is still downloading/loading?); semantic \
+                                 memory unavailable this session — will retry on next use",
+                                    crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
+                                ),
+                            };
+                            anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                        }
+                        #[cfg(not(feature = "server-stack"))]
+                        VectorBackend::Qdrant => anyhow::bail!(
+                            "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
                          feature. Rebuild with `--features server-stack`, or use the lean lite \
                          stack with CODESCOUT_VECTOR_BACKEND=sqlite-vec."
-                    ),
-                }
-            })
-            .await
-            .cloned()
+                        ),
+                    }
+                })
+                .await
+                .cloned()
     }
 
     /// Test seam: pre-populate the OnceCell with a stub store so tests don't
@@ -1729,8 +1773,12 @@ impl Agent {
     /// Lazily construct (or return cached) the dense embedder for memory ops.
     ///
     /// First call performs `RetrievalClient::from_env()` (one network probe)
-    /// and wraps the resulting `EmbedderHttp` in [`HttpDenseEmbedder`].
-    /// Subsequent calls share the cached `Arc`.
+    /// and wraps the resulting `client.embedder` (`Arc<dyn CodeEmbedder>`) in
+    /// [`crate::retrieval::embedder::CodeDenseAdapter`], rather than building a
+    /// second, independent embedder. This means memory recall always rides
+    /// whatever backend code search selected — HTTP or (once the local ONNX
+    /// path lands) in-process — instead of having its own selection path that
+    /// could drift from code search's. Subsequent calls share the cached `Arc`.
     ///
     /// In tests, pre-populate via [`Agent::set_memory_embedder_for_test`] to
     /// bypass the env-driven construction path.
@@ -1739,8 +1787,12 @@ impl Agent {
     ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
         self.memory_embedder
             .get_or_try_init(|| async {
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-                let emb = crate::retrieval::embedder::HttpDenseEmbedder::new(client.embedder);
+                let root = self.project_root().await;
+                let client =
+                    crate::retrieval::client::RetrievalClient::from_env(root.as_deref()).await?;
+                #[cfg(test)]
+                let _ = self.test_seen_client_embedder.set(client.embedder.clone());
+                let emb = crate::retrieval::embedder::CodeDenseAdapter(client.embedder);
                 anyhow::Ok(Arc::new(emb) as Arc<dyn crate::retrieval::embedder::DenseEmbedder>)
             })
             .await
@@ -2147,6 +2199,17 @@ mod tests {
 
         let _backend = EnvGuard::set("CODESCOUT_VECTOR_BACKEND", "qdrant");
         let _url = EnvGuard::set("CODESCOUT_QDRANT_URL", format!("http://{addr}"));
+        // Review round-2 I3: pin the embedder to a remote/HTTP backend so
+        // `resolve_model_dim` (now wrapped in the SAME timeout this test
+        // measures — see `semantic_memory_store`) takes its instant,
+        // zero-I/O branch regardless of ambient `[embeddings]`/env config.
+        // Without this, a host with a local model configured would make
+        // this test perform a real ONNX load (or fail if weights are
+        // absent) before ever reaching the black-hole Qdrant listener —
+        // `result.is_err()` would still pass, but for the wrong reason,
+        // and the timeout guard this test exists to pin would silently
+        // stop being exercised.
+        let _embedder_url = EnvGuard::set("CODESCOUT_EMBEDDER_URL", "http://unused.invalid");
 
         let agent = Agent::new(None).await.unwrap();
         let start = std::time::Instant::now();
@@ -2161,6 +2224,45 @@ mod tests {
             elapsed < std::time::Duration::from_secs(30),
             "semantic_memory_store() took {elapsed:?} against a black-hole Qdrant \
              — bootstrap timeout guard regressed (unbounded case blocks up to 120s)"
+        );
+    }
+
+    /// Memory recall must ride the same embedder instance code search uses. If this
+    /// regresses, memory silently keeps its own HTTP embedder and a local model
+    /// configured for code search would not reach memory at all.
+    ///
+    /// Proves INSTANCE identity, not merely equivalent behaviour. `memory_embedder()`
+    /// performs exactly one `RetrievalClient::from_env()` call; `Agent::test_seen_client_embedder`
+    /// (test-only) captures a clone of `client.embedder` at the exact point it is about
+    /// to be moved into `CodeDenseAdapter` — see `memory_embedder`'s body. If
+    /// `memory_embedder` is ever changed to build its own independent `EmbedderHttp`
+    /// instead of using `client.embedder`, the two `Arc`s diverge and `Arc::ptr_eq`
+    /// below catches it. (Verified by sabotage: temporarily swapping the
+    /// `CodeDenseAdapter(client.embedder)` line for
+    /// `CodeDenseAdapter(Arc::new(EmbedderHttp::new(...)))` makes this test fail;
+    /// reverting makes it pass again.)
+    #[tokio::test]
+    async fn memory_embedder_is_built_from_the_shared_code_embedder() {
+        use crate::retrieval::embedder::{CodeDenseAdapter, DenseEmbedder};
+
+        let agent = Agent::new(None).await.unwrap();
+        let mem: std::sync::Arc<dyn DenseEmbedder> = agent.memory_embedder().await.unwrap();
+
+        let seen_client_embedder = agent
+            .test_seen_client_embedder
+            .get()
+            .expect("memory_embedder must capture client.embedder before returning")
+            .clone();
+
+        let adapter = mem
+            .as_any()
+            .downcast_ref::<CodeDenseAdapter>()
+            .expect("memory_embedder must return a CodeDenseAdapter");
+
+        assert!(
+            std::sync::Arc::ptr_eq(&adapter.0, &seen_client_embedder),
+            "memory_embedder's returned adapter must wrap the SAME embedder Arc the \
+             RetrievalClient it built holds — got two different instances"
         );
     }
 

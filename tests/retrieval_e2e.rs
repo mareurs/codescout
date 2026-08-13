@@ -4,9 +4,9 @@ use codescout::retrieval::{client::RetrievalClient, sync::SyncOpts};
 
 #[tokio::test]
 async fn sync_then_query_roundtrip_finds_known_symbol() {
-    let client = RetrievalClient::from_env().await.expect("client");
     let project_id = "rust-library-test";
     let root = std::path::Path::new("tests/fixtures/rust-library");
+    let client = RetrievalClient::from_env(Some(root)).await.expect("client");
 
     let report = client
         .sync_project(project_id, root, SyncOpts::default())
@@ -20,9 +20,9 @@ async fn sync_then_query_roundtrip_finds_known_symbol() {
 
 #[tokio::test]
 async fn sync_is_idempotent() {
-    let client = RetrievalClient::from_env().await.expect("client");
     let project_id = "rust-library-idempotent";
     let root = std::path::Path::new("tests/fixtures/rust-library");
+    let client = RetrievalClient::from_env(Some(root)).await.expect("client");
 
     let r1 = client
         .sync_project(project_id, root, SyncOpts::default())
@@ -40,9 +40,11 @@ async fn sync_is_idempotent() {
 #[tokio::test]
 async fn sync_detects_file_modification() {
     use std::fs;
-    let client = RetrievalClient::from_env().await.expect("client");
     let project_id = "drift-detect-test";
     let tmp = tempfile::tempdir().unwrap();
+    let client = RetrievalClient::from_env(Some(tmp.path()))
+        .await
+        .expect("client");
     let f = tmp.path().join("a.rs");
     fs::write(&f, "fn original() {}").unwrap();
 
@@ -63,9 +65,9 @@ async fn sync_detects_file_modification() {
 
 #[tokio::test]
 async fn search_finds_synced_symbol() {
-    let client = RetrievalClient::from_env().await.expect("client");
     let project_id = "search-e2e-test";
     let root = std::path::Path::new("tests/fixtures/rust-library");
+    let client = RetrievalClient::from_env(Some(root)).await.expect("client");
     let _ = client
         .sync_project(project_id, root, SyncOpts::default())
         .await

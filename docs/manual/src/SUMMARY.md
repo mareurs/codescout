@@ -27,6 +27,7 @@
 - [Semantic Search](concepts/semantic-search.md)
   - [Lite Stack (daemon-free, default)](concepts/lite-stack.md)
   - [Retrieval Stack (server, opt-in)](concepts/retrieval-stack.md)
+  - [Local Embedding (offline)](concepts/local-embedding-offline.md)
   - [Setup Guide](semantic-search-guide.md)
   - [Asymmetric Query Prefix](concepts/asymmetric-query-prefix.md)
   - [Metadata-Enriched Chunks](concepts/metadata-enriched-chunks.md)

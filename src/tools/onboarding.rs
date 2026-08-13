@@ -741,7 +741,11 @@ async fn probe_index_status(ctx: &ToolContext) -> Value {
     if project_id.is_empty() {
         return json!({ "ready": false, "files": 0, "chunks": 0 });
     }
-    match crate::retrieval::client::RetrievalClient::from_env().await {
+    let root = ctx
+        .agent
+        .project_root_for(ctx.workspace_override.as_deref())
+        .await;
+    match crate::retrieval::client::RetrievalClient::from_env(root.as_deref()).await {
         Ok(client) => {
             let coll = client.config.collection("code_chunks");
             match client.project_index_stats(&coll, &project_id).await {

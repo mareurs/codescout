@@ -48,6 +48,17 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -- -D warnings
+      # --workspace --all-targets --features local-embed: the bare command
+      # above only lints the root package's non-test targets with default
+      # features, which don't include local-embed — so codescout-embed's
+      # `local` module (cfg-gated on that feature) is never even compiled
+      # here, and nothing in it, tests included, is clippy-checked in CI.
+      # Same root cause as the `test` job's --workspace gap above, just one
+      # command over. Verified empirically 2026-08-11: `cargo clippy --
+      # -D warnings` shows `Checking codescout-embed` but that's the
+      # default-features build (no `local` module); this second pass is
+      # what actually reaches local.rs and its tests.
+      - run: cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 
   test:
     name: Test (${{ matrix.os }} / ${{ matrix.config.name }})
@@ -90,7 +101,77 @@ jobs:
           mkdir -p "${{ runner.temp }}/codescout-ci"
           touch "${{ runner.temp }}/codescout-ci/workspace.toml"
           echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
-      - run: cargo test ${{ matrix.config.flags }}
+      # The local-embed lane needs real AllMiniLM-L6-v2 weights on disk for
+      # from_dir_produces_a_stable_384d_vector and
+      # from_dir_matches_the_hub_path_for_the_same_model
+      # (crates/codescout-embed/src/local.rs) — the only tests that catch a
+      # correctly-shaped-but-silently-wrong vector (wrong tokenizer/pooling).
+      # Every other lane sets the explicit opt-out below instead, so the
+      # tests are skipped on purpose rather than failing on a lane that was
+      # never meant to carry the weights.
+      #
+      # Use ${{ runner.temp }} rather than bash $HOME: on Windows, bash $HOME
+      # is the Git Bash POSIX form (/c/Users/...), which Rust on Windows
+      # cannot read as a file path — the same reasoning as the
+      # librarian-workspace seed step above, and this path is consumed the
+      # same way (an env var that becomes a Rust PathBuf).
+      #
+      # Cache restores BEFORE the download (not after) so a hit skips the
+      # curl entirely — key includes ${{ matrix.os }} (matching this file's
+      # own rust-cache key convention two steps up) so three OSes racing to
+      # save the same un-scoped key don't stomp each other's save.
+      - name: Cache ONNX weights
+        id: onnx-cache
+        if: matrix.config.name == 'local-embed'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/codescout-onnx
+          key: ${{ matrix.os }}-onnx-all-minilm-l6-v2-q-v1
+
+      - name: Seed ONNX weights (local-embed lane only, cache miss)
+        if: matrix.config.name == 'local-embed' && steps.onnx-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="${{ runner.temp }}/codescout-onnx/all-MiniLM-L6-v2"
+          mkdir -p "$DIR/onnx"
+          BASE="https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main"
+          curl -fsSL "$BASE/onnx/model_quantized.onnx" -o "$DIR/onnx/model_quantized.onnx"
+          for f in tokenizer.json config.json special_tokens_map.json tokenizer_config.json; do
+            curl -fsSL "$BASE/$f" -o "$DIR/$f"
+          done
+
+      # from_dir_matches_the_hub_path_for_the_same_model also builds an embedder
+      # via the hub path (LocalEmbedder::new), which pulls AllMiniLM-L6-v2-Q into
+      # fastembed's own cache — FASTEMBED_CACHE_DIR if set, else `.fastembed_cache`
+      # relative to CWD (Cargo runs codescout-embed's own test binary from that
+      # package's directory, not the workspace root — see the .gitignore fix in
+      # this same PR). Left unset, that's a second, uncached ~22MB download per
+      # job on three OSes, and an HF hiccup fails the lane on `.expect("hub model
+      # must load")`. Point it at a subdirectory of the same cached tree above so
+      # the one cache step covers both the from_dir weights and this download.
+      - name: Point env at the cached ONNX/fastembed dirs (local-embed lane only)
+        if: matrix.config.name == 'local-embed'
+        shell: bash
+        run: |
+          echo "CODESCOUT_TEST_ONNX_DIR=${{ runner.temp }}/codescout-onnx/all-MiniLM-L6-v2" >> "$GITHUB_ENV"
+          echo "FASTEMBED_CACHE_DIR=${{ runner.temp }}/codescout-onnx/fastembed-cache" >> "$GITHUB_ENV"
+
+      - name: Opt out of ONNX tests (non-local-embed lanes)
+        if: matrix.config.name != 'local-embed'
+        shell: bash
+        run: echo "CODESCOUT_SKIP_ONNX_TESTS=1" >> "$GITHUB_ENV"
+      # --workspace: without it, `cargo test` here only builds the default
+      # member of this non-virtual workspace (the root `codescout` package —
+      # see `default-members` in the Cargo reference). codescout-embed compiles
+      # as a dependency but its own `#[cfg(test)]` suite — chunker tests, the
+      # smoke test, and every local.rs test including the two added in this
+      # task — never runs. Verified empirically 2026-08-11: bare
+      # `cargo test --features local-embed --no-default-features` shows
+      # `codescout-embed` only in the Compiling lines, never in a `Running`
+      # line; adding `--workspace` makes it appear and all 27 of its tests
+      # execute, with 0 regressions across all three configs.
+      - run: cargo test --workspace ${{ matrix.config.flags }}
 
   # The configuration `cargo rb` actually ships.
   #
@@ -155,6 +236,15 @@ jobs:
           key: ubuntu-latest-feature-check
       - run: cargo check --features dashboard --all-targets
       - run: cargo check --features local-embed-dynamic --all-targets
+      # `retrieval-e2e` is EXEMPT (tests/feature_lanes.rs) from *running* — it needs a
+      # live Qdrant + TEI/Ollama stack no CI runner has. That justifies not running
+      # tests/retrieval_e2e.rs, not skipping compilation of it: a `cargo check` here
+      # is exactly the "enough to catch bit-rot" bar this job's own header comment
+      # describes, and tests/retrieval_e2e.rs previously rotted for a full review
+      # round (4 call sites broke under a `RetrievalClient::from_env` signature
+      # change with nothing here to catch it) — the same shape as the archived
+      # server-stack bit-rot (0863519e142b71bc) this job exists to prevent.
+      - run: cargo check --features retrieval-e2e --all-targets
 
   windows-gnu:
     name: Windows-gnu cross (MinGW + wine)

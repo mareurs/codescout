@@ -34,7 +34,7 @@ tests/fixtures/*/.codescout/
 /.env
 /.claude/*
 !/.claude/skills/
-/.fastembed_cache/
+.fastembed_cache/
 /.codescout/tmp/
 /.buddy/*
 !/.buddy/memory/

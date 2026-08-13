@@ -266,7 +266,8 @@ async fn main() -> Result<()> {
             let project_id = agent
                 .with_project(|p| Ok(p.project_id().to_string()))
                 .await?;
-            let client = codescout::retrieval::client::RetrievalClient::from_env().await?;
+            let client =
+                codescout::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
             let opts = codescout::retrieval::sync::SyncOpts {
                 force_reindex: force,
                 record_index_state: true,
@@ -298,7 +299,8 @@ async fn main() -> Result<()> {
 
             // Build the embedder once — re-embedding happens per-row inside
             // migrate_memories. Uses the same env-driven config as the server.
-            let client = codescout::retrieval::client::RetrievalClient::from_env().await?;
+            let client =
+                codescout::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
             let embedder =
                 codescout::migrate::memories::HttpMigrationEmbedder::new(client.embedder);
 

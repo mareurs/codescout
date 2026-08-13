@@ -82,6 +82,18 @@ pub trait CodeVectorStore: Send + Sync {
     ///
     /// See `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
     async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool>;
+
+    /// Dense dimension this project's collection was created with, or `None`
+    /// when it does not exist yet.
+    ///
+    /// Takes `project_id` as well as `collection` because the sqlite-vec store
+    /// is per-project — `conn_for` keys on the project, not the collection.
+    ///
+    /// Deliberately has **no default implementation**: a backend that silently
+    /// inherited `Ok(None)` would disable the dim guard with no diagnostic.
+    /// Every implementor answers explicitly, so a new backend fails to compile
+    /// rather than failing quietly.
+    async fn collection_dim(&self, collection: &str, project_id: &str) -> Result<Option<u64>>;
 }
 /// Which code-vector backend the retrieval client uses.
 ///
@@ -203,6 +215,59 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
 
     async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool> {
         crate::retrieval::qdrant::QdrantWrap::project_has_chunks(self, collection, project_id).await
+    }
+
+    async fn collection_dim(&self, collection: &str, _project_id: &str) -> Result<Option<u64>> {
+        // Qdrant collections are shared across projects, so project_id is unused
+        // here — the dimension is a property of the collection itself.
+        //
+        // Fail-open by design, not just for the missing-collection case:
+        // `collection_info` returning any `Err` (missing collection, a
+        // transient network blip, an auth hiccup) maps to `Ok(None)`, which
+        // disables `guard_index_dim` for this call rather than surfacing a
+        // spurious failure on an unrelated transient error. This mirrors the
+        // brief's own stance on this backend ("Qdrant rejects a wrong-dimension
+        // upsert server-side anyway, so this backend loses less by abstaining
+        // than sqlite does") — matching specifically on a gRPC NotFound status
+        // would need `tonic` as a new direct dependency (it's currently only
+        // transitive, via `qdrant-client`) to name the status code, for a
+        // narrower guarantee this backend doesn't need: any error here already
+        // has a legible server-side fallback at upsert time.
+        match self.client.collection_info(collection).await {
+            Ok(info) => Ok(dense_vector_size(&info)),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+/// Walk a Qdrant collection-info response down to the size of its dense
+/// ("dense") named vector. Confirmed against the vendored qdrant-client 1.17
+/// proto types: `GetCollectionInfoResponse.result -> CollectionInfo.config ->
+/// CollectionConfig.params -> CollectionParams.vectors_config ->
+/// VectorsConfig.config`, a oneof of either a single unnamed `VectorParams`
+/// (`Config::Params`) or a `VectorParamsMap` (`Config::ParamsMap`) — our
+/// collections always use the latter (`ensure_collection` names the dense leg
+/// "dense" alongside a sibling "sparse"), but `Config::Params` is handled too
+/// so an unnamed-vector collection (never created by this code, but not
+/// impossible to encounter) still resolves instead of silently returning
+/// `None`.
+#[cfg(feature = "server-stack")]
+fn dense_vector_size(info: &qdrant_client::qdrant::GetCollectionInfoResponse) -> Option<u64> {
+    use qdrant_client::qdrant::vectors_config::Config;
+    let vectors_config = info
+        .result
+        .as_ref()?
+        .config
+        .as_ref()?
+        .params
+        .as_ref()?
+        .vectors_config
+        .as_ref()?
+        .config
+        .as_ref()?;
+    match vectors_config {
+        Config::Params(p) => Some(p.size),
+        Config::ParamsMap(m) => m.map.get("dense").map(|p| p.size),
     }
 }
 
@@ -335,6 +400,14 @@ mod tests {
         async fn project_has_chunks(&self, _collection: &str, project_id: &str) -> Result<bool> {
             let store = self.chunks.lock();
             Ok(store.iter().any(|(p, _)| p.project_id == project_id))
+        }
+
+        async fn collection_dim(
+            &self,
+            _collection: &str,
+            _project_id: &str,
+        ) -> Result<Option<u64>> {
+            Ok(None)
         }
     }
 
@@ -531,5 +604,105 @@ mod tests {
         // "m" excluded by language, "x" excluded by project → only "a"
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].chunk_id, "a");
+    }
+
+    /// Review round-2 I4: `dense_vector_size` is a pure function over plain
+    /// prost structs, constructible without a real Qdrant — as shipped it had
+    /// zero coverage, so a `"dense"` → other-key typo, or a
+    /// `.get("dense")` → `.values().next()` mutation, was invisible. Four
+    /// cases: the named-map shape our collections actually use, the unnamed
+    /// single-vector shape handled for completeness, a map present but with
+    /// no `"dense"` key, and a missing `result` (mirrors a not-found
+    /// collection).
+    #[cfg(feature = "server-stack")]
+    mod dense_vector_size_tests {
+        use super::super::dense_vector_size;
+        use qdrant_client::qdrant::{
+            vectors_config, CollectionConfig, CollectionInfo, CollectionParams,
+            GetCollectionInfoResponse, VectorParams, VectorParamsMap, VectorsConfig,
+        };
+        use std::collections::HashMap;
+
+        fn response_with(config: Option<vectors_config::Config>) -> GetCollectionInfoResponse {
+            GetCollectionInfoResponse {
+                result: Some(CollectionInfo {
+                    config: Some(CollectionConfig {
+                        params: Some(CollectionParams {
+                            vectors_config: Some(VectorsConfig { config }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn walks_the_named_dense_vector_out_of_a_params_map() {
+            let mut map = HashMap::new();
+            map.insert(
+                "dense".to_string(),
+                VectorParams {
+                    size: 384,
+                    ..Default::default()
+                },
+            );
+            map.insert(
+                "sparse".to_string(),
+                VectorParams {
+                    size: 999,
+                    ..Default::default()
+                },
+            );
+            let info = response_with(Some(vectors_config::Config::ParamsMap(VectorParamsMap {
+                map,
+            })));
+            assert_eq!(
+                dense_vector_size(&info),
+                Some(384),
+                "must read the \"dense\" key specifically, not any entry in the map \
+                 (a .values().next() mutation would wrongly return 999 or 384 by luck \
+                 of HashMap iteration order)"
+            );
+        }
+
+        #[test]
+        fn a_map_with_no_dense_key_is_none_not_some_other_entry() {
+            let mut map = HashMap::new();
+            map.insert(
+                "sparse".to_string(),
+                VectorParams {
+                    size: 999,
+                    ..Default::default()
+                },
+            );
+            let info = response_with(Some(vectors_config::Config::ParamsMap(VectorParamsMap {
+                map,
+            })));
+            assert_eq!(
+                dense_vector_size(&info),
+                None,
+                "no \"dense\" key must be None — a .values().next() mutation would \
+                 wrongly return 999 here"
+            );
+        }
+
+        #[test]
+        fn handles_the_unnamed_single_vector_shape() {
+            let info = response_with(Some(vectors_config::Config::Params(VectorParams {
+                size: 1536,
+                ..Default::default()
+            })));
+            assert_eq!(dense_vector_size(&info), Some(1536));
+        }
+
+        #[test]
+        fn a_missing_result_is_none() {
+            // Mirrors what `collection_info` returns for a not-found collection.
+            let info = GetCollectionInfoResponse::default();
+            assert_eq!(dense_vector_size(&info), None);
+        }
     }
 }

@@ -354,6 +354,31 @@ impl CodeVectorStore for SqliteVecCodeStore {
         )?;
         Ok(present)
     }
+
+    async fn collection_dim(&self, _collection: &str, project_id: &str) -> Result<Option<u64>> {
+        use rusqlite::OptionalExtension;
+        let conn = self.conn_for(project_id)?;
+        let conn = conn.lock();
+        let present: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='code_vec'",
+                [],
+                |_| Ok(true),
+            )
+            .optional()
+            .context("probe code_vec existence")?
+            .unwrap_or(false);
+        if !present {
+            return Ok(None);
+        }
+        let blob_len: Option<i64> = conn
+            .query_row("SELECT length(embedding) FROM code_vec LIMIT 1", [], |r| {
+                r.get(0)
+            })
+            .optional()
+            .context("read existing code_vec dim")?;
+        Ok(blob_len.map(|n| (n / 4) as u64))
+    }
 }
 
 #[cfg(test)]
@@ -432,6 +457,25 @@ mod tests {
             "nearest vector ranks first"
         );
         assert_eq!(hits[0].file_path, "a.rs");
+    }
+
+    #[tokio::test]
+    async fn collection_dim_reports_none_then_the_baked_dim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecCodeStore::at(tmp.path().to_path_buf());
+        assert_eq!(
+            store.collection_dim("code_chunks", "proj").await.unwrap(),
+            None,
+            "no table yet must be None, not an error"
+        );
+        let p = payload("c1", "proj", "a.rs", "rust", "h1");
+        let e = embed(vec![0.1, 0.2, 0.3]);
+        store.upsert_chunks("code_chunks", &[(p, e)]).await.unwrap();
+        assert_eq!(
+            store.collection_dim("code_chunks", "proj").await.unwrap(),
+            Some(3),
+            "vec0 bakes the dim at creation — report what it baked"
+        );
     }
 
     #[tokio::test]

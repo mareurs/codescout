@@ -1,7 +1,7 @@
 ---
 id: '04ec1893cec034d3'
 kind: spec
-status: draft
+status: active
 title: Design — Local ONNX embedding reaches the query path
 owners:
 - marius
@@ -212,7 +212,7 @@ backend fixes `memory(recall)` without a second selection path.
 | ONNX session init fails | `RecoverableError` | `ORT_DYLIB_PATH` for dylib-load failures, and that an `os error 5` is application control denying the load, not a missing file |
 | Dim mismatch | `RecoverableError` | Both dimensions, the weights dir, and that `vec0` bakes dimension at table creation — delete and rebuild, never migrate |
 | `local:` configured, no local backend compiled in | `RecoverableError` | Both escapes — the rebuild command *and* setting a url. Today this is an `anyhow::bail!` naming only the rebuild, stranding a caller that could have switched endpoint. |
-| `server-stack` sparse expected + local backend | `anyhow::bail!` | Not recoverable at runtime without changing the stack |
+| `server-stack` sparse expected + local backend | `RecoverableError` | An operator-fixable config conflict, not a bug: name both fixes — `CODESCOUT_DISABLE_SPARSE=1` for dense-only, or an embedder url that serves both dense and sparse |
 
 **Repair-and-continue: cache-root paths.** `local-dir:` pointed at the cache
 root rather than the snapshot directory is the mistake this layout invites.
@@ -259,9 +259,9 @@ compile errors.
 |---|---|---|
 | 1 | `from_dir` on a missing directory names the path and all five expected files | The operator text, which is the value of the error |
 | 2 | `from_dir` produces a stable 384-d vector; same input same output; not all-zero | Wrong tokenizer or wrong pooling — both produce a correctly-shaped, silently-wrong vector |
-| 3 | Cache-root path repaired to snapshot dir, `corrections` note present | That the repair fires *and* teaches |
+| 3 | Cache-root path repaired to snapshot dir, a `tracing::info!` note naming the given and resolved paths present | That the repair fires *and* teaches |
 | 4 | url set → `EmbedderHttp`; url unset + local model → adapter; explicit url beats any model | The `8081` removal — the behaviour change gets the direct test |
-| 5 | `CODESCOUT_EMBEDDER_*` overrides `[embeddings]` (`EnvGuard` + `#[serial]`) | Config precedence, which benchmark cells depend on |
+| 5 | `CODESCOUT_EMBEDDER_*` overrides `[embeddings]`, exercised as pure functions (`EmbedEnv`, `merge_embed_config`/`resolve_embed_fields_with`) taking env as a plain value — never `EnvGuard` + `#[serial]`, banned crate-wide by `docs/conventions/test-env-isolation.md` | Config precedence, which benchmark cells depend on |
 | 6 | Model dim ≠ stored collection dim → `RecoverableError` naming both | Unit 6, at the point it exists to serve |
 | 7 | `server-stack` + sparse expected + local backend → error | A downgrade that would otherwise surface as degraded recall, never as a failure |
 

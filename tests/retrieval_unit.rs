@@ -11,18 +11,28 @@ fn config_from_env_uses_defaults_when_unset() {
         [
             "CODESCOUT_QDRANT_URL",
             "CODESCOUT_EMBEDDER_URL",
+            "CODESCOUT_EMBEDDER_MODEL",
             "CODESCOUT_SPARSE_EMBEDDER_URL",
             "CODESCOUT_RERANKER_URL",
             "CODESCOUT_MODEL_DIM",
             "CODESCOUT_RETRIEVAL_PROFILE",
+            "EMBED_API_KEY",
         ],
         || {
             let cfg = RetrievalConfig::from_env().expect("defaults");
             assert_eq!(cfg.qdrant_url, "http://127.0.0.1:6334");
-            assert_eq!(cfg.embedder_url, "http://127.0.0.1:8081");
+            assert_eq!(
+                cfg.embedder_url, None,
+                "an unset url must mean 'resolve from the model', not 'assume 8081'"
+            );
             assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:8084");
             assert_eq!(cfg.reranker_url, "http://127.0.0.1:8083");
-            assert_eq!(cfg.model_dim, 768);
+            assert_eq!(
+                cfg.model_dim, None,
+                "an unpinned dim must let the model decide"
+            );
+            assert_eq!(cfg.model, "local:AllMiniLML6V2Q");
+            assert_eq!(cfg.api_key, None);
             assert_eq!(cfg.profile, "cpu");
         },
     );
@@ -36,17 +46,89 @@ fn config_from_env_reads_overrides() {
         [
             ("CODESCOUT_QDRANT_URL", Some("http://qd:1")),
             ("CODESCOUT_EMBEDDER_URL", Some("http://eb:2")),
+            ("CODESCOUT_EMBEDDER_MODEL", Some("local:BGESmallENV15")),
             ("CODESCOUT_SPARSE_EMBEDDER_URL", Some("http://eb-sparse:5")),
             ("CODESCOUT_RERANKER_URL", Some("http://rr:3")),
             ("CODESCOUT_MODEL_DIM", Some("4096")),
             ("CODESCOUT_RETRIEVAL_PROFILE", Some("gpu")),
+            ("EMBED_API_KEY", Some("sk-test")),
         ],
         || {
             let cfg = RetrievalConfig::from_env().expect("overrides");
             assert_eq!(cfg.qdrant_url, "http://qd:1");
+            assert_eq!(cfg.embedder_url.as_deref(), Some("http://eb:2"));
             assert_eq!(cfg.sparse_embedder_url, "http://eb-sparse:5");
-            assert_eq!(cfg.model_dim, 4096);
+            assert_eq!(cfg.model_dim, Some(4096));
+            assert_eq!(cfg.model, "local:BGESmallENV15");
+            assert_eq!(cfg.api_key.as_deref(), Some("sk-test"));
             assert_eq!(cfg.profile, "gpu");
+        },
+    );
+}
+
+#[test]
+fn config_from_env_and_project_prefers_project_toml_when_env_silent() {
+    // Composition-level regression for review round-1 mutation α: the
+    // root -> ProjectConfig::load_or_default -> merge chain inside
+    // `RetrievalConfig::from_env_and_project` must actually reach the
+    // project's [embeddings] values, not just each merge field in isolation.
+    //
+    // Needs BOTH env-var families neutralized: CODESCOUT_EMBEDDER_* (what
+    // RetrievalConfig itself reads) AND CODESCOUT_EMBED_MODEL/_URL (a
+    // DIFFERENT, pre-existing family `ProjectConfig::load_or_default` applies
+    // internally, unconditionally, before RetrievalConfig ever sees the
+    // result) — this machine exports both, and a test that only controlled
+    // the first family would silently read the second family's ambient value
+    // instead of the project.toml's.
+    temp_env::with_vars_unset(
+        [
+            "CODESCOUT_EMBEDDER_URL",
+            "CODESCOUT_EMBEDDER_MODEL",
+            "EMBED_API_KEY",
+            "CODESCOUT_MODEL_DIM",
+            "CODESCOUT_EMBED_MODEL",
+            "CODESCOUT_EMBED_URL",
+        ],
+        || {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            std::fs::write(
+                dir.path().join(".codescout/project.toml"),
+                "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"local-dir:/weights\"\nurl = \"http://from-toml:9\"\n",
+            )
+            .unwrap();
+            let cfg = RetrievalConfig::from_env_and_project(Some(dir.path())).expect("loads");
+            assert_eq!(cfg.model, "local-dir:/weights");
+            assert_eq!(cfg.embedder_url.as_deref(), Some("http://from-toml:9"));
+        },
+    );
+}
+
+#[test]
+fn config_from_env_and_project_env_wins_over_project_toml() {
+    // Same composition seam as above, but with CODESCOUT_EMBEDDER_* populated
+    // too — a precedence inversion that only manifests once the real
+    // `load_or_default` call is wired in (rather than in a pure
+    // merge-function-level test alone) would slip past `merge_tests` in
+    // src/retrieval/config.rs but not this one. No need to neutralize
+    // CODESCOUT_EMBED_MODEL/_URL here: env must win regardless of what that
+    // other layer resolves the project side to.
+    temp_env::with_vars(
+        [
+            ("CODESCOUT_EMBEDDER_URL", Some("http://from-env:8")),
+            ("CODESCOUT_EMBEDDER_MODEL", Some("local:BGESmallENV15")),
+        ],
+        || {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            std::fs::write(
+                dir.path().join(".codescout/project.toml"),
+                "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"local-dir:/weights\"\nurl = \"http://from-toml:9\"\n",
+            )
+            .unwrap();
+            let cfg = RetrievalConfig::from_env_and_project(Some(dir.path())).expect("loads");
+            assert_eq!(cfg.model, "local:BGESmallENV15");
+            assert_eq!(cfg.embedder_url.as_deref(), Some("http://from-env:8"));
         },
     );
 }

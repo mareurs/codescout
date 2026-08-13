@@ -381,7 +381,7 @@ fn default_encoding() -> String {
 fn default_timeout() -> u64 {
     60
 }
-fn default_embed_model() -> String {
+pub(crate) fn default_embed_model() -> String {
     "local:AllMiniLML6V2Q".into()
 }
 
@@ -509,7 +509,7 @@ impl ProjectConfig {
 
     /// Inner implementation — accepts an already-resolved global base so tests can
     /// inject it directly without touching environment variables.
-    fn load_with_global_base(root: &Path, global_base: toml::Value) -> Result<Self> {
+    pub(crate) fn load_with_global_base(root: &Path, global_base: toml::Value) -> Result<Self> {
         let config_path = root.join(".codescout").join("project.toml");
 
         let project_overlay: toml::Value = if config_path.exists() {

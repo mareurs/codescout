@@ -308,8 +308,12 @@ impl crate::retrieval::client::RetrievalClient {
 
         let started = std::time::Instant::now();
         let collection = self.config.collection("code_chunks");
+        self.guard_index_dim(&collection, project_id).await?;
         self.code_store
-            .ensure_collection(&collection, self.config.model_dim as u64)
+            .ensure_collection(
+                &collection,
+                self.effective_model_dim(crate::retrieval::config::DEFAULT_MODEL_DIM),
+            )
             .await?;
 
         // Fetch existing chunk refs (id + hash only — bounded) for drift diffing.
@@ -324,7 +328,7 @@ impl crate::retrieval::client::RetrievalClient {
             project_id,
             &collection,
             &server,
-            &self.embedder,
+            &*self.embedder,
             self.code_store.as_ref(),
             opts.force_reindex,
             chunk_target,
@@ -362,7 +366,9 @@ mod tests {
     use crate::retrieval::code_store::CodeVectorStore;
     use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    use crate::retrieval::embedder::{BatchEmbedder, EmbedOutput, EmbedderHttp, SparseVector};
+    use crate::retrieval::embedder::{
+        BatchEmbedder, CodeEmbedder, EmbedOutput, EmbedderHttp, SparseVector,
+    };
     use crate::retrieval::payload::CodePayload;
     use crate::retrieval::reranker::RerankerHttp;
     use crate::retrieval::search::Hit;
@@ -427,11 +433,22 @@ mod tests {
         upsert_batches: Mutex<Vec<usize>>,
         upserted: Mutex<Vec<ChunkRef>>,
         deleted: Mutex<Vec<String>>,
+        /// Reported by `collection_dim`. `None` (the default) means "no index
+        /// yet" — a test overrides it to `Some(n)` to exercise `guard_index_dim`
+        /// against a pre-existing index at dimension `n`.
+        dim: Mutex<Option<u64>>,
+        /// The `dim` argument `sync_project` actually passed to
+        /// `ensure_collection` — captured so a test can prove the call site uses
+        /// `RetrievalClient::effective_model_dim` (review round-2 I5) rather than
+        /// the bare `config.model_dim.unwrap_or(DEFAULT_MODEL_DIM)` this sibling
+        /// used to use, without needing to inspect a real Qdrant collection.
+        ensured_dim: Mutex<Option<u64>>,
     }
 
     #[async_trait::async_trait]
     impl CodeVectorStore for RecordingStore {
-        async fn ensure_collection(&self, _c: &str, _d: u64) -> Result<()> {
+        async fn ensure_collection(&self, _c: &str, d: u64) -> Result<()> {
+            *self.ensured_dim.lock().unwrap() = Some(d);
             Ok(())
         }
         async fn chunk_refs(&self, _c: &str, _p: &str) -> Result<Vec<ChunkRef>> {
@@ -476,6 +493,10 @@ mod tests {
 
         async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
             Ok(false)
+        }
+
+        async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
+            Ok(*self.dim.lock().unwrap())
         }
     }
 
@@ -878,19 +899,88 @@ mod tests {
         async fn project_has_chunks(&self, _c: &str, _p: &str) -> Result<bool> {
             Ok(false)
         }
+
+        async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
+            Ok(None)
+        }
     }
 
     fn test_retrieval_client(store: impl CodeVectorStore + 'static) -> RetrievalClient {
         RetrievalClient {
             code_store: Arc::new(store),
-            embedder: EmbedderHttp::new("http://unused.invalid", "http://unused.invalid", 3),
+            embedder: std::sync::Arc::new(EmbedderHttp::new(
+                "http://unused.invalid",
+                "http://unused.invalid",
+                3,
+            )),
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),
-                embedder_url: "http://unused.invalid".into(),
+                embedder_url: Some("http://unused.invalid".into()),
                 sparse_embedder_url: "http://unused.invalid".into(),
                 reranker_url: "http://unused.invalid".into(),
-                model_dim: 3,
+                model_dim: Some(3),
+                model: "local:AllMiniLML6V2Q".into(),
+                api_key: None,
+                profile: "cpu".into(),
+                bm25_boost: 1.0,
+                disable_sparse: false,
+                rerank: false,
+                collection_prefix: String::new(),
+            },
+            lite: false,
+        }
+    }
+
+    /// A `CodeEmbedder` fake standing in for `CodeEmbedderAdapter` (a local
+    /// backend that self-describes its dimension) without a real ONNX load.
+    /// Every method but `known_dim` is unreachable — the one test using this
+    /// never calls embed.
+    struct FixedDimEmbedder(usize);
+
+    #[async_trait::async_trait]
+    impl BatchEmbedder for FixedDimEmbedder {
+        async fn embed_batch_dyn(&self, _texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CodeEmbedder for FixedDimEmbedder {
+        async fn embed_one(&self, _text: &str) -> Result<EmbedOutput> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+        async fn embed_dense_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+        fn known_dim(&self) -> Option<usize> {
+            Some(self.0)
+        }
+    }
+
+    /// Like `test_retrieval_client`, but with an injectable embedder and no
+    /// `model_dim` pin — for exercising `RetrievalClient::effective_model_dim`'s
+    /// embedder-first priority directly, rather than the pin-or-default shape
+    /// `test_retrieval_client` is set up for. Takes an already-`Arc`'d store
+    /// (rather than `impl CodeVectorStore + 'static`, as `test_retrieval_client`
+    /// does) so a caller can keep a concrete-typed clone to inspect afterward —
+    /// `CodeVectorStore` has no `as_any()`/downcast seam to recover one later.
+    fn test_retrieval_client_with_embedder(
+        store: Arc<dyn CodeVectorStore>,
+        embedder: Arc<dyn CodeEmbedder>,
+    ) -> RetrievalClient {
+        RetrievalClient {
+            code_store: store,
+            embedder,
+            reranker: RerankerHttp::new("http://unused.invalid"),
+            config: RetrievalConfig {
+                qdrant_url: "http://unused.invalid".into(),
+                embedder_url: Some("http://unused.invalid".into()),
+                sparse_embedder_url: "http://unused.invalid".into(),
+                reranker_url: "http://unused.invalid".into(),
+                model_dim: None,
+                model: "local:AllMiniLML6V2Q".into(),
+                api_key: None,
                 profile: "cpu".into(),
                 bm25_boost: 1.0,
                 disable_sparse: false,
@@ -956,5 +1046,90 @@ mod tests {
             .await
             .expect("spawned task must not panic")
             .expect("sync_project should still succeed once it completes");
+    }
+
+    /// Call-site mutation target for `guard_index_dim`'s wiring into
+    /// `sync_project`. `test_retrieval_client` pins `model_dim: Some(3)`; this
+    /// store reports an EXISTING index already baked at a different dim (999).
+    /// The project root is an empty tempdir (nothing to walk, nothing to
+    /// embed) and every other `RecordingStore` method trivially succeeds — so
+    /// absent the `self.guard_index_dim(&collection, project_id).await?;` line
+    /// in `sync_project`, this exact setup returns `Ok` with `added: 0`, not
+    /// an error. Deleting that line makes `unwrap_err()` below panic.
+    #[tokio::test]
+    async fn sync_project_fails_fast_on_a_dim_mismatch_before_touching_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        let store = RecordingStore {
+            dim: Mutex::new(Some(999)),
+            ..Default::default()
+        };
+        let client = test_retrieval_client(store);
+        let opts = SyncOpts {
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+        let err = client
+            .sync_project("dim-mismatch-project", dir.path(), opts)
+            .await
+            .expect_err("a stored dim of 999 must fail against the configured model_dim of 3");
+        // Review round-2 I2: assert the error CLASS + remedy, not just the
+        // numbers in its Display — `RecoverableError`'s Display appends the
+        // hint, so a version of this test asserting only on `format!("{err:#}")`
+        // stays green even if `RecoverableError::with_hint(...)` were replaced
+        // wholesale with a bare `anyhow::anyhow!(...)`, which drops the hint AND
+        // flips the MCP contract from `isError: false` to `true`.
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false) so sibling parallel tool calls \
+             survive a dimension mismatch; got: {err:#}"
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Delete the code index"),
+            "must carry the reindex remedy, got: {msg}"
+        );
+        assert!(
+            msg.contains("999") && msg.contains('3'),
+            "error should name both the stored and configured dims, got: {msg}"
+        );
+    }
+
+    /// Review round-2 I5: the code-collection sibling of the `memories`-collection
+    /// bug named in the task 8 brief. `sync_project`'s `ensure_collection` call
+    /// used to size a *fresh* collection with
+    /// `self.config.model_dim.unwrap_or(DEFAULT_MODEL_DIM)` — 768 — regardless
+    /// of the model actually configured. With an unpinned local embedder
+    /// reporting 384 (mirroring `local:AllMiniLML6V2Q`), this test proves the
+    /// call site now goes through `effective_model_dim` instead: it must pass
+    /// 384 to `ensure_collection`, not the 768 compatibility default. Deleting
+    /// the `self.effective_model_dim(...)` call from that line (reverting to
+    /// the bare `unwrap_or(DEFAULT_MODEL_DIM)`) makes this test's assertion
+    /// fail with `ensured_dim == Some(768)`.
+    #[tokio::test]
+    async fn sync_project_sizes_a_fresh_collection_from_the_unpinned_local_embedder() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        // Concrete-typed `Arc` kept alongside the trait-object clone handed to
+        // the client, so `ensured_dim` can be read back afterward —
+        // `CodeVectorStore` has no downcast seam.
+        let store = Arc::new(RecordingStore::default());
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(FixedDimEmbedder(384));
+        let client = test_retrieval_client_with_embedder(store.clone(), embedder);
+        let opts = SyncOpts {
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+        client
+            .sync_project("fresh-local-project", dir.path(), opts)
+            .await
+            .expect("an empty project tree with an all-Ok store must sync cleanly");
+        assert_eq!(
+            *store.ensured_dim.lock().unwrap(),
+            Some(384),
+            "must size the fresh collection from the unpinned local embedder's own \
+             dimension (384), not the DEFAULT_MODEL_DIM compatibility constant (768)"
+        );
     }
 }

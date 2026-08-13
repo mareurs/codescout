@@ -167,19 +167,17 @@ impl RemoteEmbedder {
     /// - `http://host:port/v1`            → `http://host:port/v1/embeddings`
     /// - `http://host:port/v1/embeddings` → `http://host:port/v1/embeddings`
     ///
+    /// The shape recognition (which of the three forms `url` is) is
+    /// `crate::normalize_embeddings_base` — shared with the root crate's
+    /// `RetrievalConfig::normalize_embedder_url` rather than duplicated, since
+    /// the two used to be independent copies of the same three branches.
+    ///
     /// Rejects plaintext HTTP when an `api_key` is supplied (from argument or
     /// the `EMBED_API_KEY` env var). Loopback hosts (`localhost`, `127.0.0.1`,
     /// `[::1]`) are permitted to support local Ollama / llama.cpp setups where
     /// the key is only meaningful as a request-shape parameter.
     pub fn from_url(url: &str, model: &str, api_key: Option<String>) -> Result<Self> {
-        let base = url.trim_end_matches('/');
-        let endpoint = if base.ends_with("/v1/embeddings") {
-            base.to_string()
-        } else if base.ends_with("/v1") {
-            format!("{}/embeddings", base)
-        } else {
-            format!("{}/v1/embeddings", base)
-        };
+        let endpoint = format!("{}/v1/embeddings", crate::normalize_embeddings_base(url));
 
         let api_key = api_key.or_else(|| std::env::var("EMBED_API_KEY").ok());
 

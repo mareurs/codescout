@@ -40,11 +40,11 @@ pub trait MigrationEmbedder: Send + Sync {
 /// Production embedder backed by the project's `EmbedderHttp`. Returns the
 /// dense vector only — sparse is not stored on memory points.
 pub struct HttpMigrationEmbedder {
-    inner: crate::retrieval::embedder::EmbedderHttp,
+    inner: std::sync::Arc<dyn crate::retrieval::embedder::CodeEmbedder>,
 }
 
 impl HttpMigrationEmbedder {
-    pub fn new(inner: crate::retrieval::embedder::EmbedderHttp) -> Self {
+    pub fn new(inner: std::sync::Arc<dyn crate::retrieval::embedder::CodeEmbedder>) -> Self {
         Self { inner }
     }
 }
@@ -52,7 +52,7 @@ impl HttpMigrationEmbedder {
 #[async_trait]
 impl MigrationEmbedder for HttpMigrationEmbedder {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        Ok(self.inner.embed(text).await?.dense)
+        Ok(self.inner.embed_one(text).await?.dense)
     }
 }
 
