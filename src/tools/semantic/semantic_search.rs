@@ -406,37 +406,58 @@ impl Tool for SemanticSearch {
 
     fn long_docs(&self) -> Option<&str> {
         Some(
-            "## When to use\n\
-             \n\
-             Use `semantic_search` when you know the *concept* but not the symbol name.\n\
-             Examples: \"retry logic\", \"parse JWT token\", \"database connection pool\".\n\
-             For known symbol names, prefer `symbols` (faster, exact).\n\
-             \n\
-             ## Prerequisites\n\
-             \n\
-             The project index must be built: run `index(action='build')` first.\n\
-             Check status with `index(action='status')`.\n\
-             \n\
-             ## Key parameters\n\
-             \n\
-             - `query`: natural language or a code snippet.\n\
-             - `limit`: number of results (default 10). Raise to 20-30 for broad concepts.\n\
-             - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
-             - `include_memories=true`: also search semantic memories.\n\
-             - `project_id`: filter to a specific workspace sub-project.\n\
-             - `mode`: `\"code\"` (default) excludes markdown chunks — best for finding implementations.\n\
-                       `\"full\"` includes all indexed content.\n\
-             \n\
-             ## Output\n\
-             \n\
-             Each result has `file`, `start_line`, `end_line`, and `score` (0.0–1.0).\n\
-             Use `symbols` or `read_file(start_line=N, end_line=M)` to read the chunk body.\n\
-             \n\
-             ## Tips\n\
-             \n\
-             - Short, specific queries beat long prose.\n\
-             - Scores below 0.3 are usually noise; re-query with a different angle.",
-        )
+                    "## When to use\n\
+                 \n\
+                 Use `semantic_search` when you know the *concept* but not the symbol name.\n\
+                 Examples: \"retry logic\", \"parse JWT token\", \"database connection pool\".\n\
+                 For known symbol names, prefer `symbols` (faster, exact).\n\
+                 \n\
+                 ## Prerequisites\n\
+                 \n\
+                 The project index must be built: run `index(action='build')` first.\n\
+                 Check status with `index(action='status')`.\n\
+                 \n\
+                 ## Key parameters\n\
+                 \n\
+                 - `query`: natural language or a code snippet.\n\
+                 - `limit`: number of results (default 10). Raise to 20-30 for broad concepts.\n\
+                 - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
+                 - `include_memories=true`: also search semantic memories.\n\
+                 - `project_id`: filter to a specific workspace sub-project.\n\
+                 - `mode`: `\"code\"` (default) excludes markdown chunks — best for finding implementations.\n\
+                           `\"full\"` includes all indexed content.\n\
+                 \n\
+                 ## Output\n\
+                 \n\
+                 Each result has `file_path`, `start_line`, `end_line`, and `content`. `source` is\n\
+                 present only when it is not `\"project\"` (e.g. a memory hit). There is no `score`\n\
+                 field. Use `symbols` or `read_file(start_line=N, end_line=M)` for more context\n\
+                 around the chunk.\n\
+                 \n\
+                 ## Worktree response fields (linked git worktree only)\n\
+                 \n\
+                 Called from inside a linked git worktree with no explicit `project_id`, the query\n\
+                 merges main's index with a per-worktree delta, and the response may carry:\n\
+                 \n\
+                 - `drift_note`: main was reindexed after this worktree's own delta was built, so\n\
+                   unchanged-file results may reflect main's newer content. Re-run\n\
+                   `index(action=\"build\")` here.\n\
+                 - `worktree_state_warning`: the delta has chunks but no recorded dirty paths, an\n\
+                   inconsistent state — main was queried with no path exclusions and may serve\n\
+                   stale chunks. Re-run `index(action=\"build\")` here to repair the record.\n\
+                 - `main_never_indexed_note`: main has no indexed chunks at all, so every result\n\
+                   below comes only from this worktree's own delta. Run `index(action=\"build\")`\n\
+                   in the main checkout.\n\
+                 \n\
+                 Each is an informational string, present only when its condition applies. None is\n\
+                 an error — the query still ran.\n\
+                 \n\
+                 ## Tips\n\
+                 \n\
+                 - Short, specific queries beat long prose.\n\
+                 - Results are ranked by relevance; re-query with a different angle if the top\n\
+                   hits miss.",
+                )
     }
     fn input_schema(&self) -> Value {
         json!({

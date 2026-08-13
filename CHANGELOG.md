@@ -165,6 +165,17 @@ All notable changes to codescout are documented here.
   `codescout-mode` extension that promotes a codescout tool hot-set and
   disables Pi's native `edit`, `AGENTS.md` tool-map guidance, and an
   idempotent installer.
+- **Worktree-aware `semantic_search`.** Running from a linked git worktree with no
+  explicit `project_id`, `semantic_search` now serves main's vectors for byte-identical
+  files and a per-worktree delta index for the files that differ, merged by score. The
+  dirty set is derived by comparing `(file_path, content_hash)` pairs, not a git diff —
+  no base commit to choose, no staleness window. `index(action="build")` is the only
+  thing that writes a delta; `semantic_search` itself never does, and nothing runs it
+  for you automatically yet — you must call it yourself inside the worktree. The
+  response may carry `drift_note`, `worktree_state_warning`, or
+  `main_never_indexed_note` when the worktree's own bookkeeping is stale or
+  inconsistent. Full design and the rest of the cohort:
+  `docs/superpowers/plans/2026-08-13-worktree-semantic-search.md`.
 
 ### Changed
 

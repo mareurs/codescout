@@ -35,6 +35,7 @@
   - [Auto-Reindex on Edit](concepts/auto-reindex-on-edit.md)
   - [Hybrid Dense + Sparse Retrieval](concepts/hybrid-bm25-vector.md)
   - [SPLADE on ROCm](concepts/sparse-amd.md)
+  - [Worktree Delta Search](concepts/worktree-delta-search.md)
 
 - [Library Navigation](concepts/library-navigation.md)
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)
