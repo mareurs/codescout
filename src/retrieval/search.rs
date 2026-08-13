@@ -180,6 +180,65 @@ impl RetrievalClient {
     }
 }
 
+/// Merge two score-ordered hit lists and truncate to `limit`.
+///
+/// Exact for top-`limit` when each source was queried at `limit`: a hit in the
+/// global top-`limit` is necessarily within its own source's top-`limit`. Scores
+/// are cosine from the same model, so they are comparable across sources -- both
+/// callers go through the same `RetrievalClient::search_code` path (same
+/// embedder, same store backend, same `bm25_boost`/`disable_sparse`
+/// configuration), differing only in `project_id` and `exclude_paths`.
+pub fn merge_hits(a: Vec<Hit>, b: Vec<Hit>, limit: usize) -> Vec<Hit> {
+    let mut all: Vec<Hit> = a.into_iter().chain(b).collect();
+    all.sort_by(|x, y| {
+        y.score
+            .partial_cmp(&x.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    all.truncate(limit);
+    all
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn hit(id: &str, score: f32) -> Hit {
+        Hit {
+            chunk_id: id.to_string(),
+            file_path: "unused.rs".to_string(),
+            start_line: 1,
+            end_line: 1,
+            content: String::new(),
+            score,
+            rerank_score: None,
+        }
+    }
+
+    #[test]
+    fn merge_at_limit_equals_the_true_global_top_k() {
+        // Each source is queried at `limit`, and the merge is exact: a hit in the
+        // global top-k is necessarily in its own source's top-k. So no over-fetch
+        // is needed for the merge (the lite store's internal k-widening is
+        // separate).
+        let a = vec![hit("a1", 0.90), hit("a2", 0.50)];
+        let b = vec![hit("b1", 0.70), hit("b2", 0.60)];
+        let merged = merge_hits(a, b, 3);
+        let ids: Vec<&str> = merged.iter().map(|h| h.chunk_id.as_str()).collect();
+        assert_eq!(ids, vec!["a1", "b1", "b2"]);
+    }
+
+    #[test]
+    fn merge_returns_fewer_than_limit_when_sources_are_short() {
+        let merged = merge_hits(vec![hit("a1", 0.9)], vec![], 5);
+        assert_eq!(
+            merged.len(),
+            1,
+            "must not pad or panic when sources are short"
+        );
+    }
+}
+
 #[cfg(test)]
 mod rerank_gate_tests {
     use super::should_rerank;

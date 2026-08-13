@@ -151,6 +151,130 @@ pub(crate) fn apply_file_diversity_cap(
         .collect()
 }
 
+/// Classification of a linked worktree's index state, used by `SemanticSearch::call`'s
+/// worktree branch to decide whether to query main+delta or return the
+/// not-yet-indexed hint. See `classify_worktree_index_state` for the decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorktreeIndexState {
+    /// No sidecar, or an empty dirty set with an empty delta: the worktree sync
+    /// has simply never run. `symbols`/`grep`/`references` are still correct;
+    /// only the vector index is missing.
+    NotIndexed,
+    /// A non-empty dirty set: the normal, healthy in-progress state. Main
+    /// excludes exactly these paths; the delta supplies them.
+    Healthy,
+    /// HUMAN RULING: an empty dirty set but a non-empty delta. Impossible in a
+    /// healthy state -- a delta only exists because something was dirty. Arises
+    /// when a plain `sync_project` rewrites the sidecar with `dirty_paths: []`
+    /// after a worktree sync had recorded a real set (`write_index_state`
+    /// delegates to `write_index_state_with_dirty(root, &[])`). Must NOT be read
+    /// as "nothing is dirty": that would query main with `exclude_paths` empty
+    /// and let it silently serve every stale chunk.
+    Suspect,
+}
+
+/// Pure decision at the core of the worktree branch -- see [`WorktreeIndexState`]
+/// for what each variant means and why. Kept free of any store/filesystem access
+/// so all meaningful combinations are testable without a live index.
+/// `delta_has_chunks` only matters when `dirty_paths_empty`; callers may skip
+/// that remote check otherwise (the common, non-empty case).
+pub(crate) fn classify_worktree_index_state(
+    sidecar_present: bool,
+    dirty_paths_empty: bool,
+    delta_has_chunks: bool,
+) -> WorktreeIndexState {
+    if !sidecar_present {
+        return WorktreeIndexState::NotIndexed;
+    }
+    if !dirty_paths_empty {
+        return WorktreeIndexState::Healthy;
+    }
+    if delta_has_chunks {
+        WorktreeIndexState::Suspect
+    } else {
+        WorktreeIndexState::NotIndexed
+    }
+}
+
+/// Hint returned when a linked worktree has no usable index yet
+/// (`WorktreeIndexState::NotIndexed`). Names the resolved delta project id and
+/// both exits available while the vector index catches up: `index(action="build")`
+/// to fix it, or the filesystem-backed tools that are already correct here.
+pub(crate) fn worktree_no_index_hint(delta_id: &str) -> String {
+    format!(
+        "No index for worktree project `{delta_id}`. A worktree's files differ from the main \
+         checkout, so main's vectors are not served for changed files. Run index(action=\"build\") \
+         here to index them — it only embeds what differs. `symbols`, `grep` and `references` \
+         are computed from the filesystem and are already correct in this worktree."
+    )
+}
+
+/// `Some(hint)` when the delta is not usable yet, `None` once it is. Split from
+/// [`worktree_no_index_hint`] so both directions are testable without a live
+/// store: a hint that fires unconditionally would pass a test that only checks
+/// the positive direction while telling the caller nothing.
+pub(crate) fn worktree_hint_for(delta_present: bool, delta_id: &str) -> Option<String> {
+    if delta_present {
+        None
+    } else {
+        Some(worktree_no_index_hint(delta_id))
+    }
+}
+
+/// State-condition note for `WorktreeIndexState::Suspect` (see the human ruling on
+/// that variant above). Surfaced in the response payload, never as a
+/// `RecoverableError` -- this is evidence about the index's own bookkeeping, not
+/// something the caller did wrong.
+pub(crate) fn worktree_suspect_note(delta_id: &str) -> String {
+    format!(
+        "Worktree dirty-path tracking looks inconsistent for `{delta_id}`: the delta index has \
+         chunks but no dirty paths are recorded, which should never happen in a healthy state (a \
+         delta only exists because something was dirty). Main was queried with no path exclusions \
+         below and may be serving stale chunks for files this worktree has changed. Re-run \
+         index(action=\"build\") here to repair the dirty-path record."
+    )
+}
+
+/// `true` when `main_last_indexed_at` parses to a later instant than
+/// `worktree_last_indexed_at`. `false` on any parse failure or absence --
+/// silence rather than a false claim of freshness, matching the plan's rule that
+/// undetectable drift is reported as silence, not reassurance.
+pub(crate) fn main_reindexed_after_worktree(
+    main_last_indexed_at: &str,
+    worktree_last_indexed_at: &str,
+) -> bool {
+    let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok();
+    match (parse(main_last_indexed_at), parse(worktree_last_indexed_at)) {
+        (Some(m), Some(w)) => m > w,
+        _ => false,
+    }
+}
+
+/// Note attached when [`main_reindexed_after_worktree`] fires. Also mentions --
+/// cheaply, since this string is already being constructed -- the residual gap
+/// Task 6 left open: `sync_worktree` writes its sidecar fail-soft *after*
+/// upserting delta chunks, so a disk error mid-write can leave a non-empty but
+/// stale `dirty_paths`. That combination isn't detectable without scrolling the
+/// delta's full chunk list on every query (too expensive for a read path), so it
+/// is named here rather than checked.
+pub(crate) fn worktree_main_ahead_note() -> &'static str {
+    "Note: the main checkout was re-indexed after this worktree's delta was built, so results \
+     for unchanged files may reflect main's newer content. Re-run index(action=\"build\") here \
+     to refresh. (The delta's own dirty-path record can also lag behind a partially-failed \
+     sync — a non-empty dirty set is evidence of freshness, not a guarantee of it.)"
+}
+
+/// `(main_exclude_paths, delta_exclude_paths)` for the two-source worktree query.
+/// Main must exclude the worktree's dirty paths -- it would otherwise serve stale
+/// content for files the worktree changed; the delta must exclude nothing -- it
+/// holds exactly those dirty files and nothing else. Extracted so the wiring is
+/// mutation-verifiable without a live store: swapping the two would starve the
+/// delta query of the very paths `sync_worktree` upserted, while main keeps
+/// serving what it should have excluded.
+pub(crate) fn worktree_query_exclusions(dirty_paths: &[String]) -> (Vec<String>, Vec<String>) {
+    (dirty_paths.to_vec(), Vec::new())
+}
+
 pub struct SemanticSearch;
 
 #[async_trait::async_trait]
@@ -223,10 +347,10 @@ impl Tool for SemanticSearch {
         let query = crate::tools::require_str_param(&input, "query")?;
         if query.trim().is_empty() {
             return Err(crate::tools::RecoverableError::with_hint(
-                "'query' must be a non-empty string",
-                "Provide a natural-language phrase or code snippet describing what to search for (e.g. query=\"how does the embedding cache evict entries\").",
-            )
-            .into());
+                    "'query' must be a non-empty string",
+                    "Provide a natural-language phrase or code snippet describing what to search for (e.g. query=\"how does the embedding cache evict entries\").",
+                )
+                .into());
         }
         let limit = optional_u64_param(&input, "limit").unwrap_or(10) as usize;
         let _guard = OutputGuard::from_input(&input);
@@ -263,16 +387,16 @@ impl Tool for SemanticSearch {
             pid.to_string()
         } else {
             ctx.agent
-                .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                    Ok(p.config.project.name.clone())
-                })
-                .await
-                .map_err(|_| {
-                    crate::tools::RecoverableError::with_hint(
-                        "No active project. Use workspace(action='activate') first.",
-                        "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
-                    )
-                })?
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                        Ok(p.config.project.name.clone())
+                    })
+                    .await
+                    .map_err(|_| {
+                        crate::tools::RecoverableError::with_hint(
+                            "No active project. Use workspace(action='activate') first.",
+                            "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
+                        )
+                    })?
         };
         let root = ctx
             .agent
@@ -296,6 +420,155 @@ impl Tool for SemanticSearch {
         if let Some(p) = ctx.progress.as_ref() {
             p.report_text("searching").await;
         }
+
+        // A linked worktree's own project id never gets a `sync_project` collection
+        // -- `index(action="build")` routes a worktree root to `sync_worktree`
+        // instead (Task 6), which populates `<main>@<worktree-basename>` and
+        // records the worktree's dirty paths in its own
+        // `.codescout/index-state.json`. So when `root` is a worktree, query main
+        // (with the dirty paths excluded) plus that delta project and merge --
+        // never the worktree's own `project_id`, which has nothing indexed under
+        // it at all.
+        //
+        // Skipped entirely when the caller passed an explicit `project_id`: that
+        // names a specific collection to search, and redirecting it to main+delta
+        // would silently ignore the caller's choice.
+        let explicit_project_id = input.get("project_id").and_then(|v| v.as_str()).is_some();
+        if !explicit_project_id {
+            let worktree_main_repo = root
+                .as_deref()
+                .and_then(crate::prompts::detect_worktree_info)
+                .and_then(|info| info.main_repo);
+            if let Some(main_repo) = worktree_main_repo {
+                let worktree_root = root
+                    .clone()
+                    .expect("main_repo only resolves from a Some(root)");
+                // Same derivation Task 6's sync_worktree call site uses
+                // (src/tools/semantic/index.rs) -- must match exactly, or the
+                // delta id computed here names a project nothing was ever
+                // written under.
+                let main_project_id =
+                    crate::config::project::ProjectConfig::load_or_default(&main_repo)
+                        .map(|c| c.project.name)
+                        .unwrap_or_else(|_| {
+                            main_repo
+                                .file_name()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| "main".to_string())
+                        });
+                let wt_dir = worktree_root
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "worktree".to_string());
+                let delta_id = crate::retrieval::sync::delta_project_id(&main_project_id, &wt_dir);
+                let collection = client.config.collection("code_chunks");
+
+                let state = crate::retrieval::index_state::read_index_state(&worktree_root);
+                let dirty_paths_empty = state
+                    .as_ref()
+                    .map(|s| s.dirty_paths.is_empty())
+                    .unwrap_or(true);
+                // Only worth the remote check when dirty_paths is empty -- see
+                // classify_worktree_index_state: it's irrelevant otherwise.
+                let delta_has_chunks = if state.is_some() && dirty_paths_empty {
+                    client
+                        .project_has_chunks(&collection, &delta_id)
+                        .await
+                        .map_err(|e| {
+                            let hint = classify_search_error(&e.to_string(), &delta_id);
+                            crate::tools::RecoverableError::with_hint(
+                                format!("stack search failed: {e}"),
+                                hint,
+                            )
+                        })?
+                } else {
+                    false
+                };
+                let classification = classify_worktree_index_state(
+                    state.is_some(),
+                    dirty_paths_empty,
+                    delta_has_chunks,
+                );
+
+                if let Some(hint) =
+                    worktree_hint_for(classification != WorktreeIndexState::NotIndexed, &delta_id)
+                {
+                    return Ok(serde_json::json!({
+                        "results": [], "total": 0, "truncated": false, "hint": hint
+                    }));
+                }
+
+                let state =
+                    state.expect("classification other than NotIndexed implies a parsed sidecar");
+                let (main_exclude, delta_exclude) = worktree_query_exclusions(&state.dirty_paths);
+
+                let mut main_opts = opts.clone();
+                main_opts.exclude_paths = main_exclude;
+                let main_hits = client
+                    .search_code(&main_project_id, query, main_opts)
+                    .await
+                    .map_err(|e| {
+                        let hint = classify_search_error(&e.to_string(), &main_project_id);
+                        crate::tools::RecoverableError::with_hint(
+                            format!("stack search failed: {e}"),
+                            hint,
+                        )
+                    })?;
+
+                let mut delta_opts = opts.clone();
+                delta_opts.exclude_paths = delta_exclude;
+                let delta_hits = client
+                    .search_code(&delta_id, query, delta_opts)
+                    .await
+                    .map_err(|e| {
+                        let hint = classify_search_error(&e.to_string(), &delta_id);
+                        crate::tools::RecoverableError::with_hint(
+                            format!("stack search failed: {e}"),
+                            hint,
+                        )
+                    })?;
+
+                let merged = crate::retrieval::search::merge_hits(main_hits, delta_hits, limit);
+                let result_items: Vec<serde_json::Value> = merged
+                    .iter()
+                    .map(|h| {
+                        format_search_result_item(
+                            &h.file_path,
+                            h.start_line as usize,
+                            h.end_line as usize,
+                            "stack",
+                            h.content.clone(),
+                        )
+                    })
+                    .collect();
+                let count = result_items.len();
+                let truncated = count >= limit;
+                let mut out = serde_json::json!({
+                    "results": result_items, "total": count, "truncated": truncated
+                });
+                if truncated {
+                    out["truncated_hint"] = serde_json::json!(
+                            "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
+                        );
+                }
+                if classification == WorktreeIndexState::Suspect {
+                    out["worktree_state_warning"] =
+                        serde_json::json!(worktree_suspect_note(&delta_id));
+                }
+                if let Some(main_state) =
+                    crate::retrieval::index_state::read_index_state(&main_repo)
+                {
+                    if main_reindexed_after_worktree(
+                        &main_state.last_indexed_at,
+                        &state.last_indexed_at,
+                    ) {
+                        out["drift_note"] = serde_json::json!(worktree_main_ahead_note());
+                    }
+                }
+                return Ok(out);
+            }
+        }
+
         let hits = client
             .search_code(&project_id, query, opts)
             .await
@@ -323,8 +596,8 @@ impl Tool for SemanticSearch {
             serde_json::json!({ "results": result_items, "total": count, "truncated": truncated });
         if truncated {
             out["truncated_hint"] = serde_json::json!(
-                "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
-            );
+                    "results capped at `limit`; raise `limit` for more (ranked by relevance, so later results matter less)"
+                );
         }
         Ok(out)
     }
@@ -645,6 +918,129 @@ mod map_from_env_error_tests {
         assert!(
             mapped.downcast_ref::<RecoverableError>().is_some(),
             "must still be RecoverableError so sibling calls survive: {mapped}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod worktree_search_tests {
+    use super::*;
+
+    #[test]
+    fn worktree_hint_names_the_delta_project_and_both_exits() {
+        let h = worktree_no_index_hint("codescout@wt");
+        assert!(
+            h.contains("codescout@wt"),
+            "hint must name the resolved project id"
+        );
+        assert!(h.contains("index(action=\"build\")"));
+        assert!(
+            h.contains("grep"),
+            "hint must offer the tools that ARE correct here"
+        );
+    }
+
+    #[test]
+    fn no_hint_when_the_delta_is_indexed() {
+        // The negative direction. A hint that fires unconditionally passes the
+        // positive test while telling the user nothing.
+        assert!(worktree_hint_for(/* delta present */ true, "codescout@wt").is_none());
+    }
+
+    #[test]
+    fn hint_fires_when_the_delta_is_not_present() {
+        let hint = worktree_hint_for(/* delta present */ false, "codescout@wt");
+        assert_eq!(hint, Some(worktree_no_index_hint("codescout@wt")));
+    }
+
+    /// Exhaustive over the meaningful combinations (sidecar-absent collapses the
+    /// other two dimensions). HUMAN RULING: `(sidecar=true, dirty_empty=true,
+    /// delta_has_chunks=true)` is `Suspect`, never read as "nothing is dirty" --
+    /// that combination is impossible in a healthy state (a delta only exists
+    /// because something was dirty).
+    #[test]
+    fn classify_worktree_index_state_covers_every_combination() {
+        use WorktreeIndexState::*;
+        assert_eq!(
+            classify_worktree_index_state(false, true, true),
+            NotIndexed,
+            "no sidecar at all, regardless of the delta"
+        );
+        assert_eq!(
+            classify_worktree_index_state(false, true, false),
+            NotIndexed
+        );
+        assert_eq!(
+            classify_worktree_index_state(false, false, true),
+            NotIndexed,
+            "sidecar-absent short-circuits before dirty_paths is even consulted"
+        );
+        assert_eq!(
+            classify_worktree_index_state(true, false, false),
+            Healthy,
+            "a non-empty dirty set is the normal, healthy in-progress state"
+        );
+        assert_eq!(
+            classify_worktree_index_state(true, false, true),
+            Healthy,
+            "non-empty dirty set stays healthy even when the delta also has chunks"
+        );
+        assert_eq!(
+            classify_worktree_index_state(true, true, false),
+            NotIndexed,
+            "empty dirty set + empty delta = the worktree sync has simply not run yet"
+        );
+        assert_eq!(
+            classify_worktree_index_state(true, true, true),
+            Suspect,
+            "HUMAN RULING: empty dirty set + non-empty delta is impossible in a healthy state"
+        );
+    }
+
+    #[test]
+    fn main_reindexed_after_worktree_flags_when_main_is_strictly_newer() {
+        assert!(main_reindexed_after_worktree(
+            "2026-08-13T10:00:00+00:00",
+            "2026-08-13T09:00:00+00:00",
+        ));
+        assert!(!main_reindexed_after_worktree(
+            "2026-08-13T09:00:00+00:00",
+            "2026-08-13T10:00:00+00:00",
+        ));
+        assert!(
+            !main_reindexed_after_worktree(
+                "2026-08-13T09:00:00+00:00",
+                "2026-08-13T09:00:00+00:00",
+            ),
+            "equal timestamps are not 'after' -- must be strictly greater"
+        );
+    }
+
+    #[test]
+    fn main_reindexed_after_worktree_is_false_on_unparseable_timestamps() {
+        // Undetectable drift is reported as silence, never as a false claim of
+        // freshness.
+        assert!(!main_reindexed_after_worktree(
+            "not-a-timestamp",
+            "2026-08-13T09:00:00+00:00",
+        ));
+        assert!(!main_reindexed_after_worktree(
+            "2026-08-13T09:00:00+00:00",
+            "",
+        ));
+    }
+
+    #[test]
+    fn worktree_query_exclusions_puts_dirty_paths_on_main_only() {
+        let dirty = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+        let (main_exclude, delta_exclude) = worktree_query_exclusions(&dirty);
+        assert_eq!(
+            main_exclude, dirty,
+            "main must exclude the worktree's dirty paths"
+        );
+        assert!(
+            delta_exclude.is_empty(),
+            "delta must exclude nothing -- it holds exactly the dirty files"
         );
     }
 }

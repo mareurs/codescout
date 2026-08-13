@@ -49,7 +49,10 @@ pub trait CodeVectorStore: Send + Sync {
     /// `exclude_languages` drops hits whose payload `language` is in the list.
     /// `exclude_paths` drops hits whose payload `file_path` is in the list. Used by
     /// worktree search to suppress main's chunks for files the worktree changed;
-    /// the worktree's delta project supplies those paths instead.
+    /// the worktree's delta project supplies those paths instead. Matching is exact
+    /// string equality, so every entry must already be forward-slashed and
+    /// project-relative -- the form the indexer writes via `to_forward_slash(rel_path)` --
+    /// or the exclusion is a silent no-op.
     #[allow(clippy::too_many_arguments)]
     async fn query(
         &self,
