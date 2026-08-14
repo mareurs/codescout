@@ -632,9 +632,26 @@ impl EditCode {
         // `pre_count = 0` deliberately: dropping the target IS the operation here, so the
         // TargetDropped arm must never fire. What means something on a removal is that a
         // SIBLING vanished, or that the file stopped parsing.
+        // A removal legitimately takes the target's own descendants with it, so they
+        // are not part of the question the sibling check asks ("did the range
+        // overshoot into ADJACENT code?"). Without this split, removing a non-empty
+        // module reported its own children as dropped siblings — a wrong diagnosis of
+        // a correct operation — and rolled the removal back, so a non-empty module
+        // could not be removed at all.
+        // docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md gap 2
+        let (sibling_set, removed_descendants) =
+            match (pre_set.as_ref(), target_ast_name_path.as_deref()) {
+                (Some(set), Some(target)) => {
+                    let (outside, descendants) =
+                        crate::symbol::edit::split_target_subtree(set, target);
+                    (Some(outside), descendants)
+                }
+                _ => (pre_set.clone(), Vec::new()),
+            };
+
         let verdict = crate::symbol::edit::corruption_verdict(
             0,
-            pre_set.as_ref(),
+            sibling_set.as_ref(),
             target_ast_name_path.as_deref(),
             &sym.name_path,
             post_ast.as_deref(),
@@ -697,6 +714,12 @@ impl EditCode {
         });
         if let Some(r) = range_repair {
             response["warning"] = json!(r.warning(&sym.name));
+        }
+        // Naming what went with the target. These are expected — removing a module
+        // removes its contents — but silence would leave the caller to discover the
+        // scope of their own removal by re-reading the file.
+        if !removed_descendants.is_empty() {
+            response["removed_descendants"] = json!(removed_descendants);
         }
         if verdict == CorruptionVerdict::Unverified {
             response["corruption_check"] = json!("skipped");

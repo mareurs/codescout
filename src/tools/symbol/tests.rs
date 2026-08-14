@@ -6389,6 +6389,116 @@ async fn edit_code_replace_repairs_truncated_lsp_range_from_ast() {
     );
 }
 
+/// gap 2 of `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md`:
+/// removing a non-empty module reported the module's OWN children as "dropped
+/// sibling symbols … the range overshot into adjacent code (likely a stale LSP
+/// range)" and rolled the removal back — a wrong diagnosis of a correct operation,
+/// and it made removing a non-empty module impossible through the tool.
+///
+/// The sibling check asks whether the range overshot into ADJACENT code. A symbol
+/// nested inside the target is not adjacent to it; it is part of it.
+#[tokio::test]
+async fn edit_code_remove_deletes_a_non_empty_module_and_names_its_children() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // Canonicalized root: the mock's document_symbols does an exact PathBuf lookup
+    // and `Agent::new` canonicalizes, so both sides must agree (see the sibling test).
+    let canonical_root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = canonical_root.join("src").join("lib.rs");
+    std::fs::write(
+        &file,
+        "fn keep_me() -> u8 {\n    1\n}\n\nmod doomed {\n    pub fn inner() -> u8 {\n        2\n    }\n}\n",
+    )
+    .unwrap();
+
+    let inner = SymbolInfo {
+        name: "inner".to_string(),
+        name_path: "doomed/inner".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        // 0-indexed, like every other SymbolInfo in these tests: `pub fn inner`
+        // is the 6th line of the fixture.
+        start_line: 5,
+        end_line: 7,
+        start_col: 11,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let doomed = SymbolInfo {
+        name: "doomed".to_string(),
+        name_path: "doomed".to_string(),
+        kind: SymbolKind::Module,
+        file: file.clone(),
+        start_line: 4,
+        end_line: 8,
+        start_col: 4,
+        children: vec![inner],
+        range_start_line: None,
+        detail: None,
+    };
+
+    let mock = MockLspClient::new().with_symbols(&file, vec![doomed]);
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = EditCode
+        .call(
+            json!({
+                "action": "remove",
+                "symbol": "doomed",
+                "path": "src/lib.rs",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("removing a non-empty module must not be refused as a sibling drop");
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        !content.contains("mod doomed"),
+        "the module must be gone; got:\n{content}"
+    );
+    assert!(
+        !content.contains("inner"),
+        "the module's contents go with it; got:\n{content}"
+    );
+    assert!(
+        content.contains("fn keep_me"),
+        "the true sibling must survive; got:\n{content}"
+    );
+
+    // Expected, but not silent: the caller learns the scope of their own removal
+    // without re-reading the file.
+    let descendants = result
+        .get("removed_descendants")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        descendants
+            .iter()
+            .any(|d| d.as_str().unwrap_or_default().contains("inner")),
+        "the removed child must be reported; got: {result:?}"
+    );
+}
+
 // ── resolve_library_roots ────────────────────────────────────────────────
 
 #[tokio::test]

@@ -335,6 +335,44 @@ pub fn collect_all_name_paths(
     out
 }
 
+/// Split a pre-edit name-path set into (everything outside `target`'s subtree,
+/// `target`'s own descendants sorted).
+///
+/// The sibling-drop check in [`corruption_verdict`] answers one question: *did the
+/// edit range overshoot into ADJACENT code?* A symbol nested inside the target is
+/// not adjacent to it — it is part of it. Removing `mod foo` necessarily removes
+/// `foo`'s children, and reporting them as "dropped sibling symbols … the range
+/// overshot into adjacent code (likely a stale LSP range)" is a wrong diagnosis of
+/// a correct operation. It also rolled the removal back, so removing a non-empty
+/// module was not possible at all. See
+/// `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md` gap 2.
+///
+/// Descendancy is decided by the `<target>/` name-path prefix, which is how the
+/// AST extractor nests them (`mod foo` → `foo/bar`, `impl X for Y` → `impl X for
+/// Y/method`). A `/`-delimited prefix cannot collide with a differently-named
+/// sibling: `foobar` does not start with `foo/`.
+///
+/// The target's own path is left in `outside` — [`corruption_verdict`] already
+/// excludes it deliberately (a rename legitimately changes it), and duplicating
+/// that decision here would put one rule in two places.
+pub fn split_target_subtree(
+    set: &std::collections::HashSet<String>,
+    target: &str,
+) -> (std::collections::HashSet<String>, Vec<String>) {
+    let prefix = format!("{target}/");
+    let mut outside = std::collections::HashSet::new();
+    let mut descendants = Vec::new();
+    for np in set {
+        if np.starts_with(&prefix) {
+            descendants.push(np.clone());
+        } else {
+            outside.insert(np.clone());
+        }
+    }
+    descendants.sort();
+    (outside, descendants)
+}
+
 /// Verdict of `edit_code`'s post-edit corruption check.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CorruptionVerdict {
@@ -977,6 +1015,87 @@ mod tests {
                 "mid".to_string(),
                 "zeta".to_string(),
             ])
+        );
+    }
+
+    #[test]
+    fn split_target_subtree_separates_descendants_from_true_siblings() {
+        let pre = set(&[
+            "mod_a",
+            "mod_a/inner",
+            "mod_a/inner/deep",
+            "mod_a_sibling",
+            "other",
+        ]);
+        let (outside, descendants) = split_target_subtree(&pre, "mod_a");
+
+        assert_eq!(
+            descendants,
+            vec!["mod_a/inner".to_string(), "mod_a/inner/deep".to_string()],
+            "nested paths at any depth are descendants, sorted"
+        );
+        // `mod_a_sibling` must NOT be swept up: the prefix is `mod_a/`, and a
+        // `/`-delimited prefix cannot match a differently-named sibling.
+        assert!(outside.contains("mod_a_sibling"));
+        assert!(outside.contains("other"));
+        assert!(
+            outside.contains("mod_a"),
+            "the target's own path stays — corruption_verdict already excludes it"
+        );
+    }
+
+    /// The bug this exists for: a removed module's own children were reported as
+    /// dropped siblings, which both misdiagnosed a correct operation and rolled it
+    /// back — so a non-empty module could not be removed at all.
+    /// docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md gap 2
+    #[test]
+    fn removing_a_module_does_not_report_its_own_children_as_dropped_siblings() {
+        let pre = set(&["mod_a", "mod_a/inner", "keep_me"]);
+        let post = [sym("keep_me")]; // mod_a and its child are gone; keep_me survives
+
+        // Before the split: the child counts as a dropped sibling and the removal
+        // is refused.
+        assert_eq!(
+            corruption_verdict(0, Some(&pre), Some("mod_a"), "mod_a", Some(&post), false),
+            CorruptionVerdict::SiblingsDropped(vec!["mod_a/inner".to_string()]),
+            "unfiltered: the module's own child looks like collateral"
+        );
+
+        // After: the same removal is clean.
+        let (siblings, descendants) = split_target_subtree(&pre, "mod_a");
+        assert_eq!(descendants, vec!["mod_a/inner".to_string()]);
+        assert_eq!(
+            corruption_verdict(
+                0,
+                Some(&siblings),
+                Some("mod_a"),
+                "mod_a",
+                Some(&post),
+                false
+            ),
+            CorruptionVerdict::Clean,
+        );
+    }
+
+    /// The counterweight: filtering the subtree must not blind the check to a real
+    /// overshoot. A removal that also took out an adjacent symbol is still refused.
+    #[test]
+    fn filtering_the_subtree_still_catches_a_genuine_overshoot() {
+        let pre = set(&["mod_a", "mod_a/inner", "neighbour"]);
+        let post: [SymbolInfo; 0] = []; // neighbour went too — that IS collateral
+
+        let (siblings, _) = split_target_subtree(&pre, "mod_a");
+        assert_eq!(
+            corruption_verdict(
+                0,
+                Some(&siblings),
+                Some("mod_a"),
+                "mod_a",
+                Some(&post),
+                false
+            ),
+            CorruptionVerdict::SiblingsDropped(vec!["neighbour".to_string()]),
+            "an adjacent symbol vanishing is still an overshoot"
         );
     }
 
