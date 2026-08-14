@@ -553,4 +553,106 @@ mod tests {
         // Cleanup.
         wrap.client.delete_collection(coll).await.unwrap();
     }
+
+    /// The **hybrid/RRF arm** of `hybrid_query` — the DEFAULT production path.
+    /// `RetrievalConfig::disable_sparse` is `false` unless `CODESCOUT_DISABLE_SPARSE`
+    /// is set (`src/retrieval/config.rs`), so this is the branch nearly every real
+    /// `semantic_search` call takes, and `qdrant_hybrid_query_excludes_paths` above
+    /// covers only the `disable_sparse: true` branch.
+    ///
+    /// Measured before this test existed: deleting `.filter(...)` from EITHER
+    /// prefetch leg left the entire 3701-test suite green. The exclusion has to
+    /// hold on BOTH legs — the fused result is the union of the two prefetches,
+    /// so one unfiltered leg is enough to leak an excluded path back into the
+    /// page. `drop` is given the stronger sparse vector precisely so the sparse
+    /// leg would retrieve it if its filter went missing.
+    ///
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_hybrid_rrf
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_hybrid_rrf_query_excludes_paths_on_both_prefetch_legs() {
+        use crate::retrieval::embedder::{EmbedOutput, SparseVector};
+        use crate::retrieval::payload::{payload_to_map, CodePayload};
+
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+
+        let coll = "test_hybrid_rrf_excludes_paths";
+
+        // Clean up from any previous run.
+        let _ = wrap.client.delete_collection(coll).await;
+        wrap.ensure_collection(coll, 2).await.expect("ensure");
+
+        let payload = |file: &str, chunk_id: &str| CodePayload {
+            project_id: "proj".into(),
+            file_path: file.into(),
+            language: "rust".into(),
+            start_line: 1,
+            end_line: 2,
+            ast_header: String::new(),
+            content: format!("content of {chunk_id}"),
+            content_hash: "h".into(),
+            last_indexed_commit: String::new(),
+            chunk_id: chunk_id.into(),
+        };
+        let embed = |dense: Vec<f32>, values: Vec<f32>| EmbedOutput {
+            dense,
+            sparse: SparseVector {
+                indices: vec![1, 2],
+                values,
+            },
+        };
+
+        let points = vec![
+            (
+                "keep".to_string(),
+                payload_to_map(&payload("src/keep.rs", "keep")),
+                embed(vec![1.0, 0.0], vec![1.0, 1.0]),
+            ),
+            (
+                // Ranks FIRST on the sparse leg (stronger term weights) and is
+                // retrievable on the dense leg too, so a missing filter on
+                // either prefetch surfaces it in the fused page.
+                "drop".to_string(),
+                payload_to_map(&payload("src/drop.rs", "drop")),
+                embed(vec![0.9, 0.1], vec![5.0, 5.0]),
+            ),
+        ];
+        wrap.upsert_points(coll, &points).await.expect("upsert");
+
+        let hits = wrap
+            .hybrid_query(
+                coll,
+                "proj",
+                &[1.0, 0.0],
+                &SparseVector {
+                    indices: vec![1, 2],
+                    values: vec![1.0, 1.0],
+                },
+                10,
+                3.0,
+                // The whole point of this test: the hybrid/RRF arm.
+                false,
+                &[],
+                &["src/drop.rs".to_string()],
+            )
+            .await
+            .expect("query");
+
+        assert!(
+            hits.iter().all(|h| h.file_path != "src/drop.rs"),
+            "excluded path leaked through the RRF fusion — the exclusion filter is \
+             missing from at least one prefetch leg. Got: {:?}",
+            hits.iter().map(|h| &h.file_path).collect::<Vec<_>>()
+        );
+        assert!(
+            hits.iter().any(|h| h.file_path == "src/keep.rs"),
+            "exclusion must not empty the result set — the accepting case needs \
+             pinning too, or an always-empty result would pass the assertion above"
+        );
+
+        // Cleanup.
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
 }
