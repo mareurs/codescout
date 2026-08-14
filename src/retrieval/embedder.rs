@@ -44,6 +44,18 @@ pub trait CodeEmbedder: BatchEmbedder {
     /// Dense-only query embedding, for consumers that never rank on sparse.
     async fn embed_dense_one(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 
+    /// Dense-only **document** embedding — the storage-side counterpart of
+    /// [`Self::embed_dense_one`], for text being written rather than searched
+    /// with. An asymmetric model puts its query prefix on one side only, so a
+    /// caller storing a document must not reach for the query method.
+    ///
+    /// Deliberately has **no default implementation**, for the same reason
+    /// [`Self::known_dim`] has none: a backend that silently inherited the query
+    /// method would reintroduce exactly the defect this exists to fix, and no
+    /// test would fail. See
+    /// `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`.
+    async fn embed_document_one(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+
     /// This embedder's own dense dimension, when it can answer synchronously
     /// and without a network round trip — always `Some` for a local backend
     /// (self-describing at construction), always `None` for a remote/HTTP
@@ -68,6 +80,10 @@ impl CodeEmbedder for EmbedderHttp {
         self.dense_query(text).await
     }
 
+    async fn embed_document_one(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.dense_document(text).await
+    }
+
     fn known_dim(&self) -> Option<usize> {
         // A remote/HTTP model's dimension isn't knowable without embedding a
         // probe string over the network — never synchronous.
@@ -83,6 +99,10 @@ pub struct CodeDenseAdapter(pub std::sync::Arc<dyn CodeEmbedder>);
 impl DenseEmbedder for CodeDenseAdapter {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         self.0.embed_dense_one(text).await
+    }
+
+    async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.0.embed_document_one(text).await
     }
 
     #[cfg(test)]
@@ -425,19 +445,36 @@ impl EmbedderHttp {
         items.sort_by_key(|i| i.index);
         Ok(items.into_iter().map(|i| i.embedding).collect())
     }
-    /// Dense-only query embedding: applies the configured `query_prefix` (if any)
-    /// and hits ONLY the dense endpoint — no sparse leg. This is the path for
-    /// dense-only retrieval (memory recall today; the sqlite-vec "lite" stack
-    /// tomorrow), which never needs sparse terms. Distinct from [`Self::embed`],
-    /// which also fetches the sparse vector for hybrid code search.
+    /// Dense-only **query** embedding: applies the configured `query_prefix` (if
+    /// any) and hits ONLY the dense endpoint — no sparse leg. This is the path
+    /// for dense-only retrieval (memory recall; the sqlite-vec "lite" stack).
+    /// Distinct from [`Self::embed`], which also fetches the sparse vector for
+    /// hybrid code search.
+    ///
+    /// The prefix is the *only* difference from [`Self::dense_document`], and
+    /// this is deliberately the one place that difference is expressed — an
+    /// asymmetric model wants the prefix on the query side and never on the
+    /// document side. See
+    /// `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`.
     pub async fn dense_query(&self, text: &str) -> Result<Vec<f32>> {
-        let dense_text = if self.query_prefix.is_empty() {
-            text.to_string()
-        } else {
-            format!("{}{}", self.query_prefix, text)
-        };
+        if self.query_prefix.is_empty() {
+            return self.dense_document(text).await;
+        }
+        self.dense_document(&format!("{}{}", self.query_prefix, text))
+            .await
+    }
+
+    /// Dense-only **document** embedding: the same single-item dense call as
+    /// [`Self::dense_query`] with **no** query prefix, for text being stored
+    /// rather than searched with.
+    ///
+    /// The batch doc-side path (`embed_batch`) has always been prefix-free; this
+    /// is its one-item, dense-only sibling, for the memory store — which writes
+    /// one document at a time and never ranks on sparse, so routing it through
+    /// `embed_batch` would buy a wasted sparse round trip per write.
+    pub async fn dense_document(&self, text: &str) -> Result<Vec<f32>> {
         let dense = self
-            .dense_batch(&[dense_text.as_str()])
+            .dense_batch(&[text])
             .await?
             .into_iter()
             .next()
@@ -774,6 +811,20 @@ impl EmbedderHttp {
 pub trait DenseEmbedder: Send + Sync {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 
+    /// Embed text that is being **stored**, not searched with.
+    ///
+    /// The memory path uses this seam for both directions, so it needs both
+    /// shapes: `embed` is the query side (and may carry an asymmetric model's
+    /// query prefix), this is the document side (never does). Before this
+    /// existed, memory writes went through `embed` and every stored memory
+    /// vector sat in query-space — recall still worked, because both sides
+    /// shifted together, but the model's asymmetry was discarded and any change
+    /// of prefix policy silently stranded the whole corpus.
+    ///
+    /// No default implementation on purpose: inheriting `embed` here is the bug.
+    /// See `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`.
+    async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+
     /// Test-only downcast seam. Lets a test recover the concrete impl behind
     /// `Arc<dyn DenseEmbedder>` — e.g. downcasting to [`CodeDenseAdapter`] to
     /// reach its inner `Arc<dyn CodeEmbedder>` and prove instance identity
@@ -804,6 +855,12 @@ impl DenseEmbedder for HttpDenseEmbedder {
         // Dense-only: no sparse leg. Memory recall (and the lite stack) rank on
         // the dense vector alone, so skip the sparse HTTP round-trip entirely.
         self.inner.dense_query(text).await
+    }
+
+    async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        // Same dense-only, no-sparse shape as `embed` above, minus the query
+        // prefix — see `EmbedderHttp::dense_document`.
+        self.inner.dense_document(text).await
     }
 
     #[cfg(test)]
@@ -864,6 +921,107 @@ mod tests {
             err2.contains("127.0.0.1:1"),
             "dense-one error should name the dense URL, got: {err2}"
         );
+    }
+
+    /// Regression: the query side applies `query_prefix`, the document side never
+    /// does. Before the document seam existed, memory writes went through the
+    /// query method and every stored memory vector sat in query-space.
+    ///
+    /// Asserted at the wire, not on the returned vectors: two mocks whose bodies
+    /// are disjoint, each `expect(1)`. A regression that sends prefixed text to
+    /// the document path fails twice over — the document mock goes unmatched and
+    /// the query mock is hit twice.
+    /// docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    #[tokio::test]
+    async fn dense_document_omits_the_query_prefix_that_dense_query_applies() {
+        let mut dense_server = mockito::Server::new_async().await;
+
+        let query_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "input": ["Represent this query: hello"]
+            })))
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[1.0,0.0,0.0],"index":0}]}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let document_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "input": ["hello"]
+            })))
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.0,1.0,0.0],"index":0}]}"#)
+            // Twice: once for the inherent `dense_document`, once through the
+            // `CodeEmbedder::embed_document_one` routing below. Covering only the
+            // inherent method would let an impl wired to `dense_query` pass — that
+            // routing is where the original defect lived.
+            .expect(2)
+            .create_async()
+            .await;
+
+        // `with_config` takes the prefix explicitly, so this test reads no process
+        // env — `EnvGuard`/`#[serial]` are banned crate-wide
+        // (docs/conventions/test-env-isolation.md).
+        let emb = EmbedderHttp::with_config(
+            dense_server.url(),
+            "http://unused.invalid",
+            3,
+            "test-model",
+            "Represent this query: ",
+        );
+
+        let q = emb.dense_query("hello").await.unwrap();
+        let d = emb.dense_document("hello").await.unwrap();
+        let d_via_seam = CodeEmbedder::embed_document_one(&emb, "hello")
+            .await
+            .unwrap();
+
+        query_mock.assert_async().await;
+        document_mock.assert_async().await;
+        assert_ne!(
+            q, d,
+            "the two sides must embed different inputs, so their vectors differ"
+        );
+        assert_eq!(
+            d, d_via_seam,
+            "embed_document_one must route to dense_document, not dense_query"
+        );
+    }
+
+    /// With no prefix configured the two sides must agree exactly — the
+    /// asymmetry is the prefix and nothing else. Guards against a future
+    /// `dense_document` that diverges from `dense_query` in some other way
+    /// (endpoint, model name, dim check) and would silently split the embedding
+    /// space for every operator running the benchmarked no-prefix default.
+    #[tokio::test]
+    async fn without_a_prefix_query_and_document_send_identical_requests() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let both = dense_server
+            .mock("POST", "/v1/embeddings")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "input": ["hello"]
+            })))
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.5,0.5,0.5],"index":0}]}"#)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let emb = EmbedderHttp::with_config(
+            dense_server.url(),
+            "http://unused.invalid",
+            3,
+            "test-model",
+            "",
+        );
+
+        let q = emb.dense_query("hello").await.unwrap();
+        let d = emb.dense_document("hello").await.unwrap();
+
+        both.assert_async().await;
+        assert_eq!(q, d);
     }
 
     /// Mid-chunk empties must not shift sparse vectors onto the wrong dense
@@ -1776,6 +1934,19 @@ impl CodeEmbedder for CodeEmbedderAdapter {
         Ok(v)
     }
 
+    async fn embed_document_one(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        // `embed` (not `embed_query`) — the mirror image of the note above. The
+        // crate's `embed` is the document side and applies no query prefix,
+        // which is exactly what storing a document requires. This is the same
+        // call `embed_batch_dyn` already makes for code chunks.
+        let mut v = self.inner.embed(&[text]).await?;
+        let v = v
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("embedder returned no vector"))?;
+        self.check_dim(v.len())?;
+        Ok(v)
+    }
+
     fn known_dim(&self) -> Option<usize> {
         // NOT every backend routed through this adapter is local. `build_embedder`
         // (`client.rs`) selects `CodeEmbedderAdapter` whenever no `embedder_url`
@@ -2049,6 +2220,40 @@ mod adapter_tests {
             dense,
             vec![9.0, 9.0],
             "embed_dense_one must call embed_query (and its prefix), not embed"
+        );
+    }
+
+    /// The mirror of the test above, and the reason both exist: one pins the
+    /// query side to `embed_query`, this pins the document side to `embed`.
+    /// Either alone would pass while the other direction was wrong — which is
+    /// exactly how memory writes came to run through the query seam.
+    /// docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    #[tokio::test]
+    async fn document_embedding_uses_embed_not_the_query_path() {
+        struct PrefixedEmbedder(usize);
+
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for PrefixedEmbedder {
+            fn dimensions(&self) -> usize {
+                self.0
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32; self.0]).collect())
+            }
+            async fn embed_query(&self, _text: &str) -> anyhow::Result<codescout_embed::Embedding> {
+                Ok(vec![9.0_f32; self.0])
+            }
+        }
+
+        let a = CodeEmbedderAdapter::new(Box::new(PrefixedEmbedder(2)), None).unwrap();
+        let dense = a.embed_document_one("hello").await.unwrap();
+        assert_eq!(
+            dense,
+            vec![1.0, 1.0],
+            "embed_document_one must call embed (no query prefix), not embed_query"
         );
     }
 }

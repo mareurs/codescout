@@ -350,7 +350,15 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
         })
         .await?;
 
-    let dense = ctx.agent.memory_embedder().await?.embed(content).await?;
+    // `embed_document`, not `embed`: this is a document being stored. `embed` is
+    // the query side and carries an asymmetric model's query prefix.
+    // docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    let dense = ctx
+        .agent
+        .memory_embedder()
+        .await?
+        .embed_document(content)
+        .await?;
 
     let now = now_epoch_string();
     let memory = crate::retrieval::memory_payload::SemanticMemory {
@@ -393,7 +401,15 @@ async fn create_semantic_anchors(
         })
         .await?;
 
-    let dense = ctx.agent.memory_embedder().await?.embed(content).await?;
+    // `embed_document` for the stored vector — see `cross_embed_memory`. The
+    // anchor *search* below is a query and stays on the query side, which is the
+    // asymmetry this seam exists to express.
+    let dense = ctx
+        .agent
+        .memory_embedder()
+        .await?
+        .embed_document(content)
+        .await?;
 
     // Code chunk search still goes through the full RetrievalClient — the
     // embedder seam only covers the dense vector path. When the retrieval

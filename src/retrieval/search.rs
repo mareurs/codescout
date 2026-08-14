@@ -460,6 +460,10 @@ mod dim_guard_tests {
         async fn embed_dense_one(&self, _text: &str) -> Result<Vec<f32>> {
             unreachable!("FixedDimEmbedder is only used to answer known_dim()")
         }
+        async fn embed_document_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("FixedDimEmbedder is only used to answer known_dim()")
+        }
+
         fn known_dim(&self) -> Option<usize> {
             Some(self.0)
         }

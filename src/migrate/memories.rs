@@ -52,7 +52,12 @@ impl HttpMigrationEmbedder {
 #[async_trait]
 impl MigrationEmbedder for HttpMigrationEmbedder {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        Ok(self.inner.embed_one(text).await?.dense)
+        // `embed_document_one`, not `embed_one`: a migration re-embeds *stored*
+        // content, so it must use the document side. `embed_one` is the query
+        // seam and applies an asymmetric model's query prefix — routing a
+        // migration through it re-creates the very defect a re-embed exists to
+        // repair. docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+        Ok(self.inner.embed_document_one(text).await?)
     }
 }
 

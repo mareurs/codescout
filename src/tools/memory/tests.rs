@@ -263,6 +263,12 @@ async fn memory_remember_then_recall_e2e_via_test_seams() {
             Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         }
 
+        /// Constant embedder: both sides return the same vector, which is what
+        /// this test wants — it asserts store/recall plumbing, not similarity.
+        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.embed(text).await
+        }
+
         #[cfg(test)]
         fn as_any(&self) -> &dyn std::any::Any {
             self
@@ -356,6 +362,10 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
             Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         }
 
+        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.embed(text).await
+        }
+
         #[cfg(test)]
         fn as_any(&self) -> &dyn std::any::Any {
             self
@@ -418,6 +428,10 @@ async fn memory_recall_signals_has_more_when_capped() {
     impl DenseEmbedder for FixedEmbedder {
         async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
             Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        }
+
+        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.embed(text).await
         }
 
         #[cfg(test)]
