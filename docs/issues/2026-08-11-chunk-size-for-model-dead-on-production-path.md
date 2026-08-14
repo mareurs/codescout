@@ -113,44 +113,106 @@ anywhere in `crates/codescout-embed/src` (grepped), so the behaviour belongs to
 every over-budget chunk is embedded as nothing and retrieval quality degrades with no
 signal. That single question decides the direction of the fix, so it must be answered
 first — see *Resume*.
+
+### 2026-08-14 — the truncation question, measured
+
+Answered by reading the dependency and the model files on disk, no `local-embed` build
+needed (that build is blocked on this host anyway —
+`docs/issues/2026-08-08-cyberark-epm-blocks-ort-sys-build-script.md`).
+
+**Does fastembed truncate silently? Yes — but at 512 tokens, not 256.**
+
+The chain, each link read:
+
+| Step | Location | Value |
+|---|---|---|
+| codescout builds options | `crates/codescout-embed/src/local.rs:153` | `InitOptions::new(model)` — **never calls `with_max_length`** |
+| fastembed's per-model constant | `fastembed-5.13.4/src/text_embedding/init.rs:15-17` | `impl HasMaxLength for EmbeddingModel { const MAX_LENGTH = DEFAULT_MAX_LENGTH }` |
+| that default | `fastembed-5.13.4/src/text_embedding/mod.rs:6` | `DEFAULT_MAX_LENGTH = 512` |
+| clamp against the tokenizer | `fastembed-5.13.4/src/common.rs:91` | `max_length.min(model_max_length)` |
+| the model's own value | `~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2/…/tokenizer_config.json` | `"model_max_length": 512` |
+| the truncation itself | `fastembed-5.13.4/src/common.rs:106-109` | `with_truncation(Some(TruncationParams { max_length, .. }))` — truncates, does not error |
+
+Effective truncation point: `min(512, 512)` = **512 tokens**.
+
+Production chunks are 1200 chars ≈ 300–400 tokens at the 3–4 chars/token range the
+`chunk_size_for_model` doc comment itself uses. **300–400 < 512, so no truncation occurs.**
+The silent-data-loss hypothesis is **refuted**.
+
+**Two different "max sequence length" values exist for this model, and both are real:**
+
+```
+tokenizer_config.json      "model_max_length": 512   ← fastembed reads this
+sentence_bert_config.json  "max_seq_length":  256   ← codescout's table uses this
+```
+
+fastembed never reads `sentence_bert_config.json`. So codescout's 256 is the
+sentence-transformers *tuned* sequence length (a quality boundary) while 512 is the hard
+truncation point. Production at ~300–400 tokens sits **between** them: above the tuned
+regime, below any data loss.
 ## Hypotheses tried
 
 None — found via static tracing (`references`), not runtime measurement. Filed for tracking per explicit instruction not to attempt a fix on this branch (pre-existing, out of scope for `feat/local-onnx-query-path`).
 
 ## Fix
 
-Still not implemented, and **the decision is not the one this file originally framed.**
+Still not implemented. The measurement changed which option is correct — **and it is not
+the one this file has recommended twice.**
 
-As filed, the choice was: wire it up (real fix) *or* delete it as superseded (cleanup),
-either being acceptable. That framing assumed the two systems merely disagreed about
-*who owns* chunk sizing. The arithmetic above says they disagree about *what is safe*,
-and production is on the unsafe side by 1.84× for the default model.
+### Wiring it up would be actively harmful
 
-If the embedder truncates silently, **"delete as superseded" is the wrong direction** —
-it would remove the only artefact in the tree that records the safe bound, while leaving
-production over it. The cleanup would look like tidying and would be the opposite.
+`HasMaxLength for EmbeddingModel` sets `MAX_LENGTH = DEFAULT_MAX_LENGTH = 512` for
+**every** model — fastembed does not vary its default by model. Combined with
+`max_length.min(model_max_length)`, any fastembed-hosted local model truncates at **at
+most 512 tokens**, whatever context length the model advertises.
 
-The three options, re-framed:
+Now compare what `chunk_size_for_model` would hand it:
 
-1. **Wire it through, keeping the env override.** `sync_project`'s `chunk_target`
-   resolves via `EmbeddingsSection::effective_chunk_size()`, so the default model gets
-   652 and an 8192-token model gets ~20 889. Correct by construction, and it is what the
-   dead code was built for. Cost: chunk sizes change for every existing index — a
-   full `index(force=true)` reindex, and the retrieval benchmark should be re-run,
-   because 1200 was itself a *measured* choice (`docs/research/2026-05-06-retrieval-stack-benchmark.md`,
-   the chunk×model matrix).
-2. **Keep 1200 and delete the model-aware path** — valid *only* if truncation is proven
-   not to happen, or is proven acceptable. Then 1200 is a deliberate,
-   benchmark-backed constant and the dead code is genuinely superseded. Record the
-   truncation measurement in the deleting commit so the next reader does not re-derive
-   this whole question.
-3. **Cap at the model budget, keep 1200 as the ceiling.** `chunk_target =
-   STACK_CHUNK_TARGET.min(effective_chunk_size())`. Smallest behavioural change that
-   removes the over-budget case; still changes chunk sizes for the default model, so it
-   carries option 1's reindex cost without option 1's benefit for large-context models.
+| Model | `chunk_size_for_model` | ≈ tokens | fastembed truncates at | Discarded |
+|---|---|---|---|---|
+| `local:AllMiniLML6V2Q` | 652 chars | ~200 | 512 | none |
+| `local:BGESmallENV15Q` | 1305 chars | ~400 | 512 | none |
+| `local:NomicEmbedTextV15Q` | **20 889 chars** | ~6 500 | **512** | **~92 %** |
+| `local:JinaEmbeddingsV2BaseCode` | **20 889 chars** | ~6 500 | **512** | **~92 %** |
 
-Unchanged from the original filing: leaving both systems live and disconnected is the
-actual defect.
+So **option 1 (wire `sync_project` through `effective_chunk_size`) would introduce the
+very bug this file feared**, for exactly the models it was meant to serve: 20 889-char
+chunks against a 512-token tokenizer means roughly nine tenths of each chunk embedded as
+nothing. Today's fixed 1200 accidentally protects against that.
+
+`chunk_size_for_model` is not wrong in general — for `openai:` / `ollama:` / bare-name
+remote endpoints there is no fastembed tokenizer in the path and 8192 is genuinely
+available. It is wrong **for the `local:` arm**, which is the arm feeding the only
+backend that truncates.
+
+### Revised options
+
+1. ~~**Wire it through as-is.**~~ **Rejected on evidence** — see the table. Would
+   over-chunk large-context local models by ~13× against a hard 512-token ceiling.
+2. **Keep 1200; delete `effective_chunk_size` and narrow `chunk_size_for_model`.** Now
+   the defensible default. 1200 is benchmark-backed
+   (`docs/research/2026-05-06-retrieval-stack-benchmark.md`, the chunk×model matrix), sits
+   safely under 512 tokens for every local model, and no production caller is lost
+   because there are none. If `chunk_size_for_model` is kept for the remote arms, its
+   `local:` table needs a `.min(512-token equivalent)` and a comment naming fastembed's
+   uniform default as the reason.
+3. **Wire it through *and* clamp to fastembed's ceiling.** `chunk_target =
+   STACK_CHUNK_TARGET.min(effective_chunk_size()).min(FASTEMBED_MAX_CHARS)`. Most correct
+   in principle; buys nothing today, since 1200 is already under every local model's
+   ceiling. Only pays off if codescout ever passes `with_max_length` to raise fastembed's
+   512.
+4. **Raise fastembed's `max_length` deliberately.** Independent of this bug and worth its
+   own decision: codescout could call `with_max_length` to use a large-context local
+   model's real window instead of 512. That would make option 1 or 3 meaningful. It is a
+   capability change, not a fix.
+
+### The quality question that remains open
+
+1200 chars ≈ 300–400 tokens is above `all-MiniLM-L6-v2`'s tuned `max_seq_length` of 256
+though below its 512 hard limit. Whether that costs retrieval quality is measurable with
+the existing benchmark and is *not* a correctness issue — do not conflate the two. The
+chunk×model matrix already chose 1200 empirically, which is evidence, if indirect, that
+it does not hurt on this corpus.
 ## Tests added
 
 N/A — no fix attempted; filing only, per explicit instruction not to fix this out-of-scope finding on this branch.
@@ -161,27 +223,23 @@ None needed for correctness — indexing still runs; the chunk size is just not 
 
 ## Resume
 
-**Do not start by choosing between wire-it-up and delete-it.** Answer one question
-first, because it decides which of those is correct:
+**The measurement is done. Do not re-run it.** fastembed truncates silently at
+`min(DEFAULT_MAX_LENGTH=512, tokenizer_config.model_max_length)`, which is 512 tokens for
+`all-MiniLM-L6-v2`. Production's 1200-char chunks are ~300–400 tokens, so nothing is
+truncated today. Read from `fastembed-5.13.4/src/common.rs:91,106` and
+`text_embedding/{init.rs:15-17,mod.rs:6}`, plus `model_max_length: 512` and
+`max_seq_length: 256` in the cached model's own config files.
 
-> Does the embedder silently truncate input above the model's max sequence length?
+**What remains is a scoping decision, and option 1 is now off the table** — wiring
+`effective_chunk_size` into `sync_project` unchanged would over-chunk
+`NomicEmbedTextV15Q` / `JinaEmbeddingsV2BaseCode` by ~13× against fastembed's uniform
+512-token ceiling, discarding ~92 % of each chunk. Option 2 (keep 1200, delete the dead
+path, narrow the `local:` table) is the defensible default; option 3 if you want the
+belt-and-braces clamp; option 4 is a separate capability question.
 
-Build with `--features local-embed`, embed a string comfortably over 256 tokens and one
-under it that shares a prefix, and compare the vectors. If the over-length vector equals
-the truncated-prefix vector, truncation is silent and confirmed. `crates/codescout-embed`
-has no `max_length` handling of its own, so this is `fastembed`'s behaviour — read its
-tokenizer config or measure it; do not infer it.
-
-With that answered:
-
-- **truncates silently** → this is a retrieval-quality bug, not dead code. Option 1 or 3
-  under *Fix*. Deleting the model-aware path becomes the wrong move.
-- **does not truncate** (pads, errors, or handles long input) → option 2 is available and
-  1200 stands on its benchmark evidence. Record the measurement in the commit.
-
-Either way the premise is already verified and needs no re-checking:
-`effective_chunk_size` has zero production callers, `chunk_size_for_model` returns
-characters via `n × 0.85 × 3.0`, and 652 vs 1200 is the gap.
+Whatever lands, put fastembed's uniform `DEFAULT_MAX_LENGTH = 512` in a comment next to
+any chunk-size constant. It is the non-obvious fact that makes a model's advertised 8192
+context irrelevant on the local path, and it is not discoverable from codescout's source.
 ## References
 
 - `src/config/project.rs:350-357` — `EmbeddingsSection::effective_chunk_size`
