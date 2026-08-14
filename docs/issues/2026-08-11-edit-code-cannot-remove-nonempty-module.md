@@ -95,12 +95,90 @@ None — the 14-step leaf-by-leaf workaround (rename the `mod` line via `edit_fi
 
 ## Fix
 
-Not implemented. Candidates, one per gap: (1) an explicit "insert at file/module scope" mode for `edit_code(insert)` that walks up past the anchor's enclosing blocks; (2) scope the sibling-drop guard to exclude a target's own descendant subtree when the target itself is what's being removed/replaced; (3) make `edit_file`'s "fn " filter check only `new_string` (what would be introduced), not `old_string`, so pure deletions of function-bearing code are not blocked.
+**Gap 2 fixed in `3baa993d`.** Gaps 1 and 3 remain, and gap 3's motivation is now
+weaker — see below.
 
+### Gap 2 — done
+
+Root cause at `src/symbol/edit.rs:420`: the sibling-drop filter excluded the
+target's own `name_path` but not its **descendants**, so every nested symbol was
+in `pre_set`, absent from `post_set`, and counted as collateral. Reproduced
+end-to-end first; the error was verbatim:
+
+```
+edit_code remove('doomed') would have dropped sibling symbols: doomed/inner.
+The range overshot into adjacent code (likely a stale LSP range). File restored.
+```
+
+`split_target_subtree` (`src/symbol/edit.rs`) separates descendants from true
+siblings by the `<target>/` name-path prefix — the form the AST extractor already
+uses for nesting — and the `remove` call site passes the sibling-only set. A
+`/`-delimited prefix cannot catch a differently-named neighbour (`mod_a_sibling`
+does not start with `mod_a/`), which is asserted.
+
+Three scoping decisions worth keeping:
+
+1. **`remove` only.** For `replace` the caller supplies the new body, so a child
+   that vanished is *either* intent or an accident, and today's stricter behaviour
+   is the safe default. Widening it would silently lose protection rather than fix
+   anything. See the follow-up below.
+2. **`corruption_verdict` untouched.** It is safety-critical, pure, and heavily
+   documented; the *call site* is where the caller's intent is known. Its existing
+   target-exclusion stays the single place that rule lives.
+3. **Descendants are reported, not just permitted.** `removed_descendants` in the
+   response names what went with the target — expected, but a caller should not
+   have to re-read the file to learn the scope of their own removal. Mirrors the
+   librarian's `replaced_subsections`.
+
+### Gaps 1 and 3 — still open
+
+- **Gap 1** — `edit_code(insert, position="after")` cannot escape the anchor's
+  enclosing scope, so it cannot place a new module at file scope. Unchanged. See
+  also the related `insert` bound defect in
+  `docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md`
+  § Resume item 2.
+- **Gap 3** — `edit_file`'s filter refusing pure deletions. Two things changed
+  under it: the *unanchored-keyword* half is fixed (`138de7c5`), and gap 2 being
+  fixed means `edit_code(remove)` now works on the shape that made gap 3 bite. Its
+  § Summary correction still applies — "check only `new_string`" is too broad;
+  exempt `new_string.is_empty()` specifically, if it is still worth doing at all.
+
+### Follow-up worth its own decision
+
+Should `replace` also stop treating a target's missing descendants as dropped
+siblings? Its error message ("the range overshot into adjacent code (likely a
+stale LSP range)") is a **wrong diagnosis** when the caller's own replacement body
+simply defined fewer children — the same misdiagnosis reasoning
+`corruption_verdict`'s own doc comment uses to justify its ordering. But relaxing
+it lets an incomplete body silently drop children, which nothing else catches. The
+librarian solved the identical dilemma by *reporting* (`replaced_subsections`)
+rather than refusing; the same shape would work here. Not done — it trades a
+safety guard for ergonomics and deserves a deliberate call.
 ## Tests added
 
-None.
+Four, in `3baa993d`:
 
+**`src/symbol/edit.rs`** — three on the pure split:
+- `split_target_subtree_separates_descendants_from_true_siblings` — nested paths at
+  any depth are descendants; `mod_a_sibling` is **not** swept up by the `mod_a/`
+  prefix; the target's own path stays (because `corruption_verdict` already
+  excludes it, and duplicating that rule would put it in two places).
+- `removing_a_module_does_not_report_its_own_children_as_dropped_siblings` —
+  asserts **both** directions in one test: unfiltered → `SiblingsDropped`,
+  filtered → `Clean`. It embeds its own reproduction, so it cannot silently stop
+  demonstrating the bug.
+- `filtering_the_subtree_still_catches_a_genuine_overshoot` — the counterweight: a
+  removal that also took out an adjacent symbol is still refused. Without it the
+  filter could later be widened into a hole with every other test still green.
+
+**`src/tools/symbol/tests.rs`** — one end-to-end:
+`edit_code_remove_deletes_a_non_empty_module_and_names_its_children` removes a
+non-empty `mod` through the tool, asserts the module and its contents are gone, the
+true sibling survives, and `removed_descendants` names the child. Reverting the
+call-site split fails it with the verbatim error quoted in § Fix.
+
+Gate: `cargo test --workspace` → **3797 passed / 0 failed / 50 ignored**; clippy
+`--workspace --all-targets -D warnings` clean.
 ## Workarounds
 
 To relocate or delete a non-empty module: (1) if renaming to a unique name is enough, use a single-line `edit_file` rename of the `mod` declaration (explicitly allowed per the tool's own hint); (2) to actually remove content, `edit_code(remove, ...)` each leaf child individually (reliable — no guard tripped on leaf removal); (3) only once the module is empty does `edit_file` accept deleting the shell (no more `fn` content for the filter to object to).
