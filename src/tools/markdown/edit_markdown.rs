@@ -322,22 +322,18 @@ pub fn perform_section_edit_ext(
 /// that starts at `start_idx` (0-based) and has heading level `level`.
 /// Skips headings inside fenced code blocks (``` ... ```).
 fn compute_section_end(lines: &[&str], start_idx: usize, level: usize) -> usize {
-    // Mirror parse_all_headings: if ``` fences in the slice are unbalanced,
+    // Mirror parse_all_headings: if the fences in the slice are unbalanced,
     // treat them as plain text so an unclosed fence in the section's body
     // doesn't swallow the next sibling heading.
-    let fence_count = lines[start_idx..]
-        .iter()
-        .filter(|l| l.starts_with("```"))
-        .count();
-    let fences_balanced = fence_count % 2 == 0;
+    let fences_balanced =
+        crate::util::markdown_fence::fences_balanced(lines[start_idx..].iter().copied());
 
-    let mut in_code_block = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     for (i, &line) in lines[start_idx..].iter().enumerate() {
-        if fences_balanced && line.starts_with("```") {
-            in_code_block = !in_code_block;
+        if fences_balanced && fence.feed(line) {
             continue;
         }
-        if in_code_block {
+        if fence.in_fence() {
             continue;
         }
         if let Some(lvl) = crate::tools::file_summary::heading_level(line) {
@@ -370,14 +366,13 @@ pub fn find_consumed_subsections(content: &str, heading_query: &str) -> Result<V
     let heading_idx = range.heading_line - 1;
     let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
 
-    let mut in_code_block = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     let mut out = Vec::new();
     for &line in &lines[heading_idx + 1..end_idx] {
-        if line.starts_with("```") {
-            in_code_block = !in_code_block;
+        if fence.feed(line) {
             continue;
         }
-        if in_code_block {
+        if fence.in_fence() {
             continue;
         }
         if heading_level(line).is_some() {
@@ -956,18 +951,18 @@ pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String>
 /// Whitespace there is significant — the caller warns the agent not to
 /// normalize it.
 pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
-    let mut in_fence = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     for (i, line) in section.split('\n').enumerate() {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
+        if fence.feed(t) {
+            // The delimiter line itself is code.
             if i == line_idx {
                 return true;
             }
-            in_fence = !in_fence;
             continue;
         }
         if i == line_idx {
-            if in_fence {
+            if fence.in_fence() {
                 return true;
             }
             return line.starts_with("    ") || line.starts_with('\t');

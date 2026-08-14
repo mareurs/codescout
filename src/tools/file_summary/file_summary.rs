@@ -141,24 +141,26 @@ pub struct SectionRange {
 pub fn parse_all_headings(content: &str) -> Vec<HeadingInfo> {
     let line_count = content.lines().count();
 
-    // Pre-scan: an odd number of ``` fence markers means the file has an
-    // unclosed code block (typical during in-flight batch edits whose
-    // intermediate new_string contains a half-fence). CommonMark would
-    // extend that fence to EOF, hiding every heading after it. For an
-    // editor tool, that's brittle: we'd rather treat unbalanced fences
-    // as plain text and still find the headings. Bug:
+    // Pre-scan: an unclosed code block means the file carries a half-fence
+    // (typical during in-flight batch edits whose intermediate new_string
+    // contains one). CommonMark would extend that fence to EOF, hiding every
+    // heading after it. For an editor tool, that's brittle: we'd rather treat
+    // unbalanced fences as plain text and still find the headings. Bug:
     // docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md
-    let fence_count = content.lines().filter(|l| l.starts_with("```")).count();
-    let fences_balanced = fence_count % 2 == 0;
+    //
+    // This is a real fence scan, not a parity count — a nested shorter run is
+    // content, not a delimiter, so counting fence-ish lines called balanced
+    // files unbalanced and silently disabled tracking. See
+    // docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+    let fences_balanced = crate::util::markdown_fence::fences_balanced(content.lines());
 
-    let mut in_code_block = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     let mut raw: Vec<(String, usize, usize)> = Vec::new();
     for (idx, line) in content.lines().enumerate() {
-        if fences_balanced && line.starts_with("```") {
-            in_code_block = !in_code_block;
+        if fences_balanced && fence.feed(line) {
             continue;
         }
-        if in_code_block {
+        if fence.in_fence() {
             continue;
         }
         if let Some(level) = heading_level(line) {

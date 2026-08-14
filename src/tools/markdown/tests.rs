@@ -1001,6 +1001,69 @@ fn scoped_edit_in_section_with_code_block() {
     assert!(result.contains("## Next\ntext"));
 }
 
+/// Regression for the reported symptom: a section holding a four-backtick block
+/// that itself contains a three-backtick block. The inner fence used to close
+/// the outer one, so the `#` line after it became a phantom heading, the section
+/// ended early, and a scoped edit targeting text past the outer fence failed
+/// with `old_string not found` on byte-present text.
+/// docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+#[test]
+fn scoped_edit_reaches_text_after_a_nested_fence() {
+    let content = "\
+## Task
+
+````markdown
+# Page Title
+
+```toml
+# .codescout/project.toml
+```
+````
+
+Add it to the SUMMARY, matching the existing entry style.
+
+## Next
+next body
+";
+    let result = perform_scoped_edit(
+        content,
+        "## Task",
+        "matching the existing entry style",
+        "matching the neighbouring entries",
+        false,
+    )
+    .unwrap();
+    assert!(result.contains("matching the neighbouring entries"));
+    assert!(
+        result.contains("# .codescout/project.toml"),
+        "the fenced TOML comment must survive untouched"
+    );
+    assert!(result.contains("## Next\nnext body"));
+}
+
+/// The nested fence must not make the outer block's `#` lines addressable as
+/// sections that `replace` would then consume.
+#[test]
+fn find_consumed_subsections_ignores_headings_inside_a_nested_fence() {
+    let content = "\
+## Task
+
+````markdown
+# Page Title
+
+```toml
+# .codescout/project.toml
+```
+````
+
+### Real Child
+
+## Next
+";
+    let victims = find_consumed_subsections(content, "## Task").unwrap();
+    assert_eq!(victims, vec!["### Real Child"]);
+}
+
 // ── heading matching edge cases ─────────────────────────────────────
 
 /// Heading with inline code backticks — the tool should match via stripped formatting.

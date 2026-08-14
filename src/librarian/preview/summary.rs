@@ -8,14 +8,13 @@ const MAX_SUMMARY_CHARS: usize = 200;
 /// blocks. Returns an empty string if no prose paragraph exists.
 pub fn extract(body: &str) -> String {
     let mut paragraph = String::new();
-    let mut in_fence = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     for line in body.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_fence = !in_fence;
+        if fence.feed(trimmed) {
             continue;
         }
-        if in_fence {
+        if fence.in_fence() {
             continue;
         }
         if trimmed.is_empty() {

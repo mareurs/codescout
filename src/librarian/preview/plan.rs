@@ -14,15 +14,14 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
     let mut total = 0u64;
     let mut done = 0u64;
     let mut open_next: Vec<String> = Vec::new();
-    let mut in_fence = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
 
     for line in body.lines() {
         let trimmed_start = line.trim_start();
-        if trimmed_start.starts_with("```") {
-            in_fence = !in_fence;
+        if fence.feed(trimmed_start) {
             continue;
         }
-        if in_fence {
+        if fence.in_fence() {
             continue;
         }
         let Some(rest) = trimmed_start.strip_prefix("- [") else {

@@ -14,14 +14,13 @@ pub struct Heading {
 /// Returned `line` is 1-indexed.
 pub fn parse(body: &str) -> Vec<Heading> {
     let mut out = Vec::new();
-    let mut in_fence = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     for (idx, line) in body.lines().enumerate() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
-            in_fence = !in_fence;
+        if fence.feed(trimmed) {
             continue;
         }
-        if in_fence {
+        if fence.in_fence() {
             continue;
         }
         let bytes = trimmed.as_bytes();
@@ -120,6 +119,52 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// Regression: a nested three-backtick fence must not close the enclosing
+    /// four-backtick block, or every `#` line after it becomes a phantom
+    /// heading and section scoping ends early.
+    /// docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+    #[test]
+    fn a_nested_shorter_fence_does_not_leak_headings_from_the_outer_block() {
+        let body = "\
+## Reproduction
+
+````markdown
+### Some Task
+
+```` ```markdown ````
+# Page Title
+
+```toml
+# .codescout/project.toml
+[embeddings]
+```
+```` ``` ````
+
+Then prose after the outer fence closes.
+````
+
+## Environment
+";
+        let got: Vec<(u8, String)> = parse(body).into_iter().map(|h| (h.level, h.text)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (2u8, "Reproduction".to_string()),
+                (2u8, "Environment".to_string())
+            ],
+            "only the two real headings; `# Page Title` and the TOML comment \
+             live inside the outer fence"
+        );
+    }
+
+    /// A backtick run never closes a tilde block, and vice versa.
+    #[test]
+    fn a_backtick_fence_does_not_close_a_tilde_block() {
+        let body = "# Real\n~~~\n```\n## Phantom\n~~~\n## Also real\n";
+        let got: Vec<String> = parse(body).into_iter().map(|h| h.text).collect();
+        assert_eq!(got, vec!["Real", "Also real"]);
     }
 
     #[test]

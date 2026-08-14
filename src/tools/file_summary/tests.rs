@@ -540,6 +540,79 @@ fn parse_all_headings_skips_code_blocks() {
     assert_eq!(headings[1].text, "## Real heading");
 }
 
+/// Regression: a nested three-backtick fence must not close the enclosing
+/// four-backtick block. When it did, the phantom heading terminated the
+/// enclosing section early and scoped edits reported `old_string not found`
+/// for text that was byte-present.
+/// docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+#[test]
+fn parse_all_headings_respects_nested_fence_run_length() {
+    let content = "\
+## Task
+
+````markdown
+# Page Title
+
+```toml
+# .codescout/project.toml
+```
+````
+
+Prose after the outer fence.
+
+## Next
+";
+    let got: Vec<String> = parse_all_headings(content)
+        .into_iter()
+        .map(|h| h.text)
+        .collect();
+    assert_eq!(got, vec!["## Task", "## Next"]);
+}
+
+/// The section must extend past the nested fence to the next real sibling,
+/// so text after the outer fence is still inside `## Task`.
+#[test]
+fn extract_markdown_section_spans_a_nested_fence() {
+    let content = "\
+## Task
+
+````markdown
+# Page Title
+
+```toml
+# .codescout/project.toml
+```
+````
+
+Prose after the outer fence.
+
+## Next
+next body
+";
+    let result = extract_markdown_section(content, "## Task").unwrap();
+    assert!(
+        result.content.contains("Prose after the outer fence."),
+        "section truncated at the phantom heading: {:?}",
+        result.content
+    );
+    assert!(
+        !result.content.contains("next body"),
+        "section must still stop at the real sibling: {:?}",
+        result.content
+    );
+}
+
+/// A backtick run never closes a tilde block.
+#[test]
+fn parse_all_headings_does_not_close_a_tilde_fence_with_backticks() {
+    let content = "# Real\n~~~\n```\n## Phantom\n~~~\n## Also real\n";
+    let got: Vec<String> = parse_all_headings(content)
+        .into_iter()
+        .map(|h| h.text)
+        .collect();
+    assert_eq!(got, vec!["# Real", "## Also real"]);
+}
+
 #[test]
 fn parse_all_headings_no_truncation() {
     let mut content = String::from("# Title\n");
