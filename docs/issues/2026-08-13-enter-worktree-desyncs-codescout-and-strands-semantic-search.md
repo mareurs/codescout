@@ -25,6 +25,66 @@ project's memory/sub-project topology all diverge independently.
 A harness-side signal **already exists and already fires** — a `PostToolUse` hook
 on `EnterWorktree` instructs the agent to activate and blocks codescout's *write*
 tools until it does. Reads are unguarded by design, which is the actual hole.
+## Status 2026-08-14 — HALF 2 SHIPPED, halves 1 and 3 still open
+
+**Do not archive this file.** One of the three divergences is fixed; two are not.
+
+### Half 2 — FIXED on `experiments`
+
+Worktree semantic search works. Shipped as an 8-task plan
+(`docs/superpowers/plans/2026-08-13-worktree-semantic-search.md`, spec
+`docs/superpowers/specs/2026-08-13-worktree-semantic-search-design.md`) across
+**`b7989098..bb26f43c`**, 25 commits, plus a fix wave and a closing pass after the
+final whole-branch review.
+
+What landed: a **per-worktree delta project** keyed on git's own worktree name
+(`worktree_ids`/`delta_project_id`, `src/retrieval/sync.rs`); a content-hash dirty
+set (`dirty_paths`, `src/retrieval/drift.rs`) that needs no base commit and inherits
+no staleness window; `exclude_paths` on `CodeVectorStore::query` and `SearchOpts`;
+`IndexState.dirty_paths` with `#[serde(default)]` and `schema_version` 1 → 2;
+`sync_worktree` reachable only from the `index` tool, so `semantic_search` never
+writes; and on Qdrant a **single union query** (`CodeVectorStore::query_overlay`)
+rather than two merged result sets. Gate at the close: **3705 / 44** default,
+**3718 / 51** `--features server-stack`, both clippy lanes clean.
+
+The companion-plugin half of the fix — retiring the hook instruction that said
+*"Do NOT run index in worktrees"*, which this plan made false, and replacing it with
+correct `index(action="build")` guidance — is on branch
+**`feat/worktree-index-hooks` @ `d65f96d` in `claude-plugins`, UNPUSHED**. That is a
+separate repo with its own release checklist. **Until it lands, an agent entering a
+worktree is still told not to index.**
+
+**Known limitations that shipped deliberately**, all recorded with rulings:
+
+- Three reachable **double-serve** states (main and the delta both returning a copy
+  of one path). Two are flagged in the response (`worktree_state_warning` on the
+  `Suspect` state; `drift_note` when main is newer). The third is a residual: a path
+  reverted to main's exact bytes is absent from the new sidecar while its stale delta
+  chunks survive an early return that skips the prune.
+- A first-ever **failed** sync now leaves a full dirty set with an empty delta, which
+  classifies `Healthy` — so the actionable "not yet indexed" hint is not shown.
+- `last_indexed_at` after a failed sync means "when the dirty set was computed", not
+  "when the delta was built", so a legitimate `drift_note` can be suppressed.
+- **Sub-projects are not covered**: for a workspace sub-project, `<root>/.git` does
+  not exist, `detect_worktree_info` returns `None`, and both the producer and the
+  consumer fall through to the plain path — consistent, but the worktree hint never
+  fires and the user sees an empty result with no explanation.
+
+### Half 1 — PARTIALLY addressed
+
+The `PostToolUse` hook on `EnterWorktree` exists and now carries correct index
+guidance (pending the unpushed branch above). The gap this file documents — that the
+signal **covers writes but not reads** — is unchanged: MCP write tools are blocked
+until `workspace()` is called, reads are not.
+
+### Half 3 — UNTOUCHED
+
+Memory set and sub-project topology divergence. Nothing in this plan addressed it.
+
+### Before archiving
+
+Split halves 1 and 3 into their own bug files first. Archiving this one as-is would
+retire two unfixed divergences along with the fixed one.
 ## Symptom (Effect)
 
 User-reported, 2026-08-13 (not yet reproduced by an agent in-session):
@@ -310,26 +370,31 @@ reference. The alternative — staying in main and letting git move the work —
 the isolation `EnterWorktree` was for.
 ## Resume
 
-Half 2's mechanism is measured; what is *not* settled is whether it holds on the
-branch we ship.
+**Half 2 is done — do not re-investigate it.** Read the *Status 2026-08-14* section
+above before anything else; it names what shipped, the SHA range, and the
+limitations that shipped on purpose.
 
-1. **Re-read the keying on `experiments`.** Every `path:line` above came from
-   `feat/local-onnx-query-path`, which carries 2,592 insertions across the retrieval
-   query path. Confirm on `experiments`: `project_id` = `project.name` →
-   basename fallback; collection global; `.codescout/project.toml` gitignored.
-   If the feature branch changed any of that, this file needs re-deriving, not
-   patching.
-2. **Re-measure hypothesis 5 on `experiments`** — the `not_indexed` vs `up_to_date`
-   discrepancy — before treating
-   `2026-07-12-activate-index-status-stale-probe-cache-false-negative.md` as a zombie.
-3. Then implement Fix half-2 (1), the speaking empty result. It is the smallest
-   change that resolves the reported symptom and it is agent-agnostic.
-4. Separately, widen the plugin's read-tool coverage for half 1.
-5. Update `docs/architecture/companion-plugin.md`: every hook it names as `.sh` is
-   now `.mjs` invoked via `node` (only `il3-deny-hook.sh`, `detect-tools.sh`, and
-   `*.test.sh` remain shell), and its "symlinks `.codescout/` into the worktree"
-   claim is incomplete — the real-dir fallback links only `embeddings`, which is
-   what actually happened here.
+Concrete next actions, in order:
+
+1. **Decide the companion branch.** `feat/worktree-index-hooks` @ `d65f96d` in
+   `claude-plugins` is unpushed and unmerged. Until it lands the hook still tells
+   agents not to index in a worktree, so half 2's fix is only reachable by a user who
+   knows to run `index(action="build")` manually. That repo also has an open
+   secret-guard decision on `recon/promote-substrate-bytes-secrets`, so sequence the
+   two deliberately.
+2. **Split halves 1 and 3 into their own bug files**, then archive this one. Do it
+   through the librarian (`artifact(action="move", …)`), never a bare `git mv` —
+   `id = sha256(abs_path)`.
+3. **Triage the deferred minors** recorded in the run ledger at
+   `.superpowers/sdd/2026-08-13-worktree-semantic-search/progress.md` (kept, not
+   deleted). The final review's own triage lists what it judged must-fix versus
+   fine-to-ship; the must-fix set was cleared by the fix wave.
+
+One seam is knowingly untested and worth closing if this area is touched again:
+reverting `semantic_search` to two `search_code` calls plus `merge_hits` would not
+fail any test, because nothing builds a Qdrant-backed `RetrievalClient`. The sibling
+seam (deleting Qdrant's `query_overlay` override) **is** now covered, by
+`c284786c`.
 ## References
 
 - `src/retrieval/sync.rs:107,385` — retrieval's only worktree mentions.
