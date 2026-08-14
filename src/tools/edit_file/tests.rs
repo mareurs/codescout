@@ -3340,6 +3340,61 @@ fn find_def_keyword_ignores_class_in_comment() {
     );
 }
 
+/// Regression: a keyword that merely appears *inside an identifier* is not a
+/// definition. The keywords carry a trailing space, which supplies the right-hand
+/// boundary — nothing supplied the left one, so `via_trait ` matched `trait ` and
+/// `my_fn ` matched `fn `.
+///
+/// Not hypothetical: `let via_trait = CodeEmbedder::embed_document_one(…)` was
+/// rejected as a structural rewrite while adding a test, and the only fix was to
+/// rename the variable.
+#[test]
+fn find_def_keyword_ignores_a_keyword_inside_an_identifier() {
+    assert_eq!(
+        find_def_keyword(
+            "        let via_trait = CodeEmbedder::embed_document_one(&emb, \"x\");",
+            "rust"
+        ),
+        None,
+        "`via_trait` is an identifier, not a trait definition"
+    );
+    assert_eq!(
+        find_def_keyword("    let my_fn = compute();", "rust"),
+        None,
+        "`my_fn` is an identifier, not a fn definition"
+    );
+    assert_eq!(
+        find_def_keyword("    let x = self.inner_impl (a);", "rust"),
+        None,
+        "`inner_impl ` is an identifier, not an impl block"
+    );
+}
+
+/// The control for the test above: real definitions must still be caught, whether
+/// at line start or behind modifiers and indentation. A word-boundary rule that
+/// also stopped matching these would trade a false positive for a false negative,
+/// which is the strictly worse direction for this guard.
+#[test]
+fn find_def_keyword_still_catches_real_definitions() {
+    assert_eq!(find_def_keyword("fn foo() {", "rust"), Some("fn "));
+    assert!(
+        find_def_keyword("    pub async fn foo() {", "rust").is_some(),
+        "a definition behind modifiers must still match"
+    );
+    assert!(
+        find_def_keyword("impl Trait for Thing {", "rust").is_some(),
+        "an impl block must still match"
+    );
+    assert!(
+        find_def_keyword("pub trait Seam {", "rust").is_some(),
+        "a trait definition must still match"
+    );
+    assert!(
+        find_def_keyword("    class Foo:", "python").is_some(),
+        "non-rust languages use the same matcher"
+    );
+}
+
 #[test]
 fn guard_allows_blank_line_before_unchanged_fn() {
     // spec 2026-06-16: inserting a blank line before an existing fn (ktlint).
@@ -3922,6 +3977,74 @@ async fn edit_file_passes_no_def_keyword() {
         result.is_ok(),
         "should allow import list edit (no def keyword): {:?}",
         result.err()
+    );
+}
+
+/// End-to-end version of `find_def_keyword_ignores_a_keyword_inside_an_identifier`:
+/// a real multi-line edit whose only keyword-looking text is an identifier must go
+/// through the tool, not just the matcher.
+///
+/// This is the edit that was actually refused: adding two assertion lines to a
+/// test, where a local binding named `via_trait` made the guard see `trait `.
+#[tokio::test]
+async fn edit_file_allows_a_multiline_edit_whose_only_keyword_is_inside_an_identifier() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "fn t() {\n    let a = one();\n    let b = two();\n}\n",
+    )
+    .unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "    let a = one();\n    let b = two();",
+                "new_string": "    let a = one();\n    let b = two();\n    let via_trait = seam(&a);\n    let my_fn = pick(&b);"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "identifiers containing `trait `/`fn ` are not definitions: {:?}",
+        result.err()
+    );
+}
+
+/// The counterweight: a multi-line edit that really does introduce a definition
+/// must still be refused. Without this, the boundary fix above could be loosened
+/// into a hole and nothing would notice — a false negative here means `edit_file`
+/// splices a new `fn` into an unrelated body (BUG-050).
+#[tokio::test]
+async fn edit_file_still_blocks_a_multiline_edit_that_introduces_a_definition() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "fn t() {\n    let a = one();\n    let b = two();\n}\n",
+    )
+    .unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "    let a = one();\n    let b = two();",
+                "new_string": "    let a = one();\n    let b = two();\n}\n\nfn spliced() {\n    let c = three();"
+            }),
+            &ctx,
+        )
+        .await;
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("symbol definition"),
+        "a genuine new definition must still be refused, got: {err}"
     );
 }
 

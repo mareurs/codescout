@@ -33,6 +33,47 @@ fn def_keywords_for_lang(lang: &str) -> &'static [&'static str] {
     }
 }
 
+/// True when `needle` occurs in `line` starting at a word boundary.
+///
+/// Every keyword in [`def_keywords_for_lang`] carries a trailing space, which
+/// supplies the *right*-hand boundary. Nothing supplied the left one, so a plain
+/// `contains` matched a keyword buried inside an identifier: `let via_trait = …`
+/// matched `trait `, `let my_fn = …` matched `fn `, `self.inner_impl (x)` matched
+/// `impl `. Each was reported as a structural rewrite and refused, and the only
+/// way through was to rename the variable.
+///
+/// The guard's error asymmetry is deliberate: a false positive costs a caller one
+/// rejected edit, a false negative risks the LSP range corruption this guard
+/// exists to prevent (BUG-027). So this narrows the match only where it is
+/// unambiguous — a preceding `[A-Za-z0-9_]` means the keyword is part of a longer
+/// identifier and cannot be introducing a definition.
+///
+/// Two known residuals, both left over-blocking on purpose:
+/// - A keyword inside a **string literal** (`assert!(s.contains("fn "))`) still
+///   matches: the preceding `"` is not a word character. Narrowing that needs
+///   literal-awareness (`crate::util::text::scan_line` has it) and is a wider
+///   change than this guard warrants.
+/// - A preceding **non-ASCII** character reads as a non-word boundary, so a
+///   unicode identifier ending in a keyword still matches. Rust permits those;
+///   they are vanishingly rare next to the cost of getting the common case wrong.
+fn contains_def_keyword_at_word_start(line: &str, needle: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut from = 0usize;
+    while let Some(rel) = line[from..].find(needle) {
+        let at = from + rel;
+        let preceded_by_word_char = at
+            .checked_sub(1)
+            .map(|i| bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric())
+            .unwrap_or(false);
+        if !preceded_by_word_char {
+            return true;
+        }
+        // Needles are ASCII, so `at + 1` is a char boundary.
+        from = at + 1;
+    }
+    false
+}
+
 /// Returns the matched definition keyword for error reporting, if any.
 /// Comment lines (// /* * #) are skipped so a keyword inside a comment
 /// does not falsely trip the structural-rewrite guard.
@@ -46,7 +87,12 @@ fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
                 && !t.starts_with('*')
                 && !t.starts_with('#')
         })
-        .find_map(|line| keywords.iter().find(|kw| line.contains(**kw)).copied())
+        .find_map(|line| {
+            keywords
+                .iter()
+                .find(|kw| contains_def_keyword_at_word_start(line, kw))
+                .copied()
+        })
 }
 
 /// Lines present in `from` but not (byte-identical) in `to`. Restricts the
