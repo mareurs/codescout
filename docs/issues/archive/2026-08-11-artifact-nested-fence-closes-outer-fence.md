@@ -177,7 +177,12 @@ rendered-vs-bytes gap, trailing spaces, non-breaking hyphens).
 
 ## Fix
 
-Implemented. A shared tracker replaces all seven boolean sites:
+Implemented in `8ba65118` (`experiments`). `master` is a strict ancestor
+(`git rev-list --left-right --count master...experiments` → `0 658`), so
+promotion is a fast-forward and this SHA already is the master-side SHA — there
+is no second SHA to record.
+
+A shared tracker replaces all seven boolean sites:
 `src/util/markdown_fence.rs` — `FenceState` stores the open fence's `(char, run
 length)` and closes only on a run of the same character that is at least as long
 and followed by nothing but whitespace; it also refuses to *open* on a backtick
