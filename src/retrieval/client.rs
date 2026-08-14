@@ -16,6 +16,75 @@ use std::sync::Arc;
 /// to match, rather than left as always-compiled dead code on that build.
 const FALLBACK_EMBEDDER_URL: &str = "http://127.0.0.1:8081";
 
+/// Model prefixes that name a **network** backend — arms 3 and 4 of
+/// `create_embedder_with_config`, both gated on the `remote-embed` feature.
+///
+/// `pub(crate)` because `ProjectStatus` needs this same list to tell whether a
+/// config names a remote backend the binary cannot build. One definition, two
+/// callers asking different questions of it.
+pub(crate) const REMOTE_MODEL_PREFIXES: [&str; 2] = ["ollama:", "openai:"];
+
+/// Arm 5's prefix: a hard error carrying a migration hint, neither local nor
+/// remote. Named so it cannot fall through the bare-name branch and be mistaken
+/// for a local model name.
+const HARD_ERROR_MODEL_PREFIX: &str = "custom:";
+
+/// Does this model string name a network backend?
+pub(crate) fn model_names_remote_backend(model: &str) -> bool {
+    REMOTE_MODEL_PREFIXES.iter().any(|p| model.starts_with(p))
+}
+
+/// Does this model string select the in-process local backend?
+///
+/// Mirrors `create_embedder_with_config`'s resolution ladder
+/// (`crates/codescout-embed/src/lib.rs`) on the no-url path. Two ways to select
+/// local, and the second one is the fix for
+/// `docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md`:
+///
+/// 1. An explicit `local:` / `local-dir:` prefix — arm 2.
+/// 2. A **bare** name, when a local backend is compiled in — arm 6 resolves it
+///    as a local ONNX model. Nothing else can be built for such a string, so
+///    "local or nothing" collapses to local for every consumer's purposes.
+///
+/// Case 2 used to be missing, and the cost was not cosmetic. `guard_sparse` and
+/// `dense_only` both read this, so a bare-name local config had its hybrid
+/// sparse leg left enabled against an embedder that emits no sparse vector —
+/// exactly the silent recall degradation `guard_sparse` exists to turn into a
+/// loud, operator-fixable error. `resolve_model_dim` likewise sized fresh
+/// collections from the default dimension instead of asking the real model.
+///
+/// # What this deliberately does NOT do
+///
+/// It does not consult compiled features for the *remote* prefixes. On a
+/// `--no-default-features` build an `ollama:` model has no constructible arm at
+/// all, and `create_embedder_with_config` bails with "Unknown model" — the right
+/// outcome. Reporting such a config as local would raise `guard_sparse`'s
+/// "local backend produces no sparse vector" error, which is a false
+/// explanation for a config that cannot build anything. That residual is
+/// status-string-only and stays recorded in the bug file.
+///
+/// # Accepted cost
+///
+/// A bare name that is *not* a real local model (a typo) now trips
+/// `guard_sparse` before construction reports "Unknown model", so diagnosing a
+/// typo can take two steps instead of one. That is worth it: a typo fails either
+/// way, whereas the config this fixes was working and silently degraded.
+fn model_names_local_backend(model: &str) -> bool {
+    if model.starts_with("local:") || model.starts_with("local-dir:") {
+        return true;
+    }
+    // Arm 6 only exists when a local backend is compiled in. These are this
+    // crate's features, which forward to codescout-embed's own — the switch an
+    // operator actually flips.
+    if !cfg!(any(
+        feature = "local-embed",
+        feature = "local-embed-dynamic"
+    )) {
+        return false;
+    }
+    !model_names_remote_backend(model) && !model.starts_with(HARD_ERROR_MODEL_PREFIX)
+}
+
 pub struct RetrievalClient {
     /// Code-chunk vector store behind the `CodeVectorStore` seam. Qdrant today;
     /// in-process sqlite-vec in the lite stack (Phase 2). `pub(crate)` so the
@@ -32,16 +101,15 @@ pub struct RetrievalClient {
 
 impl RetrievalClient {
     /// A local backend is selected when no url is configured and the model
-    /// names one. Keep this the single source of truth — `dense_only` and the
-    /// sparse guard both read it.
+    /// names one. Keep this the single source of truth — `dense_only`, the
+    /// sparse guard, `resolve_model_dim`, and `ProjectStatus` all read it.
     ///
     /// Note the `is_none()`: this answers "is the local backend SELECTED", so it
     /// is false precisely when a url also exists. `guard_local_model_with_url`
     /// therefore cannot reuse it — it must see the model's intent through the url
     /// that overrides it.
     pub(crate) fn backend_is_local(config: &RetrievalConfig) -> bool {
-        config.embedder_url.is_none()
-            && (config.model.starts_with("local:") || config.model.starts_with("local-dir:"))
+        config.embedder_url.is_none() && model_names_local_backend(&config.model)
     }
 
     /// A url and a `local-dir:` model are contradictory: the url selects a network
@@ -503,6 +571,74 @@ mod selection_tests {
     #[test]
     fn no_url_with_a_remote_style_model_does_not_select_the_local_backend() {
         let c = cfg_with(None, "openai:text-embedding-3-small");
+        assert!(!RetrievalClient::backend_is_local(&c));
+    }
+
+    /// Regression: a **bare** model name with no url selects the local backend,
+    /// because `create_embedder_with_config`'s arm 6 resolves it as local ONNX
+    /// and nothing else can be built for such a string.
+    ///
+    /// The assertions past the predicate are the point. `backend_is_local` is
+    /// read by `guard_sparse` and `dense_only`, so before this fix a bare-name
+    /// local config kept the hybrid sparse leg enabled against an embedder that
+    /// emits no sparse vector — the silent recall loss `guard_sparse` exists to
+    /// make loud. Asserting only the predicate would not catch a future caller
+    /// that stops consulting it.
+    /// docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
+    #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
+    #[test]
+    fn no_url_with_a_bare_model_name_selects_the_local_backend_when_compiled_in() {
+        let mut c = cfg_with(None, "AllMiniLML6V2Q");
+        c.disable_sparse = false;
+        assert!(
+            RetrievalClient::backend_is_local(&c),
+            "arm 6 resolves a bare name locally, so the classifier must agree"
+        );
+        assert!(
+            RetrievalClient::dense_only(&c, /* lite */ false),
+            "a local embedder emits no sparse vector"
+        );
+        assert!(
+            RetrievalClient::guard_sparse(&c, /* lite */ false).is_err(),
+            "the sparse conflict must be raised, not silently degraded"
+        );
+    }
+
+    /// The other side of the same cfg: with no local backend compiled, arm 6
+    /// does not exist, so a bare name selects nothing local — construction bails
+    /// with "Unknown model" instead, and the sparse guard must stay quiet rather
+    /// than blame a local backend that cannot exist.
+    #[cfg(not(any(feature = "local-embed", feature = "local-embed-dynamic")))]
+    #[test]
+    fn no_url_with_a_bare_model_name_selects_nothing_local_without_a_local_backend() {
+        let mut c = cfg_with(None, "AllMiniLML6V2Q");
+        c.disable_sparse = false;
+        assert!(!RetrievalClient::backend_is_local(&c));
+        assert!(RetrievalClient::guard_sparse(&c, /* lite */ false).is_ok());
+    }
+
+    /// Pins the deliberate non-fix: a remote-prefixed model with no url is never
+    /// classified local, whatever is compiled. On a `--no-default-features` build
+    /// nothing can be built for it and `create_embedder_with_config` bails with
+    /// "Unknown model" — the right error. Calling it local would instead raise
+    /// `guard_sparse`'s "local backend produces no sparse vector", a false
+    /// explanation. That residual is status-string-only and stays open.
+    #[test]
+    fn a_remote_prefixed_model_is_never_local_regardless_of_compiled_features() {
+        for model in ["ollama:nomic-embed-text", "openai:text-embedding-3-small"] {
+            let c = cfg_with(None, model);
+            assert!(
+                !RetrievalClient::backend_is_local(&c),
+                "{model} must not be classified local"
+            );
+        }
+    }
+
+    /// `custom:` is a hard-error prefix (arm 5), not a local one — it must not
+    /// fall through the bare-name branch into a local classification.
+    #[test]
+    fn the_custom_prefix_is_not_classified_local() {
+        let c = cfg_with(None, "custom:whatever");
         assert!(!RetrievalClient::backend_is_local(&c));
     }
 

@@ -315,7 +315,7 @@ impl Tool for ProjectStatus {
             compiled_in.push("local-onnx");
         }
         // Route through `backend_is_local` — the single source of truth
-        // `dense_only` and `guard_sparse` also read (`client.rs:37-40`) —
+        // `dense_only` and `guard_sparse` also read (`client.rs`) —
         // rather than re-deriving "is this local" from which backends happen
         // to be compiled in. The old rule ("url set? remote-http :
         // (local-onnx compiled in? local-onnx : unavailable)") never looked at
@@ -324,6 +324,8 @@ impl Tool for ProjectStatus {
         // be compiled in (it is never local, regardless of that), and as
         // "unavailable" when it wasn't (it works fine over the network
         // either way).
+        let names_remote =
+            crate::retrieval::client::model_names_remote_backend(&retrieval_config.model);
         let backend = if retrieval_config.embedder_url.is_some() {
             "remote-http"
         } else if crate::retrieval::client::RetrievalClient::backend_is_local(&retrieval_config) {
@@ -335,6 +337,16 @@ impl Tool for ProjectStatus {
                 // this block.
                 "unavailable"
             }
+        } else if names_remote && !compiled_in.contains(&"remote") {
+            // Mirror of the local arm above, for the other direction. The model
+            // names `ollama:`/`openai:`, but the arms that build those are
+            // `remote-embed`-gated (a *default* feature, so this only happens on
+            // a `--no-default-features` build) and this binary lacks them:
+            // `create_embedder_with_config` has no compiled path and bails with
+            // "Unknown model". Reporting "remote-http" claimed a working network
+            // config for one that cannot build anything.
+            // docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
+            "unavailable"
         } else {
             "remote-http"
         };
@@ -342,11 +354,19 @@ impl Tool for ProjectStatus {
         result["embedding_backend"] = json!(backend);
         result["embedding_compiled_in"] = json!(compiled_in);
         if backend == "unavailable" {
-            result["embedding_hint"] = json!(
+            // Two ways to be unavailable, and the actionable advice differs —
+            // telling someone with an `ollama:` model to rebuild with
+            // --features local-embed would send them to the wrong backend.
+            result["embedding_hint"] = json!(if names_remote {
+                "This binary has no remote embedding backend compiled in, but the \
+                 configured model names one. Rebuild without --no-default-features \
+                 (or with --features remote-embed), or point [embeddings].model at \
+                 local:<model> and rebuild with --features local-embed."
+            } else {
                 "This binary has no local embedding backend compiled in, but the \
-                     configured model names one. Rebuild with --features local-embed, \
-                     or set [embeddings].url to an OpenAI-compatible endpoint."
-            );
+                 configured model names one. Rebuild with --features local-embed, \
+                 or set [embeddings].url to an OpenAI-compatible endpoint."
+            });
         }
 
         // --- Index section ---

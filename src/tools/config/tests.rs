@@ -369,6 +369,16 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
 /// the *model string*, not just env, so it fails against the old
 /// compiled-in-only rule regardless of which optional backends this
 /// binary happens to have compiled in.
+///
+/// **Refined 2026-08-14.** I1's rationale was "the config works fine over the
+/// network" — true whenever `remote-embed` is compiled, which it is by default.
+/// A `--no-default-features` build turns that default feature off, and then no
+/// arm of `create_embedder_with_config` can build an `ollama:` model at all; it
+/// bails with "Unknown model". Reporting `remote-http` there claimed a working
+/// network config for one that cannot build anything, so the expectation is now
+/// feature-aware. I1's original assertion is preserved verbatim for every build
+/// that has the feature — which is every default build, including CI's.
+/// docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
 #[tokio::test]
 async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends() {
     let dir = tempdir().unwrap();
@@ -423,13 +433,89 @@ async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_co
 
     // Ground truth: an `ollama:` model with no url is never
     // `backend_is_local` (it doesn't start with `local:`/`local-dir:`), so
-    // it must report `"remote-http"` regardless of which backends this
-    // binary happens to have compiled in.
+    // whether a *local* backend is compiled in cannot change the answer — that
+    // is still what this test's name asserts. What does change it is whether
+    // the *remote* backend it names is compiled at all.
+    let expected = if cfg!(feature = "remote-embed") {
+        "remote-http"
+    } else {
+        "unavailable"
+    };
     assert_eq!(
         result["embedding_backend"],
-        json!("remote-http"),
-        "an ollama: model with no url must report remote-http regardless of \
-             compiled-in backends, got: {:?}",
+        json!(expected),
+        "an ollama: model with no url must report {expected} for this build \
+         (remote-embed compiled: {}), got: {:?}",
+        cfg!(feature = "remote-embed"),
+        result["embedding_backend"]
+    );
+}
+
+/// The sibling above covers the `ollama:` half of
+/// `docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md`.
+/// This covers the other half: a **bare** model name with no url. Arm 6 of
+/// `create_embedder_with_config` resolves such a name as a local ONNX model, so
+/// with `local-embed` compiled in the live backend really is `LocalEmbedder` and
+/// the status must say `local-onnx` — it used to say `remote-http`.
+///
+/// Gated on the feature because the classifier can only answer "local" when a
+/// local backend exists to answer for; the `local-embed` CI lane runs this.
+#[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
+#[tokio::test]
+async fn status_reports_local_onnx_for_an_urlless_bare_model_name() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join(".codescout/project.toml"),
+        "[project]\nname = \"test\"\n\n[embeddings]\nmodel = \"AllMiniLML6V2Q\"\n",
+    )
+    .unwrap();
+
+    // Same two ambient override layers the sibling test guards against: either
+    // one replaces the model this test just wrote, invalidating its premise.
+    if std::env::var("CODESCOUT_EMBEDDER_MODEL").is_ok()
+        || std::env::var("CODESCOUT_EMBED_MODEL").is_ok()
+    {
+        eprintln!(
+            "skipping status_reports_local_onnx_for_an_urlless_bare_model_name: \
+             CODESCOUT_EMBEDDER_MODEL/CODESCOUT_EMBED_MODEL ambient override present"
+        );
+        return;
+    }
+    if std::env::var("CODESCOUT_EMBEDDER_URL")
+        .ok()
+        .or_else(|| std::env::var("CODESCOUT_EMBED_URL").ok())
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
+        eprintln!(
+            "skipping status_reports_local_onnx_for_an_urlless_bare_model_name: \
+             an ambient embedder url is set, which always wins over the model"
+        );
+        return;
+    }
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
+
+    assert_eq!(
+        result["embedding_backend"],
+        json!("local-onnx"),
+        "a bare model name with no url resolves through arm 6 to a local ONNX \
+         embedder, so the status must name it, got: {:?}",
         result["embedding_backend"]
     );
 }
