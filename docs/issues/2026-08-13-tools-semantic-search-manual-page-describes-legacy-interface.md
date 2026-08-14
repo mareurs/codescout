@@ -1,12 +1,13 @@
 ---
 id: ec267997e2048d87
 kind: bug
-status: open
+status: fixed
 title: docs/manual/src/tools/semantic-search.md documents the retired legacy sqlite-vec interface, not the current Qdrant stack
 tags:
 - docs
 - semantic-search
 - drift
+closed: 2026-08-14
 opened: 2026-08-13
 owner: marius
 related: []
@@ -114,18 +115,102 @@ in scope for that pass and was left stale.
 
 ## Fix
 
-Not implemented in this pass — out of scope for the docs-only task that found
-it. Plan: rewrite `docs/manual/src/tools/semantic-search.md`'s `## semantic_search`
-section (parameters table, output examples, Tips) against the current
-`input_schema()` and `format_search_result_item`/`search_response` output
-shape; drop `score`, `language`, `detail_level`, `offset` unless a future pass
-reintroduces them for real. Cross-check `## index` and `## index_project` /
-`## index_status` sections in the same file too — not audited in this pass.
+Fixed 2026-08-14 on `experiments`. `docs/manual/src/tools/semantic-search.md`
+rewritten field-by-field against the live code: `SemanticSearch::input_schema`,
+`format_search_result_item`, `search_response`, `apply_worktree_plan_notes`
+(`src/tools/semantic/semantic_search.rs`) and both `input_schema`s plus the status
+response construction in `src/tools/semantic/index.rs`.
 
+The bug's Resume said to check the `index` / `index_project` / `index_status`
+sections "for the same class of drift". They had it worse than the
+`semantic_search` section did.
+
+### `semantic_search`
+
+| Documented | Live | → |
+|---|---|---|
+| 6 params | 8 | added `mode`, `project_id` |
+| `"project": "frontend"` in the workspace example | no such param | `project_id` |
+| `"score": 0.91` | not emitted | removed, with the reason |
+| `"language": "rust"` | not emitted | removed |
+| `"source": "project"` | `"stack"`; omitted when it would be `"project"` | corrected |
+| `{results, total}` | `{results, total, truncated, truncated_hint?}` | documented |
+| — | 4 worktree state fields | documented |
+
+### `index`
+
+| Documented | Live |
+|---|---|
+| "Indexing runs synchronously" | **asynchronous** — returns `{status: "started"}` immediately |
+| flat `{files_indexed, total_files, total_chunks, …}` | those live in `status`'s nested `indexing` block |
+| `drift_summary` on build | not emitted |
+| actions `build` / `status` | also `cancel` — undocumented |
+| — | `already_running` response — undocumented |
+
+### `index_status`
+
+Every documented field name was wrong, and both documented parameters do not exist
+(`IndexStatus::input_schema` declares no properties):
+
+| Documented | Live |
+|---|---|
+| `threshold`, `path` params | **no params at all** |
+| `indexed_files` | `file_count` |
+| `total_chunks` | `chunk_count` |
+| `model` | not emitted |
+| `last_updated` | `indexed_at` |
+| `stale: true` | `git_sync: {status: "behind", behind_commits: N}` |
+| `drift: […]` | not emitted |
+
+Also newly documented because it is a real trap: `indexed: false` has **two** causes
+— an empty index and an unreachable Qdrant — distinguishable only by `message`.
+
+### The intro
+
+Said vectors live in a SQLite database at `.codescout/embeddings.db`. Replaced with
+Qdrant (`:6334`, collection `code_chunks`), the hybrid dense + sparse-SPLADE + RRF
+shape, and the real default model `local:AllMiniLML6V2Q` (in-process, no server —
+the page previously said the default "works with any OpenAI-compatible endpoint or a
+local Ollama server", implying a server is required). A callout now marks the
+sqlite-vec path retired and names what still reads it.
+
+### Verified, not assumed
+
+`index_project` / `index_status` are still registered — the page's claim held, and
+`src/tools/semantic/mod.rs:6` exports both. That is the one section that needed no
+correction, which is why it was worth checking rather than rewriting on suspicion.
+
+Also not assumed: `project` really is absent as a parameter. `memory` accepts it as
+an alias for `project_id` (`memory_write_accepts_project_alias_for_project_id`), and
+`PATH_PARAM_ALIASES` exists for path params — so an alias layer was plausible. There
+is none for this tool: `semantic_search.rs` reads `input.get("project_id")` at lines
+539 and 591 and nowhere reads `"project"`, and the live MCP tool schema confirms it.
+
+Not fixed here, filed separately: `docs/issues/2026-08-14-drift-detection-enabled-is-a-dead-config-key.md`
+— the drift config key has no reader in `src/` and is still documented as working on
+two *other* manual pages, one of which cites the same non-existent `threshold`
+parameter. Out of this bug's stated file scope, and its fix is a real decision
+(remove / mark reserved / reimplement on Qdrant).
 ## Tests added
 
-N/A — not fixed yet.
+None. Docs-only content change: the page backs no `include_str!`'d constant and no
+test asserts on it — checked before editing, per the reconnaissance rule about
+files that back embedded constants.
 
+Gate: **3707 passed / 0 failed / 44 ignored**, unchanged from before the edit, which
+is the expected outcome for a docs-only change and confirms nothing asserted on this
+page. Every path and symbol newly cited in the page was existence-checked
+(`docs/trackers/2026-05-07-legacy-retrieval-removal.md`, three `concepts/` pages,
+`scripts/retrieval-stack.sh`, three `src/` files — all present).
+
+**Worth noting what has no guard.** This page drifted this far because nothing
+connects a tool's `input_schema` to its manual page. `prompt_surfaces_reference_only_real_tools`
+gates *tool names* across the three prompt surfaces, but no gate compares a
+documented parameter table against the schema it describes — which is why
+`threshold`, `path`, `project`, `score`, `language`, `model`, `indexed_files`,
+`last_updated`, `drift` and `drift_summary` could all be documented simultaneously
+without a single test failing. A schema-vs-docs gate is the durable fix for this bug
+class; it is not in this change.
 ## Workarounds
 
 Readers should treat `src/tools/semantic/semantic_search.rs`'s `long_docs()`
@@ -134,16 +219,16 @@ until this page is rewritten.
 
 ## Resume
 
-Rewrite `docs/manual/src/tools/semantic-search.md`'s `semantic_search` section
-against `src/tools/semantic/semantic_search.rs::input_schema` (lines 441-456)
-and `format_search_result_item`/`search_response` (lines 677-726) field-by-field;
-also check the `index`/`index_project`/`index_status` sections in the same
-file for the same class of drift before closing this bug.
+N/A — fixed and verified, including the `index` / `index_project` / `index_status`
+sweep the original Resume asked for.
 
+If picking up the class rather than the instance: the missing guard named under
+*Tests added* (documented parameter table vs `input_schema`) is what would stop this
+recurring, and `docs/issues/2026-08-14-drift-detection-enabled-is-a-dead-config-key.md`
+is the sibling instance still open.
 ## References
 
 - `src/tools/semantic/semantic_search.rs` (long_docs, format_search_result_item, search_response)
 - `docs/manual/src/tools/semantic-search.md`
 - `docs/trackers/2026-05-07-legacy-retrieval-removal.md`
 - Found during: `.superpowers/sdd/2026-08-13-worktree-semantic-search/task-8-report.md`
-
