@@ -576,12 +576,14 @@ impl Tool for SemanticSearch {
 
         // A linked worktree's own project id never gets a `sync_project` collection
         // -- `index(action="build")` routes a worktree root to `sync_worktree`
-        // instead (Task 6), which populates `<main>@<worktree-basename>` and
-        // records the worktree's dirty paths in its own
-        // `.codescout/index-state.json`. So when `root` is a worktree, query main
-        // (with the dirty paths excluded) plus that delta project and merge --
-        // never the worktree's own `project_id`, which has nothing indexed under
-        // it at all.
+        // instead (Task 6), which populates `<main>@<worktree-name>` (git's own
+        // worktree name, not the checkout directory's basename -- see
+        // `retrieval::sync::worktree_key`) and records the worktree's dirty paths
+        // in its own `.codescout/index-state.json`. So when `root` is a worktree,
+        // rank main (with the dirty paths excluded) and that delta project as ONE
+        // list -- never the worktree's own `project_id`, which has nothing indexed
+        // under it at all. The union happens at the store, not here; see the call
+        // to `search_code_overlay` below.
         //
         // Skipped entirely when the caller passed an explicit `project_id`: that
         // names a specific collection to search, and redirecting it to main+delta

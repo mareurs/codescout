@@ -304,6 +304,12 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
     /// two-query default. See [`CodeVectorStore::query_overlay`] for why the
     /// default is wrong on this backend specifically, and `build_query_filter`
     /// in `qdrant.rs` for the nested-filter shape.
+    ///
+    /// Deleting this method is not a compile error — it silently falls back to
+    /// the default and restores C1 in full. The one thing that notices is
+    /// `qdrant_worktree_union_ranks_the_delta_by_relevance_not_by_rank_position`
+    /// (`#[ignore]`d, live Qdrant), which calls `query_overlay` through the
+    /// trait for exactly that reason.
     #[allow(clippy::too_many_arguments)]
     async fn query_overlay(
         &self,

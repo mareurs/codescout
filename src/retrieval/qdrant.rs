@@ -1113,11 +1113,21 @@ mod tests {
         );
 
         // --- The fix: one ranking over the union. ---
+        //
+        // Deliberately through the TRAIT method, not `hybrid_query` directly.
+        // `CodeVectorStore::query_overlay` has a default (two queries +
+        // `merge_hits`) that `QdrantWrap` overrides; calling the inherent
+        // method would bypass the override and test a path production never
+        // takes, leaving "someone deletes the override" — i.e. C1 returning in
+        // full — caught by nothing at all. `RetrievalClient::search_in` is the
+        // only production caller and no test constructs a Qdrant-backed client,
+        // so this call is the entire regression net for that override.
+        use crate::retrieval::code_store::CodeVectorStore;
         let union = wrap
-            .hybrid_query(
+            .query_overlay(
                 coll,
                 MAIN,
-                Some(DELTA),
+                DELTA,
                 &q_dense,
                 &q_sparse,
                 LIMIT,

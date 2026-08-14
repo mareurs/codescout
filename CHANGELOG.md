@@ -167,15 +167,26 @@ All notable changes to codescout are documented here.
   idempotent installer.
 - **Worktree-aware `semantic_search`.** Running from a linked git worktree with no
   explicit `project_id`, `semantic_search` now serves main's vectors for byte-identical
-  files and a per-worktree delta index for the files that differ, merged by score. The
-  dirty set is derived by comparing `(file_path, content_hash)` pairs, not a git diff —
-  no base commit to choose, no staleness window. `index(action="build")` is the only
-  thing that writes a delta; `semantic_search` itself never does, and nothing runs it
-  for you automatically yet — you must call it yourself inside the worktree. The
-  response may carry `drift_note`, `worktree_state_warning`, or
-  `main_never_indexed_note` when the worktree's own bookkeeping is stale or
-  inconsistent. Full design and the rest of the cohort:
-  `docs/superpowers/plans/2026-08-13-worktree-semantic-search.md`.
+  files and a per-worktree delta index for the files that differ, ranked together as a
+  single result page. The union is expressed at the vector store, not composed by the
+  caller: backends whose scores are absolute functions of content (sqlite-vec,
+  in-memory) satisfy it by querying twice and merging, while Qdrant — whose hybrid
+  scores are Reciprocal Rank Fusion, a function of rank position only — answers with
+  one query so the delta cannot take a fixed share of every page. The dirty set is
+  derived by comparing `(file_path, content_hash)` pairs, not a git diff — no base
+  commit to choose, no staleness window. `index(action="build")` is the only thing
+  that writes a delta; `semantic_search` itself never does, and nothing runs it for
+  you automatically yet — you must call it yourself inside the worktree. The response
+  may carry `drift_note`, `worktree_state_warning`, or `main_never_indexed_note` when
+  the worktree's own bookkeeping is stale or inconsistent. Full design and the rest of
+  the cohort: `docs/superpowers/plans/2026-08-13-worktree-semantic-search.md`.
+  - *If you built a worktree delta on an earlier `experiments` build:* the delta is
+    keyed on git's worktree name rather than the checkout directory's basename (so
+    two worktrees sharing a basename stay distinct). A delta built before that change
+    is orphaned under its old id — re-run `index(action="build")` in the worktree.
+    `git worktree add <path>` names the worktree after `basename(path)`, so the two
+    keys only diverge for a renamed or explicitly-named worktree. No migration is
+    provided; the feature is unreleased.
 
 ### Changed
 
