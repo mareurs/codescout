@@ -19,6 +19,55 @@ severity: medium
 
 `edit_code(action="replace")` on a struct symbol whose replacement body also contained a full new `impl <Struct> { ... }` block did not consume or dedupe the pre-existing `impl` block that already followed the struct in the file — `replace` only swaps the targeted symbol's own span. The result was two syntactically identical `impl CodeEmbedderAdapter { ... }` blocks in one file (a genuine Rust duplicate-definition error: two inherent impls both defining `new`/`dimensions`/`check_dim`/`wrap`). Neither `edit_code(remove, symbol="impl CodeEmbedderAdapter")` nor `edit_code(replace, symbol="impl CodeEmbedderAdapter")` could recover, because `find_unique_symbol_by_name_path` (`src/symbol/query.rs:714`) resolves purely by name-path string equality — there is no line/position disambiguator in the current tool surface for two symbols that share the exact same name_path.
 
+
+### Update 2026-08-14 — scope narrowed, and a separate `insert` defect found
+
+Measured while adding a method to three identically-named `FixedEmbedder` impls in
+`src/tools/memory/tests.rs`.
+
+**The claim "no way to disambiguate two symbols with an identical name_path" is
+true only for duplicates in the *same enclosing scope* — which is exactly this
+bug's case, so the finding stands.** But it does not generalise. For duplicates in
+*different* scopes the name path is already qualified by the enclosing item, and
+`edit_code`'s ambiguity error hands the disambiguators back:
+
+```
+ambiguous name_path "impl DenseEmbedder for FixedEmbedder/embed" matches 3 symbols:
+  memory_remember_then_recall_e2e_via_test_seams/impl DenseEmbedder for FixedEmbedder/embed,
+  cross_embed_memory_stores_under_pinned_project_not_session_default/impl DenseEmbedder for FixedEmbedder/embed,
+  memory_recall_signals_has_more_when_capped/impl DenseEmbedder for FixedEmbedder/embed
+```
+
+Those paths **resolve**, and `action="replace"` accepted all three. So the gap is
+narrower than the title suggests: two `impl CodeEmbedderAdapter` blocks at *file*
+scope share an enclosing scope and have no qualifier available, which is
+genuinely unresolvable by name path — while same-name symbols in different scopes
+are already addressable today. Any fix should target the same-scope case (a
+line/position disambiguator) and need not touch name-path qualification.
+
+**Separately — a worse adjacent defect.** Each of those three resolvable paths,
+copied verbatim as the error instructed, failed on `action="insert"`:
+
+```
+cannot determine end of 'embed' for insert-after — AST parse failed
+```
+
+The hint reads *"The file likely has syntax errors that broke tree-sitter's
+parse"*. **The file had none** — the only failure at that moment was semantic
+(missing trait items after adding a trait method), which tree-sitter does not see.
+So `edit_code` returns a disambiguator that its own `insert` path then refuses,
+with a hint pointing at a cause that does not exist.
+
+**Workaround (verified, used three times):** `action="replace"` on the whole impl
+*object* rather than `insert`-after one of its methods. `replace` needs no
+end-of-method bound, and it preserves the outer `#[async_trait::async_trait]`
+attribute.
+
+Taken together with `edit_file`'s keyword filter, the two tools deadlocked on "add
+a method to a trait impl nested inside a test fn" until that workaround was found
+— `edit_file` refused any content containing `fn `, and `edit_code` could not
+bound the insertion point. The `edit_file` half is fixed in `138de7c5`; this half
+is not.
 ## Symptom (Effect)
 
 ```
@@ -72,11 +121,24 @@ Never combine "replace a container symbol" with "restate a sibling/child block t
 
 ## Resume
 
-Read `find_unique_symbol_by_name_path` (`src/symbol/query.rs:714`) and its callers in `edit_code`'s remove/replace/insert dispatch. Check whether the ambiguous-match error already carries enough position data (line/byte range per candidate) to expose a disambiguator parameter on `edit_code` cheaply.
+Two independent pieces now, and the second is the cheaper win:
 
+**1. The same-scope disambiguator (the original bug).** Read
+`find_unique_symbol_by_name_path` (`src/symbol/query.rs:714`) and its callers in
+`edit_code`'s remove/replace/insert dispatch. Check whether the ambiguous-match
+error already carries enough position data (line/byte range per candidate) to
+expose a disambiguator parameter cheaply. Note the scope narrowing in § Summary →
+*Update 2026-08-14*: only same-enclosing-scope duplicates need this.
+
+**2. `insert`'s end-of-symbol bound for a nested trait-impl method**, plus its
+misleading hint. Reproduce with three same-named local `impl` blocks in separate
+test fns (`src/tools/memory/tests.rs` has exactly that shape today) and
+`action="insert", position="after"` on a fully-qualified method path. Fix the hint
+regardless of the bound: "the file likely has syntax errors" is wrong for a file
+that only fails to type-check, and it sent one session hunting for syntax errors
+that did not exist.
 ## References
 
 - `.superpowers/sdd/2026-08-11-local-onnx-embedding-query-path/task-5-report.md` § "A real tool hazard hit mid-fix (worth recording)"
 - `src/symbol/query.rs:714` — `find_unique_symbol_by_name_path`
 - Related but a different mechanism (naming-form asymmetry between `symbols` and `edit_code` for trait-impl methods, not duplicate name_path resolution): `docs/issues/2026-08-08-symbols-and-edit-code-disagree-on-the-same-name-path.md`
-

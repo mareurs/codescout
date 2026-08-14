@@ -89,7 +89,7 @@ time_scope: open-ended
 | F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 | F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
-| F-44 | 2026-08-14 | med | codescout-tool | promoted-to-bug-tracker | `edit_file` and `edit_code` deadlock on "add a method to a trait impl nested in a test fn": the `fn `/`trait ` filter is a naive substring match (a variable named `via_trait` tripped it), and `edit_code` hands back a disambiguating name_path it then refuses with a misleading "fix the syntax errors first" |
+| F-44 | 2026-08-14 | med | codescout-tool | fixed-verified (half) | `edit_file` and `edit_code` deadlock on "add a method to a trait impl nested in a test fn". `edit_file` half **fixed** in `138de7c5` (unanchored per-line keyword match — `via_trait ` matched `trait `); `edit_code` half open. **Two of my own claims in this entry were overstated and are corrected in its body** |
 
 ## Wins Index
 
@@ -2935,6 +2935,37 @@ I was one sentence away from reporting "this project has no semantic memories, s
 
 **Fix idea / Pointer:** `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md` (substring filter), `docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md` (narrower than filed; add the `insert`-after-nested-impl failure and the wrong hint).
 
+
+**Corrected 2026-08-14, same day — two of the three claims above were overstated.**
+Both corrections came from reading the implementation instead of inferring it from
+the error message, which is the discipline R-80 is about, applied to my own entry.
+
+1. **"Naive substring match" was wrong.** The guard is diff-aware
+   (`lines_only_in`, so a keyword on a line byte-identical in old and new counts
+   as an unchanged anchor), gated on multi-line, and **already comment-aware**
+   (`find_def_keyword` skips `//`, `/*`, `*`, `#`, with its own test
+   `find_def_keyword_ignores_class_in_comment`). So my sub-claim that comments
+   trip it was simply false. The real defect was one step in and much narrower:
+   within a non-comment *changed* line, `line.contains(kw)` had no left word
+   boundary. Fixed in `138de7c5` — 4 tests, mutation-verified.
+2. **"Partly refutes the no-disambiguator bug" was too strong.** That bug's own
+   case is two `impl` blocks at **file scope** — same enclosing scope, so no
+   qualifier can exist, and it is genuinely unresolvable by name path. Today's
+   case had duplicates in *different* scopes, which the name path already
+   qualifies. So the bug is **narrowed, not refuted**: its finding stands for its
+   own shape, and its title over-generalises. Recorded in that file's § Summary.
+
+What survives unchanged: the `edit_code` `insert` failure on a nested trait-impl
+method, and its hint blaming syntax errors on a file whose only problem was
+semantic. Both now live in
+`docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md`
+§ Resume as item 2.
+
+**Lesson for the ledger:** an entry written from a tool's *error message* inherits
+that message's model of itself. `edit_file`'s error says "edit contains a symbol
+definition", which invites "it matched a substring" — and the code says something
+more careful. Reading `guard_structural_rewrite` first would have produced a
+narrower, truer entry in one pass instead of two.
 ## W-36 — Refuse a default trait impl and the compiler becomes your enumerator
 
 **Observed:** 2026-08-14, adding a document-side method to `CodeEmbedder` and `DenseEmbedder` for the memory query-prefix fix.
