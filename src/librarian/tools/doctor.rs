@@ -222,14 +222,48 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // rather than applied silently — a report that quietly drops findings is
     // the same failure mode this check was added to close. `shown` carries the
     // post-truncation length so the two can never be confused for each other.
-    const OUTSIDE_ROOTS_SAMPLE: usize = 10;
+    // The window is caller-controlled, because a sample nobody can look past is
+    // a report that names findings it cannot produce. `limit` widens or narrows
+    // it; `offset` pages through the rest. Both rely on the `ORDER BY abs_path`
+    // in `scan_artifact_paths` for stability — without it `offset` would page
+    // through a set that reshuffles between calls.
+    const OUTSIDE_ROOTS_SAMPLE_DEFAULT: usize = 10;
+    let sample_limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(OUTSIDE_ROOTS_SAMPLE_DEFAULT);
+    let sample_offset = args
+        .get("offset")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or(0);
+
+    // Grouped BEFORE the truncation, so every row is accounted for even when
+    // most are dropped. This is what keeps an alphabetically-ordered window
+    // honest: the first `limit` rows all belong to whichever project sorts
+    // first, and the aggregate is how a reader still sees the whole shape and
+    // knows which project to page into.
+    let mut outside_by_project: std::collections::BTreeMap<String, usize> = Default::default();
+    for v in all_violations
+        .iter()
+        .filter(|v| v.check == "abs_path_outside_managed_roots")
+    {
+        *outside_by_project
+            .entry(outside_roots_group(&v.path))
+            .or_insert(0) += 1;
+    }
+
+    let mut seen_outside = 0usize;
     let mut shown_outside = 0usize;
     let mut elided_outside = 0usize;
     all_violations.retain(|v| {
         if v.check != "abs_path_outside_managed_roots" {
             return true;
         }
-        if shown_outside < OUTSIDE_ROOTS_SAMPLE {
+        let idx = seen_outside;
+        seen_outside += 1;
+        if idx >= sample_offset && shown_outside < sample_limit {
             shown_outside += 1;
             true
         } else {
@@ -240,9 +274,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let mut hint_parts: Vec<String> = Vec::new();
     if elided_outside > 0 {
+        let total_outside = shown_outside + elided_outside;
+        let next_offset = sample_offset + shown_outside;
+        // Naming a parameter WITH a real value is the
+        // docs/PROGRESSIVE_DISCOVERABILITY.md § Pattern 1 contract. The previous
+        // wording told the reader to inspect the elided rows and named nothing
+        // that could reach them, because nothing could.
         hint_parts.push(format!(
-            "abs_path_outside_managed_roots fired {} time(s); showing {shown_outside}, {elided_outside} elided (full count in summary.by_check). Rows outside the active project's roots are EXPECTED when the catalog spans several workspaces — confirm a row should be under a managed root before treating it as drift.",
-            shown_outside + elided_outside
+            "abs_path_outside_managed_roots fired {total_outside} time(s); showing {shown_outside} from offset {sample_offset}, {elided_outside} elided. \
+             Rows are ordered by abs_path, so the window is stable across calls: \
+             librarian(action=\"doctor\", limit={total_outside}) returns all of them, \
+             or limit={sample_limit}, offset={next_offset} for the next page. \
+             catalog_health.outside_roots_by_project counts every row, elided ones included. \
+             Rows outside the active project's roots are EXPECTED when the catalog spans several workspaces — \
+             confirm a row should be under a managed root before treating it as drift."
         ));
     }
     if hidden_rows > 0 {
@@ -274,6 +319,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             })
             .collect();
         catalog_health.insert("move_candidates_detail".to_string(), json!(detail));
+    }
+    if !outside_by_project.is_empty() {
+        catalog_health.insert(
+            "outside_roots_by_project".to_string(),
+            json!(outside_by_project),
+        );
     }
     catalog_health.insert("hint".to_string(), json!(health_hint));
 
@@ -685,6 +736,32 @@ fn count_dead_root(
     Ok((arts.max(0) as usize, commits.max(0) as usize))
 }
 
+/// Group key for the `outside_roots_by_project` aggregate: the project root a
+/// row's path implies.
+///
+/// Artifact paths are `<project>/docs/...` by convention, so the prefix before
+/// the first `docs` component names the project. A path with no `docs`
+/// component is a stray file rather than part of a docs tree; its parent
+/// directory is the honest answer there, since nothing in the path identifies a
+/// project to attribute it to.
+///
+/// This is deliberately a *reporting* key, not a managed-root lookup. It exists
+/// so a truncated sample can still account for every row it dropped, and it
+/// never decides whether a row is a violation.
+fn outside_roots_group(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let mut prefix = std::path::PathBuf::new();
+    for comp in p.components() {
+        if comp.as_os_str() == "docs" {
+            return prefix.to_string_lossy().into_owned();
+        }
+        prefix.push(comp);
+    }
+    p.parent()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
 /// Pulls every `(id, abs_path)` row once and runs six per-row checks
 /// (abs_path_must_be_absolute / backslash / ads_colon / dotdot /
 /// missing_file / outside_managed_roots). Single SQL fetch + in-memory passes
@@ -699,7 +776,14 @@ fn count_dead_root(
 /// managed-root check is skipped entirely rather than flagging every row —
 /// "no roots configured" is not evidence that any row is misplaced.
 fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result<Vec<Violation>> {
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact")?;
+    // `ORDER BY abs_path` is load-bearing, not tidiness. The outside-roots
+    // findings are sampled downstream, and without an ORDER BY the kept rows
+    // are whatever prefix the planner happened to return — a set that can
+    // change when an index is added or the DB is VACUUMed, with no content
+    // change at all. A stable order is also what makes the `offset` parameter
+    // mean anything. See
+    // docs/issues/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
@@ -787,7 +871,7 @@ fn scan_commits_git_root(conn: &rusqlite::Connection) -> Result<Vec<Violation>> 
     // `commits.git_root` carries normalized paths (since #66). A backslash
     // here is pre-migration drift, same shape as the artifact-side check
     // but without an artifact_id anchor.
-    let mut stmt = conn.prepare("SELECT DISTINCT git_root FROM commits")?;
+    let mut stmt = conn.prepare("SELECT DISTINCT git_root FROM commits ORDER BY git_root")?;
     let roots: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<_>>()?;
@@ -906,7 +990,9 @@ fn shared_entry_overlap(
 /// one [`current_project::is_linked_worktree`] recognizes (a `.git` *file*
 /// containing a `gitdir: .../worktrees/<name>` pointer) — no `git` subprocess.
 fn scan_worktree_scoped(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact")?;
+    // Ordered for the same reason as `scan_artifact_paths` — a report whose row
+    // order shifts after a VACUUM is one nobody can diff against a prior run.
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
@@ -1354,6 +1440,187 @@ mod tests {
         assert!(
             hint.contains("15 elided"),
             "the hint must name what was dropped; got: {hint}"
+        );
+    }
+
+    /// Collect the emitted outside-roots paths from a report, in report order.
+    fn outside_paths(report: &Value) -> Vec<String> {
+        report["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["check"] == "abs_path_outside_managed_roots")
+            .map(|v| v["path"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Seed `n` outside-roots rows spread over two projects and return the ctx.
+    fn ctx_with_outside_rows(n: usize) -> ToolContext {
+        let cat = Catalog::open_in_memory().unwrap();
+        for i in 0..n {
+            let project = if i % 2 == 0 { "alpha" } else { "beta" };
+            seed_artifact(
+                &cat,
+                &format!("far-{i}"),
+                // Zero-padded so lexical order is also numeric order, which keeps
+                // the paging assertions readable.
+                &format!("/elsewhere/{project}/docs/doc-{i:03}.md"),
+            );
+        }
+        TestToolContextBuilder::new(cat)
+            .with_root(crate::librarian::workspace::Root {
+                name: "managed".to_string(),
+                path: PathBuf::from("/managed/root"),
+            })
+            .build()
+    }
+
+    /// The elided rows must be reachable. Before this, `doctor` announced N
+    /// elided violations and exposed no parameter that could return any of them,
+    /// while the hint instructed the reader to inspect exactly those rows.
+    /// docs/issues/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
+    #[tokio::test]
+    async fn outside_managed_roots_limit_reaches_every_elided_row() {
+        let ctx = ctx_with_outside_rows(25);
+
+        let capped = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(outside_paths(&capped).len(), 10, "default sample");
+
+        let full = call(&ctx, json!({"limit": 25})).await.unwrap();
+        assert_eq!(
+            outside_paths(&full).len(),
+            25,
+            "limit must reach every row the summary counts"
+        );
+        assert_eq!(
+            full["catalog_health"]["hint"].as_str().unwrap_or_default(),
+            "",
+            "nothing elided means no elision hint"
+        );
+    }
+
+    /// `offset` pages through the remainder, and the pages partition the set:
+    /// no row appears twice, none is skipped. This is only meaningful because
+    /// `scan_artifact_paths` orders by `abs_path` — paging an unordered set
+    /// would silently repeat and drop rows.
+    #[tokio::test]
+    async fn outside_managed_roots_offset_pages_without_gaps_or_repeats() {
+        let ctx = ctx_with_outside_rows(25);
+
+        let mut paged: Vec<String> = Vec::new();
+        for page in 0..3 {
+            let report = call(&ctx, json!({"limit": 10, "offset": page * 10}))
+                .await
+                .unwrap();
+            paged.extend(outside_paths(&report));
+        }
+
+        let all = outside_paths(&call(&ctx, json!({"limit": 25})).await.unwrap());
+        assert_eq!(
+            paged, all,
+            "three pages must reconstruct the full set in order"
+        );
+
+        let unique: std::collections::BTreeSet<&String> = paged.iter().collect();
+        assert_eq!(unique.len(), 25, "no row may appear on two pages");
+    }
+
+    /// The window must be the same window on every call. An unordered SELECT
+    /// returns a planner-dependent prefix, so which rows appeared could change
+    /// after a VACUUM or a new index with no content change at all.
+    #[tokio::test]
+    async fn outside_managed_roots_sample_is_ordered_and_repeatable() {
+        let ctx = ctx_with_outside_rows(25);
+
+        let first = outside_paths(&call(&ctx, json!({})).await.unwrap());
+        let second = outside_paths(&call(&ctx, json!({})).await.unwrap());
+        assert_eq!(first, second, "repeated calls must return the same window");
+
+        let mut sorted = first.clone();
+        sorted.sort();
+        assert_eq!(first, sorted, "rows must be emitted in abs_path order");
+    }
+
+    /// Every row is accounted for by project even when most are elided, so an
+    /// alphabetically-ordered window (which clusters in whichever project sorts
+    /// first) still tells the reader the whole shape.
+    #[tokio::test]
+    async fn outside_roots_by_project_counts_elided_rows_too() {
+        let ctx = ctx_with_outside_rows(25);
+        let report = call(&ctx, json!({})).await.unwrap();
+
+        let by_project = &report["catalog_health"]["outside_roots_by_project"];
+        assert_eq!(by_project["/elsewhere/alpha"], json!(13), "even indices");
+        assert_eq!(by_project["/elsewhere/beta"], json!(12), "odd indices");
+
+        let counted: u64 = by_project
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|v| v.as_u64().unwrap())
+            .sum();
+        assert_eq!(
+            counted, 25,
+            "the aggregate must partition the true total, not the shown sample"
+        );
+
+        // The emitted sample really is clustered — which is exactly why the
+        // aggregate has to exist.
+        let shown = outside_paths(&report);
+        assert!(
+            shown.iter().all(|p| p.starts_with("/elsewhere/alpha")),
+            "alphabetical order clusters the window: {shown:?}"
+        );
+    }
+
+    /// docs/PROGRESSIVE_DISCOVERABILITY.md § Pattern 1: an overflow hint must
+    /// name at least one parameter WITH a usable value. The old hint named none,
+    /// because none existed.
+    #[tokio::test]
+    async fn outside_managed_roots_hint_names_a_parameter_that_reaches_the_rest() {
+        let ctx = ctx_with_outside_rows(25);
+        let report = call(&ctx, json!({})).await.unwrap();
+        let hint = report["catalog_health"]["hint"]
+            .as_str()
+            .unwrap_or_default();
+
+        assert!(
+            hint.contains("limit=25"),
+            "hint must name limit with the value that returns everything; got: {hint}"
+        );
+        assert!(
+            hint.contains("offset=10"),
+            "hint must name the next page's offset; got: {hint}"
+        );
+        assert!(
+            hint.contains("outside_roots_by_project"),
+            "hint must point at the field that accounts for the elided rows; got: {hint}"
+        );
+        assert!(
+            hint.contains("15 elided"),
+            "the elision must still be announced; got: {hint}"
+        );
+    }
+
+    #[test]
+    fn outside_roots_group_uses_the_project_prefix_before_docs() {
+        assert_eq!(
+            outside_roots_group("/home/u/work/proj/docs/trackers/x.md"),
+            "/home/u/work/proj"
+        );
+        // Only the FIRST docs component splits, so a nested docs/ dir does not
+        // re-split and fragment one project into many groups.
+        assert_eq!(
+            outside_roots_group("/home/u/work/proj/docs/manual/docs/y.md"),
+            "/home/u/work/proj"
+        );
+    }
+
+    #[test]
+    fn outside_roots_group_falls_back_to_the_parent_without_a_docs_component() {
+        assert_eq!(
+            outside_roots_group("/home/u/agents/system/crash/root_cause.md"),
+            "/home/u/agents/system/crash"
         );
     }
 
