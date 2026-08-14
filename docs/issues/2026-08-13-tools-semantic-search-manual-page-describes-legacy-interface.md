@@ -7,17 +7,10 @@ tags:
 - docs
 - semantic-search
 - drift
----
-
----
-status: open
 opened: 2026-08-13
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [docs, semantic-search, drift]
-kind: bug
+severity: medium
 ---
 
 # BUG: `docs/manual/src/tools/semantic-search.md` documents the retired legacy sqlite-vec interface, not the current Qdrant stack

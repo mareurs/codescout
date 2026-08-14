@@ -7,17 +7,10 @@ tags:
 - docs
 - state-protocol
 - drift
----
-
----
-status: open
 opened: 2026-08-13
-closed:
-severity: low
 owner: marius
 related: []
-tags: [docs, state-protocol, drift]
-kind: bug
+severity: low
 ---
 
 # BUG: `docs/state-protocol.md` still names companion's session-start hook `.sh` in four other rows (actual file is `.mjs`)

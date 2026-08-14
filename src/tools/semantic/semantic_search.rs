@@ -397,7 +397,7 @@ impl Tool for SemanticSearch {
     }
     fn description(&self) -> &str {
         "Find code by natural language description or code snippet. \
-         Returns ranked chunks with file path, line range, and similarity score."
+             Returns ranked chunks with file path and line range."
     }
 
     fn relevant_guide_topic(&self) -> Option<&str> {

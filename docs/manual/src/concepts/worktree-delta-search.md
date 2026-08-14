@@ -61,7 +61,8 @@ A `semantic_search` call from inside the worktree, with no explicit
 - **Main** is queried with the dirty paths excluded (`exclude_paths` on
   `SearchOpts` — a Qdrant `must_not` filter server-side; the sqlite-vec lite
   store post-filters and widens `k` to compensate), so it never serves a
-  chunk the worktree has changed.
+  chunk the worktree has changed — unless a partial sync left `dirty_paths`
+  incomplete, see `drift_note` below.
 - **The delta** is queried for everything it has, unfiltered.
 
 ## Response fields
@@ -71,7 +72,11 @@ fields — none of them is an error, and the query still ran:
 
 - **`drift_note`** — main's own index was rebuilt *after* this worktree's
   delta, so unchanged-file results may reflect main's newer content. Re-run
-  `index(action="build")` in the worktree to refresh.
+  `index(action="build")` in the worktree to refresh. Also covers a subtler
+  case: a partially-failed worktree sync can leave `dirty_paths` incomplete,
+  and a path missing from it is never excluded from main — that file's
+  chunks can then come back from **both** main and the delta, a double-serve
+  rather than mere staleness.
 - **`worktree_state_warning`** — the delta has chunks but no dirty paths are
   recorded, an inconsistent state that should never happen in a healthy
   worktree (a delta only exists because something was dirty). Main was

@@ -59,7 +59,7 @@ Primary writer: codescout server. Resides at `<project_root>/.codescout/`.
 | `anchors/<topic>.toml` | codescout memory anchor system | codescout staleness check | TOML sidecars for memory↔source-file anchors. Internal to codescout. |
 | `embeddings.db` (legacy) | codescout legacy index | codescout legacy retrieval, companion `session-start.sh` (queries `meta.last_indexed_commit` and `drift_report` view) | sqlite-vec virtual tables. **Being removed** — see `docs/trackers/2026-05-07-legacy-retrieval-removal.md` (L-01..L-15). Companion's drift query depends on `meta` table and `drift_report` view; when the legacy index goes, companion drift detection must move to the new stack or be removed. |
 | `embeddings/project.db` | codescout `sync_project` binary, retrieval stack writers | codescout `semantic_search` | sqlite-format Qdrant per-project store (post-Phase 6). |
-| `index-state.json` | codescout `sync_project` completion (`index_state::write_index_state`) | codescout `index(action="status")` (`git_sync` envelope); **companion** `session-start.mjs` (reads `last_indexed_commit` today) | JSON `{ last_indexed_commit, last_indexed_at (RFC3339), schema_version, dirty_paths }` (v2 — see the schema section below). `last_indexed_commit` = full git HEAD oid at sync time (`""` for non-git roots). Qdrant-era replacement for the legacy `meta.last_indexed_commit` reindex trigger — lets an out-of-process consumer detect external HEAD moves (checkout/pull/HEAD change) via a single file read, no internal-DB access. |
+| `index-state.json` | codescout `sync_project` / `sync_worktree` completion, both via `index_state::write_index_state_with_dirty` — only `sync_worktree` (`src/retrieval/sync.rs`) ever populates `dirty_paths`; `sync_project` preserves whatever it finds but never adds to it | codescout `index(action="status")` (`git_sync` envelope); **companion** `session-start.mjs` (reads `last_indexed_commit` today) | JSON `{ last_indexed_commit, last_indexed_at (RFC3339), schema_version, dirty_paths }` (v2 — see the schema section below). `last_indexed_commit` = full git HEAD oid at sync time (`""` for non-git roots). Qdrant-era replacement for the legacy `meta.last_indexed_commit` reindex trigger — lets an out-of-process consumer detect external HEAD moves (checkout/pull/HEAD change) via a single file read, no internal-DB access. |
 | `embeddings/lib/<name>.db` | codescout library indexing | codescout library-scoped search | Per-registered-library embeddings. |
 | `libraries.json` | codescout `library(action="register")` | codescout library scope resolution | JSON array of registered libraries with paths and versions. |
 | `cc_session_id` | **companion** `session-start.sh` | codescout `usage` tracking | Plain-text Claude Code session UUID. **Cross-plugin write into a codescout-owned directory** — only companion writes here. Codescout reads it during usage.db correlation. |
@@ -81,9 +81,13 @@ remove from the companion).
 
 ### `.codescout/index-state.json` schema (freshness signal — supersedes the `embeddings.db` `meta` read)
 
-Written by codescout on every successful project `sync_project` completion
-(`src/retrieval/index_state.rs::write_index_state`); the Qdrant-era replacement for the
-now-frozen legacy `meta.last_indexed_commit`.
+Written by codescout on every successful `sync_project` or `sync_worktree` completion,
+always through `index_state::write_index_state_with_dirty`
+(`src/retrieval/index_state.rs`) — the plain `write_index_state` wrapper delegates to it
+with an empty dirty list and has no production caller (tests only). `sync_worktree`
+(`src/retrieval/sync.rs`) is the only writer that ever populates `dirty_paths`;
+`sync_project` reads back and preserves whatever dirty set already exists but never adds
+to it. Qdrant-era replacement for the now-frozen legacy `meta.last_indexed_commit`.
 
 ```json
 {
