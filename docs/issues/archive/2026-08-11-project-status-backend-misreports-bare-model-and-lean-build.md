@@ -214,8 +214,10 @@ N/A — root cause fully determined by reading the resolution ladder against
 
 ## Fix
 
-Implemented in `experiments`. `master` is a strict ancestor, so this SHA is the
-master-side SHA — nothing further to record.
+Implemented in `5b7536f5` (`experiments`). `master` is a strict ancestor
+(`git rev-list --left-right --count master...experiments` → `0 660`), so promotion
+is a fast-forward and this SHA already is the master-side SHA — there is no
+second SHA to record.
 
 **Case 1 — `src/retrieval/client.rs`.** `backend_is_local` now delegates to a new
 module-level `model_names_local_backend`, which mirrors the resolver's no-url
