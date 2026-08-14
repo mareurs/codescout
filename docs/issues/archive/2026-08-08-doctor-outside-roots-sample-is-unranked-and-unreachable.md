@@ -131,7 +131,11 @@ trusts 291 or dismisses it, and neither is the intended action.
 
 ## Fix
 
-Implemented. Three changes in `src/librarian/tools/doctor.rs`, plus the schema:
+Implemented in `27309362` (`experiments`). `master` is a strict ancestor, so
+promotion is a fast-forward and this SHA already is the master-side SHA — there
+is no second SHA to record.
+
+Three changes in `src/librarian/tools/doctor.rs`, plus the schema:
 
 1. **Deterministic order.** `ORDER BY abs_path` on both artifact `SELECT`s and
    `ORDER BY git_root` on the commits scan. This is what makes a window
