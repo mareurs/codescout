@@ -67,6 +67,92 @@ pub trait CodeVectorStore: Send + Sync {
         exclude_paths: &[String],
     ) -> Result<Vec<Hit>>;
 
+    /// Query `project_id` **and** `overlay_project_id` as ONE ranking, with
+    /// `exclude_paths` applied to `project_id` only.
+    ///
+    /// This is the worktree main+delta query: main supplies everything the
+    /// worktree did not touch (`exclude_paths` = the dirty set), the overlay
+    /// delta supplies exactly the dirty files. The store — not the caller —
+    /// decides how to satisfy it, which is the point: the tool layer must not
+    /// have to know which backend is underneath.
+    ///
+    /// ## Why this is a trait method and not two calls at the call site
+    ///
+    /// The caller cannot correctly merge two result lists without knowing
+    /// whether the backend's scores are comparable across queries, and they
+    /// are not universally:
+    ///
+    /// - `SqliteVecCodeStore` returns `1 / (1 + distance)` and
+    ///   `InMemoryCodeStore` returns cosine — both absolute functions of
+    ///   content, so ranking two lists together is meaningful. The default
+    ///   below does exactly that, and is correct for them.
+    /// - `QdrantWrap` with `disable_sparse == false` (the **default**
+    ///   configuration) returns the RRF *fusion* score, a function of rank
+    ///   position only — measured on the live collection as 0.5, 0.333, 0.25,
+    ///   0.2, 0.167 … = `1 / (1 + rank)`, identical whether the project holds
+    ///   three chunks or half a million. Merging two such lists by score gives
+    ///   the smaller project half the page no matter how irrelevant its
+    ///   contents are. Qdrant therefore overrides this with a single query
+    ///   whose filter unions both projects.
+    ///
+    /// ## On the default
+    ///
+    /// The two other required methods on this trait
+    /// ([`CodeVectorStore::project_has_chunks`],
+    /// [`CodeVectorStore::collection_dim`]) deliberately have **no** default,
+    /// because theirs would be wrong for every backend. This one is different
+    /// and is defaulted on purpose: two-queries-and-merge is *correct*
+    /// wherever scores are absolute, which is every backend here except
+    /// rank-fusion ones. **If your store returns a rank-derived score
+    /// (RRF, RRF-like fusion, borda), override this** — the default will
+    /// silently hand the overlay a fixed share of every page.
+    #[allow(clippy::too_many_arguments)]
+    async fn query_overlay(
+        &self,
+        collection: &str,
+        project_id: &str,
+        overlay_project_id: &str,
+        dense: &[f32],
+        sparse: &SparseVector,
+        limit: usize,
+        bm25_boost: f32,
+        disable_sparse: bool,
+        exclude_languages: &[String],
+        exclude_paths: &[String],
+    ) -> Result<Vec<Hit>> {
+        let primary = self
+            .query(
+                collection,
+                project_id,
+                dense,
+                sparse,
+                limit,
+                bm25_boost,
+                disable_sparse,
+                exclude_languages,
+                exclude_paths,
+            )
+            .await?;
+        // The overlay excludes nothing: it holds exactly the paths main was
+        // told to skip and nothing else.
+        let overlay = self
+            .query(
+                collection,
+                overlay_project_id,
+                dense,
+                sparse,
+                limit,
+                bm25_boost,
+                disable_sparse,
+                exclude_languages,
+                &[],
+            )
+            .await?;
+        Ok(crate::retrieval::search::merge_hits(
+            primary, overlay, limit,
+        ))
+    }
+
     /// `(chunk_count, file_count)` for `project_id`.
     async fn project_index_stats(
         &self,
@@ -202,6 +288,40 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
         self.hybrid_query(
             collection,
             project_id,
+            None,
+            dense,
+            sparse,
+            limit,
+            bm25_boost,
+            disable_sparse,
+            exclude_languages,
+            exclude_paths,
+        )
+        .await
+    }
+
+    /// Qdrant satisfies the union in ONE query, overriding the trait's
+    /// two-query default. See [`CodeVectorStore::query_overlay`] for why the
+    /// default is wrong on this backend specifically, and `build_query_filter`
+    /// in `qdrant.rs` for the nested-filter shape.
+    #[allow(clippy::too_many_arguments)]
+    async fn query_overlay(
+        &self,
+        collection: &str,
+        project_id: &str,
+        overlay_project_id: &str,
+        dense: &[f32],
+        sparse: &SparseVector,
+        limit: usize,
+        bm25_boost: f32,
+        disable_sparse: bool,
+        exclude_languages: &[String],
+        exclude_paths: &[String],
+    ) -> Result<Vec<Hit>> {
+        self.hybrid_query(
+            collection,
+            project_id,
+            Some(overlay_project_id),
             dense,
             sparse,
             limit,
@@ -694,6 +814,93 @@ mod tests {
             hits.iter().any(|h| h.file_path == "src/keep.rs"),
             "exclusion must not empty the result set — the accepting case needs pinning too"
         );
+    }
+
+    /// The worktree main+delta query as a store-level contract, exercised here
+    /// against the trait's DEFAULT `query_overlay` (two queries + `merge_hits`)
+    /// — i.e. exactly the path `SqliteVecCodeStore` and `InMemoryCodeStore`
+    /// take. Qdrant overrides it with a single nested-filter query; both shapes
+    /// owe the same answer, and this is the half that must keep working after
+    /// C1 moved composition down here from the tool layer.
+    ///
+    /// Three things have to hold at once, and each fails differently:
+    /// - main serves `keep.rs` (the union actually includes the primary),
+    /// - the delta serves `dirty.rs` (the exclusion is scoped to the primary —
+    ///   applying it to the overlay too deletes the only content the overlay
+    ///   has, and the worktree's own edits vanish from search),
+    /// - main's stale `dirty.rs` is gone (the exclusion is applied at all —
+    ///   dropping it double-serves that path, one copy per project),
+    /// - an unrelated project never leaks in.
+    #[tokio::test]
+    async fn contract_query_overlay_unions_both_projects_and_scopes_the_exclusion_to_the_primary() {
+        let store = InMemoryCodeStore::default();
+        store
+            .upsert_chunks(
+                "c",
+                &[
+                    (
+                        payload("main-keep", "proj", "src/keep.rs", "rust", "h1"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                    // Main's copy of the file the worktree changed — stale here.
+                    (
+                        payload("main-dirty", "proj", "src/dirty.rs", "rust", "h2"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                    // The worktree's own copy of that same path.
+                    (
+                        payload("delta-dirty", "proj@wt", "src/dirty.rs", "rust", "h3"),
+                        embed(vec![0.9, 0.1]),
+                    ),
+                    (
+                        payload("stranger", "unrelated", "src/x.rs", "rust", "h4"),
+                        embed(vec![1.0, 0.0]),
+                    ),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let hits = store
+            .query_overlay(
+                "c",
+                "proj",
+                "proj@wt",
+                &[1.0, 0.0],
+                &SparseVector {
+                    indices: vec![],
+                    values: vec![],
+                },
+                10,
+                3.0,
+                true,
+                &[],
+                &["src/dirty.rs".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let ids: std::collections::BTreeSet<&str> =
+            hits.iter().map(|h| h.chunk_id.as_str()).collect();
+        assert!(
+            ids.contains("main-keep"),
+            "the primary project must still be served: {ids:?}"
+        );
+        assert!(
+            ids.contains("delta-dirty"),
+            "the overlay must NOT inherit the primary's path exclusion — it holds \
+             nothing but those paths: {ids:?}"
+        );
+        assert!(
+            !ids.contains("main-dirty"),
+            "the primary's copy of an excluded path must not be served — that is \
+             the double-serve this whole design exists to prevent: {ids:?}"
+        );
+        assert!(
+            !ids.contains("stranger"),
+            "a third project must not leak into the union: {ids:?}"
+        );
+        assert_eq!(ids.len(), 2, "exactly two hits expected, got {ids:?}");
     }
 
     /// Review round-2 I4: `dense_vector_size` is a pure function over plain

@@ -658,14 +658,21 @@ impl Tool for SemanticSearch {
                 );
                 let (main_opts, delta_opts) = worktree_search_opts(&opts, &plan);
 
+                // ONE ranking over main + delta, not two lists merged by score.
+                // Scores are only comparable across queries on some backends,
+                // and the default one (Qdrant, hybrid RRF) is not among them --
+                // `CodeVectorStore::query_overlay` carries the full argument.
+                // The tool layer must not learn which backend is underneath, so
+                // the union is expressed at the store and this stays one call.
+                //
                 // `plan.query_main` is false exactly when main holds no indexed
-                // chunks -- see that field's doc comment for why running the
-                // query anyway is not merely wasted but expensively wasted.
-                // `plan.main_never_indexed_note` still explains the empty
-                // contribution in the response.
-                let main_hits = if plan.query_main {
+                // chunks; the query would then return an empty page after
+                // shipping the whole exclusion list to find that out, so the
+                // delta is queried alone. `plan.main_never_indexed_note` still
+                // explains the empty contribution in the response payload.
+                let hits = if plan.query_main {
                     client
-                        .search_code(&main_project_id, query, main_opts)
+                        .search_code_overlay(&main_project_id, &delta_id, query, main_opts)
                         .await
                         .map_err(|e| {
                             let hint = classify_search_error(&e.to_string(), &main_project_id);
@@ -675,22 +682,19 @@ impl Tool for SemanticSearch {
                             )
                         })?
                 } else {
-                    Vec::new()
+                    client
+                        .search_code(&delta_id, query, delta_opts)
+                        .await
+                        .map_err(|e| {
+                            let hint = classify_search_error(&e.to_string(), &delta_id);
+                            crate::tools::RecoverableError::with_hint(
+                                format!("stack search failed: {e}"),
+                                hint,
+                            )
+                        })?
                 };
 
-                let delta_hits = client
-                    .search_code(&delta_id, query, delta_opts)
-                    .await
-                    .map_err(|e| {
-                        let hint = classify_search_error(&e.to_string(), &delta_id);
-                        crate::tools::RecoverableError::with_hint(
-                            format!("stack search failed: {e}"),
-                            hint,
-                        )
-                    })?;
-
-                let merged = crate::retrieval::search::merge_hits(main_hits, delta_hits, limit);
-                let mut out = search_response(&merged, limit);
+                let mut out = search_response(&hits, limit);
                 apply_worktree_plan_notes(&mut out, &plan);
                 return Ok(out);
             }

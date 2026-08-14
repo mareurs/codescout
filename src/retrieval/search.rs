@@ -91,10 +91,18 @@ pub struct Hit {
 
 impl RetrievalClient {
     /// Core helper: embed → query (hybrid or dense-only) → optional rerank.
+    ///
+    /// `overlay_project_id`, when present, unions a second project into the
+    /// same ranking with `opts.exclude_paths` applied to `project_id` only —
+    /// the worktree main+delta query. It is deliberately handed to the store
+    /// as one call rather than composed here from two: see
+    /// [`crate::retrieval::code_store::CodeVectorStore::query_overlay`] for why
+    /// a caller cannot merge two lists correctly without knowing the backend.
     async fn search_in(
         &self,
         collection: &str,
         project_id: &str,
+        overlay_project_id: Option<&str>,
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
@@ -102,20 +110,39 @@ impl RetrievalClient {
         let mut timer = crate::perf::PhaseTimer::start("semantic_search");
         let q = self.embedder.embed_one(query).await?;
         timer.lap("embed");
-        let candidates = self
-            .code_store
-            .query(
-                collection,
-                project_id,
-                &q.dense,
-                &q.sparse,
-                opts.overfetch,
-                self.config.bm25_boost,
-                self.config.disable_sparse,
-                &opts.exclude_languages,
-                &opts.exclude_paths,
-            )
-            .await?;
+        let candidates = match overlay_project_id {
+            Some(overlay) => {
+                self.code_store
+                    .query_overlay(
+                        collection,
+                        project_id,
+                        overlay,
+                        &q.dense,
+                        &q.sparse,
+                        opts.overfetch,
+                        self.config.bm25_boost,
+                        self.config.disable_sparse,
+                        &opts.exclude_languages,
+                        &opts.exclude_paths,
+                    )
+                    .await?
+            }
+            None => {
+                self.code_store
+                    .query(
+                        collection,
+                        project_id,
+                        &q.dense,
+                        &q.sparse,
+                        opts.overfetch,
+                        self.config.bm25_boost,
+                        self.config.disable_sparse,
+                        &opts.exclude_languages,
+                        &opts.exclude_paths,
+                    )
+                    .await?
+            }
+        };
         timer.lap("vector_query");
 
         if !should_rerank(opts.rerank, self.config.rerank, self.lite, candidates.len()) {
@@ -157,6 +184,32 @@ impl RetrievalClient {
         self.search_in(
             &self.config.collection("code_chunks"),
             project_id,
+            None,
+            query,
+            opts,
+        )
+        .await
+    }
+
+    /// The worktree main+delta search: `project_id` (main) with
+    /// `opts.exclude_paths` applied, unioned with `overlay_project_id` (the
+    /// worktree's delta project) which excludes nothing, returned as ONE
+    /// relevance ranking.
+    ///
+    /// Callers stay backend-agnostic on purpose — whether this costs one
+    /// round trip or two is the store's business. See
+    /// [`crate::retrieval::code_store::CodeVectorStore::query_overlay`].
+    pub async fn search_code_overlay(
+        &self,
+        project_id: &str,
+        overlay_project_id: &str,
+        query: &str,
+        opts: SearchOpts,
+    ) -> Result<Vec<Hit>> {
+        self.search_in(
+            &self.config.collection("code_chunks"),
+            project_id,
+            Some(overlay_project_id),
             query,
             opts,
         )
@@ -169,25 +222,59 @@ impl RetrievalClient {
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
-        self.search_in(&self.config.collection("memories"), project_id, query, opts)
-            .await
+        self.search_in(
+            &self.config.collection("memories"),
+            project_id,
+            None,
+            query,
+            opts,
+        )
+        .await
     }
 
     /// Search across all library chunks regardless of project.
     pub async fn search_libraries(&self, query: &str, opts: SearchOpts) -> Result<Vec<Hit>> {
-        self.search_in(&self.config.collection("library_chunks"), "*", query, opts)
-            .await
+        self.search_in(
+            &self.config.collection("library_chunks"),
+            "*",
+            None,
+            query,
+            opts,
+        )
+        .await
     }
 }
 
 /// Merge two score-ordered hit lists and truncate to `limit`.
 ///
 /// Exact for top-`limit` when each source was queried at `limit`: a hit in the
-/// global top-`limit` is necessarily within its own source's top-`limit`. Scores
-/// are cosine from the same model, so they are comparable across sources -- both
-/// callers go through the same `RetrievalClient::search_code` path (same
-/// embedder, same store backend, same `bm25_boost`/`disable_sparse`
-/// configuration), differing only in `project_id` and `exclude_paths`.
+/// global top-`limit` is necessarily within its own source's top-`limit`.
+///
+/// # This is only valid when the two sources' scores are comparable
+///
+/// **It is not universally.** This docstring used to assert "Scores are cosine
+/// from the same model, so they are comparable across sources", and that
+/// sentence was false on the default backend — it is what made C1 look safe.
+///
+/// - `InMemoryCodeStore` returns cosine and `SqliteVecCodeStore` returns
+///   `1 / (1 + distance)`. Both are absolute functions of content, so merging
+///   two of their lists is meaningful. This function is correct there.
+/// - `QdrantWrap` with `disable_sparse == false` — the **default**
+///   configuration ([`crate::retrieval::config::RetrievalConfig`]) — returns
+///   the **RRF fusion score**, which depends on *rank position only*.
+///   Measured on the live collection: 0.5, 0.333, 0.25, 0.2, 0.167 … =
+///   `1 / (1 + rank)`, identical whether the queried project holds three
+///   chunks or half a million. Feeding two such lists in here sorts a
+///   3-chunk delta's top-3 level with a 500k-chunk index's top-3; the sort
+///   is stable, so the result is literally `a[0], b[0], a[1], b[1], …` and
+///   the smaller source takes half of every page regardless of relevance.
+///
+/// So: only call this on lists whose scores mean the same thing. Cross-project
+/// code search goes through
+/// [`crate::retrieval::code_store::CodeVectorStore::query_overlay`] instead,
+/// which lets a rank-fusion backend answer with a single ranking; that trait
+/// method's *default implementation* is this function, which is exactly the
+/// right default for the score-comparable stores and is overridden by Qdrant.
 pub fn merge_hits(a: Vec<Hit>, b: Vec<Hit>, limit: usize) -> Vec<Hit> {
     let mut all: Vec<Hit> = a.into_iter().chain(b).collect();
     all.sort_by(|x, y| {

@@ -8,7 +8,7 @@
 `semantic_search` works inside a linked git worktree. It serves the main
 checkout's vectors for every file that is byte-identical between the two
 trees, and a small per-worktree delta index for the files that differ,
-merging the two result sets by score.
+ranking both together as a single result page.
 
 ## Can I use this today?
 
@@ -56,14 +56,35 @@ format and from library ids (`lib:<name>`).
 ## The merged query
 
 A `semantic_search` call from inside the worktree, with no explicit
-`project_id`, queries **both** projects and merges the hits by score:
+`project_id`, covers **both** projects:
 
-- **Main** is queried with the dirty paths excluded (`exclude_paths` on
-  `SearchOpts` — a Qdrant `must_not` filter server-side; the sqlite-vec lite
-  store post-filters and widens `k` to compensate), so it never serves a
-  chunk the worktree has changed — unless a partial sync left `dirty_paths`
-  incomplete, see `drift_note` below.
-- **The delta** is queried for everything it has, unfiltered.
+- **Main** contributes everything the worktree has not touched: the dirty
+  paths are excluded (`exclude_paths` on `SearchOpts`), so main never serves
+  a chunk the worktree has changed — unless a partial sync left
+  `dirty_paths` incomplete, see `drift_note` below.
+- **The delta** contributes everything it has, unfiltered. It holds exactly
+  the dirty files, so excluding those paths from it too would empty it.
+
+The union is expressed **at the vector store**
+(`CodeVectorStore::query_overlay`), not composed in the tool layer, and this
+is load-bearing rather than tidiness. Whether two result lists can be merged
+by score depends on the backend:
+
+- the sqlite-vec lite store scores `1 / (1 + distance)` and the in-memory
+  test store scores cosine. Both are absolute functions of content, so
+  ranking two lists together is meaningful — those backends satisfy the
+  union by querying twice and merging, which is what the trait's default
+  implementation does.
+- Qdrant with hybrid retrieval on (the default) scores by **Reciprocal Rank
+  Fusion**, which depends on rank *position* only — measured as `1/(1 +
+  rank)`, the same ladder whether the project holds three chunks or half a
+  million. Merging two such lists by score gives the smaller project a fixed
+  share of every page no matter how irrelevant its contents are. Qdrant
+  therefore answers with **one** query whose filter unions both project ids
+  and nests the path exclusion so it binds to main alone.
+
+So the tool layer asks for "these two projects, with these exclusions on the
+first" and stays backend-agnostic; each store decides how to satisfy it.
 
 ## Response fields
 
@@ -83,7 +104,9 @@ fields — none of them is an error, and the query still ran:
   queried with no exclusions and may be serving stale chunks. Re-run
   `index(action="build")` in the worktree to repair the record.
 - **`main_never_indexed_note`** — main itself has no indexed chunks at all,
-  so every result comes only from the worktree's own delta.
+  so every result comes only from the worktree's own delta. Main is not
+  queried at all in this state: it could only return an empty page, and
+  asking would ship the whole exclusion list to the store to find that out.
 
 See the `semantic_search` tool's own extended description (its `long_docs`,
 surfaced by MCP clients that expose per-tool detailed help) or

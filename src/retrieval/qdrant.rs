@@ -38,8 +38,9 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
 /// dense-only branch cannot drift apart; and the shape is unit-testable
 /// without a live Qdrant.
 ///
-/// The shape that matters: `exclude_paths` collapses into a **single**
-/// `MatchAny` condition, not one `must_not` condition per path. Qdrant
+/// ## One `MatchAny`, not one condition per value (C2)
+///
+/// `exclude_paths` collapses into a **single** `MatchAny` condition. Qdrant
 /// evaluates `must_not` conditions one at a time, and this collection carries
 /// no payload index on `file_path`, so N conditions cost N passes. Measured on
 /// the live 576k-point `code_chunks` collection, same query shape, identical
@@ -47,29 +48,78 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
 ///
 /// | excluded paths | one condition each | single `MatchAny` |
 /// |---|---|---|
-/// | 500   | 2.35 s  | 0.55 s |
-/// | 2 000 | 9.32 s  | 0.55 s |
-/// | 8 000 | 37.29 s | 0.56 s |
+/// | 500   | 2.35 s  | 0.58 s |
+/// | 2 000 | 9.32 s  | 0.56 s |
+/// | 8 000 | 37.29 s | 0.57 s |
 ///
 /// This is not a tail case. `sync_worktree` marks every file dirty whenever
 /// main has never been indexed, so "every path in the repo lands in this
 /// filter" is the *certain* state on a fresh main, not an unlucky one.
+///
+/// ## `overlay_project_id`: one ranking over two projects (C1)
+///
+/// With an overlay the filter covers **both** projects in a single query, and
+/// the path exclusion is *nested* so it binds only to `project_id`:
+///
+/// ```text
+/// must:     [ project_id MatchAny [primary, overlay] ]
+/// must_not: [ language MatchAny [...],                       // both projects
+///             Filter { must: [ project_id = primary,
+///                              file_path MatchAny [...] ] } ] // primary only
+/// ```
+///
+/// The nesting is the whole point. Flattening those two inner conditions up
+/// into the outer `must_not` would exclude the paths from the **overlay** too
+/// — and the overlay (a worktree delta) holds nothing *but* those paths, so
+/// the flattened form silently returns main-minus-dirty and nothing else.
+/// Dropping the nested `project_id` condition does the same thing.
+///
+/// Why one query rather than two merged lists: with `disable_sparse == false`
+/// (the default) Qdrant's `Hit.score` is the RRF fusion score, a function of
+/// **rank position only** — measured on the live collection as 0.5, 0.333,
+/// 0.25, 0.2, 0.167 … = `1/(1 + rank)`. It carries no information about
+/// content, corpus size or similarity, so a 3-chunk delta produces the same
+/// top-3 scores as a 500k-chunk main index and a score-sorted merge hands the
+/// delta half of every page regardless of relevance. Ranking both projects in
+/// one query is what makes the scores mean the same thing. See
+/// [`crate::retrieval::search::merge_hits`] and
+/// [`crate::retrieval::code_store::CodeVectorStore::query_overlay`].
 fn build_query_filter(
     project_id: &str,
+    overlay_project_id: Option<&str>,
     exclude_languages: &[String],
     exclude_paths: &[String],
 ) -> Filter {
-    let must = vec![Condition::matches("project_id", project_id.to_string())];
+    let must = match overlay_project_id {
+        Some(overlay) => vec![Condition::matches(
+            "project_id",
+            vec![project_id.to_string(), overlay.to_string()],
+        )],
+        None => vec![Condition::matches("project_id", project_id.to_string())],
+    };
+
     let mut must_not: Vec<Condition> = Vec::new();
     // Guarded on non-empty: `Condition::matches(field, vec![])` would emit a
     // `MatchAny` over an empty keyword set, which is a real condition Qdrant
     // still has to evaluate rather than the no-op an empty list means here.
     if !exclude_languages.is_empty() {
+        // Deliberately NOT nested: a language exclusion is the caller's
+        // `mode="code"` preference and applies to everything on the page.
         must_not.push(Condition::matches("language", exclude_languages.to_vec()));
     }
     if !exclude_paths.is_empty() {
-        must_not.push(Condition::matches("file_path", exclude_paths.to_vec()));
+        must_not.push(match overlay_project_id {
+            Some(_) => Condition::from(Filter {
+                must: vec![
+                    Condition::matches("project_id", project_id.to_string()),
+                    Condition::matches("file_path", exclude_paths.to_vec()),
+                ],
+                ..Default::default()
+            }),
+            None => Condition::matches("file_path", exclude_paths.to_vec()),
+        });
     }
+
     Filter {
         must,
         must_not,
@@ -361,11 +411,18 @@ impl QdrantWrap {
     /// `semantic_search(mode="code")` and worktree search respectively. Each is
     /// exactly ONE `MatchAny` condition however long the list — see
     /// [`build_query_filter`], which owns the shape and carries the measurements.
+    ///
+    /// `overlay_project_id` unions a second project into the **same** RRF
+    /// ranking, with `exclude_paths` nested so it binds only to `project_id`.
+    /// That is the worktree main+delta query, and it must stay one query:
+    /// running two and merging by score is what C1 was. Again, see
+    /// [`build_query_filter`].
     #[allow(clippy::too_many_arguments)]
     pub async fn hybrid_query(
         &self,
         collection: &str,
         project_id: &str,
+        overlay_project_id: Option<&str>,
         dense: &[f32],
         sparse: &crate::retrieval::embedder::SparseVector,
         limit: usize,
@@ -374,7 +431,12 @@ impl QdrantWrap {
         exclude_languages: &[String],
         exclude_paths: &[String],
     ) -> Result<Vec<crate::retrieval::search::Hit>> {
-        let filter = build_query_filter(project_id, exclude_languages, exclude_paths);
+        let filter = build_query_filter(
+            project_id,
+            overlay_project_id,
+            exclude_languages,
+            exclude_paths,
+        );
 
         let resp = if disable_sparse {
             // Pure dense ANN — no fusion, no sparse leg.
@@ -483,7 +545,7 @@ mod tests {
 
         let paths: Vec<String> = (0..8000).map(|i| format!("src/f{i}.rs")).collect();
         let langs = vec!["markdown".to_string(), "json".to_string()];
-        let filter = build_query_filter("proj", &langs, &paths);
+        let filter = build_query_filter("proj", None, &langs, &paths);
 
         assert_eq!(filter.must.len(), 1, "exactly one project_id condition");
         assert_eq!(
@@ -525,7 +587,7 @@ mod tests {
     /// accident. Pinned so the non-empty guard cannot be dropped as redundant.
     #[test]
     fn build_query_filter_emits_no_condition_for_an_empty_exclusion_list() {
-        let filter = build_query_filter("proj", &[], &[]);
+        let filter = build_query_filter("proj", None, &[], &[]);
         assert_eq!(filter.must.len(), 1);
         assert!(
             filter.must_not.is_empty(),
@@ -533,12 +595,137 @@ mod tests {
             filter.must_not.len()
         );
 
-        let only_paths = build_query_filter("proj", &[], &["a.rs".to_string()]);
+        let only_paths = build_query_filter("proj", None, &[], &["a.rs".to_string()]);
         assert_eq!(
             only_paths.must_not.len(),
             1,
             "an empty language list must not leave a stray condition behind"
         );
+    }
+
+    /// C1's filter shape, pinned without a live Qdrant.
+    ///
+    /// With an overlay the query must cover BOTH projects (`must` is one
+    /// `MatchAny` over the pair) while the path exclusion binds to the primary
+    /// ONLY — expressed as a *nested* `Filter` inside `must_not`, whose inner
+    /// `must` carries both `project_id = primary` and the path list.
+    ///
+    /// Two mutations this catches, both of which read as harmless
+    /// simplifications:
+    /// - flattening the nested conditions into the outer `must_not`: the paths
+    ///   would then be excluded from the overlay too, and the overlay holds
+    ///   *nothing but* those paths, so the worktree's own edits silently
+    ///   disappear from every search;
+    /// - dropping the inner `project_id` condition: same outcome, by the same
+    ///   mechanism.
+    #[test]
+    fn build_query_filter_nests_the_path_exclusion_under_the_primary_project() {
+        use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+
+        let keywords = |c: &Condition| -> (String, Vec<String>) {
+            match c.condition_one_of.as_ref().expect("condition set") {
+                ConditionOneOf::Field(f) => match f
+                    .r#match
+                    .as_ref()
+                    .and_then(|m| m.match_value.as_ref())
+                    .expect("match value set")
+                {
+                    MatchValue::Keywords(k) => (f.key.clone(), k.strings.clone()),
+                    MatchValue::Keyword(s) => (f.key.clone(), vec![s.clone()]),
+                    other => panic!("expected a keyword match, got {other:?}"),
+                },
+                other => panic!("expected a field condition, got {other:?}"),
+            }
+        };
+
+        let paths = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+        let filter = build_query_filter("main", Some("main@wt"), &["markdown".into()], &paths);
+
+        // Both projects are in scope for the ranking.
+        assert_eq!(filter.must.len(), 1);
+        let (must_key, must_vals) = keywords(&filter.must[0]);
+        assert_eq!(must_key, "project_id");
+        assert_eq!(must_vals, vec!["main".to_string(), "main@wt".to_string()]);
+
+        assert_eq!(filter.must_not.len(), 2);
+
+        // The language exclusion stays flat: it is the caller's mode="code"
+        // preference and applies to everything on the page.
+        let (lang_key, lang_vals) = keywords(&filter.must_not[0]);
+        assert_eq!(lang_key, "language");
+        assert_eq!(lang_vals, vec!["markdown".to_string()]);
+
+        // The path exclusion is nested, and the nest names the primary.
+        let nested = match filter.must_not[1]
+            .condition_one_of
+            .as_ref()
+            .expect("condition set")
+        {
+            ConditionOneOf::Filter(f) => f,
+            other => panic!(
+                "path exclusion must be a NESTED Filter so it binds to the primary \
+                 project only — got {other:?}"
+            ),
+        };
+        assert_eq!(
+            nested.must.len(),
+            2,
+            "the nest must carry BOTH project_id and file_path: dropping either \
+             makes it exclude the paths from the overlay as well"
+        );
+        let (p_key, p_vals) = keywords(&nested.must[0]);
+        assert_eq!(p_key, "project_id");
+        assert_eq!(p_vals, vec!["main".to_string()]);
+        let (f_key, f_vals) = keywords(&nested.must[1]);
+        assert_eq!(f_key, "file_path");
+        assert_eq!(f_vals, paths);
+        assert!(
+            nested.must_not.is_empty(),
+            "the nest is a positive match on what to remove, not a double negation"
+        );
+    }
+
+    /// The no-overlay shape must stay flat. An overlay-less query has one
+    /// project, so nesting there would be pure overhead — and, more usefully,
+    /// this pins that the `Some`/`None` arms did not get collapsed into one.
+    #[test]
+    fn build_query_filter_without_an_overlay_stays_a_flat_single_project_filter() {
+        use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+
+        let filter = build_query_filter("main", None, &[], &["src/a.rs".to_string()]);
+        assert_eq!(filter.must.len(), 1);
+        assert_eq!(filter.must_not.len(), 1);
+        match filter.must_not[0]
+            .condition_one_of
+            .as_ref()
+            .expect("condition set")
+        {
+            ConditionOneOf::Field(f) => {
+                assert_eq!(f.key, "file_path");
+                assert!(matches!(
+                    f.r#match.as_ref().and_then(|m| m.match_value.as_ref()),
+                    Some(MatchValue::Keywords(_))
+                ));
+            }
+            other => panic!("expected a flat field condition without an overlay, got {other:?}"),
+        }
+        match filter.must[0]
+            .condition_one_of
+            .as_ref()
+            .expect("condition set")
+        {
+            ConditionOneOf::Field(f) => {
+                assert_eq!(f.key, "project_id");
+                assert!(
+                    matches!(
+                        f.r#match.as_ref().and_then(|m| m.match_value.as_ref()),
+                        Some(MatchValue::Keyword(k)) if k == "main"
+                    ),
+                    "a single project must match one keyword, not a MatchAny pair"
+                );
+            }
+            other => panic!("expected a field condition, got {other:?}"),
+        }
     }
 
     /// Full E2E test — requires a running Qdrant instance (testcontainers).
@@ -634,6 +821,7 @@ mod tests {
             .hybrid_query(
                 coll,
                 "proj",
+                None,
                 &[1.0, 0.0],
                 &SparseVector {
                     indices: vec![],
@@ -732,6 +920,7 @@ mod tests {
             .hybrid_query(
                 coll,
                 "proj",
+                None,
                 &[1.0, 0.0],
                 &SparseVector {
                     indices: vec![1, 2],
@@ -757,6 +946,232 @@ mod tests {
             hits.iter().any(|h| h.file_path == "src/keep.rs"),
             "exclusion must not empty the result set — the accepting case needs \
              pinning too, or an always-empty result would pass the assertion above"
+        );
+
+        // Cleanup.
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
+
+    /// C1, end to end against a live Qdrant: the worktree delta must earn its
+    /// place on the page by relevance, not collect a fixed share of it.
+    ///
+    /// The fixture is deliberately lopsided — 12 relevant main chunks, plus a
+    /// delta holding ONE relevant chunk and five that match neither the dense
+    /// nor the sparse query at all. A relevance-ranked page owes the delta
+    /// exactly one slot.
+    ///
+    /// The test asserts BOTH shapes, because the contrast is the evidence:
+    ///
+    /// - `two_query_merge` reproduces the shipped composition (two
+    ///   `hybrid_query` calls fused by `merge_hits`). Qdrant's RRF score is
+    ///   `1/(1 + rank)` — a function of rank position only — so the delta's
+    ///   6-chunk ranking produces the same score ladder as main's 12-chunk one
+    ///   and a stable score sort interleaves them. The delta takes roughly half
+    ///   the page whatever it contains.
+    /// - the union query ranks all 18 chunks once, and the five irrelevant
+    ///   delta chunks sink below main's.
+    ///
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_worktree_union
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_worktree_union_ranks_the_delta_by_relevance_not_by_rank_position() {
+        use crate::retrieval::embedder::{EmbedOutput, SparseVector};
+        use crate::retrieval::payload::{payload_to_map, CodePayload};
+
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+
+        let coll = "test_worktree_union_ranking";
+        const MAIN: &str = "m";
+        const DELTA: &str = "m@wt";
+        const DIRTY: &str = "src/dirty.rs";
+        const LIMIT: usize = 12;
+
+        let _ = wrap.client.delete_collection(coll).await;
+        wrap.ensure_collection(coll, 2).await.expect("ensure");
+
+        let payload = |project: &str, file: &str, chunk_id: &str| CodePayload {
+            project_id: project.into(),
+            file_path: file.into(),
+            language: "rust".into(),
+            start_line: 1,
+            end_line: 2,
+            ast_header: String::new(),
+            content: format!("content of {chunk_id}"),
+            content_hash: "h".into(),
+            last_indexed_commit: String::new(),
+            chunk_id: chunk_id.into(),
+        };
+        let embed = |dense: Vec<f32>, idx: Vec<u32>| EmbedOutput {
+            dense,
+            sparse: SparseVector {
+                indices: idx,
+                values: vec![1.0, 1.0],
+            },
+        };
+
+        let mut points = Vec::new();
+        // Main: 12 relevant chunks, all close to the query on both legs.
+        for i in 0..12 {
+            let id = format!("main-{i}");
+            points.push((
+                id.clone(),
+                payload_to_map(&payload(MAIN, &format!("src/m{i}.rs"), &id)),
+                embed(vec![1.0, 0.01 * i as f32], vec![1, 2]),
+            ));
+        }
+        // Main's stale copy of the worktree-changed file. Maximally relevant,
+        // so if the exclusion ever stops working it lands at the very top.
+        points.push((
+            "main-dirty".to_string(),
+            payload_to_map(&payload(MAIN, DIRTY, "main-dirty")),
+            embed(vec![1.0, 0.0], vec![1, 2]),
+        ));
+        // The delta's own copy of that file — genuinely relevant, must appear.
+        points.push((
+            "delta-dirty".to_string(),
+            payload_to_map(&payload(DELTA, DIRTY, "delta-dirty")),
+            embed(vec![1.0, 0.005], vec![1, 2]),
+        ));
+        // Five delta chunks that match nothing: orthogonal dense vector and
+        // disjoint sparse terms. A relevance ranking owes them nothing.
+        for i in 0..5 {
+            let id = format!("delta-noise-{i}");
+            points.push((
+                id.clone(),
+                payload_to_map(&payload(DELTA, &format!("src/noise{i}.rs"), &id)),
+                embed(vec![0.0, 1.0], vec![90, 91]),
+            ));
+        }
+        wrap.upsert_points(coll, &points).await.expect("upsert");
+
+        let q_dense = [1.0f32, 0.0];
+        let q_sparse = SparseVector {
+            indices: vec![1, 2],
+            values: vec![1.0, 1.0],
+        };
+        let excl = [DIRTY.to_string()];
+        let is_delta = |h: &crate::retrieval::search::Hit| h.chunk_id.starts_with("delta-");
+
+        // --- The shipped composition: two queries fused by score. ---
+        let main_hits = wrap
+            .hybrid_query(
+                coll,
+                MAIN,
+                None,
+                &q_dense,
+                &q_sparse,
+                LIMIT,
+                3.0,
+                false,
+                &[],
+                &excl,
+            )
+            .await
+            .expect("main query");
+        let delta_hits = wrap
+            .hybrid_query(
+                coll,
+                DELTA,
+                None,
+                &q_dense,
+                &q_sparse,
+                LIMIT,
+                3.0,
+                false,
+                &[],
+                &[],
+            )
+            .await
+            .expect("delta query");
+        let merged = crate::retrieval::search::merge_hits(main_hits, delta_hits, LIMIT);
+        let noise = |h: &crate::retrieval::search::Hit| h.chunk_id.starts_with("delta-noise");
+        let delta_share_merged = merged.iter().filter(|h| is_delta(h)).count();
+        let noise_merged = merged.iter().filter(|h| noise(h)).count();
+        let main_share_merged = merged.len() - delta_share_merged;
+        eprintln!(
+            "two-query merge: delta {delta_share_merged}/{} (noise {noise_merged}) — {:?}",
+            merged.len(),
+            merged
+                .iter()
+                .map(|h| (h.chunk_id.clone(), h.score))
+                .collect::<Vec<_>>()
+        );
+        // This arm documents C1 rather than guarding it: it is a measurement of
+        // the composition the fix replaced. The threshold-free statement of the
+        // defect is that chunks matching NEITHER leg of the query reach the
+        // page at all -- they are there purely because rank 4 in a 6-chunk
+        // corpus scores the same as rank 4 in a 500k one.
+        assert!(
+            noise_merged > 0,
+            "expected the score merge to seat delta chunks that match nothing \
+             (delta share {delta_share_merged}/{}). If this ever stops \
+             reproducing, Qdrant's fusion scoring changed and the reasoning in \
+             `merge_hits` and `query_overlay` needs re-deriving, not deleting.",
+            merged.len()
+        );
+
+        // --- The fix: one ranking over the union. ---
+        let union = wrap
+            .hybrid_query(
+                coll,
+                MAIN,
+                Some(DELTA),
+                &q_dense,
+                &q_sparse,
+                LIMIT,
+                3.0,
+                false,
+                &[],
+                &excl,
+            )
+            .await
+            .expect("union query");
+        let delta_share_union = union.iter().filter(|h| is_delta(h)).count();
+        let noise_union = union.iter().filter(|h| noise(h)).count();
+        let main_share_union = union.len() - delta_share_union;
+        eprintln!(
+            "union query:     delta {delta_share_union}/{} (noise {noise_union}) — {:?}",
+            union.len(),
+            union
+                .iter()
+                .map(|h| (h.chunk_id.clone(), h.score))
+                .collect::<Vec<_>>()
+        );
+
+        assert_eq!(
+            noise_union,
+            0,
+            "delta chunks matching neither leg must not reach the page: {:?}",
+            union.iter().map(|h| &h.chunk_id).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            delta_share_union,
+            1,
+            "the delta holds exactly one relevant chunk, so it earns exactly one \
+             slot — got {delta_share_union}. Page: {:?}",
+            union.iter().map(|h| &h.chunk_id).collect::<Vec<_>>()
+        );
+        assert!(
+            union.iter().any(|h| h.chunk_id == "delta-dirty"),
+            "the delta's relevant chunk must still be served — the worktree's own \
+             edits are the entire reason the delta exists. Page: {:?}",
+            union.iter().map(|h| &h.chunk_id).collect::<Vec<_>>()
+        );
+        assert!(
+            union.iter().all(|h| h.chunk_id != "main-dirty"),
+            "main's stale copy of the changed path must be excluded — serving both \
+             copies is the double-serve this design prevents. Page: {:?}",
+            union.iter().map(|h| &h.chunk_id).collect::<Vec<_>>()
+        );
+        assert!(
+            main_share_union > main_share_merged,
+            "main's genuine results were being truncated to make room for the \
+             delta: {main_share_merged}/{} slots under the score merge vs \
+             {main_share_union}/{} under the union",
+            merged.len(),
+            union.len()
         );
 
         // Cleanup.
