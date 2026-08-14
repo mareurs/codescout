@@ -20,6 +20,23 @@ pub(crate) fn parse_rerank_opt_in(raw: Option<&str>) -> bool {
     )
 }
 
+/// Sparse-embedder fallback: the **host** port `docker-compose.yml` publishes for
+/// the sparse service (`127.0.0.1:48084:80`).
+///
+/// The container-internal port (`80`) is not reachable from the host, and neither
+/// is `8084` — which is what this fallback used to be. A wrong fallback here does
+/// not fail loudly at startup; it degrades `semantic_search`, semantic-memory
+/// cross-embedding, and anchor creation with a connect error while the surrounding
+/// operation still reports success, which is why the drift survived unnoticed.
+/// `retrieval_default_ports_match_published_compose_ports` keeps this honest.
+pub(crate) const DEFAULT_SPARSE_EMBEDDER_URL: &str = "http://127.0.0.1:48084";
+
+/// Reranker fallback: the **host** port `docker-compose.yml` publishes for the
+/// reranker service (`127.0.0.1:48083:8080`). See
+/// [`DEFAULT_SPARSE_EMBEDDER_URL`] for why the container-internal port is wrong
+/// and how the mismatch stays caught.
+pub(crate) const DEFAULT_RERANKER_URL: &str = "http://127.0.0.1:48083";
+
 // no Debug derive: `api_key` holds a plaintext key, and Debug is the only
 // thing that would let a stray `tracing::debug!(?config)` leak it. If a
 // future change adds a derive here, redact `api_key` explicitly first.
@@ -116,9 +133,9 @@ impl RetrievalConfig {
             api_key,
             model_dim,
             sparse_embedder_url: std::env::var("CODESCOUT_SPARSE_EMBEDDER_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8084".into()),
+                .unwrap_or_else(|_| DEFAULT_SPARSE_EMBEDDER_URL.into()),
             reranker_url: std::env::var("CODESCOUT_RERANKER_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8083".into()),
+                .unwrap_or_else(|_| DEFAULT_RERANKER_URL.into()),
             profile: std::env::var("CODESCOUT_RETRIEVAL_PROFILE").unwrap_or_else(|_| "cpu".into()),
             // Dense-vs-sparse fusion weight — corpus- and model-dependent by
             // construction, so 3.0 is a value that worked on OUR corpus and dense
@@ -569,5 +586,85 @@ mod merge_tests {
         assert_eq!(url, None);
         assert_eq!(api_key, None);
         assert_eq!(dim, None);
+    }
+}
+
+#[cfg(test)]
+mod default_port_tests {
+    use super::{DEFAULT_RERANKER_URL, DEFAULT_SPARSE_EMBEDDER_URL};
+
+    /// Host ports `docker-compose.yml` publishes, read out of its
+    /// `- "127.0.0.1:<host>:<container>"` mappings.
+    ///
+    /// Deliberately parsed from the real compose file rather than restated here: a
+    /// constant duplicated into the test is a constant the test can no longer
+    /// disagree with.
+    fn published_host_ports() -> Vec<u16> {
+        let compose = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docker-compose.yml"),
+        )
+        .expect("docker-compose.yml must exist at the crate root");
+
+        compose
+            .lines()
+            .filter_map(|line| {
+                let mapping = line
+                    .trim()
+                    .strip_prefix("- ")?
+                    .trim()
+                    .trim_matches('"')
+                    .strip_prefix("127.0.0.1:")?;
+                mapping.split(':').next()?.parse::<u16>().ok()
+            })
+            .collect()
+    }
+
+    fn port_of(url: &str) -> u16 {
+        url.rsplit(':')
+            .next()
+            .and_then(|tail| tail.split('/').next())
+            .and_then(|p| p.parse().ok())
+            .unwrap_or_else(|| panic!("no parseable port in {url}"))
+    }
+
+    /// The bug this guards: the fallbacks named `8084`/`8083`, which are
+    /// container-internal ports. Nothing listens on them from the host, so
+    /// `semantic_search`, semantic-memory cross-embedding, and anchor creation all
+    /// failed to connect — each non-fatally, which is why it went unnoticed for
+    /// weeks. See `docs/issues/2026-08-06-retrieval-stack-default-endpoints-doc-drift.md`.
+    #[test]
+    fn retrieval_default_ports_match_published_compose_ports() {
+        let published = published_host_ports();
+
+        // Without this the whole test silently degrades to a no-op the moment the
+        // compose port syntax changes shape.
+        assert!(
+            !published.is_empty(),
+            "parsed zero published ports from docker-compose.yml — the port-mapping \
+             syntax changed and this guard has stopped guarding"
+        );
+
+        for (service, url) in [
+            ("sparse embedder", DEFAULT_SPARSE_EMBEDDER_URL),
+            ("reranker", DEFAULT_RERANKER_URL),
+        ] {
+            let port = port_of(url);
+            assert!(
+                published.contains(&port),
+                "{service} default {url} uses port {port}, which docker-compose.yml \
+                 does not publish to the host (published: {published:?}). A \
+                 container-internal port here degrades retrieval silently."
+            );
+        }
+    }
+
+    #[test]
+    fn sparse_and_reranker_defaults_are_distinct() {
+        assert_ne!(
+            port_of(DEFAULT_SPARSE_EMBEDDER_URL),
+            port_of(DEFAULT_RERANKER_URL),
+            "sparse and reranker share a port — one of the two constants was \
+             copy-pasted without changing the port"
+        );
     }
 }

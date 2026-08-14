@@ -25,8 +25,16 @@ fn config_from_env_uses_defaults_when_unset() {
                 cfg.embedder_url, None,
                 "an unset url must mean 'resolve from the model', not 'assume 8081'"
             );
-            assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:8084");
-            assert_eq!(cfg.reranker_url, "http://127.0.0.1:8083");
+            // 48084/48083 are the HOST ports docker-compose.yml publishes. These
+            // read as literals because the constants behind them are pub(crate) and
+            // this is an integration test; the in-crate guard
+            // `config::default_port_tests::retrieval_default_ports_match_published_compose_ports`
+            // is what proves they still match the compose file. Until 2026-08-14
+            // these asserted 8084/8083 — container-internal ports nothing listens on
+            // from the host — so this test pinned the bug in place rather than
+            // catching it.
+            assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:48084");
+            assert_eq!(cfg.reranker_url, "http://127.0.0.1:48083");
             assert_eq!(
                 cfg.model_dim, None,
                 "an unpinned dim must let the model decide"

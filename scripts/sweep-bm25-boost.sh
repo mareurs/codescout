@@ -7,9 +7,11 @@ PROJECT_PATH="${2:-/home/marius/work/claude/code-explorer}"
 BOOSTS="${3:-0.25 0.5 1.0 1.5 2.0 3.0 5.0}"
 
 export CODESCOUT_QDRANT_URL="http://127.0.0.1:6334"
-export CODESCOUT_EMBEDDER_URL="http://127.0.0.1:8081"
-export CODESCOUT_SPARSE_EMBEDDER_URL="http://127.0.0.1:8084"
-export CODESCOUT_RERANKER_URL="http://127.0.0.1:8083"
+# Host ports as published by docker-compose.yml. The container-internal ports
+# (8080/80/8080) are not reachable from here -- this script runs a host binary.
+export CODESCOUT_EMBEDDER_URL="http://127.0.0.1:48081"
+export CODESCOUT_SPARSE_EMBEDDER_URL="http://127.0.0.1:48084"
+export CODESCOUT_RERANKER_URL="http://127.0.0.1:48083"
 export CODESCOUT_MODEL_DIM="768"
 
 echo "boost  score  p50ms  p95ms"

@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- docs
+- retrieval
+- config
+closed: 2026-08-14
 opened: 2026-08-06
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [docs, retrieval, config]
-kind: bug
+severity: medium
 ---
 
 # BUG: retrieval-stack docs default endpoints drift from runtime defaults
@@ -51,55 +54,92 @@ Doc/runtime drift:
    - **Evidence link:** shell output in session.
 
 ## Fix
-N/A — not implemented in this session.
 
+Fixed 2026-08-14 on `experiments`. **The source-of-truth question the Resume left
+open answers itself on evidence** — three surfaces already agreed and only the
+runtime disagreed:
+
+- `docker-compose.yml:81,144,211` publishes `127.0.0.1:48081`, `:48084`, `:48083`
+- `.env.example:14-16` uses those same three
+- `docs/manual/src/concepts/retrieval-stack.md` uses them throughout (13 hits)
+
+`8081/8084/8083` are **container-internal** ports (`8080`, `80`, `8080` behind the
+published mappings). Nothing listens on them from the host, ever. So the docs were
+right and the runtime was wrong — the opposite of the direction the bug title
+implies.
+
+**The bug named two drifted surfaces. There were five.**
+
+| # | Surface | Was | Now |
+|---|---|---|---|
+| 1 | `src/retrieval/config.rs` sparse fallback | `:8084` | `DEFAULT_SPARSE_EMBEDDER_URL` = `:48084` |
+| 2 | `src/retrieval/config.rs` reranker fallback | `:8083` | `DEFAULT_RERANKER_URL` = `:48083` |
+| 3 | `scripts/sweep-bm25-boost.sh:10-12` | `:8081/:8084/:8083` | `:48081/:48084/:48083` |
+| 4 | manual env table | `CODESCOUT_SPARSE_URL` | `CODESCOUT_SPARSE_EMBEDDER_URL` |
+| 5 | manual env table | `CODESCOUT_EMBEDDER_URL` default `:48081` | *(unset)* — the default was deliberately removed |
+
+Surfaces 4 and 5 are worse than the port drift and were found only by checking the
+doc side rather than assuming it:
+
+- **4** — `CODESCOUT_SPARSE_URL` occurs **exactly once in the whole repository**:
+  that table row. Nothing reads it. Code, tests, `.env.example`,
+  `contrib/pi/mcp.json.example`, both benchmark trackers and
+  `semantic_search.rs`'s own error hint all use `CODESCOUT_SPARSE_EMBEDDER_URL`. A
+  reader configuring sparse from the manual set a variable that configures
+  nothing, and got **no error at all** — strictly worse than the port bug, which at
+  least produced a connect failure.
+- **5** — the dense row documented a default that had already been removed on
+  purpose (`config.rs:29-30`: *"Previously defaulted to `http://127.0.0.1:8081`,
+  which fabricated a server that may never have existed"*). The doc was
+  advertising the exact fabrication the code had stopped doing.
+
+**The dense half of this bug was already fixed before this session** — unset now
+means "resolve the backend from the model", guarded by
+`unset_everything_no_longer_fabricates_anything`. Sparse and reranker were left
+behind in the same commit that fixed dense, including in the test (see below).
+A half-applied fix, not a stale bug.
+
+The family-split documentation this bug's Resume also asked for landed as
+`### Three embedder config families, and they are not the same one` in the same
+manual section, covering all three spellings (`CODESCOUT_EMBEDDER_*`,
+`CODESCOUT_EMBED_*`, `LIBRARIAN_EMBED_*`), their consumers, their precedence, and
+the non-fatal-failure property that let this hide.
+
+Not fixed here, filed separately: the machine-specific dead absolute paths in
+`scripts/sweep-bm25-boost.sh` and `scripts/sweep-bm25-cr1200.sh` (both point into
+the `code-explorer` root removed in task #45). Different defect class, same files.
 ## Tests added
-N/A — docs/config alignment check not implemented yet.
 
+**`config::default_port_tests::retrieval_default_ports_match_published_compose_ports`**
+(`src/retrieval/config.rs`) — parses the `- "127.0.0.1:<host>:<container>"` mappings
+out of the real `docker-compose.yml` and asserts each default's port is one the
+compose file actually publishes. Deliberately parsed rather than restated: a
+constant duplicated into its own test is a constant the test can no longer
+disagree with. It also asserts the parse found *something*, so a change to the
+compose port syntax fails loudly instead of degrading the guard to a no-op.
+
+**`config::default_port_tests::sparse_and_reranker_defaults_are_distinct`** — catches
+the copy-paste that gives both constants the same port.
+
+**`config_from_env_uses_defaults_when_unset`** (`tests/retrieval_unit.rs:28`) was
+*already asserting the bug*: `assert_eq!(cfg.sparse_embedder_url,
+"http://127.0.0.1:8084")`. It was the single failure when the fix landed, which is
+the correct outcome — but note what it means. This test ran green for the entire
+life of the bug **because it was pinning it**. Its dense assertion had been updated
+when dense was fixed; the two lines below it were not. A test updated in half
+measures the half it was updated for and defends the other half against repair.
+
+Gate at fix: **3707 passed / 0 failed / 44 ignored**, `clippy --all-targets -D
+warnings` clean. 3707 = 3705 at the prior session close + the 2 tests above,
+reconciling exactly.
 ## Workarounds
 Set explicit env vars for the running MCP process (`CODESCOUT_EMBEDDER_URL`, `CODESCOUT_SPARSE_EMBEDDER_URL`, `CODESCOUT_RERANKER_URL`) rather than relying on defaults.
 
 ## Resume
 
-Decide source of truth (runtime vs docs), then align one to the other and add a
-regression check that docs-stated defaults match `RetrievalConfig::from_env`
-fallbacks.
-
-**Still open and confirmed live 2026-08-07.** `memory(action="write")` now
-reports it on every call:
-
-```
-cross-embed failed: dense embed connect failed: http://127.0.0.1:8081/v1/embeddings
-semantic anchor creation failed: ... (same)
-```
-
-So the blast radius is wider than `semantic_search`: semantic memory
-cross-embedding and anchor creation degrade too. Both fail non-fatally — the
-topic write succeeds — which is why this has gone unnoticed.
-
-**Finding that belongs with this bug: there are two independent embedder config
-families, and only one is wired up on this machine.**
-
-| Family | Consumer | State on this box |
-|---|---|---|
-| `CODESCOUT_EMBEDDER_URL` / `_SPARSE_` / `_RERANKER_` | retrieval stack: code `semantic_search`, semantic memory | **unset** → falls back to `127.0.0.1:8081`, nothing listening |
-| `LIBRARIAN_EMBED_URL` / `_MODEL` / `_API_KEY` | librarian artifact index | configured → Azure, working (fixed 2026-08-07) |
-
-The names are near-identical and the docs discuss them as if one subsystem, so
-"the embedder is configured" can be true and false simultaneously depending on
-which one is meant. Fixing the `LIBRARIAN_EMBED_*` 404 earlier today did not
-touch this path, and the `CODESCOUT_EMBED_URL` key read by
-`ProjectConfig::load_or_default` (`src/config/project.rs:505`) is a *third*
-spelling again.
-
-Suggested scope when this is picked up: align the doc/runtime defaults as
-originally planned, **and** document the family split explicitly — a reader who
-has configured one has no signal that the other exists. Pointing
-`CODESCOUT_EMBEDDER_URL` at the same Azure `/openai` base that
-`LIBRARIAN_EMBED_URL` now uses would likely resolve the runtime failure, but the
-dimension implications (`CODESCOUT_EMBED_DIMENSIONS=768` vs the model's native
-3072) need checking first — see the `artifact_vec` / Qdrant rebuild in
-`docs/trackers/windows-shell-env-session-log.md` for how that bit last time.
+N/A — fixed and verified. The source-of-truth question is settled (compose
+publishes the host ports; the runtime was wrong) and the family-split doc is
+written. Do not re-open to "align the docs" — the docs were already right.
 ## References
 - `src/retrieval/config.rs`
 - `docs/manual/src/concepts/retrieval-stack.md`

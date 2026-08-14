@@ -159,20 +159,49 @@ GPU and drops a full reindex from "minutes of CPU melting" to ~6 m 36 s at
 121 % CPU.
 ## How codescout finds the stack
 
-codescout reads endpoints from environment variables and falls back to the
-defaults above:
+codescout reads endpoints from environment variables. Where a fallback exists it
+is the **host** port `docker-compose.yml` publishes — not the container-internal
+port, which is unreachable from the host. The dense URL has no fallback at all:
+
+> Env-var names here are exact. There is no `CODESCOUT_SPARSE_URL` — setting that
+> name configures nothing and fails silently, which is what this table said until
+> 2026-08-14.
 
 | Env | Default | Effect |
 |---|---|---|
 | `CODESCOUT_QDRANT_URL` | `http://127.0.0.1:6334` | Qdrant gRPC URL |
-| `CODESCOUT_EMBEDDER_URL` | `http://127.0.0.1:48081` | Dense embedder base URL |
+| `CODESCOUT_EMBEDDER_URL` | *(unset)* | Dense embedder base URL. **No default** — unset means "resolve the backend from the embed model", so a `local:` model runs in-process and needs no server. Set it to `http://127.0.0.1:48081` to select the compose dense service. |
 | `CODESCOUT_RERANKER_URL` | `http://127.0.0.1:48083` | Reranker base URL |
-| `CODESCOUT_SPARSE_URL` | `http://127.0.0.1:48084` | Sparse SPLADE base URL |
+| `CODESCOUT_SPARSE_EMBEDDER_URL` | `http://127.0.0.1:48084` | Sparse SPLADE base URL |
 | `CODESCOUT_EMBEDDER_MODEL_NAME` | (empty) | Model id sent in OpenAI-protocol JSON payloads |
 | `CODESCOUT_QUERY_PREFIX` | (empty) | Prepended to query text only. Required by some asymmetric models (e.g. Nomic, BGE-large). |
 | `CODESCOUT_RERANKER_PROTOCOL` | `tei` | `tei` (HuggingFace TEI) or `llama-server`/`infinity`/`cohere` (Cohere-shape `/rerank`, used by llama-server `--reranking`) |
 | `CODESCOUT_RERANKER_MODEL` | (unset) | Override the reranker model id (Infinity-protocol only) |
 
+### Three embedder config families, and they are not the same one
+
+"The embedder is configured" can be true and false at the same time here, because
+three independently-read families of env vars exist and their names are
+near-identical. Configuring one gives you no signal that the others exist.
+
+| Family | Read by | Consumers | If unset |
+|---|---|---|---|
+| `CODESCOUT_EMBEDDER_URL`, `CODESCOUT_SPARSE_EMBEDDER_URL`, `CODESCOUT_RERANKER_URL`, `CODESCOUT_EMBEDDER_MODEL` | `src/retrieval/config.rs` | the retrieval stack: `semantic_search` over code, semantic memory cross-embedding, anchor creation | sparse/reranker fall back to the published host ports; the dense URL falls back to nothing and the backend is resolved from the model |
+| `CODESCOUT_EMBED_URL`, `CODESCOUT_EMBED_MODEL` | `src/config/project.rs` | the same retrieval stack, at **lower precedence** — a project-config layer beneath the `CODESCOUT_EMBEDDER_*` names | ignored |
+| `LIBRARIAN_EMBED_MODEL`, `LIBRARIAN_EMBED_URL`, `LIBRARIAN_EMBED_API_KEY` | `src/librarian/mod.rs` | the librarian artifact index only — `artifact(semantic=…)`, `librarian(context)` | absent `LIBRARIAN_EMBED_MODEL` disables the librarian embedding service entirely |
+
+Two consequences worth knowing before you debug an embedding failure:
+
+- **Fixing one family does not fix another.** A working `LIBRARIAN_EMBED_URL`
+  leaves code `semantic_search` exactly as broken as it was, and vice versa.
+- **The retrieval stack's failures are non-fatal.** A wrong endpoint surfaces as
+  `dense embed connect failed: …` while the surrounding operation still reports
+  success — `memory(action="write")` stores the topic and only *degrades* the
+  semantic anchor. So silence is not evidence that this is configured.
+
+For the retrieval model specifically, precedence is highest-first:
+`CODESCOUT_EMBEDDER_MODEL`, then project `[embeddings]`, then
+`CODESCOUT_EMBED_MODEL`, then the built-in default `local:AllMiniLML6V2Q`.
 ## Using Ollama / llama.cpp / OpenAI as the dense embedder
 
 The shipped stack uses `llama.cpp:server` for the dense leg, but the dense
