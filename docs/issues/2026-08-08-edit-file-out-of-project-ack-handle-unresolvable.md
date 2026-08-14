@@ -1,7 +1,7 @@
 ---
 id: a99388a299352d21
 kind: bug
-status: open
+status: fixed
 title: edit_file's out-of-project ack handle does not resolve — the hint it prints cannot be followed
 owners:
 - marius
@@ -10,6 +10,7 @@ tags:
 - write-guard
 - ack
 - misleading-error
+closed: 2026-08-14
 opened: 2026-08-08
 severity: low
 ---
@@ -62,14 +63,51 @@ Target file was a user config outside any project root
 
 ## Root cause
 
-Unknown — not investigated. The observation only localises it: parameter validation
-sees the handle (it complains about a missing `old_string` first), and the failure is
-a filesystem `ENOENT`, so the handle is most likely being passed through to a path
-open rather than being looked up in the ack store the way `run_command` looks up its
-own. `src/tools/core/write_ack.rs` is the place to start.
+**The original diagnosis is falsified. The ack handle resolves correctly; it always did.**
 
-**Inferred from two observed responses — not measured against the code.**
+Measured 2026-08-14 against the running MCP server (post `cargo rb` + `/mcp` reconnect),
+both call shapes, on a fresh out-of-project directory:
 
+| Call | Result |
+|---|---|
+| `edit_file(path="@ack_003a6918")` — the hint's exact form | `"ok"`, and `hello world` → `HELLO WORLD` landed on disk |
+| `edit_file(path="@ack_003b6339", old_string=…, new_string=…)` — **this file's form** | `"ok"`, and the edit landed |
+
+The handle carries the whole pending operation, so re-supplying the strings is optional
+and harmless either way.
+
+### The ENOENT was the target file, and it reproduces on demand
+
+```
+edit_file(path="/home/marius/.local/state/cs-ack-nonexistent/missing.toml", old_string=…)
+  → pending_ack @ack_003c0d18
+edit_file(path="@ack_003c0d18", old_string=…, new_string=…)
+  → No such file or directory (os error 2)
+```
+
+Byte-identical to the symptom recorded above — produced by a **file that does not
+exist**, with the ack handle resolving perfectly. The observation was real; the
+attribution was not.
+
+### Why the fix could not have been the cause
+
+- `151cc9df feat(edit_file): out-of-scope write returns ack handle at all resolve sites`
+  is dated **2026-06-27** and `git merge-base --is-ancestor 151cc9df 8f724171` → **true**:
+  the mechanism this file calls broken was already present in the exact SHA the file
+  cites.
+- `git log --since=2026-08-07 -- src/tools/core/write_ack.rs src/tools/edit_file/ src/fs/`
+  → **empty**. Nothing changed in this area between the filing and now, so "it must have
+  been fixed since" is not available either.
+
+The file's own evidence pointed here and was read the other way: *"passing only
+`file_path` returned `missing 'old_string' parameter`, which shows the handle IS reaching
+parameter validation."* The handle was resolving. That sentence is the refutation,
+recorded under *Symptom* and then argued past.
+
+One detail worth knowing for anyone re-testing: the ack **approves the whole directory
+for the session**. A second attempt in the same directory does not produce a
+`pending_ack` at all, so a fresh directory is required per probe — which is a plausible
+way the original session's retries produced confusing results.
 ## Evidence
 
 The `missing 'old_string' parameter` response is the useful one: it proves the call
@@ -87,19 +125,54 @@ handle rejected up front would not have produced a parameter-specific complaint.
 
 ## Fix
 
-Not investigated. Either resolve `@ack_*` to the stored target path in `edit_file`'s
-path handling the way `run_command` does, or — if out-of-project writes through
-`edit_file` are meant to be refused outright — change the hint, because a hint that
-names an unusable call is worse than a plain refusal. It cost two extra round-trips
-here and would cost more to anyone who trusts it.
+**The reported defect needed no fix. The defect that produced the misdiagnosis did, and
+that shipped 2026-08-14 on `experiments`.**
 
+All three `std::fs::read_to_string(&resolved)?` sites in `src/tools/edit_file/mod.rs`
+now route through `read_edit_target`, which:
+
+- **names the path** in every failure, ENOENT or otherwise;
+- classifies a missing file as `RecoverableError` with a hint — correct per the
+  repair-and-continue convention, since a wrong path is caller-fixable;
+- **states explicitly that the `@ack_*` handle resolved correctly**, so the reading this
+  bug arrived at is no longer the reasonable one.
+
+The old message was `No such file or directory (os error 2)` — no path, no stage. After
+passing a handle and getting that back, "the handle didn't resolve" is the obvious
+inference: the handle is the thing you just typed, and the error names nothing else. The
+report cost two extra round-trips and a bug file, and the message is why.
+
+The alternative the original *Fix* offered — "change the hint, because a hint that names
+an unusable call is worse than a plain refusal" — is moot: the hint names a call that
+works. Verified twice above.
 ## Tests added
 
-None. Wanted: a test that takes the `pending_ack` handle from an out-of-project
-`edit_file` and feeds it straight back, asserting the write succeeds. The absence of
-that test is why the hint and the behaviour could drift apart — nothing exercises the
-documented recovery path end to end.
+Two, in `src/tools/edit_file/tests.rs`:
 
+- **`a_missing_edit_target_names_the_path_and_absolves_the_ack_handle`** — asserts the
+  error names the file, is a `RecoverableError`, and mentions `@ack_` so the handle is
+  explicitly cleared.
+- **`a_non_enoent_read_failure_is_not_reported_as_a_missing_file`** — reads a *directory*
+  (`IsADirectory`, not `NotFound`), asserting the path is still named and the message is
+  **not** relabelled "no file to edit at". Guards against collapsing every io error into
+  the friendly case.
+
+**Mutation-verified, and the pair discriminates.** Forcing the `NotFound` branch to
+`false`:
+
+```
+a_missing_edit_target_names_the_path_and_absolves_the_ack_handle ... FAILED
+  a missing path is caller-fixable, so it belongs in RecoverableError;
+  got: reading /tmp/.tmpbWKy2X/nested/absent.toml to edit it
+a_non_enoent_read_failure_is_not_reported_as_a_missing_file      ... ok
+```
+
+The first caught it, the second correctly did not — and note the mutated message still
+named the path, so only the *classification* assertion fired. The two assertions cover
+different properties rather than restating one.
+
+Gate: **3720 passed / 0 failed / 44 ignored** (3718 + these 2), `clippy --workspace
+--all-targets -D warnings` clean.
 ## Workarounds
 
 Use `run_command` with a bounded editor (`sed -i` on explicit line numbers, after
@@ -108,11 +181,13 @@ what was done for the config edit this was found on; see `927d75c0`'s sibling wo
 
 ## Resume
 
-Read `src/tools/core/write_ack.rs` and compare how `run_command` resolves an `@ack_*`
-handle with how `edit_file` resolves `file_path`. Decide between resolving the handle
-and dropping the hint. Low priority — a workaround exists and out-of-project edits
-are rare.
+N/A. Do **not** re-open to "fix the ack handle" — it works, measured in both call shapes
+on 2026-08-14, and the code has not changed in that area since before this file was
+written.
 
+If `No such file or directory` shows up again after passing an `@ack_*` handle, the
+message now tells you which file and that the handle is fine. Check whether the target
+exists.
 ## References
 
 - `src/tools/core/write_ack.rs` — ack storage/lookup

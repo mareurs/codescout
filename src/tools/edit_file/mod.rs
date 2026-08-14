@@ -416,7 +416,7 @@ impl Tool for EditFile {
                     super::WriteOutcome::Write(p) => p,
                     super::WriteOutcome::Pending(env) => return Ok(env),
                 };
-            let mut content = std::fs::read_to_string(&resolved)?;
+            let mut content = read_edit_target(&resolved)?;
 
             // Pre-pass: identify structural edits before applying any. When the
             // batch mixes safe edits with structural ones, the caller benefits
@@ -535,7 +535,7 @@ impl Tool for EditFile {
                     super::WriteOutcome::Write(p) => p,
                     super::WriteOutcome::Pending(env) => return Ok(env),
                 };
-            let content = std::fs::read_to_string(&resolved)?;
+            let content = read_edit_target(&resolved)?;
             // Reject librarian-managed artifacts — use artifact(action="update") instead.
             crate::util::librarian_guard::guard_not_librarian_managed(path, &content)?;
             let new_content = match insert {
@@ -592,6 +592,36 @@ impl Tool for EditFile {
     }
 }
 
+/// Read the file an edit targets, naming it in any failure.
+///
+/// A bare `std::fs::read_to_string(&resolved)?` propagates
+/// `No such file or directory (os error 2)` with no path and no indication of which
+/// stage failed. That is fine in isolation and actively misleading after an
+/// out-of-scope ack replay, where the obvious reading is "the `@ack_*` handle did not
+/// resolve" — the handle is the thing you just passed, and the error names nothing
+/// else.
+///
+/// That misreading is on record: `docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
+/// concluded the ack mechanism was broken and filed it as a bug. Measured 2026-08-14,
+/// the mechanism works in both call shapes; the ENOENT was the *target file*. The
+/// report cost two extra round-trips and a bug file, and the only thing that made the
+/// wrong conclusion attractive was an error message that mentioned no path.
+fn read_edit_target(resolved: &std::path::Path) -> anyhow::Result<String> {
+    std::fs::read_to_string(resolved).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            crate::tools::RecoverableError::with_hint(
+                format!("no file to edit at {}", resolved.display()),
+                "Check the path, or use create_file if it should be created. If you got \
+                 here by passing an `@ack_*` handle: the handle resolved correctly and \
+                 this is the target file, not the handle.",
+            )
+            .into()
+        } else {
+            anyhow::Error::new(e).context(format!("reading {} to edit it", resolved.display()))
+        }
+    })
+}
+
 async fn perform_edit(
     path: &str,
     old_string: &str,
@@ -606,7 +636,7 @@ async fn perform_edit(
             crate::tools::WriteOutcome::Pending(env) => return Ok(env),
         };
 
-    let content = std::fs::read_to_string(&resolved)?;
+    let content = read_edit_target(&resolved)?;
 
     let match_count = content.matches(old_string).count();
 

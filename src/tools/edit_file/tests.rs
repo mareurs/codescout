@@ -5454,3 +5454,54 @@ async fn edit_file_outside_project_returns_pending_ack() {
     assert_eq!(stored.tool_name, "edit_file");
     assert_eq!(stored.input["new_string"], json!("b"));
 }
+
+/// A missing target must name itself, and must say the ack handle is not the problem.
+///
+/// `docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
+/// concluded the `@ack_*` mechanism was broken from a bare
+/// `No such file or directory (os error 2)`. Measured 2026-08-14, the mechanism works in
+/// both call shapes and the ENOENT was the target file — but the error named nothing, so
+/// the wrong conclusion was the reasonable one. This pins the message that makes the
+/// right conclusion available instead.
+#[test]
+fn a_missing_edit_target_names_the_path_and_absolves_the_ack_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("nested").join("absent.toml");
+
+    let err = super::read_edit_target(&missing).expect_err("a missing file must error");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("absent.toml"),
+        "the error must name the file it could not read; got: {msg}"
+    );
+    assert!(
+        err.downcast_ref::<crate::tools::RecoverableError>()
+            .is_some(),
+        "a missing path is caller-fixable, so it belongs in RecoverableError; got: {msg}"
+    );
+    assert!(
+        msg.contains("@ack_"),
+        "the hint must state the handle resolved correctly — that is the misreading this \
+         message exists to prevent; got: {msg}"
+    );
+}
+
+/// A read failure that is NOT a missing file keeps its own cause and still names the
+/// path. Guards against collapsing every io error into "no file here".
+#[test]
+fn a_non_enoent_read_failure_is_not_reported_as_a_missing_file() {
+    let dir = tempfile::tempdir().unwrap();
+    // A directory is not a file: read_to_string fails with IsADirectory, not NotFound.
+    let err = super::read_edit_target(dir.path()).expect_err("reading a dir must error");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains(&dir.path().display().to_string()),
+        "non-ENOENT failures must name the path too; got: {msg}"
+    );
+    assert!(
+        !msg.contains("no file to edit at"),
+        "an IsADirectory error must not be relabelled as a missing file; got: {msg}"
+    );
+}
