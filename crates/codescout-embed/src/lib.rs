@@ -64,6 +64,11 @@ pub fn normalize_embeddings_base(url: &str) -> &str {
 ///
 /// This value is not user-configurable. It is derived from the model spec
 /// so that users cannot accidentally misconfigure it.
+/// fastembed's `DEFAULT_MAX_LENGTH` — the token ceiling every `local:` model is
+/// actually tokenized at, irrespective of its advertised context window. See the
+/// clamp in [`chunk_size_for_model`]'s `local:` arm for why this is uniform.
+const FASTEMBED_DEFAULT_MAX_TOKENS: usize = 512;
+
 pub fn chunk_size_for_model(model_spec: &str) -> usize {
     // 85 % of context × 3 chars/token.
     fn from_tokens(n: usize) -> usize {
@@ -124,7 +129,23 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
             "allminilml6v2q" | "allminilml6v2" => 256,
             _ => 512,
         };
-        return from_tokens(max_tokens);
+        // A local model's advertised context is NOT what it gets. fastembed
+        // truncates at `min(DEFAULT_MAX_LENGTH, tokenizer_config.model_max_length)`
+        // (`fastembed/src/common.rs:91,106`) and `DEFAULT_MAX_LENGTH` is 512 for
+        // *every* model — `impl HasMaxLength for EmbeddingModel` hands back the same
+        // constant regardless of which model it is
+        // (`fastembed/src/text_embedding/init.rs:15-17`, `mod.rs:6`). local.rs never
+        // calls `with_max_length`, so 512 is what we actually run with.
+        //
+        // Without this clamp the 8192-token entries above return 20 889 chars, and
+        // everything past ~512 tokens of that is silently dropped by the tokenizer.
+        // Measured 2026-08-14; see
+        // docs/issues/2026-08-11-chunk-size-for-model-dead-on-production-path.md.
+        //
+        // Raising `with_max_length` in local.rs is the prerequisite for lifting this,
+        // not a reason to skip it: this function must describe what the embedder does,
+        // not what the model could do.
+        return from_tokens(max_tokens.min(FASTEMBED_DEFAULT_MAX_TOKENS));
     }
 
     // Strip backend prefix to get the bare model name.
@@ -362,6 +383,48 @@ mod smoke {
             expected,
             "a path that happens to contain another model's name must not \
              change the chunk size — from_dir always loads AllMiniLM"
+        );
+    }
+
+    /// A `local:` model's advertised context is not what it gets. fastembed tokenizes
+    /// every model at `DEFAULT_MAX_LENGTH = 512` because
+    /// `impl HasMaxLength for EmbeddingModel` returns that same constant for all of
+    /// them, and `local.rs` never calls `with_max_length`. Chunks sized to an 8192-token
+    /// window would have most of their content silently dropped by the tokenizer.
+    ///
+    /// Measured 2026-08-14 against `fastembed-5.13.4`; see
+    /// `docs/issues/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
+    #[test]
+    fn local_models_are_clamped_to_fastembeds_actual_token_ceiling() {
+        let ceiling = crate::chunk_size_for_model("local:BGESmallENV15Q");
+        assert_eq!(ceiling, 1305, "sanity: 512 tokens x 0.85 x 3 chars moved");
+
+        for big in [
+            "local:NomicEmbedTextV15Q",
+            "local:NomicEmbedTextV15",
+            "local:JinaEmbeddingsV2BaseCode",
+        ] {
+            assert_eq!(
+                crate::chunk_size_for_model(big),
+                ceiling,
+                "{big} advertises 8192 tokens but fastembed truncates it at 512, so its \
+                 chunk budget must not exceed the 512-token budget"
+            );
+        }
+
+        // Models already under the ceiling keep their own smaller budget — the clamp is
+        // a maximum, not a floor that inflates small-context models.
+        assert_eq!(
+            crate::chunk_size_for_model("local:AllMiniLML6V2Q"),
+            652,
+            "a 256-token model must stay at its own budget, not be raised to 512's"
+        );
+
+        // Remote arms are unaffected: no fastembed tokenizer sits in that path, so an
+        // 8192-token endpoint really does accept 8192 tokens.
+        assert!(
+            crate::chunk_size_for_model("ollama:nomic-embed-text") > ceiling,
+            "the clamp must apply to the local: arm only"
         );
     }
 

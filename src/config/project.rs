@@ -75,21 +75,24 @@ pub struct EmbeddingsSection {
     /// writing it to logs/stdout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<crate::config::sensitive::SensitiveString>,
-    /// Override the per-chunk size in characters. Smaller chunks produce
-    /// sharper semantic search results and cost less LLM context per hit
-    /// (typical search returns 3–5 chunks; large chunks bloat the agent's
-    /// remaining context budget across multiple searches in a session).
+    /// **Ignored** — kept for backwards-compatible deserialisation of existing
+    /// `project.toml` files that set a `chunk_size` key. Same treatment as
+    /// `chunk_overlap` below, for a different reason.
     ///
-    /// When `None` (the default), `embed::chunk_size_for_model` is used —
-    /// derived from the model's published context window. When `Some(n)`,
-    /// the value is capped at the model's max so users can't accidentally
-    /// exceed the embedding API's input limit.
+    /// It was read by one function, `EmbeddingsSection::effective_chunk_size`, which
+    /// no production code ever called: real indexing takes `STACK_CHUNK_TARGET`
+    /// (`src/retrieval/sync.rs`, overridable via `CODESCOUT_CHUNK_TARGET`) straight to
+    /// `split_file`. That function was removed on 2026-08-14 rather than wired up,
+    /// because the model-derived budget it computed exceeds what the local embedder
+    /// will actually tokenize — see
+    /// `docs/issues/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
     ///
-    /// Recommended starting point for code projects: `chunk_size = 1500`
-    /// (≈375–500 tokens — fits comfortably in any embedding context, keeps
-    /// retrieval slices small enough that 5 hits use ≈7.5KB of LLM context).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chunk_size: Option<usize>,
+    /// **To change chunk size, set `CODESCOUT_CHUNK_TARGET`.** It is the only live
+    /// knob. This field is retained solely so an existing `project.toml` carrying it
+    /// still deserialises; deleting it would turn a silently-ignored key into a hard
+    /// parse error on upgrade.
+    #[serde(default, skip_serializing, rename = "chunk_size")]
+    pub _chunk_size_ignored: Option<usize>,
     /// Ignored — kept for backwards-compatible deserialisation of existing
     /// `project.toml` files that include a `chunk_overlap` key.
     ///
@@ -327,7 +330,7 @@ impl Default for EmbeddingsSection {
             model: default_embed_model(),
             url: None,
             api_key: None,
-            chunk_size: None,
+            _chunk_size_ignored: None,
             _chunk_overlap_ignored: None,
             drift_detection_enabled: default_drift_detection_enabled(),
             max_inflight: None,
@@ -337,25 +340,6 @@ impl Default for EmbeddingsSection {
 }
 
 impl EmbeddingsSection {
-    /// Resolve the chunk size in characters.
-    ///
-    /// - User-set `chunk_size` → `min(user_value, model_max)` (user opt-in to
-    ///   larger or smaller, capped at API input limit).
-    /// - Unset/zero → `min(model_max, DEFAULT_CAP)`.
-    ///
-    /// DEFAULT_CAP of 4096 chars keeps embed throughput reasonable on large-
-    /// context models (nomic-embed, jina, bge-m3 would otherwise default to
-    /// ~20k chars per chunk, which both slows indexing and dilutes ranking
-    /// signal by averaging too many concepts into one vector).
-    pub fn effective_chunk_size(&self) -> usize {
-        const DEFAULT_CAP: usize = 4096;
-        let model_max = codescout_embed::chunk_size_for_model(&self.model);
-        match self.chunk_size {
-            Some(n) if n > 0 => n.min(model_max),
-            _ => model_max.min(DEFAULT_CAP),
-        }
-    }
-
     /// Resolve the concurrent in-flight embedding request limit for indexing.
     /// Defaults to 8. See `max_inflight` doc for tuning guidance.
     pub fn effective_max_inflight(&self) -> usize {
@@ -883,54 +867,33 @@ model = "ollama:nomic-embed-text"
         let cfg = ProjectConfig::default_for("test-project".into());
         assert_eq!(cfg.security.max_index_bytes, 500 * 1024 * 1024);
     }
-    /// Default chunk_size is None → effective uses model max.
-    #[test]
-    fn effective_chunk_size_none_uses_model_max() {
-        let sec = EmbeddingsSection {
-            model: "ollama:nomic-embed-text".into(),
-            ..Default::default()
-        };
-        // nomic-embed model max is ~20k chars; default caps at 4096.
-        assert_eq!(sec.effective_chunk_size(), 4096);
-    }
 
-    /// Explicit chunk_size below model max is honored verbatim — fixes the
-    /// silent-ignore behavior where users could not opt into smaller chunks
-    /// for tighter LLM context budgets during semantic search.
+    /// `chunk_size` is retained purely so an existing `project.toml` carrying it still
+    /// deserialises. The four `effective_chunk_size_*` tests that used to sit here were
+    /// removed on 2026-08-14 with the function they covered: it had zero production
+    /// callers, and the model-derived budget it computed exceeded what the local
+    /// embedder actually tokenizes (fastembed caps at 512 tokens for every model).
+    ///
+    /// This replaces them with the only contract still owed: **an upgrade must not turn
+    /// a silently-ignored key into a parse error.**
     #[test]
-    fn effective_chunk_size_user_value_below_cap_honored() {
-        let sec = EmbeddingsSection {
-            model: "ollama:nomic-embed-text".into(),
-            chunk_size: Some(1500),
-            ..Default::default()
-        };
-        assert_eq!(sec.effective_chunk_size(), 1500);
-    }
+    fn a_retained_chunk_size_key_still_deserialises_and_is_ignored() {
+        let parsed: EmbeddingsSection =
+            toml::from_str("model = \"local:AllMiniLML6V2Q\"\nchunk_size = 1500\n")
+                .expect("an existing project.toml carrying chunk_size must still parse");
+        assert_eq!(
+            parsed._chunk_size_ignored,
+            Some(1500),
+            "the key should land in the ignored field, not be dropped by serde"
+        );
 
-    /// Explicit chunk_size above model max is capped — protects against
-    /// API-side truncation when a user misconfigures.
-    #[test]
-    fn effective_chunk_size_user_value_above_cap_clamped() {
-        let model_max = codescout_embed::chunk_size_for_model("local:AllMiniLML6V2Q");
-        let sec = EmbeddingsSection {
-            model: "local:AllMiniLML6V2Q".into(),
-            chunk_size: Some(model_max * 10),
-            ..Default::default()
-        };
-        assert_eq!(sec.effective_chunk_size(), model_max);
-    }
-
-    /// chunk_size = Some(0) is treated as unset (model max), not as a
-    /// degenerate zero chunk size.
-    #[test]
-    fn effective_chunk_size_zero_falls_back_to_model_max() {
-        let sec = EmbeddingsSection {
-            model: "ollama:nomic-embed-text".into(),
-            chunk_size: Some(0),
-            ..Default::default()
-        };
-        // Some(0) falls back to default path, which caps at 4096.
-        assert_eq!(sec.effective_chunk_size(), 4096);
+        // And it must not be written back out — `skip_serializing` keeps a dead knob
+        // from reappearing in files codescout generates.
+        let round_tripped = toml::to_string(&parsed).expect("serialises");
+        assert!(
+            !round_tripped.contains("chunk_size"),
+            "an ignored key must not be re-emitted: {round_tripped}"
+        );
     }
 
     #[test]
@@ -989,7 +952,7 @@ model = "ollama:nomic-embed-text"
         assert_eq!(w.embeddings.file_group_size, Some(100));
     }
 
-    /// Project config TOML round-trip: explicit chunk_size deserializes,
+    /// Project config TOML round-trip: an explicit (now-ignored) chunk_size deserializes,
     /// missing key produces None.
     #[test]
     fn project_config_chunk_size_round_trip() {
@@ -1001,7 +964,7 @@ model = "local:AllMiniLML6V2Q"
 chunk_size = 1500
 "#;
         let cfg: ProjectConfig = toml::from_str(toml_with).unwrap();
-        assert_eq!(cfg.embeddings.chunk_size, Some(1500));
+        assert_eq!(cfg.embeddings._chunk_size_ignored, Some(1500));
 
         let toml_without = r#"
 [project]
@@ -1010,7 +973,7 @@ name = "test"
 model = "local:AllMiniLML6V2Q"
 "#;
         let cfg: ProjectConfig = toml::from_str(toml_without).unwrap();
-        assert_eq!(cfg.embeddings.chunk_size, None);
+        assert_eq!(cfg.embeddings._chunk_size_ignored, None);
     }
 
     // The four `load_with_global_base` tests below were previously

@@ -1,14 +1,14 @@
 ---
 id: '7438a064c8d61f86'
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: chunk_size_for_model''s model-derived chunk budget is dead code on the production indexing path'
 tags:
 - chunking
 - embeddings
 - dead-code
 - retrieval
-closed: null
+closed: 2026-08-14
 opened: 2026-08-11
 owner: marius
 related: []
@@ -156,90 +156,98 @@ None — found via static tracing (`references`), not runtime measurement. Filed
 
 ## Fix
 
-Still not implemented. The measurement changed which option is correct — **and it is not
-the one this file has recommended twice.**
+**Option 2 implemented 2026-08-14 on `experiments`.**
 
-### Wiring it up would be actively harmful
+1. **`EmbeddingsSection::effective_chunk_size` deleted** (`src/config/project.rs`) — zero
+   production callers, and the budget it computed was not one the local embedder honours.
+2. **`[embeddings].chunk_size` retired to ignored-for-compat**, renamed
+   `_chunk_size_ignored` with `#[serde(default, skip_serializing, rename = "chunk_size")]`,
+   following the precedent already in the same struct for `chunk_overlap`. Deleting the
+   field outright would have turned a silently-ignored key into a **hard parse error** on
+   upgrade for anyone whose `project.toml` carries it; `skip_serializing` also stops a dead
+   knob reappearing in files codescout generates.
+3. **`chunk_size_for_model`'s `local:` arm clamped** to
+   `FASTEMBED_DEFAULT_MAX_TOKENS = 512` (`crates/codescout-embed/src/lib.rs`), with the
+   mechanism and its source lines in a comment. The function itself is kept: it is correct
+   for the `openai:` / `ollama:` / bare-name arms, where no fastembed tokenizer is in the
+   path.
+4. `STACK_CHUNK_TARGET = 1200` unchanged — benchmark-backed, and under every local model's
+   real ceiling.
 
-`HasMaxLength for EmbeddingModel` sets `MAX_LENGTH = DEFAULT_MAX_LENGTH = 512` for
-**every** model — fastembed does not vary its default by model. Combined with
-`max_length.min(model_max_length)`, any fastembed-hosted local model truncates at **at
-most 512 tokens**, whatever context length the model advertises.
+### Correction to this file's own analysis
 
-Now compare what `chunk_size_for_model` would hand it:
+The previous revision claimed wiring option 1 would hand **20 889-char chunks** to a
+512-token tokenizer and discard **~92 %**. **That was wrong, and it was mine.** It read
+`chunk_size_for_model`'s raw output and attributed it to `effective_chunk_size`, which
+applied its own `DEFAULT_CAP = 4096` — a cap whose doc comment gives exactly this reason
+(*"nomic-embed, jina, bge-m3 would otherwise default to ~20k chars per chunk, which both
+slows indexing and dilutes ranking signal"*). The author had already anticipated
+over-chunking.
 
-| Model | `chunk_size_for_model` | ≈ tokens | fastembed truncates at | Discarded |
+Corrected:
+
+| | chars offered | ≈ tokens | fastembed ceiling | discarded |
 |---|---|---|---|---|
-| `local:AllMiniLML6V2Q` | 652 chars | ~200 | 512 | none |
-| `local:BGESmallENV15Q` | 1305 chars | ~400 | 512 | none |
-| `local:NomicEmbedTextV15Q` | **20 889 chars** | ~6 500 | **512** | **~92 %** |
-| `local:JinaEmbeddingsV2BaseCode` | **20 889 chars** | ~6 500 | **512** | **~92 %** |
+| pre-fix `effective_chunk_size()`, 8192-token local model | 4096 | ~1365 | 512 (~1536 chars) | **~62 %** |
 
-So **option 1 (wire `sync_project` through `effective_chunk_size`) would introduce the
-very bug this file feared**, for exactly the models it was meant to serve: 20 889-char
-chunks against a 512-token tokenizer means roughly nine tenths of each chunk embedded as
-nothing. Today's fixed 1200 accidentally protects against that.
+The conclusion holds — option 1 was still the wrong direction, and `DEFAULT_CAP` mitigated
+without eliminating the problem — but the magnitude was overstated by 30 points. The
+reasoning error is the instructive part: the table was built from the function named in
+the *evidence* rather than the one named in the *option*.
 
-`chunk_size_for_model` is not wrong in general — for `openai:` / `ollama:` / bare-name
-remote endpoints there is no fastembed tokenizer in the path and 8192 is genuinely
-available. It is wrong **for the `local:` arm**, which is the arm feeding the only
-backend that truncates.
+### Still open, deliberately: raising fastembed's ceiling
 
-### Revised options
-
-1. ~~**Wire it through as-is.**~~ **Rejected on evidence** — see the table. Would
-   over-chunk large-context local models by ~13× against a hard 512-token ceiling.
-2. **Keep 1200; delete `effective_chunk_size` and narrow `chunk_size_for_model`.** Now
-   the defensible default. 1200 is benchmark-backed
-   (`docs/research/2026-05-06-retrieval-stack-benchmark.md`, the chunk×model matrix), sits
-   safely under 512 tokens for every local model, and no production caller is lost
-   because there are none. If `chunk_size_for_model` is kept for the remote arms, its
-   `local:` table needs a `.min(512-token equivalent)` and a comment naming fastembed's
-   uniform default as the reason.
-3. **Wire it through *and* clamp to fastembed's ceiling.** `chunk_target =
-   STACK_CHUNK_TARGET.min(effective_chunk_size()).min(FASTEMBED_MAX_CHARS)`. Most correct
-   in principle; buys nothing today, since 1200 is already under every local model's
-   ceiling. Only pays off if codescout ever passes `with_max_length` to raise fastembed's
-   512.
-4. **Raise fastembed's `max_length` deliberately.** Independent of this bug and worth its
-   own decision: codescout could call `with_max_length` to use a large-context local
-   model's real window instead of 512. That would make option 1 or 3 meaningful. It is a
-   capability change, not a fix.
+codescout *could* call `with_max_length` in `local.rs` to give a large-context local model
+its real window instead of 512. That would make a model-aware chunk budget meaningful
+again and would be the point to reconsider a per-model `chunk_target`. A capability
+change, not a bug fix; nothing currently depends on it.
 
 ### The quality question that remains open
 
 1200 chars ≈ 300–400 tokens is above `all-MiniLM-L6-v2`'s tuned `max_seq_length` of 256
 though below its 512 hard limit. Whether that costs retrieval quality is measurable with
-the existing benchmark and is *not* a correctness issue — do not conflate the two. The
-chunk×model matrix already chose 1200 empirically, which is evidence, if indirect, that
-it does not hurt on this corpus.
+the existing chunk×model benchmark and is **not** a correctness issue — do not conflate the
+two. That benchmark already chose 1200 empirically, which is indirect evidence it does not
+hurt on this corpus.
 ## Tests added
 
-N/A — no fix attempted; filing only, per explicit instruction not to fix this out-of-scope finding on this branch.
+**`local_models_are_clamped_to_fastembeds_actual_token_ceiling`**
+(`crates/codescout-embed/src/lib.rs`) — the three 8192-token `local:` entries must all
+collapse to the 512-token budget (1305 chars); `AllMiniLML6V2Q` must **keep** its smaller
+652 (the clamp is a maximum, not a floor that inflates small models); and
+`ollama:nomic-embed-text` must stay **above** the ceiling, proving the clamp is scoped to
+the `local:` arm. That last assertion is the one that catches a clamp applied too broadly —
+the failure mode of this fix.
 
+**`a_retained_chunk_size_key_still_deserialises_and_is_ignored`**
+(`src/config/project.rs`) — replaces the four deleted tests with the only contract still
+owed: an upgrade must not turn a silently-ignored key into a parse error. Also asserts the
+key is not re-emitted on serialise.
+
+**Removed:** `effective_chunk_size_none_uses_model_max`, `_user_value_below_cap_honored`,
+`_user_value_above_cap_clamped`, `_zero_falls_back_to_model_max`. All four exercised a
+function no production path called — four green tests over a disconnected component, which
+is what let the drift persist unnoticed. `project_config_chunk_size_round_trip` was kept
+and repointed at the ignored field; it tests deserialisation compatibility, which is
+exactly what was preserved.
+
+Gate: **3718 passed / 0 failed / 44 ignored** root-only (3721 − 4 removed + 1 added,
+reconciling exactly), **3751 / 49** with `--workspace`, `clippy --workspace --all-targets
+-D warnings` clean.
 ## Workarounds
 
 None needed for correctness — indexing still runs; the chunk size is just not model-tuned. Operators who want a different chunk size can already reach for `CODESCOUT_CHUNK_TARGET`, which works today — it just isn't what `effective_chunk_size()` would have computed for the configured model.
 
 ## Resume
 
-**The measurement is done. Do not re-run it.** fastembed truncates silently at
-`min(DEFAULT_MAX_LENGTH=512, tokenizer_config.model_max_length)`, which is 512 tokens for
-`all-MiniLM-L6-v2`. Production's 1200-char chunks are ~300–400 tokens, so nothing is
-truncated today. Read from `fastembed-5.13.4/src/common.rs:91,106` and
-`text_embedding/{init.rs:15-17,mod.rs:6}`, plus `model_max_length: 512` and
-`max_seq_length: 256` in the cached model's own config files.
+N/A — fixed and verified.
 
-**What remains is a scoping decision, and option 1 is now off the table** — wiring
-`effective_chunk_size` into `sync_project` unchanged would over-chunk
-`NomicEmbedTextV15Q` / `JinaEmbeddingsV2BaseCode` by ~13× against fastembed's uniform
-512-token ceiling, discarding ~92 % of each chunk. Option 2 (keep 1200, delete the dead
-path, narrow the `local:` table) is the defensible default; option 3 if you want the
-belt-and-braces clamp; option 4 is a separate capability question.
-
-Whatever lands, put fastembed's uniform `DEFAULT_MAX_LENGTH = 512` in a comment next to
-any chunk-size constant. It is the non-obvious fact that makes a model's advertised 8192
-context irrelevant on the local path, and it is not discoverable from codescout's source.
+One fact a later session should not re-derive: **fastembed caps every `local:` model at
+512 tokens.** `HasMaxLength for EmbeddingModel` returns `DEFAULT_MAX_LENGTH` regardless of
+model (`fastembed-5.13.4/src/text_embedding/{init.rs:15-17,mod.rs:6}`), clamped again
+against `tokenizer_config.model_max_length` (`common.rs:91`) and applied as silent
+truncation (`common.rs:106`); `local.rs` never calls `with_max_length`. It is now recorded
+in a comment beside the clamp, which is where it will actually be read.
 ## References
 
 - `src/config/project.rs:350-357` — `EmbeddingsSection::effective_chunk_size`
