@@ -251,22 +251,29 @@ pub(crate) fn main_reindexed_after_worktree(
 }
 
 /// Note attached when [`main_reindexed_after_worktree`] fires. Also mentions --
-/// cheaply, since this string is already being constructed -- the residual gap
-/// Task 6 left open: `sync_worktree` writes its sidecar fail-soft *after*
-/// upserting delta chunks, so a disk error mid-write can leave a non-empty but
-/// INCOMPLETE `dirty_paths`. The symptom is not mere staleness: if the sidecar
-/// is missing a path, main is never told to exclude it, so that file's chunks
-/// come back from BOTH main and the delta -- a double-serve, the exact hazard
-/// class this whole design exists to prevent. Not caught by the `Suspect`
-/// check (the list isn't empty) and not fixed here: the complete check needs
-/// the delta's full chunk list, too expensive to scroll on a read path -- so
-/// it is named here rather than checked.
+/// cheaply, since this string is already being constructed -- the residual
+/// double-serve window a partially-failed sync can still leave.
+///
+/// That window is NOT the one this note used to describe. I3 moved
+/// `sync_worktree`'s sidecar write to *before* the delta upserts and made it a
+/// hard error, so a failed sync can no longer leave a non-empty but incomplete
+/// `dirty_paths` -- the recorded set is now always the complete one computed for
+/// that run, or the sync refuses to proceed at all. What remains is the
+/// opposite ordering: a path that went dirty -> clean since the last sync is
+/// absent from the new sidecar (so main serves it, correctly), while its old
+/// delta chunks survive until the prune, which an early return between the
+/// upserts and that prune skips. Both copies then answer.
+///
+/// Still not checked here, for the same reason as before: detecting it needs the
+/// delta's full chunk list, too expensive to scroll on a read path. It is named
+/// rather than checked -- and it now requires the user to have reverted a file
+/// to main's exact bytes, which is strictly rarer than the edit case I3 closed.
 pub(crate) fn worktree_main_ahead_note() -> &'static str {
     "Note: the main checkout was re-indexed after this worktree's delta was built, so results \
      for unchanged files may reflect main's newer content. Re-run index(action=\"build\") here \
-     to refresh. (The worktree's own dirty-path record can also lag behind a partially-failed \
-     sync: a path missing from it is never excluded from main, so that file's chunks can come \
-     back from BOTH main and the delta — a double-serve, not just staleness.)"
+     to refresh. (A sync that failed part-way can also leave stale delta chunks for a file you \
+     have since reverted to match main: main serves it and the delta's leftover copy does too, \
+     so the same path can appear twice.)"
 }
 
 /// `(main_exclude_paths, delta_exclude_paths)` for the two-source worktree query.
@@ -448,7 +455,8 @@ impl Tool for SemanticSearch {
                  ## Worktree response fields (linked git worktree only)\n\
                  \n\
                  Called from inside a linked git worktree with no explicit `project_id`, the query\n\
-                 merges main's index with a per-worktree delta, and the response may carry:\n\
+                 ranks main's index and a per-worktree delta as one list, and the response may\n\
+                 carry:\n\
                  \n\
                  - `drift_note`: main was reindexed after this worktree's own delta was built, so\n\
                    unchanged-file results may reflect main's newer content. Re-run\n\

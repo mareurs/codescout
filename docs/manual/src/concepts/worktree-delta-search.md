@@ -104,10 +104,14 @@ fields — none of them is an error, and the query still ran:
 - **`drift_note`** — main's own index was rebuilt *after* this worktree's
   delta, so unchanged-file results may reflect main's newer content. Re-run
   `index(action="build")` in the worktree to refresh. Also covers a subtler
-  case: a partially-failed worktree sync can leave `dirty_paths` incomplete,
-  and a path missing from it is never excluded from main — that file's
-  chunks can then come back from **both** main and the delta, a double-serve
-  rather than mere staleness.
+  case: a worktree sync that failed part-way can leave stale delta chunks
+  for a file you have since reverted to match main. That path is no longer
+  in `dirty_paths`, so main serves it — correctly — while the delta's
+  leftover copy answers too, and the same path appears twice. The sync
+  records its dirty set *before* it upserts anything, so the reverse
+  failure (a path the delta holds but the sidecar never listed) cannot
+  happen; a failed sync over-excludes, which returns too few results rather
+  than results from another branch.
 - **`worktree_state_warning`** — the delta has chunks but no dirty paths are
   recorded, an inconsistent state that should never happen in a healthy
   worktree (a delta only exists because something was dirty). Main was

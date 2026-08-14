@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -502,14 +502,32 @@ pub async fn sync_worktree(
         None => crate::retrieval::index_lock::acquire(&delta_id)?,
     };
 
+    // I2: these two reads are the drift baseline, and `unwrap_or_default()` on
+    // them turned a transient store error into a *factual claim* -- "main holds
+    // nothing" -- which `dirty_paths` then reads as "every file in the worktree
+    // is dirty". The cost of that lie is not a warning: it is a full re-embed of
+    // the entire corpus, and (composed with C2's filter) every subsequent query
+    // shipping every path in the repo as an exclusion. Propagate instead; an
+    // *empty* baseline is still `Ok(vec![])` and still means what it says, so
+    // the genuinely-unindexed-main case is untouched.
+    //
+    // `sync_worktree` deliberately does not call `ensure_collection` (see this
+    // function's doc comment); with the error swallowed, a missing collection
+    // used to surface much later as an upsert failure with no mention of the
+    // real cause.
     let main_refs = store
         .chunk_refs(collection, main_project_id)
         .await
-        .unwrap_or_default();
+        .with_context(|| {
+            format!(
+                "reading main project `{main_project_id}`'s chunk refs to compute this \
+                 worktree's dirty set (has the main checkout been indexed?)"
+            )
+        })?;
     let delta_refs = store
         .chunk_refs(collection, &delta_id)
         .await
-        .unwrap_or_default();
+        .with_context(|| format!("reading worktree delta `{delta_id}`'s existing chunk refs"))?;
     let delta_ids_present: HashSet<&str> = delta_refs.iter().map(|c| c.chunk_id.as_str()).collect();
 
     // One walk, shared with `stream_index` via `indexable_files`. Collected
@@ -537,6 +555,47 @@ pub async fn sync_worktree(
 
     // The one authoritative dirty/clean call -- see the doc comment above.
     let dirty = dirty_paths(&main_refs, &local);
+
+    // I3: the sidecar is written BEFORE the first upsert, and the ordering is
+    // the whole point.
+    //
+    // Every `flush_pending(...).await?` below is an early return sitting between
+    // a committed upsert and this write. With the write at the end, an embedder
+    // timeout or a store blip left delta chunks committed for freshly-edited
+    // paths while the sidecar still listed the *previous* dirty set -- so main
+    // was never told to exclude those paths and served its stale copy alongside
+    // the delta's new one. That is a double-serve of the files the user just
+    // edited: the common case, not a corner.
+    //
+    // Written first, the same failure leaves the sidecar naming paths the delta
+    // does not hold yet. Main excludes them, the delta has nothing for them, and
+    // they return no results until the next `index(action="build")` -- an
+    // under-serve. Both directions are wrong; only one of them shows the user
+    // content from a branch they are not on.
+    //
+    // A residual window remains and is not closed here: a path that went dirty
+    // -> clean since the last sync is absent from the new sidecar (so main
+    // serves it) while its old delta chunks survive until the prune below,
+    // which an early return also skips. That needs the user to have reverted a
+    // file to main's exact bytes, and it is strictly rarer than the edit case
+    // this ordering fixes.
+    //
+    // MUST go through `write_index_state_with_dirty`, never plain
+    // `write_index_state` -- see the routing guard in `sync_project`.
+    //
+    // A hard error, not the fail-soft warning this used to be: nothing has been
+    // committed to the store at this point, so failing here leaves the index
+    // exactly as it was rather than half-updated with no record of it.
+    let dirty_vec: Vec<String> = dirty.paths.iter().cloned().collect();
+    crate::retrieval::index_state::write_index_state_with_dirty(worktree_root, &dirty_vec)
+        .with_context(|| {
+            format!(
+                "recording this worktree's dirty set ({} paths) before upserting the \
+                 delta -- refusing to index without it, since main would keep serving \
+                 stale chunks for every path listed",
+                dirty_vec.len()
+            )
+        })?;
 
     // Pass 2: re-visit the same file list, materialising full chunk content
     // only for files `dirty_paths` marked dirty.
@@ -602,16 +661,6 @@ pub async fn sync_worktree(
         store
             .delete_chunks(collection, &delta_id, &to_delete)
             .await?;
-    }
-
-    // Record the dirty set so the query path knows what main must not be asked
-    // for. MUST go through `write_index_state_with_dirty`, never plain
-    // `write_index_state` -- see the routing guard in `sync_project`.
-    let dirty_vec: Vec<String> = dirty.paths.iter().cloned().collect();
-    if let Err(e) =
-        crate::retrieval::index_state::write_index_state_with_dirty(worktree_root, &dirty_vec)
-    {
-        tracing::warn!(error = %e, "worktree index-state write failed");
     }
 
     Ok(SyncReport {
@@ -992,6 +1041,11 @@ mod tests {
         /// `(project_id, ref)` pairs; `chunk_refs` unions this (filtered by the
         /// queried project_id) with whatever `upsert_chunks` has recorded.
         seeded: Mutex<Vec<(String, ChunkRef)>>,
+        /// When set, `chunk_refs` returns `Err` for this project id and this one
+        /// only. Stands in for a transient store failure (I2): the point of the
+        /// double is that an error and an empty result are DIFFERENT answers,
+        /// which `unwrap_or_default()` used to flatten into the same one.
+        chunk_refs_error_for: Mutex<Option<String>>,
     }
 
     #[async_trait::async_trait]
@@ -1001,6 +1055,9 @@ mod tests {
             Ok(())
         }
         async fn chunk_refs(&self, _c: &str, p: &str) -> Result<Vec<ChunkRef>> {
+            if self.chunk_refs_error_for.lock().unwrap().as_deref() == Some(p) {
+                anyhow::bail!("simulated transient store failure reading `{p}`");
+            }
             // Union the seeded baseline (filtered to the queried project) with
             // whatever `upsert_chunks` has actually recorded under that project
             // -- see the `seeded` field's doc comment on why these stay separate.
@@ -1565,6 +1622,158 @@ mod tests {
             "a file main holds and the worktree lacks must be excluded from main's results"
         );
         assert!(!dirty.contains("src/same.rs"));
+    }
+
+    /// Build the fixture both I2 and I3 use: a linked worktree of `main` whose
+    /// git name is `feat`, holding one file byte-identical to main's index and
+    /// one that differs. Returns `(tmpdir, worktree_root)`.
+    fn worktree_fixture() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        let wt = tmp.path().join("wt");
+        let meta = main.join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&meta).unwrap();
+        std::fs::write(meta.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::create_dir_all(wt.join("src")).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", meta.display())).unwrap();
+        std::fs::write(wt.join("src").join("same.rs"), "fn same() {}\n").unwrap();
+        std::fs::write(wt.join("src").join("changed.rs"), "fn changed_v2() {}\n").unwrap();
+        (tmp, wt)
+    }
+
+    fn seeded_main_store() -> RecordingStore {
+        RecordingStore::seeded_for_main(
+            "codescout",
+            &[
+                ("src/same.rs", "fn same() {}\n"),
+                ("src/changed.rs", "fn changed_v1() {}\n"),
+            ],
+        )
+    }
+
+    /// I2: a store error reading main's chunk refs must NOT be read as "main
+    /// holds nothing".
+    ///
+    /// `unwrap_or_default()` turned a transient failure into that factual
+    /// claim, and `dirty_paths` then concluded every file in the worktree is
+    /// dirty. The visible cost is not a warning: it is a full re-embed of the
+    /// whole corpus, and every later query shipping every path in the repo as
+    /// an exclusion filter. Both are silent.
+    ///
+    /// The assertions are deliberately about *effects*, not just the `Err`: a
+    /// version that returned the error but had already re-embedded, or had
+    /// already written a whole-corpus dirty set, would still have done the
+    /// damage.
+    #[tokio::test]
+    async fn worktree_sync_propagates_a_chunk_refs_failure_instead_of_reading_it_as_empty() {
+        let (_tmp, wt) = worktree_fixture();
+        let store = seeded_main_store();
+        *store.chunk_refs_error_for.lock().unwrap() = Some("codescout".to_string());
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        let err = sync_worktree(
+            &store,
+            &wt,
+            "codescout",
+            "coll",
+            &emb,
+            false,
+            &[],
+            Some(lock_dir.path()),
+        )
+        .await
+        .expect_err("a store failure on the drift baseline must not be swallowed");
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("codescout"),
+            "the error must name the project whose refs could not be read: {msg}"
+        );
+
+        assert!(
+            store.upserted_project_ids().is_empty(),
+            "nothing may be embedded off a baseline we could not read -- that is \
+             the full-corpus re-embed this guards against"
+        );
+        assert!(
+            crate::retrieval::index_state::read_index_state(&wt).is_none(),
+            "no dirty set may be recorded off an unreadable baseline: writing one \
+             here would list every file in the worktree and make every later query \
+             carry the whole repo as an exclusion filter"
+        );
+    }
+
+    /// I3: the dirty-path sidecar is written BEFORE the first upsert, so a
+    /// failure part-way through leaves the index over-excluded, never
+    /// under-excluded.
+    ///
+    /// With the write at the end (as shipped), an embedder timeout between the
+    /// first committed flush and that write left delta chunks committed for
+    /// freshly-edited paths while the sidecar still named the PREVIOUS dirty
+    /// set. Main was therefore never told to exclude those paths and served its
+    /// stale copy alongside the delta's new one -- a double-serve of exactly the
+    /// files the user just edited.
+    ///
+    /// Here the embedder fails on its first call, so the sync cannot complete;
+    /// the sidecar must nonetheless already name the dirty path. Reversing the
+    /// order leaves no sidecar at all and this fails.
+    #[tokio::test]
+    async fn worktree_sync_records_the_dirty_set_before_it_upserts_anything() {
+        struct FailingEmbedder;
+        #[async_trait::async_trait]
+        impl BatchEmbedder for FailingEmbedder {
+            async fn embed_batch_dyn(&self, _texts: &[String]) -> Result<Vec<EmbedOutput>> {
+                anyhow::bail!("simulated embedder timeout")
+            }
+        }
+
+        let (_tmp, wt) = worktree_fixture();
+        let store = seeded_main_store();
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        let err = sync_worktree(
+            &store,
+            &wt,
+            "codescout",
+            "coll",
+            &FailingEmbedder,
+            false,
+            &[],
+            Some(lock_dir.path()),
+        )
+        .await
+        .expect_err("the embedder failed, so the sync must not report success");
+        assert!(
+            format!("{err:#}").contains("simulated embedder timeout"),
+            "unexpected failure: {err:#}"
+        );
+
+        assert!(
+            store.upserted_project_ids().is_empty(),
+            "fixture precondition: the embedder failed before any upsert landed"
+        );
+
+        let st = crate::retrieval::index_state::read_index_state(&wt).expect(
+            "the dirty set must already be on disk when the upserts fail -- without \
+             it main is never told to exclude the changed path and serves its stale \
+             copy, a double-serve rather than mere staleness",
+        );
+        assert!(
+            st.dirty_paths.contains(&"src/changed.rs".to_string()),
+            "the recorded dirty set must be the COMPLETE one computed before the \
+             upserts, got {:?}",
+            st.dirty_paths
+        );
+        assert!(
+            !st.dirty_paths.contains(&"src/same.rs".to_string()),
+            "a byte-identical file is not dirty and must not be excluded from main, \
+             got {:?}",
+            st.dirty_paths
+        );
     }
 
     #[tokio::test]
