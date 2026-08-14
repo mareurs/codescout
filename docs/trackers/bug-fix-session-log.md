@@ -84,6 +84,8 @@ time_scope: open-ended
 | F-36 | 2026-07-28 | med | self-friction | fixed-verified | The literal-scanner fix I had just shipped missed the commonest Rust multi-line-string form (plain `"` + raw newline); all six of its tests reused the bug report's `"\` shape, so the suite sampled one point of the class six times |
 | F-35 | 2026-07-28 | low | self-friction | fixed-verified | Two doc comments I had just written made claims the code did not support (an unreachable fallback described as reachable; "reindents nothing" where the opener still shifts) — no gate can catch a doc comment that overstates a guarantee |
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
+| F-39 | 2026-08-14 | high | plan-prose | fixed-verified | Three bug files' `## Root cause` falsified on contact; `b86d81f1`'s premise would have left a measured IL3 **bypass** in place, `db5fe933`'s would have fixed 4 of 9 rows. Two carried their own refutation under Symptom |
+| F-40 | 2026-08-14 | low | self-friction | mitigated | Mis-tranched 3 of 10 bugs as "no design decision needed" — triaged from titles when the blocked decision was named in each `## Resume` |
 
 ## Wins Index
 
@@ -120,6 +122,9 @@ time_scope: open-ended
 | W-26 | 2026-07-28 | med | A failing NEW test with an innocent implementation: diagnose the fixture before touching the code | Suspecting `heading_at` would have meant loosening the heading predicate to trim leading whitespace — making the new test pass while breaking `filter_sections_indented_heading_not_a_boundary`, then "fixing" that older test and landing a real regression. Reading the file back exonerated the implementation in one step; the defect was in `edit_code` | validated |
 | W-25 | 2026-07-28 | med | Scout for discovery-by-directory-scan before relocating a file whose path is computed in one place | Defensive branch: thread a dir param through `LspManager::get_or_start` -> `get_or_start_via_mux` -> `claim_mux_lock`, a test concern in a production signature plus 17 individual test opt-ins, versus the 3-line `cfg(test)` seam that fixed all 17 at once. Optimistic branch: ship and later find mux sockets silently undiscoverable. Also surfaced the `#[ignore]`d test at manager.rs:2350 fixing for free and the peer subsystem's identical latent exposure | validated |
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
+| W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
+| W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-33 | 2026-08-14 | med | Mutate each new guard and check WHICH assertion fires | 3 mutations, 3 catches; one showed the control test correctly still passing (under- vs over-blocking arms), another showed two assertions cover distinct properties rather than restating one. Also surfaced that no warning catches a struct field that never existed | validated |
 
 ## Category conventions
 
@@ -2605,6 +2610,173 @@ asserting something false, and located the genuine defect.
 **Promote-when:** at 2 datapoints with W-29. Both say the same thing from different angles:
 **on re-entry, prefer the substrate over the artifact** — re-run the reproduction, re-scout
 the root cause. Promote jointly to the reconnaissance skill rather than separately.
+
+**Status:** validated.
+
+## F-39 — Three bug files' `## Root cause` sections were falsified on contact, and one of them hid a security bypass
+
+**Observed:** 2026-08-14, tranche-based sweep of the `docs/issues/` backlog. Each bug was
+verify-opened before any fix.
+
+**When:** Reading each bug's stated mechanism before implementing its Resume.
+
+**Expected (bug files):** the `## Root cause` narrows the work.
+
+**Got (scouted reality):** three of the eight worked reversed the work instead.
+
+| Bug | Its claim | Reality |
+|---|---|---|
+| `db5fe933` state-protocol `.sh` | Resume warned *off* the buddy rows: "a different, legitimately-`.sh` component" | `ls buddy/hooks/` → no `session-start.sh` at all; `hooks.json:4` dispatches `node run.mjs session-start`. Scope was 4 rows; actual 9 |
+| `b86d81f1` IL3 quoted pipe | "the caller already does the quote-aware thing via `pipeline_segments`" | `pipeline_segments` scanned raw bytes with **no quote state**. The same defect in two functions, one recorded as the other's solution |
+| `a99388a2` edit_file ack | "the ack handle does not resolve" | Resolves in both call shapes. `151cc9df` (the fix) is an **ancestor of the SHA the bug cites**; no commits since. The ENOENT was the target file |
+
+**Probable cause:** a bug file's Symptom is *observed*; its Root cause is usually
+*inferred* and then written in the same declarative voice. Nothing marks the seam. Two of
+the three even carried their own refutation: `a99388a2` recorded "the handle IS reaching
+parameter validation" under Symptom and argued past it; `db5fe933` had left its
+companion-side hypothesis `deferred` while stating the buddy-side equivalent as settled.
+
+**Severity:** high — following `b86d81f1`'s premise would have fixed the false positive
+and left the **bypass** in place: a quoted `;` before a real pipe hid it from the
+enforcer entirely, measured at `exit_code: 0` on a `git log | head`. Following
+`db5fe933` would have fixed 4 of 9 rows and closed the bug.
+
+**Status:** fixed-verified — all three closed, each with the correction written into the
+bug file rather than only into the commit.
+
+**Fix idea / Pointer:** the template already distinguishes `measured` from `inferred` for
+Root cause (added 2026-08-07, task #31). It is being used for the *mechanism* and not for
+the *scope* or the *prescription*. Cheapest strengthening: require the Resume to name the
+one command that would falsify it. All three here had one, and it was one line — `ls`,
+`read pipeline_segments`, `merge-base --is-ancestor`.
+
+## F-40 — I mis-tranched 3 of 10 bugs as "no design decision needed"
+
+**Observed:** 2026-08-14, after triaging 32 non-terminal bug files into four tranches.
+
+**When:** Building tranche B ("small code bugs, no design decision needed") from titles
+plus a one-line skim, then discovering the decisions on contact.
+
+**Got:** three of the ten needed an owner decision and moved to tranche C:
+
+- `2faaf32a` sqlite-vec leak — the prescribed fix is a 14-call-site refactor, because the
+  env read is three frames below the tests that trigger it.
+- `7438a064` chunk-size dead code — needed a *measurement* (does fastembed truncate?)
+  before the direction could be chosen, and the answer inverted it.
+- `f95e6841` / others still unassessed.
+
+**Probable cause:** the tranche was built from what the bug *reported*, and the decision
+lives in what the fix *requires*. Two of the three said so in their own Resume
+("decide, with the codebase owner"), which I had not read at triage time — titles and
+severity only.
+
+**Severity:** low — no wasted implementation; the cost was re-tranching mid-flow and one
+report to the user revising its own estimate.
+
+**Status:** mitigated — tranche C now carries them with the analysis done, which is worth
+more than the original classification was.
+
+**Fix idea / Pointer:** when triaging a backlog into effort classes, read each item's
+`## Resume` — not its title. That is the field that names the blocked decision, and it is
+one `artifact(get, headings=["## Resume"])` per item.
+
+## W-31 — `references` answered a question a bug file scoped as "instrument and bisect"
+
+**Observed:** 2026-08-14, `2faaf32a` (every `cargo test` leaks ~144 sqlite-vec DBs into
+`$HOME`).
+
+**Pattern:** when a bug asks *"which code path reaches X during the suite?"*, try
+`references(X)` before instrumenting. A single production caller makes the question
+static, not dynamic.
+
+**Counterfactual:** the bug's Resume prescribed *"adding a temporary `tracing::warn!` on
+the home-dir fallback branch and running the suite once"* — an edit, a full `cargo test`
+(~2 min), log reading, then a revert. `references(SqliteVecCodeStore/from_env)` returned
+**one** production caller (`client.rs:238`) in one call. Following that to
+`VectorBackend::resolve` then explained the part the instrumentation would *not* have
+shown: the leak is specific to the default lane because the default resolves to
+`SqliteVec` under `cfg(not(feature = "server-stack"))`, which is also why the
+server-stack lane looks clean.
+
+**Confirming data points:**
+1. This session — sole caller found statically; the instrumentation was never needed.
+2. F-12 (2026-05-24), inverted: *dismissing* `references`' own "use `call_graph` for
+   authoritative callers" warning shipped a half-fix.
+
+**Impact:** med — saves a build+suite cycle per "who calls this at runtime" question, and
+yields the *why* alongside the *where*.
+
+**Promote-when:** a second bug file prescribes runtime instrumentation for a question
+`references`/`call_graph` answers statically. At two datapoints, add to the recon skill's
+Phase 1: "before instrumenting to find a runtime caller, check whether the static caller
+set is size 1."
+
+**Status:** validated.
+
+## W-32 — Reproducing before fixing changed the fix three times in one session
+
+**Observed:** 2026-08-14, across the whole tranche sweep.
+
+**Pattern:** run the bug's own reproduction against the current tool *before* reading its
+fix plan. Not to confirm the bug exists — to find out what the plan is actually about.
+
+**Counterfactual, three times:**
+
+1. `973f0c0f` — filed as "top-level `extra` dropped". Reproducing it, then probing
+   `tags`/`topic`/`time_scope` on the same call, showed **five** params dropped by one
+   mechanism. A per-field fix would have shipped the same defect a seventh time; the July
+   fix for `status` alone is *why* this bug existed.
+2. `037430886` — filed with `delete` "reparents, parses fine". Two reproductions showed it
+   depends on the **neighbouring** key: scalar above → invalid YAML (loud); sequence above
+   → `{'tags': ['alpha','a.md']}` (silent). Only the second justifies `severity: high`,
+   and only reproduction distinguishes them.
+3. `7438a064` — the fix direction *inverted*. Measuring fastembed's real ceiling (512
+   tokens, uniform across models) showed the prescribed "wire the model-aware budget in"
+   would over-chunk large-context local models against a hard cap. The dead code's
+   deletion, not its promotion, was correct.
+
+**Confirming data points:** the three above, plus W-30 (2026-07-28), which is the same
+lesson at one datapoint.
+
+**Impact:** high — in case 3 the plan-as-written would have introduced a bug; in case 1 it
+would have left four siblings broken behind a passing test.
+
+**Promote-when:** already at four datapoints with W-30. Promote to CLAUDE.md's bug-file
+section: *"run the reproduction before reading the fix plan — the plan is a hypothesis
+about the reproduction."*
+
+**Status:** validated — promote next session.
+
+## W-33 — Mutating each new regression test, and finding the pair discriminates
+
+**Observed:** 2026-08-14, on all four code fixes that added guards.
+
+**Pattern:** after a new test passes, break the fix it guards and confirm the test fails
+— and check *which* assertions fire.
+
+**Counterfactual:** three mutations, three catches, and the third taught something the
+pass alone did not:
+
+- removing the `tags` lift → `update_lifts_every_advertised_top_level_param` failed with
+  the intended diagnostic. **Bonus:** it also tripped `field 'tags' is never read`, so
+  under `-D warnings` a deleted lift fails two independent ways — but *no* warning catches
+  a field that never existed, which is the original bug, so the struct now carries a
+  comment against "cleaning up" an apparently-unused field.
+- reverting `pipeline_segments` to `split(';')` → the bypass test failed **while the
+  six-violation control test kept passing.** That is the pair working as designed: one arm
+  catches under-blocking, the other over-blocking, and a mutation tripping only one is
+  correctly diagnosed.
+- forcing `read_edit_target`'s `NotFound` branch to `false` → the missing-target test
+  failed on its *classification* assertion only; the path-naming assertion still passed,
+  because the generic arm also names the path. Two assertions, two distinct properties,
+  confirmed non-redundant.
+
+**Impact:** med — cheap (one edit, one filtered test run, one revert) and it converts "the
+test passes" into "the test can fail", which is the only version worth having. The
+per-assertion detail is the part a plain pass/fail mutation check misses.
+
+**Promote-when:** already project convention in spirit (memory `test-design-discipline`).
+Worth adding the sharper form: *check which assertion fires, not just that one does.*
 
 **Status:** validated.
 
