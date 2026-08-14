@@ -88,6 +88,8 @@ time_scope: open-ended
 | F-40 | 2026-08-14 | low | self-friction | mitigated | Mis-tranched 3 of 10 bugs as "no design decision needed" — triaged from titles when the blocked decision was named in each `## Resume` |
 | F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
+| F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
+| F-44 | 2026-08-14 | med | codescout-tool | promoted-to-bug-tracker | `edit_file` and `edit_code` deadlock on "add a method to a trait impl nested in a test fn": the `fn `/`trait ` filter is a naive substring match (a variable named `via_trait` tripped it), and `edit_code` hands back a disambiguating name_path it then refuses with a misleading "fix the syntax errors first" |
 
 ## Wins Index
 
@@ -126,6 +128,8 @@ time_scope: open-ended
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 | W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
 | W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-37 | 2026-08-14 | high | Mutation-test the TEST, not only the code | The first version of the prefix regression test exercised the inherent `dense_query`/`dense_document` and would have passed with the trait method wired to `dense_query` — which is precisely where the defect lived. Mutation exposed the wrong-layer coverage; the fixed test then failed with mockito reporting the QUERY mock hit twice | validated |
+| W-36 | 2026-08-14 | high | Refuse a default trait impl and the compiler becomes your enumerator | Adding `embed_document`/`embed_document_one` with NO default made `cargo check` list all five implementors, exactly matching the prediction. A default would have compiled silently and left every implementor free to keep inheriting the query method — i.e. the bug. The repo already had this precedent in `known_dim`'s doc comment | validated |
 | W-35 | 2026-08-14 | med | A prompt-surface byte cap is a design reviewer | `every_tool_description_under_cap` rejected the doctor change twice (1960, then 1846 vs an 1800 cap) and was right both times: parameter detail belongs in the uncapped parameter descriptions, not the action list. Also revealed the `librarian` description sits at ~1790/1800 — 99.4% of budget | validated |
 | W-34 | 2026-08-14 | high | Mutation-test a SHARED helper before converting its call sites | Building `FenceState` and mutating it twice, before touching any of 7 boolean sites, showed the run-length rule alone does NOT reject the line that triggered the report — the backtick info-string rule does. Without that run I would have shipped the "obvious" one-rule fix and left the actual trigger unfixed across all 7 | validated |
 | W-33 | 2026-08-14 | med | Mutate each new guard and check WHICH assertion fires | 3 mutations, 3 catches; one showed the control test correctly still passing (under- vs over-blocking arms), another showed two assertions cover distinct properties rather than restating one. Also surfaced that no warning catches a struct field that never existed | validated |
@@ -2882,6 +2886,90 @@ Had I implemented the file's single proposed rule and converted seven sites, all
 **Impact:** med. The gate is cheap, already exists, and reframes a byte limit as an editorial one.
 
 **Promote-when:** a third instance where the cap redirects content to a better surface rather than merely shortening it. Then note in `src/prompts/README.md` that the cap is a placement test, not just a size test.
+
+**Status:** validated.
+
+## F-43 — A default-features build reported an empty memory corpus, and it nearly became a finding
+
+**Observed:** 2026-08-14, live-verifying `codescout migrate-memories --in-place` (the repair half of the memory query-prefix bug).
+
+**When:** First run of the new CLI mode against this project, to confirm it reaches the real store.
+
+**Expected:** a non-zero `read` — this project demonstrably has semantic memories.
+
+**Got:**
+
+```json
+{"read":0,"upserted":0,"skipped":0,"anchors_attached":0,"dry_run":true,"mode":"in-place-reembed"}
+```
+
+I was one sentence away from reporting "this project has no semantic memories, so there is nothing to repair" — which would have closed the bug on a false premise **and** retracted a true earlier statement.
+
+**Probable cause:** `cargo run --bin codescout` builds with **default features**. `server-stack` is *not* a default (`Cargo.toml`: `default = ["remote-embed", "http", "librarian"]`), so `QdrantSemanticMemoryStore` was not compiled, `VectorBackend::resolve()`'s `cfg(not(feature = "server-stack"))` arm chose sqlite-vec, and the CLI listed an empty *local* store. The live MCP server runs `cargo rb` — `build --release --features server-stack,local-embed` — and talks to Qdrant. Two different stores, one command, no error either way.
+
+**What caught it:** `memory(action="recall", query="embedding backend and retrieval architecture")` returned three memories including `architecture`. A second, independent surface contradicting the first — which is the only reason this is an F-N and not a wrong conclusion in a commit message. Rebuilt with `cargo rb`, the same command reports `read: 15, anchors_attached: 37`.
+
+**Severity:** med. No damage — dry-run wrote nothing — but the failure mode is a **false negative about live data on the verification step itself**, which is the worst place for one. Anything touching the live memory or vector store must be run from a `cargo rb` binary; `cargo run` silently answers about a different backend.
+
+**Status:** fixed-verified — the real run reports 15/15 upserted. Recorded in the archived bug file's § Resume so the next session does not repeat it.
+
+**Fix idea / Pointer:** `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md` § Resume. Kin R-81. Same family as R-77/R-79 (a negative result that is evidence about the instrument, not the world) — here the instrument is a *build configuration*.
+
+## F-44 — `edit_file` and `edit_code` deadlock on a method inside a nested trait impl
+
+**Observed:** 2026-08-14, adding `embed_document` to three identically-named `FixedEmbedder` test fakes in `src/tools/memory/tests.rs`.
+
+**Got — three distinct tool defects in one edit:**
+
+1. **`edit_file`'s content filter is a naive substring match.** It rejected a diff whose only offence was a local variable named `via_trait`: the string `via_trait ` contains `trait `. The filter is meant to catch `trait Foo {` definitions. Renaming to `d_via_seam` was the whole fix. (Third hit of `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md`'s `fn `-filter this session; the substring aspect is new.)
+2. **`edit_code` returns a disambiguator it then refuses.** Given three same-named impls it correctly errored with three fully-qualified paths — `<test_fn>/impl DenseEmbedder for FixedEmbedder/embed` — and said "copied verbatim". Copied verbatim, each one failed: *"cannot determine end of 'embed' for insert-after — AST parse failed"*.
+3. **That error's hint is wrong.** *"The file likely has syntax errors that broke tree-sitter's parse"* — the file had none. The only failure at that moment was **semantic** (missing trait items), which tree-sitter does not see. A reader following the hint hunts for syntax errors that do not exist.
+
+**Together:** `edit_file` refuses any content containing `fn `, and `edit_code` cannot insert after a method nested inside a test fn — so there is no supported way to add a method to such an impl. **Workaround:** `edit_code action="replace"` on the whole impl *object* (which needs no end-of-method detection) using the fully-qualified path. That worked on all three.
+
+**Partial refutation worth recording:** `docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md` says there is "no way to disambiguate two symbols with an identical name_path". For this shape the error message *does* hand you the disambiguator — and resolution works for `replace`. That bug is narrower than filed; the adjacent `insert` failure is worse than filed.
+
+**Severity:** med — no wrong output, but it cost several tool round-trips and the misleading hint pointed away from the real cause.
+
+**Status:** promoted-to-bug-tracker — belongs on the two existing `edit_code`/`edit_file` bug files rather than as a fourth. Both should be updated with these facets.
+
+**Fix idea / Pointer:** `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md` (substring filter), `docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md` (narrower than filed; add the `insert`-after-nested-impl failure and the wrong hint).
+
+## W-36 — Refuse a default trait impl and the compiler becomes your enumerator
+
+**Observed:** 2026-08-14, adding a document-side method to `CodeEmbedder` and `DenseEmbedder` for the memory query-prefix fix.
+
+**Pattern:** When a trait gains a method whose *whole purpose* is that implementors must not fall back to the old behaviour, give it **no default implementation**. `cargo check` then lists every implementor that needs attention, and none can silently inherit the defect.
+
+**Counterfactual:** a default delegating to `embed` would have compiled clean and left all five implementors free to keep routing documents through the query seam — i.e. the exact bug, now with a trait method that *looks* like it fixed it. No test would have failed, because no test existed for a method nobody called. Instead the compiler produced five `E0046`s naming `search.rs:456`, `sync.rs:2075`, and three `memory/tests.rs` sites — matching the prediction made before compiling.
+
+**Confirming data points:**
+1. This session — five implementors enumerated, prediction confirmed.
+2. **The repo already knew this.** `CodeEmbedder::known_dim`'s doc comment: *"Deliberately has no default: a backend that silently inherited `None` would fall back to trusting a config value … defeating the point of asking."* Same reasoning, independently arrived at, now twice.
+
+**Impact:** high. The alternative failure is invisible and permanent.
+
+**Promote-when:** already at two independent datapoints. **Routing: craft-shaped, so the recon SKILL and not codescout memory** — "a trait method added to correct a behaviour gets no default impl, so the compiler enumerates the implementors" is true in any language with default trait/interface methods and would not mislead another project. (Only the *instances* — `known_dim`, `embed_document` — are project facts, and they live here in the tracker.) Sync-flow it as a one-line rule; do not spend a slot in the ~10-rule memory cap on a general lesson.
+
+**Status:** validated.
+
+## W-37 — Mutation-test the test, not only the code
+
+**Observed:** 2026-08-14, writing the wire-level regression test for the document seam.
+
+**Pattern:** After writing a regression test, ask *which layer* it actually exercises — then mutate the layer you believe it protects. If the mutation passes, the test is aimed at the wrong seam.
+
+**Counterfactual, and it is concrete.** My first version asserted on `EmbedderHttp::dense_query` and `dense_document` directly. Both are inherent methods. The defect lived one layer up, in `CodeEmbedder::embed_document_one`'s *routing* — so an impl wired to `dense_query` would have passed my test while reproducing the bug exactly. I noticed before mutating, extended the test to call through the seam (`expect(2)` on the document mock), and the mutation run then failed it with mockito reporting the **query** mock hit twice instead of once.
+
+Relation to W-33/W-34: those mutate the *implementation* to check the tests can fail. This is the complement — checking the test is pointed at the layer where the defect can occur. A test can be perfectly capable of failing and still guard the wrong thing.
+
+**Confirming data points:**
+1. This session — wrong-layer coverage caught before commit, mutation-confirmed after the fix.
+2. Kin F-36 (2026-07-28), where six tests reused the bug report's single shape and sampled one point of the class six times — the same error in the *input* dimension rather than the *layer* dimension.
+
+**Impact:** high — an on-target-looking test that cannot see the defect is worse than no test, because it stops anyone looking again.
+
+**Promote-when:** a third instance where asking "what layer does this assert on?" relocates a test. Then fold into the recon SKILL alongside W-33/W-34 as one mutation-discipline rule with three faces: can it fail, is it aimed at the right layer, does it sample the class.
 
 **Status:** validated.
 
