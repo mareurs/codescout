@@ -225,41 +225,76 @@ None yet — bug filed on discovery.
 
 ## Workarounds
 
-**Reclaiming the 25 GB is safe and targeted.** The two test patterns partition the
-directory at 99.99% — 75,480 of 75,489 files — and the nine survivors are named after
-real projects. Verify, then delete:
+**Cleanup performed 2026-08-14 (operator-authorised). `~/.codescout` went from 25 GB to
+285 MB — ~24.7 GB reclaimed.**
 
-```bash
-D="$HOME/.codescout/embeddings"
-# what would survive -- expect 9 real project names
-find "$D" -maxdepth 1 -type f ! -name '_tmp*' ! -name 'cache-sandwich*' -printf '%f\n'
-# what would go
-find "$D" -maxdepth 1 -type f \( -name '_tmp*' -o -name 'cache-sandwich*' \) -delete
-```
+| Deleted | Count | Freed |
+|---|---|---|
+| test DBs (`_tmp*`, `cache-sandwich*`) | 75,480 | ~24.4 GB |
+| logs `>30d` in `~/.codescout` (newest 2026-06-30) | 11 | ~24 MB |
+| `codescout/.codescout/usage.db.bak-2026-05-31` (75d) | 1 | 70 MB |
+| orphaned project stores `>30d` (`oom-verify-bk.db`, `code-explorer.db`) | 2 | 309 MB |
 
-Run the survivor query **first**. This is the operator's call, not an agent's: it is a
-bulk delete in `$HOME`, and one of the nine (`code-explorer.db`) belongs to a project
-root that was itself removed in task #45, so the survivor list is worth a human glance
-rather than a pattern match.
+Age was deliberately **not** the criterion for the test DBs: they are stores for
+`tempfile::tempdir()` projects that no longer exist, so a 3-day-old one is exactly as
+worthless as a 3-month-old one. A literal 30-day cut would have left 42,700 files /
+~14 GB of known garbage. Logs and the `usage.db` backup *did* use the 30-day rule.
 
-Cleanup does not fix anything — the next `cargo test` adds ~144 files back. It only buys
-disk back until the fix lands.
+Untouched, deliberately: this repo's `.codescout/*.log` (12 files, all within 30 days —
+active), `usage.db` itself (59.6 MB, live observability data), and
+`codescout/.codescout/embeddings/` (162 MB — one `project.db` plus `lib/`, the current
+per-project store, not leakage).
+
+### The survivor check that mattered
+
+A shallow existence check across three parent directories reported `backend-kotlin` and
+`MRV-poc` as orphaned. **Both exist** — `/home/marius/work/mirela/backend-kotlin` and
+`/home/marius/work/stefanini/southpole/MRV-poc`, found only by widening to
+`find -maxdepth 4` over `work/`. Deleting on the shallow result would have destroyed
+118 MB of live index for the very project that task #46 tracks 13 pending
+`worktree_scoped_row` merges against.
+
+Only two stores were deleted as orphans, each satisfying **both** conditions
+(no project dir found at depth 4 **and** older than 30 days):
+`oom-verify-bk.db` and `code-explorer.db` — the latter's root having been measured gone
+earlier the same session when task #45 removed its registry entry.
+
+Four 16 KB stubs (`api.db`, `mcp-server.db`, `test.db`,
+`prompt-test-mcp-cli-iyok5akq.db`) were kept: their names match many candidate
+directories, attribution is ambiguous, and the total is 64 KB.
+
+### Cleanup is not a fix
+
+The next `cargo test` starts refilling the directory. What the cleanup *does* buy is a
+clean measurement baseline — see *Resume*.
 ## Resume
 
-**The writer is identified; do not re-run the instrumentation the old Resume asked
+**The writer is identified; do not re-run the instrumentation the original Resume asked
 for.** It is `RetrievalClient::from_env` → `SqliteVecCodeStore::from_env`
 (`src/retrieval/client.rs:238`), the sole production caller, reached because
 `VectorBackend::resolve` defaults to `SqliteVec` on the non-`server-stack` build. Found
-with `references`, no instrumentation needed.
+with `references`; no tracing needed.
 
-What remains is the **decision** among the three options under *Fix*, and it is a real
-one because the prescribed option A is a 14-call-site refactor rather than a patch.
-Option 3 is the tempting one and is a trap — it fixes `--lib` and leaves `tests/`
-leaking.
+What remains is the **decision** among the three options under *Fix*. Option A as the
+convention prescribes it is a 14-call-site refactor, not a patch. Option 3
+(`#[cfg(test)]`) is the tempting one and is a trap — it fixes `--lib` and leaves
+`tests/` leaking.
 
-When the fix lands, verify with a before/after count around one full `cargo test`:
-the delta must be **0**, not merely smaller. The 144-per-run figure was measured on
-`cargo test --lib` alone, so re-baseline against a full run first.
+**Verification is now easy, because the directory is clean.** As of 2026-08-14 it holds
+exactly **7 files** and 285 MB, every one attributable to a live project or a 16 KB
+stub. So:
+
+```bash
+E="$HOME/.codescout/embeddings"
+before=$(find "$E" -maxdepth 1 -type f | wc -l)   # 7 on a clean base
+cargo test
+after=$(find "$E" -maxdepth 1 -type f | wc -l)
+echo "delta=$((after - before))"                  # must be 0
+```
+
+Re-baseline before trusting the old 144-per-run figure: that was measured on
+`cargo test --lib` alone, and a full `cargo test` run also exercises the integration
+tests in `tests/`, which is exactly the population option 3 would miss.
 ## References
 
 - `src/retrieval/sqlite_code_store.rs:45-57` — `from_env`, the home-dir fallback
