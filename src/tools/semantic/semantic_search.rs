@@ -313,6 +313,16 @@ pub(crate) struct WorktreeQueryPlan {
     pub delta_id: String,
     pub main_exclude: Vec<String>,
     pub delta_exclude: Vec<String>,
+    /// Is main worth querying at all?
+    ///
+    /// `false` when main holds no indexed chunks: the query could then only
+    /// ever return an empty page, and it would ship the entire
+    /// `main_exclude` list to the store to find that out. On the state this
+    /// design models most often -- main never indexed, so `sync_worktree`
+    /// marks *every* file dirty -- that list is the whole repository. A
+    /// field rather than an `if` at the call site so the skip is pinned by
+    /// `worktree_query_plan`'s own tests.
+    pub query_main: bool,
     pub warning: Option<String>,
     pub main_never_indexed_note: Option<String>,
     pub drift_note: Option<String>,
@@ -346,6 +356,7 @@ pub(crate) fn worktree_query_plan(
         delta_id: delta_id.to_string(),
         main_exclude,
         delta_exclude,
+        query_main: main_has_chunks,
         warning,
         main_never_indexed_note,
         drift_note,
@@ -647,16 +658,25 @@ impl Tool for SemanticSearch {
                 );
                 let (main_opts, delta_opts) = worktree_search_opts(&opts, &plan);
 
-                let main_hits = client
-                    .search_code(&main_project_id, query, main_opts)
-                    .await
-                    .map_err(|e| {
-                        let hint = classify_search_error(&e.to_string(), &main_project_id);
-                        crate::tools::RecoverableError::with_hint(
-                            format!("stack search failed: {e}"),
-                            hint,
-                        )
-                    })?;
+                // `plan.query_main` is false exactly when main holds no indexed
+                // chunks -- see that field's doc comment for why running the
+                // query anyway is not merely wasted but expensively wasted.
+                // `plan.main_never_indexed_note` still explains the empty
+                // contribution in the response.
+                let main_hits = if plan.query_main {
+                    client
+                        .search_code(&main_project_id, query, main_opts)
+                        .await
+                        .map_err(|e| {
+                            let hint = classify_search_error(&e.to_string(), &main_project_id);
+                            crate::tools::RecoverableError::with_hint(
+                                format!("stack search failed: {e}"),
+                                hint,
+                            )
+                        })?
+                } else {
+                    Vec::new()
+                };
 
                 let delta_hits = client
                     .search_code(&delta_id, query, delta_opts)
@@ -1292,6 +1312,10 @@ mod worktree_search_tests {
             indexed.main_never_indexed_note.is_none(),
             "main_has_chunks=true must carry no note"
         );
+        assert!(
+            indexed.query_main,
+            "main holds chunks, so it must still be queried"
+        );
 
         let not_indexed = worktree_query_plan(
             &main_repo,
@@ -1307,6 +1331,14 @@ mod worktree_search_tests {
             "main_has_chunks=false must carry the requirement-6 note"
         );
         assert!(not_indexed.main_never_indexed_note.unwrap().contains('m'));
+        // C2: the note alone is not the fix. Main holding nothing means the
+        // query can only return an empty page, and the shipped code still ran
+        // it -- shipping every excluded path across the wire to learn that.
+        assert!(
+            !not_indexed.query_main,
+            "main holds no chunks: the query must be skipped entirely, not just \
+             annotated"
+        );
     }
 
     #[test]
@@ -1420,6 +1452,7 @@ mod worktree_search_tests {
             main_exclude: Vec::new(),
             delta_exclude: Vec::new(),
             warning: Some("SUSPECT-TEXT".to_string()),
+            query_main: true,
             main_never_indexed_note: None,
             drift_note: Some("DRIFT-TEXT".to_string()),
         };

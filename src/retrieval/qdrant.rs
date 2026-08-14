@@ -31,6 +31,52 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
     u64::from_le_bytes(hash[..8].try_into().unwrap())
 }
 
+/// The `Filter` every `hybrid_query` leg runs with.
+///
+/// Extracted as a pure function for two reasons. It is the ONE place the
+/// filter shape is decided, so the dense prefetch, the sparse prefetch and the
+/// dense-only branch cannot drift apart; and the shape is unit-testable
+/// without a live Qdrant.
+///
+/// The shape that matters: `exclude_paths` collapses into a **single**
+/// `MatchAny` condition, not one `must_not` condition per path. Qdrant
+/// evaluates `must_not` conditions one at a time, and this collection carries
+/// no payload index on `file_path`, so N conditions cost N passes. Measured on
+/// the live 576k-point `code_chunks` collection, same query shape, identical
+/// top-10 ids and scores both ways:
+///
+/// | excluded paths | one condition each | single `MatchAny` |
+/// |---|---|---|
+/// | 500   | 2.35 s  | 0.55 s |
+/// | 2 000 | 9.32 s  | 0.55 s |
+/// | 8 000 | 37.29 s | 0.56 s |
+///
+/// This is not a tail case. `sync_worktree` marks every file dirty whenever
+/// main has never been indexed, so "every path in the repo lands in this
+/// filter" is the *certain* state on a fresh main, not an unlucky one.
+fn build_query_filter(
+    project_id: &str,
+    exclude_languages: &[String],
+    exclude_paths: &[String],
+) -> Filter {
+    let must = vec![Condition::matches("project_id", project_id.to_string())];
+    let mut must_not: Vec<Condition> = Vec::new();
+    // Guarded on non-empty: `Condition::matches(field, vec![])` would emit a
+    // `MatchAny` over an empty keyword set, which is a real condition Qdrant
+    // still has to evaluate rather than the no-op an empty list means here.
+    if !exclude_languages.is_empty() {
+        must_not.push(Condition::matches("language", exclude_languages.to_vec()));
+    }
+    if !exclude_paths.is_empty() {
+        must_not.push(Condition::matches("file_path", exclude_paths.to_vec()));
+    }
+    Filter {
+        must,
+        must_not,
+        ..Default::default()
+    }
+}
+
 impl QdrantWrap {
     /// Build the Qdrant client. `Qdrant::from_url(...).build()` is a plain,
     /// synchronous call that — despite appearances — performs a blocking
@@ -312,7 +358,9 @@ impl QdrantWrap {
     /// `exclude_languages` adds a `must_not` clause on the payload `language`
     /// field (empty = no filter). `exclude_paths` adds a `must_not` clause on the
     /// payload `file_path` field (empty = no filter). Used for
-    /// `semantic_search(mode="code")` and worktree search respectively.
+    /// `semantic_search(mode="code")` and worktree search respectively. Each is
+    /// exactly ONE `MatchAny` condition however long the list — see
+    /// [`build_query_filter`], which owns the shape and carries the measurements.
     #[allow(clippy::too_many_arguments)]
     pub async fn hybrid_query(
         &self,
@@ -326,21 +374,7 @@ impl QdrantWrap {
         exclude_languages: &[String],
         exclude_paths: &[String],
     ) -> Result<Vec<crate::retrieval::search::Hit>> {
-        let must = vec![Condition::matches("project_id", project_id.to_string())];
-        let mut must_not: Vec<Condition> = exclude_languages
-            .iter()
-            .map(|l| Condition::matches("language", l.clone()))
-            .collect();
-        must_not.extend(
-            exclude_paths
-                .iter()
-                .map(|p| Condition::matches("file_path", p.clone())),
-        );
-        let filter = Filter {
-            must,
-            must_not,
-            ..Default::default()
-        };
+        let filter = build_query_filter(project_id, exclude_languages, exclude_paths);
 
         let resp = if disable_sparse {
             // Pure dense ANN — no fusion, no sparse leg.
@@ -433,6 +467,79 @@ impl QdrantWrap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pure shape test for [`build_query_filter`] — no Qdrant required, so it
+    /// runs in the ordinary suite rather than behind `--ignored`.
+    ///
+    /// The assertion that carries the weight is `must_not.len() == 2`: the
+    /// shipped code emitted one condition **per excluded path**, which cost
+    /// 37 s for 8 000 paths against the live collection (0.56 s collapsed).
+    /// Re-expanding the list into per-path conditions — the natural thing for a
+    /// later edit to do, since it reads more simply — fails right here instead
+    /// of only showing up as latency nobody attributes to this function.
+    #[test]
+    fn build_query_filter_collapses_each_exclusion_list_into_one_match_any() {
+        use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+
+        let paths: Vec<String> = (0..8000).map(|i| format!("src/f{i}.rs")).collect();
+        let langs = vec!["markdown".to_string(), "json".to_string()];
+        let filter = build_query_filter("proj", &langs, &paths);
+
+        assert_eq!(filter.must.len(), 1, "exactly one project_id condition");
+        assert_eq!(
+            filter.must_not.len(),
+            2,
+            "8000 paths + 2 languages must collapse to ONE condition each, not \
+             8002 conditions — got {}",
+            filter.must_not.len()
+        );
+
+        // …and each one really is a MatchAny carrying the whole list, not a
+        // single-value Keyword condition that silently drops the rest.
+        let keywords = |c: &Condition| -> (String, Vec<String>) {
+            match c.condition_one_of.as_ref().expect("condition set") {
+                ConditionOneOf::Field(f) => match f
+                    .r#match
+                    .as_ref()
+                    .and_then(|m| m.match_value.as_ref())
+                    .expect("match value set")
+                {
+                    MatchValue::Keywords(k) => (f.key.clone(), k.strings.clone()),
+                    other => panic!("expected MatchAny/Keywords, got {other:?}"),
+                },
+                other => panic!("expected a field condition, got {other:?}"),
+            }
+        };
+        let (lang_key, lang_vals) = keywords(&filter.must_not[0]);
+        assert_eq!(lang_key, "language");
+        assert_eq!(lang_vals, langs);
+        let (path_key, path_vals) = keywords(&filter.must_not[1]);
+        assert_eq!(path_key, "file_path");
+        assert_eq!(path_vals.len(), 8000);
+        assert_eq!(path_vals[7999], "src/f7999.rs");
+    }
+
+    /// The empty case is a no-op, not a `MatchAny` over nothing. An empty
+    /// `Keywords` set is still a condition Qdrant evaluates, and — worse — it
+    /// matches nothing, so an empty `must_not` entry is harmless only by
+    /// accident. Pinned so the non-empty guard cannot be dropped as redundant.
+    #[test]
+    fn build_query_filter_emits_no_condition_for_an_empty_exclusion_list() {
+        let filter = build_query_filter("proj", &[], &[]);
+        assert_eq!(filter.must.len(), 1);
+        assert!(
+            filter.must_not.is_empty(),
+            "empty exclusion lists must produce zero must_not conditions, got {}",
+            filter.must_not.len()
+        );
+
+        let only_paths = build_query_filter("proj", &[], &["a.rs".to_string()]);
+        assert_eq!(
+            only_paths.must_not.len(),
+            1,
+            "an empty language list must not leave a stray condition behind"
+        );
+    }
 
     /// Full E2E test — requires a running Qdrant instance (testcontainers).
     /// Run with: cargo test -- --ignored qdrant_creates_collection_with_dense_and_sparse
