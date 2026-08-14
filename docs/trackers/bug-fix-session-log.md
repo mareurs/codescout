@@ -86,6 +86,8 @@ time_scope: open-ended
 | F-33 | 2026-07-28 | low | self-friction | fixed-verified | Relocated the mux lock dir (`cfg(test)` redirect) before verifying nothing discovers those files by directory scan; assumption held, but left `peer_socket_differs_from_mux_and_shares_dir`'s name asserting an invariant now false in test builds |
 | F-39 | 2026-08-14 | high | plan-prose | fixed-verified | Three bug files' `## Root cause` falsified on contact; `b86d81f1`'s premise would have left a measured IL3 **bypass** in place, `db5fe933`'s would have fixed 4 of 9 rows. Two carried their own refutation under Symptom |
 | F-40 | 2026-08-14 | low | self-friction | mitigated | Mis-tranched 3 of 10 bugs as "no design decision needed" — triaged from titles when the blocked decision was named in each `## Resume` |
+| F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
+| F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 
 ## Wins Index
 
@@ -124,6 +126,8 @@ time_scope: open-ended
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 | W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
 | W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-35 | 2026-08-14 | med | A prompt-surface byte cap is a design reviewer | `every_tool_description_under_cap` rejected the doctor change twice (1960, then 1846 vs an 1800 cap) and was right both times: parameter detail belongs in the uncapped parameter descriptions, not the action list. Also revealed the `librarian` description sits at ~1790/1800 — 99.4% of budget | validated |
+| W-34 | 2026-08-14 | high | Mutation-test a SHARED helper before converting its call sites | Building `FenceState` and mutating it twice, before touching any of 7 boolean sites, showed the run-length rule alone does NOT reject the line that triggered the report — the backtick info-string rule does. Without that run I would have shipped the "obvious" one-rule fix and left the actual trigger unfixed across all 7 | validated |
 | W-33 | 2026-08-14 | med | Mutate each new guard and check WHICH assertion fires | 3 mutations, 3 catches; one showed the control test correctly still passing (under- vs over-blocking arms), another showed two assertions cover distinct properties rather than restating one. Also surfaced that no warning catches a struct field that never existed | validated |
 
 ## Category conventions
@@ -2777,6 +2781,107 @@ per-assertion detail is the part a plain pass/fail mutation check misses.
 
 **Promote-when:** already project convention in spirit (memory `test-design-discipline`).
 Worth adding the sharper form: *check which assertion fires, not just that one does.*
+
+**Status:** validated.
+
+## F-41 — A bug file's argument for NOT fixing was itself false, and it suppressed a live-path fix
+
+**Observed:** 2026-08-14, working `docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md` (`c7ba92f5`) from the tranche-B backlog.
+
+**When:** Before writing any code, reading the file's `## Root cause` — which contained a subsection titled *"Why the obvious fix is wrong"*.
+
+**Expected (the file):** Two configurations get the wrong `embedding_backend` string. *"Both are status-string-only: the actual embedder construction … goes through `create_embedder_with_config` directly, never through `backend_is_local`."* Therefore widening `backend_is_local` "changes what those two functions decide for real queries — strictly riskier than a status-string residual", and the file existed "to record the residual rather than 'fix' it".
+
+**Got (measured):** `references(symbol="backend_is_local")` returns **four** consumers, not one: `guard_sparse`, `dense_only`, `resolve_model_dim`, and `ProjectStatus`. Three are live behaviour. And `build_embedder` reads the predicate **three lines above** the construction the file said was unaffected:
+
+```rust
+Self::guard_sparse(config, lite)?;                // reads backend_is_local
+let dense_only = Self::dense_only(config, lite);  // reads backend_is_local
+…
+codescout_embed::create_embedder_with_config(…)   // arm 6 -> LocalEmbedder
+```
+
+So a bare-name local config composed a **hybrid query against an embedder that emits no sparse vector** — precisely the "degraded recall that never shows as a failure" that `guard_sparse`'s own doc comment says it exists to make loud. The guard could not fire because the predicate it consults did not recognise the config.
+
+**Probable cause:** The filing traced one consumer of a shared predicate (the status tool it was reporting) and generalised to "status-string-only". The claim it made — construction does not consult `backend_is_local` — is *true*; it just is not the claim that matters. Query *composition* consults it, in the same function.
+
+**Severity:** high. Not for the size of the fix (one predicate) but for the shape of the error: the false premise had been written into the file **as a reason not to fix**, complete with a persuasive risk argument. A residual labelled "deliberately unfixed, and here is why" gets re-read as settled and skipped. Every later verify-open pass would have skipped it.
+
+**Relationship to F-39:** F-39 (same day) recorded three bug files whose `## Root cause` was falsified on contact. This is the same family one level up — the falsified claim is the file's **fix rationale**, not its mechanism. That is the higher-leverage error, because a wrong root cause produces a wrong fix, while a wrong rationale produces *no* fix. Captured as `R-80` in `docs/trackers/reconnaissance-patterns.md`.
+
+**Status:** fixed-verified — widened in `5b7536f5`, 5 new tests, mutation-verified, gate green in all three CI feature configs.
+
+**Fix idea / Pointer:** `docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md` § Root cause → *"The filing's own reasoning was falsified"*.
+
+## F-42 — Two status tests are vacuous on this host, and a mutation run reported a false PASS
+
+**Observed:** 2026-08-14, mutation-testing the case-1 fix for `c7ba92f5`.
+
+**When:** Reverting `model_names_local_backend`'s new branch to prove the two new tests discriminate. The `selection_tests` one failed as predicted. `status_reports_local_onnx_for_an_urlless_bare_model_name` **passed** — under a mutation that should have made it fail.
+
+**Got:** Both `ProjectStatus` status tests open with ambient-env skip guards that `return` early when `CODESCOUT_EMBEDDER_MODEL` / `CODESCOUT_EMBED_MODEL` / an embedder url is set, because those override the `project.toml` the test just wrote. This host sets three of them:
+
+```
+CODESCOUT_EMBED_URL=http://127.0.0.1:48081/v1
+CODESCOUT_EMBED_MODEL=CodeRankEmbed
+CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081
+```
+
+So the test — and its pre-existing I1 sibling, which has carried the same guard since it was written — assert nothing here. Re-running under `env -u CODESCOUT_EMBED_MODEL -u … ` failed them both with the expected `got: String("remote-http")`.
+
+**Probable cause:** The guards are deliberate and documented ("skip rather than assert a premise that isn't true here") and correct in intent — the alternative is a test that fails for an unrelated reason. The defect is that the skip is announced only through `eprintln!`, which `cargo test` hides unless `--nocapture`. A skipped test and a passing test are indistinguishable in the output an author actually reads.
+
+**Severity:** med. No production impact, but it silently voided a mutation check — the one procedure whose entire purpose is to prove a test can fail. Anyone developing these tests on a configured host gets a green suite that proves nothing.
+
+**Workaround (used):** run the mutation under `env -u` for each of the four vars. Recorded in the bug file's § Tests added so the next session does not have to rediscover it.
+
+**Status:** fixed-verified as a *finding* — discrimination was proved. The underlying test-design issue is unfixed and is the real follow-up: resolve the effective config at the edge and pass it in (option A of `docs/conventions/test-env-isolation.md`) rather than depending on ambient env, which would remove the need for the guard entirely.
+
+**Fix idea / Pointer:** `src/tools/config/tests.rs` — `status_reports_local_onnx_for_an_urlless_bare_model_name` and `status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends`. See also `docs/conventions/test-env-isolation.md`.
+
+## W-34 — Mutation-test a shared helper BEFORE converting its call sites
+
+**Observed:** 2026-08-14, fixing `docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md` — a boolean fence-tracker defect replicated across seven line-oriented markdown scanners.
+
+**Pattern:** When the fix is "extract a shared helper, then convert N call sites", write the helper with its own tests and **mutate it** before touching any call site. The helper is where the actual rule lives; the call sites only inherit it.
+
+**Counterfactual — and it is not hypothetical.** The bug file proposed one rule: *"store the opening fence's character and run length, and close only on a run of the same character that is at least as long, per CommonMark."* That is correct and insufficient. Mutating the helper showed why: the line that **actually triggered the report** is
+
+```
+```` ```markdown ````
+```
+
+whose leading run is **four** backticks — so it satisfies `run >= open_run` and the run-length rule does not reject it. What rejects it is CommonMark's *other* two constraints: a closer may be followed only by whitespace, and a backtick fence's info string may not contain a backtick. Dropping the info-string rule failed exactly one test with `left: []` — the whole document swallowed as code.
+
+Had I implemented the file's single proposed rule and converted seven sites, all seven would still have mis-parsed the reported input, and the surface tests (written from the same fixture) would have been the only thing to catch it — after seven conversions instead of before any.
+
+**Confirming data points:**
+1. This session — two mutations on `FenceState`, each failing a disjoint, predicted test set (3 tests / 1 test) with the right assertion messages.
+2. W-33 (same day) — the sibling pattern at the *guard* level; this is the same discipline applied to a shared *helper*, where the leverage is N× higher.
+
+**Impact:** high. The multiplier is the number of call sites: a wrong helper is wrong everywhere at once, and "all the call sites agree" reads as corroboration.
+
+**Promote-when:** a second shared-helper extraction where mutation-testing the helper changes the rule before conversion. At two datapoints, promote to the recon SKILL as: *"When the fix is extract-a-helper-then-convert-N-sites, mutate the helper before converting anything — a wrong rule is wrong N times and the call sites cannot dissent."*
+
+**Status:** validated — single strong datapoint where the mutation demonstrably changed the rule.
+
+## W-35 — A prompt-surface byte cap acted as a design reviewer
+
+**Observed:** 2026-08-14, adding `limit`/`offset` to `librarian(action="doctor")` for `docs/issues/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md`.
+
+**Pattern:** `server::tests::every_tool_description_under_cap` (`src/server.rs:2128`) enforces an 1800-char budget per tool description. It rejected the change **twice** — at 1960, then at 1846 after I trimmed — and both rejections were correct on the merits, not merely on bytes.
+
+**Counterfactual:** my first instinct was to describe the new windowing in the tool's action list, where every agent pays for it on every call. The cap forced the question "does this belong here?", and the answer was no: parameter semantics belong in the (uncapped) `limit` / `offset` parameter descriptions and in the runtime overflow hint, which is where `docs/PROGRESSIVE_DISCOVERABILITY.md` § Pattern 1 requires the parameter to be named anyway. The final change carries the information in two better places and zero bytes of shared budget.
+
+**Confirming data points:**
+1. This session — two rejections, ending in a strictly better placement.
+2. F-20 (2026-06-12) — the same gate caught a 329-char `get_guide` description against a 300 cap, but there the lesson recorded was "run the broader test target"; that it *improved the design* went unrecorded.
+
+**Incidental finding worth carrying:** the `librarian` description sits at **~1790 of 1800 chars — 99.4% of budget**. The next action added to that tool trips this gate with no room to trim. Not a defect today; a known cliff.
+
+**Impact:** med. The gate is cheap, already exists, and reframes a byte limit as an editorial one.
+
+**Promote-when:** a third instance where the cap redirects content to a better surface rather than merely shortening it. Then note in `src/prompts/README.md` that the cap is a placement test, not just a size test.
 
 **Status:** validated.
 
