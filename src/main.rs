@@ -134,6 +134,12 @@ enum Commands {
     /// Migrate legacy sqlite-vec memories at .codescout/embeddings.db into the
     /// Qdrant `memories` collection. Idempotent — re-running overwrites by
     /// deterministic point id rather than duplicating.
+    ///
+    /// With --in-place, imports nothing and instead re-embeds the memories
+    /// already in the store from the content it already holds. Use that after any
+    /// change of embedding convention (query-prefix policy, model, dimension):
+    /// fixing the write path only fixes future writes, and vectors stored under
+    /// the old convention are stranded once queries move to the new one.
     MigrateMemories {
         /// Project root path (defaults to CWD). Used both to locate the legacy
         /// db and to derive the project_id namespace in Qdrant.
@@ -148,6 +154,14 @@ enum Commands {
         /// Read + count without embedding or writing to Qdrant.
         #[arg(long)]
         dry_run: bool,
+
+        /// Re-embed the memories already in the store, in place, instead of
+        /// importing from a legacy db. Preserves point ids, content, anchors and
+        /// timestamps — only the vectors change. A failed row keeps its existing
+        /// vector, so a misconfigured embedder cannot degrade the corpus.
+        /// Mutually exclusive with --db-path.
+        #[arg(long, conflicts_with = "db_path")]
+        in_place: bool,
     },
 
     /// Print the codescout git SHA, full SHA, and dirty status baked into this
@@ -283,6 +297,7 @@ async fn main() -> Result<()> {
             project,
             db_path,
             dry_run,
+            in_place,
         } => {
             let root = project
                 .or_else(|| std::env::current_dir().ok())
@@ -304,20 +319,33 @@ async fn main() -> Result<()> {
             let embedder =
                 codescout::migrate::memories::HttpMigrationEmbedder::new(client.embedder);
 
-            tracing::info!(
-                "migrate-memories: src={} project_id={} dry_run={}",
-                db_path.display(),
-                project_id,
-                dry_run,
-            );
-            let report = codescout::migrate::memories::migrate_memories(
-                &db_path,
-                store.as_ref(),
-                &embedder,
-                &project_id,
-                dry_run,
-            )
-            .await?;
+            let report = if in_place {
+                tracing::info!(
+                    "migrate-memories --in-place: project_id={project_id} dry_run={dry_run}"
+                );
+                codescout::migrate::memories::reembed_memories_in_place(
+                    store.as_ref(),
+                    &embedder,
+                    &project_id,
+                    dry_run,
+                )
+                .await?
+            } else {
+                tracing::info!(
+                    "migrate-memories: src={} project_id={} dry_run={}",
+                    db_path.display(),
+                    project_id,
+                    dry_run,
+                );
+                codescout::migrate::memories::migrate_memories(
+                    &db_path,
+                    store.as_ref(),
+                    &embedder,
+                    &project_id,
+                    dry_run,
+                )
+                .await?
+            };
 
             println!(
                 "{}",
@@ -327,10 +355,11 @@ async fn main() -> Result<()> {
                     "skipped": report.skipped,
                     "anchors_attached": report.anchors_attached,
                     "dry_run": report.dry_run,
-                    "next_step": if report.dry_run {
-                        "Re-run without --dry-run to perform the upserts."
-                    } else {
-                        "Verify recall works against the new store, then delete .codescout/embeddings.db when satisfied."
+                    "mode": if in_place { "in-place-reembed" } else { "legacy-import" },
+                    "next_step": match (report.dry_run, in_place) {
+                        (true, _) => "Re-run without --dry-run to perform the upserts.",
+                        (false, true) => "Every memory vector was re-derived from current embedding config. Check `skipped` — those rows kept their previous vectors and are still on the old convention.",
+                        (false, false) => "Verify recall works against the new store, then delete .codescout/embeddings.db when satisfied.",
                     },
                 })
             );

@@ -167,6 +167,98 @@ pub async fn migrate_memories(
     Ok(report)
 }
 
+/// Re-embed every memory already in the store, in place, from the content the
+/// store itself holds.
+///
+/// This is the repair half of
+/// `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`. Fixing
+/// the write path only fixes *future* writes; vectors already stored under the
+/// old convention stay where they are, and once queries move to the corrected
+/// convention those rows are stranded — a real mismatch where before there was
+/// a harmless symmetric shift. Anything that changes embedding convention
+/// (query-prefix policy, model, dimension) needs this, which is why it takes no
+/// argument describing *what* changed: it just re-derives every vector from
+/// current config.
+///
+/// Distinct from [`migrate_memories`], which reads a legacy sqlite db and writes
+/// somewhere else. This reads and writes the same store.
+///
+/// **Safety properties**, each covered by a test below:
+/// - **In-place, never duplicating.** The `SemanticMemory` is passed back
+///   verbatim, so `point_id` (UUIDv5 over `project_id`/`bucket`/`title`) is
+///   unchanged and the upsert overwrites its own row. Content, anchors and
+///   timestamps are carried through untouched — only the vector changes.
+/// - **Failure is non-destructive.** An embed or upsert error skips that row and
+///   leaves its existing point intact, so a broken embedder cannot degrade the
+///   corpus; it just does nothing. Counted in `skipped`.
+/// - **Idempotent.** Re-running is a no-op beyond rewriting identical vectors.
+///
+/// A *partial* run does leave a mixed corpus (some rows re-embedded, some not) —
+/// unavoidable without transactional writes across the store. The report
+/// distinguishes the two, and re-running is safe.
+///
+/// Report fields in this mode: `read` = memories found, `upserted` = re-embedded
+/// and written, `skipped` = embed-or-upsert failures. `anchors_attached` counts
+/// anchors **carried through unchanged** — nothing is newly derived here, unlike
+/// in [`migrate_memories`].
+pub async fn reembed_memories_in_place(
+    store: &dyn SemanticMemoryStore,
+    embedder: &dyn MigrationEmbedder,
+    project_id: &str,
+    dry_run: bool,
+) -> Result<MigrationReport> {
+    let mut report = MigrationReport {
+        dry_run,
+        ..Default::default()
+    };
+
+    let hits = store
+        .list(
+            project_id,
+            crate::memory::semantic_store::MemoryFilter::default(),
+        )
+        .await
+        .with_context(|| format!("list memories for project {project_id}"))?;
+    report.read = hits.len();
+
+    for hit in hits {
+        report.anchors_attached += hit.memory.anchors.len();
+
+        if dry_run {
+            report.upserted += 1;
+            continue;
+        }
+
+        let dense = match embedder.embed(&hit.memory.content).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "reembed-memories: embed failed for {}/{}: {e} (existing vector left in place)",
+                    hit.memory.bucket,
+                    hit.memory.title
+                );
+                report.skipped += 1;
+                continue;
+            }
+        };
+
+        // `&hit.memory` verbatim: same point_id, same content, same anchors and
+        // timestamps. Only the vector is new.
+        if let Err(e) = store.upsert(&hit.memory, &dense).await {
+            tracing::warn!(
+                "reembed-memories: upsert failed for {}/{}: {e} (existing vector left in place)",
+                hit.memory.bucket,
+                hit.memory.title
+            );
+            report.skipped += 1;
+            continue;
+        }
+        report.upserted += 1;
+    }
+
+    Ok(report)
+}
+
 #[derive(Debug)]
 struct LegacyRow {
     bucket: String,
@@ -420,5 +512,153 @@ mod tests {
 
         let hits = store.list("p", MemoryFilter::default()).await.unwrap();
         assert_eq!(hits.len(), 1, "second run must overwrite, not duplicate");
+    }
+
+    /// Seed one memory whose stored vector is `seed`, then re-embed in place with
+    /// an embedder returning `fresh`.
+    async fn seeded_store(
+        seed: Vec<f32>,
+    ) -> (
+        Arc<InMemorySemanticMemoryStore>,
+        crate::retrieval::memory_payload::SemanticMemory,
+    ) {
+        let store: Arc<InMemorySemanticMemoryStore> = Arc::new(InMemorySemanticMemoryStore::new());
+        let mem = crate::retrieval::memory_payload::SemanticMemory {
+            project_id: "p".into(),
+            bucket: "structured".into(),
+            title: "t".into(),
+            content: "the stored content".into(),
+            anchors: vec![MemoryAnchor {
+                path: "src/lib.rs".into(),
+            }],
+            created_at: "2026-01-01".into(),
+            updated_at: "2026-01-01".into(),
+        };
+        store.upsert(&mem, &seed).await.unwrap();
+        (store, mem)
+    }
+
+    /// The vector is replaced; the identity and payload are not. Asserted through
+    /// `search` rather than by reaching into the store: a query equal to the fresh
+    /// vector must score ~1.0, and one equal to the (orthogonal) seed ~0.0.
+    /// docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    #[tokio::test]
+    async fn reembed_in_place_replaces_the_vector_and_preserves_everything_else() {
+        let seed = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let fresh = vec![0.0_f32, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let (store, mem) = seeded_store(seed.clone()).await;
+
+        let report = reembed_memories_in_place(
+            store.as_ref(),
+            &FixedEmbedder { vec: fresh.clone() },
+            "p",
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.read, 1);
+        assert_eq!(report.upserted, 1);
+        assert_eq!(report.skipped, 0);
+        assert_eq!(report.anchors_attached, 1, "anchors carried through");
+
+        let all = store.list("p", MemoryFilter::default()).await.unwrap();
+        assert_eq!(all.len(), 1, "in place: must not duplicate the row");
+        assert_eq!(all[0].id, mem.point_id(), "same deterministic point id");
+        assert_eq!(all[0].memory.content, "the stored content");
+        assert_eq!(all[0].memory.anchors.len(), 1);
+        assert_eq!(all[0].memory.created_at, "2026-01-01");
+
+        let by_fresh = store.search("p", &fresh, 1, None).await.unwrap();
+        assert!(
+            by_fresh[0].score.unwrap() > 0.99,
+            "stored vector must now be the fresh one, got score {:?}",
+            by_fresh[0].score
+        );
+        let by_seed = store.search("p", &seed, 1, None).await.unwrap();
+        assert!(
+            by_seed[0].score.unwrap() < 0.01,
+            "the seed vector must no longer be what is stored, got score {:?}",
+            by_seed[0].score
+        );
+    }
+
+    /// A failing embedder must not degrade the corpus: the row keeps the vector it
+    /// had. This is what makes the command safe to run against a live store with a
+    /// possibly-misconfigured embedder.
+    #[tokio::test]
+    async fn reembed_in_place_leaves_the_existing_vector_when_embedding_fails() {
+        let seed = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let (store, _mem) = seeded_store(seed.clone()).await;
+
+        let report = reembed_memories_in_place(store.as_ref(), &ErrEmbedder, "p", false)
+            .await
+            .unwrap();
+        assert_eq!(report.read, 1);
+        assert_eq!(report.upserted, 0);
+        assert_eq!(report.skipped, 1);
+
+        let by_seed = store.search("p", &seed, 1, None).await.unwrap();
+        assert!(
+            by_seed[0].score.unwrap() > 0.99,
+            "the original vector must survive a failed re-embed"
+        );
+    }
+
+    /// Dry run counts without embedding or writing — `ErrEmbedder` would error if
+    /// invoked, so a passing run proves the embedder was never called.
+    #[tokio::test]
+    async fn reembed_in_place_dry_run_neither_embeds_nor_writes() {
+        let seed = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let (store, _mem) = seeded_store(seed.clone()).await;
+
+        let report = reembed_memories_in_place(store.as_ref(), &ErrEmbedder, "p", true)
+            .await
+            .unwrap();
+        assert_eq!(report.read, 1);
+        assert_eq!(report.upserted, 1, "counted");
+        assert_eq!(report.skipped, 0);
+        assert!(report.dry_run);
+
+        let by_seed = store.search("p", &seed, 1, None).await.unwrap();
+        assert!(
+            by_seed[0].score.unwrap() > 0.99,
+            "dry run must not have rewritten the vector"
+        );
+    }
+
+    /// Only the requested project is touched — the command is per-project, and a
+    /// shared collection holds several.
+    #[tokio::test]
+    async fn reembed_in_place_ignores_other_projects() {
+        let seed = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let fresh = vec![0.0_f32, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let (store, mem) = seeded_store(seed.clone()).await;
+
+        let mut other = mem.clone();
+        other.project_id = "other".into();
+        store.upsert(&other, &seed).await.unwrap();
+
+        let report =
+            reembed_memories_in_place(store.as_ref(), &FixedEmbedder { vec: fresh }, "p", false)
+                .await
+                .unwrap();
+        assert_eq!(report.read, 1, "only project p's memory is in scope");
+
+        let other_hits = store.search("other", &seed, 1, None).await.unwrap();
+        assert!(
+            other_hits[0].score.unwrap() > 0.99,
+            "the other project's vector must be untouched"
+        );
+    }
+
+    /// An empty store is a clean no-op, not an error — matches
+    /// `missing_db_returns_empty_report` for the legacy path.
+    #[tokio::test]
+    async fn reembed_in_place_on_an_empty_store_is_a_no_op() {
+        let store = InMemorySemanticMemoryStore::new();
+        let report = reembed_memories_in_place(&store, &ErrEmbedder, "p", false)
+            .await
+            .unwrap();
+        assert_eq!(report, MigrationReport::default());
     }
 }
