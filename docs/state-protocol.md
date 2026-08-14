@@ -53,16 +53,16 @@ Primary writer: codescout server. Resides at `<project_root>/.codescout/`.
 | Path | Writer | Readers | Purpose / Schema |
 |---|---|---|---|
 | `project.toml` | codescout `onboarding` tool, codescout config writes | codescout server (config load), companion `detect-tools.sh` (gates onboarding-prompt injection) | TOML config: `[project]` (name, languages), `[lsp.<lang>]` (mux toggle), `[security]` (shell_command_mode, indexing_enabled), `[memory]` (drift_detection_enabled). Schema versioned implicitly by codescout MSRV; field additions are minor. |
-| `system-prompt.md` | codescout `onboarding` tool (regenerated when `ONBOARDING_VERSION` bumps) | companion `session-start.sh` (injects into Claude Code session) | Markdown. Free-form. Generated from `src/prompts/onboarding_prompt.md` + `builders.rs::build_system_prompt_draft`. Companion treats as opaque. |
-| `memories/<topic>.md` | codescout `memory(action="write")` | codescout `memory(action="read"|"list")`, companion `session-start.sh` (lists names only — content not parsed) | Markdown with optional frontmatter for anchors. Topic path = filename. |
+| `system-prompt.md` | codescout `onboarding` tool (regenerated when `ONBOARDING_VERSION` bumps) | companion `session-start.mjs` (injects into Claude Code session) | Markdown. Free-form. Generated from `src/prompts/onboarding_prompt.md` + `builders.rs::build_system_prompt_draft`. Companion treats as opaque. |
+| `memories/<topic>.md` | codescout `memory(action="write")` | codescout `memory(action="read"|"list")`, companion `session-start.mjs` (lists names only — content not parsed) | Markdown with optional frontmatter for anchors. Topic path = filename. |
 | `private-memories/<topic>.md` | codescout `memory(action="write", private=true)` | codescout only | Same as memories/, but auto-gitignored. Companion does not list. |
 | `anchors/<topic>.toml` | codescout memory anchor system | codescout staleness check | TOML sidecars for memory↔source-file anchors. Internal to codescout. |
-| `embeddings.db` (legacy) | codescout legacy index | codescout legacy retrieval, companion `session-start.sh` (queries `meta.last_indexed_commit` and `drift_report` view) | sqlite-vec virtual tables. **Being removed** — see `docs/trackers/2026-05-07-legacy-retrieval-removal.md` (L-01..L-15). Companion's drift query depends on `meta` table and `drift_report` view; when the legacy index goes, companion drift detection must move to the new stack or be removed. |
+| `embeddings.db` (legacy) | codescout legacy index | codescout legacy retrieval, companion `session-start.mjs` (queries `meta.last_indexed_commit` and `drift_report` view) | sqlite-vec virtual tables. **Being removed** — see `docs/trackers/2026-05-07-legacy-retrieval-removal.md` (L-01..L-15). Companion's drift query depends on `meta` table and `drift_report` view; when the legacy index goes, companion drift detection must move to the new stack or be removed. |
 | `embeddings/project.db` | codescout `sync_project` binary, retrieval stack writers | codescout `semantic_search` | sqlite-format Qdrant per-project store (post-Phase 6). |
 | `index-state.json` | codescout `sync_project` / `sync_worktree` completion, both via `index_state::write_index_state_with_dirty` — only `sync_worktree` (`src/retrieval/sync.rs`) ever populates `dirty_paths`; `sync_project` preserves whatever it finds but never adds to it | codescout `index(action="status")` (`git_sync` envelope); **companion** `session-start.mjs` (reads `last_indexed_commit` today) | JSON `{ last_indexed_commit, last_indexed_at (RFC3339), schema_version, dirty_paths }` (v2 — see the schema section below). `last_indexed_commit` = full git HEAD oid at sync time (`""` for non-git roots). Qdrant-era replacement for the legacy `meta.last_indexed_commit` reindex trigger — lets an out-of-process consumer detect external HEAD moves (checkout/pull/HEAD change) via a single file read, no internal-DB access. |
 | `embeddings/lib/<name>.db` | codescout library indexing | codescout library-scoped search | Per-registered-library embeddings. |
 | `libraries.json` | codescout `library(action="register")` | codescout library scope resolution | JSON array of registered libraries with paths and versions. |
-| `cc_session_id` | **companion** `session-start.sh` | codescout `usage` tracking | Plain-text Claude Code session UUID. **Cross-plugin write into a codescout-owned directory** — only companion writes here. Codescout reads it during usage.db correlation. |
+| `cc_session_id` | **companion** `session-start.mjs` | codescout `usage` tracking | Plain-text Claude Code session UUID. **Cross-plugin write into a codescout-owned directory** — only companion writes here. Codescout reads it during usage.db correlation. |
 | `tantivy/` (legacy) | codescout legacy keyword index | codescout legacy retrieval | **Being removed** with `embeddings.db`. |
 
 ### `.codescout/embeddings.db` schema (companion's read surface)
@@ -136,9 +136,9 @@ Resides at `<project_root>/.buddy/`. Buddy is sole writer; nothing else writes h
 | `<sid>/verdicts.json` | buddy plan-judge worker | buddy `pre-tool-use.sh`, statusline | JSON judge findings: `{verdict, severity, evidence, correction, affected_files}`. Refreshed every N tool calls. |
 | `<sid>/cs_verdicts.json` | buddy cs-judge worker | buddy statusline (badge), `/buddy:check` | JSON, codescout-specific judge findings. Same shape as `verdicts.json`. |
 | `<sid>/active_plan.json` | `/buddy:summon`, plan-detection logic | buddy hooks, judge | JSON: active plan metadata for judge prompt assembly. |
-| `.current_session_id` | buddy `session-start.sh` | slash commands (`resolve_session_id_for_command`) | Plain-text current session UUID. Resolved with PPID fallback. |
-| `by-ppid/<PPID>/session_id` | buddy `session-start.sh` | slash commands (PPID-resolved fallback) | Plain-text session UUID indexed by parent PID. GC'd when stored `started_at` doesn't match `ps -o lstart`. |
-| `by-ppid/<PPID>/started_at` | buddy `session-start.sh` | session-start GC | Plain-text process start time (output of `ps -o lstart`). |
+| `.current_session_id` | buddy `run.mjs session-start` | slash commands (`resolve_session_id_for_command`) | Plain-text current session UUID. Resolved with PPID fallback. |
+| `by-ppid/<PPID>/session_id` | buddy `run.mjs session-start` | slash commands (PPID-resolved fallback) | Plain-text session UUID indexed by parent PID. GC'd when stored `started_at` doesn't match `ps -o lstart`. |
+| `by-ppid/<PPID>/started_at` | buddy `run.mjs session-start` | session-start GC | Plain-text process start time (output of `ps -o lstart`). |
 | `memory/INDEX.md` | buddy memory protocol | buddy memory dedup, future-summon load | Markdown index per memory protocol. Sole catalog of project memories. |
 | `memory/<specialist>/<slug>.md` | buddy `/buddy:remember`, autonomous mid-turn writes | buddy summon (loads when specialist is summoned) | Markdown with frontmatter `{specialist, scope: project, slug, created, updated, tags}`. Body contains lesson + reasoning. |
 | `memory/common/<slug>.md` | same | loaded for every summoned specialist | Same shape as per-specialist; stored under `common/` for cross-buddy lessons. |
@@ -156,7 +156,7 @@ namespace. Codescout-companion does not touch this directory.
 | `memory/INDEX.md` | buddy memory protocol | buddy memory dedup, future-summon load | Same shape as project INDEX. |
 | `memory/<specialist>/<slug>.md` | buddy `/buddy:remember --global`, autonomous writes | buddy summon | Same shape as project memories; mirrored to `~/.claude-sdd/buddy/memory/<specialist>/<slug>.md` if multi-instance configured (`buddy/data/instances.json`). |
 | `memory/common/<slug>.md` | same | loaded for every summoned specialist | Same. |
-| ~~`state.json`~~ | (deprecated) | — | **Removed.** `session-start.sh` performs one-shot deletion if found. Was per-user state before per-session refactor. |
+| ~~`state.json`~~ | (deprecated) | — | **Removed.** `run.mjs session-start` performs one-shot deletion if found. Was per-user state before per-session refactor. |
 
 **Mirror discipline:** Global writes call `mirror_global_write()` from `scripts/memory.py`.
 INDEX regeneration on the mirror is lazy — performed when the mirror instance next summons
@@ -220,7 +220,7 @@ These exist today and **must be retired** as part of tracker item I-10. They are
 here so I-10 has an authoritative checklist:
 
 - `.code-explorer/` directory (legacy of `.codescout/` rename)
-- `~/.claude/buddy/state.json` (legacy global state — `session-start.sh` deletes on first run)
+- `~/.claude/buddy/state.json` (legacy global state — `run.mjs session-start` deletes on first run)
 - Routing config name fallbacks: `codescout-companion.json` (canonical) →
   `codescout-routing.json` → `code-explorer-routing.json` (legacy)
 - Hard-coded `embeddings.db` schema reads (companion drift detection) — moves to new

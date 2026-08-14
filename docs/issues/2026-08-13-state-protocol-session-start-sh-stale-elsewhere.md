@@ -1,12 +1,13 @@
 ---
 id: db5fe93344e0371b
 kind: bug
-status: open
+status: fixed
 title: docs/state-protocol.md still names companion's session-start hook `.sh` in four other rows (actual file is `.mjs`)
 tags:
 - docs
 - state-protocol
 - drift
+closed: 2026-08-14
 opened: 2026-08-13
 owner: marius
 related: []
@@ -94,33 +95,57 @@ today (not "planned").
 
 ## Fix
 
-Not implemented — out of scope for the docs-only task that found it (that
-task's explicit mandate was the single `index-state.json` row plus a search
-for a third *statement of the schema*, not a full `.sh`/`.mjs` sweep of the
-document). Likely belongs with the sibling "retire the contradiction" task-8
-slice of the same plan, which already touches `docs/architecture/companion-plugin.md`
-for an identical `.sh` → `.mjs` correction.
+Fixed 2026-08-14 on `experiments`. All **nine** occurrences of `session-start.sh`
+in `docs/state-protocol.md` corrected in one atomic `edit_markdown` batch —
+verified afterwards by `grep 'session-start\.(sh|mjs)|run\.mjs session-start'`
+returning 10 hits with **zero** `.sh` remaining (the 10th is line 62, already
+correct before this fix).
 
+Two classes, two different corrections:
+
+| Rows | Section | Was | Now |
+|---|---|---|---|
+| 56, 57, 60, 65 | `## .codescout/` | companion `session-start.sh` | companion `session-start.mjs` |
+| 139, 140, 141 | `## .buddy/` | buddy `session-start.sh` | buddy `run.mjs session-start` |
+| 159 | `## ~/.claude/buddy/` | `session-start.sh` performs one-shot deletion | `run.mjs session-start` performs … |
+| 223 | `## Backwards-compat fossils` | `session-start.sh` deletes on first run | `run.mjs session-start` deletes … |
+
+**This bug undercounted its own scope by five rows.** The title says "four other
+rows" and the Resume actively warned the fixer *off* the buddy rows, calling
+buddy's hook "a different, legitimately-`.sh` component." That premise is false.
+Measured 2026-08-14, `ls claude-plugins/buddy/hooks/` → `hook_dispatch.py`,
+`hooks.json`, `judge.env`, `run.mjs` — there is no `session-start.sh` anywhere in
+buddy. `buddy/hooks/hooks.json:4` dispatches
+`node run.mjs session-start`, so the five buddy rows were stale in a *different*
+way than the companion rows, not correct as the file claimed.
+
+The original filing never ran `ls` on either hooks directory — it inferred
+buddy's shape from the companion migration note in the task-8 brief. Hypothesis 1
+was left `deferred` for the companion rows; the same uncertainty applied to the
+buddy rows but was written down as a settled fact instead.
 ## Tests added
 
-N/A — not fixed yet.
+None. Doc-only content fix with no code surface to assert on — the file backs no
+`include_str!` constant and no test reads it.
 
+The real regression guard for this bug class already exists and is itself an open
+bug: `librarian(action="audit_doc_refs")` lints markdown for stale code refs, but
+per `docs/issues/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md`
+its file set has gaps. A stale *cross-repo* filename like this one is out of
+reach for that lint regardless — the referenced file lives in `claude-plugins`,
+which the audit does not traverse. That is a coverage limit worth knowing, not a
+blocker for closing this bug.
 ## Workarounds
 
 None needed — informational only, does not block any tool.
 
 ## Resume
 
-Sweep `docs/state-protocol.md` for every remaining `session-start.sh`
-reference to the companion component (not buddy's own `session-start.sh`,
-which is a different, legitimately-`.sh` component — see the `.buddy/` table
-lower in the same file) and confirm against the current
-`codescout-companion/hooks/` file list before editing.
-
+N/A — fixed and verified. Do not re-open to "check the buddy rows"; they were
+part of this fix.
 ## References
 
 - `docs/state-protocol.md`
 - `codescout-companion/hooks/session-start.mjs` (claude-plugins repo)
 - `.superpowers/sdd/2026-08-13-worktree-semantic-search/task-8-brief.md` (sibling slice, hook/companion-plugin.md corrections)
 - Found during: `.superpowers/sdd/2026-08-13-worktree-semantic-search/task-8-report.md`
-
