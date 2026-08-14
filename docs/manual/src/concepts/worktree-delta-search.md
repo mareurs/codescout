@@ -49,9 +49,19 @@ point-in-time ref.
 (`sync_worktree` in `src/retrieval/sync.rs`) — `semantic_search` only reads.
 It reuses main's vectors for byte-identical files and embeds only the files
 `dirty_paths` marked dirty, storing them under a delta project id built as
-`{main_project_id}@{worktree_dir}` (`delta_project_id`, `src/retrieval/sync.rs`).
+`{main_project_id}@{worktree_name}` (`delta_project_id`, `src/retrieval/sync.rs`).
 The `@` separator keeps the id distinct from `chunk_id`'s own `:`-joined
 format and from library ids (`lib:<name>`).
+
+`{worktree_name}` is **git's own worktree name** — the `<name>` in the
+`gitdir: <main>/.git/worktrees/<name>` pointer that `git worktree add` writes
+into the worktree's `.git` file — not the checkout directory's basename. Git
+keeps that name unique per repository; a basename is not unique, so `/a/wt`
+and `/b/wt` of the same repo would otherwise share one delta index, and the
+second worktree's sync would prune the first's chunks and then serve them
+from the wrong branch with no warning. The basename is used only as a
+fallback, when there is no linked-worktree pointer to read
+(`worktree_key`, `src/retrieval/sync.rs`).
 
 ## The merged query
 
@@ -117,9 +127,6 @@ list every result carries.
 
 - **No automatic trigger.** Nothing runs `index(action="build")` for you on
   entering a worktree — see *Can I use this today?* above.
-- **Single collection, basename-keyed.** `worktree_dir` must be a directory
-  basename, not a path; two worktrees sharing a basename under different
-  parents are not distinguished.
 - **Read-only from `semantic_search`.** Only `index` produces a delta —
   calling `semantic_search` never writes one, even implicitly.
 

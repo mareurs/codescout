@@ -189,6 +189,18 @@ pub struct WorktreeInfo {
     /// `gitdir: <main>/.git/worktrees/<name>`; we strip the `/worktrees/<name>`
     /// suffix and a trailing `/.git` to recover `<main>`).
     pub main_repo: Option<std::path::PathBuf>,
+    /// The worktree's **git name** — the `<name>` in
+    /// `gitdir: <main>/.git/worktrees/<name>`. `None` only when the pointer
+    /// does not have that shape.
+    ///
+    /// Git guarantees this is unique per repository, which the worktree's
+    /// directory basename is not: `/a/wt` and `/b/wt` of the same repo share a
+    /// basename but never share a git name. That distinction is load-bearing
+    /// for `crate::retrieval::sync::worktree_ids`, which keys the delta index
+    /// on it — two worktrees collapsing onto one delta project id means one
+    /// worktree's sync prunes the other's chunks and then serves them from the
+    /// wrong branch, classified `Healthy` with no warning.
+    pub name: Option<String>,
 }
 
 /// Detect whether `root` is a git worktree and return basic context if so.
@@ -213,6 +225,14 @@ pub fn detect_worktree_info(root: &std::path::Path) -> Option<WorktreeInfo> {
         .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))?;
     let gitdir = std::path::PathBuf::from(gitdir_line);
 
+    // The worktree's git name is the last segment of that same path. Git keeps
+    // it unique per repo, so it is the only identifier here that two sibling
+    // worktrees cannot share — see `WorktreeInfo::name`.
+    let name = gitdir
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty());
+
     // Recover the main repo path: gitdir typically looks like
     // `<main_repo>/.git/worktrees/<name>`. Strip `<name>` then `worktrees`
     // then `.git`. Be tolerant — if the shape doesn't match, we still
@@ -233,7 +253,11 @@ pub fn detect_worktree_info(root: &std::path::Path) -> Option<WorktreeInfo> {
                 .map(|b| b.trim().to_string())
         });
 
-    Some(WorktreeInfo { branch, main_repo })
+    Some(WorktreeInfo {
+        branch,
+        main_repo,
+        name,
+    })
 }
 
 /// Dynamic project status used to build server instructions.
@@ -736,6 +760,7 @@ mod tests {
             worktree: Some(WorktreeInfo {
                 branch: Some("weekly-pattern".into()),
                 main_repo: Some(std::path::PathBuf::from("/home/user/repo")),
+                name: Some("weekly-pattern".into()),
             }),
         };
         let result = build_server_instructions(Some(&status));
@@ -761,6 +786,7 @@ mod tests {
             worktree: Some(WorktreeInfo {
                 branch: None,
                 main_repo: Some(std::path::PathBuf::from("/main")),
+                name: Some("wt".into()),
             }),
         };
         let result = build_server_instructions(Some(&status));
@@ -793,6 +819,11 @@ mod tests {
         let info = detect_worktree_info(&wt).expect("worktree should be detected");
         assert_eq!(info.branch.as_deref(), Some("feat"));
         assert_eq!(info.main_repo.as_deref(), Some(main.as_path()));
+        // The git worktree name is the last gitdir segment -- `feat` here,
+        // deliberately DIFFERENT from the checkout directory's basename
+        // (`wt`), so reading `name` off the wrong end of the path fails.
+        // `retrieval::sync::worktree_key` keys the delta index on this.
+        assert_eq!(info.name.as_deref(), Some("feat"));
     }
 
     #[test]

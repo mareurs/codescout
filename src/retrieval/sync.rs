@@ -80,10 +80,16 @@ pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String
 
 /// Project id for a worktree's delta index: the changed files only.
 ///
-/// `worktree_dir` MUST be a basename (e.g. `"wt"`), not a path — Task 6 writes
-/// chunks under this id and Task 7 queries them; if either passes a path where
-/// the other passes a basename, the two disagree on the id and the delta
+/// `worktree_dir` MUST be a single segment (e.g. `"wt"`), not a path — Task 6
+/// writes chunks under this id and Task 7 queries them; if either passes a path
+/// where the other passes a segment, the two disagree on the id and the delta
 /// becomes invisible with no error (main silently serves stale chunks).
+///
+/// It must also be a segment that is **unique per repository**, which a
+/// directory basename is not. Both callers derive it through [`worktree_key`],
+/// which returns git's own worktree name and falls back to the basename only
+/// when there is no linked-worktree pointer to read — see that function for
+/// what keying on the basename cost.
 ///
 /// `@` rather than `:` deliberately — [`chunk_id`] joins on `:`, and the
 /// `delete_chunks` comment at `sqlite_code_store.rs:234-238` (pinned by the
@@ -124,17 +130,43 @@ pub fn delta_project_id(main_project_id: &str, worktree_dir: &str) -> String {
     format!("{main_project_id}@{worktree_dir}")
 }
 
-/// The basename of a worktree root, with an `"worktree"` fallback when the
-/// path has none (e.g. `/`). MUST be the basename, never the full path -- see
-/// [`delta_project_id`]'s doc comment for why a divergence here makes a delta
-/// invisible with no error. This is the ONE place that decision is made;
-/// every caller that needs a worktree's basename (`sync_worktree` and
-/// [`worktree_ids`]) goes through this function so a future edit cannot
-/// change the rule in one place and miss another.
-fn worktree_basename(worktree_root: &Path) -> String {
-    worktree_root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
+/// The key a worktree's delta project id is built on.
+///
+/// **Git's worktree name first, the directory basename only as a fallback.**
+///
+/// The basename alone is not unique: `/a/wt` and `/b/wt` can be two different
+/// worktrees of the same repository, and keying on `file_name()` collapsed
+/// them onto one `delta_project_id`. The consequence is the worst of the known
+/// double-serves and is entirely silent -- B's sync deletes A's chunks via the
+/// prune (they are not in B's local id set), then A's query serves main's
+/// `fileB` *and* B's `fileB`: the same path twice, one copy from another
+/// branch. `classify_worktree_index_state` reports `Healthy`, no warning and no
+/// drift note fire, and A's own `fileA` is served by nothing at all.
+///
+/// [`crate::prompts::detect_worktree_info`] already parses
+/// `gitdir: <main>/.git/worktrees/<NAME>`, and git guarantees `<NAME>` is
+/// unique per repository, so it is the correct key. The basename fallback
+/// covers a root that is not a linked worktree (a plain directory, or a `.git`
+/// pointer whose shape does not parse) -- there is no git name to use there,
+/// and the previous behaviour is what remains.
+///
+/// This is the ONE place the decision is made. Both sides go through it:
+/// `sync_worktree` (producer) and [`worktree_ids`] (consumer). A divergence
+/// makes the delta invisible with no error -- see [`delta_project_id`].
+///
+/// Costs one small `.git` read per call. `semantic_search` calls
+/// `detect_worktree_info` itself moments earlier and this repeats that read
+/// rather than threading the value through, deliberately: a parameter here is
+/// one more thing the two sides could pass differently, which is exactly the
+/// failure mode above.
+fn worktree_key(worktree_root: &Path) -> String {
+    crate::prompts::detect_worktree_info(worktree_root)
+        .and_then(|info| info.name)
+        .or_else(|| {
+            worktree_root
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
         .unwrap_or_else(|| "worktree".to_string())
 }
 
@@ -143,7 +175,8 @@ fn worktree_basename(worktree_root: &Path) -> String {
 /// [`crate::config::project::ProjectConfig::load_or_default`], which already
 /// falls back to `main_repo`'s own basename when no `project.toml` exists --
 /// see that function's doc comment) and `worktree_root` (via
-/// [`worktree_basename`]).
+/// [`worktree_key`], which prefers git's own unique worktree name over the
+/// directory basename).
 ///
 /// This is the single derivation both the producer (`index`'s `sync_worktree`
 /// call site) and the consumer (`semantic_search`'s worktree query branch)
@@ -151,7 +184,7 @@ fn worktree_basename(worktree_root: &Path) -> String {
 /// (`sync.rs`, `index.rs`, `semantic_search.rs`) into one. `sync_worktree`
 /// itself cannot call this directly (it receives an already-resolved
 /// `main_project_id: &str`, not a `main_repo: &Path`), so it shares only the
-/// [`worktree_basename`] half.
+/// [`worktree_key`] half.
 pub fn worktree_ids(main_repo: &Path, worktree_root: &Path) -> (String, String) {
     let main_project_id = crate::config::project::ProjectConfig::load_or_default(main_repo)
         .map(|c| c.project.name)
@@ -161,7 +194,7 @@ pub fn worktree_ids(main_repo: &Path, worktree_root: &Path) -> (String, String) 
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "main".to_string())
         });
-    let wt_dir = worktree_basename(worktree_root);
+    let wt_dir = worktree_key(worktree_root);
     let delta_id = delta_project_id(&main_project_id, &wt_dir);
     (main_project_id, delta_id)
 }
@@ -449,12 +482,13 @@ pub async fn sync_worktree(
 
     let started = std::time::Instant::now();
 
-    // `worktree_dir` MUST be a basename, never a path -- Task 7's query path
-    // computes the same id from the same basename, and if the two disagree the
-    // delta becomes invisible with no error (see `delta_project_id`'s doc
-    // comment). Shares `worktree_basename` with `worktree_ids` so this rule
-    // lives in exactly one place.
-    let wt_dir = worktree_basename(worktree_root);
+    // `worktree_dir` MUST be a single segment, never a path, and MUST be the
+    // same segment the query path derives -- if the two disagree the delta
+    // becomes invisible with no error (see `delta_project_id`'s doc comment).
+    // Shares `worktree_key` with `worktree_ids` so this rule lives in exactly
+    // one place; that function is also what makes the key git's unique
+    // worktree name rather than the ambiguous directory basename.
+    let wt_dir = worktree_key(worktree_root);
     let delta_id = delta_project_id(main_project_id, &wt_dir);
 
     // Serialize delta syncs for THIS worktree -- see the doc comment above for
@@ -797,6 +831,9 @@ mod tests {
 
     #[test]
     fn worktree_ids_uses_the_worktree_basename_not_the_full_path() {
+        // The FALLBACK arm of `worktree_key`: a plain directory with no `.git`
+        // pointer has no git worktree name, so the basename is what remains.
+        //
         // Regression target: `worktree_root.file_name()` mutated to
         // `worktree_root.to_string_lossy()` compiles and would smuggle the
         // FULL PATH into the delta id -- exactly the hazard `delta_project_id`'s
@@ -823,6 +860,65 @@ mod tests {
         assert!(
             !delta_id.contains("nested") && !delta_id.contains("deeper"),
             "delta id must not leak any parent path segment: {delta_id}"
+        );
+    }
+
+    /// I1: two worktrees of the SAME repo sharing a directory basename under
+    /// different parents must not collapse onto one delta project id.
+    ///
+    /// Keying on `file_name()` made `/a/wt` and `/b/wt` the same delta, and the
+    /// failure is silent and destructive rather than merely confusing: B's sync
+    /// prunes A's chunks (they are absent from B's local id set), after which
+    /// A's query serves main's `fileB` *and* B's `fileB` -- the same path twice,
+    /// one copy from another branch -- while A's own `fileA` is served by
+    /// nothing. `classify_worktree_index_state` calls that `Healthy`; no
+    /// warning, no drift note.
+    ///
+    /// Git's worktree name (`gitdir: <main>/.git/worktrees/<NAME>`) is unique
+    /// per repository, so it is what the key is built on. Both the producer
+    /// (`sync_worktree`) and the consumer (`worktree_ids`) go through
+    /// `worktree_key`, asserted directly here alongside the ids so the shared
+    /// derivation is pinned and not merely implied.
+    #[test]
+    fn worktree_ids_distinguishes_two_worktrees_that_share_a_basename() {
+        let dir = tempfile::tempdir().unwrap();
+        let main_repo = dir.path().join("main");
+        std::fs::create_dir_all(&main_repo).unwrap();
+
+        // Two linked worktrees of `main`, git-named `alpha` and `beta`, whose
+        // checkout directories are BOTH called `wt`.
+        let mut roots = Vec::new();
+        for (parent, git_name) in [("a", "alpha"), ("b", "beta")] {
+            let meta = main_repo.join(".git").join("worktrees").join(git_name);
+            std::fs::create_dir_all(&meta).unwrap();
+            std::fs::write(meta.join("HEAD"), format!("ref: refs/heads/{git_name}\n")).unwrap();
+
+            let root = dir.path().join(parent).join("wt");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join(".git"), format!("gitdir: {}\n", meta.display())).unwrap();
+            roots.push(root);
+        }
+
+        assert_eq!(
+            roots[0].file_name(),
+            roots[1].file_name(),
+            "fixture precondition: the two worktrees must share a basename"
+        );
+
+        // The shared derivation both sides go through.
+        assert_eq!(worktree_key(&roots[0]), "alpha");
+        assert_eq!(worktree_key(&roots[1]), "beta");
+
+        let (main_a, delta_a) = worktree_ids(&main_repo, &roots[0]);
+        let (main_b, delta_b) = worktree_ids(&main_repo, &roots[1]);
+
+        assert_eq!(main_a, "main");
+        assert_eq!(main_b, "main");
+        assert_eq!(delta_a, "main@alpha");
+        assert_eq!(delta_b, "main@beta");
+        assert_ne!(
+            delta_a, delta_b,
+            "two worktrees of one repo must never share a delta project id"
         );
     }
 
@@ -1418,8 +1514,8 @@ mod tests {
         };
         // A dir of its own, not `tmp`: the lock must not land inside the tree
         // being synced, and each test needs its own lock namespace so parallel
-        // tests using the same "codescout@wt" delta id don't contend with each
-        // other or with the real per-user runtime dir.
+        // tests using the same delta id don't contend with each other or with
+        // the real per-user runtime dir.
         let lock_dir = tempfile::tempdir().unwrap();
 
         sync_worktree(
@@ -1440,9 +1536,15 @@ mod tests {
             !upserted.is_empty(),
             "the changed file must have produced at least one upsert"
         );
+        // `codescout@feat`, not `codescout@wt`: this fixture's checkout
+        // directory is `wt` while its git worktree name is `feat`, and the
+        // delta is keyed on the git name (I1 -- see `worktree_key`). The
+        // divergence is deliberate; it is what makes this assertion notice if
+        // the key ever falls back to the basename.
         assert!(
-            upserted.iter().all(|p| p == "codescout@wt"),
-            "a worktree sync must never write under main's project_id, got {upserted:?}"
+            upserted.iter().all(|p| p == "codescout@feat"),
+            "a worktree sync must write under the git-name-keyed delta id and \
+             never under main's project_id, got {upserted:?}"
         );
         let files = store.upserted_file_paths();
         assert!(files.contains(&"src/changed.rs".to_string()));
