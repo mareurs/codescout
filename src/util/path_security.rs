@@ -576,10 +576,13 @@ fn shell_normalized(command: &str) -> Option<String> {
 /// exactly the model these helpers used before conversion, so anything the old
 /// model caught, the new one still catches.
 ///
-/// That path is not hypothetical. [`il3_offending_lead`] splits a pipeline on a
-/// bare `|`, so [`stage_trims`] is routinely handed fragments with unbalanced
-/// quotes — `grep 'a|b' f` yields the stage `b' f`. Those fail to tokenize by
-/// construction and land in the fallback on every call.
+/// The fallback is still reachable, but no longer *routinely* so. Until 2026-08-14
+/// [`il3_offending_lead`] split a pipeline on a bare `|`, which handed
+/// [`stage_trims`] fragments with unbalanced quotes by construction — `grep 'a|b' f`
+/// yielded the stage `b' f`. Both splitters are quote-aware now, so unbalanced
+/// fragments arrive only when the *user* supplied an unclosed quote, which is the
+/// case the fallback exists for. Do not delete it on the strength of that: an
+/// unclosed quote must still never let a check be skipped.
 ///
 /// **Unlike [`shell_normalized`], this REPLACES the old token source rather than
 /// unioning with it.** The union argument that makes `is_dangerous_command` safe
@@ -703,29 +706,11 @@ fn strip_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
 /// `a; b` — so a chain that merely *starts* with an unbounded producer is blocked
 /// because some later, unrelated segment happens to pipe into a trimmer. A single
 /// `|` is a pipe and stays inside its segment; `||` is a boundary.
-fn pipeline_segments(command: &str) -> Vec<&str> {
-    let bytes = command.as_bytes();
-    let mut segments = Vec::new();
-    let mut start = 0usize;
-    let mut i = 0usize;
-    while i < bytes.len() {
-        // `;`, `&&`, `||` separate commands. `2>&1` must not read as `&&`, and a
-        // lone `|` must not read as `||` — both are handled by the lookahead.
-        let width = match bytes[i] {
-            b';' => 1,
-            b'&' if bytes.get(i + 1) == Some(&b'&') => 2,
-            b'|' if bytes.get(i + 1) == Some(&b'|') => 2,
-            _ => {
-                i += 1;
-                continue;
-            }
-        };
-        segments.push(&command[start..i]);
-        i += width;
-        start = i;
-    }
-    segments.push(&command[start..]);
-    segments
+fn pipeline_segments(command: &str) -> Vec<String> {
+    // `&&` and `||` before `;` is irrelevant here (disjoint first bytes), but the
+    // ordering contract of `split_outside_quotes` is why multi-char separators are
+    // listed first. `2>&1` does not read as `&&`: at the `&`, the remainder is `&1`.
+    split_outside_quotes(command, &["&&", "||", ";"])
 }
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
@@ -776,8 +761,8 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
     // `;`-chain whose first word happened to be `git`.
     let stripped = strip_heredoc_bodies(command);
     let lead = pipeline_segments(&stripped)
-        .into_iter()
-        .find_map(il3_offending_lead)?
+        .iter()
+        .find_map(|seg| il3_offending_lead(seg))?
         .trim()
         .to_string();
 
@@ -796,27 +781,37 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
 }
 
 /// The offending left-hand side of a single command segment, if it violates IL3.
-fn il3_offending_lead(segment: &str) -> Option<&str> {
+fn il3_offending_lead(segment: &str) -> Option<String> {
     static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let buf_re = IL3_BUFFER_REF.get_or_init(|| {
         Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("IL3_BUFFER_REF regex compiles")
     });
 
-    let mut stages = segment.split('|');
-    let pre_pipe = stages.next().unwrap_or("");
+    // Quote-aware. A `|` inside a quoted argument is data, not a pipe, and splitting
+    // on it fabricates stages the shell will never create — see
+    // `il3_allows_a_quoted_pipe_inside_an_argument`.
+    //
+    // Only `|` is listed, and that is safe *because* `pipeline_segments` already
+    // consumed every unquoted `||`. A `||` that survives to here is inside quotes, so
+    // `split_outside_quotes` correctly leaves it alone. The invariant is pinned by
+    // `il3_does_not_treat_the_rhs_of_a_logical_or_as_a_pipe_stage` rather than left as
+    // a comment, because it is held by a caller.
+    let stages = split_outside_quotes(segment, &["|"]);
+    let mut stages = stages.into_iter();
+    let pre_pipe = stages.next().unwrap_or_default();
 
     // Cheap reject: nothing downstream TRIMS output → never IL3. Pure aggregators
     // (`wc`, counting `grep -c`) collapse output to a summary and do not count.
-    if !stages.any(stage_trims) {
+    if !stages.any(|s| stage_trims(&s)) {
         return None;
     }
 
     // Allow buffer-ops: pre-pipe segment references an already-captured handle.
-    if buf_re.is_match(pre_pipe) {
+    if buf_re.is_match(&pre_pipe) {
         return None;
     }
 
-    if !is_unbounded_lhs(pre_pipe) {
+    if !is_unbounded_lhs(&pre_pipe) {
         return None;
     }
 
@@ -2657,6 +2652,91 @@ EOF"#;
         // ...and `||` is a separator while a single `|` is a pipe.
         assert!(detect_il3_violation("false || cargo test | grep FAILED").is_some());
         assert!(detect_il3_violation("cargo build && ls | head -3").is_none());
+    }
+
+    /// The false positive: a `|` inside a quoted argument is data, not a pipe.
+    ///
+    /// `git log --grep='fix|head foo'` has no pipeline at all — git receives
+    /// `fix|head foo` as one pattern. The naive `split('|')` manufactured the stage
+    /// `head foo'`, whose head token reads as a trimmer, and blocked the command.
+    /// The hint it printed was itself unusable: `run_command("git log --grep='fix")`
+    /// carries an unterminated quote.
+    #[test]
+    fn il3_allows_a_quoted_pipe_inside_an_argument() {
+        assert!(
+            detect_il3_violation("git log --grep='fix|head foo' --oneline -3").is_none(),
+            "a `|` inside a quoted argument is not a pipe"
+        );
+        // Double quotes too, and with the trimmer name adjacent to the quote.
+        assert!(detect_il3_violation(r#"git log --grep="a|head" -3"#).is_none());
+        // A quoted pipe on a command that ALSO has a real pipe must still block --
+        // the fix must not turn quote-awareness into a blanket exemption.
+        assert!(
+            detect_il3_violation("git log --grep='a|head' | head -3").is_some(),
+            "a real pipe still violates even when a quoted one precedes it"
+        );
+    }
+
+    /// Pins the invariant `il3_offending_lead` relies on: it splits only on `|`,
+    /// which is sound only because `pipeline_segments` consumed every unquoted `||`
+    /// first. If that ever stops being true, the RHS of a logical-or starts being
+    /// analysed as a pipe stage and `false || cargo test` becomes a violation.
+    #[test]
+    fn il3_does_not_treat_the_rhs_of_a_logical_or_as_a_pipe_stage() {
+        // `head -3` here runs only if the LHS fails. Nothing is piped into it.
+        assert!(
+            detect_il3_violation("cargo build || head -3 log.txt").is_none(),
+            "`||` is a command separator; its RHS receives no piped output"
+        );
+        // A quoted `||` never reaches the separator logic at all.
+        assert!(detect_il3_violation("git log --grep='a||head' -3").is_none());
+    }
+
+    /// The bypass, and the more serious half of this defect: `pipeline_segments` was
+    /// quote-blind too, so a quoted `;` fabricated segment boundaries that hid a
+    /// genuine pipe from the enforcer.
+    ///
+    /// Measured 2026-08-14 through the live MCP server before the fix:
+    /// `git log --oneline -50 --grep='a;b' | head -3` returned exit_code 0 -- an
+    /// unbounded producer piped to a trimmer, allowed. The split at the quoted `;`
+    /// left the pipe in a segment whose pre-pipe lead was the fragment `b'`, which is
+    /// not an unbounded command, so the check passed.
+    ///
+    /// A false positive costs a retry. This cost the guarantee.
+    #[test]
+    fn il3_still_blocks_when_a_quoted_separator_precedes_a_real_pipe() {
+        assert!(
+            detect_il3_violation("git log --oneline -50 --grep='a;b' | head -3").is_some(),
+            "a quoted `;` must not hide a real pipe from the check"
+        );
+        assert!(
+            detect_il3_violation("cargo test --test 'a&&b' | head -5").is_some(),
+            "a quoted `&&` must not hide a real pipe from the check"
+        );
+        assert!(
+            detect_il3_violation("cargo test --test 'a||b' | grep FAILED").is_some(),
+            "a quoted `||` must not hide a real pipe from the check"
+        );
+    }
+
+    /// Control for the direction of the change. Making the splitters quote-aware
+    /// strictly reduces fabricated stages, so the risk is under-blocking, not
+    /// over-blocking. These are the plain violations that must never stop firing.
+    #[test]
+    fn il3_control_plain_violations_still_fire_after_quote_awareness() {
+        for cmd in [
+            "cargo test | head -50",
+            "git log | grep fix",
+            "rg pattern | head",
+            "npm test | tail -20",
+            "grep -r foo . | head",
+            "find . -name '*.rs' | head",
+        ] {
+            assert!(
+                detect_il3_violation(cmd).is_some(),
+                "genuine violation stopped firing: {cmd}"
+            );
+        }
     }
 
     #[test]

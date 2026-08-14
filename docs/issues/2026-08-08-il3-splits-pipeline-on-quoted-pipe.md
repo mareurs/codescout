@@ -1,18 +1,18 @@
 ---
 id: b86d81f12983f566
 kind: bug
-status: open
+status: fixed
 title: 'BUG: IL3 splits a pipeline on a bare `|`, so a quoted pipe inside an argument reports a violation on a command that has no pipe'
 tags:
 - security
 - run_command
 - il3
 - tokenizer
-closed: null
+closed: 2026-08-14
 opened: 2026-08-08
 owner: marius
 related: []
-severity: medium
+severity: high
 ---
 
 # BUG: IL3 splits a pipeline on a bare `|`, so a quoted pipe inside an argument reports a violation on a command that has no pipe
@@ -123,28 +123,121 @@ yields a clean `head`. That narrowness is why it went unnoticed.
 
 ## Fix
 
-Not implemented. Plan: replace `segment.split('|')` with
-`split_outside_quotes(segment, &["|"])`, matching the sibling. Two things to settle first,
-neither obvious:
+Fixed 2026-08-14 on `experiments`. Both splitters in `src/util/path_security.rs` are
+now quote-aware:
 
-1. **`||` cannot reach this site** — `pipeline_segments` consumed it upstream — but that is
-   an invariant held by a *caller*, so pin it with a test rather than a comment, or pass
-   `&["||", "|"]` and let the ordering rule handle it locally.
-2. **`split_outside_quotes` returns owned `String`s**, while `il3_offending_lead` returns
-   `Option<&str>` borrowed from `segment`. Same signature change `extract_grep_pattern`
-   took; the caller does `.trim().to_string()` immediately, so the borrow buys nothing.
+- `il3_offending_lead`: `segment.split('|')` → `split_outside_quotes(segment, &["|"])`,
+  return type `Option<&str>` → `Option<String>`.
+- `pipeline_segments`: hand-rolled quote-blind byte scan →
+  `split_outside_quotes(command, &["&&", "||", ";"])`, return `Vec<&str>` → `Vec<String>`.
+- `detect_il3_violation`: adapted to owned segments (it already did
+  `.trim().to_string()`, so the borrow bought nothing — as this file predicted).
 
-Direction of the behaviour change: strictly fewer IL3 blocks. A quoted `|` stops
-fabricating stages; nothing new starts being blocked. That is the opposite of the
-`check_source_file_access` conversion, so it needs a control asserting that genuine
-violations still fire — `cargo test | head -50` must stay blocked.
+### This bug's premise was wrong, and the error hid a bypass
 
+*Root cause* said:
+
+> The caller already does the quote-aware thing one level up: `detect_il3_violation`
+> splits on `;` / `&&` / `||` via `pipeline_segments` …
+
+`pipeline_segments` was **not** quote-aware. It scanned raw bytes with zero quote
+tracking — read it and there is no `in_single` / `in_double` state anywhere. Only
+`check_source_file_access`'s use of `split_outside_quotes` was quote-aware. So the
+same defect existed in two functions, and this file recorded one of them as the
+solution to the other.
+
+That mattered, because the second instance is not a false positive. **It is a
+bypass.** Measured 2026-08-14 through the live MCP server, before any change:
+
+```
+run_command("git log --oneline -50 --grep='a;b' | head -3")
+  -> {"exit_code": 0}
+```
+
+An unbounded producer piped to a trimmer — a textbook IL3 violation — **allowed**.
+The quoted `;` split the command into `git log --oneline -50 --grep='a` and
+`b' | head -3`. The second segment's pre-pipe lead is the fragment `b'`, which is not
+an unbounded command, so the check passed and the pipe went through.
+
+Any quoted separator does it: `;`, `&&`, `||`. Prefix a real pipe with one and the
+enforcer stops seeing the pipe.
+
+### What made it visible
+
+The companion hook and the server gate **disagreed**. Running the repro, the
+advisory hook printed `IL3 warning — piped … to a log-trimmer` while the server —
+the actual enforcer — returned `exit_code: 0`. The hook uses a separate
+implementation that happens to handle the quoted `;` correctly. Without that
+disagreement there was no signal at all: a bypass produces a *successful command*,
+which looks exactly like correct behaviour.
+
+### Severity raised low→high
+
+Filed `medium` as a false positive. A false positive costs a retry and prints a
+confusing hint. A false negative costs the guarantee the control exists to provide,
+and is silent by construction.
+
+### The `||` question, settled
+
+*Fix* asked whether to rely on `pipeline_segments` consuming `||` or re-handle it
+locally. **Rely on it** — but the answer only became correct once `pipeline_segments`
+was itself fixed:
+
+- an **unquoted** `||` is consumed upstream, so it never reaches `il3_offending_lead`;
+- a **quoted** `||` reaches it, and `split_outside_quotes(segment, &["|"])` correctly
+  leaves it alone because it is inside quotes.
+
+Passing `&["||", "|"]` would have been *wrong*, not merely redundant: `||` is a
+logical-or, so splitting on it would make the RHS look like a pipe stage and turn
+`cargo build || head -3 log.txt` into a violation. Pinned by test rather than comment,
+since the invariant is held by a caller.
+
+### Cross-repo half — not fixed here
+
+The companion's IL3 implementation has the **false positive** (it warned on
+`git log --grep='fix|head foo'`) though not the bypass. It needs the same
+quote-awareness. Deliberately not touched: `claude-plugins` has another session
+mid-release, and companion ships from a version-keyed cache, so a source edit is
+inert until `1.16.4 → 1.16.5` plus a reinstall across all three profiles. That bump
+is the operator's call and this fix should ride with it.
 ## Tests added
 
-None — not fixed. When fixed, the discriminating test is the reproduction above
-(`git log --grep='fix|head foo'` → `None`) plus a control that `cargo test | head -50`
-still yields a violation.
+Four, in `src/util/path_security.rs`:
 
+- **`il3_allows_a_quoted_pipe_inside_an_argument`** — the filed false positive, in
+  single and double quotes, **plus** the control that a quoted pipe followed by a real
+  one still blocks. Without that third assertion the fix could have been a blanket
+  exemption and the test would not have noticed.
+- **`il3_does_not_treat_the_rhs_of_a_logical_or_as_a_pipe_stage`** — pins the caller-held
+  invariant that makes `&["|"]` sound.
+- **`il3_still_blocks_when_a_quoted_separator_precedes_a_real_pipe`** — the bypass, for
+  all three separators.
+- **`il3_control_plain_violations_still_fire_after_quote_awareness`** — six plain
+  violations. The change strictly reduces fabricated stages, so the risk it introduces
+  is under-blocking; this is the arm that catches over-correction.
+
+**Verified the bypass test can fail.** Reverted `pipeline_segments` to a quote-blind
+`split(';')` and re-ran:
+
+```
+il3_still_blocks_when_a_quoted_separator_precedes_a_real_pipe ... FAILED
+  a quoted `;` must not hide a real pipe from the check
+```
+
+The control test kept passing under that mutation, which is the point of having both:
+one arm catches under-blocking, the other over-blocking, and a mutation that trips only
+one of them is correctly diagnosed.
+
+Gate: **3714 passed / 0 failed / 44 ignored** (3710 + these 4, reconciling exactly),
+`clippy --all-targets -D warnings` clean.
+
+Two doc comments that cited the naive split as a *live* hazard were corrected in the
+same change — `shell_tokens` in the same file (it claimed the tokenizer fallback is
+hit "on every call" *because* of the naive split) and `posix_tokenize` in
+`src/platform/mod.rs` (which listed `il3_offending_lead` among the things that do not
+agree with the shell). Both would have been false the moment this landed, and the
+latter carries an explicit warning that it has already been wrong twice in opposite
+directions.
 ## Workarounds
 
 Re-invoke with the returned `@ack_*` handle, or avoid `|` inside quoted arguments to
@@ -152,13 +245,14 @@ Re-invoke with the returned `@ack_*` handle, or avoid `|` inside quoted argument
 
 ## Resume
 
-Edit `il3_offending_lead` in `src/util/path_security.rs`: swap `segment.split('|')` for
-`split_outside_quotes(segment, &["|"])`, change the return type to `Option<String>`, and
-drop the now-unneeded borrow in `detect_il3_violation` (it already calls
-`.trim().to_string()`). Then add the two tests named under *Tests added*. Settle the `||`
-question first — read `pipeline_segments` and decide whether to rely on it or re-handle
-`||` locally.
+N/A on the codescout side — fixed and verified, including the bypass this file's
+premise denied existed.
 
+**One thing remains, cross-repo:** the companion's IL3 implementation still has the
+false positive. It rides with the `codescout-companion 1.16.4 → 1.16.5` bump and the
+three-profile reinstall, which is the operator's call — a source edit there is inert
+until the cache is refreshed. Do not re-open this file for it; it is a claude-plugins
+change.
 ## References
 
 - `src/util/path_security.rs` — `il3_offending_lead` (the naive split),

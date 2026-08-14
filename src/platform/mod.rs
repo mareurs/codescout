@@ -143,10 +143,13 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
 ///   never let a check be skipped entirely.
 ///
 /// What still does NOT agree with the shell: `is_dangerous_command`'s raw-string
-/// pass (deliberate — it is the other half of the union), `OutputBuffer`'s
-/// path-likeness heuristic in `src/tools/output_buffer.rs`, and
-/// `il3_offending_lead`, which splits a pipeline on a bare `|` and so hands
-/// `stage_trims` fragments with unbalanced quotes.
+/// pass (deliberate — it is the other half of the union) and `OutputBuffer`'s
+/// path-likeness heuristic in `src/tools/output_buffer.rs`.
+///
+/// `il3_offending_lead` used to belong on that list — it split a pipeline on a bare
+/// `|`. Fixed 2026-08-14 along with `pipeline_segments`, which had the same
+/// quote-blindness on `;` / `&&` / `||` and was the more serious of the two: it let a
+/// quoted `;` hide a genuine pipe from the enforcer entirely.
 ///
 /// History, because this comment has been wrong twice in opposite directions.
 /// It first claimed to feed the security checks when nothing called it. That was
