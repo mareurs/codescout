@@ -66,17 +66,39 @@ pub fn apply_ops(
     let mut applied: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let delete_set: std::collections::HashSet<&str> = delete.iter().map(|s| s.as_str()).collect();
 
-    for line in block {
-        match line_key(line) {
+    // Index-based rather than `for line in block`: replacing or deleting a key must
+    // also consume that key's continuation lines. Line-at-a-time iteration left them
+    // behind, which produced invalid YAML on `set` and — when the preceding key was
+    // itself a block sequence — silently reparented them on `delete`.
+    let mut i = 0usize;
+    while i < block.len() {
+        let line = &block[i];
+        let mutated = match line_key(line) {
             Some(key) if delete_set.contains(key) => {
-                // skip — deletes the line
+                i += 1;
+                true
             }
             Some(key) if set.contains_key(key) => {
                 let v = &set[key];
                 out.push(format!("{key}: {}", serialize_value(v)?));
                 applied.insert(key);
+                i += 1;
+                true
             }
-            _ => out.push(line.clone()),
+            _ => {
+                out.push(line.clone());
+                i += 1;
+                false
+            }
+        };
+        if mutated {
+            // Drop the old value's continuation lines. Correct for every multi-line
+            // shape, because both `set` and `delete` replace the value wholesale: a
+            // nested map, a block scalar and a block sequence are all discarded the
+            // same way.
+            while i < block.len() && is_continuation(&block[i]) {
+                i += 1;
+            }
         }
     }
     // Append any set keys that didn't already exist, in caller order
@@ -97,6 +119,25 @@ pub fn apply_ops(
         }
         out.push(format!("{key}: {}", serialize_value(value)?));
     }
+
+    // Backstop for multi-line shapes the continuation scan cannot fully consume (a
+    // sequence with an interleaved comment, say). Compared against the input rather
+    // than checked absolutely, so a file that arrived broken can still be repaired.
+    let before = orphaned_sequence_items(block);
+    let after = orphaned_sequence_items(&out);
+    if after > before {
+        return Err(crate::tools::RecoverableError::with_hint(
+            "frontmatter edit would orphan a block-sequence item, producing invalid YAML — refusing to write"
+                .to_string(),
+            "This module is flat-only and cannot safely rewrite a multi-line YAML value it \
+             did not fully recognise. For a librarian-managed artifact use \
+             artifact(action=\"update\", patch={...}); otherwise rewrite the frontmatter block \
+             in one edit."
+                .to_string(),
+        )
+        .into());
+    }
+
     Ok(out)
 }
 
@@ -140,6 +181,71 @@ fn line_key(line: &str) -> Option<&str> {
     }
     let colon = trimmed.find(':')?;
     Some(&trimmed[..colon])
+}
+
+/// Does this line continue the previous key's value rather than begin a new key?
+///
+/// Two shapes, and both must be caught, or mutating the key above leaves orphans
+/// behind — see
+/// `docs/issues/2026-08-08-edit-markdown-frontmatter-set-orphans-block-sequence.md`:
+///
+/// - **indented** — nested maps and block scalars (`|`, `>`).
+/// - **`-` at column 0** — a block-sequence entry. YAML permits sequence items at the
+///   parent key's own indentation, and that is the form the librarian writes.
+///
+/// Deliberately **not** expressed as `line_key(line).is_none()`. `line_key` answers a
+/// different question and gets this one wrong: for a sequence-of-maps entry like
+/// `- name: x` it finds a colon and returns `Some("- name")`, so a continuation line
+/// would read as a fresh key and stop the scan mid-value.
+///
+/// Blank and comment lines are **not** continuations. Consuming them would silently
+/// delete a comment belonging to the key below. The cost is that a sequence with an
+/// interleaved comment is not fully consumed; `orphaned_sequence_items` is the
+/// backstop for that.
+fn is_continuation(line: &str) -> bool {
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return true;
+    }
+    line.starts_with('-')
+}
+
+/// Count block-sequence items that have no parent key to attach to.
+///
+/// A `- item` at column 0 is well-formed only when the nearest preceding key line
+/// declares an empty value (`tags:`), which is what opens a block sequence. If the
+/// nearest preceding key already carries a value (`related: ["x"]`) — or there is no
+/// preceding key at all — the item is orphaned and the block is invalid YAML.
+///
+/// This exists because there is no YAML parser in the dependency tree (the module is
+/// hand-rolled and flat-only by design, and pulling one in for a validation pass is a
+/// worse trade). It is a structural approximation, used only to compare before/after:
+/// `apply_ops` refuses a write that *increases* the count, so an already-broken file
+/// can still be repaired.
+fn orphaned_sequence_items(block: &[String]) -> usize {
+    let mut orphans = 0usize;
+    // None = no key seen yet; Some(true) = last key opened a block (empty value).
+    let mut last_key_opened_block: Option<bool> = None;
+
+    for line in block {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Indented content belongs to whatever is above it; not our concern.
+            continue;
+        }
+        if line.starts_with('-') {
+            if last_key_opened_block != Some(true) {
+                orphans += 1;
+            }
+            continue;
+        }
+        if let Some(colon) = trimmed.find(':') {
+            last_key_opened_block = Some(trimmed[colon + 1..].trim().is_empty());
+        }
+    }
+    orphans
 }
 
 /// Serialize a JSON value to its YAML inline form. Errors on nested objects
@@ -288,6 +394,142 @@ mod tests {
         ];
         let out = apply_ops(&block, &serde_json::Map::new(), &["legacy".to_string()]).unwrap();
         assert_eq!(out, vec!["status: open", "severity: low"]);
+    }
+
+    /// The filed case. Measured live 2026-08-14 before the fix: the call returned
+    /// `"ok"` and wrote `related: ["c.md"]` followed by the surviving `- a.md` /
+    /// `- b.md` lines — invalid YAML, rejected by `yaml.safe_load`.
+    #[test]
+    fn set_on_a_block_sequence_consumes_its_items() {
+        let block = vec![
+            "owner: marius".to_string(),
+            "related:".to_string(),
+            "- a.md".to_string(),
+            "- b.md".to_string(),
+            "severity: medium".to_string(),
+        ];
+        let mut set = serde_json::Map::new();
+        set.insert("related".to_string(), json!(["c.md"]));
+        let out = apply_ops(&block, &set, &[]).unwrap();
+        assert_eq!(
+            out,
+            vec!["owner: marius", "related: [\"c.md\"]", "severity: medium"],
+            "the old sequence items must not survive beneath the new inline value"
+        );
+    }
+
+    /// `delete` has two distinct failure modes and which one you get depends on the
+    /// *neighbouring* key, not on the deleted one.
+    ///
+    /// Here the preceding key is a scalar, so orphaned items are invalid YAML —
+    /// loud, if anyone looks.
+    #[test]
+    fn delete_of_a_block_sequence_after_a_scalar_key_consumes_its_items() {
+        let block = vec![
+            "owner: marius".to_string(),
+            "related:".to_string(),
+            "- a.md".to_string(),
+            "severity: medium".to_string(),
+        ];
+        let out = apply_ops(&block, &serde_json::Map::new(), &["related".to_string()]).unwrap();
+        assert_eq!(out, vec!["owner: marius", "severity: medium"]);
+    }
+
+    /// The dangerous mode, and the reason this bug is `severity: high`.
+    ///
+    /// When the preceding key is *itself* a block sequence, orphaned items reattach to
+    /// it. The result is **valid YAML that means something else**, so nothing errors at
+    /// any layer. Measured live 2026-08-14 before the fix: deleting `related` from
+    /// `tags: [alpha] / related: [a.md]` yielded `{'tags': ['alpha', 'a.md']}`.
+    #[test]
+    fn delete_does_not_reparent_items_onto_a_preceding_sequence() {
+        let block = vec![
+            "tags:".to_string(),
+            "- alpha".to_string(),
+            "related:".to_string(),
+            "- a.md".to_string(),
+            "severity: medium".to_string(),
+        ];
+        let out = apply_ops(&block, &serde_json::Map::new(), &["related".to_string()]).unwrap();
+        assert_eq!(
+            out,
+            vec!["tags:", "- alpha", "severity: medium"],
+            "`a.md` must not end up as a member of `tags`"
+        );
+    }
+
+    /// Block sequences are not the only multi-line shape. Both `set` and `delete`
+    /// replace the value wholesale, so consuming indented continuations is correct for
+    /// nested maps and block scalars too — neither of which the old loop handled.
+    #[test]
+    fn set_consumes_indented_continuations() {
+        let block = vec![
+            "cfg:".to_string(),
+            "  a: 1".to_string(),
+            "  b: 2".to_string(),
+            "note: |".to_string(),
+            "  first".to_string(),
+            "  second".to_string(),
+            "severity: low".to_string(),
+        ];
+        let mut set = serde_json::Map::new();
+        set.insert("cfg".to_string(), json!("replaced"));
+        set.insert("note".to_string(), json!("flat"));
+        let out = apply_ops(&block, &set, &[]).unwrap();
+        assert_eq!(out, vec!["cfg: replaced", "note: flat", "severity: low"]);
+    }
+
+    /// A sequence-of-maps entry is a continuation even though `line_key` reads a key
+    /// out of it (`- name: x` → `Some("- name")`). If the scan used `line_key` as its
+    /// terminator this item would survive as an orphan.
+    #[test]
+    fn set_consumes_a_sequence_of_maps_whose_items_contain_colons() {
+        let block = vec![
+            "steps:".to_string(),
+            "- name: build".to_string(),
+            "- name: test".to_string(),
+            "severity: low".to_string(),
+        ];
+        let mut set = serde_json::Map::new();
+        set.insert("steps".to_string(), json!(["only"]));
+        let out = apply_ops(&block, &set, &[]).unwrap();
+        assert_eq!(out, vec!["steps: [\"only\"]", "severity: low"]);
+    }
+
+    /// The backstop. A comment interleaved in a sequence stops the continuation scan —
+    /// deliberately, since consuming comments would delete one belonging to the key
+    /// below — so the write would orphan `- b.md`. Refuse rather than corrupt.
+    #[test]
+    fn orphan_backstop_refuses_a_write_it_cannot_make_safe() {
+        let block = vec![
+            "related:".to_string(),
+            "- a.md".to_string(),
+            "# keep this".to_string(),
+            "- b.md".to_string(),
+        ];
+        let mut set = serde_json::Map::new();
+        set.insert("related".to_string(), json!(["c.md"]));
+        let err = apply_ops(&block, &set, &[]).unwrap_err().to_string();
+        assert!(
+            err.contains("orphan"),
+            "expected the orphan backstop to fire; got: {err}"
+        );
+    }
+
+    /// The backstop compares against the input rather than checking absolutely, so a
+    /// block that arrived already broken can still be repaired.
+    #[test]
+    fn orphan_backstop_allows_repairing_an_already_broken_block() {
+        let block = vec![
+            "owner: marius".to_string(),
+            "related: [old]".to_string(),
+            "- stray.md".to_string(),
+        ];
+        let mut set = serde_json::Map::new();
+        set.insert("owner".to_string(), json!("someone"));
+        let out = apply_ops(&block, &set, &[])
+            .expect("a pre-existing orphan must not block an unrelated edit");
+        assert!(out.contains(&"owner: someone".to_string()));
     }
 
     #[test]
