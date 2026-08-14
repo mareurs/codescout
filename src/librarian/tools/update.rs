@@ -49,12 +49,29 @@ struct UpdatePatch {
 struct Args {
     id: String,
     patch: UpdatePatch,
-    /// The tool schema advertises `status` as a top-level param for both
-    /// `create` and `update`. `create` honors it; this field exists so
-    /// `update` does too — `call()` lifts it into `patch.status` rather than
-    /// letting serde drop it silently. See the note there.
+    // The tool schema advertises these as top-level params for `create` AND
+    // `update`. `create` honors them; `update`'s canonical form is inside
+    // `patch`, so `call()` lifts each one rather than letting serde drop it
+    // silently. Every field here exists for that reason alone — see
+    // `lift_top_level_param!` and the note at the top of `call()`.
+    //
+    // Do not remove one because it "looks unused": `Args` has no
+    // `deny_unknown_fields`, so deleting a field turns a working param back
+    // into a silent no-op that still reports `updated: true`.
     #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    owners: Option<Vec<String>>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    topic: Option<String>,
+    #[serde(default)]
+    time_scope: Option<String>,
+    #[serde(default)]
+    extra: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     /// When true, also call augmentation::commit_refresh after the update.
     #[serde(default)]
     commit_refresh: bool,
@@ -213,6 +230,50 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
     Ok(buf)
 }
 
+/// Lift a top-level param the schema advertises for `update` into its canonical
+/// `patch.<field>` slot, per the Repair-and-Continue convention: one correct
+/// reading is repaired and noted; two conflicting readings are refused, because a
+/// wrong guess on a write is unrecoverable.
+///
+/// Why a macro rather than seven hand-written blocks: this defect has now shipped
+/// twice from the same cause. `Args` cannot carry `deny_unknown_fields` — the
+/// dispatcher passes `action` through and the shared artifact schema carries
+/// create-only keys — so any advertised param *missing* from `Args` is discarded by
+/// serde while the call still returns `updated: true`. A silent partial success on a
+/// write. It was fixed for `status` alone (2026-07-20), which left the identical
+/// hole in `extra`, `owners`, `tags`, `topic` and `time_scope` (found 2026-08-14).
+/// One mechanism means the next param added to the schema either joins this list or
+/// is visibly absent from it.
+macro_rules! lift_top_level_param {
+    ($corrections:expr, $top:expr, $patch:expr, $name:literal) => {
+        if let Some(top) = $top.take() {
+            match &$patch {
+                Some(existing) if *existing != top => {
+                    return Err(super::RecoverableError::with_hint(
+                        format!(
+                            "artifact(action=\"update\"): conflicting `{}` values — the top-level param and `patch.{}` disagree",
+                            $name, $name
+                        ),
+                        format!(
+                            "Pass `{}` once. The canonical form for update is patch={{\"{}\": ...}}.",
+                            $name, $name
+                        ),
+                    ));
+                }
+                // Two readings that agree is not ambiguity — repair silently.
+                Some(_) => {}
+                None => {
+                    $patch = Some(top);
+                    $corrections.push(format!(
+                        "lifted top-level `{}` into `patch.{}` — the canonical form is patch={{\"{}\": ...}}",
+                        $name, $name, $name
+                    ));
+                }
+            }
+        }
+    };
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("patch").and_then(|p| p.get("rel_path")).is_some() {
         return Err(super::RecoverableError::with_hint(
@@ -223,37 +284,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let mut a: Args = serde_json::from_value(args)?;
 
-    // The schema advertises `status` as a top-level param for create AND
-    // update. update::Args used to declare no such field, so serde discarded
-    // it while the call still returned `updated: true` — a silent partial
-    // success that left bug files sitting at their old status after a
-    // supposedly-successful close (2026-07-20).
+    // Every top-level param the artifact schema advertises for `update` is lifted
+    // into `patch`, which is where the write actually reads from. Skipping one does
+    // not error — it silently no-ops while reporting `updated: true`, which is how
+    // `status` shipped broken until 2026-07-20 and how the other five shipped broken
+    // until 2026-08-14. See `lift_top_level_param!` above.
     //
-    // Repair-and-Continue: one correct reading -> lift it and note the
-    // correction; two conflicting readings -> refuse, because a wrong guess on
-    // a write is unrecoverable.
+    // `title` is lifted too. The schema documents it as create-only, so a top-level
+    // `title` on update is off-schema rather than advertised — but `UpdatePatch` has
+    // the field, it is the same class of mistake, and repairing it with a note beats
+    // discarding a rename in silence.
     let mut corrections: Vec<String> = Vec::new();
-    if let Some(top) = a.status.take() {
-        match &a.patch.status {
-            Some(p) if *p != top => {
-                return Err(super::RecoverableError::with_hint(
-                    format!(
-                        "artifact(action=\"update\"): conflicting status values — top-level `{top}` vs patch `{p}`"
-                    ),
-                    "Pass status once. The canonical form is patch={\"status\": \"...\"}.".to_string(),
-                ));
-            }
-            Some(_) => {}
-            None => {
-                a.patch.status = Some(top);
-                corrections.push(
-                    "lifted top-level `status` into `patch.status` — the canonical form is \
-                     patch={\"status\": \"...\"}"
-                        .to_string(),
-                );
-            }
-        }
-    }
+    lift_top_level_param!(corrections, a.status, a.patch.status, "status");
+    lift_top_level_param!(corrections, a.title, a.patch.title, "title");
+    lift_top_level_param!(corrections, a.owners, a.patch.owners, "owners");
+    lift_top_level_param!(corrections, a.tags, a.patch.tags, "tags");
+    lift_top_level_param!(corrections, a.topic, a.patch.topic, "topic");
+    lift_top_level_param!(corrections, a.time_scope, a.patch.time_scope, "time_scope");
+    lift_top_level_param!(corrections, a.extra, a.patch.extra, "extra");
 
     let a = {
         let mut cat = ctx.catalog.lock();
@@ -818,6 +866,140 @@ mod tests {
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_ne!(row.status, "fixed", "a refused call must not write");
         assert_ne!(row.status, "archived", "a refused call must not write");
+    }
+
+    /// Every top-level param the artifact schema advertises for `update` must reach
+    /// the file. `status` alone was fixed on 2026-07-20; the other five kept
+    /// returning `updated: true` while writing nothing until 2026-08-14.
+    ///
+    /// Table-driven on purpose. The defect is per-param, and a fix that lifts one
+    /// while forgetting the rest is precisely what happened the first time — a test
+    /// covering a single param would have passed through the entire second bug.
+    #[tokio::test]
+    async fn update_lifts_every_advertised_top_level_param() {
+        // (param, top-level value, distinctive substring that must appear in the
+        // written frontmatter). Values are unique, so their presence cannot be
+        // explained by anything already in the file.
+        let cases: Vec<(&str, serde_json::Value, &str)> = vec![
+            ("status", serde_json::json!("probestatus"), "probestatus"),
+            ("title", serde_json::json!("probetitle"), "probetitle"),
+            ("owners", serde_json::json!(["probeowner"]), "probeowner"),
+            ("tags", serde_json::json!(["probetag"]), "probetag"),
+            ("topic", serde_json::json!("probetopic"), "probetopic"),
+            ("time_scope", serde_json::json!("probescope"), "probescope"),
+            (
+                "extra",
+                serde_json::json!({"probe_key": "probeextra"}),
+                "probeextra",
+            ),
+        ];
+
+        for (param, value, needle) in cases {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let rel = format!("doc_{param}.md");
+            let v = crate::librarian::tools::create::call(
+                &ctx,
+                serde_json::json!({
+                    "repo": "r", "rel_path": rel,
+                    "kind": "spec", "title": "T", "body": "body text"
+                }),
+            )
+            .await
+            .unwrap();
+            let id = v["id"].as_str().unwrap().to_string();
+
+            // `patch` is deliberately non-empty and unrelated, so the call has real
+            // work either way. That reproduces the shape of the bug, where a
+            // succeeding patch masked the dropped top-level param.
+            let out = call(
+                &ctx,
+                serde_json::json!({ "id": id, param: value, "patch": {"body": "body text v2"} }),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("update with top-level `{param}` failed: {e}"));
+
+            let content = std::fs::read_to_string(tmp.path().join(&rel)).unwrap();
+            assert!(
+                content.contains(needle),
+                "top-level `{param}` was accepted (`updated: true`) but never reached \
+                 the frontmatter — the silent-drop bug. File:\n{content}"
+            );
+            assert!(
+                out["corrections"].is_array(),
+                "the lift of `{param}` must be advertised via a corrections note: {out}"
+            );
+        }
+    }
+
+    /// The conflict arm must hold for non-`status` params too — a wrong guess on a
+    /// write is unrecoverable regardless of which field carries it.
+    #[tokio::test]
+    async fn update_conflicting_non_status_sources_are_refused() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc_tag_conflict.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({
+                "id": id, "tags": ["fromtop"], "patch": {"tags": ["frompatch"]}
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err
+            .downcast_ref::<super::super::RecoverableError>()
+            .is_some());
+        let content = std::fs::read_to_string(tmp.path().join("doc_tag_conflict.md")).unwrap();
+        assert!(
+            !content.contains("fromtop") && !content.contains("frompatch"),
+            "a refused call must not write either reading. File:\n{content}"
+        );
+    }
+
+    /// Agreement is not ambiguity — repair silently with no note, matching the
+    /// `status` arm.
+    #[tokio::test]
+    async fn update_agreeing_non_status_sources_are_not_flagged() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc_tag_agree.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let out = call(
+            &ctx,
+            serde_json::json!({
+                "id": id, "tags": ["sametag"], "patch": {"tags": ["sametag"]}
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(out.get("corrections").is_none(), "got: {out}");
+        let content = std::fs::read_to_string(tmp.path().join("doc_tag_agree.md")).unwrap();
+        assert!(
+            content.contains("sametag"),
+            "the agreed value must still be written"
+        );
     }
 
     #[tokio::test]
