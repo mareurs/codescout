@@ -1,7 +1,7 @@
 ---
 id: '87ff73c8d0ae9c72'
 kind: bug
-status: open
+status: fixed
 title: 'CI never ran or linted codescout-embed: bare `cargo test`/`cargo clippy` resolve to the root package only'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - cargo
 - tests-that-cannot-fail
 - codescout-embed
+closed: 2026-08-14
 ---
 
 # BUG: CI never ran or linted `codescout-embed` — bare cargo commands resolve to the root package only
@@ -98,21 +99,53 @@ detect one.
 
 ## Fix
 
-Both halves are fixed on branch `feat/local-onnx-query-path`:
+**Already fixed when this file was re-checked on 2026-08-14 — a zombie-open entry, not
+outstanding work.** Both halves landed on `experiments`, in two commits neither of which
+names this bug file:
 
-- **Test job** — `a3905e2e` added `--workspace` to `cargo test ${{ matrix.config.flags }}`.
-- **Clippy job** — `370a738b` added `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`. Verified while fixing it that the bare command did not even compile `crates/codescout-embed/src/local.rs` under default features.
+| SHA (`experiments`) | Commit subject | Closed |
+|---|---|---|
+| `a3905e2e` | `test(embed): prove from_dir vectors are real, and make CI run them` | the `cargo test` half |
+| `370a738b` | `fix(embed): close the QuantizationMode blind spot review found in the parity test` | the `cargo clippy` half |
 
-Neither is on `experiments` yet; both ride the branch that will repoint PR #13.
+Current state of `.github/workflows/ci.yml`:
 
-Broader question this raises and does not answer: whether any other CI command in this repo addresses the workspace by assumption rather than explicitly. Worth one sweep of `.github/workflows/` for bare cargo invocations before closing. The same gap exists in `CLAUDE.md`'s stated pre-commit gate, which says `cargo test` — see Workarounds.
+- **line 174** — `cargo test --workspace ${{ matrix.config.flags }}`
+- **line 61** — `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`
+
+Both carry comments explaining the gap and citing an empirical check dated 2026-08-11 —
+that bare `cargo clippy` prints `Checking codescout-embed` but is the *default-features*
+build with no `local` module, so the second pass is what actually reaches `local.rs` and
+its tests. The workspace has two members (`.` and `crates/codescout-embed`,
+`Cargo.toml:2`), which is the whole basis of the bug.
+
+The bare `cargo clippy -- -D warnings` at line 50 is retained deliberately as a separate
+lane, not left over: it is the default-features check, and line 61 is the wider one.
+
+SHAs are labelled `experiments` with **no pending-master-SHA line**, per the template's
+rule: `git rev-list --left-right --count master...experiments` → `0  651`, so `master` is
+a strict ancestor and the promotion is a fast-forward. The `experiments` SHA already *is*
+the master SHA; writing that line would send a later session hunting for a second SHA
+that will never exist.
+
+### Why it stayed open
+
+Exactly the fix-then-forget mechanism CLAUDE.md's verify-open cadence describes: a fix
+shipping under a `test(embed):` or `fix(embed):` subject rather than one naming the
+tracker entry trips no automated gate. Both commits were about the embed crate's
+*content*; making CI actually run it was the incidental means, so neither author was
+looking at this file. Found by re-reading `ci.yml` during a verify-open pass, not by any
+alert.
 ## Tests added
 
-None yet, and a regression test here is awkward — the defect lives in CI configuration, not
-in Rust. The cheapest durable guard is a CI assertion that the `Running` output names
-`codescout-embed`, or a `cargo metadata` check that the tested set includes every workspace
-member. Not implemented; recorded here so the gap is visible rather than assumed closed.
+None by this pass — the fix predates it. `a3905e2e` is itself a test commit ("prove
+`from_dir` vectors are real"), and the CI comment records that adding `--workspace` made
+the crate's 27 tests appear in the run where they had previously been silently absent.
 
+The guard against recurrence is the `--workspace` flag itself plus the two explanatory
+comments, which name the failure mode so the next person to "simplify" the duplicate
+clippy invocation sees why both exist. Task #53's feature-coverage guard (every declared
+feature must appear in some CI lane) is the adjacent structural check.
 ## Workarounds
 
 Run `cargo test --workspace` locally. The pre-commit gate in `CLAUDE.md` says `cargo test`,
@@ -120,11 +153,7 @@ which has the same gap — worth correcting there too.
 
 ## Resume
 
-Sweep `.github/workflows/ci.yml` for any remaining bare `cargo` invocation that should be workspace-scoped — grep for `cargo ` and check each hit for `--workspace`/`-p`. Two are known fixed (`a3905e2e`, `370a738b`); the MSRV, feature-check, windows-gnu-cross, and server-stack jobs have not been checked.
-
-Then decide whether the durable guard in § Tests added is worth building, and correct `CLAUDE.md`'s pre-commit gate line from `cargo test` to `cargo test --workspace`.
-
-Do not close this file on the two command fixes alone — the defect is a class, and the sweep is what establishes whether the class is closed.
+N/A — fixed and verified on `experiments`; archived 2026-08-14.
 ## References
 
 - `docs/adrs/2026-07-25-embedding-transport-boundary.md` — the extraction that created the crate
