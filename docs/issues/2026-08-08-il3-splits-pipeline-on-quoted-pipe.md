@@ -238,6 +238,27 @@ hit "on every call" *because* of the naive split) and `posix_tokenize` in
 agree with the shell). Both would have been false the moment this landed, and the
 latter carries an explicit warning that it has already been wrong twice in opposite
 directions.
+
+### Live-surface verification, 2026-08-14 (post `cargo rb` + `/mcp` reconnect)
+
+Both arms confirmed against the running MCP server, not just the unit suite:
+
+| Command | Before | After |
+|---|---|---|
+| `git log --grep='fix\|head foo' --oneline -3` | BLOCKED (false positive) | **ran, `EXIT=0`** |
+| `git log --oneline -50 --grep='a;b' \| head -3` | ran, `exit_code: 0` (**bypass**) | **BLOCKED** |
+
+The remediation hint is now runnable too, which was the second half of the original
+complaint. It prints `run_command("git log --oneline -50 --grep='a;b'")` — balanced quotes
+— where the pre-fix hint printed `git log --grep='fix`, an unterminated quote that would
+have produced a shell parse error if followed.
+
+**The companion hook still emits the false positive.** Observed in the same run: the
+server allowed the quoted-pipe command while the advisory hook warned about it. That is
+the expected split — companion ships from a version-keyed cache at 1.16.4 and a source
+edit there is inert until the bump. It also re-demonstrates the property that made the
+bypass findable at all: when the two implementations disagree, the disagreement is the
+signal.
 ## Workarounds
 
 Re-invoke with the returned `@ack_*` handle, or avoid `|` inside quoted arguments to

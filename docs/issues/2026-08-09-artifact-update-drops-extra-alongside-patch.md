@@ -167,6 +167,24 @@ carries an explicit comment against "cleaning up" a field that looks unused.
 
 Gate: **3710 passed / 0 failed / 44 ignored** (3707 + these 3, reconciling exactly),
 `clippy --all-targets -D warnings` clean.
+
+### Live-surface verification, 2026-08-14 (post `cargo rb` + `/mcp` reconnect)
+
+Re-run against the running server with a top-level param, on the same artifact used to
+reproduce the drop:
+
+```
+artifact(update, id=f6dd06e3388e5465, tags=[… 5 tags …], patch={"status": "open"})
+
+  before  {"updated": true}                      tags silently discarded
+  after   {"updated": true, "corrections": [
+            "lifted top-level `tags` into `patch.tags` — …" ]}
+```
+
+And the values reached the frontmatter on disk — all five tags present, where the
+pre-fix call left the original four untouched. The `corrections` note is the part worth
+having: the fix does not just work, it *tells the caller* it repaired something, so the
+canonical form gets learned instead of the repair being relied on silently.
 ## Workarounds
 Pass everything inside `patch`: `artifact(action="update", id=…, patch={"status": …,
 "extra": {…}, "body_edits": [...]})`. Verify with `artifact(action="get", id=…)` that

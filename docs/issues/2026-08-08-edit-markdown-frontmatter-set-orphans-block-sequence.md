@@ -234,6 +234,21 @@ passed in both. Expectations corrected; no code change.
 
 Gate: **3721 passed / 0 failed / 44 ignored** (3714 + these 7, reconciling exactly),
 `clippy --all-targets -D warnings` clean.
+
+### Live-surface verification, 2026-08-14 (post `cargo rb` + `/mcp` reconnect)
+
+The silent mode — the one that justified `severity: high` — re-run against the running
+server on the same fixture used to reproduce it:
+
+```
+frontmatter={"delete": ["related"]}   over   tags:/- alpha/related:/- a.md
+
+  before  {'tags': ['alpha', 'a.md']}   valid YAML, wrong data, no error
+  after   {'tags': ['alpha']}           a.md consumed with its key
+```
+
+Verdict taken from `yaml.safe_load` on the written file, not from reading the diff — the
+whole point of this bug is that the corrupt output *parses*.
 ## Workarounds
 
 - For librarian-managed artifacts, use `artifact(action="update", patch={tags: [...]})`
