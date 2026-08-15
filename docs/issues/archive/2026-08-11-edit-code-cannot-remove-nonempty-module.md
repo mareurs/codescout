@@ -101,7 +101,7 @@ All four gaps are now closed or refuted.
 |---|---|---|
 | 1 — insert cannot reach file scope | **refuted** — capability existed, now asserted | `80350afe` |
 | 2 — remove drops a module's own children | **fixed** | `3baa993d` |
-| 3 — `edit_file` refuses pure deletions | **fixed** | `80350afe` |
+| 3 — `edit_file` refuses pure deletions | **wontfix-by-design** — exemption tried and reverted | `80350afe` → `9b902e0a` |
 | 4 — keyword matched mid-identifier | **fixed** | `138de7c5` |
 
 Gap 4 was never in the original filing; it surfaced while working gap 2. The one
@@ -145,24 +145,33 @@ Three scoping decisions worth keeping:
 This file's own sequencing advice — fix (2) first, then re-ask whether the rest
 are real — was right, and re-asking changed both answers.
 
-**Gap 3 — fixed, narrowly.** `guard_structural_rewrite` now returns `Ok(())`
-immediately when `new_string.is_empty()`. This is the narrow form the § Summary
-correction called for, not the too-broad "check only `new_string`".
+**Gap 3 — wontfix-by-design.** Implemented as an exemption in `80350afe`, then
+**reverted the same day in `9b902e0a`.** Recording both, because the reversal is
+the useful part.
 
-The justification is the guard's own doc comment: route 1 blocks *rewriting an
-existing symbol via raw text replacement*. A deletion is not a rewrite — nothing
-is spliced into the symbol's place, so no symbol's ranges can go stale. Route 2
-cannot fire on a deletion at all, by construction: an empty string contains no
-newline, and route 2 is gated on `new_string.contains('\n')`.
+The exemption made `guard_structural_rewrite` return `Ok(())` when
+`new_string.is_empty()`, reasoning that route 1 blocks *rewriting* and a deletion
+is not a rewrite. The full test suite refuted it:
+`edit_file_warns_hint_suggests_remove_when_new_empty` asserts that exact refusal,
+and `infer_edit_hint` carries bespoke machinery to route the deletion case to
+`edit_code(action='remove')`. **The block is a contract with purpose-built
+support, not an oversight.** This file described it as an oversight, and I took
+that at face value.
 
-The exemption sits **before** `is_source_path` and language detection, so it is
-language-independent by construction rather than by coincidence.
+The supporting argument does not survive either. It was *"`edit_code(remove)` is
+unavailable exactly when its AST/LSP naming fails"* — true, but those failures
+are two separate open bugs (duplicate `name_path`; `symbols` resolving a path
+`edit_code` rejects). The fix for a dead end is to open the road, not to remove
+the guardrail beside it. Gap 3 is folded into that name-path work.
 
-It is deliberately **not** a syntax check on the removed region. `edit_file`
-already permits deletions that break the file whenever no definition keyword
-lands in range; gating only keyword-bearing deletions on parseability would make
-the contract depend on whether the deleted text happened to contain the word
-`fn` — not a distinction a caller can predict.
+A test now records the decision, since from the outside it did not look like one:
+`guard_blocks_pure_deletion_of_a_nonempty_module`, pointing at its hint sibling.
+
+**The distinguishing question, worth keeping:** when a test blocks a change, does
+it assert a **cause** or a **contract**? Earlier in this same cohort a test
+pinned a false *diagnosis* and correcting it was right (`cafa4b37`). This one
+pins a contract, so the code was wrong. Same surface, opposite verdicts — the
+test's subject decides, not its resistance.
 
 **Gap 1 — not a defect. The capability already existed.** The claim was that
 `insert` cannot escape the anchor's enclosing scope, so a module cannot be placed
@@ -193,18 +202,12 @@ rather than refusing; the same shape would work here. Not done — it trades a
 safety guard for ergonomics and deserves a deliberate call.
 ## Tests added
 
-**Gap 3 — five tests in `src/tools/edit_file/tests.rs`.** Three permissive
-(function, non-empty module, Kotlin) and two that stop the exemption from
-quietly widening:
-
-- `guard_still_blocks_a_rewrite_that_only_shrinks` — the exemption keys on
-  `new_string` being **empty**, not on the edit removing more than it adds.
-  Without this, "deletion" could drift into meaning "any shrinking edit", which
-  reopens the whole rewrite route.
-- `guard_still_blocks_a_rewrite_down_to_whitespace` — `" "` and `"\n"` splice a
-  line into the symbol's place and stay blocked. A `trim().is_empty()` check here
-  would widen the exemption; this test makes that a failing change rather than an
-  invisible one.
+**Gap 3 — one test, `guard_blocks_pure_deletion_of_a_nonempty_module`.** The
+five tests written for the exemption went with it. What remains records the
+*decision* to refuse, with a pointer to
+`edit_file_warns_hint_suggests_remove_when_new_empty`, which pins the hint the
+refusal emits. The refusal is only defensible because it routes somewhere that
+works, so the two belong read together.
 
 **Gap 1 — `insert_after_top_level_symbol_lands_at_file_scope`**
 (`tests/symbol_lsp.rs`). Inserts a module after a top-level `fn` and asserts the
@@ -229,9 +232,9 @@ To relocate or delete a non-empty module: (1) if renaming to a unique name is en
 Closed. One item deliberately survives this file: § Follow-up worth its own
 decision (should `replace` stop treating a target's missing descendants as
 dropped siblings?). It was scoped out on purpose — it trades a safety guard for
-ergonomics.
+ergonomics. Gap 3's reversal is a direct argument for leaving it alone.
 
-Two lessons, both about how this file reasoned rather than what it found:
+Three lessons, all about how this file reasoned rather than what it found:
 
 1. **Sequencing worked.** The instruction to fix gap 2 first and then re-ask
    dissolved gap 3's motivation and exposed gap 1 as a non-defect. A bug file
@@ -242,6 +245,10 @@ Two lessons, both about how this file reasoned rather than what it found:
    generalising to all anchors. One read of `find_parent_symbol`'s doc comment —
    which states the top-level case in plain English — would have bounded it. Same
    shape as R-82: the observed behaviour was real, the explanation invented.
+3. **A refusal described as an oversight deserves a search for its test.** Gap 3
+   read as an unnoticed side effect. It had a dedicated test *and* dedicated hint
+   machinery. Both were one `grep` away, and finding them would have turned a
+   day's implement-then-revert into a one-line triage.
 ## References
 
 - `.superpowers/sdd/2026-08-11-local-onnx-embedding-query-path/task-7-report.md` § "Surprises / tool friction worth recording"

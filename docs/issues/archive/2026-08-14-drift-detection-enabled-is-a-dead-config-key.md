@@ -1,7 +1,7 @@
 ---
 id: a2d5ce3fe9211977
 kind: bug
-status: open
+status: fixed
 title: 'BUG: drift_detection_enabled is a config key no codescout code reads, still documented as functional on two manual pages, and companion gates a dead sqlite query on it'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - drift
 - cross-repo
 - legacy-retrieval
-closed: null
+closed: 2026-08-15
 opened: 2026-08-14
 owner: marius
 related:
@@ -127,33 +127,48 @@ migration of the old feature and does not restore the old outputs.
 
 ## Fix
 
-Not implemented. The decision is what the key should become, and it is not
-mechanical:
+**Option 1 — remove it.** Shipped in `9b902e0a`.
 
-- **Remove it.** Drop the field from `src/config/project.rs` and
-  `src/config/global.rs`, delete both manual rows, and remove companion's drift
-  block. Honest and smallest. Costs the option of reviving the feature cheaply, and
-  needs the companion change to land in the same cohort or session-start starts
-  reading a key that no longer parses (harmless — it string-matches the file — but
-  worth knowing).
-- **Keep the key, fix the docs.** Mark it reserved/no-op in both manual pages.
-  Cheapest, but a config key that does nothing is a trap for the next reader, and
-  this bug is the second time the docs and this key have disagreed.
-- **Reimplement drift on Qdrant.** Real work: it needs the prior generation of
-  vectors retained, or a stored per-chunk embedding to diff against. Only worth it
-  if the feature is actually wanted — check whether anyone used it before rebuilding.
+Chosen over "keep the key, fix the docs" because a config key that does nothing is
+a trap, and this was the *second* time the docs and this key disagreed — a
+reserved/no-op row invites a third. Chosen over "reimplement drift on Qdrant"
+because that needs a prior generation of vectors retained, and nothing suggests
+anyone used the feature: the ask was never made, and the surface the manual
+promised (`workspace(action: status, threshold=...)`) never existed to be used.
+Git history keeps the revival path cheap.
 
-Whichever is chosen, the companion half must be routed too, and that belongs with
-`docs/trackers/2026-05-07-legacy-retrieval-removal.md` rather than duplicated here.
+Removed:
 
+- `EmbeddingsSection::drift_detection_enabled` + `default_drift_detection_enabled`
+  + the `Default` entry (`src/config/project.rs`)
+- `GlobalEmbeddingsSection::drift_detection_enabled` (`src/config/global.rs`)
+- rows/examples on `configuration/project-toml.md` (×3),
+  `configuration/embeddings.md`, `tools/semantic-search.md`
+- the `[memory] (drift_detection_enabled)` mention in `docs/state-protocol.md`
+  — which named the wrong section too; the key lived under `[embeddings]`
+
+Two tests used the field as a *vehicle* for testing merge machinery, not for its
+own sake. Both were re-pointed at live fields:
+`merge_toml_base_fills_missing_key` → `max_inflight`, and
+`to_toml_value_emits_only_some_fields` widened to two sections so it still has a
+`None` to discriminate against (`[embeddings]` was left with a single field, and
+"emits only `Some`" is vacuous without a `None` in view).
 ## Tests added
 
-N/A — not fixed. A guard is easy for the remove-it path and worth adding with it: a
-test asserting every `[embeddings]` config field is read somewhere outside the config
-modules would catch this whole class. It would need an allow-list for
-deliberately-reserved keys, which is exactly the honest place to record such a
-decision.
+`stale_drift_detection_enabled_key_is_ignored_not_rejected` — an existing
+`project.toml` that still sets the key must parse with the key silently ignored,
+not error on startup.
 
+This is the assumption the whole removal rests on, so it is asserted rather than
+assumed. It mirrors the precedent already in the file for the retired
+`debug_enforce_symbol_tools` flag: `EmbeddingsSection` carries no
+`deny_unknown_fields`, so unknown keys are skipped. The test also asserts that a
+*neighbouring* key in the same section still lands — proof the stale key was
+skipped rather than the whole `[embeddings]` table being dropped, which a bare
+"it parses" assertion would not distinguish.
+
+Gate: `cargo test --workspace` → **3805 passed / 0 failed / 50 ignored**;
+clippy `--workspace --all-targets -D warnings` clean.
 ## Workarounds
 
 None needed — the flag is inert. Do not spend time toggling it to change drift
@@ -161,15 +176,29 @@ behaviour; there is no drift behaviour on the codescout side to change.
 
 ## Resume
 
-Decide among the three options above. Before choosing "reimplement", establish
-whether per-file semantic drift was ever used for anything — if the answer is
-"companion printed warnings at session start and nobody acted on them," the remove
-path is correct and the whole feature can go in one cohort with the companion block.
+Closed. **The companion half needs no change for correctness**, which is the
+opposite of what this file assumed.
 
-Do **not** start by editing the two manual pages in isolation: the docs are the
-symptom, and fixing them alone leaves a dead config key that will re-grow
-documentation.
+`hooks/session-start.mjs:202` does:
 
+```js
+driftEnabled = readFileSync(d.CS_CONFIG_FILE, 'utf8').includes('drift_detection_enabled = true');
+```
+
+An absent key makes that `false`, so companion now **skips** its drift block —
+exactly what is wanted, since the block queried the retired sqlite `drift_report`
+table. The match is fail-closed.
+
+`docs/state-protocol.md` claimed the opposite ("companion behaves as if drift
+detection is on (default-true assumption)") and has been corrected. Worth noting
+*how* that error survived: the contract doc stated a consequence of removal
+without anyone having removed anything, so nothing ever tested the claim. A
+predicted consequence in a contract doc is a hypothesis wearing a fact's clothes.
+
+Remaining, cosmetic only: companion still carries a dead drift block and a
+`drift_report` query against a retired table. Routed to
+`docs/trackers/2026-05-07-legacy-retrieval-removal.md` rather than duplicated
+here, as this file originally directed.
 ## References
 
 - `src/config/project.rs` — field definition + default
@@ -180,4 +209,3 @@ documentation.
 - `docs/trackers/2026-05-07-legacy-retrieval-removal.md` — owns the companion half
 - `claude-plugins` → `codescout-companion/hooks/session-start.mjs` — the live reader of a dead table
 - Found while fixing `docs/issues/2026-08-13-tools-semantic-search-manual-page-describes-legacy-interface.md`
-
