@@ -27,6 +27,7 @@ follow the links for the controlling convention.
 | **WIN-N** | `docs/trackers/windows-platform-support.md` (augmented artifact `52451519052d207c`) | Windows-platform issue: process-spawn / lsp / platform-gated / path-handling / build-install / test-portability / companion defect, fix, or cfg-gate decision | `artifact_augment(merge=true, params={issues: [..., {id:"WIN-N", ...}]})` + sync body `## Issue index` table | Bug file (`docs/issues/`) for new incidents; `status` flips in place as fixes land |
 | **A-N** | `docs/trackers/prompt-hamsa-audit-log.md` (craft-level twin in `claude-plugins/docs/trackers/`) | Prompt-audit record from a Hamsa audit: named gap, recommended move, prediction, confidence, outcome (filled when evidence lands) | Per the tracker's maintenance convention (`## A-N — <title>` section + Index row) | Hamsa SKILL.md heuristic / buddy memory when the finding generalizes |
 | **PV-N** | `docs/trackers/provenance-subsystem.md` (augmented artifact `e12cd7e0060ed9b8`) | Provenance/attribution **programme** state: measurement verdicts vs pre-registered kill conditions, standing design decisions, hazards not to rediscover, open decisions, buildable work. Typed `finding \| gap \| decision \| hazard \| task` | `artifact(action="append_entry", id_prefix="PV", entry_collection="items", entry={...})` — atomic monotonic id; query with `entry_filter` | Implementation plan (`docs/plans/`) once phase moves past MEASUREMENT; a `decision` flips to `settled` in place |
+| **CAP-N** | `docs/trackers/capability-proposals.md` (augmented artifact `01291679a5ee4707`) | **Pre-plan** proposal for a codescout capability we do not have: the ask, a substrate check citing what exists today at `path:line` and what is genuinely missing, and the open decisions. Reflective — judgment, not gathering | Append a `## CAP-N` section above `## Anti-goals` + an Index row, via `artifact(action="update", patch={body_edits: [...]})` | A spec + plan under `docs/superpowers/` once it has tasks and a file structure; or `rejected` in place with the reason kept |
 | **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` once the fix is verified on `experiments` — reaching master is NOT required. Label the SHA `experiments` and keep a Resume note that the master-side SHA is still owed (it orphans on rebase); the ship sequence's step 4 reconciles it. Move via `artifact(action="move", …)`, never `git mv` |
 
 ## Work-stream-specific prefixes (not durable taxonomy slots)
@@ -67,6 +68,12 @@ You observed something. Where does it go?
 │
 ├─ Is it about the recon skill itself (hit / miss / proposal)?
 │   → R-N in reconnaissance-patterns.md
+│
+├─ Is it a feature idea — a capability codescout does not have yet?
+│   → CAP-N in capability-proposals.md (artifact 01291679a5ee4707)
+│     Do the substrate check BEFORE writing it: what exists today, what is
+│     actually missing. An entry without one is not ready.
+│     Already has tasks + a file structure? Skip this — write a spec + plan.
 │
 └─ Is it a per-work-stream friction or win, scoped to one task / refactor?
     ├─ Friction → F-N in <topic>-session-log.md
