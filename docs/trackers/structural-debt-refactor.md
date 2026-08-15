@@ -423,3 +423,52 @@ pair. That is orthogonal to scope width and outlived the decision unchanged:
 `docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
 Inferred from the code, **not** measured — the bug file says so and carries the
 reproduction that would settle it.
+
+### 2026-08-15 — SD-10 closed: the divergence is now a parameter, not an absence
+
+`experiments:649dc0a4`. `resolve_scope(requested, current, policy)` now sits
+beside `apply_scope` in `src/librarian/tools/scope.rs`, called with
+`UmbrellaPolicy::Require` from `src/librarian/tools/find.rs` and
+`src/librarian/tools/workspace_state_at.rs`, and `UmbrellaPolicy::Literal` from
+`src/librarian/tools/context.rs`. Structural delta measured: the fallback arm
+went **3 occurrences → 1**, and a DRY gate holds it there.
+
+**The fix shape was the whole question.** Restoring the "missing" steps in
+`src/librarian/tools/context.rs` — the obvious reading of the original finding
+— would have *broken
+intended behaviour*. Extraction had to declare the difference rather than erase
+it, which is why the policy is an argument rather than a comment.
+
+**The planned test became wrong, and that is the lesson.** SD-10 originally
+specified a parity test: one `(requested_scope, has_current_project,
+has_umbrella)` triple must resolve identically in all three handlers. Once the
+divergence was blessed, that test was not merely unnecessary — it asserted the
+opposite of the truth. The handlers are now *required* to differ on exactly one
+input. What shipped is a parity **sweep** asserting they agree on every input
+*except* an explicit `all`, plus a discriminating-pair test where identical
+inputs give opposite outcomes and the only difference is the policy named at the
+call site. A test specified before a decision is a hypothesis about the
+decision.
+
+**Both new guards are mutation-verified, not merely green.** Re-inlining the arm
+in `src/librarian/tools/context.rs` made the DRY gate fail *and name the
+offending file*; flipping `context` to `Require` made the end-to-end test fail
+on the aliasing assertion. A gate that cannot be made to fail is decoration.
+
+**Coverage asymmetry, worth recording.** The `Require` side needed no new
+characterisation test — `find` already had `scope_all_blocked_without_umbrella`
+and `scope_all_allowed_with_umbrella`, and their passing untouched *is* the
+behaviour-preservation proof. The `Literal` side had **zero** coverage. That
+asymmetry is not incidental: a behaviour that exists only as the absence of a
+block is a behaviour nothing can assert on, which is precisely why it was
+reported as a defect rather than recognised as a choice.
+
+Gate: **3850 passed / 0 failed / 50 ignored** against a 3842 baseline recorded
+before the first edit — `+8` is exactly the count added, so no pre-existing test
+changed behaviour. `cargo fmt --all` and
+`clippy --workspace --all-targets -D warnings` both clean.
+
+Still open and deliberately untouched: neither `src/librarian/tools/context.rs`
+nor `src/librarian/tools/workspace_state_at.rs` dedups the worktree overlay that
+`apply_scope` documents as the caller's job —
+`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
