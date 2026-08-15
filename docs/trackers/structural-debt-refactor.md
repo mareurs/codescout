@@ -331,3 +331,36 @@ array — but SD-8 had been *appended*, so it was not in the local params file,
 and a naive rewrite would have deleted the very row being closed. Reconstructed
 it first, then rewrote, then appended SD-9. Post-write check confirms all nine
 ids survived.
+
+### 2026-08-15 — SD-3 discharged and falsified; the duplication it was looking for is real, elsewhere, and already broken
+
+SD-3's own `fix` field carried an instruction rather than a proposal: *"UNVERIFIED whether the four share a phase structure. Read the other three BEFORE proposing any extraction."* All four bodies were read in full at `1d22b715`. The hypothesis is **falsified**, and following the instruction anyway produced a better finding than the hypothesis would have.
+
+**The four do not share a phase structure.** They split into two pairs, on an axis the grouping that produced them cannot see:
+
+- **Query handlers** — `src/librarian/tools/find.rs`, `src/librarian/tools/context.rs`. Resolve scope → build filter → execute → assemble.
+- **Single-artifact handlers** — `src/librarian/tools/get.rs`, `src/librarian/tools/update.rs`. Reject a removed parameter off the raw `args` before deserializing → parse → id to row → assemble a response by conditional key.
+
+The hypothesised "apply overlay" phase is 2 of 4, not 4 of 4: `get` and `find` share the read-overlay (`shadow_main_pairs`, and both say so in comments), `update` uses a different worktree operation entirely (`resolve_write_target`, fork-on-first-write), and `context` has none. What all four genuinely share is not a phase but a **convention** — repair-and-continue, where a handler fixes or notices something and rides the notice back in the response rather than erroring. `src/librarian/tools/update.rs` and `src/librarian/tools/find.rs` both emit a `corrections` key from two completely unrelated mechanisms. That is a convention worth naming, not a function worth extracting.
+
+**What the reading found instead (SD-10).** The scope-resolution prologue is written three times. `src/librarian/tools/find.rs:524` and `src/librarian/tools/workspace_state_at.rs:98` carry the same ~30-line block verbatim — down to the line-wrap position of the shared error string. `src/librarian/tools/context.rs:56` carries a **truncated copy**: it keeps the no-current-project fallback and drops both the `scope="all"` umbrella guard and the `All → Umbrella` alias. Since `apply_scope` maps `Scope::All` to no clause at all (`src/librarian/tools/scope.rs:75`), `context` runs unfiltered where its two siblings narrow to umbrella members.
+
+This was **measured, not inferred**. Both calls were run against the live server: `artifact(find, scope="all")` reported `scope.applied = "umbrella"`; `librarian(context, scope="all")` reported `"all"` and returned an artifact belonging to a project outside the umbrella. The duplicated error string names the exact harm its missing copy permits — *"without one it crosses into unrelated workspace projects"* — and `find`'s own overflow hint actively recommends `scope="all"`, so the narrower meaning is what an agent learns and the wider one is what `context` delivers. Filed as `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
+
+**The instrument caveat repeats, one level up.** SD-3 already carried a warning that `legibility_scan` attributes cost too coarsely to rank *within* its group. The deeper limit is that it ranks by body size and per-symbol cost at all, so it can only ever see a law duplicated **within** one symbol. A law duplicated **across** symbols in different files is structurally invisible to it — which is why the highest-value structural finding here was invisible to the very ranking that opened the group, and why `src/librarian/tools/workspace_state_at.rs` (comfortably under the body budget, never flagged) turned out to hold one of the three copies.
+
+SD-3 is marked `superseded`, closed by SD-10, rather than rewritten — a falsified premise that produced a good finding is worth keeping legible.
+
+**And recording SD-10 surfaced SD-11.** Its params fields carry about ten
+`path:line` citations, and none of them are in this file: a `grep` for `SD-10`
+against the on-disk tracker returns only the two mentions in this prose. Params
+live in the catalog's augmentation table, and `render_template` output is
+produced at read time rather than written to disk — so `audit_doc_refs`, which
+scans files, cannot see them. That is a third citation surface, after prose
+(SD-1) and code comments (SD-1b), and it is the one the project's most heavily
+cited trackers actually use. Recorded, not fixed: no params citation has been
+observed stale yet, and all three candidate fixes have real costs — see SD-11.
+The gap is bounded, though: only *augmented* trackers are affected.
+`docs/trackers/bug-fix-session-log.md` and
+`docs/trackers/reconnaissance-patterns.md` are plain markdown, verified
+not-augmented this session, and are scanned in full.

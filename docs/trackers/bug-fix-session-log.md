@@ -144,6 +144,7 @@ time_scope: open-ended
 | W-35 | 2026-08-14 | med | A prompt-surface byte cap is a design reviewer | `every_tool_description_under_cap` rejected the doctor change twice (1960, then 1846 vs an 1800 cap) and was right both times: parameter detail belongs in the uncapped parameter descriptions, not the action list. Also revealed the `librarian` description sits at ~1790/1800 — 99.4% of budget | validated |
 | W-34 | 2026-08-14 | high | Mutation-test a SHARED helper before converting its call sites | Building `FenceState` and mutating it twice, before touching any of 7 boolean sites, showed the run-length rule alone does NOT reject the line that triggered the report — the backtick info-string rule does. Without that run I would have shipped the "obvious" one-rule fix and left the actual trigger unfixed across all 7 | validated |
 | W-33 | 2026-08-14 | med | Mutate each new guard and check WHICH assertion fires | 3 mutations, 3 catches; one showed the control test correctly still passing (under- vs over-blocking arms), another showed two assertions cover distinct properties rather than restating one. Also surfaced that no warning catches a struct field that never existed | validated |
+| W-43 | 2026-08-15 | **high** | A backlog row's instruction can outlive its own hypothesis; run the instruction | SD-3 claimed four over-budget `::call` handlers should give up a shared extraction, and in the same field admitted the shape was UNVERIFIED — read the other three first. Reading falsified it (two pairs, on a different axis) and found the duplication that IS there: a scope-resolution prologue written three times, one copy drifted, whose live effect is `librarian(context, scope="all")` crossing the umbrella boundary. Acting on the hypothesis would have refactored ~1460 lines toward a shape that does not exist, and buried two of the three real sites | validated |
 
 ## Category conventions
 
@@ -3476,6 +3477,66 @@ build the seeing before finishing the sweep — the sweep is then verified rathe
 than asserted.*
 
 **Status:** validated — single stream, three confirming data points within it.
+
+## W-43 — A backlog row's instruction can outlive its own hypothesis; run the instruction
+
+**Observed:** 2026-08-15, resuming the structural-debt stream at
+`docs/trackers/structural-debt-refactor.md` SD-3, on `experiments` @ `1d22b715`.
+
+**Pattern:** When a tracker row carries *both* a hypothesis and an instruction to
+verify it before acting, run the instruction even when the hypothesis looks
+obviously right — and when the reading falsifies it, mark the row `superseded`
+with a successor rather than rewriting it in place. A row whose hypothesis was
+wrong but whose instruction was sound is evidence about how the backlog is
+written, and rewriting it destroys that.
+
+SD-3's hypothesis: four `::call` handlers, all ranked tier-1 over-budget by
+`legibility_scan`, are the measured friction and should give up a shared
+extraction. SD-3's instruction, written into the same field: *"UNVERIFIED whether
+the four share a phase structure. Read the other three BEFORE proposing
+anything."*
+
+**Counterfactual:** Acting on the hypothesis meant proposing an extraction from
+`src/librarian/tools/get.rs` alone, or a four-way one, across ~1460 lines of
+working code. Reading all four showed the shape does not exist: they are two
+pairs on a different axis — `find`/`context` are query handlers,
+`get`/`update` are single-artifact handlers — and the hypothesised shared
+"apply overlay" phase is 2 of 4 (`get` and `find` share `shadow_main_pairs`;
+`update` uses `resolve_write_target`; `context` has none).
+
+The cost of getting this wrong was not only wasted effort. The reading found the
+duplication that *is* there — the scope-resolution prologue written three times,
+one copy drifted (SD-10) — and that copy is not a tidiness question but a live defect:
+`librarian(action="context", scope="all")` runs with no scope clause where
+`artifact(action="find", scope="all")` narrows to the umbrella, measured on the
+running server, returning an artifact from outside the umbrella. Filed as
+`docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
+
+Had the extraction gone ahead on the hypothesised axis, the three-way duplication
+would have been left untouched *and* made harder to see, since two of its three
+sites sit inside handlers the refactor would have reorganised. The third site,
+`src/librarian/tools/workspace_state_at.rs`, was never in the group at all.
+
+**Confirming data points:**
+1. This session — SD-3's hypothesis falsified, its instruction produced SD-10 and
+   a high-severity bug file.
+2. W-32 (2026-08-14) — the same shape one level down: *run the bug's reproduction
+   before reading its fix plan, because the plan is a hypothesis about the
+   reproduction*. Three fixes changed on contact.
+3. W-39 (2026-08-15) — eleven of fourteen bug filings had reasoning weaker than
+   their own code.
+
+**Impact:** high — prevented a large no-op refactor of load-bearing handlers and
+converted the effort into a measured, filed defect.
+
+**Promote-when:** a third instance where a tracker/bug row's *verify-first*
+instruction contradicts its own stated conclusion and the instruction wins. At
+three, promote to `CLAUDE.md` as a backlog-reading rule: when a row states both a
+conclusion and a check, the check is the load-bearing half — and prefer
+`superseded` over in-place rewrite so the falsification stays legible.
+
+**Status:** validated — two adjacent data points (W-32, W-39) already support the
+general shape; this is the first at backlog-row grain.
 
 ## Template for new entries
 

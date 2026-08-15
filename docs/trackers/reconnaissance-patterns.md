@@ -1941,6 +1941,58 @@ answered by finding the existing dispatch. At two datapoints this belongs in
 the reconnaissance skill file (in the codescout-companion repo, so not a path
 resolvable from here) as a named seam class: *the variant-dispatch seam*.
 
+## R-88 — Hit: the instrument that nominates a refactor group also fixes its axis, and that axis can be orthogonal to the real duplication
+
+**Verdict:** hit — the scout falsified the group's premise and located the actual
+duplication, which a live A/B measurement then confirmed as a defect.
+
+**Seam:** four `::call` handlers nominated by `legibility_scan` as tier-1
+over-budget bodies, proposed in `docs/trackers/structural-debt-refactor.md` SD-3
+as the source of a shared extraction.
+
+**What the scout did.** Read all four bodies in full before proposing anything,
+smallest first (`src/librarian/tools/update.rs`, 272 lines; then
+`src/librarian/tools/find.rs`, 327) to form the hypothesis, then the two the
+tracker had already characterised in detail (`src/librarian/tools/context.rs`,
+379; `src/librarian/tools/get.rs`, 482) to test it. Reading
+`src/librarian/tools/get.rs` first would have anchored the scout on a shape the
+tracker had already described.
+
+**Finding.** The four do not share a phase structure. They are two pairs on an
+axis the nomination cannot express: `find`/`context` are query handlers,
+`get`/`update` are single-artifact handlers. Following the shared-looking
+fragments outward with `grep` instead found the real duplication — a
+scope-resolution prologue written three times, one copy drifted — and its third
+site is `src/librarian/tools/workspace_state_at.rs`, a file comfortably under the
+body budget that `legibility_scan` never flagged.
+
+**The cross-cutting lesson.** `legibility_scan` ranks by symbol body size and
+observed per-symbol cost. That makes it structurally capable of seeing only
+duplication *within* one symbol; a law duplicated *across* symbols in different
+files is invisible to it by construction, and the files holding the other copies
+need not be large. So a group it nominates is a list of *expensive symbols*, not
+a list of *related symbols*, and the two are easy to confuse because the output
+looks the same either way. This is the same class as SD-3's own recorded caveat
+(identical cost tuples across four distinct symbols mean attribution is coarser
+than per-symbol) — one level further out.
+
+**Rule to apply next time.** Before extracting from any instrument-nominated
+group: (1) read every member, not the highest-ranked one; (2) for each block that
+*looks* shared, grep its most distinctive token across the whole tree rather than
+across the group — the decisive third copy is the one the instrument did not
+nominate. Both steps are cheap; step 2 is what turned this from a falsified
+hypothesis into a filed defect.
+
+**Evidence:** `docs/trackers/bug-fix-session-log.md` W-43 (full narrative and
+counterfactual); `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`
+(the defect); `docs/trackers/structural-debt-refactor.md` SD-3 → SD-10.
+
+**Promote-when:** a second instance where an instrument-nominated group's axis
+turns out orthogonal to the duplication, and the decisive site sits outside the
+group. At two, promote step 2 into this skill's Phase 1 as a named seam class
+(*instrument-nominated group*), since it is craft-shaped — it holds for any
+ranking tool that scores symbols independently, not just this repo's.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
