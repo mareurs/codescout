@@ -263,13 +263,121 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.contains("symbol not found") {
         return Some("symbol_not_found");
     }
+    // ---- 2026-08-15 extension (TU-5): the unclassified head ----
+    // Ordered most-specific first, like the block above. Sizes are hits in the
+    // live-DB unclassified population (197 errors, six actively-written DBs);
+    // the lifetime corpus is not used for ranking because 77% of its
+    // unclassified mass sits in dead DBs frozen at `user_version=0`.
+
+    // json_path key miss (27). Deliberately NOT folded into
+    // `json_path_unsupported`: there the syntax is rejected, here the syntax is
+    // valid and the key is absent from THIS buffer's shape. The fixes diverge
+    // (rewrite the expression vs. inspect the shape first), so one family would
+    // make the ranking undecidable.
+    if msg.contains("path segment ") && msg.contains(" not found") {
+        return Some("json_path_key_miss");
+    }
+    // Librarian routing guard (25) — same class as the IL routing families:
+    // the gate rejected the call and re-routed it to `artifact`.
+    if msg.contains("is a librarian-managed artifact") {
+        return Some("librarian_managed_artifact");
+    }
+    // Healthy guards, tagged so they are visible in the ranking rather than
+    // invisible in the NULL bucket. cf. TU-7: a high-volume guard doing its job
+    // must not read as an error family worth "fixing".
+    if msg.contains("would wipe") {
+        return Some("destructive_replace_blocked");
+    }
+    if msg.contains("would introduce syntax errors")
+        || msg.contains("left the file syntactically invalid")
+    {
+        return Some("edit_would_break_syntax");
+    }
+    // Heading resolution reached from artifact's body_edits batch. The arm above
+    // is anchored with `starts_with("heading ")`, which the batch form
+    // (`body_edits[0]: heading '## Fix' not found`) never satisfies. Ambiguity is
+    // split from absence — add-context vs. fix-the-name are different repairs.
+    if msg.contains("heading ") && msg.contains(" not found") {
+        return Some("heading_not_found");
+    }
+    if msg.contains("heading ") && msg.contains(" times") {
+        return Some("ambiguous_heading");
+    }
+    // Target already exists (17).
+    if msg.starts_with("file already exists:") {
+        return Some("target_already_exists");
+    }
+    // Target missing (13) — three shapes across four tools. read_markdown's own
+    // `file not found:` is claimed by its tool-scoped arm well above this.
+    if msg.starts_with("path not found:")
+        || msg.starts_with("file not found:")
+        || msg.contains("No such file or directory")
+    {
+        return Some("path_not_found");
+    }
+    // Unknown enum / field value (8) — the agent supplied a well-formed call
+    // with a value outside the accepted set.
+    if msg.contains("unknown action ")
+        || msg.contains("unknown field ")
+        || msg.contains("unknown repo ")
+        || msg.contains("unknown id ")
+        || msg.contains("is not a bug status")
+    {
+        return Some("unknown_enum_value");
+    }
+    // Expired buffer handle (6) — the overflow-recovery failure mode: an @ref
+    // held past the session that owned it.
+    if msg.contains("buffer reference not found") || msg.contains("background job ref not found") {
+        return Some("buffer_ref_expired");
+    }
+    // Line range past EOF / inverted (4). Tool-agnostic, and reached only after
+    // the read_markdown block above, which keeps its own tool-scoped family:
+    // unifying the two would require re-mapping already-classified rows, and the
+    // backfill only fills NULLs — there is no re-map path. Deferred, not intended.
+    if msg.contains("invalid line range") || msg.contains("is past end of file") {
+        return Some("invalid_line_range");
+    }
+    // Invalid regex (5).
+    if msg.contains("invalid regex") || msg.contains("regex parse error") {
+        return Some("invalid_regex");
+    }
+    // old_string ambiguous, not absent (4). `edit_stale_match` above means
+    // re-read the file; this means add disambiguating context. Opposite repairs,
+    // so they must not share a family.
+    if msg.contains("old_string found ") || msg.contains("old_string matches ") {
+        return Some("ambiguous_old_string");
+    }
+    // edit_markdown's own wrong-extension error (1). read_markdown has carried an
+    // arm for this since the taxonomy was written; its twin never did, so every
+    // edit_markdown-on-a-non-md-file landed unclassified. Tool-scoped for the
+    // same reason the read_markdown block is.
+    if tool_name == "edit_markdown" && msg.contains("only supports .md files") {
+        return Some("edit_markdown_wrong_ext");
+    }
+    // Missing / conditionally-required params (38, the largest family). Kept LAST
+    // because its shapes are the broadest: any earlier arm that also matches is
+    // by definition the more specific reading.
+    if (msg.starts_with("missing ") && (msg.contains(" parameter") || msg.contains("field ")))
+        || msg.contains("requires '")
+        || msg.contains("is required for")
+        || msg.ends_with(" required")
+    {
+        return Some("missing_required_param");
+    }
     None
 }
 
 /// Bump to force a one-time re-run of [`backfill_legacy_rows`] on the next open
 /// (e.g. after the [`normalize_err_family`] taxonomy is extended). Tracked via
 /// SQLite's `PRAGMA user_version`.
-const BACKFILL_VERSION: i64 = 2;
+// Bump whenever `normalize_err_family` gains or re-maps an arm: the backfill is
+// gated on `PRAGMA user_version >= BACKFILL_VERSION`, so without a bump every
+// already-backfilled DB keeps its historical rows NULL and the new families tag
+// only future rows. Pinned by `backfill_reruns_when_the_taxonomy_version_advances`.
+// v3 (2026-08-15): TU-5 unclassified-head families.
+// v4 (2026-08-15): twin-tool gaps — buffer_ref_expired widened to run_command,
+//                  invalid_line_range added for read_file.
+const BACKFILL_VERSION: i64 = 4;
 
 /// One-time, idempotent repair of rows written before the friction columns were
 /// populated. Gated on `PRAGMA user_version` so it runs once per DB and is a
@@ -1529,6 +1637,251 @@ mod tests {
                 "tool={tool_name} msg={msg}"
             );
         }
+    }
+
+    /// Families measured against the *live-DB* unclassified population on
+    /// 2026-08-15: 197 errors across the six actively-written `usage.db` files.
+    /// Hit counts in the comments are from that population deliberately — the
+    /// lifetime figure is dominated by five dead DBs frozen at `user_version=0`
+    /// which no longer receive the backfill, so ranking on it measures history
+    /// rather than the current surface.
+    #[test]
+    fn normalize_err_family_maps_the_unclassified_head() {
+        let cases = [
+            // Missing / conditionally-required params — 38 hits, the largest
+            // family. Spans four distinct message shapes across five tools.
+            (
+                "edit_code",
+                "missing 'symbol' parameter",
+                Some("missing_required_param"),
+            ),
+            (
+                "edit_code",
+                "action 'insert' requires 'body'",
+                Some("missing_required_param"),
+            ),
+            (
+                "artifact",
+                "missing field `patch`",
+                Some("missing_required_param"),
+            ),
+            (
+                "artifact_event",
+                "note.text required",
+                Some("missing_required_param"),
+            ),
+            (
+                "artifact",
+                "body_edits[1]: content is required for the insert_after action",
+                Some("missing_required_param"),
+            ),
+            // json_path key miss — 27 hits. Distinct from `json_path_unsupported`:
+            // there the syntax is rejected, here the syntax is fine and the key
+            // simply is not in THIS buffer's shape. Different fix, so different
+            // family — merging them would make the ranking undecidable.
+            (
+                "read_file",
+                "path segment 'summary' not found — hint: Available keys: content, lines, hint",
+                Some("json_path_key_miss"),
+            ),
+            (
+                "read_file",
+                "unsupported json_path segment '[*]'",
+                Some("json_path_unsupported"),
+            ),
+            // Librarian routing guard — 25 hits. Same class as the IL routing
+            // families: the gate rejected and re-routed to `artifact`.
+            (
+                "read_markdown",
+                "'docs/trackers/x.md' is a librarian-managed artifact — do not read or edit it directly",
+                Some("librarian_managed_artifact"),
+            ),
+            // Heading resolution, now also reachable from artifact's body_edits
+            // batch, whose message is prefixed by the edit index so the existing
+            // `starts_with("heading ")` arm never matched it.
+            (
+                "artifact",
+                "body_edits[0]: heading '## Fix' not found",
+                Some("heading_not_found"),
+            ),
+            (
+                "artifact",
+                "body_edits[2]: heading '### Git state' found 3 times (lines 10, 40, 90)",
+                Some("ambiguous_heading"),
+            ),
+            // Healthy guards. Recorded so they are VISIBLE in the ranking, not so
+            // they get "fixed" — cf. TU-7, where two high-volume guards were
+            // working exactly as designed.
+            (
+                "artifact",
+                "body_edits[0]: replace on '## Fix' would wipe 3 nested heading(s): ### A",
+                Some("destructive_replace_blocked"),
+            ),
+            (
+                "edit_code",
+                "inserting near 'project_has_chunks' would introduce syntax errors — not written",
+                Some("edit_would_break_syntax"),
+            ),
+            // Target already exists — 17 hits.
+            (
+                "create_file",
+                "file already exists: /repo/docs/x.md",
+                Some("target_already_exists"),
+            ),
+            // Target missing — 13 hits, three message shapes across four tools.
+            (
+                "symbols",
+                "path not found: /repo/src/lib.rs",
+                Some("path_not_found"),
+            ),
+            (
+                "edit_file",
+                "No such file or directory (os error 2)",
+                Some("path_not_found"),
+            ),
+            // Unknown enum / field value — 8 hits.
+            (
+                "memory",
+                "unknown action 'get'. Must be one of: read, write, list",
+                Some("unknown_enum_value"),
+            ),
+            (
+                "artifact",
+                "status \"wip\" is not a bug status; use one of: open, investigating",
+                Some("unknown_enum_value"),
+            ),
+            // Expired buffer handle — 6 hits. The overflow-recovery failure mode:
+            // the agent held an @ref past the session that owned it.
+            (
+                "grep",
+                "buffer reference not found: '@bg_00000033'",
+                Some("buffer_ref_expired"),
+            ),
+            // Invalid regex — 5 hits.
+            (
+                "grep",
+                "invalid regex: regex parse error: ^path = \"docs/(?!archive/)",
+                Some("invalid_regex"),
+            ),
+            // old_string AMBIGUOUS, not absent. `edit_stale_match` means re-read
+            // the file; this means add disambiguating context. Opposite actions,
+            // so they must not share a family.
+            (
+                "edit_file",
+                "old_string found 2 times (lines 115, 202). Include more surrounding context",
+                Some("ambiguous_old_string"),
+            ),
+            (
+                "edit_file",
+                "old_string matches 2 regions after whitespace normalization (lines 1528-1528, 1540-1540)",
+                Some("ambiguous_old_string"),
+            ),
+            (
+                "edit_file",
+                "old_string not found in src/x.rs",
+                Some("edit_stale_match"),
+            ),
+            // edit_markdown's own wrong-extension error. read_markdown had an arm
+            // from the start; its twin never did, so every edit_markdown-on-non-md
+            // landed unclassified.
+            (
+                "edit_markdown",
+                "edit_markdown only supports .md files",
+                Some("edit_markdown_wrong_ext"),
+            ),
+            // Same failure, twin tool, no arm. The taxonomy was written
+            // tool-by-tool, so wherever two tools share a failure mode only the
+            // first-written one got an arm. `grep` had `buffer reference not
+            // found`; `run_command`'s wording for the identical expiry differs,
+            // and its hint text is word-for-word the same — proof they are one
+            // family, not two.
+            (
+                "run_command",
+                "background job ref not found: @bg_0000000b — hint: Buffer refs expire when the session ends",
+                Some("buffer_ref_expired"),
+            ),
+            // Third instance of the same twin-gap: read_markdown has had a
+            // line-range family since the taxonomy was written, read_file never did.
+            (
+                "read_file",
+                "line range 136-145 is past end of file (104 lines)",
+                Some("invalid_line_range"),
+            ),
+            (
+                "read_file",
+                "invalid line range: start_line=746 end_line=700 (start_line must be >= 1)",
+                Some("invalid_line_range"),
+            ),
+            // read_markdown deliberately KEEPS its own tool-scoped family rather
+            // than being folded into the generic one: unifying them would have to
+            // re-map already-classified rows, and the backfill only ever fills
+            // NULLs — it has no re-map path. Recorded as deferred, not as intent.
+            (
+                "read_markdown",
+                "invalid line range: start_line=5 end_line=2",
+                Some("read_markdown_invalid_line_range"),
+            ),
+            // Scoping proof, mirroring the read_markdown one above: the same text
+            // from an unrelated tool must not pick up the markdown-specific family.
+            (
+                "some_other_tool",
+                "edit_markdown only supports .md files",
+                None,
+            ),
+            // The residual tail is genuinely one-off and stays None by design;
+            // inventing a family per message would break the low-cardinality
+            // contract this function is documented to hold.
+            (
+                "edit_code",
+                "some brand new failure nobody has seen before",
+                None,
+            ),
+        ];
+        for (tool_name, msg, want) in cases {
+            assert_eq!(
+                normalize_err_family(tool_name, msg),
+                want,
+                "tool={tool_name} msg={msg}"
+            );
+        }
+    }
+
+    /// The coupling that silently freezes the corpus: `backfill_legacy_rows` is
+    /// gated on `PRAGMA user_version >= BACKFILL_VERSION`, so a DB that already
+    /// ran the backfill never re-runs it. Extending `normalize_err_family`
+    /// WITHOUT bumping `BACKFILL_VERSION` therefore leaves every live DB's
+    /// historical rows NULL, and the new families only ever tag future rows.
+    ///
+    /// This test fails whenever arms are added and the version is not bumped.
+    #[test]
+    fn backfill_reruns_when_the_taxonomy_version_advances() {
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, latency_ms, outcome, error_msg, project_root, err_family) \
+             VALUES ('read_file', 5, 'recoverable_error', 'path segment ''summary'' not found', '/repo', NULL)",
+            [],
+        )
+        .unwrap();
+
+        // Simulate a DB already backfilled under the PREVIOUS taxonomy version —
+        // the state every actively-used usage.db is actually in. Derived from the
+        // constant rather than hardcoded, so this keeps testing the MOST RECENT
+        // bump: a literal would silently stop covering later extensions.
+        conn.execute_batch(&format!("PRAGMA user_version = {};", BACKFILL_VERSION - 1))
+            .unwrap();
+        drop(conn);
+
+        let conn = open_db(dir.path()).unwrap();
+        let fam: Option<String> = conn
+            .query_row("SELECT err_family FROM tool_calls", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            fam.as_deref(),
+            Some("json_path_key_miss"),
+            "extending normalize_err_family must bump BACKFILL_VERSION, or \
+             already-backfilled DBs keep their historical rows unclassified"
+        );
     }
 
     #[test]
