@@ -148,3 +148,46 @@ clean.
 SD-1 stays **open** on purpose. The sweep fixes today's state; only the gate
 (SD-1b) stops the next archive wave from re-opening it, and that is a feature
 needing a design pass rather than a sweep.
+
+### 2026-08-15 — SD-2 closed: one spelling, and a gate that proved itself twice
+
+`experiments:31609aa5` (not-yet-on-master). Nested-`REPLACE` occurrences across
+`src` went **5 → 1**.
+
+Two things the survey had wrong, both discovered by doing the work:
+
+**The duplicated unit was larger than recorded.** The `|| '/%' ESCAPE` tail is
+shared as well, so what sat at four sites was the whole *strict-descendant
+predicate*, not merely the escape idiom. Extracting the larger concept removed
+more duplication and — the actual test for whether an extraction is real — gave
+the function an obvious name.
+
+**The operand asymmetry is the reason the second implementation exists at all.**
+`catalog::worktree::covering_conn` escapes a per-row **column**; the other three
+escape a bound parameter. A column cannot be reached by `escape_like_pattern`,
+which acts on a Rust-side value. Three separate comments each explained this
+independently — the surest sign a shared concept was going unnamed.
+
+Behaviour preservation is proven rather than argued:
+`descendant_path_like_reproduces_the_pre_extraction_sql_exactly` pins the exact
+pre-refactor string, whitespace included, and passed first try. A stray line
+continuation in the helper's `format!` would change the query text even though
+SQL tolerates it; that assertion is what would catch it. Three property tests
+cover what a snapshot cannot explain — escape order, strict-descendant
+anchoring, operand interpolation.
+
+**The guard is the deliverable, not the tidiness.** The Rust-side gate could not
+do this job: it greps a Rust call signature, and this idiom is SQL text. One law
+with two spellings needs two gates, or the unguarded spelling is the one that
+drifts. It was mutation-verified twice — once deliberately, and once by
+accident, catching my own characterization test's expected literal as a genuine
+second occurrence in the same commit that introduced it.
+
+One process note for the next session, because it recurred today:
+`cargo test --lib descendant_path_like` reported **4/4 green while the suite was
+broken**, because the filter matches the behaviour tests but not
+`sql_descendant_like_...`. That is F-48 — a name filter selects by naming
+convention, not by blast radius. Only `--workspace` tells the truth.
+
+Baseline: **3823 / 0 / 50** (from 3818, +5 tests), `fmt --check` and
+`clippy --all-targets -D warnings` clean.
