@@ -1,20 +1,20 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - edit_code
 - mcp-tool
 - silent-data-loss
 - attributes
 - derive
-closed: null
+closed: 2026-08-15
 opened: 2026-08-13
 owner: marius
 related:
 - ec39936568425950
 - '0aa3860453ea8053'
 - dce1189f5b382c92
-severity: high
+severity: medium
 ---
 
 # BUG: edit_code's `attributes` parameter replaces the whole attribute list, so an incomplete list silently deletes the attributes you did not name
@@ -128,26 +128,58 @@ Three things this occurrence establishes that the first one did not:
 
 ## Fix
 
-Not planned yet. Two candidate directions, neither validated:
+**Direction 2, shipped in `edbdf4d9`** — report what was removed, keep replace
+semantics.
 
-1. **Merge instead of replace** — treat `attributes` as an upsert keyed by
-   attribute name, so unnamed attributes survive. Changes existing behavior for
-   any caller relying on replace semantics.
-2. **Report what was removed** — keep replace semantics but return a
-   `removed_attributes` field, the way the librarian's body writes return
-   `replaced_subsections`. That precedent exists precisely because a
-   silent-destructive write that grows the file passes every size guard by
-   construction; the same argument applies here.
+Direction 1 (merge instead of replace) was rejected on the reasoning this file
+already sketched: it changes behaviour for every existing caller in order to fix
+what is really a *discoverability* problem. The semantics are correct and the tool
+description states them; what was missing is the write telling you what it cost.
 
-Direction 2 is the cheaper and more consistent-with-precedent option and does
-not break callers.
+The precedent is now three-for-three in this codebase, and they all exist for one
+reason: **a destructive write that GROWS the file passes every size guard by
+construction**, so the only defence is naming the casualties.
 
+| Surface | Field |
+|---|---|
+| librarian body writes | `replaced_subsections` |
+| `edit_code(remove)` (`3baa993d`) | `removed_descendants` |
+| `edit_code(replace, attributes=[…])` | **`removed_attributes`** |
+
+Two design points that are the actual content of the fix:
+
+1. **Casualties, not the region.** An attribute the caller re-states in the
+   supplied list survives, so it is not reported. Listing the whole lead region
+   would be easier and wrong.
+2. **Absent when nothing was lost.** A `removed_attributes: []` on every replace
+   is noise, and noise is how a warning field stops being read — the same end
+   state as reporting nothing at all.
+
+Doc comments are deliberately excluded from the field. It answers *"which
+attributes did I lose"*; folding documentation and attributes into one list is
+precisely how the lead region caused trouble before (`do_replace` carries its own
+comment on treating the two classes independently).
+
+Severity lowered `high` → `medium`: the loss is no longer silent, which was the
+whole of the severity. The write is still destructive by design.
 ## Tests added
 
-None yet — the bug is not fixed. A regression test belongs with the fix and
-must assert the *preserved* attribute, not just the added one: a test that only
-checks the new attribute is present passes whether or not the others survived.
+Two in `tests/symbol_lsp.rs`, **mock-backed on purpose**. The existing attribute
+tests (`u19_*`, `u21_*` in `tests/bug_regression.rs`) sit behind `#[ignore]`
+because they need a real rust-analyzer, so a regression there would not fail the
+normal gate — this is the coverage gap § Evidence already named.
 
+- `replace_with_attributes_names_the_attributes_it_dropped` — the supplied list
+  **re-states** `#[deprecated]` and adds `#[inline]`, so only
+  `#[allow(dead_code)]` is genuinely lost. Asserting the exact one-element vector
+  is what separates *reporting casualties* from *reporting the lead region*; a
+  `contains` check would pass for both.
+- `replace_reports_no_removed_attributes_when_nothing_was_lost` — both no-loss
+  arms in one loop: no `attributes` param at all, and a list re-stating exactly
+  what was already there.
+
+Gate: `cargo test --workspace` → 3812 passed / 0 failed / 50 ignored; clippy
+`--workspace --all-targets -D warnings` clean.
 ## Workarounds
 
 - **Always pass the complete intended attribute list**, not just the delta.
@@ -159,17 +191,15 @@ checks the new attribute is present passes whether or not the others survived.
 
 ## Resume
 
-Run the Reproduction section's four steps on a scratch copy of a struct with two
-attributes and record the actual before/after attribute lists — that converts
-this file's root cause from hypothesis to measured mechanism. Then check whether
-the behavior is Rust-specific by repeating on a Kotlin or TypeScript symbol.
+Closed. The related open question about `replace` and *descendants* (should a
+replacement body that defines fewer children report rather than refuse?) is
+tracked separately and is the same argument one level up — report what changed
+rather than guess at intent.
 
-Only after that, read `edit_code`'s attribute-handling path and decide between
-the two Fix directions.
-
-Do not archive this file on the strength of the Task 2 fix — Task 2 restored the
-derive by hand; the tool behavior is untouched.
-
+Worth keeping from this one: the fix is not the field, it is **which entries the
+field contains**. A destructive-write warning that lists everything in range, or
+fires on every call, decays into noise and stops being read — which lands in the
+same place as the silence it replaced.
 ## References
 
 - Sibling bugs, same failure class:

@@ -1,12 +1,18 @@
 ---
-status: investigating
+kind: bug
+status: fixed
+tags:
+- worktree
+- workspace-activation
+- semantic-search
+- retrieval
+- companion-plugin
+- agent-agnostic
+closed: 2026-08-15
 opened: 2026-08-13
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [worktree, workspace-activation, semantic-search, retrieval, companion-plugin, agent-agnostic]
-kind: bug
+severity: medium
 ---
 
 # BUG: Claude Code's `EnterWorktree` desyncs codescout's active project, and activating the worktree strands semantic search
@@ -370,31 +376,37 @@ reference. The alternative — staying in main and letting git move the work —
 the isolation `EnterWorktree` was for.
 ## Resume
 
-**Half 2 is done — do not re-investigate it.** Read the *Status 2026-08-14* section
-above before anything else; it names what shipped, the SHA range, and the
-limitations that shipped on purpose.
+**Archived 2026-08-15.** Half 2 shipped; halves 1 and 3 were split into their own
+files, which is step 2 of the plan this section used to carry:
 
-Concrete next actions, in order:
+- **Half 1** → `docs/issues/2026-08-15-worktree-guard-covers-writes-but-not-reads.md`
+  — the write guard proves the condition is detectable, then spends the detection
+  on half the surface. Now carries a fix *design* it did not have here: a one-shot
+  notice rather than a refusal, because a read guard would fire during exactly the
+  orientation reads that cannot yet satisfy it.
+- **Half 3** → `docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md`
+  — and the split found something this file had merged: **memories shrink because
+  `.codescout/memories/` IS git-tracked; sub-projects multiply because
+  `.codescout/workspace.toml` is NOT.** Opposite mechanisms, one symptom. Filed
+  with three mutually-constrained options and a recommended sequencing.
 
-1. **Decide the companion branch.** `feat/worktree-index-hooks` @ `d65f96d` in
+Still outstanding, and **not** this repo's to close:
+
+1. **The companion branch.** `feat/worktree-index-hooks` @ `d65f96d` in
    `claude-plugins` is unpushed and unmerged. Until it lands the hook still tells
-   agents not to index in a worktree, so half 2's fix is only reachable by a user who
-   knows to run `index(action="build")` manually. That repo also has an open
-   secret-guard decision on `recon/promote-substrate-bytes-secrets`, so sequence the
-   two deliberately.
-2. **Split halves 1 and 3 into their own bug files**, then archive this one. Do it
-   through the librarian (`artifact(action="move", …)`), never a bare `git mv` —
-   `id = sha256(abs_path)`.
-3. **Triage the deferred minors** recorded in the run ledger at
+   agents not to index in a worktree, so half 2's fix is only reachable by a user
+   who knows to run `index(action="build")` by hand. Sequence against the open
+   secret-guard decision on `recon/promote-substrate-bytes-secrets` in the same
+   repo.
+2. **Deferred minors** in the run ledger at
    `.superpowers/sdd/2026-08-13-worktree-semantic-search/progress.md` (kept, not
-   deleted). The final review's own triage lists what it judged must-fix versus
-   fine-to-ship; the must-fix set was cleared by the fix wave.
+   deleted). The final review's triage separates must-fix from fine-to-ship; the
+   must-fix set was cleared by the fix wave.
 
-One seam is knowingly untested and worth closing if this area is touched again:
-reverting `semantic_search` to two `search_code` calls plus `merge_hits` would not
-fail any test, because nothing builds a Qdrant-backed `RetrievalClient`. The sibling
-seam (deleting Qdrant's `query_overlay` override) **is** now covered, by
-`c284786c`.
+One seam is knowingly untested: reverting `semantic_search` to two `search_code`
+calls plus `merge_hits` would fail no test, because nothing builds a Qdrant-backed
+`RetrievalClient`. The sibling seam (deleting Qdrant's `query_overlay` override)
+**is** covered, by `c284786c`.
 ## References
 
 - `src/retrieval/sync.rs:107,385` — retrieval's only worktree mentions.
