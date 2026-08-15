@@ -69,9 +69,15 @@ None — the mitigation (`post_compact=true`) was applied on notice, without rea
 
 ## Fix
 
-Shipped in `eedb308c`, and it is the candidate this file proposed — mtime/hash
-drift detection with an auto-flush — with the hash dropped for a reason worth
-recording.
+Shipped in **two** commits, and the second exists because the first did nothing.
+
+> **`eedb308c` was INERT on the mux path** — the path this project actually uses
+> for Rust. Live verification on the rebuilt server reproduced the original bug
+> unchanged. Really fixed in **`7c8863f0`**; see § Resume, where the mechanism is
+> worth more than the fix.
+
+The approach is the candidate this file proposed — mtime/hash drift detection with
+an auto-flush — with the hash dropped for a reason worth recording.
 
 `LspClient` gains `synced_sigs`: the on-disk signature of the content last **sent**
 to the server, per file. Recorded in `did_open` and `did_change` (both already read
@@ -107,32 +113,65 @@ had; a false positive costs one redundant `didChange`.
   `did_change_refreshes_stale_symbol_positions`, whose step 3 asserted the
   opposite. See § Resume.
 
-**Verified end to end against a real rust-analyzer**, not only by unit test: the
-rewritten test prepends three lines on disk with no flush and asserts the shift is
-picked up. Gate: `cargo test --workspace` → 3814 passed / 0 failed / 50 ignored;
-clippy clean.
+**That end-to-end test was necessary and not sufficient**, which is this file's
+real lesson. It drives `LspClient::start` with `mux: false` — the **stdio**
+transport — and the defect exists only on **socket**. It passed against a real
+rust-analyzer while the shipped binary stayed broken.
+
+Two transport-independent tests landed in `7c8863f0`:
+
+- `a_repeat_did_open_must_not_overwrite_the_recorded_signature` — asserts both
+  that the mark holds *and* that drift is still visible after a repeat `didOpen`.
+  Mutation-verified against the real defect, not a hypothetical: restoring the
+  unconditional overwrite fails it with `(20, t=1600000060)` where
+  `(10, t=1600000000)` was expected.
+- `an_unrecorded_file_has_not_drifted` — a never-sent file must not fire a
+  redundant `didChange` on first navigation.
+
+Both assert on `SyncedSignatures` rather than through a transport. That is what
+makes the invariant testable without standing up a mux — the reason it had no test
+before.
+
+**Live-verified on the mux path**, 2026-08-15, after `cargo rb` + `/mcp`: an
+external `cp` prepended three lines to a probe file; `symbols()` with no flush
+reported `10-12`, having reported `7-9` before. The identical sequence against the
+`eedb308c` binary returned the pre-write range.
+
+Gate: `cargo test --workspace` → 3817 passed / 0 failed / 50 ignored; clippy clean.
 ## Workarounds
 
 After any edit made outside codescout's own tools (external `git checkout`, `git stash`, another editor, a build step that rewrites generated code), call `workspace(action="status", post_compact=true)` before trusting `symbols()`/`edit_code` output for the affected file(s).
 
 ## Resume
 
-Closed. The part worth carrying forward is the test that had to be rewritten.
+Closed — for real this time, and the two-step is the useful part.
 
-`did_change_refreshes_stale_symbol_positions` asserted, at its step 3, that a
-query after an external write returns **stale** positions — as a demonstration of
-why a caller had to send `did_change` themselves. **That demonstration was the
-bug.** Fixing it necessarily broke the test.
+**Why `eedb308c` shipped inert.** `did_open` recorded the on-disk signature. On
+**socket** transport it never takes its already-open early return, because the mux
+owns document dedup — so every `document_symbols` re-recorded the *current* disk
+state, and the drift check running afterwards compared the file against itself.
+Meanwhile the mux deduped the `didOpen`, so the server kept its stale copy. Two
+halves silently cancelling.
 
-The distinction that decided what to do: **the test's subject was a defect, not a
-contract**, so it became obsolete the moment the defect closed, and rewriting it
-was correct. Contrast `9b902e0a` the same day — there a failing test pinned a real
-contract with purpose-built support behind it, and the *code* was wrong, so the
-change was reverted. Same surface (a test blocking a change), opposite verdicts.
+**Why no test caught it.** The end-to-end test used `mux: false`. **It exercised
+the one transport on which the defect cannot appear** — and Rust in this project
+runs through the mux.
 
-**Ask what a blocking test is a statement about before deciding which side
-yields.** A test that documents "this is broken" and a test that documents "this
-is the agreement" look identical from the failure message.
+**What actually fixed it.** Not the reordering, though the check now runs before
+`did_open`. The repair that matters is making the rule explicit rather than
+positional: **`did_open` records vacant-only, `did_change` overwrites — a
+notification that may be deduped must not claim delivery.** That turns ordering
+from load-bearing into irrelevant, which is the difference between fixing this
+instance and being able to regress it silently again.
+
+Two lessons, both generalised:
+
+1. **A test that exercises only the simplest transport or deployment mode is not
+   verification of a fix whose failure mode is mode-specific** — R-86, F-49.
+2. The earlier lesson still stands: `did_change_refreshes_stale_symbol_positions`
+   documented a *defect*, so rewriting it was right (R-85). Note this one bug
+   required both calls, in opposite directions, one commit apart — a test yielded
+   to the code, then the code yielded to reality.
 ## References
 
 - `.superpowers/sdd/2026-08-11-local-onnx-embedding-query-path/task-5-report.md` § "A real tool hazard hit mid-fix (worth recording)"

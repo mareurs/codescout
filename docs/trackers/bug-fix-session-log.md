@@ -89,6 +89,7 @@ time_scope: open-ended
 | F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 | F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
+| F-49 | 2026-08-15 | **high** | self-friction | fixed-verified | A fix I shipped and archived as done was **inert on the transport the project actually uses** — its end-to-end test drove the one transport where the defect cannot appear, and live verification on the rebuilt server reproduced the original bug unchanged |
 | F-47 | 2026-08-15 | med | self-friction | fixed-verified | Implemented a guard exemption, shipped it, and reverted it within the hour — the bug file described the refusal as an oversight, and it had both a dedicated test and purpose-built hint machinery, each one `grep` away |
 | F-48 | 2026-08-15 | med | tooling | fixed-verified | A name-filtered `cargo test` gave false confidence: `--lib guard_` did not match `edit_file_warns_hint_suggests_remove_when_new_empty`, so the change that broke it passed its own targeted run and was committed |
 | F-46 | 2026-08-15 | med-high | self-friction | fixed-verified | An existing integration test asserted `msg.contains("AST parse failed")` on a **syntactically perfect** fixture — it had been corroborating a false explanation of its own scenario since it was written, and made correcting the message look like a regression |
@@ -132,6 +133,7 @@ time_scope: open-ended
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 | W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
 | W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-41 | 2026-08-15 | **high** | Live-verify on the running server after every rebuild, even when the suite is green and the bug is already archived | The stale-symbols fix passed a real-rust-analyzer end-to-end test, cleared a 3814-test gate, was documented, archived, and reported as verified. It did nothing. The post-`/mcp` probe — external write, then `symbols()` with no flush — took under a minute and reproduced the original bug exactly. Without it, a closed bug file, a CHANGELOG entry and a promotion to master would all have asserted a fix that was not there | validated |
 | W-39 | 2026-08-15 | high | Reproduce before trusting the filing — measured across a whole backlog | Fourteen bugs closed in one drive; **eleven had a filing whose reasoning was weaker than its own code**. Not wrong about the symptom — wrong about cause, scope, or what was already true. Three recurring shapes: absence claims ("no test discriminates", "no workaround exists", "reproduces only on Windows"), count-vs-category generalisation, and false comments about a peer component. Trusting any one filing's fix section would have produced the wrong change | validated |
 | W-40 | 2026-08-15 | med-high | Time the subject against a trivial control on the same connection | A ~990 ms `semantic_search` was filed with ~950 ms unaccounted. Measuring it alone would have produced another bare number; measuring it beside `tools/list` (1 ms) and `tree depth=1` (39.5 ms) over one MCP session turned it into a breakdown — and showed the headline finding, that the figure is now **127 ms** and its largest identified slice is per-call dispatch shared by every tool | validated |
 | W-38 | 2026-08-15 | high | Separate a safety guard's REFUSAL from its DIAGNOSIS | `insert position="after"` looked broken. Split three ways it wasn't: the refusal is correct (BUG-051, would splice mid-body), the *message* was the defect (asserted "AST parse failed" on files that parse), and the real limit is an LSP/AST asymmetry belonging to the extractor. Treating it as one bug would have reopened a closed corruption bug. Also: the codebase already had `has_syntax_errors` sitting next to an error that *guessed* about syntax errors | validated |
@@ -3284,6 +3286,94 @@ as a measurement rule.
 
 **Status:** validated — single datapoint, but it produced both a refutation and a
 new separately-filed finding.
+
+## F-49 — A fix I shipped, documented and archived was inert on the transport the project uses
+
+**Observed:** 2026-08-15, live verification after `cargo rb` + `/mcp` on the
+rebuilt server — the routine post-rebuild check, run on a bug already closed.
+
+**When:** Verifying `eedb308c` ("re-sync a file that changed on disk before
+answering about it"). Wrote a probe file, `symbols()` it, prepended three lines via
+shell (an external write codescout is never told about), `symbols()` again.
+
+**Expected:** the shifted line range, per the fix.
+
+**Got:** `4-6` — the pre-write range. **The original bug, unchanged.**
+
+**Probable cause — measured, not guessed.** `did_open` records the on-disk
+signature, and on **socket** transport it never takes its already-open early
+return, because the mux owns document dedup. So every `document_symbols`
+re-recorded the *current* disk state, and the drift check running afterwards
+compared the file against itself. Meanwhile the mux deduped the `didOpen`, so the
+server kept its stale copy. **Two halves silently cancelling**, each correct in
+isolation.
+
+The end-to-end test passed throughout because it drives `LspClient::start` with
+`mux: false` — the **stdio** path, where `did_open`'s early return hides the
+difference. Rust in this project runs through the mux. **The test exercised the one
+transport on which the defect cannot appear.**
+
+**Workaround / fix:** `7c8863f0`. The drift check now runs *before* `did_open`, but
+the repair that matters is making the recording rule explicit instead of
+positional: `did_open` records vacant-only, `did_change` overwrites — *a
+notification that may be deduped must not claim delivery*. Ordering becomes
+irrelevant rather than load-bearing. The bookkeeping moved into a
+`SyncedSignatures` type so the invariant is testable without standing up a mux,
+which is exactly why it had no test before.
+
+**Severity:** high — not for the defect (a stale read) but for **how close it came
+to being believed**. It had a green 3814-test gate, a real-rust-analyzer end-to-end
+test, a written-up bug file, an archive move, and a "verified" line in my own
+report. Every one of those was wrong together.
+
+**Status:** fixed-verified — re-verified live on the mux path (`7-9` → external
+write → `10-12`, no flush), mutation-verified in unit tests, gate 3817 green.
+
+**Fix idea / Pointer:** when a component has more than one transport or deployment
+mode, a test that constructs the *simplest* one is a smoke test, not verification.
+Either parameterise over the modes or assert on a mode-independent invariant — the
+latter is what `SyncedSignatures` made possible here. Generalised as R-86.
+
+## W-41 — Live-verify after every rebuild, even when the bug is already closed
+
+**Observed:** 2026-08-15, post-`/mcp` verification pass at the end of a
+fourteen-bug drive.
+
+**Pattern:** After `cargo rb` + `/mcp`, re-run the *original reproduction* for each
+fix on the live server — not a proxy, not the test suite, the reproduction. Treat a
+closed bug file as a claim to be checked, not a record to be trusted.
+
+**Counterfactual:** `eedb308c` had a real-rust-analyzer end-to-end test, a green
+3814-test gate, a written bug file with a § Tests-added section, an archive move,
+and my own "verified end to end" line in the session report. **All of it was
+wrong.** The fix was inert on the mux path (F-49). The probe that caught it — write
+a file, `symbols()`, prepend three lines via shell, `symbols()` again — took under
+a minute.
+
+Without that minute: a closed bug file asserting a fix that did not exist, a
+CHANGELOG entry describing it, and a fast-forward to `master` carrying all three.
+The next session to hit stale symbols would have found the bug marked *fixed and
+archived* — the most expensive state for a live bug to be in, because it redirects
+the reader away from the cause.
+
+**Confirming data points:**
+1. This session — `eedb308c` inert, caught only live.
+2. The same pass confirmed three *other* fixes genuinely live (name-path
+   reconciliation, ambiguity spans, `at_line` hint), so the check discriminates
+   rather than always finding fault.
+3. Prior: `docs/RELEASE.md` already carries a live-surface verification step from
+   an earlier round — this is its first save.
+
+**Impact:** high — it is the only gate that sees the *shipped configuration*. The
+test suite chooses its own construction; the live server does not.
+
+**Promote-when:** already promoted in shape — `docs/RELEASE.md`'s live-surface step
+exists. Strengthen its wording at the next edit: the step must re-run the bug's
+**original reproduction**, not merely confirm the tool responds. A smoke call would
+have passed here.
+
+**Status:** validated — one save, and it prevented a false "fixed" from reaching
+`master`.
 
 ## Template for new entries
 
