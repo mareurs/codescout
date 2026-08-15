@@ -167,21 +167,15 @@ pub(crate) fn shadow_main_pairs(
     cat: &Catalog,
     worktree_root: &str,
 ) -> Result<Vec<(String, String)>> {
-    // worktree_root is bound as a LIKE *pattern* below (`... || '/%'`), so its
-    // own `%`/`_` characters must be escaped (backslash first, then `%`, then
-    // `_`) or a root like `.worktrees/fix_1` has its `_` read as a
-    // single-char wildcard, false-matching unrelated siblings such as
-    // `.worktrees/fixe1`. Mirrors `catalog::worktree::covering`'s escaping;
-    // applied to the bound parameter here (rather than a column, as
-    // `covering` does) because the wildcard-bearing value is the
-    // caller-supplied worktree root, not a stored column.
-    let mut stmt = cat.conn.prepare(
+    // `?2` is the caller-supplied worktree root, bound as a LIKE *pattern*, so
+    // its own `%`/`_` must be escaped. Shares one spelling with every other
+    // strict-descendant query via `descendant_path_like`.
+    let under_root = crate::librarian::util::descendant_path_like("?2");
+    let mut stmt = cat.conn.prepare(&format!(
         "SELECT l.dst_id, l.src_id FROM artifact_link l \
          JOIN artifact s ON s.id = l.src_id \
-         WHERE l.rel = ?1 AND (s.abs_path = ?2 OR s.abs_path LIKE \
-         REPLACE(REPLACE(REPLACE(?2, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
-         || '/%' ESCAPE '\\')",
-    )?;
+         WHERE l.rel = ?1 AND (s.abs_path = ?2 OR s.abs_path {under_root})"
+    ))?;
     let pairs = stmt
         .query_map(rusqlite::params![LINEAGE_REL, worktree_root], |r| {
             Ok((r.get(0)?, r.get(1)?))

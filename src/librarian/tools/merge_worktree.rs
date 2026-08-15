@@ -62,16 +62,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let now = chrono::Utc::now().timestamp_millis();
 
     // Every catalog row living under `root` — forked shadow twins AND
-    // worktree-born artifacts alike. `root` is bound as a LIKE *pattern*
-    // below, so its own `%`/`_` characters must be escaped (mirrors
-    // `catalog::worktree::covering` / `tools::worktree::shadow_main_pairs`) or
-    // a root like `.worktrees/fix_1` has its `_` read as a single-char
-    // wildcard, false-matching a sibling such as `.worktrees/fixe1`.
-    let mut stmt = cat.conn.prepare(
-        "SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path LIKE \
-         REPLACE(REPLACE(REPLACE(?1, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
-         || '/%' ESCAPE '\\' ORDER BY abs_path",
-    )?;
+    // worktree-born artifacts alike. `root` is bound as a LIKE *pattern*, so
+    // its own `%`/`_` must be escaped; `descendant_path_like` is the one
+    // spelling of that predicate.
+    let under_root = crate::librarian::util::descendant_path_like("?1");
+    let mut stmt = cat.conn.prepare(&format!(
+        "SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path {under_root} \
+         ORDER BY abs_path"
+    ))?;
     let shadow_ids: Vec<String> = stmt
         .query_map([&root], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
@@ -80,9 +78,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if a.abandon {
         if !a.dry_run {
             cat.conn.execute(
-                "DELETE FROM artifact WHERE abs_path = ?1 OR abs_path LIKE \
-                 REPLACE(REPLACE(REPLACE(?1, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
-                 || '/%' ESCAPE '\\'",
+                &format!("DELETE FROM artifact WHERE abs_path = ?1 OR abs_path {under_root}"),
                 [&root],
             )?;
             reg::set_status(&cat, &root, "abandoned", now)?;

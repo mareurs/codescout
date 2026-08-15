@@ -72,20 +72,17 @@ pub(crate) fn covering_conn(
     conn: &rusqlite::Connection,
     abs_path: &str,
 ) -> Result<Option<RegistrationRow>> {
-    // worktree_root is used below as a LIKE *pattern*, so its own `%`/`_`
-    // characters must be escaped (backslash first, then `%`, then `_`) or a
-    // root like `.worktrees/fix_1` has its `_` read as a single-char
-    // wildcard, false-matching unrelated siblings such as `.worktrees/fixe1`.
-    // Mirrors the LeafOp::Prefix escaping in filter.rs; done via SQL
-    // REPLACE() rather than a bound Rust parameter because the value being
-    // escaped is a per-row column, not a value already held in Rust.
+    // `worktree_root` is a per-row COLUMN here, not a value held in Rust, so
+    // the wildcard escaping has to happen inside the query —
+    // `escape_like_pattern` cannot reach it. `descendant_path_like` is the
+    // SQL-side twin that can; see its doc comment for why the escaping is
+    // required at all.
+    let under_root = crate::librarian::util::descendant_path_like("worktree_root");
     Ok(conn
         .query_row(
             &format!(
                 "SELECT {COLS} FROM worktree_registration \
-                 WHERE status='active' AND (?1 = worktree_root OR ?1 LIKE \
-                 REPLACE(REPLACE(REPLACE(worktree_root, '\\', '\\\\'), '%', '\\%'), '_', '\\_') \
-                 || '/%' ESCAPE '\\')"
+                 WHERE status='active' AND (?1 = worktree_root OR ?1 {under_root})"
             ),
             [abs_path],
             row_from_sql,
