@@ -241,3 +241,53 @@ The three citations that resolve to nothing are split out as **SD-8** — no rul
 can fix them, so they were deliberately left out of the sweep.
 
 Baseline: **3835 / 0 / 50** (from 3818, +17 tests), fmt and clippy clean.
+
+### 2026-08-15 — correction: SD-1b saw a fifth of what it was built for, and my "cap never fired" claim was wrong
+
+Two errors from the same root, both mine, both worth keeping because the shape
+recurred three times in one session.
+
+**The cap claim was false.** The entry above said the first live scan produced
+zero `code_comment_capped` findings, and reasoned from that to "the cap is
+untested." It fires. I had run that scan as `… | head -8`, so the buffer held
+**eight lines**, and I grepped those and read the empty result as a fact about a
+1390-file corpus. A second attempt failed the same way for a different reason:
+run bare, the findings array itself reports `"shown": 50, "total": 51833` — a
+0.1% sample. Production evidence exists and is narrow and sufficient:
+`src/fs/mod.rs` returns three findings, two carrying
+`severity_reason=code_comment_capped`.
+
+That is the third instance today of **measuring the instrument and reporting it
+as the subject** — after the markdown auditor pointed at Rust, and the
+default-mode grep capped at 50 while its footer read "Showing 50 of 50". The
+parallel session filed the grep one as its own bug file. The tests written on
+the false premise are still correct and stay: a policy deserves a test whatever
+prompted it.
+
+**SD-1b covered 20% of its target.** `parse_refs` extracts from exactly three
+places — inline code spans, fenced blocks, link targets — and of 699
+`docs/*.md` citations in this repo's `.rs` files only **140** are backticked.
+Fixed in `experiments:63b279ed` with a prose branch that only the source-comment
+path calls, leaving markdown byte-identical.
+
+The first working version of that was not shippable, which is the part worth
+remembering. Prose carries no backticks to signal "this is a path", so
+`classify` admits any slash-bearing word: one file went **2 → 106 refs**, 97 of
+them junk — the comment markers `//` and `///` themselves, plus slash-joined
+English like `overview` / `read` and `generated` / `vendored` (written apart
+here on purpose: quoted as one token they trip the markdown scanner, which has
+no extension guard — writing about a false positive produced two).
+Stripping the marker and requiring a file extension
+brings it to **3 refs, 0 unknowns**. The extension rule is deliberately strict
+and misses citations written without one; that is a malformed citation, better
+fixed in the comment than accommodated by a fuzzier matcher.
+
+**The noise came from where I wasn't looking.** Unknown verdicts went
+24,932 → 25,333 with the code-span branch (**+401**) and → 25,349 with prose
+(**+16**). The branch I was scrutinising contributed 4%; the one already shipped
+contributed 96% — backticked table-dot-column refs (`commits` `git_root`,
+`artifact` `slug`) that the prose guard rejects but never reaches. Proportionate
+on a 25k base, non-gating, left alone deliberately.
+
+Repo-wide: **51,833 refs, 16,398 resolved, exit 0.** Baseline **3842 / 0 / 50**
+(from 3818, +24 tests).
