@@ -1,12 +1,18 @@
 ---
-status: open
-opened: 2026-08-08
-closed:
-severity: high
-owner: marius
-related: [WIN-35]
-tags: [windows, cyberark-epm, build, ort, fastembed]
 kind: bug
+status: wontfix
+tags:
+- windows
+- cyberark-epm
+- build
+- ort
+- fastembed
+closed: 2026-08-15
+opened: 2026-08-08
+owner: marius
+related:
+- WIN-35
+severity: low
 ---
 
 # BUG: CyberArk EPM denies execution of the freshly-compiled `ort-sys` build script, blocking any `local-embed*` build
@@ -91,19 +97,53 @@ EXIT:126
    **Verdict:** confirmed as the proximate symptom; the EPM-specific mechanism (vs. some other Windows-side deny, e.g. mismatched exec bit) is inferred from the WIN-32/WIN-35 precedent in `docs/trackers/windows-platform-support.md`, not independently re-verified here (no EPM console access from this session).
 
 ## Fix
-Not fixable from codescout — this is a host security-policy block, matching the WIN-35 precedent ("Not fixable from codescout — needs a CyberArk policy exception"). Needs a CyberArk EPM policy exception for `ort-sys`'s build-script binary (or for `cargo`-emitted build scripts generally under `target/**/build/*/build-script-main.exe`), analogous to what WIN-35 asks for the uv trampoline.
 
-Status kept `open`, not `mitigated`: no workaround was found in this session (see Workarounds — none available).
+**wontfix — not a codescout defect.** CyberArk EPM denies execution of a
+freshly-compiled binary that no policy has whitelisted; `ort-sys`'s build script
+is that binary. Nothing in this repo can grant itself execution rights, and
+vendoring around it would mean shipping a prebuilt ORT for the gnu ABI, which
+upstream `ort` does not publish (that absence is why `local-embed-dynamic`
+exists in the first place).
 
+Resolution is either an EPM policy exception for cargo build scripts under the
+target directory, or the default-features build documented under Workarounds.
+
+Severity lowered `high` → `low`: it was set when the file recorded no
+workaround and read as "codescout does not build on this host". codescout
+builds fine on that host; one optional feature does not.
 ## Tests added
 N/A — this is a host/tooling block, not a code defect; there is nothing in codescout's own source to regress-test. The `LocalOnnxEmbedder` unit tests (`src/retrieval/local_onnx.rs::tests`) exist and are believed correct per code review against the task-3 brief, but could not be executed on this host to confirm — see the task-3 report for that caveat.
 
 ## Workarounds
-None found this session. Building on a host without the CyberArk EPM block (or with a policy exception for freshly-built `ort-sys` build scripts) is required to compile any `local-embed` / `local-embed-dynamic` feature build here.
 
+Revised 2026-08-15 — the original "None found this session" was too pessimistic,
+and the severity that followed from it (`high`) was set on a false premise.
+
+**Build with default features.** `Cargo.toml:175` declares
+`default = ["remote-embed", "http", "librarian"]`, and `remote-embed` resolves
+to `codescout-embed/remote-embed` = `["dep:reqwest", "dep:rustls"]`. **No `ort`
+anywhere in that graph.** An EPM-locked host is therefore blocked on
+`local-embed` / `local-embed-dynamic` only — not on codescout.
+
+Verified 2026-08-15, not inferred: the entire tree cross-compiles *and* lints
+for `x86_64-pc-windows-gnu` with default features and zero `ort-sys`
+(`scripts/build-windows.sh build`, `scripts/build-windows.sh clippy
+--all-targets -- -D warnings`). CI's `windows-gnu` lane exercises the same
+configuration on every push.
+
+The cost is real but bounded: embeddings must come from a remote endpoint
+(`CODESCOUT_EMBEDDER_URL`) instead of running in-process. Semantic search,
+memory, and the librarian all work; only the local ONNX embedder is off.
+
+Unchanged: there is no way to make `local-embed*` build under the EPM policy
+from inside this repo.
 ## Resume
-Ask for a CyberArk EPM exception (or investigate `ORT_LIB_LOCATION` / a pre-built `ort-sys` binding cache that would let `cargo` skip re-running the build script — check `ort-sys`'s build.rs for an env var that short-circuits execution, e.g. a way to point directly at a prebuilt bindings.rs, avoiding the need to execute the build script at all). Re-run `cargo +stable-x86_64-pc-windows-gnu test --features local-embed-dynamic --lib retrieval::local_onnx` once either lands.
 
+Closed as wontfix. Re-open only if `local-embed*` becomes required rather than
+optional — today it is neither in `default` nor needed by any CI lane that
+targets Windows.
+
+Related: WIN-35.
 ## References
 - `docs/trackers/windows-platform-support.md` WIN-32, WIN-35 rows (the CyberArk EPM precedent + the WIN-18-vs-CyberArk distinction)
 - `docs/superpowers/specs/2026-08-08-local-onnx-embedder-design.md:210` (the `os error 5` → CyberArk EPM lesson this bug reconfirms one build step earlier)

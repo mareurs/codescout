@@ -301,11 +301,35 @@ fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
 ///      silently splice into an unrelated function body.
 ///
 /// Both routes should go through `edit_code` instead.
+///
+/// A pure deletion (`new_string == ""`) is exempt — see the body for why.
 fn guard_structural_rewrite(
     path: &str,
     old_string: &str,
     new_string: &str,
 ) -> Result<(), super::RecoverableError> {
+    // A pure deletion is not a rewrite, and this guard is about rewrites.
+    //
+    // Route 2 cannot fire here by construction: an empty string has no newline.
+    // Route 1 exists to stop an existing symbol being *rewritten* through raw text
+    // (BUG-027's LSP-range corruption) — but a deletion splices nothing into the
+    // symbol's place, so there is no rewritten symbol whose ranges can go stale.
+    //
+    // Refusing deletions also left no working tool at all in the cases that matter
+    // most: `edit_code(remove)` is unavailable exactly when its AST/LSP naming
+    // fails, which is a live defect in its own right (duplicate `name_path`, and
+    // `symbols` resolving a path `edit_code` rejects). The fallback has to work
+    // when the primary does not.
+    //
+    // Note this is deliberately NOT a syntax check. `edit_file` already permits
+    // deletions that break the file when no definition keyword happens to be in
+    // range — gating only keyword-bearing deletions on parseability would make the
+    // contract depend on whether the removed text contained the word `fn`, which is
+    // not a distinction a caller can predict.
+    if new_string.is_empty() {
+        return Ok(());
+    }
+
     if !crate::util::path_security::is_source_path(path) {
         return Ok(());
     }

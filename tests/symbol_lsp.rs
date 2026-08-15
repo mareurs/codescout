@@ -1333,6 +1333,56 @@ async fn insert_code_after_lands_past_symbol() {
         "bar must be inserted after foo; got:\n{result}"
     );
 }
+/// A top-level anchor gets no parent clamp, so a new module lands at file scope.
+///
+/// This pins the route that the "insert cannot escape the enclosing scope" report
+/// treated as missing. The clamp in `do_insert` only exists when
+/// `find_parent_symbol` returns `Some`, and that function returns `None` for any
+/// `name_path` without a `/` — so anchoring on a file-scope sibling is already the
+/// way to place a file-scope item. The capability was real but unasserted, which is
+/// one refactor away from not being real.
+#[tokio::test]
+async fn insert_after_top_level_symbol_lands_at_file_scope() {
+    let src = "fn foo() {\n}\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new().with_symbols(file.clone(), vec![sym("foo", 0, 1, file)])
+    })
+    .await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "foo",
+                "position": "after",
+                "action": "insert",
+                "body": "mod fresh {\n    pub fn a() {}\n}\n"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    let mod_line = result
+        .lines()
+        .find(|l| l.contains("mod fresh"))
+        .unwrap_or_else(|| panic!("module must be present; got:\n{result}"));
+    // Column 0, not re-based into anything: asserting the exact line rather than
+    // `contains` is what makes this a scope test instead of a presence test.
+    assert_eq!(
+        mod_line, "mod fresh {",
+        "module must land unindented at file scope; got:\n{result}"
+    );
+    let foo_pos = result.find("fn foo()").unwrap();
+    let mod_pos = result.find("mod fresh").unwrap();
+    assert!(
+        mod_pos > foo_pos,
+        "module must follow the anchor; got:\n{result}"
+    );
+}
 
 /// BUG-023 regression: when LSP over-extends end_line to the next function's opening
 /// line, editing_end_line() caps it to the AST-reported end, so insertion lands

@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- clippy
+- toolchain
+- ci
+closed: 2026-08-15
 opened: 2026-08-08
-closed:
-severity: low
 owner: marius
 related: []
-tags: [clippy, toolchain, ci]
-kind: bug
+severity: low
 ---
 
 # BUG: `cargo clippy --all-targets -- -D warnings` fails on 3 pre-existing lints under the `stable-x86_64-pc-windows-gnu` substitute toolchain
@@ -81,28 +84,69 @@ different expectation in this clippy version.
    link it on this host to compare).
 
 ## Fix
-Not attempted in this session — out of scope for Task 1 (pure embedder
-trait-object refactor; brief names only `src/retrieval/{embedder,client,
-search,sync}.rs`). Candidate one-line fixes if pursued: rewrite the
-`thread_local!` block per whatever clippy 0.1.96 actually wants, add
-`.wait()` (or an explicit rationale) after the test-only `spawn()` in
-`windows.rs:362`, and drop the `return` in `path_security.rs:1485`.
 
+Shipped in `2f76136e`. The filing's framing — "pre-existing lints on a Windows
+host, out of scope here" — was wrong on both halves.
+
+**They reproduce on Linux.** `x86_64-pc-windows-gnu` is an installed rustup
+*target*, so `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D
+warnings` lints the Windows cfg from this machine. No Windows host required.
+That single command is what turned this from a triage note into a fix.
+
+**Only 2 of the 3 fire.** `event_create.rs`'s `thread_local` lint is gone under
+clippy 1.97 — as this file already suspected, the initializer was wrapped in
+`const { }`, which *is* that lint's documented fix, so it was a version
+artifact. Nothing to change there.
+
+1. **`path_security.rs` — `needless_return`.** Not really about the `return`.
+   Every assertion in `symlink_to_denied_path_is_caught_on_read` lived inside
+   `#[cfg(unix)]`, so on Windows the body reduced to "look up `$HOME/.ssh`, then
+   stop": a test that ran, asserted nothing, and reported `ok`. The `return`
+   became needless *because everything after it compiled out* — the lint was
+   pointing at the empty test. Gating the whole test `#[cfg(unix)]` removes the
+   thing the lint was complaining about and drops six now-redundant inner `cfg`
+   attributes. Same shape as the `server-stack` lane
+   (`tests/feature_lanes.rs`): coverage that looks present because a name is in
+   the test list.
+2. **`windows.rs` — `zombie_processes`.** A real leak: an unwaited `Child` holds
+   the process handle open for the life of the test binary. Liveness is now
+   sampled into a local *before* the reap, so the assertion observes exactly
+   what it did before.
+
+**Systemic half.** The `windows-gnu` CI lane built and tested that target but
+never linted it — so the host Clippy job was the only lint gate, and it cannot
+see `#[cfg(windows)]` code at all. `scripts/build-windows.sh` gains a `clippy`
+mode (so the local loop and CI run the identical command) and the lane now runs
+`scripts/build-windows.sh clippy --all-targets -- -D warnings`.
 ## Tests added
-N/A — no fix attempted; this file documents a pre-existing gate
-failure discovered while verifying Task 1.
 
+No new test — the gate *is* the regression guard, and it is a CI lane rather
+than a `#[test]` because the invariant is "this target lints clean", which no
+host-target test can assert.
+
+Verified locally, both directions:
+
+- Before: `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D
+  warnings` → 2 errors (`windows.rs:362` zombie_processes,
+  `path_security.rs:1480` needless_return).
+- After: same command → clean. Via the new script mode
+  (`scripts/build-windows.sh clippy --all-targets -- -D warnings`) → clean.
+- Linux unaffected: `cargo clippy --workspace --all-targets -- -D warnings`
+  clean, and `symlink_to_denied_path_is_caught_on_read` still runs and passes
+  there (it is unix-gated, not deleted).
 ## Workarounds
 Run `cargo clippy` (without `--all-targets`) to skip `#[cfg(test)]`
 code, or scope clippy to the changed files/crate when validating a
 specific change.
 
 ## Resume
-Confirm whether the pinned `1.97.1-msvc` toolchain (once linkable, or
-on a host with MSVC available) reproduces these 3 lints. If it does
-not, this is toolchain-substitute drift and the fix is either pinning
-CI to match, or applying the 3 one-line fixes described in `## Fix`.
 
+Closed. The reusable lesson is narrower and more useful than the bug:
+**"reproduces only on platform X" deserves one check of `rustup target list
+--installed` before it is believed.** Cross-target `clippy` needs no linker, no
+emulator, and no second machine — it type-checks and lints another platform's
+cfg from wherever you are. This file sat scoped-to-a-host for a week behind a
+command that takes 40 seconds.
 ## References
 - `.superpowers/sdd/2026-08-08-local-onnx-embedder/task-1-brief.md`
 - memory `gotchas` — MSVC linker unavailable, `+stable-x86_64-pc-windows-gnu` substitute
