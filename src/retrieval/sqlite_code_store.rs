@@ -12,8 +12,12 @@
 //! artifact store already behave.
 //!
 //! ## Storage layout
-//! One DB per project id under a data dir (`$CODESCOUT_SQLITE_DIR`, else
-//! `<home>/.codescout/embeddings/`). Tables are created lazily; the `vec0`
+//! One DB per project id under a data dir resolved by
+//! `crate::retrieval::config::resolve_sqlite_dir` and carried on
+//! `RetrievalConfig::sqlite_dir` — `$CODESCOUT_SQLITE_DIR` if set, else
+//! `<project_root>/.codescout/embeddings/`, else (rootless callers only)
+//! `<home>/.codescout/embeddings/`. This store does NOT read the environment;
+//! it is handed a directory. Tables are created lazily; the `vec0`
 //! dimension is inferred from the first batch of embeddings (so a remote model's
 //! native dim is adopted automatically). A dimension change requires a reindex —
 //! same caveat as switching Qdrant embedders (WIN-22).

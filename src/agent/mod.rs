@@ -1680,83 +1680,97 @@ impl Agent {
     pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
         use crate::retrieval::code_store::VectorBackend;
         self.semantic_memory
-                .get_or_try_init(|| async {
-                    match VectorBackend::resolve() {
-                        VectorBackend::SqliteVec => {
-                            let store =
-                                crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
-                            anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
-                        }
-                        #[cfg(feature = "server-stack")]
-                        VectorBackend::Qdrant => {
-                            // Same project root `memory_embedder` resolves — without this,
-                            // a project.toml-only [embeddings] config would make
-                            // memory_embedder project-aware while this stayed env-only,
-                            // a split env-only config could not produce (review round-1
-                            // I-3).
-                            let root = self.project_root().await;
-                            let config =
-                                crate::retrieval::config::RetrievalConfig::from_env_and_project(
-                                    root.as_deref(),
-                                )?;
-                            let qdrant =
-                                crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
-                            let collection = config.collection("memories");
-                            // Both the dimension resolution AND the collection bootstrap
-                            // are bound by ONE timeout (review round-2 I3). Resolving the
-                            // model's own dimension (below) can, for a local backend,
-                            // trigger a first-time ONNX weights download from the HF hub —
-                            // that used to sit entirely outside any timeout, reachable from
-                            // `main.rs`/`prompts::builders`/the memory tool's `forget` path,
-                            // none of which call `memory_embedder()` first to warm the
-                            // cache. Bounding it here means a slow/absent download fails
-                            // fast and retries on next use, exactly like the Qdrant-hang
-                            // case below already did — same fail-soft contract, one timeout
-                            // covering both causes.
-                            let store = match tokio::time::timeout(
-                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
-                                async {
-                                    // Resolve the model's own dimension rather than trusting an
-                                    // absent-or-wrong CODESCOUT_MODEL_DIM pin — see
-                                    // `RetrievalClient::resolve_model_dim` for why this can't
-                                    // reuse `memory_embedder()`'s already-built instance.
-                                    let dim = crate::retrieval::client::RetrievalClient::resolve_model_dim(
+            .get_or_try_init(|| async {
+                match VectorBackend::resolve() {
+                    VectorBackend::SqliteVec => {
+                        // Same project root the Qdrant arm below resolves. This arm
+                        // used to read the environment itself, which is the split
+                        // that arm's comment already called out — and it is also why
+                        // the memory store kept writing `<id>.memories.db` into
+                        // `$HOME` after the code store stopped.
+                        let root = self.project_root().await;
+                        let config =
+                            crate::retrieval::config::RetrievalConfig::from_env_and_project(
+                                root.as_deref(),
+                            )?;
+                        let store =
+                            crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::at(
+                                config.sqlite_dir.clone(),
+                            );
+                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                    }
+                    #[cfg(feature = "server-stack")]
+                    VectorBackend::Qdrant => {
+                        // Same project root `memory_embedder` resolves — without this,
+                        // a project.toml-only [embeddings] config would make
+                        // memory_embedder project-aware while this stayed env-only,
+                        // a split env-only config could not produce (review round-1
+                        // I-3).
+                        let root = self.project_root().await;
+                        let config =
+                            crate::retrieval::config::RetrievalConfig::from_env_and_project(
+                                root.as_deref(),
+                            )?;
+                        let qdrant =
+                            crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url)
+                                .await?;
+                        let collection = config.collection("memories");
+                        // Both the dimension resolution AND the collection bootstrap
+                        // are bound by ONE timeout (review round-2 I3). Resolving the
+                        // model's own dimension (below) can, for a local backend,
+                        // trigger a first-time ONNX weights download from the HF hub —
+                        // that used to sit entirely outside any timeout, reachable from
+                        // `main.rs`/`prompts::builders`/the memory tool's `forget` path,
+                        // none of which call `memory_embedder()` first to warm the
+                        // cache. Bounding it here means a slow/absent download fails
+                        // fast and retries on next use, exactly like the Qdrant-hang
+                        // case below already did — same fail-soft contract, one timeout
+                        // covering both causes.
+                        let store = match tokio::time::timeout(
+                            crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT,
+                            async {
+                                // Resolve the model's own dimension rather than trusting an
+                                // absent-or-wrong CODESCOUT_MODEL_DIM pin — see
+                                // `RetrievalClient::resolve_model_dim` for why this can't
+                                // reuse `memory_embedder()`'s already-built instance.
+                                let dim =
+                                    crate::retrieval::client::RetrievalClient::resolve_model_dim(
                                         &config,
                                     )
                                     .await? as u64;
-                                    crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                                        qdrant, collection, dim,
-                                    )
-                                    .await
-                                },
-                            )
-                            .await
-                            {
-                                // Treated exactly like a connect error: it flows out as an
-                                // `Err`, so `get_or_try_init` leaves the cell uninitialized
-                                // and retries on the next call once the cause (a hung Qdrant,
-                                // or a slow/absent model download) clears.
-                                Ok(result) => result?,
-                                Err(_) => anyhow::bail!(
-                                    "timed out bootstrapping Qdrant memories collection after {:?} \
+                                crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                                    qdrant, collection, dim,
+                                )
+                                .await
+                            },
+                        )
+                        .await
+                        {
+                            // Treated exactly like a connect error: it flows out as an
+                            // `Err`, so `get_or_try_init` leaves the cell uninitialized
+                            // and retries on the next call once the cause (a hung Qdrant,
+                            // or a slow/absent model download) clears.
+                            Ok(result) => result?,
+                            Err(_) => anyhow::bail!(
+                                "timed out bootstrapping Qdrant memories collection after {:?} \
                                  (Qdrant reachable but unresponsive, or the configured \
                                  embedding model is still downloading/loading?); semantic \
                                  memory unavailable this session — will retry on next use",
-                                    crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
-                                ),
-                            };
-                            anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
-                        }
-                        #[cfg(not(feature = "server-stack"))]
-                        VectorBackend::Qdrant => anyhow::bail!(
-                            "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
+                                crate::retrieval::qdrant::QDRANT_BOOTSTRAP_TIMEOUT
+                            ),
+                        };
+                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                    }
+                    #[cfg(not(feature = "server-stack"))]
+                    VectorBackend::Qdrant => anyhow::bail!(
+                        "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
                          feature. Rebuild with `--features server-stack`, or use the lean lite \
                          stack with CODESCOUT_VECTOR_BACKEND=sqlite-vec."
-                        ),
-                    }
-                })
-                .await
-                .cloned()
+                    ),
+                }
+            })
+            .await
+            .cloned()
     }
 
     /// Test seam: pre-populate the OnceCell with a stub store so tests don't

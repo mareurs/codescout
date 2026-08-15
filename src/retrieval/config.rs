@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Parse `CODESCOUT_RERANK` into the opt-in flag. **Absent, blank, or unrecognised is
 /// `false`** — the reranker stays off unless someone asks for it explicitly.
@@ -21,35 +21,55 @@ pub(crate) fn parse_rerank_opt_in(raw: Option<&str>) -> bool {
     )
 }
 
-/// Resolve the sqlite-vec store directory from an **already-read** env value.
+/// Resolve the sqlite-vec store directory, from an **already-read** env value
+/// and the project root.
 ///
-/// Pure over `Option<String>` for the same reason as [`parse_rerank_opt_in`]:
-/// the precedence must be testable without `std::env::set_var`, which is UB
-/// against the suite's concurrent `getenv` readers and is banned crate-wide by
+/// Precedence:
+///
+/// 1. `CODESCOUT_SQLITE_DIR`, when set and non-empty — an operator override, and
+///    the only way to put the stores somewhere else entirely.
+/// 2. `<root>/.codescout/embeddings` — the default. Per-project, beside the
+///    `.codescout/` directory that already holds the project's memories and
+///    workspace config.
+/// 3. `$HOME/.codescout/embeddings` — only when there is no project root at all
+///    (`RetrievalConfig::from_env()`). Rootless callers have no project-local
+///    place to put anything.
+///
+/// Pure over its inputs for the same reason as [`parse_rerank_opt_in`]: the
+/// precedence must be testable without `std::env::set_var`, which is UB against
+/// the suite's concurrent `getenv` readers and is banned crate-wide by
 /// `docs/conventions/test-env-isolation.md`.
 ///
-/// Relocating this read is the point of the change. It used to sit inside
-/// `SqliteVecCodeStore::from_env`, three frames below the tool call, so the only
-/// way to redirect it was to set a process-global env var — the banned option B.
-/// It now happens at the same edge as every other `CODESCOUT_*` read, and the
-/// resolved value travels inward on [`RetrievalConfig`], which is what
-/// `docs/conventions/test-env-isolation.md` calls option A.
+/// **Why per-project rather than per-user.** Case 2 replaced a `$HOME` default
+/// that had three problems, only the first of which was visible:
 ///
-/// **This does not by itself stop tests writing to `$HOME`.** With the variable
-/// unset the fallback is still the user's home directory, and no test sets it.
-/// What changes is that the fallback is now one expression in one function that
-/// every consumer reads through, so the remaining question — what the fallback
-/// *should* be — is a policy decision rather than a refactor. Measured cost of
-/// leaving it as-is: 296 files per full `cargo test` run. See
+/// - Tests build projects in tempdirs, so every run minted a fresh
+///   `<random>.db` in the developer's home that nothing ever removed — ~148 per
+///   full `cargo test`, 8,000+ files and 2.7 GB accumulated on one machine.
+///   Under a project root the store is inside the tempdir and dies with it.
+/// - Nothing bounded growth in production either: deleting a project left its
+///   store behind forever, at 3.2 MB preallocated per `vec0` table.
+/// - `project_id` is the root's **directory basename** when a project has no
+///   config of its own (`src/config/project.rs`), so `$HOME` made a single
+///   global namespace keyed by basename — two projects named `api` shared one
+///   database file, and the `project_id` column inside it could not tell their
+///   rows apart. Per-root paths cannot collide.
+///
+/// The cost is that stores written under the old default are orphaned: an
+/// existing project re-indexes once. That was the accepted trade —
 /// `docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md`.
-pub(crate) fn resolve_sqlite_dir(raw: Option<String>) -> Result<PathBuf> {
-    match raw.filter(|s| !s.is_empty()) {
-        Some(d) => Ok(PathBuf::from(d)),
-        None => Ok(crate::platform::home_dir()
-            .context("cannot resolve home dir for sqlite-vec store; set CODESCOUT_SQLITE_DIR")?
-            .join(".codescout")
-            .join("embeddings")),
+pub(crate) fn resolve_sqlite_dir(raw: Option<String>, root: Option<&Path>) -> Result<PathBuf> {
+    if let Some(d) = raw.filter(|s| !s.is_empty()) {
+        return Ok(PathBuf::from(d));
     }
+    let base = match root {
+        Some(r) => r.to_path_buf(),
+        None => crate::platform::home_dir().context(
+            "cannot resolve home dir for the sqlite-vec store, and no project root was \
+             supplied; set CODESCOUT_SQLITE_DIR",
+        )?,
+    };
+    Ok(base.join(".codescout").join("embeddings"))
 }
 
 /// Sparse-embedder fallback: the **host** port `docker-compose.yml` publishes for
@@ -194,7 +214,7 @@ impl RetrievalConfig {
             rerank: parse_rerank_opt_in(std::env::var("CODESCOUT_RERANK").ok().as_deref()),
             collection_prefix: std::env::var("CODESCOUT_QDRANT_COLLECTION_PREFIX")
                 .unwrap_or_default(),
-            sqlite_dir: resolve_sqlite_dir(std::env::var("CODESCOUT_SQLITE_DIR").ok())?,
+            sqlite_dir: resolve_sqlite_dir(std::env::var("CODESCOUT_SQLITE_DIR").ok(), root)?,
         })
     }
 }
@@ -398,7 +418,13 @@ mod sqlite_dir_tests {
 
     #[test]
     fn an_explicit_value_wins() {
-        let got = resolve_sqlite_dir(Some("/tmp/somewhere/else".to_string())).unwrap();
+        // Over the project root, too — an operator override is the only way to
+        // put the stores somewhere else entirely.
+        let got = resolve_sqlite_dir(
+            Some("/tmp/somewhere/else".to_string()),
+            Some(std::path::Path::new("/w/proj")),
+        )
+        .unwrap();
         assert_eq!(got, PathBuf::from("/tmp/somewhere/else"));
     }
 
@@ -409,30 +435,93 @@ mod sqlite_dir_tests {
         // directory — silently, and differently per invocation. Pinned because
         // the `.filter(|s| !s.is_empty())` that prevents it is one call long and
         // reads like a redundant guard.
-        let got = resolve_sqlite_dir(Some(String::new())).unwrap();
-        assert_ne!(got, PathBuf::from(""));
-        assert!(got.ends_with("embeddings"), "got: {}", got.display());
+        let got =
+            resolve_sqlite_dir(Some(String::new()), Some(std::path::Path::new("/w/proj"))).unwrap();
+        assert_eq!(got, PathBuf::from("/w/proj/.codescout/embeddings"));
     }
 
     #[test]
     fn the_fallback_is_the_users_home_directory() {
-        // Characterizes the behaviour that produces the leak this change does NOT
-        // yet fix: with the variable unset — which is every test run, since none
-        // set it — the store lands under `$HOME`, outside any tempdir's cleanup.
-        // Measured 2026-08-16: 296 files per full `cargo test` run.
+        // Only when there is no project root at all — `RetrievalConfig::from_env()`.
+        // A rootless caller has no project-local place to put anything. This is
+        // now the ONLY surviving path to `$HOME`; it used to be the default, and
+        // that default is what produced the leak, the unbounded production
+        // growth, and the basename collision.
         // docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md
-        let got = resolve_sqlite_dir(None).unwrap();
-        assert!(
-            got.ends_with(PathBuf::from(".codescout").join("embeddings")),
-            "expected a $HOME/.codescout/embeddings fallback, got: {}",
-            got.display()
-        );
+        let got = resolve_sqlite_dir(None, None).unwrap();
         let home = crate::platform::home_dir().unwrap();
-        assert!(
-            got.starts_with(&home),
-            "fallback must sit under the home dir ({}), got: {}",
-            home.display(),
-            got.display()
+        assert_eq!(got, home.join(".codescout").join("embeddings"));
+    }
+
+    #[test]
+    fn the_default_is_under_the_project_root() {
+        let got = resolve_sqlite_dir(None, Some(std::path::Path::new("/w/proj"))).unwrap();
+        assert_eq!(got, PathBuf::from("/w/proj/.codescout/embeddings"));
+    }
+
+    #[test]
+    fn two_projects_with_the_same_basename_get_different_stores() {
+        // The regression guard for the collision this change exists to close.
+        // `project_id` is the root's directory basename when a project has no
+        // config of its own (`src/config/project.rs`), so under the old `$HOME`
+        // default these two resolved to ONE database file — and the `project_id`
+        // column inside it, being that same basename, could not tell their rows
+        // apart either.
+        let one = std::path::Path::new("/w/one/api");
+        let two = std::path::Path::new("/w/two/api");
+        assert_eq!(
+            one.file_name(),
+            two.file_name(),
+            "precondition: the roots must share a basename, or this proves nothing"
+        );
+        let a = resolve_sqlite_dir(None, Some(one)).unwrap();
+        let b = resolve_sqlite_dir(None, Some(two)).unwrap();
+        assert_ne!(a, b, "same-basename projects must not share a store dir");
+    }
+
+    /// DRY gate: `CODESCOUT_SQLITE_DIR` must be READ in exactly one place.
+    ///
+    /// It was read in two: `SqliteVecCodeStore::from_env` and
+    /// `SqliteVecSemanticMemoryStore::from_env`, verbatim twins differing only in
+    /// the db filename suffix. Routing the code store through `RetrievalConfig`
+    /// left the memory store still writing `<id>.memories.db` into `$HOME`, and
+    /// nothing failed — the suite was green and the leak was 60% smaller, which
+    /// is exactly the shape of a fix that looks done. It was found by insisting
+    /// the measured per-run delta reach zero rather than "much better".
+    ///
+    /// The needle is assembled character-wise so this test's own source, and the
+    /// prose above it, do not match.
+    #[test]
+    fn the_sqlite_dir_env_var_is_read_in_exactly_one_place() {
+        let needle: String = ["env::var(\"", "CODESCOUT", "_SQLITE_DIR"].concat();
+        let root = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut hits: Vec<String> = Vec::new();
+        for entry in walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let count = content.matches(needle.as_str()).count();
+            if count > 0 {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                hits.push(format!(
+                    "{} ({count})",
+                    rel.display().to_string().replace('\\', "/")
+                ));
+            }
+        }
+        assert_eq!(
+            hits,
+            vec!["retrieval/config.rs (1)".to_string()],
+            "the sqlite-vec dir must be resolved once, at the config edge; a new \
+             store should take a directory from RetrievalConfig::sqlite_dir rather \
+             than reading the environment itself — found: {hits:?}"
         );
     }
 }

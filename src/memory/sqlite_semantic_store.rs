@@ -26,23 +26,6 @@ pub struct SqliteVecSemanticMemoryStore {
 }
 
 impl SqliteVecSemanticMemoryStore {
-    /// Resolve the data dir from the environment (shared with the code store).
-    pub fn from_env() -> Result<Self> {
-        let dir = match std::env::var("CODESCOUT_SQLITE_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-        {
-            Some(d) => PathBuf::from(d),
-            None => crate::platform::home_dir()
-                .context(
-                    "cannot resolve home dir for sqlite-vec memory store; set CODESCOUT_SQLITE_DIR",
-                )?
-                .join(".codescout")
-                .join("embeddings"),
-        };
-        Ok(Self::at(dir))
-    }
-
     pub fn at(dir: PathBuf) -> Self {
         Self {
             dir,
