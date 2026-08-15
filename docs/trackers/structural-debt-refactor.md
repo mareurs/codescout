@@ -291,3 +291,43 @@ on a 25k base, non-gating, left alone deliberately.
 
 Repo-wide: **51,833 refs, 16,398 resolved, exit 0.** Baseline **3842 / 0 / 50**
 (from 3818, +24 tests).
+
+### 2026-08-15 — SD-8 closed by git history; SD-9 names what the new surface costs
+
+`experiments:c692f901`. The three citations left out of the sweep on purpose —
+no rule could fix them — each turned out to have a different answer, and
+**`git log` supplied all three**.
+
+The most interesting was the semantic-search misleading-stack-error slug (named
+without its extension here on purpose — spelled in full it is itself an
+unresolvable citation, which is the third time in this stream that writing
+*about* drift has produced drift). It was cited twice, and
+`git log --diff-filter=A` across all refs returns **nothing**. The file was
+never created. Both sites already carried prose giving the full reason, so
+the citation was ornament and is dropped rather than replaced — inventing a
+plausible substitute is precisely what `dont-fabricate-commit-rationale` warns
+against. The second was pruned as a duplicate in `c6184884` and now cites the
+`gotchas` memory that CLAUDE.md already makes canonical, naming the pruning
+commit so the next reader does not go hunting. The third was never a path:
+prose shorthand with a literal ellipsis.
+
+Verified by the gate rather than by eye, which is the point of having built it —
+both surviving citations report `verdict=resolved`, and `CLAUDE.md` resolves at
+`src/fs/mod.rs:315` where the dead path used to sit.
+
+**SD-9 records the price of the code-comment surface**, so a future session
+asking "is this gate noisy?" gets a numerator and a denominator instead of an
+impression. Two false-positive classes, both non-gating: *historical
+provenance* (`//! Moved from … (Phase 6.2)` — the path is absent BECAUSE the
+move happened, so the sentence is true and unresolvable by design, the same
+family `cap_released_history` already exists for) and *fixture filenames in
+test comments* (files the test creates in a tempdir, which never existed in the
+repo). Against that: the surface found 95 real stale citations and one
+genuinely dead reference.
+
+**SD-7 was paid a third time here**, and this instance would have caused real
+loss rather than friction. Closing SD-8 meant rewriting the whole `items`
+array — but SD-8 had been *appended*, so it was not in the local params file,
+and a naive rewrite would have deleted the very row being closed. Reconstructed
+it first, then rewrote, then appended SD-9. Post-write check confirms all nine
+ids survived.
