@@ -57,6 +57,9 @@ Overall error rate by month — improving:
 | TU-5 | 31% of errors carry no `err_family` — the ranking's own blind spot | **open**, not filed |
 | TU-6 | `ast_extent_fail`'s hint blamed syntax errors on files that parse | **already fixed** `cafa4b37`, same day — near-miss, see § Method caveats |
 | TU-7 | Two high-volume guards are healthy and must not be "fixed" | **no action** — negative result, recorded so it is not re-litigated |
+| TU-8 | Routing is 45% of all errors — and is broadly working | **no action** — negative result, see § Tool sweep |
+| TU-9 | `artifact_event` carries TU-4's defect in a third tool | **open** — extends `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md` |
+| TU-10 | Overflow pressure is concentrated, and compounds TU-1 | **open**, not filed |
 
 ## TU-7 — the negative result that shapes everything else
 
@@ -177,6 +180,97 @@ the reusable part of this document.
    for?" is unanswerable from this corpus. That gap is CAP-1 in
    `docs/trackers/capability-proposals.md`.
 
+## Tool sweep — all tools, 2026-07 onward
+
+A second pass, **tool-complete rather than family-complete**, run to sidestep TU-5: it depends on
+`error_msg` and `tool_name`, not on `err_family`, so the unclassified 31% is included.
+
+Window: **21,329 calls · 89 sessions · 8 projects · 992 errors.**
+
+| Tool | Calls | Err% | Overflow% | Avg ms | Max ms |
+|---|---:|---:|---:|---:|---:|
+| `run_command` | 7,098 | 4.7 | 9.9 | 7,108 | 1,500,016 |
+| `symbols` | 2,925 | 0.4 | 7.8 | 396 | 45,840 |
+| `read_file` | 2,598 | **11.9** | 1.5 | 0 | 45 |
+| `grep` | 2,262 | 0.3 | 3.0 | 23 | 9,230 |
+| `artifact` | 1,250 | 2.6 | 7.7 | 13 | 4,579 |
+| `edit_code` | 1,153 | 6.9 | 0 | 64 | 9,403 |
+| `edit_file` | 1,113 | 8.8 | 0 | 9 | 83 |
+| `read_markdown` | 985 | 5.5 | 2.4 | 0 | 10 |
+| `edit_markdown` | 527 | 5.7 | 0 | 1 | 13 |
+| `workspace` | 244 | 0.4 | 0 | 1,872 | 13,433 |
+| `librarian` | 139 | 0 | **40.3** | 1,831 | 16,530 |
+| `semantic_search` | 172 | 0 | **20.9** | 1,050 | 2,215 |
+
+### TU-8 — routing is 45% of all errors, and is broadly working
+
+**444 of 992 errors (44.8%)** in the window are the gate re-routing a wrong-tool call:
+
+| Route | n |
+|---|---:|
+| `run_command` → bare + `@cmd_*` buffer (IL3 pipe) | 221 |
+| `run_command` → symbols/grep (shell on source) | 110 |
+| `edit_file` → `edit_code` (structural) | 53 |
+| `read_markdown` → `artifact` (librarian-managed) | 23 |
+| `edit_file` → `edit_markdown` | 17 |
+| `read_file` → `read_markdown` | 10 |
+| `read_markdown` → `read_file` (non-md) | 7 |
+
+**Compliance — and a measurement trap worth copying.** Measured on the *immediately* next call,
+compliance looks poor: `edit_file`→`edit_code` 45%, `read_file`→`read_markdown` 40%. Widening to
+**within three calls** changes the picture completely:
+
+| Route | n | next call | within 3 |
+|---|---:|---:|---:|
+| `edit_file` → `edit_code` | 53 | 45% | **74%** |
+| `read_markdown` → `artifact` | 23 | 57% | **74%** |
+| `edit_file` → `edit_markdown` | 17 | 59% | **76%** |
+| `read_file` → `read_markdown` | 10 | 40% | **70%** |
+
+The strict measure understates compliance by 25–30 points, because an agent told "use `edit_code`"
+reasonably **reads the symbol first**. Adjacent-call analysis systematically penalises any guard
+whose correct recovery involves a lookup. Always widen the window before calling a routing guard
+ineffective.
+
+**Verdict: no action.** Routing dominates error *volume* while working ~75% of the time. Like TU-7,
+this is recorded so a future pass does not mistake the volume for a defect. The residual ~25% is
+roughly 14 cases at n=53 — not worth chasing ahead of TU-5.
+
+### TU-9 — `artifact_event` carries TU-4's defect, in a third tool
+
+`artifact_event` shows a 50% error rate in the window (3 of 6 calls). All three are the **same class
+as TU-4** — a payload field required only for a particular event `kind`:
+
+    note.text required
+    external_signal.source_id required
+    external_signal.summary required
+
+TU-4 was filed against `edit_code.body` and `artifact.patch` and recommended sweeping every
+`action`-dispatched tool rather than fixing only the two measured. This is that recommendation
+vindicated **by a pass that did not look for it** — `artifact_event` never surfaced in the
+family-based analysis because these errors carry no `err_family`. Add it to TU-4's fix.
+
+### TU-10 — overflow pressure is concentrated, and compounds TU-1
+
+| Tool | Overflow rate | Avg tokens | Max tokens |
+|---|---:|---:|---:|
+| `librarian` | **40.3%** | 9,474 | 45,088 |
+| `semantic_search` | 20.9% | 2,843 | 5,017 |
+| `run_command` | 9.9% | 7,526 | 44,600 |
+| `artifact` | 7.7% | 5,739 | 26,127 |
+| `grep` | 3.0% | **84,928** | **4,427,639** |
+
+Two distinct shapes. `librarian` overflows **two calls in five** and is also the largest by average
+payload — progressive disclosure is the normal path there, not the exception. `grep` is the
+opposite: it rarely overflows, but when it does the buffer is enormous — one call produced
+**4.4 million tokens**.
+
+**The compounding matters more than either number.** The tools that most often hand back a handle
+(`librarian`, `artifact`, `semantic_search`) are exactly the ones whose payload is a **list of
+records** — and TU-1 is that `json_path` cannot project a field across a list (`[*]` is rejected,
+73% of all rejections). So the highest-overflow tools feed the weakest recovery path. Fixing TU-1
+is worth more than its own 30-occurrence count suggests.
+
 ## Still unpulled
 
 - **TU-5's unclassified head** — extend `normalize_err_family`, then re-rank. Highest value next step.
@@ -193,3 +287,19 @@ the reusable part of this document.
 Investigation run and findings filed in one pass. TU-1 through TU-4 filed as bugs; TU-5 and the
 unpulled threads left open; TU-6 closed as already-fixed; TU-7 recorded as a negative result.
 
+### 2026-08-15 — tool-complete sweep added (TU-8 .. TU-10)
+
+Second pass over the same corpus, restricted to **2026-07 onward** and keyed on `tool_name` +
+`error_msg` rather than `err_family`, so TU-5's unclassified 31% is inside the window rather than
+outside it. That change of key is what surfaced TU-9: `artifact_event`'s conditionally-required
+params carry no `err_family` and were invisible to the first pass.
+
+Two of the three new findings are **negative results** (TU-8 routing, and TU-7 before it). That is
+not a shortage of defects — it is the sweep doing its job. Roughly 45% of the error volume in this
+window is a guard correctly re-routing a wrong-tool call, and the temptation to read that volume as
+breakage is precisely what these entries exist to block.
+
+One method caveat was added from this pass and is worth applying elsewhere: **adjacent-call
+compliance systematically understates any guard whose correct recovery involves a lookup first.**
+Measured on the next call alone, `edit_file`→`edit_code` compliance is 45%; within three calls it is
+74%. The first number would have justified a redesign that the second shows is unnecessary.
