@@ -121,22 +121,53 @@ Never combine "replace a container symbol" with "restate a sibling/child block t
 
 ## Resume
 
-Two independent pieces now, and the second is the cheaper win:
+**Item 2 resolved 2026-08-15 in `cafa4b37`** — with a correction to how it was
+framed here. Item 1 remains.
 
-**1. The same-scope disambiguator (the original bug).** Read
-`find_unique_symbol_by_name_path` (`src/symbol/query.rs:714`) and its callers in
-`edit_code`'s remove/replace/insert dispatch. Check whether the ambiguous-match
+### 1. The same-scope disambiguator (the original bug) — open
+
+Read `find_unique_symbol_by_name_path` (`src/symbol/query.rs:714`) and its callers
+in `edit_code`'s remove/replace/insert dispatch. Check whether the ambiguous-match
 error already carries enough position data (line/byte range per candidate) to
 expose a disambiguator parameter cheaply. Note the scope narrowing in § Summary →
-*Update 2026-08-14*: only same-enclosing-scope duplicates need this.
+*Update 2026-08-14*: only **same-enclosing-scope** duplicates need this; different
+scopes already resolve.
 
-**2. `insert`'s end-of-symbol bound for a nested trait-impl method**, plus its
-misleading hint. Reproduce with three same-named local `impl` blocks in separate
-test fns (`src/tools/memory/tests.rs` has exactly that shape today) and
-`action="insert", position="after"` on a fully-qualified method path. Fix the hint
-regardless of the bound: "the file likely has syntax errors" is wrong for a file
-that only fails to type-check, and it sent one session hunting for syntax errors
-that did not exist.
+### 2. The `insert` refusal — diagnosed, and it was not what this file said
+
+This file described it as `insert`'s "end-of-symbol bound" failing. Measured, the
+split is different and worth keeping straight:
+
+- **The refusal is correct and stays.** BUG-051's residual closure refuses rather
+  than trust an LSP end that can be short and would splice new code mid-body.
+- **The message was the defect.** It asserted "AST parse failed" and hinted "the
+  file likely has syntax errors" for every cause — false whenever the file parses,
+  which is the usual case. It now checks `crate::ast::has_syntax_errors` and says
+  which of the two actually applies, with the working workaround named
+  (`action="replace"` on the enclosing symbol).
+- **The underlying limitation is an LSP/AST asymmetry, not a bound bug.**
+  `ast_does_not_expose_methods_of_an_impl_nested_in_a_function`
+  (`src/tools/symbol/tests.rs`) measures it: tree-sitter's extractor surfaces
+  `outer` but not the method of an impl nested inside it, on a fixture confirmed
+  clean by `has_syntax_errors`. The LSP resolves that same symbol fine —
+  `symbols(name="one")` returns it with a body. So there is nothing for the AST
+  end-line resolver to match; it is not failing to bound a symbol it can see.
+
+**If you want insert to actually work on this shape**, that is a third piece of
+work and it belongs to the extractor, not to `edit_code`: teach
+`crate::ast::extract_symbols` to descend into `impl` blocks inside function
+bodies. The test above fails the moment it does, which is the intended signal to
+come back and relax the refusal — the end would then be knowable. Until then
+`action="replace"` on the enclosing symbol is the supported route, and the error
+now says so.
+
+### Related, and closed
+
+The `edit_file` half of the deadlock (its keyword guard rejecting any content
+containing `fn `/`trait `) is fixed in `138de7c5`. Together with the above, "add a
+method to a trait impl nested inside a test fn" is no longer a deadlock: `replace`
+on the impl object works, and `edit_file` no longer refuses identifiers that merely
+contain a keyword.
 ## References
 
 - `.superpowers/sdd/2026-08-11-local-onnx-embedding-query-path/task-5-report.md` § "A real tool hazard hit mid-fix (worth recording)"
