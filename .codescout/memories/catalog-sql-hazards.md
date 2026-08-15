@@ -26,10 +26,26 @@ test that loops `SCHEMA_SQL`'s declared columns against every legacy-seed path
 
 Any user/data string interpolated into a SQL `LIKE` pattern must escape `%`, `_`, and the
 escape char, with an explicit `ESCAPE` clause — else `%`/`_` in the input act as wildcards
-(e.g. `resolve_cite_ref("foo_bar.md")` also matching `fooXbar.md`). Canonical Rust-side
-idiom: `src/librarian/filter.rs:230-236`
-(`.replace('\\',"\\\\").replace('%',"\\%").replace('_',"\\_")` + `LIKE ? ESCAPE '\\'`).
-Fixed twice now (commit `4b922ac4` worktree `covering()`; Stage-2 `resolve_cite_ref`). The
-idiom is duplicated in ~5 inline sites with no shared helper →
-`docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md` (plan: extract
-`escape_like_pattern` + a grep `#[test]` asserting every `LIKE` literal pairs with `ESCAPE`).
+(e.g. `resolve_cite_ref("foo_bar.md")` also matching `fooXbar.md`).
+
+**Rust side — settled, use the helper.** Call `crate::librarian::util::escape_like_pattern`
+and pair it with an `ESCAPE` clause; never re-inline the triple-replace. The helper carries
+5 unit tests plus a DRY gate, `like_escape_idiom_is_not_inlined_outside_helper`, that fails
+if the Rust idiom appears anywhere but the helper itself. Live callers:
+`src/librarian/filter.rs` (`compile_leaf`), `src/librarian/catalog/augmentation.rs`
+(`resolve_cite_ref`), and `src/librarian/catalog/gc.rs` (`detect_move_candidates`,
+`plan_rehome`, `rehome_commits`). The extraction and its gate **shipped**, and the bug file
+that asked for them is closed —
+`docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md`. Earlier
+point fixes: `4b922ac4` (worktree `covering()`), and the Stage-2 `resolve_cite_ref` bug that
+motivated the extraction.
+
+**SQL side — a second implementation, still unguarded.** Where the *haystack* column is
+escaped rather than the needle, the same law is expressed as a nested triple-`REPLACE`
+inside the SQL string — see `src/librarian/catalog/worktree.rs` (`covering_conn`). It is
+verbatim at four sites: `src/librarian/tools/merge_worktree.rs` (×2),
+`src/librarian/catalog/worktree.rs`, `src/librarian/tools/worktree.rs`. The Rust gate
+excludes this form **by design** (SQL string literals cannot match the Rust call signature it
+greps for), so nothing enforces it — the sites are held together by "mirrors" comments. All
+four are currently correct. Tracked as SD-2 in
+`docs/trackers/structural-debt-refactor.md`.
