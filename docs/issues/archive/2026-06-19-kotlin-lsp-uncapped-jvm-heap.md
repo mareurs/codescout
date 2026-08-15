@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a kotlin-lsp mem-kill does not count toward the LSP circuit breaker, so kill->respawn->grow->kill is bounded but unthrottled (the original "no -Xmx, ~31 GiB heap" premise was falsified 2026-08-07 — jcmd shows -Xmx2g from the distro vmoptions)'
 tags:
 - memory
@@ -9,7 +9,7 @@ tags:
 - lsp
 - jvm
 - stability
-closed: null
+closed: 2026-08-15
 opened: 2026-06-19
 owner: marius
 related:
@@ -339,15 +339,54 @@ goes with item 1's.
    On `experiments`; **not yet on master**.
 3. **DONE — the `watch_memory` doc comment** was rewritten to describe the new
    kill actuation and its env knobs (it is no longer "log-only").
-4. **Blast-radius cap (moved out).** The cgroup `MemoryMax`/`MemorySwapMax=0` blast-radius cap is now tracked in `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md`. The sibling 68 GiB OOM bug was fixed and archived to `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`.
+5. **DONE (2026-08-15, `89f5d591`) — a mem-kill now counts toward the circuit
+   breaker.** This was the last open item and the one the title names.
+
+   **Why it was invisible:** the kill happens in the **mux** process; the respawn
+   is driven by `LspManager` in the **codescout** process. Every respawn after a
+   kill *succeeds*, and `do_start` resets the counter on success — so the breaker
+   only ever saw good news. `-Xmx` and the kill ceiling bound how much memory one
+   instance takes; nothing bounded how *often*.
+
+   The two sides share no channel that survives the mux exiting, which is exactly
+   what a mem-kill causes, so the signal is a file. `watch_memory` writes a marker
+   beside the lock file; `get_or_start` consumes it immediately before the existing
+   breaker check, so the throttling stays in one mechanism rather than two.
+
+   Three decisions worth keeping:
+
+   - **The marker is written BEFORE the `killpg`.** Killing the group can take the
+     mux down with it, and a marker that only lands on the happy path is a marker
+     that never lands on the path that matters.
+   - **The path derives from the lock path**, not from `(language, workspace)`. The
+     mux only has the lock path, and a second `*_for_workspace` helper would be a
+     second place to get the workspace hash wrong.
+   - **It counts as a startup failure**, not a separate counter, so a mixed run —
+     two mem-kills, three failed starts — trips at five rather than at neither.
+     From a caller's side they are one fact: this language is not staying up.
+
+6. **Blast-radius cap (moved out).** The cgroup `MemoryMax`/`MemorySwapMax=0` blast-radius cap is now tracked in `docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md`. The sibling 68 GiB OOM bug was fixed and archived to `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`.
 **Update (2026-06-21).** Fix 1 is **committed** as `3adb66e7` `fix(lsp): cap kotlin-lsp JVM heap with -Xmx2g` on `experiments` (code + the `kotlin_caps_jvm_heap` regression test), and **live-verified**: after `cargo rb` + `/mcp`, the codescout-repo kotlin-lsp JVM (PID 4100626, carrying our `-Xmx2g`) reports `jcmd … VM.flags` → `-XX:MaxHeapSize=2147483648` (exactly 2 GiB). Per the §Root cause correction, this is the *reliable* cap (the distribution's vmoptions `-Xmx2048m` is not dependably applied to our instances). **Still TODO:** Fix 2 (`watch_memory` actuation) remains the real defense for *native* (off-heap) growth, which `-Xmx` does not bound — the capped JVM's RSS is 4.16 GiB = 2 GiB heap + ~2 GiB native.
 ## Tests added
 
-`kotlin_caps_jvm_heap` in `src/lsp/servers/mod.rs` (tests module, inserted after
-`kotlin_redirects_user_home_off_real_config`) — asserts the Kotlin
-`LspServerConfig`'s `JAVA_TOOL_OPTIONS` contains an `-Xmx` token. Mirrors the
-existing `kotlin_redirects_user_home_off_real_config` style. Full lib suite green
-(2796 passed, 6 ignored); clippy `-D warnings` clean.
+- `kotlin_caps_jvm_heap` — the `-Xmx2g` regression guard (fix 1), plus live
+  verification via `jcmd … VM.flags` → `-XX:MaxHeapSize=2147483648`.
+- `classify_memory_*` — five pure tests over the kill/warn verdict (fix 2),
+  covering both kill arms, the culpability gate, unknown `MemAvailable`, and the
+  disable switch.
+- `mem_kill_marker_counts_toward_the_breaker_then_is_consumed` (fix 5) — three
+  arms, because each failure mode is silent on its own:
+  1. **fresh** marker counts *and* is consumed — one that counted but stayed would
+     re-count on every later call and trip the breaker instantly;
+  2. **stale** marker is consumed *without* counting — an hour-old kill must not
+     inflate an unrelated burst;
+  3. **absent** marker is a no-op — without this arm every ordinary start would
+     look like a kill, and the test would pass anyway.
+
+  The absent arm runs first so the fresh arm's increment is attributable to the
+  marker rather than to the call.
+
+Gate: `cargo test --workspace` → 3815 passed / 0 failed / 50 ignored; clippy clean.
 ## Workarounds
 - Export a heap cap into the environment codescout inherits, so the builder's
   `prev` branch carries it: `export JAVA_TOOL_OPTIONS="-Xmx2g"` before launching

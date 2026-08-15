@@ -75,13 +75,27 @@ says what it did.
 Nothing here learns any specific harness's worktree tool by name, which is the
 constraint that shaped the parent bug's whole design.
 
-**The implementation cost is one-shot state, and that is what deferred it.** A
-per-session "already told them" flag has to live on `ToolContext`, which is
-constructed at many sites (tests included), so adding a field is a wide mechanical
-change. `guide_hints_emitted` is an existing per-session emitted-once ledger with
-the right semantics and could carry a sentinel key instead — cheaper, slightly
-abusive of that field's meaning. **Pick one deliberately; do not add a second
-one-shot mechanism.**
+**The implementation cost is one-shot state, and that is what deferred it —
+measured, not guessed.** A per-session "already told them" flag has to live on
+`ToolContext`, and `ToolContext` is constructed at **38 sites** in `src/` (32 in
+`src/tools/config/tests.rs` alone, plus `src/library/auto_register.rs` ×3,
+`src/tools/core/tests.rs` ×2, `src/tools/core/write_ack.rs`). Adding a field means
+touching all of them.
+
+That is not a hypothetical cost: `docs/trackers/bug-fix-session-log.md` records
+that adding `guide_hints_emitted` itself once left `HEAD` **not compiling** —
+`E0063: missing field guide_hints_emitted` — because 12 test-fixture sites were
+not updated in the same commit. The same change, the same shape, already went
+wrong once.
+
+`guide_hints_emitted` is an existing per-session, **file-backed** emitted-once
+ledger with exactly the right semantics, and could carry a sentinel key with no
+struct change. The cost is that the sentinel would appear in the session's
+guide-topic JSON as though it were a guide topic, and could collide with a future
+real topic name.
+
+**Pick one deliberately; do not add a second one-shot mechanism.** Neither option
+is free and the cheap-looking one has the subtler price.
 
 ## Tests added
 
@@ -108,3 +122,12 @@ Do not re-derive the detection: `guard_worktree_write` already has it, tested an
 shipped. The open question is only *where the notice attaches* and *which one-shot
 mechanism carries it*.
 
+`call_content()` (`src/tools/core/types.rs`) is the natural attach point — it is
+the single MCP entry point every tool passes through, and it already does exactly
+this shape of work for guide hints. Read that function before designing anything
+else.
+
+Deliberately **not** implemented on 2026-08-15 alongside the split: a 38-site
+mechanical change to `ToolContext` on the eve of a 675-commit promotion is the
+wrong sequencing, and the alternative (a sentinel in the guide-topic ledger) is a
+semantic compromise that deserves a decision rather than a deadline.
