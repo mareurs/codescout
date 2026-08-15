@@ -190,6 +190,25 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **sqlite-vec indexes now live under the project root, not `$HOME`.** The store
+  directory resolves as `CODESCOUT_SQLITE_DIR` if set, else
+  `<project_root>/.codescout/embeddings/`, else — for callers with no project root at
+  all — `<home>/.codescout/embeddings/`. **Existing indexes are orphaned: each project
+  re-indexes once.** The old `$HOME/.codescout/embeddings/` directory is safe to delete
+  afterwards.
+  Three problems went with the old default and only the first was visible: tests build
+  projects in tempdirs, so every `cargo test` run minted fresh databases in the
+  developer's home that nothing removed (~148 per run; 8,452 files and 2.7 GB
+  accumulated on one machine). Nothing bounded growth in production either — a deleted
+  project left its store behind forever, at 3.2 MB preallocated per `vec0` table. And
+  because a project's id is its **directory basename** when it has no config of its own,
+  `$HOME` was a single global namespace keyed by that basename: two projects named `api`
+  shared one database file, and the `project_id` column inside it could not tell their
+  rows apart. Per-root paths cannot collide.
+  The directory is created with a self-ignoring `.gitignore`, so a regenerated index
+  never surfaces in `git status` even in repositories that do not themselves ignore
+  `.codescout/embeddings/`.
+
 - **`run_command` executes through Git Bash on Windows, not `cmd.exe`.** Commands now run
   under a POSIX shell on every platform, which is what makes the documented buffer-query
   idioms (`grep`, `tail`, `awk`, `tee`) work there at all — under `cmd /C` none of those

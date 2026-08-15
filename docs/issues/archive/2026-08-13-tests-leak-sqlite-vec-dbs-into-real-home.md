@@ -1,7 +1,7 @@
 ---
 id: '2faaf32abe069400'
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: every `cargo test` run leaks ~144 sqlite-vec databases into the real `~/.codescout/embeddings/` — 69,429 files / 23 GB accumulated'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - disk-leak
 - env-isolation
 topic: test-env-isolation
+closed: 2026-08-16
 severity: high
 ---
 
@@ -222,6 +223,56 @@ store at all.
 
 ## Fix
 
+**FIXED — `experiments:2579e2bd`** (groundwork in `experiments:faae7892`),
+not-yet-on-master. Option 2 was chosen: the store directory derives from the
+project root.
+
+```
+CODESCOUT_SQLITE_DIR (operator override)  ->  that
+a project root                            ->  <root>/.codescout/embeddings
+no root at all                            ->  <home>/.codescout/embeddings
+```
+
+One resolver, `resolve_sqlite_dir` in `src/retrieval/config.rs`, reached through
+`RetrievalConfig::sqlite_dir`. Neither store reads the environment any more; both
+are handed a directory.
+
+**Measured: 8452 → 8452 files across a full `cargo test --workspace
+--no-fail-fast`.** Zero is also the one direction a shared machine cannot fake —
+a concurrent writer could only add files — so if anything the number is
+conservative.
+
+This closes all three problems, not only the one in the title. Test tempdirs take
+their stores with them; a deleted project takes its index; and per-root paths
+cannot collide, which closes the basename collision recorded under *Evidence*.
+
+**The 57-file step that nearly shipped as done.** Routing only the *code* store
+through the config took the per-run delta from ~148 to 57 with a green suite.
+`SqliteVecSemanticMemoryStore::from_env` turned out to be a verbatim twin of the
+constructor just deleted — same env var, same fallback, differing only in the
+`.memories.db` suffix — and it kept writing into `$HOME`. That is precisely the
+sibling-set trap this file cites `4eabe442` and `4c9c23b8` for, reached from the
+other direction: not by choosing a half-fix, but by *completing* one and stopping
+at the first green suite. The only thing that caught it was requiring the delta to
+reach zero rather than "much better". A DRY gate now asserts the env var is read
+in exactly one place.
+
+Folding the memory store in also closed a split that its Qdrant arm's own comment
+had already flagged in review: that arm resolved a project root, the sqlite arm
+was env-only.
+
+**Safety in other people's repositories.** The stores now sit inside the user's
+tree. This repo's `.gitignore` covers `.codescout/embeddings/`; nobody else's
+does. `open_conn` therefore drops a self-ignoring `.gitignore` (`*`) into the
+directory on creation — best-effort, never clobbering an existing file — so a
+regenerated multi-megabyte index cannot surface in someone's `git status`.
+
+**Migration.** Stores written under the old default are orphaned in `$HOME`; each
+project re-indexes once. That was the accepted trade. The stale directory is safe
+to delete — 8,452 files, 2.8 GB at last count.
+
+The original analysis and the rejected options are kept below, unedited.
+
 Not implemented, and **this bug is larger than it was filed as.** Reclassified from a
 mechanical fix to one needing a design decision, for a reason worth recording.
 
@@ -295,8 +346,27 @@ part of this bug that can corrupt a user's search results rather than merely
 fill a disk.
 ## Tests added
 
-None yet — bug filed on discovery.
+Nine, in `src/retrieval/config.rs` (`sqlite_dir_tests`) and `src/sqlite_vec_ext.rs`
+(`self_ignore_tests`). None mutates process env — the resolver is pure over
+`(Option<String>, Option<&Path>)`, which is the whole point of moving it to the
+edge.
 
+- `an_explicit_value_wins` — the operator override beats the project root.
+- `an_empty_value_is_treated_as_unset` — `CODESCOUT_SQLITE_DIR=` is a shell idiom
+  for clearing a variable; taken literally it would resolve the store to the
+  process CWD, silently and differently per invocation.
+- `the_default_is_under_the_project_root`.
+- `the_fallback_is_the_users_home_directory` — rootless callers only, now the sole
+  surviving path to `$HOME`.
+- `two_projects_with_the_same_basename_get_different_stores` — the collision
+  regression. It asserts the shared-basename precondition first, so a later edit
+  to the fixture cannot make it vacuously pass.
+- `the_sqlite_dir_env_var_is_read_in_exactly_one_place` — DRY gate, needle
+  assembled character-wise. Added *because* two verbatim readers already existed
+  and only measurement found the second.
+- Three on `write_self_ignore`: a fresh directory gets a bare `*`; a pre-existing
+  `.gitignore` is left alone; an unwritable path does not panic, since
+  housekeeping must never fail the operation the caller actually asked for.
 ## Workarounds
 
 **Cleanup performed 2026-08-14 (operator-authorised). `~/.codescout` went from 25 GB to
@@ -343,36 +413,15 @@ The next `cargo test` starts refilling the directory. What the cleanup *does* bu
 clean measurement baseline — see *Resume*.
 ## Resume
 
-**Do not re-run the writer-identification work, and do not re-derive the
-threading.** The writer is `RetrievalClient::from_env` → the sqlite store
-(`src/retrieval/client.rs`), and the threading is done — `experiments:faae7892`.
+N/A — fixed and verified on `experiments` (`2579e2bd`, groundwork `faae7892`),
+gate green, regression tests in place, per-run delta measured at zero.
 
-One decision is open, and it is a product call, not a technical one: **what
-`resolve_sqlite_dir` should return when `CODESCOUT_SQLITE_DIR` is unset.** See
-the three options under *Fix*. It is now a one-line change in
-`src/retrieval/config.rs`.
-
-Before choosing, run the collision reproduction — it is cheap, it is unproven,
-and it is the finding that most changes the answer: create two projects with the
-same directory basename and no config file of their own, index both, then search one for a
-symbol that exists only in the other. If they share a store this is a
-correctness bug, not a housekeeping one.
-
-When measuring anything here, note the hazard recorded under *Evidence*:
-`~/.codescout/embeddings/` is machine-wide, so a concurrent `cargo test` from any
-other session lands in the same count. One 296-file reading was already wrong
-that way. Measure quiet, or decompose and check the parts sum:
-
-```bash
-E="$HOME/.codescout/embeddings"
-before=$(find "$E" -maxdepth 1 -type f | wc -l)
-cargo test --workspace --no-fail-fast
-after=$(find "$E" -maxdepth 1 -type f | wc -l)
-echo "delta=$((after - before))"    # ~148 today; must be 0 once the fallback moves
-```
-
-Cleanup is still not a fix and is still safe to do meanwhile — the directory
-held 8,395 files at last count.
+One claim in this file remains **inferred rather than reproduced**: the basename
+collision under *Evidence*. The fix removes the condition that would let it be
+observed, so it is now unfalsifiable in place — recorded here rather than quietly
+dropped. Anyone wanting the demonstration must run it against a commit before
+`2579e2bd`: two projects sharing a directory basename and having no config of
+their own, indexed, then search one for a symbol that exists only in the other.
 ## References
 
 - `src/retrieval/sqlite_code_store.rs:45-57` — `from_env`, the home-dir fallback
