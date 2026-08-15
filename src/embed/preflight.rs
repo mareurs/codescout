@@ -262,7 +262,8 @@ mod tests {
     #[test]
     fn classify_path_detects_home_directory() {
         // Reads HOME only. No lock needed: nothing in the suite MUTATES env any more
-        // (see docs/issues/2026-07-13-test-env-access-ub-...md), and concurrent
+        // (see docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md),
+        // and concurrent
         // getenv readers do not race each other.
         let Some(home) = crate::platform::home_dir() else {
             return;

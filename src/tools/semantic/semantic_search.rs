@@ -48,8 +48,7 @@ pub(crate) fn map_from_env_error(
 ///
 /// The embedder-connect bucket must precede transport: a client-side connect
 /// failure's message carries reqwest's "Connection refused", which would
-/// otherwise be misrouted to the qdrant-oriented transport hint
-/// (docs/issues/2026-07-13-semantic-search-misleading-stack-error-on-missing-env.md).
+/// otherwise be misrouted to the qdrant-oriented transport hint.
 /// The resolver-path bucket exists for the same reason: `RemoteEmbedder`'s
 /// failure shapes ("embedding server unavailable after N attempts", "HTTP
 /// {status} from embedding server", `crates/codescout-embed/src/remote.rs`)
@@ -993,8 +992,7 @@ mod classify_search_error_tests {
     fn dense_connect_failure_routes_to_embedder_hint_not_qdrant() {
         // Regression: a client-side connect failure (wrong CODESCOUT_EMBEDDER_URL
         // or embedder down) used to fall through to the generic "check qdrant
-        // logs" fallback, sending operators to debug a healthy stack. See
-        // docs/issues/2026-07-13-semantic-search-misleading-stack-error-on-missing-env.md.
+        // logs" fallback, sending operators to debug a healthy stack.
         let err = "stack search failed: dense embed connect failed: \
                    http://127.0.0.1:8081/v1/embeddings — the dense embedder is unreachable";
         let hint = classify_search_error(err, "codescout");

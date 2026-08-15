@@ -310,7 +310,9 @@ pub(crate) async fn get_lsp_client(
 /// 2. server-side disconnect — "LSP server disconnected" from
 ///    `LspClient::drain_pending_disconnect`, surfaced when a request was
 ///    pending at the moment the server died (most common with the Kotlin LSP
-///    eviction cycle, see docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md).
+///    eviction cycle). The bug file this used to cite was pruned as a
+///    duplicate in `c6184884`; the codescout memory `gotchas` (LSP section) is
+///    the canonical account of the concurrent-instance failures, per CLAUDE.md.
 fn is_mux_disconnect(e: &anyhow::Error) -> bool {
     let s = e.to_string();
     s.contains("Mux connection lost")
