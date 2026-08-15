@@ -190,6 +190,65 @@ fn disk_signature(path: &Path) -> Option<DiskSignature> {
     let md = std::fs::metadata(path).ok()?;
     Some((md.len(), md.modified().ok()))
 }
+/// Per-file record of the on-disk signature last **delivered** to the server.
+///
+/// Its own type rather than a bare map because the `overwrite` rule is the whole
+/// correctness argument and belongs next to the data it governs — see [`Self::record`].
+#[derive(Debug, Default)]
+pub(crate) struct SyncedSignatures(StdMutex<HashMap<PathBuf, DiskSignature>>);
+
+impl SyncedSignatures {
+    /// Note that `canonical`'s current bytes were handed to the server.
+    ///
+    /// `overwrite: false` is for `didOpen`, which does **not** reliably deliver for a
+    /// file the server already has: on stdio it early-returns, and on socket the mux
+    /// dedups it. Recording there would replace a true "last delivered" with a merely
+    /// *current* disk state, and [`Self::has_drifted`] would then compare the file
+    /// against itself and never fire.
+    ///
+    /// That is not hypothetical. It shipped in `eedb308c` and made the external-write
+    /// fix **inert on the mux path** — the one this project uses for Rust — while its
+    /// stdio unit test passed, because the early return hides the difference. Live
+    /// verification caught it.
+    ///
+    /// `overwrite: true` is for `didChange`, which always sends.
+    fn record(&self, canonical: &Path, overwrite: bool) {
+        let Some(sig) = disk_signature(canonical) else {
+            return;
+        };
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match map.entry(canonical.to_path_buf()) {
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                if overwrite {
+                    e.insert(sig);
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(sig);
+            }
+        }
+    }
+
+    /// Whether `canonical` differs on disk from what was last delivered.
+    ///
+    /// `false` for a file never delivered — that is `didOpen`'s business, not drift.
+    fn has_drifted(&self, canonical: &Path) -> bool {
+        let Some(current) = disk_signature(canonical) else {
+            return false;
+        };
+        let map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(canonical).is_some_and(|last| *last != current)
+    }
+
+    #[cfg(test)]
+    fn get(&self, canonical: &Path) -> Option<DiskSignature> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(canonical)
+            .copied()
+    }
+}
 
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
 fn convert_document_symbols(
@@ -286,7 +345,7 @@ pub struct LspClient {
     /// the server have its current bytes". `did_open` returns early for an
     /// already-open file, so without this an external `git checkout` leaves the
     /// server answering from pre-checkout content indefinitely.
-    synced_sigs: StdMutex<HashMap<PathBuf, DiskSignature>>,
+    synced_sigs: SyncedSignatures,
     /// Collects stderr lines from the server process. Checked during init retries
     /// to detect fatal errors (e.g. kotlin-lsp "Multiple editing sessions").
     stderr_lines: Arc<StdMutex<Vec<String>>>,
@@ -536,7 +595,7 @@ impl LspClient {
             transport: LspTransport::Process { child_pid },
             init_timeout,
             open_files: StdMutex::new(HashMap::new()),
-            synced_sigs: StdMutex::new(HashMap::new()),
+            synced_sigs: SyncedSignatures::default(),
             stderr_lines,
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
@@ -618,7 +677,7 @@ impl LspClient {
             },
             init_timeout: std::time::Duration::from_secs(30),
             open_files: StdMutex::new(HashMap::new()),
-            synced_sigs: StdMutex::new(HashMap::new()),
+            synced_sigs: SyncedSignatures::default(),
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
@@ -1002,38 +1061,30 @@ impl LspClient {
             .collect())
     }
 
-    /// Record the on-disk signature we are about to hand the server.
-    fn record_synced(&self, path: &Path) {
+    /// Note that `path`'s current bytes were handed to the server.
+    ///
+    /// See [`SyncedSignatures::record`] for what `overwrite` means and why it is not
+    /// always `true`.
+    fn record_synced(&self, path: &Path, overwrite: bool) {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        if let Some(sig) = disk_signature(&canonical) {
-            self.synced_sigs
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(canonical, sig);
-        }
+        self.synced_sigs.record(&canonical, overwrite);
     }
 
     /// Re-send a file the server already has if it changed on disk behind our back.
     ///
     /// codescout's own writes notify the server. An external `git checkout`, `git
     /// stash`, a rebase, or a plain editor save does not — and `did_open` returns
-    /// early for an already-open file, so nothing re-syncs it. The server then keeps
-    /// answering from the old content, which is the expensive failure: not an error,
-    /// a confident wrong answer, with symbol bodies and line numbers describing a
-    /// version of the file that no longer exists.
+    /// early for an already-open file (stdio) or is deduped by the mux (socket), so
+    /// nothing re-syncs it. The server then keeps answering from the old content,
+    /// which is the expensive failure: not an error, a confident wrong answer, with
+    /// symbol bodies and line numbers describing a version of the file that no longer
+    /// exists.
     ///
-    /// Only fires when a signature was previously recorded. A file we have never
-    /// sent is `did_open`'s business, not this function's.
+    /// Only fires when a signature was previously recorded. A file we have never sent
+    /// is `did_open`'s business, not this function's.
     async fn resync_if_drifted(&self, path: &Path) {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let Some(current) = disk_signature(&canonical) else {
-            return;
-        };
-        let drifted = {
-            let sigs = self.synced_sigs.lock().unwrap_or_else(|e| e.into_inner());
-            sigs.get(&canonical).is_some_and(|last| *last != current)
-        };
-        if drifted {
+        if self.synced_sigs.has_drifted(&canonical) {
             tracing::debug!(path = %canonical.display(), "resyncing file changed outside codescout");
             // did_change re-reads from disk and records the new signature, so a
             // failure here simply leaves the drift recorded for the next attempt.
@@ -1075,7 +1126,8 @@ impl LspClient {
 
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read file for didOpen: {:?}", path))?;
-        self.record_synced(path);
+        // Vacant-only: a repeat didOpen delivers nothing on either transport.
+        self.record_synced(path, false);
         let uri = path_to_uri(path)?;
 
         self.notify(
@@ -1101,12 +1153,21 @@ impl LspClient {
         path: &Path,
         language_id: &str,
     ) -> Result<Vec<super::SymbolInfo>> {
-        // Ensure the file is open in the server
-        self.did_open(path, language_id).await?;
-        // ...and that what it has open is what is on disk NOW. did_open is a no-op
-        // for an already-open file, so this is the only thing standing between an
-        // external `git checkout` and a confidently stale answer.
+        // Check for drift BEFORE did_open, not after — the ordering is the whole fix.
+        //
+        // On SOCKET transport `did_open` skips its already-open early return (the mux
+        // owns document dedup), so it re-reads the file and re-records the signature on
+        // every call. Running the drift check after that compares the current disk state
+        // against itself and can never fire, while the mux quietly dedups the didOpen so
+        // the server keeps its stale copy. Checking first compares against the last
+        // content actually delivered.
+        //
+        // Ordering is also correct for stdio and for a first-time open: a file with no
+        // recorded signature is `did_open`'s business, and `resync_if_drifted` returns
+        // without doing anything.
         self.resync_if_drifted(path).await;
+        // Ensure the file is open in the server.
+        self.did_open(path, language_id).await?;
 
         let uri = path_to_uri(path)?;
         let params = lsp_types::DocumentSymbolParams {
@@ -1407,7 +1468,8 @@ impl LspClient {
 
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read file for didChange: {:?}", path))?;
-        self.record_synced(path);
+        // didChange always sends, so this is a true "last delivered".
+        self.record_synced(path, true);
         let uri = path_to_uri(path)?;
         self.notify(
             "textDocument/didChange",
@@ -2260,6 +2322,75 @@ struct Point {
         let dir = tempfile::tempdir().unwrap();
         assert!(disk_signature(&dir.path().join("nope.rs")).is_none());
     }
+    /// A repeat `didOpen` must not overwrite the recorded signature.
+    ///
+    /// This is the test the first attempt at the external-write fix did not have, and
+    /// the reason that attempt shipped **inert**. `did_open` recorded unconditionally;
+    /// on SOCKET transport it never takes its already-open early return (the mux owns
+    /// dedup), so every `document_symbols` re-recorded the current disk state before
+    /// the drift check ran — comparing the file against itself. The stdio unit test
+    /// passed throughout, because the early return hides the difference. Live
+    /// verification on the mux path is what caught it.
+    ///
+    /// Asserting on `SyncedSignatures` rather than through a transport is deliberate:
+    /// it makes the invariant testable without standing up a mux, and the invariant is
+    /// transport-independent — a notification that may be deduped must not claim
+    /// delivery.
+    #[test]
+    fn a_repeat_did_open_must_not_overwrite_the_recorded_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f.rs");
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        filetime::set_file_mtime(&file, filetime::FileTime::from_unix_time(1_600_000_000, 0))
+            .unwrap();
+
+        let sigs = SyncedSignatures::default();
+        sigs.record(&file, false); // the didOpen that actually delivered
+        let first = sigs.get(&file).expect("didOpen must record on first sight");
+        assert!(!sigs.has_drifted(&file), "nothing changed yet");
+
+        // The file changes behind our back, then a repeat didOpen fires — exactly what
+        // socket transport does on every document_symbols.
+        std::fs::write(&file, "fn a() {}\nfn b() {}\n").unwrap();
+        filetime::set_file_mtime(&file, filetime::FileTime::from_unix_time(1_600_000_060, 0))
+            .unwrap();
+        sigs.record(&file, false);
+
+        assert_eq!(
+            sigs.get(&file),
+            Some(first),
+            "a repeat didOpen delivers nothing, so it must not claim the new content — \
+             overwriting here is what made the drift check compare a file against itself"
+        );
+        assert!(
+            sigs.has_drifted(&file),
+            "and the drift must still be visible AFTER the repeat didOpen — this is the \
+             assertion that fails against the shipped-inert version"
+        );
+
+        // didChange DOES always send, so it is allowed to move the mark forward.
+        sigs.record(&file, true);
+        assert!(
+            !sigs.has_drifted(&file),
+            "didChange always sends, so it must record what it sent"
+        );
+    }
+
+    /// A file never delivered is not "drifted" — that is `did_open`'s job.
+    ///
+    /// Without this, `has_drifted` returning `true` for an unknown path would make the
+    /// very first navigation on every file fire a redundant `didChange`.
+    #[test]
+    fn an_unrecorded_file_has_not_drifted() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("never_sent.rs");
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+
+        let sigs = SyncedSignatures::default();
+        assert!(!sigs.has_drifted(&file));
+        assert!(!sigs.has_drifted(&dir.path().join("does_not_exist.rs")));
+    }
+
     /// `document_symbols` must reflect a write made outside codescout's edit tools.
     ///
     /// This replaces `did_change_refreshes_stale_symbol_positions`, which asserted
