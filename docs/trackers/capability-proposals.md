@@ -35,6 +35,7 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 |----|--------|--------|------|-------|
 | CAP-1 | 2026-08-15 | proposed | small–medium | Session artifact-touch ledger — expose what this session read and wrote |
 | CAP-2 | 2026-08-15 | brainstorm | large | Second arm — a codescout-issued LLM controller that challenges unverified claims |
+| CAP-3 | 2026-08-15 | research | medium | Background / async tool execution — surface what already works, then decide on MCP `ext-tasks` |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -166,6 +167,97 @@ controller is a third, heavier layer. Before building it, it is worth knowing wh
 already recover — the natural experiment in that document is pre-registered for exactly this and
 has not been run. **Running it is arguably the real first task of CAP-2.**
 
+## CAP-3 — Background / async tool execution
+
+**Ask.** Claude Code now accepts MCP calls that run in the background and can be waited on. It is
+visibly working already, but codescout surfaces none of it in `get_guide`. Understand it first,
+then decide what to expose.
+
+**Substrate check — there are THREE distinct mechanisms here, and conflating them is the main
+risk.** Verified 2026-08-15.
+
+**(1) codescout's own `run_in_background` — exists, works, is undocumented.**
+`run_command` takes `run_in_background: true`, detaches, and returns an `@bg_*` handle that is
+queryable like any other buffer (`tail -50 @bg_00000003`). Used four times in this session and it
+worked every time. But: grepping `src/prompts/**/*.md` for `run_in_background` / `@bg_` /
+`background` returns **exactly one hit**, and it is about LSP prewarming — unrelated. So the
+feature is real, load-bearing for long builds and test runs, and reachable only by reading the
+tool schema. `get_guide("progressive-disclosure")` documents `@cmd_*`, `@tool_*`, `@file_*` and
+`@ack_*` and never mentions `@bg_*`, even though it is the same handle family. **This is the
+actual reported gap and it is cheap to close.**
+
+**(2) Claude Code's client-side backgrounding of a slow MCP call — codescout is passive.**
+Observed directly this session:
+
+    MCP tool "codescout/run_command" is still running after 120s. It was moved to the
+    background as task kmtbscucy and keeps running; you'll receive a notification with the
+    result when it completes. To stop it, use TaskStop with task_id "kmtbscucy".
+
+The result arrived later as a `<task-notification>` system message. The controls
+(`TaskStop`/`TaskGet`/`TaskList`/`TaskOutput`) are **Claude Code's own tools, not codescout's**.
+codescout was never told any of this happened — it simply kept running the call. So this is
+application-layer behaviour in the client, and codescout needs no protocol change to benefit from
+it; a slow call is already survivable.
+
+**(3) The MCP `ext-tasks` draft extension — codescout does NOT implement it.**
+`ServerCapabilities::builder().enable_tools().enable_tool_list_changed().enable_resources()`
+(`src/server.rs:867-873`) declares no `extensions` block at all, and rmcp is pinned at 1.3.0 with
+features `server, macros, transport-io, elicitation, schemars` — no tasks feature. Read from the
+spec draft ([`modelcontextprotocol/ext-tasks`](https://github.com/modelcontextprotocol/ext-tasks),
+`specification/draft/tasks.md`, 2026-08-15):
+
+- Methods are `tasks/get` (poll status, carries the final `result` when `completed`),
+  `tasks/update` (answer a server-issued input request), `tasks/cancel`.
+- Negotiated by **capability**, not per-request: the client advertises
+  `io.modelcontextprotocol/tasks` under `_meta.io.modelcontextprotocol/clientCapabilities.extensions`;
+  the server advertises it in its discover response under `capabilities.extensions`. The **server**
+  then decides per request whether to return a task or an ordinary result.
+- Lifecycle: `working` → optional `input_required` → terminal `completed` | `failed` | `cancelled`.
+- The completed `result` has the same shape as the original call's normal result (`CallToolResult`).
+- **Directly relevant to code we already have:** the draft states that `notifications/progress` and
+  `notifications/message` **MUST NOT** be sent for a task; tasks use `inputRequests`/`inputResponses`
+  instead. codescout already implements throttled `notifications/progress`
+  (`src/tools/progress.rs`), so adopting tasks means those two paths must not overlap.
+- Status: **draft extension**, not core spec. Revises a `2025-11-25` predecessor.
+
+**What is NOT yet known — and how to find out.** The one observation is ambiguous: Claude Code
+backgrounded the call "after 120s" on a `run_command` where `timeout_secs` was *also* 120, so
+whether the client threshold is 120s, configurable, or tied to the server's own timeout cannot be
+read off that datapoint. Measure it deliberately: issue a `run_command` with `timeout_secs: 600`
+running `sleep 300` and record when the backgrounding message appears. Until then, treat the
+threshold as unmeasured rather than assumed — the whole point of writing this entry before acting.
+
+**Open questions.**
+
+1. **Scope split.** (1) is a documentation fix worth doing on its own and needs no research; (3) is
+   a protocol adoption with real cost. Should this entry graduate as two, so the cheap half is not
+   held hostage to the expensive one? Weak preference: yes.
+2. **Where does `@bg_*` get documented?** `get_guide("progressive-disclosure")` already owns the
+   handle families and is auto-injected on first overflow, which makes it the natural home. Mind
+   the 2200-byte cap on the `server_instructions` slice (that cap is why guide topics exist) — so
+   the guide, not `source.md`.
+3. **Does adopting `ext-tasks` buy anything the client already provides?** Claude Code's
+   application-layer backgrounding already makes slow calls survivable with zero server work. The
+   case for (3) has to be something that behaviour cannot do — e.g. a task surviving a client
+   restart, or `input_required` for mid-call elicitation. Name that before building.
+4. **Draft-tracking cost.** `ext-tasks` is a draft that has already revised once. Implementing
+   against it means tracking a moving target, and rmcp 1.3.0 does not expose it — so it would be
+   hand-rolled JSON-RPC over the extensions block, or an rmcp upgrade.
+5. **Progress/tasks exclusivity.** Given the MUST NOT above, which existing progress-reporting call
+   sites (`src/tools/semantic/index.rs` is one) would have to change behaviour if their tool ever
+   returned a task?
+
+**Why it is worth doing.** Item (1) is a real capability the model cannot discover from the
+guidance surfaces — the same failure class as any undocumented affordance: it gets used by accident
+or not at all. Items (2) and (3) matter because a long `cargo test` or a full reindex is exactly
+the call most likely to exceed a client timeout, and knowing which layer owns that failure decides
+whether we fix it here or rely on the client.
+
+**Prior art to check before designing (not yet read).** `docs/trackers/run-command-pipeline.md`
+and `mcp-integration-ideas-2026-04.md` §5 ("Lifecycle resilience / kill the `/mcp` restart dance")
+both touch long-running-call behaviour and may already record decisions this entry would otherwise
+rediscover.
+
 ## Anti-goals
 
 - Not a wishlist. An entry without a substrate check ("what exists today, what is missing") is not
@@ -183,6 +275,18 @@ than deferred: CAP-1's `usage.db` reading (the `--debug` gate on `input_json` is
 and CAP-2's zero-hit search for any existing LLM client. `docs/TAXONOMY.md` gains a CAP-N row in
 the same change.
 
+### 2026-08-15 — CAP-3 added
+
+Raised from a live observation (Claude Code backgrounding a slow codescout call) and researched
+before writing, per the entry requirement. The research pass found three separate mechanisms where
+the question assumed one, which is the entry's main content. Two corrections worth keeping:
+
+- A research summary asserted "no official specification for MCP tasks exists" while **its own
+  source list contained the draft spec** (`modelcontextprotocol/ext-tasks`). Read the spec instead
+  of the synthesis; everything in CAP-3 §(3) comes from the draft itself.
+- The one available observation of the client's backgrounding threshold is ambiguous (the client
+  backgrounded "after 120s" on a call whose own `timeout_secs` was also 120). Recorded as
+  unmeasured with a specific experiment to settle it, rather than written up as 120s.
 ## Template for new entries
 
 <!-- Insert new CAP-N entries above the "## Anti-goals" heading. Also add an Index row.
@@ -198,4 +302,3 @@ without this is not ready.
 
 **Why it is worth building.** Evidence, ideally measured, ideally not self-generated.
 -->
-
