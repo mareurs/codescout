@@ -98,6 +98,60 @@ run on this host. The `resolve_first_probe` path was checked and **excluded** �
 `cache-sandwich-*` files come from a different consumer of that id, not from that test's
 in-memory cache calls.
 
+### Re-measured 2026-08-16 — the per-run figure, corrected, and decomposed
+
+The Resume asked for a re-baseline against a full `cargo test` rather than the
+original `--lib`-only 144. Done, and the decomposition changes an argument in the
+*Fix* section:
+
+| scope | files created per run |
+|---|---|
+| `cargo test --lib` | **132–144** |
+| `cargo test --test '*'` (every target in `tests/`) | **4** |
+| full `cargo test --workspace --no-fail-fast` | **~148** |
+
+**A first reading of 296 was wrong and is retracted.** It was taken in a window
+that overlapped a test run from a second session sharing this checkout, so ~148
+of those files were not created by the measured run at all. It was caught by a
+behaviour-preservation check rather than by suspicion: the `resolve_sqlite_dir`
+extraction should have changed nothing, so a delta that halved on the next run
+was a contradiction that had to be resolved. The decomposition above is the
+resolution — `132 + 4 ≈ 148`, and 296 is the outlier.
+
+Why it matters: it re-rates option 3 under *Fix* from covering ~49% of the test
+leak to covering ~97%. That does **not** revive it — see the amended note there —
+but the arithmetic previously offered against it was wrong by roughly a factor of
+four, and an argument that leans on a bad number should not be left standing even
+when its conclusion survives.
+
+**Standing hazard for anyone re-measuring this:** file counts under
+`~/.codescout/embeddings/` are a *machine-wide* signal, not a per-run one. Any
+concurrent `cargo test` — another session, another checkout, a background job —
+lands in the same directory. Measure with nothing else running, or decompose and
+check the parts sum.
+
+### The basename collision — the same design, without any tests involved
+
+`ActiveProject::project_id()` returns `config.project.name`
+(`src/agent/mod.rs:311`), and when a project has no config file of its own that
+name defaults to the root's **directory basename** (`src/config/project.rs:489`). The
+store path is `$HOME/.codescout/embeddings/<project_id>.db`.
+
+So the store is a single global namespace keyed by directory basename. Two
+projects named `api` on one machine — `~/work/a/api` and `~/work/b/api`, or any
+two monorepo siblings — resolve to the **same database file**, and because the
+`project_id` column inside it is that same basename, their rows are
+indistinguishable once written. One project's chunks can be served as another's
+search results.
+
+This is not a test-isolation problem and no fix aimed only at tests touches it.
+It has stayed invisible for the same reason the leak grew: test tempdirs
+(`_tmpZZRMEO`) never collide, so the population that made the directory huge is
+exactly the population that cannot exhibit the bug. **Inferred from the two cited
+lines — not reproduced.** The reproduction is cheap and should be run before the
+fix is chosen: index two same-basename projects, then search one for a symbol
+that exists only in the other.
+
 ## Evidence
 
 ### Directory census
@@ -199,26 +253,46 @@ a patch.
 
 ### The decision to make
 
-1. **Thread it properly (option A, full).** Add `sqlite_dir` to `RetrievalConfig` —
-   which `RetrievalClient::from_env` already builds via
-   `RetrievalConfig::from_env_and_project`, so the env read lands exactly at the edge
-   the convention names — then pass it to `SqliteVecCodeStore::at`. Tests that build a
-   config literally get isolation for free. Cost: the 14 call sites need to reach a
-   config they mostly already have, and the tool-level tests need a way to supply one.
-2. **Derive the store dir from the project root** instead of `$HOME`. Kills the leak
-   outright, since test projects are temp dirs that get cleaned up. But it relocates
-   every existing user's index and changes a user-scoped store into a per-project one —
-   a product decision, not a test-isolation one.
-3. **`#[cfg(test)]` fallback to a temp dir.** Smallest change, and it would have cut
-   the measured 144-per-run figure (that was `cargo test --lib`). **Rejected as a
-   knowing half-fix**: `cfg(test)` does not apply to integration tests in `tests/`,
-   which link the lib compiled without it, so those would keep leaking silently. Two
-   bugs closed earlier today (`4eabe442`, `4c9c23b8`) were *caused* by exactly this —
-   fixing one member of a set and leaving its siblings guarded by a passing test.
+**Groundwork is done — `experiments:faae7892`.** `RetrievalConfig` now carries
+`sqlite_dir`, resolved at the edge by a pure `resolve_sqlite_dir(Option<String>)`
+beside `parse_rerank_opt_in`; `src/retrieval/client.rs` builds the store with
+`::at(config.sqlite_dir.clone())`; `SqliteVecCodeStore::from_env` is deleted.
+This is option A's *mechanism*, and it deliberately changes no behaviour — the
+fallback is still `$HOME`, so the leak is untouched.
 
-Separately still worth deciding, and unchanged from the original filing: whether the
-production fallback should self-limit at all. 3.2 MB preallocated per `vec0` table
-makes a handful of stale ids cheap; 75,480 of them is 25 GB.
+One fear in the original framing turned out to be unfounded: this was called a
+14-call-site refactor, and it was five files. All 11 production callers of
+`RetrievalClient::from_env` already pass `root`, and `from_env_and_project`
+already accepts it. The parameter was threaded; only the field was missing.
+
+What remains is one question: **what should the fallback be when
+`CODESCOUT_SQLITE_DIR` is unset?** It is now a one-line change in one function.
+
+1. **Keep `$HOME` (status quo).** Zero disruption. Leaves ~148 files per test
+   run, unbounded production growth, and the basename collision above.
+2. **Derive from the project root** (`<root>/.codescout/embeddings/`). Fixes all
+   three at once: test tempdirs take their stores with them when they are
+   removed, a deleted project takes its index, and per-root paths cannot
+   collide. Consistent with the per-project `.codescout/` directory that already
+   holds this project's memories and workspace config. Cost: existing users' indexes are
+   orphaned in `$HOME` and every project re-indexes once. That is a product
+   decision, which is why it is not taken here.
+   - A migration shim (*use the legacy `$HOME` file when it exists, otherwise the
+     new location*) would avoid the re-index, but keeps two resolution paths
+     indefinitely and leaves the collision alive for every project that predates
+     it. Worth naming; not obviously worth taking.
+3. **`#[cfg(test)]` fallback to a temp dir.** ~~Would have cut the measured
+   144-per-run figure~~ — amended 2026-08-16: it would cover roughly **97%** of
+   the test leak, not the ~49% implied by the retracted 296 figure. Still
+   rejected, on two grounds that do not depend on the arithmetic: `cfg(test)`
+   does not reach the integration targets in `tests/`, so those keep leaking
+   silently behind a green suite — the shape that caused `4eabe442` and
+   `4c9c23b8` — and it does nothing at all for the unbounded production growth
+   or the basename collision, both of which exist with no tests running.
+
+Option 2 is the only one that addresses the collision, and the collision is the
+part of this bug that can corrupt a user's search results rather than merely
+fill a disk.
 ## Tests added
 
 None yet — bug filed on discovery.
@@ -269,32 +343,36 @@ The next `cargo test` starts refilling the directory. What the cleanup *does* bu
 clean measurement baseline — see *Resume*.
 ## Resume
 
-**The writer is identified; do not re-run the instrumentation the original Resume asked
-for.** It is `RetrievalClient::from_env` → `SqliteVecCodeStore::from_env`
-(`src/retrieval/client.rs:238`), the sole production caller, reached because
-`VectorBackend::resolve` defaults to `SqliteVec` on the non-`server-stack` build. Found
-with `references`; no tracing needed.
+**Do not re-run the writer-identification work, and do not re-derive the
+threading.** The writer is `RetrievalClient::from_env` → the sqlite store
+(`src/retrieval/client.rs`), and the threading is done — `experiments:faae7892`.
 
-What remains is the **decision** among the three options under *Fix*. Option A as the
-convention prescribes it is a 14-call-site refactor, not a patch. Option 3
-(`#[cfg(test)]`) is the tempting one and is a trap — it fixes `--lib` and leaves
-`tests/` leaking.
+One decision is open, and it is a product call, not a technical one: **what
+`resolve_sqlite_dir` should return when `CODESCOUT_SQLITE_DIR` is unset.** See
+the three options under *Fix*. It is now a one-line change in
+`src/retrieval/config.rs`.
 
-**Verification is now easy, because the directory is clean.** As of 2026-08-14 it holds
-exactly **7 files** and 285 MB, every one attributable to a live project or a 16 KB
-stub. So:
+Before choosing, run the collision reproduction — it is cheap, it is unproven,
+and it is the finding that most changes the answer: create two projects with the
+same directory basename and no config file of their own, index both, then search one for a
+symbol that exists only in the other. If they share a store this is a
+correctness bug, not a housekeeping one.
+
+When measuring anything here, note the hazard recorded under *Evidence*:
+`~/.codescout/embeddings/` is machine-wide, so a concurrent `cargo test` from any
+other session lands in the same count. One 296-file reading was already wrong
+that way. Measure quiet, or decompose and check the parts sum:
 
 ```bash
 E="$HOME/.codescout/embeddings"
-before=$(find "$E" -maxdepth 1 -type f | wc -l)   # 7 on a clean base
-cargo test
+before=$(find "$E" -maxdepth 1 -type f | wc -l)
+cargo test --workspace --no-fail-fast
 after=$(find "$E" -maxdepth 1 -type f | wc -l)
-echo "delta=$((after - before))"                  # must be 0
+echo "delta=$((after - before))"    # ~148 today; must be 0 once the fallback moves
 ```
 
-Re-baseline before trusting the old 144-per-run figure: that was measured on
-`cargo test --lib` alone, and a full `cargo test` run also exercises the integration
-tests in `tests/`, which is exactly the population option 3 would miss.
+Cleanup is still not a fix and is still safe to do meanwhile — the directory
+held 8,395 files at last count.
 ## References
 
 - `src/retrieval/sqlite_code_store.rs:45-57` — `from_env`, the home-dir fallback
