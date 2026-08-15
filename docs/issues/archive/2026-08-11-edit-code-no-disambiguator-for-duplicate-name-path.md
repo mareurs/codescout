@@ -1,13 +1,13 @@
 ---
 id: '51d5a80b7fe2f125'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: edit_code has no way to disambiguate two symbols with an identical name_path, so a duplicate impl block cannot be removed or replaced without reverting the file'
 tags:
 - edit-code
 - name-resolution
 - tool-friction
-closed: null
+closed: 2026-08-15
 opened: 2026-08-11
 owner: marius
 related:
@@ -109,12 +109,44 @@ None — filed on notice. The workaround (`git checkout` + redo as two separate 
 
 ## Fix
 
-Not implemented. Candidate: when `find_unique_symbol_by_name_path` returns >1 candidate, extend the existing ambiguous-name_path error path (which already fires correctly for other duplicate-name cases) to accept an optional position hint (line number, or "nth match" ordinal) instead of only erroring.
+Shipped in `b2bc8edb`, taking the candidate this file proposed — a position hint
+on the ambiguous path — and choosing **line over ordinal**.
 
+An ordinal ("nth match") depends on traversal order, which is an implementation
+detail the caller cannot see and which changes when the resolver does. A line is
+already printed by `symbols`, stable, and verifiable by eye.
+
+`edit_code` gains `at_line`, threaded through `fetch_validated_symbol` to the new
+`find_unique_symbol_by_name_path_at`. Three details matter more than the parameter:
+
+1. **The ambiguity error now carries each candidate's span.** With identical paths
+   the span is the *only* thing distinguishing candidates — the old error printed
+   the same string N times and offered no way forward. A disambiguator with no way
+   to learn what to pass is not usable.
+2. **`at_line` matches anywhere in the span**, not just the declaration line,
+   because the number a caller has is whatever `symbols` printed — which may be a
+   body line or the end.
+3. **A line matching no candidate is its own error**, distinct from "symbol not
+   found": the name *did* resolve. Conflating them would send the caller hunting
+   for a wrong name when their name was right.
+
+1-based on the surface, 0-based internally; converted once in `symbol_covers_line`
+rather than asking callers to subtract.
 ## Tests added
 
-None. A regression test would assert that `edit_code(remove, symbol=X, line=N)` (or equivalent) can select one of two symbols sharing name_path X, once such a parameter exists.
+`at_line_breaks_a_tie_no_name_can_break` — two blocks with byte-identical
+`name_path`s at spans 11-21 and 31-41, covering:
 
+- ambiguity error lists **both spans** (the fix's usability precondition);
+- declaration line resolves;
+- a **mid-body** line resolves — span match, not declaration match;
+- both span ends are inclusive;
+- a line in neither span errors *naming the line and listing the real spans*, and
+  explicitly does **not** read as "not found";
+- a line passed against an already-unique name still resolves — adding the
+  parameter must never turn a working call into a failing one.
+
+Gate: `cargo test --workspace` → 3810 passed / 0 failed / 50 ignored; clippy clean.
 ## Workarounds
 
 Never combine "replace a container symbol" with "restate a sibling/child block that already exists elsewhere in the file" in one `edit_code(replace)` body — do the two edits as separate calls (container first, then the pre-existing block, addressed while it is still uniquely named). If a duplicate is already created and uncommitted, `git checkout -- <file>` is the fastest recovery.
@@ -124,15 +156,17 @@ Never combine "replace a container symbol" with "restate a sibling/child block t
 **Item 2 resolved 2026-08-15 in `cafa4b37`** — with a correction to how it was
 framed here. Item 1 remains.
 
-### 1. The same-scope disambiguator (the original bug) — open
+### 1. The same-scope disambiguator (the original bug) — fixed
 
-Read `find_unique_symbol_by_name_path` (`src/symbol/query.rs:714`) and its callers
-in `edit_code`'s remove/replace/insert dispatch. Check whether the ambiguous-match
-error already carries enough position data (line/byte range per candidate) to
-expose a disambiguator parameter cheaply. Note the scope narrowing in § Summary →
-*Update 2026-08-14*: only **same-enclosing-scope** duplicates need this; different
-scopes already resolve.
+Fixed in `b2bc8edb` — see § Fix. The investigation this section asked for
+("check whether the ambiguous-match error already carries enough position data to
+expose a disambiguator cheaply") had a clean answer: it did **not** carry position
+data, and adding it was the larger half of the value. The parameter without the
+spans in the error would have been unusable, because nothing told the caller which
+line to pass.
 
+The § Summary scope narrowing held: only same-enclosing-scope duplicates need
+this, and different scopes still resolve by name alone.
 ### 2. The `insert` refusal — diagnosed, and it was not what this file said
 
 This file described it as `insert`'s "end-of-symbol bound" failing. Measured, the

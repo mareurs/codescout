@@ -801,7 +801,27 @@ impl EditCode {
         // new body. Skips the body_leads_with_decorator heuristic — the
         // caller's intent is explicit. `attributes: []` drops all outer
         // attributes; non-empty replaces them with exactly that list.
+        // What the supplied list is about to delete. Replace semantics are correct
+        // and documented, but a destructive write that GROWS the file passes every
+        // size guard by construction, so the only defence is saying what went. Same
+        // argument, same shape as the librarian's `replaced_subsections` and
+        // `remove`'s `removed_descendants`.
+        let mut removed_attributes: Vec<String> = Vec::new();
         let (start, effective_body): (usize, String) = if let Some(attrs) = attributes {
+            let supplied: std::collections::HashSet<&str> =
+                attrs.iter().map(|a| a.trim()).collect();
+            let decl = (sym.start_line as usize).min(lines.len());
+            removed_attributes = lines[start.min(decl)..decl]
+                .iter()
+                .map(|l| l.trim())
+                // `#[` is Rust/other attribute syntax; `@` covers Java/Kotlin/Python
+                // decorators. Doc comments are deliberately NOT counted — this field
+                // answers "which attributes did I lose", and folding two classes into
+                // one list is how the lead region caused trouble before.
+                .filter(|t| t.starts_with("#[") || t.starts_with('@'))
+                .filter(|t| !supplied.contains(t))
+                .map(|t| t.to_string())
+                .collect();
             let attrs_block = attrs.join("\n");
             let combined = if attrs_block.is_empty() {
                 new_body.to_string()
@@ -1002,6 +1022,9 @@ impl EditCode {
             json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) });
         if let Some(r) = range_repair {
             response["warning"] = json!(r.warning(&sym.name));
+        }
+        if !removed_attributes.is_empty() {
+            response["removed_attributes"] = json!(removed_attributes);
         }
         // The write succeeded but the dropped-symbol / dropped-sibling checks could
         // not run. Say so — the previous code reported a bare "ok" here, which read

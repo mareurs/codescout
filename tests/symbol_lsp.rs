@@ -1383,6 +1383,87 @@ async fn insert_after_top_level_symbol_lands_at_file_scope() {
         "module must follow the anchor; got:\n{result}"
     );
 }
+/// `attributes` replaces the whole list, so the response must say what it deleted.
+///
+/// The semantics are correct and documented, but a destructive write that GROWS the
+/// file passes every size guard by construction — so naming the casualties is the
+/// only defence. It cost two silent losses in one session before this existed.
+/// Same shape as the librarian's `replaced_subsections` and `remove`'s
+/// `removed_descendants`.
+#[tokio::test]
+async fn replace_with_attributes_names_the_attributes_it_dropped() {
+    let src = "#[allow(dead_code)]\n#[deprecated]\npub fn target() -> i32 {\n    1\n}\n";
+
+    let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Declaration on line 2 (0-based); the two attributes sit above it.
+        MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 2, 4, file)])
+    })
+    .await;
+
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "action": "replace",
+                "body": "pub fn target() -> i32 {\n    99\n}",
+                // Deliberately RE-STATES #[deprecated] and adds #[inline]. Only
+                // #[allow(dead_code)] is actually lost, so a list of "every attribute
+                // in the lead region" would be wrong here — this is what separates
+                // reporting the casualties from reporting the region.
+                "attributes": ["#[deprecated]", "#[inline]"],
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let dropped = result["removed_attributes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("removed_attributes must be reported; got: {result}"));
+    let dropped: Vec<&str> = dropped.iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(
+        dropped,
+        vec!["#[allow(dead_code)]"],
+        "only the attribute actually lost may be named — a re-stated one survives \
+         and a supplied one was never there; got: {dropped:?}"
+    );
+}
+
+/// The field must stay absent when nothing was lost.
+///
+/// A `removed_attributes: []` on every replace is noise, and noise is how a
+/// warning field stops being read. Two arms: no `attributes` param at all, and a
+/// list that re-states exactly what was already there.
+#[tokio::test]
+async fn replace_reports_no_removed_attributes_when_nothing_was_lost() {
+    let src = "#[allow(dead_code)]\npub fn target() -> i32 {\n    1\n}\n";
+
+    for attrs in [None, Some(vec!["#[allow(dead_code)]"])] {
+        let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+            let file = root.join("src/lib.rs");
+            MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 1, 3, file)])
+        })
+        .await;
+
+        let mut input = json!({
+            "path": "src/lib.rs",
+            "symbol": "target",
+            "action": "replace",
+            "body": "pub fn target() -> i32 {\n    99\n}",
+        });
+        if let Some(a) = &attrs {
+            input["attributes"] = json!(a);
+        }
+
+        let result = EditCode.call(input, &ctx).await.unwrap();
+        assert!(
+            result.get("removed_attributes").is_none(),
+            "nothing was lost, so the field must be absent (attrs={attrs:?}); got: {result}"
+        );
+    }
+}
 
 /// BUG-023 regression: when LSP over-extends end_line to the next function's opening
 /// line, editing_end_line() caps it to the AST-reported end, so insertion lands
