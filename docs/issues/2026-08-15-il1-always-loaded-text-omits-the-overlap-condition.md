@@ -169,6 +169,59 @@ nothing in the repo claims one, and the rate is still above May's.
 **Revised acceptance test.** Use **reach and intensity together**, measured on a single project so
 the confound cannot recur: `codescout` August baseline is 29% reach / 5.8 per affected session.
 A wording fix should move reach first — fewer sessions attempting the blocked operation at all.
+### What the refused reads actually asked for (added 2026-08-15, from `input_json`)
+
+The statistical passes above characterise this bug by *frequency* and *what tool came next*. Neither
+shows **intent**. `input_json` turns out to be populated on 95% of rows (debug mode has been on),
+so the requested ranges are recoverable after all — and they sharpen the finding considerably.
+
+Shape of the 244 refused reads in the window that carry arguments:
+
+| Shape of requested range | n |
+|---|---:|
+| small slice (≤40 lines) | 97 |
+| **file HEAD (`start_line` ≤ 5)** | **84** |
+| medium slice (41–150) | 56 |
+| large slice (>150) | 7 |
+
+And of the 84 head reads, **69 extend no further than line 60** — they are not whole-file reads in
+disguise. Verbatim samples, all refused:
+
+    read_file("src/librarian/catalog/mod.rs",     start_line=1, end_line=20)
+    read_file("src/librarian/workspace.rs",       start_line=1, end_line=20)
+    read_file("src/librarian/current_project.rs", start_line=1, end_line=30)
+    read_file("src/librarian/adapter.rs",         start_line=1, end_line=60)
+
+**Lines 1–20 of a source file is the canonical "show me the imports" read** — the exact operation
+Iron Law 1 names as permitted and `iron-laws-detail.md:15-16` calls *"the correct tool, not a
+fallback"*. It is refused because a `mod` declaration or a struct begins inside the first 20 lines.
+
+**And the recommended recovery cannot serve these.** The same guide states that `symbols` is a
+*definition projection* that **does not return imports / `use` / `package`**
+(`iron-laws-detail.md:12-16`). So for 69 of 244 refusals (28%), the hint's primary suggestion —
+`symbols(name=…, include_body=true)` — is **structurally incapable** of answering the question, and
+`force=true`, the only thing that works, is offered second.
+
+That is a sharper defect than "the always-loaded text omits the condition", and it is the one worth
+fixing first.
+
+### Correction: "35% same-tool recovery" measured the wrong thing
+
+The recovery figure quoted earlier counts a retry of **`read_file`** as recovery. Tracing actual
+sequences shows the *correct* recovery for the symbol-body case is a **different tool**:
+
+    ERR  read_file("src/embed/ast_chunker.rs", 2076, 2189)
+      N1 symbols(name="tests/split_file_rust_populates_metadata_headers", include_body=true)  ok
+      N2 symbols(name="tests/inner_method_signature_skips_doc_comments", include_body=true)   ok
+
+That is the guard working exactly as designed — the agent wanted two test bodies and got them by
+name — and the same-tool metric scores it as a failure to recover. **For the symbol-body case the
+guard is healthy.** The defect is confined to the cases where no symbol is the answer: imports,
+glue, and cross-symbol slices.
+
+Revised characterisation: this is not "a guard that fires too often". It is **one guard serving two
+populations**, healthy for the larger one and structurally wrong for the ~28% that want
+non-definition text.
 ## Hypotheses tried
 
 1. **Hypothesis:** the guide is wrong and needs fixing (doc-vs-code drift, like the sibling bug
@@ -191,20 +244,25 @@ A wording fix should move reach first — fewer sessions attempting the blocked 
 
 ## Fix
 
-Not implemented. The cheapest candidate is a wording change on the always-loaded surface: state the
-condition, not just the permission — e.g. *"Line-range read_file is fine for imports/glue; on
-source files the gate refuses a range that overlaps a symbol — pass force=true for an exact
-slice."* That is a `src/prompts/source.md` edit and must respect the 2200-byte slice cap
-(`src/prompts/README.md`), so something else in the slice likely has to give.
+Not implemented. Revised 2026-08-15 after reading the refused arguments — the wording change alone
+is no longer the first move.
 
-Worth deciding alongside: whether the hint should lead with `force=true` when the requested range
-is **small relative to the overlapping symbol**. The current hint always leads with
-`symbols(include_body=true)`, which for a 27-line slice of a 400-line method returns strictly more
-than was asked for — the opposite of the Iron Law's intent.
+**1. Exempt the case the guard cannot serve.** When the requested range is non-definition text — in
+practice a file head, `start_line` ≤ 5 with a modest extent — the recommended alternative
+(`symbols(include_body=true)`) *cannot* return it, because `symbols` does not surface imports
+(`iron-laws-detail.md:12-16`). Either allow the read, or lead the hint with `force=true` for that
+shape instead of offering it second. 69 of 244 refusals in the window are this case.
 
-**Do not treat "relax the gate" as the default fix.** The `il3_pipe_to_trimmer` comparison shows a
-frequently-fired guard can be healthy; this one's problem is attempt rate and recovery ambiguity.
+**2. Order the hint by what the caller asked for.** For a small slice of a large symbol, leading
+with `symbols(include_body=true)` returns strictly more than was requested — the opposite of Iron
+Law 1's intent. The requested extent is known at refusal time; use it to pick which escape leads.
 
+**3. Then the wording.** State the condition on the always-loaded surface
+(`src/prompts/source.md:8-9`), respecting the 2200-byte slice cap (`src/prompts/README.md`).
+
+**Do not relax the gate wholesale.** The traced sequences show it is genuinely useful for the
+symbol-body population — agents refused a blind line range go on to fetch the exact symbols they
+wanted, by name. Fixing (1) and (2) preserves that while removing the population it cannot serve.
 ## Tests added
 
 None yet — filed on discovery.
@@ -217,12 +275,20 @@ None yet — filed on discovery.
 
 ## Resume
 
-Edit the IL1 line in `src/prompts/source.md:8-9` to carry the overlap condition, checking the
-2200-byte cap on the `server_instructions` slice first
-(`prompt_surfaces_reference_only_real_tools` and the cap test gate this file). Then re-measure:
-`il1_read_overlaps_symbol` per-session rate should fall from 4.7; that number is the acceptance
-test. The query is in the Evidence section.
+Start with Fix (1), which is the measurable one. In `src/tools/read_file.rs:544-565`, the refusal
+has both the requested range and the overlapping symbols in hand; add the file-head exemption (or
+the hint reordering) there.
 
+Acceptance test: re-run the range-shape query in Evidence and confirm the `file HEAD` bucket drops
+from 84 (of which 69 are ≤60 lines) to ~0, while the `small slice` and `medium slice` buckets are
+unchanged — those are the healthy population and must keep being refused.
+
+Secondary baseline, per the earlier correction: `codescout` August reach/intensity of 29% / 5.8,
+measured on a single project.
+
+The range-shape query needs `input_json`, which is `--debug`-gated (`src/tools/../usage/mod.rs:85-89`)
+but in practice populated on 95% of recorded rows on this machine. Confirm it is still being
+captured before re-measuring, or the query silently returns nothing.
 ## References
 
 - `src/tools/read_file.rs:544-565` — the gate

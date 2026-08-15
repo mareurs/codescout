@@ -60,6 +60,7 @@ Overall error rate by month — improving:
 | TU-8 | Routing is 45% of all errors — and is broadly working | **no action** — negative result, see § Tool sweep |
 | TU-9 | `artifact_event` carries TU-4's defect in a third tool | **open** — extends `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md` |
 | TU-10 | Overflow pressure is concentrated, and compounds TU-1 | **open**, not filed |
+| TU-11 | Reading the arguments overturned conclusions in **both** directions | **method** — see § Trace pass; corrections folded into TU-1 and TU-2 |
 
 ## TU-7 — the negative result that shapes everything else
 
@@ -270,6 +271,72 @@ opposite: it rarely overflows, but when it does the buffer is enormous — one c
 records** — and TU-1 is that `json_path` cannot project a field across a list (`[*]` is rejected,
 73% of all rejections). So the highest-overflow tools feed the weakest recovery path. Fixing TU-1
 is worth more than its own 30-occurrence count suggests.
+
+## Trace pass — reading what the agent actually asked for
+
+Everything above is sequence-shaped: *which tool errored, which tool came next, did it succeed*.
+None of it shows **intent**. Prompted by the concern that statistics-from-above give the wrong
+impression, a third pass read `input_json` — which turns out to be populated on **51,164 of 53,916
+rows (95%)**, because debug capture has been on. (§ Method caveats #7 said this was unavailable; the
+mechanism is real but the data exists on this machine. Corrected.)
+
+It overturned conclusions in **both** directions, which is why it is recorded as its own finding.
+
+### TU-11a — statistics OVERSTATED recovery (TU-1)
+
+Every `[*]` rejection was scored a successful recovery by the sequence view. The arguments show what
+those recoveries actually were:
+
+| The agent asked for | "Recovery" scored as success | What it really cost |
+|---|---|---|
+| `$.items[*].abs_path` | `read_file(lines 92–485)` | 393 lines of raw JSON for one field |
+| `$.entries[*].id` | `$.entries[4].id` | one element per call, O(n) |
+| `$.results[*].rel_path` | re-ran `artifact(find)` narrower | abandoned the buffer, re-queried upstream |
+| `$.results[*].['id','rel_path','title']` | `grep` regex on the buffer | left the tool surface |
+
+**Not one recovery got what was asked for cheaply.** A green `outcome` column concealed a degraded
+workaround every time.
+
+It also revealed a requirement TU-1 understated: two of six used **multi-field selection**
+(`['id','title','rel_path','status','tags']`), not just a wildcard. Agents want *projection*, not
+only `[*]`.
+
+### TU-11b — statistics UNDERSTATED the guard (TU-2)
+
+The opposite error. `il1`'s "35% same-tool recovery" counted only a retry of `read_file`. Traced
+sequences show the *correct* recovery is usually a different tool:
+
+    ERR  read_file("src/embed/ast_chunker.rs", 2076, 2189)
+      N1 symbols(name="tests/split_file_rust_populates_metadata_headers", include_body=true)  ok
+      N2 symbols(name="tests/inner_method_signature_skips_doc_comments", include_body=true)   ok
+
+The agent wanted two test bodies and got them by name. That is the guard working, scored as failure.
+
+But the same pass found a **sharper defect the statistics missed entirely**. Bucketing the refused
+ranges by shape: of 244 refusals, **84 are file-head reads** (`start_line` ≤ 5) and **69 of those
+extend no further than line 60** — canonical imports reads (`1–20`, `1–30`, `1–60`), refused because a
+`mod` or struct begins inside them. And `symbols` **cannot** answer them: it is a definition
+projection that does not return imports (`iron-laws-detail.md:12-16`). For 28% of refusals the
+recommended recovery is structurally incapable, and `force=true` — the only thing that works — is
+offered second.
+
+TU-2 is therefore not "a guard that fires too often" but **one guard serving two populations**:
+healthy for symbol-body reads, structurally wrong for the non-definition minority. Its Fix section
+was rewritten around that split.
+
+### The rule
+
+**Sequence shape is a screen, not a verdict.** It is good at ranking where to look and systematically
+wrong about what it found:
+
+- a `success` in the next row can be a **degraded workaround** (TU-11a) — it says the call returned,
+  never that the agent got what it wanted;
+- a `non-recovery` can be **correct cross-tool behaviour** (TU-11b), and same-tool metrics penalise
+  exactly the guards whose right answer is a different tool.
+
+Before filing or closing anything from aggregate counts, read the arguments of ten instances. Both
+corrections here came from fewer than a dozen rows, and neither was visible from any amount of
+aggregation.
 
 ## Still unpulled
 
