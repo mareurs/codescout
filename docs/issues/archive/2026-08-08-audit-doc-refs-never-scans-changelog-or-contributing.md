@@ -234,9 +234,30 @@ Audit them explicitly:
 
 ## Resume
 
-Closed. One follow-up survives by design: `src/prompts/**` →
-`DEFAULT_AUDIT_EXCLUDES`, to make an existing silence explicit. Not bundled, as
-this file instructed.
+Closed, and the one surviving follow-up is now discharged too —
+`experiments:325f4387` added the `src/prompts` payloads to
+`DEFAULT_AUDIT_EXCLUDES`, not bundled, as this file instructed.
+
+**It shipped narrower than this file prescribed, and the correction came from
+this file's own evidence.** The prescription above says `src/prompts/**`; the
+section two headings up records that `src/prompts/README.md` *is* scanned via
+`**/README.md`. Those two facts do not compose. Excludes are matched after the
+include set with no re-include and `globset` has no negation, so
+`src/prompts/**` would not have documented a silence — it would have created
+one, costing the 28 refs (24 resolved, 0 high) on the only file in that
+directory whose refs are real citations rather than teaching placeholders. The
+placeholder-vs-citation discriminator this file drew cuts *between* README and
+its neighbours, not around the directory, so the four payload patterns are
+enumerated: `src/prompts/guides/**`, `src/prompts/source.md`,
+`src/prompts/memory-templates.md`, `src/prompts/workspace_onboarding_prompt.md`.
+
+The entries are **inert** under today's `DEFAULT_AUDIT_GLOBS` — verified, not
+assumed: the default scan with the new constant compiled in reports the same
+945 files / 50134 refs / exit 0, with README still contributing its 28. Their
+only job is to survive a future glob widening, so the test
+(`prompt_payload_excludes_survive_a_glob_widening_but_spare_the_readme`)
+simulates that widening; a default-scan assertion would have passed with the
+four entries deleted.
 
 The transferable lesson is about the *shape of the reconciliation*, not the gate.
 This file grouped 8 findings under one label ("historical release sections") after
