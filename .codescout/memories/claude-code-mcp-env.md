@@ -1,76 +1,5 @@
 # Claude Code → stdio MCP server environment
 
-## CLAUDE_CODE_SESSION_ID is available (verified 2026-06-14)
-
-Claude Code sets **`CLAUDE_CODE_SESSION_ID`** in the env of stdio MCP server
-subprocesses since **v2.1.154** (2026-05-28). Verified live: `printenv
-CLAUDE_CODE_SESSION_ID` inside a codescout `run_command` returned the CC
-conversation id (`c38fc7f3-…`), identical to `.codescout/cc_session_id` (which
-the companion's `session-start.sh:21` writes from the hook `$SESSION_ID`).
-
-Verified properties:
-- **Survives `/mcp` restart** — present on a codescout process spawned by a
-  `/mcp` reconnect (the var is set on every MCP subprocess spawn, not just at
-  CC startup).
-- **Per-process / concurrency-safe** — each CC instance gets its own value, so
-  concurrent CC windows on one project don't collide (unlike the single shared
-  `.codescout/cc_session_id` file, which is last-writer-wins).
-- The MCP `initialize` handshake DOES carry client identity (see clientInfo
-  section below) but NO session id — the env var is the only session-id channel.
-
-**Use `CLAUDE_CODE_SESSION_ID`** for per-CC-session state in the MCP server —
-not a `/proc`-ancestry hack, not the shared `cc_session_id` file. Fallback chain
-for older CC / non-CC clients: `env → .codescout/cc_session_id file → random uuid`.
-
-Open question: whether it's set on a FRESH (non-`--resume`) session — changelog
-is ambiguous (v2.1.163 added it "explicitly on --resume"; v2.1.154 likely covered
-fresh start). The file fallback covers any gap. Verify with a fresh `claude`
-session + `printenv` in an MCP `run_command`.
-
-First consumer: the get_guide re-injection fix,
-`docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
-Refs: anthropics/claude-code #25642 (closed dup of the env-var request),
-#41836 (HTTP-transport session id — still open, distinct from this stdio env var).
-
-## Full injected env inventory (verified live 2026-06-14, CC v2.1.177)
-
-`printenv` inside a codescout `run_command` is the ground truth — docs do NOT
-list all of these. The complete set of Claude-Code-injected vars:
-
-| Var | Example value | Since | Use for codescout |
-|---|---|---|---|
-| `CLAUDE_CODE_SESSION_ID` | `c38fc7f3-…` | v2.1.154 | per-session state (see above) — **consumed** |
-| `CLAUDE_PROJECT_DIR` | `/home/marius/work/claude/codescout` | **v2.1.139** | authoritative launch-project hint (stay a *hint*; non-CC clients don't set it) — not yet consumed |
-| `AI_AGENT` | `claude-code_2-1-177_harness` | (observed) | `<agent>_<version>_<surface>`; version dash-encoded. Superseded by clientInfo for identity+version (see below). Only unique offering: the `harness`/surface marker + pre-handshake availability — not yet consumed |
-| `CLAUDE_CONFIG_DIR` | `/home/marius/.claude` | (observed) | which of the three CC profiles launched the server — namespace per-profile state — not yet consumed |
-| `CLAUDE_CODE_ENTRYPOINT` | `cli` | (observed) | cli vs sdk — NOTE disagrees with AI_AGENT's surface field (`harness`), so neither is a clean entrypoint source — not yet consumed |
-| `CLAUDECODE` | `1` | (observed) | boolean "running under Claude Code" — not yet consumed |
-
-**NOT injected** (verified absent, despite a research agent's "medium confidence"
-guess): **`CLAUDE_EFFORT`** — it is a *hooks-only* field, not an MCP-subprocess
-env var. Do NOT build server-side effort-gating on it.
-
-## clientInfo is the best client-identity source (verified live 2026-06-14)
-
-The MCP `initialize` handshake's `clientInfo` is reachable via
-`ctx.peer.as_ref().and_then(|p| p.peer_info()).map(|i| &i.client_info)` — an
-rmcp `Implementation { name: String, version: String }`. codescout ALREADY reads
-`.name` at `src/tools/onboarding.rs:180-192` (`client_name` → `is_subagent_capable`
-gates subagent guidance on `name.contains("claude")`); it discards `.version`.
-
-**Live-probed values** (temp echo in `workspace(status)`, CC v2.1.177):
-- `client_info.name` = **`"claude-code"`** (clean, lowercase)
-- `client_info.version` = **`"2.1.177"`** (clean dotted — NOT empty, NOT garbage)
-
-**Decision: source client-awareness from `clientInfo.{name, version}`, not
-`AI_AGENT`.** Reasons: clean dotted version (no parsing, unlike AI_AGENT's
-`2-1-177`); protocol-proper + agent-agnostic (every MCP client sends it, not just
-CC); `.name` already consumed so extending to `.version` is ~1 line. `AI_AGENT`
-is a redundant fallback — keep only if the `harness`/surface marker or a
-pre-handshake value is ever needed (neither is today). "CC is always updated, no
-BW-compat" → version-gating is NOT a motivation; the only durable value is client
-*identity* for agent-agnostic branching.
-
 ## MCP client capabilities (cross-checked, not all live-verified)
 
 - **Elicitation** (server→user structured prompt): supported since **v2.1.76**
@@ -84,9 +13,72 @@ BW-compat" → version-gating is NOT a motivation; the only durable value is cli
 - **Roots** (client advertises workspace roots): planned only, open issue #57243.
 - **Sampling** (server→client LLM): NOT supported client-side.
 
-## Hook payload additions (codescout-companion)
+## MCP v2 / the 2026-07-28 spec — CC implements it, codescout does not (2026-08-15)
 
-`additionalContext` return from `Stop`/`SubagentStop` injects context into the
-next turn without blocking (cleaner than goal-stop-hook stop-reason text);
-`continueOnBlock` for `PostToolUse`; `args: string[]` for shell-free hook exec;
-`background_tasks`/`session_crons` in Stop payloads.
+The section above was captured at CC **v2.1.177**. Re-checked against the CC
+changelog at **v2.1.233** (this machine: session ran 2.1.227 via `AI_AGENT`,
+CLI on disk 2.1.233). What changed:
+
+**MCP shipped a 2026-07-28 specification.** The protocol becomes **stateless**
+and gains a formal **extensions framework**. Tasks moved OUT of experimental core
+INTO the `io.modelcontextprotocol/tasks` extension: a server may answer
+`tools/call` with a **task handle**, and the client drives it with `tasks/get`,
+`tasks/update`, `tasks/cancel`. A new **`subscriptions/listen`** stream carries
+opted-in server→client change notifications and **replaces the HTTP GET endpoint
+plus `resources/subscribe` / `resources/unsubscribe`**; servers may push
+`notifications/tasks` on it, each carrying full task state.
+
+**Request-scoped notifications are NOT on that stream.** `notifications/progress`
+and `notifications/message` still flow on the response stream of the request they
+belong to. Do not read the tasks spec's "MUST NOT ... on the subscriptions/listen
+stream" as a blanket ban on progress during a task — it is not, and reading it
+that way makes tasks look incompatible with `src/tools/progress.rs` when they are
+not.
+
+**Claude Code already speaks MCP v2** — inferred from a bug fix that presupposes
+it: 2.1.233 "Fixed MCP v2 connections endlessly reopening the subscriptions/listen
+stream". codescout does not: `ServerCapabilities::builder().enable_tools()
+.enable_tool_list_changed().enable_resources()` (`src/server.rs:867-873`) declares
+no `extensions` block, and rmcp is pinned at **1.3.0**, which predates the spec.
+**Open, and the gate on any adoption: whether the Rust SDK has shipped
+stateless/extensions/tasks support and at what version.** Not yet looked up.
+
+**Client-side backgrounding of slow calls (v2.1.212):** "MCP tool calls running
+longer than 2 minutes now move to the background." A **fixed 2-minute client
+rule**, independent of the server's own timeout — the call is moved to a CC task
+with an id, and the result arrives later as a `<task-notification>`. codescout is
+never told and simply keeps running, so a slow tool is already survivable with no
+server-side work. Do not confuse this with codescout's own `run_in_background` /
+`@bg_*` handles, which are a separate server-side mechanism.
+
+Other MCP-relevant entries 2.1.177 → 2.1.233:
+
+| Version | Entry |
+|---|---|
+| 2.1.214 | periodic progress heartbeat for long-running tool calls (client UI; NOT MCP `notifications/progress`) |
+| 2.1.219 | `mcp_server_errors` added to the headless stream-json init event |
+| 2.1.221 | fixed MCP servers from `--mcp-config` not connected before the first turn |
+| 2.1.224 | fixed MCP tools connecting mid-turn being deferred for tool search |
+| 2.1.232 | fixed MCP connections hanging for the full **30-second connect timeout** |
+| 2.1.233 | **"Todo/task-tracking tools (TaskCreate/Get/Update/List, TodoWrite) are no longer available"** |
+
+That last one bites agents that used `TaskCreate`/`TaskUpdate`/`TaskList` for
+todo tracking — they vanish on 2.1.233. Whether the background-task controls
+(`TaskStop`, `TaskOutput`) survive the removal is **unverified**; the
+backgrounding message still names `TaskStop`. Do not assume either way.
+
+**Still unknown: does CC actually SEND `_meta.progressToken`?** codescout builds a
+`ProgressReporter` only when it receives one (`src/server.rs:977-979`) and logs
+nothing either way. The live `.codescout/diagnostic-*.log` files are tracing
+output, not raw JSON-RPC — their zero hits for `progressToken` are a property of
+the view, not evidence about the client (the only `_meta` matches there are
+`body_meta` inside response bodies). Settle it with one temporary
+`tracing::info!` on the `get_progress_token()` branch + one rebuild + one call.
+
+**On the old crash (BUG-038 / unsolicited `notifications/progress` closing CC's
+stdin):** nothing in 2.1.177 → 2.1.233 claims a fix, so treat the client behaviour
+as unchanged — absence of a changelog entry is not evidence of a fix. It is moot
+for correctness anyway: codescout's side was fixed 2026-06-14
+(`docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md`),
+and emission is now strictly opt-in on a client-supplied token, which is the
+correct MCP behaviour regardless of how the client reacts.

@@ -136,6 +136,39 @@ the intent. The 60 repeat failures are agents guessing at a new range rather tha
 Both leaders are Rust repos worked symbol-heavily — consistent with a rule about source files
 rather than a per-project misconfiguration.
 
+### Correction: the headline figure is a lifetime average and hides the trend (added 2026-08-15)
+
+This file originally led with "416 occurrences across 89 sessions, 4.7 per session". That is the
+corpus-lifetime average and it is misleading in both directions. Splitting **reach** (share of
+sessions that hit the guard at all) from **intensity** (hits per affected session):
+
+| Month | Sessions | Hit it | Reach | Hits | Per affected session |
+|---|---:|---:|---:|---:|---:|
+| 2026-05 | 360 | 59 | 16% | 169 | 2.9 |
+| 2026-06 | 11 | 1 | 9% | 2 | 2.0 |
+| 2026-07 | 38 | 14 | 37% | 158 | **11.3** |
+| 2026-08 | 51 | 15 | 29% | 87 | 5.8 |
+
+So the current intensity is **5.8 per affected session**, higher than the 4.7 lifetime figure, and
+August is **worse than May on both measures**. It did not get fixed — it got much worse in July and
+partially recovered.
+
+**Month-over-month is confounded by project, except for one comparison.** Each month's corpus is
+dominated by a different repo (May: `code-explorer.old`, 30,556 calls; July and August: `codescout`).
+So May→July is not a like-for-like comparison. July→August **is** — same project — and within
+`codescout` the rate fell from 23.1 to 6.4 per 1,000 calls, i.e. 6.55 → 2.05 hits per session
+counting all sessions. `read_file`'s share of all calls fell only 14.4% → 11.0% over the same span,
+so a change in tool mix accounts for a minority of the drop; the rest is unexplained by this data.
+
+**What this does not establish.** No cause. `input_json` is `--debug`-gated (see
+`docs/trackers/capability-proposals.md` CAP-1), so the requested ranges are not recorded and it is
+impossible to tell from usage.db whether agents changed what they asked for, or the guard's
+classification changed underneath them. Do not read the August improvement as a fix having landed —
+nothing in the repo claims one, and the rate is still above May's.
+
+**Revised acceptance test.** Use **reach and intensity together**, measured on a single project so
+the confound cannot recur: `codescout` August baseline is 29% reach / 5.8 per affected session.
+A wording fix should move reach first — fewer sessions attempting the blocked operation at all.
 ## Hypotheses tried
 
 1. **Hypothesis:** the guide is wrong and needs fixing (doc-vs-code drift, like the sibling bug
@@ -200,4 +233,3 @@ test. The query is in the Evidence section.
   escape is discarded on whole-file reads; this bug relies on it working for line ranges, where it does
 - `docs/issues/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md` (open) — same
   family (IL surface vs gate), different law
-
