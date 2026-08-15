@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::PathBuf;
 
 /// Parse `CODESCOUT_RERANK` into the opt-in flag. **Absent, blank, or unrecognised is
 /// `false`** — the reranker stays off unless someone asks for it explicitly.
@@ -18,6 +19,37 @@ pub(crate) fn parse_rerank_opt_in(raw: Option<&str>) -> bool {
             .as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+/// Resolve the sqlite-vec store directory from an **already-read** env value.
+///
+/// Pure over `Option<String>` for the same reason as [`parse_rerank_opt_in`]:
+/// the precedence must be testable without `std::env::set_var`, which is UB
+/// against the suite's concurrent `getenv` readers and is banned crate-wide by
+/// `docs/conventions/test-env-isolation.md`.
+///
+/// Relocating this read is the point of the change. It used to sit inside
+/// `SqliteVecCodeStore::from_env`, three frames below the tool call, so the only
+/// way to redirect it was to set a process-global env var — the banned option B.
+/// It now happens at the same edge as every other `CODESCOUT_*` read, and the
+/// resolved value travels inward on [`RetrievalConfig`], which is what
+/// `docs/conventions/test-env-isolation.md` calls option A.
+///
+/// **This does not by itself stop tests writing to `$HOME`.** With the variable
+/// unset the fallback is still the user's home directory, and no test sets it.
+/// What changes is that the fallback is now one expression in one function that
+/// every consumer reads through, so the remaining question — what the fallback
+/// *should* be — is a policy decision rather than a refactor. Measured cost of
+/// leaving it as-is: 296 files per full `cargo test` run. See
+/// `docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md`.
+pub(crate) fn resolve_sqlite_dir(raw: Option<String>) -> Result<PathBuf> {
+    match raw.filter(|s| !s.is_empty()) {
+        Some(d) => Ok(PathBuf::from(d)),
+        None => Ok(crate::platform::home_dir()
+            .context("cannot resolve home dir for sqlite-vec store; set CODESCOUT_SQLITE_DIR")?
+            .join(".codescout")
+            .join("embeddings")),
+    }
 }
 
 /// Sparse-embedder fallback: the **host** port `docker-compose.yml` publishes for
@@ -100,6 +132,13 @@ pub struct RetrievalConfig {
     /// CODESCOUT_QDRANT_COLLECTION_PREFIX to isolate benchmark runs (e.g.
     /// `bench_jinav2_` → `bench_jinav2_code_chunks`).
     pub collection_prefix: String,
+    /// Directory holding the sqlite-vec stores, one `<project_id>.db` per project.
+    /// Resolved once at the edge by [`resolve_sqlite_dir`] rather than read from
+    /// the environment inside the store constructor.
+    ///
+    /// Inert on the Qdrant backend — `VectorBackend::resolve` picks the store, and
+    /// only `SqliteVec` reads this.
+    pub sqlite_dir: PathBuf,
 }
 
 impl RetrievalConfig {
@@ -155,6 +194,7 @@ impl RetrievalConfig {
             rerank: parse_rerank_opt_in(std::env::var("CODESCOUT_RERANK").ok().as_deref()),
             collection_prefix: std::env::var("CODESCOUT_QDRANT_COLLECTION_PREFIX")
                 .unwrap_or_default(),
+            sqlite_dir: resolve_sqlite_dir(std::env::var("CODESCOUT_SQLITE_DIR").ok())?,
         })
     }
 }
@@ -342,6 +382,58 @@ mod rerank_opt_in_tests {
                 "{raw:?} should enable the reranker"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod sqlite_dir_tests {
+    use super::resolve_sqlite_dir;
+    use std::path::PathBuf;
+
+    // Every case below drives the resolver by ARGUMENT. That is the whole point
+    // of the split: before it, the same precedence lived inside
+    // `SqliteVecCodeStore::from_env` and could only be exercised by mutating
+    // process env, which `docs/conventions/test-env-isolation.md` bans and which
+    // is UB against the suite's concurrent readers.
+
+    #[test]
+    fn an_explicit_value_wins() {
+        let got = resolve_sqlite_dir(Some("/tmp/somewhere/else".to_string())).unwrap();
+        assert_eq!(got, PathBuf::from("/tmp/somewhere/else"));
+    }
+
+    #[test]
+    fn an_empty_value_is_treated_as_unset() {
+        // `CODESCOUT_SQLITE_DIR=` is a shell idiom for clearing a variable, and
+        // taking it literally would resolve the store to the process's current
+        // directory — silently, and differently per invocation. Pinned because
+        // the `.filter(|s| !s.is_empty())` that prevents it is one call long and
+        // reads like a redundant guard.
+        let got = resolve_sqlite_dir(Some(String::new())).unwrap();
+        assert_ne!(got, PathBuf::from(""));
+        assert!(got.ends_with("embeddings"), "got: {}", got.display());
+    }
+
+    #[test]
+    fn the_fallback_is_the_users_home_directory() {
+        // Characterizes the behaviour that produces the leak this change does NOT
+        // yet fix: with the variable unset — which is every test run, since none
+        // set it — the store lands under `$HOME`, outside any tempdir's cleanup.
+        // Measured 2026-08-16: 296 files per full `cargo test` run.
+        // docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md
+        let got = resolve_sqlite_dir(None).unwrap();
+        assert!(
+            got.ends_with(PathBuf::from(".codescout").join("embeddings")),
+            "expected a $HOME/.codescout/embeddings fallback, got: {}",
+            got.display()
+        );
+        let home = crate::platform::home_dir().unwrap();
+        assert!(
+            got.starts_with(&home),
+            "fallback must sit under the home dir ({}), got: {}",
+            home.display(),
+            got.display()
+        );
     }
 }
 

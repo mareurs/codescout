@@ -40,22 +40,6 @@ pub struct SqliteVecCodeStore {
 }
 
 impl SqliteVecCodeStore {
-    /// Resolve the data dir from the environment and construct an empty store.
-    /// No I/O until the first per-project operation.
-    pub fn from_env() -> Result<Self> {
-        let dir = match std::env::var("CODESCOUT_SQLITE_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-        {
-            Some(d) => PathBuf::from(d),
-            None => crate::platform::home_dir()
-                .context("cannot resolve home dir for sqlite-vec store; set CODESCOUT_SQLITE_DIR")?
-                .join(".codescout")
-                .join("embeddings"),
-        };
-        Ok(Self::at(dir))
-    }
-
     /// Construct a store rooted at `dir` (one DB file per project id beneath it).
     pub fn at(dir: PathBuf) -> Self {
         Self {
