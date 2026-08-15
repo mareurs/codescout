@@ -140,6 +140,64 @@ pub fn cap_gitignored_path(
     }
     (sev, reason)
 }
+/// The first line belonging to a *released* section of a changelog, if this file
+/// is one. `None` for every other file.
+///
+/// One boundary is enough because a Keep-a-Changelog file is reverse-chronological
+/// and append-at-top: `## [Unreleased]` leads, and every heading below it describes
+/// a version that already shipped. So the first non-`[Unreleased]` version heading
+/// divides live claims from history, and no per-section bookkeeping is needed.
+pub fn released_history_boundary(text: &str, md_path: &Path) -> Option<u32> {
+    let name = md_path.file_name()?.to_str()?;
+    if !name.eq_ignore_ascii_case("CHANGELOG.md") {
+        return None;
+    }
+    text.lines().enumerate().find_map(|(i, line)| {
+        // `## [1.2.3] - 2026-01-01`, but not `## [Unreleased]`.
+        let rest = line.strip_prefix("## ")?;
+        let inner = rest.trim_start().strip_prefix('[')?;
+        let (tag, _) = inner.split_once(']')?;
+        (!tag.eq_ignore_ascii_case("unreleased")).then_some(i as u32 + 1)
+    })
+}
+
+/// Cap a `missing` severity when the ref is cited from a released changelog section.
+///
+/// A shipped release section is a true statement about the past. When it says a
+/// change touched `src/embed/index.rs`, that was where the code lived *at that
+/// version* — the module has since been reorganised, and rewriting the entry to
+/// name today's path would falsify what that release actually shipped. So the
+/// reference is unfixable by design, and unfixable findings must not gate.
+///
+/// This is the changelog analogue of `archive_drop`, and it drops rather than
+/// suppresses for the same reason: a historical record citing a moved path carries
+/// no *live* drift signal, but it is still worth reporting below the gate.
+///
+/// `[Unreleased]` is deliberately excluded and keeps gating at full severity. That
+/// is the half that describes the current tree, and it earns its keep: the change
+/// that added this cap also repaired a genuinely broken `docs/issues/…` ref sitting
+/// in `[Unreleased]`, whose file had been moved to `docs/issues/archive/`.
+pub fn cap_released_history(
+    verdict: Verdict,
+    md_line: u32,
+    boundary: Option<u32>,
+    sev: Severity,
+    reason: &'static str,
+) -> (Severity, &'static str) {
+    let Some(from) = boundary else {
+        return (sev, reason);
+    };
+    if md_line >= from
+        && sev == Severity::High
+        && matches!(
+            verdict,
+            Verdict::Missing | Verdict::FileMissing | Verdict::SymbolMissing
+        )
+    {
+        return (drop_one(sev), "released_history");
+    }
+    (sev, reason)
+}
 
 /// Apply path-based drop rules. Returns `(severity, reason)`.
 pub fn apply_drops(

@@ -146,8 +146,26 @@ fn default_fail_on() -> String {
     "never".to_string()
 }
 
-pub const DEFAULT_AUDIT_GLOBS: &[&str] =
-    &["docs/**/*.md", "CLAUDE.md", "**/CLAUDE.md", "**/README.md"];
+/// The default scan set.
+///
+/// `CHANGELOG.md` and `CONTRIBUTING.md` are enumerated explicitly because the rest
+/// of this list covers `docs/**` plus two conventional filenames — a root-level
+/// project doc that is neither `CLAUDE.md` nor `README.md` was never in scope, and
+/// there was no exclusion to notice, only an absence. Both went unscanned for the
+/// project's whole life; the first default run over them found a real broken
+/// `docs/issues/…` ref whose file had moved to `docs/issues/archive/`.
+///
+/// Adding `CHANGELOG.md` is only safe alongside `cap_released_history` — a shipped
+/// release section names paths that were correct at that version, and correcting
+/// them would falsify what the release shipped. See that function.
+pub const DEFAULT_AUDIT_GLOBS: &[&str] = &[
+    "docs/**/*.md",
+    "CLAUDE.md",
+    "**/CLAUDE.md",
+    "**/README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+];
 
 /// The `fail_on` values `build_response` actually honors — the single source of
 /// truth for the CLI's `--fail-on` value set, so the two cannot drift.
@@ -260,9 +278,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .strip_prefix(&repo_root)
             .unwrap_or(md.as_path())
             .to_path_buf();
+        // Computed per file, not per ref: a changelog has one boundary and the
+        // scan is line-ordered anyway.
+        let history_from = severity::released_history_boundary(&text, &rel);
         let (cands, warns) = parser::parse_refs(&text, &rel);
         for c in cands {
-            let r = resolver::resolve_ref(&c, &resolve_ctx);
+            let mut r = resolver::resolve_ref(&c, &resolve_ctx);
+            let (sev, reason) = severity::cap_released_history(
+                r.verdict,
+                c.md_line,
+                history_from,
+                r.severity,
+                r.severity_reason,
+            );
+            r.severity = sev;
+            r.severity_reason = reason;
             all_findings.push(Finding {
                 candidate: c,
                 resolution: r,
@@ -1386,6 +1416,102 @@ mod tests {
                 n_scanned, 1,
                 "default scan should exclude docs/agents/** — only docs/other/guide.md should be scanned"
             );
+    }
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn default_scan_covers_changelog_and_contributing() {
+        // Both are tracked root-level project docs that are neither CLAUDE.md nor
+        // README.md, so neither was ever enumerated — an absence, with no exclusion
+        // to notice. The first default run over them found a real broken ref.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("CHANGELOG.md"), "# Changelog\n").unwrap();
+        std::fs::write(tmp.path().join("CONTRIBUTING.md"), "# Contributing\n").unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(&ctx, serde_json::json!({"emit_tracker": false}))
+            .await
+            .unwrap();
+        assert_eq!(
+            result["n_files_scanned"].as_u64().unwrap(),
+            2,
+            "default scan must cover CHANGELOG.md and CONTRIBUTING.md"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn changelog_released_sections_drop_below_the_gate_but_unreleased_does_not() {
+        // The whole reason CHANGELOG.md could not simply be added to the globs. A
+        // shipped release section naming a since-moved path is accurate about the
+        // past and unfixable without falsifying it, so it must not gate. The
+        // `[Unreleased]` half describes the current tree and must keep gating —
+        // this is the single test that keeps the cap from swallowing both.
+        let tmp = TempDir::new().unwrap();
+        // A real `src/` root, so both refs are judged as *structural* paths.
+        // Without it `cap_inferred_path` caps them to med first and the two arms
+        // become indistinguishable — the test would pass for the wrong reason.
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("CHANGELOG.md"),
+            "# Changelog\n\n\
+                 ## [Unreleased]\n\n\
+                 ### Fixed\n\n\
+                 - live claim about `src/still_gone.rs`\n\n\
+                 ## [1.0.0] — 2026-01-01\n\n\
+                 ### Changed\n\n\
+                 - shipped change to `src/history_gone.rs`\n",
+        )
+        .unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(&ctx, serde_json::json!({"emit_tracker": false}))
+            .await
+            .unwrap();
+        let findings = result["findings"].as_array().unwrap();
+
+        let live = findings
+            .iter()
+            .find(|f| f["raw_ref"] == "src/still_gone.rs")
+            .expect("unreleased ref must still be reported");
+        assert_eq!(
+            live["severity"], "high",
+            "a ref in [Unreleased] must keep gating: {live}"
+        );
+
+        let historical = findings
+            .iter()
+            .find(|f| f["raw_ref"] == "src/history_gone.rs")
+            .expect("released ref must still be reported, just below the gate");
+        assert_eq!(
+            historical["severity"], "med",
+            "a ref in a released section must drop below the gate: {historical}"
+        );
+        assert_eq!(historical["severity_reason"], "released_history");
+    }
+
+    #[test]
+    fn released_history_boundary_only_applies_to_changelogs() {
+        use std::path::Path;
+        let text = "# Changelog\n\n## [Unreleased]\n\n- a\n\n## [1.0.0] — 2026-01-01\n";
+        // Line 7, 1-based: the first version heading that is not [Unreleased].
+        assert_eq!(
+            severity::released_history_boundary(text, Path::new("CHANGELOG.md")),
+            Some(7)
+        );
+        // Same text under any other name is not a changelog and gets no boundary —
+        // otherwise every doc with a `## [x]` heading would silently stop gating.
+        assert_eq!(
+            severity::released_history_boundary(text, Path::new("docs/notes.md")),
+            None
+        );
+        // A changelog with nothing released yet has no history to forgive.
+        assert_eq!(
+            severity::released_history_boundary(
+                "# Changelog\n\n## [Unreleased]\n\n- a\n",
+                Path::new("CHANGELOG.md")
+            ),
+            None
+        );
     }
 
     #[tokio::test]

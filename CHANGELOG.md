@@ -259,7 +259,7 @@ All notable changes to codescout are documented here.
   inline-vs-buffered size check, so that check measures the shorter, already-relative
   form — a result that used to just clear the buffering threshold can now come back
   inline instead of buffered. See
-  `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md` and
+  `docs/issues/archive/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md` and
   `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`.
 
 - **The shipped build could prepend a dependency's diagnostic to `--json` output.**
@@ -279,7 +279,7 @@ All notable changes to codescout are documented here.
   `docs/issues/archive/2026-08-08-qdrant-compat-check-printlns-to-stdout.md`.
 - **The chunk metadata header reached neither the embedder nor the payload.**
   `build_metadata_header` computes an identity line for every chunk —
-  `src/foo.rs :: impl Bar :: fn baz(…)` — and has nine tests pinning its shape, yet
+  `` `src/foo.rs :: impl Bar :: fn baz(…)` `` — and has nine tests pinning its shape, yet
   nothing outside the chunker consumed it: `flush_pending` embedded `payload.content`
   alone and `stream_index` wrote `ast_header` as `String::new()`. Measured against the
   live collection: empty on **579,311 of 579,311** points, across every project and
@@ -423,6 +423,11 @@ All notable changes to codescout are documented here.
   every construction site in the tree. It had no producer anywhere, so populating it
   would have meant inventing a value; a permanently-empty payload field is worse than no
   field. Points written before 2026-08-08 still carry the key and it is no longer read.
+
+<!-- audit-doc-refs:ignore -->
+<!-- A "Removed" entry cites the path it removed, so every ref under this heading
+     is dangling BY CONSTRUCTION — that is the entry being accurate, not drift.
+     The marker's scope is one section, which is exactly the right scope here. -->
 
 - **Benchmark matrix scaffolding** — `docker-compose.matrix.yml` and
   `scripts/chunk-model-matrix.py`. The tuned defaults they produced (chunk
