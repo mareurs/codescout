@@ -1,6 +1,7 @@
 // src/librarian/tools/audit_doc_refs/mod.rs
 use serde::{Deserialize, Serialize};
 
+pub mod code_comments;
 pub mod parser;
 pub mod resolver;
 pub mod severity;
@@ -181,6 +182,42 @@ pub const DEFAULT_AUDIT_GLOBS: &[&str] = &[
 /// caller's behavior changes.
 pub const FAIL_ON_VALUES: [&str; 5] = ["high", "med", "low", "any", "never"];
 
+/// Source files whose **documentation nodes** join the default scan.
+///
+/// Citations live in code — `// see docs/issues/….md` — and were invisible for
+/// the project's whole life because the include set was markdown. Measured
+/// 2026-08-15: 111 unique bug files cited from 94 `.rs` files, 95 of them
+/// pointing at a path archived out from under the comment. See SD-1 in
+/// docs/trackers/structural-debt-refactor.md.
+///
+/// One extension per grammar codescout vendors, and no more: a language with
+/// no grammar cannot have its comments found, so listing it would add walk
+/// cost for a guaranteed zero. `ignore::WalkBuilder` honours `.gitignore`, so
+/// vendored trees (`node_modules`, `target`) never reach this.
+///
+/// These are matched by the SAME include/exclude machinery as the markdown
+/// globs; what makes a source file behave differently is the per-file branch
+/// in `call`, which routes anything with a tree-sitter grammar through
+/// `scan_code_comments` instead of parsing it whole.
+pub const DEFAULT_AUDIT_CODE_GLOBS: &[&str] = &[
+    "**/*.rs",
+    "**/*.py",
+    "**/*.go",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.java",
+    "**/*.kt",
+    "**/*.kts",
+    "**/*.sh",
+    "**/*.bash",
+    "**/*.html",
+    "**/*.css",
+    "**/*.scss",
+    "**/*.less",
+];
+
 /// Patterns matched against rel paths AFTER the include set. Matching files
 /// are dropped from the scan. Used to exclude content that IS path-shaped
 /// markdown but represents reader-side references (agent-onboarding docs
@@ -253,7 +290,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (globs, excludes): (Vec<String>, Vec<String>) = match args.paths.clone() {
         Some(p) => (p, Vec::new()),
         None => (
-            DEFAULT_AUDIT_GLOBS.iter().map(|s| s.to_string()).collect(),
+            DEFAULT_AUDIT_GLOBS
+                .iter()
+                .chain(DEFAULT_AUDIT_CODE_GLOBS.iter())
+                .map(|s| s.to_string())
+                .collect(),
             DEFAULT_AUDIT_EXCLUDES
                 .iter()
                 .map(|s| s.to_string())
@@ -301,6 +342,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .strip_prefix(&repo_root)
             .unwrap_or(md.as_path())
             .to_path_buf();
+
+        // A file codescout has a grammar for is scanned through its
+        // DOCUMENTATION NODES ONLY, never whole. `detect_language` alone is not
+        // the test — it answers `Some("markdown")` for `.md` — so the
+        // discriminator is "has a tree-sitter grammar", which markdown does not.
+        //
+        // Whole-file parsing of source is not merely noisy, it is meaningless:
+        // handing `.rs` to the markdown parser yields 33,105 "refs" because it
+        // reads `tokio::sync::Semaphore` as a link. This branch is also what
+        // makes an explicit `paths=["src/**/*.rs"]` argument behave sanely
+        // rather than reporting that garbage.
+        let grammar_lang =
+            crate::ast::detect_language(md).filter(|l| crate::ast::get_ts_language(l).is_some());
+        if let Some(language) = grammar_lang {
+            all_findings.extend(scan_code_comments(&text, language, &rel, &resolve_ctx));
+            continue;
+        }
+
         // Computed per file, not per ref: a changelog has one boundary and the
         // scan is line-ordered anyway.
         let history_from = severity::released_history_boundary(&text, &rel);
@@ -665,6 +724,52 @@ fn enforce_file_cap(file_count: usize, max_files: usize) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Scan one source file's documentation nodes for citations.
+///
+/// The pipeline below the text source is unchanged — the same `parse_refs`,
+/// the same `resolve_ref`. Only two things differ from the markdown path, and
+/// both are deliberate:
+///
+/// 1. **Line offsetting.** `parse_refs` numbers lines from the start of the
+///    text it is given, which here is one comment, not the file. The ref's
+///    line is rebased onto the file so a finding points where a reader can go.
+/// 2. **Severity is forced to `Med`.** A citation rotting inside a comment is
+///    real drift and should be visible, but it must not gate CI at
+///    `--fail-on high` — a contributor who archives a bug file should not
+///    break the build for everyone via a comment they never touched. Promote
+///    to full severity later if the surface earns it; that is a policy change
+///    worth making on evidence rather than on the first day.
+///
+/// `released_history_boundary` is deliberately NOT applied: it exists to stop
+/// a shipped CHANGELOG section being "corrected" into falsehood, and source
+/// comments carry no release history.
+fn scan_code_comments(
+    text: &str,
+    language: &str,
+    rel: &std::path::Path,
+    resolve_ctx: &resolver::ResolveCtx,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for block in code_comments::extract_comments(text, language) {
+        // Warnings are dropped rather than collected: they describe markdown
+        // fence structure, and a comment is a fragment, so every one would be
+        // an artefact of slicing rather than a fact about the file.
+        let (cands, _warns) = parser::parse_refs(&block.text, rel);
+        for mut c in cands {
+            c.md_line = block.line + c.md_line.saturating_sub(1);
+            let mut r = resolver::resolve_ref(&c, resolve_ctx);
+            let (sev, reason) = severity::cap_code_comment(r.severity, r.severity_reason);
+            r.severity = sev;
+            r.severity_reason = reason;
+            out.push(Finding {
+                candidate: c,
+                resolution: r,
+            });
+        }
+    }
+    out
 }
 
 fn collect_markdown_files(

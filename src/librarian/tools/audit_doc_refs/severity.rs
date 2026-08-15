@@ -161,6 +161,28 @@ pub fn released_history_boundary(text: &str, md_path: &Path) -> Option<u32> {
     })
 }
 
+/// Cap a citation found in a **source comment** at `Med`.
+///
+/// Sibling of [`cap_released_history`]: both exist because a verdict that is
+/// correct in the abstract can still be the wrong thing to gate a build on.
+///
+/// A citation rotting inside a comment is real drift and belongs in the
+/// report. It must not fail CI, because the person who breaks it is rarely the
+/// person editing that comment — archiving a bug file orphans citations
+/// repo-wide (measured 2026-08-15: one archive convention left 95 of 111 cited
+/// bug files pointing at a path that had moved). Gating on that would make an
+/// unrelated contributor's build fail for a comment they never touched.
+///
+/// Promote to full severity when the surface has earned it on evidence, not on
+/// its first day. See SD-1 in docs/trackers/structural-debt-refactor.md.
+pub fn cap_code_comment(severity: Severity, reason: &'static str) -> (Severity, &'static str) {
+    if severity == Severity::High {
+        (Severity::Med, "code_comment_capped")
+    } else {
+        (severity, reason)
+    }
+}
+
 /// Cap a `missing` severity when the ref is cited from a released changelog section.
 ///
 /// A shipped release section is a true statement about the past. When it says a
