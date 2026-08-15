@@ -60,6 +60,10 @@ impl Tool for EditCode {
                     "type": "string",
                     "enum": ["before", "after"],
                     "description": "insert only, default 'after'"
+                },
+                "at_line": {
+                    "type": "integer",
+                    "description": "Tie-breaker for two symbols whose name_path is byte-identical — two inherent impl-blocks for one type, or two #[cfg]-gated definitions of the same item. Reach for a more specific name_path FIRST; this is only for the case where no more specific name exists. Pass any 1-based line inside the one you mean, as symbols() prints it (declaration, body, or end all work). The ambiguity error lists each candidate's span for exactly this purpose. Ignored when the name already resolves to one symbol."
                 }
             }
         })
@@ -95,6 +99,10 @@ impl Tool for EditCode {
         let name_path = require_str_param(&input, "symbol")?;
         let rel_path = require_path_param(&input)?;
         let action = require_str_param(&input, "action")?;
+        // Optional tie-breaker for two symbols whose name_paths are byte-identical
+        // (two inherent impl blocks for one type, two #[cfg]-gated definitions).
+        // No more specific name exists for those, so a line is the only key left.
+        let at_line = input["at_line"].as_u64().map(|n| n as u32);
 
         match action {
             "rename" => {
@@ -108,7 +116,7 @@ impl Tool for EditCode {
                 ));
                 Ok(result)
             }
-            "remove" => self.do_remove(ctx, name_path, rel_path).await,
+            "remove" => self.do_remove(ctx, name_path, rel_path, at_line).await,
             "replace" => {
                 let Some(body) = input["body"].as_str() else {
                     return Err(RecoverableError::new("action 'replace' requires 'body'").into());
@@ -142,7 +150,14 @@ impl Tool for EditCode {
                     }
                 };
                 let mut result = self
-                    .do_replace(ctx, name_path, rel_path, body, attributes.as_deref())
+                    .do_replace(
+                        ctx,
+                        name_path,
+                        rel_path,
+                        body,
+                        attributes.as_deref(),
+                        at_line,
+                    )
                     .await?;
                 result["hint"] = json!(format!(
                     "verify callers: references(symbol=\"{}\", path=\"{}\")",
@@ -155,7 +170,7 @@ impl Tool for EditCode {
                     return Err(RecoverableError::new("action 'insert' requires 'body'").into());
                 };
                 let position = input["position"].as_str().unwrap_or("after");
-                self.do_insert(ctx, name_path, rel_path, body, position)
+                self.do_insert(ctx, name_path, rel_path, body, position, at_line)
                     .await
             }
             _ => Err(RecoverableError::new(format!("unknown action '{action}'")).into()),
@@ -551,6 +566,7 @@ impl EditCode {
         ctx: &ToolContext,
         name_path: &str,
         rel_path: &str,
+        at_line: Option<u32>,
     ) -> anyhow::Result<Value> {
         let full_path =
             resolve_write_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
@@ -564,7 +580,7 @@ impl EditCode {
         .await?;
 
         let (sym, symbols, range_repair) =
-            fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+            fetch_validated_symbol(&client, &full_path, &lang, name_path, at_line).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -741,6 +757,7 @@ impl EditCode {
         rel_path: &str,
         new_body: &str,
         attributes: Option<&[String]>,
+        at_line: Option<u32>,
     ) -> anyhow::Result<Value> {
         let full_path =
             resolve_write_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
@@ -754,7 +771,7 @@ impl EditCode {
         .await?;
 
         let (sym, symbols, range_repair) =
-            fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+            fetch_validated_symbol(&client, &full_path, &lang, name_path, at_line).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -1009,6 +1026,7 @@ impl EditCode {
         rel_path: &str,
         code: &str,
         position: &str,
+        at_line: Option<u32>,
     ) -> anyhow::Result<Value> {
         let full_path =
             resolve_write_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
@@ -1022,7 +1040,7 @@ impl EditCode {
         .await?;
 
         let (sym, symbols, range_repair) =
-            fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+            fetch_validated_symbol(&client, &full_path, &lang, name_path, at_line).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();

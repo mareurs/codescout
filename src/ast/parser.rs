@@ -262,8 +262,18 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
                     let methods = body
                         .map(|b| extract_rust_impl_methods(b, source, file, &np))
                         .unwrap_or_default();
-                    // Don't create a symbol for impl blocks; merge methods at current level
-                    // This matches how LSP reports symbols (methods under the type)
+                    // Don't create a symbol for impl blocks; merge methods at the
+                    // current level, so a method reads as `Type/method`.
+                    //
+                    // This does NOT match how LSP reports symbols, despite what this
+                    // comment claimed until 2026-08-15. rust-analyzer's
+                    // `documentSymbol` nests methods under an `impl Trait for Type`
+                    // node, so the same method is `impl Trait for Type/method` there.
+                    // The divergence is deliberate — `Type/method` is the better name
+                    // to show a reader — but it is a divergence, and it leaked: a path
+                    // `symbols` printed was not a path `edit_code` accepted. The two
+                    // are reconciled in `segments_match_eliding_qualifiers`
+                    // (`src/symbol/query.rs`); read it before changing the shape here.
                     symbols.extend(methods);
                 }
             }

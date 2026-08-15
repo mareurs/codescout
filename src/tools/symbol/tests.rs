@@ -1207,6 +1207,66 @@ fn symbol_name_matches_suffix_at_word_boundary() {
     assert!(!symbol_name_matches(&s, "Catalog/add"));
     assert!(symbol_name_matches(&s, "add")); // bare name works
 }
+#[test]
+fn symbol_name_matches_qualifier_elided_in_a_middle_segment() {
+    let make_sym = |name: &str, name_path: &str| SymbolInfo {
+        name: name.to_string(),
+        name_path: name_path.to_string(),
+        kind: crate::lsp::SymbolKind::Method,
+        file: std::env::temp_dir().join("test.rs"),
+        start_line: 0,
+        end_line: 10,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+
+    // The exact repro: `symbols` prints the AST form (impl named by its type),
+    // `edit_code` resolves against LSP's form (impl named `impl Trait for Type`).
+    // The query is NOT a suffix of the candidate — `tests/` sits in front of the
+    // elided qualifier — so every whole-string rule misses it.
+    let s = make_sym(
+        "project_index_stats",
+        "tests/impl CodeVectorStore for RecordingStore/project_index_stats",
+    );
+    assert!(symbol_name_matches(
+        &s,
+        "tests/RecordingStore/project_index_stats"
+    ));
+    // The un-prefixed form already worked via the suffix rule; it must keep working.
+    assert!(symbol_name_matches(
+        &s,
+        "RecordingStore/project_index_stats"
+    ));
+
+    // Qualified path inside the segment: ':' is a boundary too.
+    let s2 = make_sym(
+        "search_text",
+        "outer/impl Searchable for crate::models::Book/search_text",
+    );
+    assert!(symbol_name_matches(&s2, "outer/Book/search_text"));
+
+    // --- and the three ways it must stay strict ---
+
+    // Wrong type entirely: the elision rule must not degrade into "leaf matches".
+    let s3 = make_sym("call", "tests/impl Bar for Baz/call");
+    assert!(!symbol_name_matches(&s3, "tests/Foo/call"));
+
+    // Not boundary-anchored: 'o' precedes the match, so this is a different type.
+    let s4 = make_sym("call", "tests/FooSemanticSearch/call");
+    assert!(!symbol_name_matches(&s4, "tests/SemanticSearch/call"));
+
+    // Arity must match: a shorter query is the suffix rule's business, and letting
+    // arity float here would make a bare leaf match anything ending in that leaf.
+    let s5 = make_sym("add", "a/b/impl T for C/add");
+    assert!(!symbol_name_matches(&s5, "b/C/add"));
+
+    // Generics still break it, exactly as `symbol_name_matches_suffix_at_word_boundary`
+    // already asserts for the un-prefixed form: the candidate ends in '>', not the query.
+    let s6 = make_sym("add", "tests/impl Catalog<T>/add");
+    assert!(!symbol_name_matches(&s6, "tests/Catalog/add"));
+}
 
 #[test]
 fn symbol_name_matches_kotlin_backtick_normalization() {
@@ -1455,6 +1515,86 @@ fn find_unique_symbol_by_name_path_suggests_leaf_matches() {
     assert!(
         !err_str.contains("did you mean"),
         "bare-name miss should not suggest, got: {err_str}"
+    );
+}
+#[test]
+fn at_line_breaks_a_tie_no_name_can_break() {
+    use crate::symbol::query::find_unique_symbol_by_name_path_at;
+
+    // Two inherent impl-blocks for one type: identical name_paths, different spans.
+    // This is the case a "use a more specific name_path" hint cannot answer, because
+    // there is no more specific name — which is why remove/replace were both
+    // unreachable and the only recovery was reverting the file.
+    let test_file = std::env::temp_dir().join("dup.rs");
+    let blk = |start: u32, end: u32| SymbolInfo {
+        name: "CodeEmbedderAdapter".to_string(),
+        name_path: "CodeEmbedderAdapter".to_string(),
+        kind: crate::lsp::SymbolKind::Object,
+        file: test_file.clone(),
+        start_line: start,
+        end_line: end,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    // 0-based internally; 1-based to the caller. Spans are 11-21 and 31-41 as printed.
+    let symbols = vec![blk(10, 20), blk(30, 40)];
+
+    // Without a line, still ambiguous — and the error must carry the SPANS, since
+    // with identical paths they are the only thing distinguishing the candidates.
+    let err = find_unique_symbol_by_name_path_at(&symbols, "CodeEmbedderAdapter", None)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("11-21"), "spans must be listed, got: {err}");
+    assert!(err.contains("31-41"), "spans must be listed, got: {err}");
+
+    // Declaration line of the second block resolves it.
+    let got =
+        find_unique_symbol_by_name_path_at(&symbols, "CodeEmbedderAdapter", Some(31)).unwrap();
+    assert_eq!(got.start_line, 30);
+
+    // A line in the middle of the FIRST block resolves that one — the match is over
+    // the span, not the declaration line, because the number a caller has may have
+    // come from anywhere in the printed range.
+    let got =
+        find_unique_symbol_by_name_path_at(&symbols, "CodeEmbedderAdapter", Some(15)).unwrap();
+    assert_eq!(got.start_line, 10);
+
+    // End lines are inclusive on both sides.
+    assert_eq!(
+        find_unique_symbol_by_name_path_at(&symbols, "CodeEmbedderAdapter", Some(21))
+            .unwrap()
+            .start_line,
+        10
+    );
+    assert_eq!(
+        find_unique_symbol_by_name_path_at(&symbols, "CodeEmbedderAdapter", Some(41))
+            .unwrap()
+            .start_line,
+        30
+    );
+
+    // A line in neither span is its own error, not "symbol not found": the name DID
+    // resolve. Conflating the two would send the caller hunting for a wrong name.
+    let err = find_unique_symbol_by_name_path_at(&symbols, "CodeEmbedderAdapter", Some(99))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("at_line 99") && err.contains("11-21"),
+        "must name the bad line and list the real spans, got: {err}"
+    );
+    assert!(
+        !err.contains("not found"),
+        "must not read as a name miss, got: {err}"
+    );
+
+    // A line is ignored when the name is already unique — passing one must never
+    // turn a working call into a failing one.
+    let single = vec![blk(10, 20)];
+    assert!(
+        find_unique_symbol_by_name_path_at(&single, "CodeEmbedderAdapter", Some(15)).is_ok(),
+        "a covering line on an unambiguous name must resolve"
     );
 }
 

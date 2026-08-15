@@ -528,6 +528,7 @@ pub async fn fetch_validated_symbol(
     path: &std::path::Path,
     lang: &str,
     name_path: &str,
+    at_line: Option<u32>,
 ) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>, Option<RangeRepair>)> {
     const MAX_RETRIES: u32 = 3;
     let mut last_err: Option<anyhow::Error> = None;
@@ -535,7 +536,7 @@ pub async fn fetch_validated_symbol(
     for attempt in 0..MAX_RETRIES {
         let attempt_result = async {
             let symbols = client.document_symbols(path, lang).await?;
-            let mut sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
+            let mut sym = find_unique_symbol_by_name_path_at(&symbols, name_path, at_line)?.clone();
             let content = std::fs::read_to_string(path)?;
             let lines: Vec<&str> = content.lines().collect();
             // Staleness/position check FIRST. A stale LSP range puts `start_line`
@@ -640,6 +641,10 @@ pub fn find_matching_symbol(
 /// e.g. `SemanticSearch/call` matches `impl Tool for SemanticSearch/call`
 /// and `Book/method` matches `impl Trait for crate::path::Book/method`.
 ///
+/// Finally, a segment-wise match (`segments_match_eliding_qualifiers`) covers the
+/// case the whole-string suffix rule structurally cannot: a qualifier elided in a
+/// *middle* segment. See that function.
+///
 /// Kotlin backtick normalization: kotlin-language-server strips backtick
 /// delimiters from `DocumentSymbol.name`, so LSP symbols carry `foo bar`
 /// while the AST (and `symbols()` output) carries `` `foo bar` ``. When
@@ -671,6 +676,10 @@ pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
             }
         }
     }
+    // Segment-wise, for a qualifier elided somewhere other than the front.
+    if segments_match_eliding_qualifiers(&sym.name_path, query) {
+        return true;
+    }
     // Kotlin backtick normalization: strip backtick delimiters and retry exact
     // match. Only pays the allocation cost when backticks are actually present.
     if query.contains('`') || sym.name.contains('`') || sym.name_path.contains('`') {
@@ -682,6 +691,69 @@ pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
         }
     }
     false
+}
+
+/// Whether `query` matches `candidate` segment-for-segment, tolerating a segment
+/// that elides a qualifier the candidate spells out.
+///
+/// The whole-string suffix rule above cannot reach this case, and the gap is not
+/// hypothetical — it is the reason a name `symbols` printed was not a name
+/// `edit_code` accepted:
+///
+/// ```text
+/// symbols  prints  tests/RecordingStore/project_index_stats
+/// LSP      holds   tests/impl CodeVectorStore for RecordingStore/project_index_stats
+/// ```
+///
+/// The query is not a suffix of the candidate — `tests/` sits in front of the
+/// elided qualifier — so every whole-string rule fails, even though the two name
+/// the same method. Comparing segment by segment puts the elision back inside a
+/// single segment, where the same boundary rule applies.
+///
+/// Two producers disagree here by construction: the AST extractor names an impl
+/// block by its implementing *type* (`src/ast/parser.rs`), while LSP
+/// `documentSymbol` nests methods under an `impl Trait for Type` node. Neither is
+/// wrong; this is where they are reconciled.
+///
+/// Deliberately strict in three ways, each pinned by a test:
+/// * **Same arity.** `A/b` must not match `X/A/b` — that is the suffix rule's job,
+///   and letting arity float here would make `b` match anything ending in `b`.
+/// * **Boundary-anchored.** The elided part must end at a space or `:`, so
+///   `SemanticSearch` matches `impl Tool for SemanticSearch` but not
+///   `FooSemanticSearch`.
+/// * **No generic tolerance.** `Catalog` does not match `impl Catalog<T>` — the
+///   candidate ends in `>`, not the query. That is existing, asserted behaviour.
+fn segments_match_eliding_qualifiers(candidate: &str, query: &str) -> bool {
+    // Single-segment cases are already covered above; requiring a '/' on both
+    // sides also keeps this from re-deciding bare-name matching.
+    if !query.contains('/') || !candidate.contains('/') {
+        return false;
+    }
+    let cand: Vec<&str> = candidate.split('/').collect();
+    let quer: Vec<&str> = query.split('/').collect();
+    if cand.len() != quer.len() {
+        return false;
+    }
+    cand.iter()
+        .zip(quer.iter())
+        .all(|(c, q)| segment_matches_eliding_qualifier(c, q))
+}
+
+/// One segment of `segments_match_eliding_qualifiers`: equal, or the candidate
+/// spells out a qualifier the query dropped (`impl T for Foo` vs `Foo`).
+fn segment_matches_eliding_qualifier(candidate: &str, query: &str) -> bool {
+    if candidate == query {
+        return true;
+    }
+    // `/` is absent by construction (we split on it), so the boundary set is the
+    // two that can precede a type inside one segment: ` ` from `impl T for Foo`
+    // and `:` from `crate::module::Foo`.
+    candidate.len() > query.len()
+        && candidate.ends_with(query)
+        && matches!(
+            candidate.as_bytes()[candidate.len() - query.len() - 1],
+            b' ' | b':'
+        )
 }
 
 #[cfg(test)]
@@ -711,11 +783,72 @@ pub fn find_symbol_by_name_path<'a>(
 /// When multiple candidates match but exactly one has an exact `name_path`
 /// match (e.g. class `Book` vs constructor `Book/Book(...)`), the exact match
 /// wins without raising an ambiguity error.
+///
+/// See [`find_unique_symbol_by_name_path_at`] for the case a more specific
+/// `name_path` cannot resolve: two symbols whose paths are byte-identical.
 pub fn find_unique_symbol_by_name_path<'a>(
     symbols: &'a [SymbolInfo],
     name_path: &str,
 ) -> anyhow::Result<&'a SymbolInfo> {
-    let matches = collect_matching_symbols(symbols, name_path);
+    find_unique_symbol_by_name_path_at(symbols, name_path, None)
+}
+
+/// Whether `line` (1-based, as `symbols` prints it) falls inside `sym`.
+///
+/// `SymbolInfo` line fields are 0-based; the tools print them 1-based. Callers
+/// have the printed form in hand, so that is what `at_line` accepts — converting
+/// here rather than asking every caller to subtract one.
+fn symbol_covers_line(sym: &SymbolInfo, line: u32) -> bool {
+    let (first, last) = (sym.start_line + 1, sym.end_line + 1);
+    (first..=last).contains(&line)
+}
+
+/// [`find_unique_symbol_by_name_path`], plus an optional line to break a tie that
+/// no name can break.
+///
+/// A more specific `name_path` resolves most ambiguity, and that is the first
+/// thing to reach for. It cannot resolve the case this exists for: **two symbols
+/// whose `name_path`s are byte-identical**, which a file gets by holding two
+/// inherent `impl` blocks for one type, or two `#[cfg]`-gated definitions of the
+/// same item. There is no more specific name to give, so `remove` and `replace`
+/// were both unreachable for either one — the only recovery was reverting the
+/// file.
+///
+/// `at_line` is 1-based and matches anywhere inside the symbol's span, not just
+/// its first line. Candidates sharing a `name_path` do not overlap, so a span
+/// match is unambiguous, and being forgiving here matters: the number a caller
+/// has is whatever `symbols` printed, which may be the declaration line, a line
+/// in the body, or the end.
+pub fn find_unique_symbol_by_name_path_at<'a>(
+    symbols: &'a [SymbolInfo],
+    name_path: &str,
+    at_line: Option<u32>,
+) -> anyhow::Result<&'a SymbolInfo> {
+    let mut matches = collect_matching_symbols(symbols, name_path);
+
+    if let Some(line) = at_line {
+        let before: Vec<String> = matches
+            .iter()
+            .map(|s| format!("{} @ {}-{}", s.name_path, s.start_line + 1, s.end_line + 1))
+            .collect();
+        matches.retain(|s| symbol_covers_line(s, line));
+        if matches.is_empty() && !before.is_empty() {
+            // Distinct from plain not-found: the name resolved, the line did not.
+            // Saying so — and listing the spans that DID match — turns a retry into
+            // a copy rather than another search.
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "at_line {line} matched none of the {} symbols named \"{name_path}\": {}",
+                    before.len(),
+                    before.join(", ")
+                ),
+                "Pass a line inside one of the spans listed above, as printed by symbols(). \
+                 Omit at_line to see the ambiguity error instead.",
+            )
+            .into());
+        }
+    }
+
     match matches.len() {
         0 => {
             // Progressive disclosure: when the query contains '/', search by
@@ -760,14 +893,20 @@ pub fn find_unique_symbol_by_name_path<'a>(
             if exact.len() == 1 {
                 return Ok(exact.into_iter().next().unwrap());
             }
-            let paths: Vec<String> = matches.iter().map(|s| s.name_path.clone()).collect();
+            // Spans are carried in the message because when the paths are identical
+            // they are the ONLY thing that tells the candidates apart — without them
+            // the error lists the same string N times and offers no way forward.
+            let paths: Vec<String> = matches
+                .iter()
+                .map(|s| format!("{} @ {}-{}", s.name_path, s.start_line + 1, s.end_line + 1))
+                .collect();
             Err(RecoverableError::with_hint(
                 format!(
                     "ambiguous name_path \"{name_path}\" matches {} symbols: {}",
                     paths.len(),
                     paths.join(", ")
                 ),
-                "Re-run with one of the fully-qualified name_paths listed above, copied verbatim — a trait-impl method is addressable as \"impl Trait for Type/method\"; the bare \"Type/method\" form stays ambiguous.",
+                "Re-run with one of the fully-qualified name_paths listed above, copied verbatim — a trait-impl method is addressable as \"impl Trait for Type/method\"; the bare \"Type/method\" form stays ambiguous. If the paths are identical, pass at_line with a line inside the one you mean.",
             )
             .into())
         }

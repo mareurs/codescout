@@ -1,7 +1,7 @@
 ---
 id: f85d79f54a12f7a1
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the Audit Doc Refs gate never scans CHANGELOG.md or CONTRIBUTING.md — 18 broken refs and 8 high findings hide there'
 owners:
 - marius
@@ -155,33 +155,74 @@ is silent for the *same* reason, whether that silence is right (prompt guides) o
 
 ## Fix
 
-Two steps, in this order. Step 1 alone turns the gate red.
+Shipped in `130c93a5`, following this file's own sequencing (reconcile first, then
+widen the globs). The recommendation — option (b), a severity drop for released
+sections — was right. The *classification* it rested on was not.
 
-1. **Reconcile the 18 refs first.** The 8 high ones are historical release sections. Decide
-   between: (a) correcting each path to where the file lives now — wrong, it falsifies what
-   that release shipped; (b) a severity drop for released-version sections, the changelog
-   analogue of `matches_archive`, leaving `[Unreleased]` at full severity; (c) scoping the
-   changelog scan to the `[Unreleased]` section only. **(b) is the recommendation** — it
-   matches the existing `archive_drop` rationale exactly (a historical record citing a moved
-   path carries no live drift signal) and keeps the section that actually gates.
-2. **Then** add `CHANGELOG.md` and `CONTRIBUTING.md` to `DEFAULT_AUDIT_GLOBS`.
-3. **Separately** (not bundled) add `src/prompts/**` to `DEFAULT_AUDIT_EXCLUDES` — see
-   § Evidence: those 26 broken refs are teaching placeholders and one accepted
-   classifier-pattern FP, so the fix there is to make the silence explicit rather than to
-   start gating on it.
+**Re-measured on HEAD (2026-08-15): 10 highs, not 8, and they are three different
+things.** This file said "the 8 high findings are historical release sections" and
+"every `src/embed/*.rs` ref sits in a released-version section". The second is
+true; the first is not.
 
-Not fixed in this session: it is a gate-severity change landing on the eve of a
-474-commit `experiments` → `master` promotion, and the two CHANGELOG refs that made it
-visible were repaired by hand.
+| Class | Count | Disposition |
+|---|---|---|
+| Historical release sections | 7 | `cap_released_history` — drop one band |
+| **Live drift, genuinely broken** | 1 | **repaired** |
+| Correct-as-written, needing neither | 2 | ignore marker / display form |
 
+**The one that mattered.** `CHANGELOG.md` cited
+`docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`
+after that bug file was archived to `docs/issues/archive/`. The very next bullet
+cites an archived file *correctly*, so it was a plain miss — and the gate caught
+it the instant it could see the file. That single finding is the argument for
+keeping `[Unreleased]` at full severity instead of forgiving the whole file, and
+it is why the implementation is a line-boundary cap rather than a path rule.
+
+**The two that needed no severity change at all.** Both would have been quietly
+mis-forgiven by a blanket rule:
+
+- `scripts/chunk-model-matrix.py` sits under `### Removed`. **A removal entry
+  cites the path it removed, so its refs dangle by construction** — that is the
+  entry being accurate, not drift. The existing `<!-- audit-doc-refs:ignore -->`
+  marker is scoped to exactly one section, which is exactly the right scope, so
+  the block carries one. No new mechanism.
+- `` `src/foo.rs :: impl Bar :: fn baz(…)` `` illustrates a *generated header
+  format*. It now uses the repo's established double-backtick display form, which
+  `is_markup_display` already skips outright.
+
+**Implementation.** `severity::released_history_boundary` + `cap_released_history`,
+applied once per file in `run_audit` where both the text and each ref's `md_line`
+are already in scope — so no struct or signature changed. One boundary suffices
+because a Keep-a-Changelog file is reverse-chronological and appends at the top:
+the first non-`[Unreleased]` version heading divides live claims from history.
+
+Then `CHANGELOG.md` and `CONTRIBUTING.md` joined `DEFAULT_AUDIT_GLOBS`.
+
+**Step 3 (`src/prompts/**` → excludes) is deliberately still not bundled**, as
+this file directed. Those paths are not in the glob list either, so the silence is
+real but undocumented; making it explicit is its own change.
 ## Tests added
 
-None yet — the fix is not implemented. The regression test to write with step 2 is a
-default-glob assertion in the shape of the existing
-`default_scan_excludes_docs_agents` (`mod.rs:1367`): assert `CHANGELOG.md` and
-`CONTRIBUTING.md` **are** in the default file set, so a future glob edit cannot silently
-drop them again.
+Three in `src/librarian/tools/audit_doc_refs/mod.rs`:
 
+- `default_scan_covers_changelog_and_contributing` — the coverage gap itself.
+- `changelog_released_sections_drop_below_the_gate_but_unreleased_does_not` — the
+  load-bearing one. Both arms in one fixture, because **a cap that swallowed both
+  would look identical to a correct one** from either arm alone. Its fixture also
+  creates a real `src/` directory: without it `cap_inferred_path` caps both refs
+  to `med` first and the test passes for the wrong reason. That is not
+  hypothetical — it failed exactly that way on the first run.
+- `released_history_boundary_only_applies_to_changelogs` — pins the `None` cases:
+  a non-changelog with `## [x]` headings must get no boundary (otherwise any doc
+  using that heading style silently stops gating), and a changelog with nothing
+  released yet has no history to forgive.
+
+**End-to-end verification with the real CI command**, not just unit tests:
+`./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high
+--json --project .` — **exit 1 before, exit 0 after**, across 943 files.
+
+Gate: `cargo test --workspace` → 3808 passed / 0 failed / 50 ignored; clippy
+`--workspace --all-targets -D warnings` clean.
 ## Workarounds
 
 Audit them explicitly:
@@ -193,15 +234,17 @@ Audit them explicitly:
 
 ## Resume
 
-Implement § Fix step 1 option (b): add a `matches_released_changelog`-style drop to
-`src/librarian/tools/audit_doc_refs/severity.rs` next to `matches_archive`
-(`severity.rs:183`), keyed on the ref's line falling under a released `## [x.y.z]` heading
-rather than `## [Unreleased]` — note this needs section context the resolver does not
-currently carry, so check whether `RefCandidate` (`src/librarian/tools/audit_doc_refs/parser.rs`)
-can supply the enclosing heading before committing to the approach. Then step 2, plus the
-glob-membership test named above. Verify with the `--paths` command in § Workarounds
-reaching exit 0, then a default run still at exit 0.
+Closed. One follow-up survives by design: `src/prompts/**` →
+`DEFAULT_AUDIT_EXCLUDES`, to make an existing silence explicit. Not bundled, as
+this file instructed.
 
+The transferable lesson is about the *shape of the reconciliation*, not the gate.
+This file grouped 8 findings under one label ("historical release sections") after
+verifying that label against the `src/embed/*` subset. The generalisation held for
+7 of 10 and hid the only finding that was a real bug — which is the worst possible
+place for a summary to be slightly wrong, because the summary is what decides
+whether anyone looks at the individual rows. **A count and a category are two
+claims; verifying the category on a sample does not verify it on the count.**
 ## References
 
 - `src/librarian/tools/audit_doc_refs/mod.rs:149` — `DEFAULT_AUDIT_GLOBS`
