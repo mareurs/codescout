@@ -263,6 +263,14 @@ jobs:
           key: windows-gnu-cross
       - name: Cross-build (default features)
         run: scripts/build-windows.sh build
+      # The host Clippy job cannot see this cfg. #[cfg(windows)] code is invisible to
+      # it, and code it CAN see may lint differently once the #[cfg(unix)] arms are
+      # erased — a `return` becomes needless when everything after it compiles out.
+      # Two such lints reached this branch and were only found by running clippy on a
+      # Windows host, which is exactly the manual step this lane exists to replace.
+      # docs/issues/archive/2026-08-08-clippy-pre-existing-drift-stable-gnu-toolchain.md
+      - name: Cross-clippy (default features)
+        run: scripts/build-windows.sh clippy --all-targets -- -D warnings
       # 12 pre-existing wine failures skipped (bisect-proven pre-existing; NOT regressions),
       # plus one NEW test (59df5c9e) that exercises the same wine-broken glob-walk path.
       # The 8-test guide_hint cluster is no longer skipped: fixed 2026-07-05 by seeding

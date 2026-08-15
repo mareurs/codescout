@@ -1472,46 +1472,56 @@ mod tests {
 
     // ── Symlink resolution ───────────────────────────────────────────────
 
+    /// Unix-only, and compiled out elsewhere rather than merely inert.
+    ///
+    /// Every assertion here lived inside `#[cfg(unix)]`, so on Windows the body
+    /// reduced to "look up `$HOME/.ssh`, then stop" — a test that ran, asserted
+    /// nothing, and reported `ok`. That is the failure shape this repo already
+    /// paid for once with the `server-stack` lane (see `tests/feature_lanes.rs`):
+    /// coverage that looks present because a name is in the test list.
+    ///
+    /// It also explains the `needless_return` that only ever fired on Windows —
+    /// with the `#[cfg(unix)]` blocks erased, the early `return` became the last
+    /// statement in the function. Gating the whole test fixes the lint by
+    /// removing the thing the lint was correctly complaining about.
+    #[cfg(unix)]
     #[test]
     fn symlink_to_denied_path_is_caught_on_read() {
-        if let Some(home) = home_dir() {
-            let ssh_dir = home.join(".ssh");
-            if !ssh_dir.exists() {
-                return; // skip if no .ssh directory
-            }
-
-            #[cfg(unix)]
-            let dir = tempdir().unwrap();
-            #[cfg(unix)]
-            let link = dir.path().join("sneaky_link");
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&ssh_dir, &link).unwrap();
-                // Find an actual file inside ~/.ssh to test against.
-                // If none exists, test the directory symlink itself.
-                let target = std::fs::read_dir(&ssh_dir).ok().and_then(|mut entries| {
-                    entries.find_map(|e| {
-                        let e = e.ok()?;
-                        e.file_type().ok()?.is_file().then(|| e.file_name())
-                    })
-                });
-                let test_path = match &target {
-                    Some(file) => link.join(file),
-                    None => link.clone(), // test directory itself
-                };
-                let result = validate_read_path(
-                    test_path.to_str().unwrap(),
-                    Some(dir.path()),
-                    &default_config(),
-                );
-                // After canonicalization the symlink resolves to ~/.ssh/...
-                assert!(
-                    result.is_err(),
-                    "symlink to ~/.ssh should be denied, path: {:?}",
-                    test_path
-                );
-            }
+        let Some(home) = home_dir() else {
+            return;
+        };
+        let ssh_dir = home.join(".ssh");
+        if !ssh_dir.exists() {
+            return; // skip if no .ssh directory
         }
+
+        let dir = tempdir().unwrap();
+        let link = dir.path().join("sneaky_link");
+        std::os::unix::fs::symlink(&ssh_dir, &link).unwrap();
+
+        // Find an actual file inside ~/.ssh to test against.
+        // If none exists, test the directory symlink itself.
+        let target = std::fs::read_dir(&ssh_dir).ok().and_then(|mut entries| {
+            entries.find_map(|e| {
+                let e = e.ok()?;
+                e.file_type().ok()?.is_file().then(|| e.file_name())
+            })
+        });
+        let test_path = match &target {
+            Some(file) => link.join(file),
+            None => link.clone(), // test directory itself
+        };
+        let result = validate_read_path(
+            test_path.to_str().unwrap(),
+            Some(dir.path()),
+            &default_config(),
+        );
+        // After canonicalization the symlink resolves to ~/.ssh/...
+        assert!(
+            result.is_err(),
+            "symlink to ~/.ssh should be denied, path: {:?}",
+            test_path
+        );
     }
 
     #[test]

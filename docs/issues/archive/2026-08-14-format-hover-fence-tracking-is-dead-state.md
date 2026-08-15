@@ -1,7 +1,7 @@
 ---
 id: '04cefabc58e23c88'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: format_hover''s in_code_block is dead state — it strips fence delimiters from docstrings but never actually tracks a code block'
 owners:
 - marius
@@ -11,7 +11,7 @@ tags:
 - dead-code
 - markdown-parser
 - fenced-code
-closed: null
+closed: 2026-08-15
 opened: 2026-08-14
 owner: marius
 related:
@@ -142,24 +142,34 @@ on purpose.
 
 ## Fix
 
-Not implemented, and deliberately not bundled with the fence-tracker
-conversion. Two candidates, and picking one is a rendering decision:
+Option 1, shipped in `51283504` — but not as "the conservative default". The
+filing's framing was wrong twice, and both errors pointed the same way:
 
-1. **Delete the variable.** Keeps today's output byte-identical, removes the
-   misleading state. Add a test pinning "fenced docstring renders without
-   delimiters" so the behaviour is asserted rather than accidental.
-2. **Make it real** — convert to `crate::util::markdown_fence::FenceState` and
-   add the missing `if fence.in_fence() { continue; }`. Hover then omits code
-   examples entirely, which changes output for every docstring with a fence.
+1. **The two readings are not equally defensible.** Option 2 was described as
+   "hover then omits code examples entirely". An LSP hover has no code examples
+   — rust-analyzer wraps the *signature* in a ```rust fence. Verified live
+   2026-08-15 via `symbol_at(src/tools/symbol/display.rs, 65)`, whose rendered
+   hover carries `codescout::tools` and `pub mod symbol`: both came out of a
+   fenced region. Skipping fenced content would delete the single most useful
+   line hover produces.
+2. **A test already discriminated them.** This file claimed "There is no test
+   asserting either behaviour, so the suite cannot tell us which one shipped on
+   purpose." `hover_with_code_fence` (`src/tools/symbol/tests.rs:4764`) asserts
+   `result.contains("  pub struct OutputGuard {")` *and*
+   `!result.contains("```")` — the fenced content survives, the delimiters do
+   not. Option 2 would have failed it. The behaviour was pinned all along.
 
-Option 1 is the conservative default; option 2 is only right if hover is meant
-to be prose-only. Either way the fix is ~5 lines plus one test.
-
+So the fix is a pure deletion of the two dead lines, output byte-identical, plus
+a comment recording *why* the loop strips the delimiter and keeps what it wraps.
+No new test: `hover_with_code_fence` already fails in both directions — drop the
+`continue` and "```" appears; skip fenced content and the signature vanishes.
 ## Tests added
 
-None. `format_hover` currently has no test covering a fenced docstring — that
-absence is part of the finding, and whichever option is chosen should close it.
+None, deliberately. `hover_with_code_fence` already covers both mutation
+directions; a second test asserting the same pair would be redundant.
 
+Gate after the change: all 12 `hover` tests green (`cargo test --lib hover`),
+clippy `--workspace --all-targets -D warnings` clean.
 ## Workarounds
 
 None needed — the rendering is cosmetic and lossless (code content survives).
@@ -167,17 +177,16 @@ Callers wanting the raw docstring can read the symbol body directly.
 
 ## Resume
 
-Decide option 1 (delete, pin current output) or option 2 (skip fenced content),
-then implement in `format_hover` at `src/tools/symbol/display.rs:65-105` and add
-the missing fenced-docstring test to the `tests` module at
-`src/tools/symbol/display.rs:495-603`. Do not convert this site to `FenceState`
-without making that choice first — a mechanical conversion silently ships
-option 2.
+Closed. No follow-up.
 
+The transferable lesson is R-82's, earned again here: **a bug file's own
+reasoning is a hypothesis, not a reading of the code.** This one asserted an
+absence ("no test discriminates") that a single `symbols(name=...)` call
+refuted. Absence claims in bug files are the cheapest to write and the most
+expensive to trust.
 ## References
 
 - `docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md` — the
   fence-tracker bug whose conversion pass surfaced this site
 - `src/util/markdown_fence.rs` — the shared `FenceState` tracker the other seven
   boolean sites were converted to
-

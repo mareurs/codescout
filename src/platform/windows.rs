@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn win32_terminate_and_liveness() {
         // Spawn a long sleeper, confirm alive, terminate, confirm dead.
-        let child = std::process::Command::new("cmd")
+        let mut child = std::process::Command::new("cmd")
             .args(["/C", "ping -n 30 127.0.0.1 >nul"])
             .spawn()
             .unwrap();
@@ -368,8 +368,13 @@ mod tests {
         terminate_process(pid).unwrap();
         // Give the OS a moment to reap the terminated process.
         std::thread::sleep(std::time::Duration::from_millis(300));
+        let alive_after_terminate = process_alive(pid);
+        // Reap before asserting: an unwaited `Child` holds the process handle open
+        // for the rest of the test binary's life. Liveness is sampled first so the
+        // assertion still observes exactly what it did before this reap was added.
+        let _ = child.wait();
         assert!(
-            !process_alive(pid),
+            !alive_after_terminate,
             "sleeper should be dead after terminate"
         );
     }

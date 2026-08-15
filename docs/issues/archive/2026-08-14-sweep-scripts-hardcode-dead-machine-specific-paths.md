@@ -1,7 +1,7 @@
 ---
 id: f6dd06e3388e5465
 kind: bug
-status: open
+status: fixed
 title: 'BUG: both bm25 sweep scripts hardcode machine-specific absolute paths, and both point at a directory that no longer exists'
 owners:
 - marius
@@ -11,7 +11,7 @@ tags:
 - machine-specific
 - dead-path
 - live-verified-2026-08-14
-closed: null
+closed: 2026-08-15
 opened: 2026-08-14
 owner: marius
 related:
@@ -102,27 +102,59 @@ script whose zero-argument default cannot work.
 
 ## Fix
 
-Not implemented. Two candidate shapes, and the choice is a judgment call rather
-than a mechanical fix:
+Shipped in `51283504`. The filing called this a machine-specific path; it is
+that, but the sharper finding is *which* machine-specific path.
 
-- **Fail closed.** Drop both defaults; require the corpus path as an argument and
-  exit with a usage message naming what is missing. Honest, and it cannot rot
-  again. Costs the zero-argument convenience.
-- **Default to the repo itself.** Benchmark codescout against codescout. Always
-  valid, never machine-specific — but the tc-benchmark's scoring fixtures may be
-  tuned to the `code-explorer` corpus, in which case a substituted corpus yields
-  numbers that look fine and mean nothing. **Verify that before choosing this.**
+**`code-explorer` is codescout's own pre-rename name** — see
+`docs/superpowers/plans/2026-03-04-rename-to-codescout.md`. The corpus default
+was never pointing at a foreign project on the author's disk; it pointed at
+**this repo**, under a name that stopped existing at the rename. That is why no
+one noticed: the value looked like a personal convenience default, so nobody
+re-read it, and the thing it named had been gone for months.
 
-Whichever is chosen, `sweep-bm25-cr1200.sh` may simply deserve deletion instead —
-it is a single experiment cell pinned to a stack that is not the shipped one.
-Check whether its results are cited anywhere first.
+Confirmed by the benchmark itself: `run-tc-benchmark.py`'s `expected` lists name
+codescout's own tree — `src/tools/core/types.rs`, `src/lsp/client.rs`,
+`src/embed/index.rs`, `docs/FEATURES.md`, `docs/PROGRESSIVE_DISCOVERABILITY.md`.
+Any other corpus scores meaningless numbers. So the correct default is not
+"nothing, make the user pass it" but **the repo root, derived**:
 
+- `sweep-bm25-boost.sh`: `PROJECT_PATH="${2:-$(cd "$(dirname "$0")/.." && pwd)}"`
+- `sweep-bm25-cr1200.sh`: `CORPUS="${CORPUS:-$PWD}"` (after the existing `cd` to
+  the repo root)
+
+The cr1200 endpoint pins are now env-overridable
+(`${CODESCOUT_EMBEDDER_URL:-...}`) with a comment stating what the filing
+observed: the cell measures CodeRankEmbed at chunk 1200 and needs an endpoint
+actually serving that model, which is **not** the stack `docker-compose.yml`
+publishes. Left as documented ad-hoc values rather than retargeted, because
+changing the endpoint would change what the experiment measures.
 ## Tests added
 
-N/A — not fixed. A regression guard is feasible and worth adding with the fix: a
-test asserting no file under `scripts/` contains a `/home/` literal would catch
-this class permanently, and is the kind of guard that cannot silently stop working.
+`tests/committed_paths.rs` — the gate whose absence is root cause 2. No
+committed script may name a path under a personal home directory.
 
+- `no_committed_script_hardcodes_a_personal_home_path` — walks `scripts/`,
+  reports every `file:line`, and names the derive-it-instead fix in the failure
+  message.
+- `the_home_path_scan_discriminates` — pins `account_after`'s parsing and the
+  `UNIVERSAL_ACCOUNTS` exemption, so a scanner that returned `None` for
+  everything cannot leave the gate vacuously green.
+- `the_scan_actually_reads_files` — guards against a wrong `CARGO_MANIFEST_DIR`
+  join making the walk find nothing. Same false-green shape that let this bug
+  ship.
+
+**Proven able to fail before being trusted.** A planted probe
+(`scripts/__mutation_probe.sh` with `CORPUS=/home/someone/work/thing`) produced
+`scripts/__mutation_probe.sh:2 — /home/someone`; probe removed after.
+
+Scope is `scripts/` on purpose. `docs/` home paths are *records* — measured
+output, quoted sessions, archived reports — and rewriting them would falsify
+history. `.github/workflows/` is exempt for a different reason: `/home/runner`
+is GitHub's path on every runner alive, so it is not machine-specific;
+`UNIVERSAL_ACCOUNTS` carries `runner` for the same reason.
+
+Verification: `bash -n` clean on both scripts; the boost default resolves to
+`/home/marius/work/claude/codescout` (the repo root) on this host.
 ## Workarounds
 
 Pass the corpus path explicitly: `scripts/sweep-bm25-boost.sh <binary> <project-path>`.
@@ -130,13 +162,10 @@ For `sweep-bm25-cr1200.sh`, edit `CORPUS` in place — it takes no argument.
 
 ## Resume
 
-Decide fail-closed vs default-to-repo for `sweep-bm25-boost.sh`, and decide whether
-`sweep-bm25-cr1200.sh` is deleted rather than fixed. Before choosing
-default-to-repo, read `scripts/run-tc-benchmark.py`'s fixture/scoring set and
-confirm whether its expected results are corpus-specific — if they are, a
-substituted corpus produces meaningless scores that still look like scores, which
-is worse than a script that refuses to run.
-
+Closed. One residual, deliberately not fixed: `sweep-bm25-cr1200.sh` still needs
+a CodeRankEmbed endpoint that nothing in this repo starts. That is an ad-hoc
+experiment cell, not a defect — it is now documented in the script rather than
+silently pinned.
 ## References
 
 - `scripts/sweep-bm25-boost.sh`
@@ -144,4 +173,3 @@ is worse than a script that refuses to run.
 - `src/retrieval/config.rs` — the `bm25_boost` comment that points at the first script
 - `docs/issues/2026-08-06-retrieval-stack-default-endpoints-doc-drift.md` — found while fixing this; same two files, different defect class
 - Task #45 — removed the `code-explorer` registry root these paths name
-

@@ -21,8 +21,15 @@
 #   scripts/build-windows.sh                 # build, default features
 #   scripts/build-windows.sh build --edr     # build with runtime-loaded ONNX (local-embed-dynamic)
 #   scripts/build-windows.sh check           # fast type-check only (no link)
+#   scripts/build-windows.sh clippy --all-targets -- -D warnings   # lint the Windows cfg
 #   scripts/build-windows.sh test [FILTER]   # cargo test under wine (optional name filter)
 #   scripts/build-windows.sh test --edr win32
+#
+# Why 'clippy' is its own mode: lints are cfg-sensitive, so a host-only clippy run
+# cannot see #[cfg(windows)] code at all, and can even disagree about code it CAN
+# see -- a `return` that is redundant only once the #[cfg(unix)] arms around it are
+# erased. Two such lints sat unnoticed until someone ran clippy on a Windows host.
+# See docs/issues/archive/2026-08-08-clippy-pre-existing-drift-stable-gnu-toolchain.md.
 #
 # Caveat: wine executes the Win32 API surface (OpenProcess/TerminateProcess/...)
 # and the platform logic, but it is NOT EDR. EDR-only behaviors (GPU-probe skip,
@@ -62,12 +69,13 @@ done
 case "$CMD" in
   build) set -x; exec cargo build --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;
   check) set -x; exec cargo check --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;
+  clippy) set -x; exec cargo clippy --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;
   test)
     require wine "install wine to execute the test binaries (e.g. 'sudo pacman -S wine')"
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine"
     export WINEDEBUG="${WINEDEBUG:--all}"   # silence wine's GL/pci-id probe noise
     set -x; exec cargo test --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;
   *)
-    echo "usage: $0 {build|check|test} [--edr] [cargo args... | test filter]" >&2
+    echo "usage: $0 {build|check|clippy|test} [--edr] [cargo args... | test filter]" >&2
     exit 2 ;;
 esac
