@@ -340,6 +340,13 @@ aggregation.
 
 ## Still unpulled
 
+> **CLOSED 2026-08-16 — all four items measured.** The list below is kept as written (this is a
+> snapshot); results are in § History → *2026-08-16*. Headlines: TU-5's head is classified
+> (unclassified 19.8% → 2.1%); latency is `run_command` alone and the missing primitive is *await*,
+> not background; overflow is concentrated on two disagreeing axes (rate: `librarian` 39.7%;
+> tokens: `grep` 68%); `friction_target` has no rankable head and should stay a `legibility_scan`
+> input.
+
 - **TU-5's unclassified head** — extend `normalize_err_family`, then re-rank. Highest value next step.
 - **Latency / timeout profile** — never examined; `latency_ms` and the 2-minute client backgrounding
   threshold (CAP-3) interact and neither was measured here.
@@ -458,3 +465,73 @@ it: gate the backfill on a **fingerprint of the emittable family set** rather th
 adding an arm changes the fingerprint and triggers re-classification with no human step at all.
 Until then the bump is a convention held by the comment on `BACKFILL_VERSION`, not by the suite —
 and it should be treated as such.
+
+### 2026-08-16 — § Still unpulled closed: latency, overflow, friction_target
+
+Corpus rebuilt after the v4 backfill: 54,250 calls / 464 sessions, of which **21,638 sit on live
+DBs** (`user_version >= 2`). All figures below are live-only, per the rule established above.
+
+#### Latency — a negative result, then the real finding underneath it
+
+**Latency is one tool.** Of 1,455 calls over 10s, **1,425 are `run_command`**; all 31 calls over
+120s are. Every other tool is effectively fast (`symbols` p-max 45s across 2,933 calls, one call
+over 30s; nothing else reaches 30s). Overall avg 2.5s, max **25 minutes**.
+
+So CAP-3 is not a general async problem — it is a `run_command` problem, and `run_command`
+**already has `run_in_background`**. The interesting question is therefore not adoption but what
+the blocking calls are actually doing:
+
+| >10s `run_command`, args present | Calls | Blocked |
+|---|---|---|
+| Total | 1,424 | 46,779s (≈13h) |
+| · `cargo` build/test/clippy | 1,287 (90%) | 32,699s (≈9.1h) |
+| · hand-rolled wait (`sleep`/`seq` loop, `gh run watch`, `@bg_` poll) | 56 (4%) | 10,584s (≈2.9h) |
+
+The extreme tail inverts that ratio. In the **>60s** band, hand-rolled waits are **37% of calls but
+64% of blocked time** (35 calls, 10,075s of 15,707s). The longest single call — 25 minutes — is a
+`gh run watch` on CI.
+
+**The smoking gun: 18 calls / 2,371s were spent polling a `@bg_` buffer for a job the agent had
+already backgrounded.** A `for i in $(seq 1 60); do grep ... @bg_00000011; sleep 5; done` in the
+foreground.
+
+**Correction to a reading made during this pass.** `run_in_background` shows 140 uses, *all* in the
+`<10s` band, which first reads as "used backwards — never on the slow calls." That is wrong: a
+backgrounded call returns immediately **by design**, so `<10s` is exactly where it belongs. The
+absence of blocking there is the feature working.
+
+The gap is the other half of the pair: **backgrounding a job creates a need to wait for it, and
+there is no await primitive** — so the wait becomes a *second*, foreground, polling call. That, not
+"background execution," is what CAP-3 should specify. Evidence appended to CAP-3.
+
+#### Overflow — concentrated on two different axes, which do not agree
+
+1,275 of 21,638 calls overflow (**5.9%**), buffering **8.45M tokens**. TU-10 called overflow
+"concentrated"; measured properly, it is concentrated **twice, differently**, and ranking by either
+axis alone misleads:
+
+**By rate** — `librarian` **39.7%** (58/146), `semantic_search` **20.9%**, `run_command` 9.9%,
+`artifact` 7.9%, `symbols` 7.8%.
+
+The librarian figure is not `context` (1 call, 0 overflow — hypothesis rejected). It is three
+actions whose *normal* output exceeds the budget: `link_scan` **8/8 = 100%**, `tracker_design`
+**6/6 = 100%**, `audit_doc_refs` **37/50 = 74%**. `tracker_design` is the sharp one — it exists to
+teach the caller before they create a tracker, and it has **never once been delivered inline**.
+
+**By tokens** — `grep` alone accounts for **5.78M of 8.45M (68%)** on a 3.0% overflow rate, driven
+by a single call that buffered **4,427,639 tokens**: a pattern over `*.json` with `limit: 40`.
+`limit` bounds *lines*, and a minified JSON file is one line — so a 40-line cap admitted 4.4M
+tokens. Both filed.
+
+#### friction_target — aggregating it is the wrong use
+
+962 rows carry the field across **483 distinct targets** — a mean of 2. There is no head to rank:
+the largest is `src/tools/markdown/tests.rs` at 31. The key space is also **heterogeneous** — it
+mixes file paths (`src/librarian/tools/doctor.rs`) with bare symbol names (`call`, `tests`,
+`sync_worktree`, `stream_index`), so a naive `GROUP BY` groups two different kinds of thing.
+
+This is a negative result in the TU-7 sense: the field is doing its job as a per-row pointer for
+`legibility_scan`, which ranks by observed cost against the symbol index. It is not a standalone
+ranking surface and should not be turned into one.
+
+§ Still unpulled is now empty.
