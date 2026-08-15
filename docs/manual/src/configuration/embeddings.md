@@ -145,7 +145,7 @@ api_key = "sk-..."  # or set EMBED_API_KEY env var
 | `model` | string | `"local:AllMiniLML6V2Q"` | Model name. With `url`: sent in API body. Without `url`: prefix determines backend. |
 | `url` | string | *(none)* | Base URL for any OpenAI-compatible `/v1/embeddings` endpoint. |
 | `api_key` | string | *(none)* | API key sent as Bearer token. Also available via `EMBED_API_KEY` env var. |
-| `drift_detection_enabled` | bool | `true` | Track how much code meaning changes between index builds. |
+
 
 ### Resolution Order
 

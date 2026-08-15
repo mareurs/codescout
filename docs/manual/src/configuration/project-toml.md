@@ -50,14 +50,13 @@ Controls which embedding model is used and how source files are chunked before e
 ```toml
 [embeddings]
 model = "ollama:mxbai-embed-large"
-drift_detection_enabled = true
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `model` | string | `"ollama:mxbai-embed-large"` | Embedding model. The prefix selects the backend. See [Embedding Backends](embedding-backends.md) for the full list of supported prefixes and models. |
 | `chunk_size` | integer | model-derived | Target characters per chunk. Unset → derived from the model's context window (capped at 4096). Set explicitly to opt into smaller/larger chunks (capped at the model's input limit). |
-| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index(action: build)` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `workspace(action: status, threshold=...)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
+
 
 > **Note — chunk size is automatic by default.** When `chunk_size` is unset,
 > codescout derives the chunk budget from the model's published context window
@@ -202,7 +201,6 @@ tool_timeout_secs = 120
 
 [embeddings]
 model = "local:AllMiniLML6V2Q"
-drift_detection_enabled = true    # set to false to opt out of semantic drift scoring
 
 [ignored_paths]
 patterns = [

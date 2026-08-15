@@ -101,22 +101,6 @@ pub struct EmbeddingsSection {
     /// use 0 overlap so each sub-chunk is distinct.
     #[serde(default, skip_serializing, rename = "chunk_overlap")]
     pub _chunk_overlap_ignored: Option<usize>,
-    /// Enable semantic drift detection during index builds (default: true).
-    ///
-    /// When enabled, `index(action='build')` compares old and new chunk embeddings to
-    /// score how much each file's *meaning* changed (not just its bytes). Results
-    /// are stored in the `drift_report` table and surfaced via the `check_drift` tool.
-    ///
-    /// Experimental — reads all old embeddings before deletion, adding memory and
-    /// DB overhead proportional to the number of changed files.
-    ///
-    /// Opt out in `.codescout/project.toml`:
-    /// ```toml
-    /// [embeddings]
-    /// drift_detection_enabled = false
-    /// ```
-    #[serde(default = "default_drift_detection_enabled")]
-    pub drift_detection_enabled: bool,
     /// Max concurrent in-flight embedding requests during `index_project`.
     ///
     /// Defaults to 8 (see `DEFAULT_MAX_INFLIGHT`). Bump this when using a
@@ -234,10 +218,6 @@ impl SecuritySection {
     }
 }
 
-fn default_drift_detection_enabled() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySection {
     /// Min drift score to trigger reverse-drift staleness flag (0.0-1.0)
@@ -332,7 +312,6 @@ impl Default for EmbeddingsSection {
             api_key: None,
             _chunk_size_ignored: None,
             _chunk_overlap_ignored: None,
-            drift_detection_enabled: default_drift_detection_enabled(),
             max_inflight: None,
             file_group_size: None,
         }
@@ -796,6 +775,21 @@ fetch_timeout_secs = 120
         let config: ProjectConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.project.name, "test");
     }
+    #[test]
+    fn stale_drift_detection_enabled_key_is_ignored_not_rejected() {
+        // `drift_detection_enabled` was retired: nothing in src/ ever read it, and
+        // the feature it named does not exist on the Qdrant retrieval stack.
+        // EmbeddingsSection carries no `deny_unknown_fields`, so the many existing
+        // project.toml files that still set it must parse with the key silently
+        // ignored, not error on startup. Removing a config field is only safe
+        // because of that, which is why this asserts it rather than assuming it.
+        let toml_str = "[project]\nname = \"test\"\n\n[embeddings]\ndrift_detection_enabled = false\nmodel = \"local:BGESmallENV15\"\n";
+        let config: ProjectConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.project.name, "test");
+        // The neighbouring key in the same section still lands — proof the stale
+        // key was skipped rather than the whole section being dropped.
+        assert_eq!(config.embeddings.model, "local:BGESmallENV15");
+    }
 
     #[test]
     fn project_section_deserializes_onboarding_version() {
@@ -1181,14 +1175,10 @@ model = "local:test"
     #[test]
     fn merge_toml_base_fills_missing_key() {
         let base = toml::Value::Table(toml::toml! { [embeddings] model = "global-model" });
-        let overlay =
-            toml::Value::Table(toml::toml! { [embeddings] drift_detection_enabled = false });
+        let overlay = toml::Value::Table(toml::toml! { [embeddings] max_inflight = 4 });
         let merged = super::merge_toml(base, overlay);
         assert_eq!(merged["embeddings"]["model"].as_str(), Some("global-model"));
-        assert_eq!(
-            merged["embeddings"]["drift_detection_enabled"].as_bool(),
-            Some(false)
-        );
+        assert_eq!(merged["embeddings"]["max_inflight"].as_integer(), Some(4));
     }
 
     #[test]

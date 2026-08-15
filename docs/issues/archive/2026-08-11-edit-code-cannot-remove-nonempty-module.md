@@ -1,14 +1,14 @@
 ---
 id: '2c8690b597f76fa4'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: edit_code cannot remove or relocate a non-empty module, and edit_file''s "fn " content filter blocks pure deletions too'
 tags:
 - edit-code
 - edit-file
 - module-removal
 - tool-friction
-closed: null
+closed: 2026-08-15
 opened: 2026-08-11
 owner: marius
 related: []
@@ -95,8 +95,18 @@ None — the 14-step leaf-by-leaf workaround (rename the `mod` line via `edit_fi
 
 ## Fix
 
-**Gap 2 fixed in `3baa993d`.** Gaps 1 and 3 remain, and gap 3's motivation is now
-weaker — see below.
+All four gaps are now closed or refuted.
+
+| Gap | Outcome | Where |
+|---|---|---|
+| 1 — insert cannot reach file scope | **refuted** — capability existed, now asserted | `80350afe` |
+| 2 — remove drops a module's own children | **fixed** | `3baa993d` |
+| 3 — `edit_file` refuses pure deletions | **fixed** | `80350afe` |
+| 4 — keyword matched mid-identifier | **fixed** | `138de7c5` |
+
+Gap 4 was never in the original filing; it surfaced while working gap 2. The one
+item still open is the § Follow-up below, which this file already scoped out as
+needing its own decision.
 
 ### Gap 2 — done
 
@@ -130,19 +140,46 @@ Three scoping decisions worth keeping:
    have to re-read the file to learn the scope of their own removal. Mirrors the
    librarian's `replaced_subsections`.
 
-### Gaps 1 and 3 — still open
+### Gaps 1 and 3 — resolved 2026-08-15 (`80350afe`)
 
-- **Gap 1** — `edit_code(insert, position="after")` cannot escape the anchor's
-  enclosing scope, so it cannot place a new module at file scope. Unchanged. See
-  also the related `insert` bound defect in
-  `docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md`
-  § Resume item 2.
-- **Gap 3** — `edit_file`'s filter refusing pure deletions. Two things changed
-  under it: the *unanchored-keyword* half is fixed (`138de7c5`), and gap 2 being
-  fixed means `edit_code(remove)` now works on the shape that made gap 3 bite. Its
-  § Summary correction still applies — "check only `new_string`" is too broad;
-  exempt `new_string.is_empty()` specifically, if it is still worth doing at all.
+This file's own sequencing advice — fix (2) first, then re-ask whether the rest
+are real — was right, and re-asking changed both answers.
 
+**Gap 3 — fixed, narrowly.** `guard_structural_rewrite` now returns `Ok(())`
+immediately when `new_string.is_empty()`. This is the narrow form the § Summary
+correction called for, not the too-broad "check only `new_string`".
+
+The justification is the guard's own doc comment: route 1 blocks *rewriting an
+existing symbol via raw text replacement*. A deletion is not a rewrite — nothing
+is spliced into the symbol's place, so no symbol's ranges can go stale. Route 2
+cannot fire on a deletion at all, by construction: an empty string contains no
+newline, and route 2 is gated on `new_string.contains('\n')`.
+
+The exemption sits **before** `is_source_path` and language detection, so it is
+language-independent by construction rather than by coincidence.
+
+It is deliberately **not** a syntax check on the removed region. `edit_file`
+already permits deletions that break the file whenever no definition keyword
+lands in range; gating only keyword-bearing deletions on parseability would make
+the contract depend on whether the deleted text happened to contain the word
+`fn` — not a distinction a caller can predict.
+
+**Gap 1 — not a defect. The capability already existed.** The claim was that
+`insert` cannot escape the anchor's enclosing scope, so a module cannot be placed
+at file scope. The first half is true and deliberate; the conclusion does not
+follow.
+
+`do_insert`'s clamp lives inside `if let Some(parent) = find_parent_symbol(...)`,
+and `find_parent_symbol` opens with `if !child_name_path.contains('/') { return
+None; }`. Its doc comment says so outright: *"Returns `None` for top-level
+symbols"*. **A top-level anchor is never clamped.** Placing an item at file scope
+is therefore done by anchoring on a file-scope sibling, which every file has. A
+second route exists too: `edit_file(insert="append"|"prepend")` writes at file
+start/end and never calls `guard_structural_rewrite` at all.
+
+Loosening the clamp — the fix this gap implied — would have reopened two recorded
+regressions: the 2026-06-05 Python trailing-statement orphaning and the
+2026-07-19 insert-into-a-sibling's-multiline-macro. The clamp is load-bearing.
 ### Follow-up worth its own decision
 
 Should `replace` also stop treating a target's missing descendants as dropped
@@ -156,52 +193,55 @@ rather than refusing; the same shape would work here. Not done — it trades a
 safety guard for ergonomics and deserves a deliberate call.
 ## Tests added
 
-Four, in `3baa993d`:
+**Gap 3 — five tests in `src/tools/edit_file/tests.rs`.** Three permissive
+(function, non-empty module, Kotlin) and two that stop the exemption from
+quietly widening:
 
-**`src/symbol/edit.rs`** — three on the pure split:
-- `split_target_subtree_separates_descendants_from_true_siblings` — nested paths at
-  any depth are descendants; `mod_a_sibling` is **not** swept up by the `mod_a/`
-  prefix; the target's own path stays (because `corruption_verdict` already
-  excludes it, and duplicating that rule would put it in two places).
-- `removing_a_module_does_not_report_its_own_children_as_dropped_siblings` —
-  asserts **both** directions in one test: unfiltered → `SiblingsDropped`,
-  filtered → `Clean`. It embeds its own reproduction, so it cannot silently stop
-  demonstrating the bug.
-- `filtering_the_subtree_still_catches_a_genuine_overshoot` — the counterweight: a
-  removal that also took out an adjacent symbol is still refused. Without it the
-  filter could later be widened into a hole with every other test still green.
+- `guard_still_blocks_a_rewrite_that_only_shrinks` — the exemption keys on
+  `new_string` being **empty**, not on the edit removing more than it adds.
+  Without this, "deletion" could drift into meaning "any shrinking edit", which
+  reopens the whole rewrite route.
+- `guard_still_blocks_a_rewrite_down_to_whitespace` — `" "` and `"\n"` splice a
+  line into the symbol's place and stay blocked. A `trim().is_empty()` check here
+  would widen the exemption; this test makes that a failing change rather than an
+  invisible one.
 
-**`src/tools/symbol/tests.rs`** — one end-to-end:
-`edit_code_remove_deletes_a_non_empty_module_and_names_its_children` removes a
-non-empty `mod` through the tool, asserts the module and its contents are gone, the
-true sibling survives, and `removed_descendants` names the child. Reverting the
-call-site split fails it with the verbatim error quoted in § Fix.
+**Gap 1 — `insert_after_top_level_symbol_lands_at_file_scope`**
+(`tests/symbol_lsp.rs`). Inserts a module after a top-level `fn` and asserts the
+emitted line equals `"mod fresh {"` exactly. Asserting the exact line rather than
+`contains` is what makes it a *scope* assertion instead of a presence assertion —
+an indented, re-based module would pass a `contains` check.
 
-Gate: `cargo test --workspace` → **3797 passed / 0 failed / 50 ignored**; clippy
-`--workspace --all-targets -D warnings` clean.
+The capability was real but unasserted before this, which is one refactor away
+from not being real — the same failure shape as gap 2's.
+
+**Gap 2 (2026-08-14, `3baa993d`)** — `edit_code_remove_deletes_a_non_empty_module_and_names_its_children`
+plus the AST-nesting test that exposed the descendant-vs-sibling confusion.
+
+Gate: `cargo clippy --workspace --all-targets -- -D warnings` clean; all 29
+`guard_` tests pass.
 ## Workarounds
 
 To relocate or delete a non-empty module: (1) if renaming to a unique name is enough, use a single-line `edit_file` rename of the `mod` declaration (explicitly allowed per the tool's own hint); (2) to actually remove content, `edit_code(remove, ...)` each leaf child individually (reliable — no guard tripped on leaf removal); (3) only once the module is empty does `edit_file` accept deleting the shell (no more `fn` content for the filter to object to).
 
 ## Resume
 
-Still the sibling-drop guard (gap 2) — it degrades a correct operation (removing a
-module's own children as part of removing the module) into a false positive,
-rather than being a missing feature. Find its implementation (search for "would
-drop sibling symbols" / "would have dropped sibling symbols" in the `edit_code`
-source) and scope it to exclude a target's own descendant subtree.
+Closed. One item deliberately survives this file: § Follow-up worth its own
+decision (should `replace` stop treating a target's missing descendants as
+dropped siblings?). It was scoped out on purpose — it trades a safety guard for
+ergonomics.
 
-Then re-ask whether gap (3) is still real: see § Summary → *Correction 2*. Gap (4)
-(the unanchored keyword match) is fixed in `138de7c5`; do not re-derive it.
+Two lessons, both about how this file reasoned rather than what it found:
 
-One more `edit_code` defect surfaced 2026-08-14 while working around this one, and
-it belongs with gap (1)/(2) rather than here: `edit_code(insert, position="after")`
-cannot bound a method inside a trait impl that is itself nested in a test fn —
-*"cannot determine end of 'embed' for insert-after — AST parse failed"* — on a file
-with no syntax errors, and the error's hint blames syntax errors misleadingly. See
-`docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md`
-§ Update 2026-08-14, where it is recorded with its workaround
-(`action="replace"` on the whole impl object).
+1. **Sequencing worked.** The instruction to fix gap 2 first and then re-ask
+   dissolved gap 3's motivation and exposed gap 1 as a non-defect. A bug file
+   that records *dependencies between its own gaps* is worth more than one that
+   lists them flat.
+2. **"Tool X cannot do Y" needs the negative checked, not inferred.** Gap 1 was
+   derived from watching `insert` fail against a *nested* anchor and
+   generalising to all anchors. One read of `find_parent_symbol`'s doc comment —
+   which states the top-level case in plain English — would have bounded it. Same
+   shape as R-82: the observed behaviour was real, the explanation invented.
 ## References
 
 - `.superpowers/sdd/2026-08-11-local-onnx-embedding-query-path/task-7-report.md` § "Surprises / tool friction worth recording"

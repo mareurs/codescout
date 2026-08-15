@@ -16,8 +16,6 @@ pub struct GlobalConfig {
 pub struct GlobalEmbeddingsSection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub drift_detection_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -309,18 +307,27 @@ mod tests {
 
     #[test]
     fn to_toml_value_emits_only_some_fields() {
+        // Two sections, so the assertion still discriminates after
+        // `drift_detection_enabled` was retired and left `[embeddings]` with a
+        // single field: a `None` needs to exist somewhere for "only Some fields
+        // are emitted" to mean anything.
         let config = GlobalConfig {
             embeddings: GlobalEmbeddingsSection {
                 model: Some("local:BGESmallENV15".to_string()),
-                drift_detection_enabled: None,
+            },
+            security: GlobalSecuritySection {
+                shell_command_mode: Some("safe".to_string()),
+                ..Default::default()
             },
             ..Default::default()
         };
         let val = config.to_toml_value();
         assert!(val["embeddings"]["model"].as_str().is_some());
+        assert!(val["security"]["shell_command_mode"].as_str().is_some());
+        // A `None` field must be omitted entirely, not emitted as a null.
         assert!(val
-            .get("embeddings")
-            .and_then(|e| e.get("drift_detection_enabled"))
+            .get("security")
+            .and_then(|s| s.get("file_write_enabled"))
             .is_none());
     }
 

@@ -52,7 +52,7 @@ Primary writer: codescout server. Resides at `<project_root>/.codescout/`.
 
 | Path | Writer | Readers | Purpose / Schema |
 |---|---|---|---|
-| `project.toml` | codescout `onboarding` tool, codescout config writes | codescout server (config load), companion `detect-tools.sh` (gates onboarding-prompt injection) | TOML config: `[project]` (name, languages), `[lsp.<lang>]` (mux toggle), `[security]` (shell_command_mode, indexing_enabled), `[memory]` (drift_detection_enabled). Schema versioned implicitly by codescout MSRV; field additions are minor. |
+| `project.toml` | codescout `onboarding` tool, codescout config writes | codescout server (config load), companion `detect-tools.sh` (gates onboarding-prompt injection) | TOML config: `[project]` (name, languages), `[lsp.<lang>]` (mux toggle), `[security]` (shell_command_mode, indexing_enabled). Schema versioned implicitly by codescout MSRV; field additions are minor. |
 | `system-prompt.md` | codescout `onboarding` tool (regenerated when `ONBOARDING_VERSION` bumps) | companion `session-start.mjs` (injects into Claude Code session) | Markdown. Free-form. Generated from `src/prompts/onboarding_prompt.md` + `builders.rs::build_system_prompt_draft`. Companion treats as opaque. |
 | `memories/<topic>.md` | codescout `memory(action="write")` | codescout `memory(action="read"|"list")`, companion `session-start.mjs` (lists names only — content not parsed) | Markdown with optional frontmatter for anchors. Topic path = filename. |
 | `private-memories/<topic>.md` | codescout `memory(action="write", private=true)` | codescout only | Same as memories/, but auto-gitignored. Companion does not list. |
@@ -172,7 +172,7 @@ The only paths written by one component and read by another are:
 | `.codescout/system-prompt.md` | codescout → companion | Once per onboarding (rare) + read on every session start | If codescout changes the format from markdown to something else, companion injects garbage into Claude Code. **Treat content as opaque — only existence is the contract.** |
 | `.codescout/memories/*.md` | codescout → companion | Listed on every session start | Companion reads filenames only. Filename rename: companion still works (lists whatever is there). Path layout change (e.g. moving to `memories/v2/`): companion stops listing → minor regression on session-start memory hint. |
 | `.codescout/embeddings.db` | codescout → companion | Read on every session start | Schema break: companion's drift/reindex hooks fail silently. Currently mitigated by `2>/dev/null`; the user sees no warning. **If `meta.last_indexed_commit` or `drift_report` are renamed without coordination, companion drift warnings disappear.** |
-| `.codescout/project.toml` | codescout → companion | Read on every session start | Companion checks `drift_detection_enabled` flag. Removal of this key: companion behaves as if drift detection is on (default-true assumption). |
+| `.codescout/project.toml` | codescout → companion | Read on every session start | Companion string-matches `drift_detection_enabled = true` (`hooks/session-start.mjs`). codescout **retired that key on 2026-08-15**, so the match now always fails and companion's drift block is skipped — the wanted outcome, since it queried the retired sqlite `drift_report` table. This row previously said removal would make companion "behave as if drift detection is on (default-true assumption)"; that was backwards. The match is fail-closed, and reading the hook is what settled it. |
 
 Everything else is single-owner and not part of the cross-component contract.
 

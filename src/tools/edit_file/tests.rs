@@ -3445,48 +3445,21 @@ fn guard_blocks_changed_keyword_line_despite_unchanged_keyword_context() {
     assert!(err.message.contains("fn "), "got: {}", err.message);
 }
 #[test]
-fn guard_allows_pure_deletion_of_a_function() {
-    // A deletion is not a rewrite: nothing is spliced into the symbol's place, so
-    // there are no stale ranges to corrupt. Refusing this left no working tool when
-    // edit_code's own naming fails.
-    let old = "fn doomed() {\n    body();\n}\n";
-    assert!(guard_structural_rewrite("x.rs", old, "").is_ok());
-}
-
-#[test]
-fn guard_allows_pure_deletion_of_a_nonempty_module() {
-    // The shape this bug was filed about — a module with children, which
-    // edit_code(remove) could not address at the time.
+fn guard_blocks_pure_deletion_of_a_nonempty_module() {
+    // Deliberate, and recorded here because it did not look deliberate.
+    //
+    // A bug report read this refusal as an oversight ("the filter fires on
+    // deletions just as much as insertions"), and an exemption for
+    // `new_string.is_empty()` was implemented on 2026-08-15 and reverted the same
+    // day. Deleting a symbol IS a structural change; `edit_code(action='remove')`
+    // is the LSP-aware way to do it, and it has handled non-empty modules since
+    // 3baa993d — which is what removed the reason to weaken the guard at all.
+    //
+    // `edit_file_warns_hint_suggests_remove_when_new_empty` is the sibling that
+    // pins the hint this refusal produces. Read the two together: the refusal is
+    // only defensible because it routes somewhere that works.
     let old = "mod doomed {\n    fn a() {}\n    fn b() {}\n}\n";
-    assert!(guard_structural_rewrite("x.rs", old, "").is_ok());
-}
-
-#[test]
-fn guard_allows_pure_deletion_in_kotlin() {
-    // Exemption is language-independent: it precedes language detection entirely.
-    let old = "fun doomed(): Int {\n    return 0\n}\n";
-    assert!(guard_structural_rewrite("x.kt", old, "").is_ok());
-}
-
-#[test]
-fn guard_still_blocks_a_rewrite_that_only_shrinks() {
-    // The exemption keys on new_string being EMPTY, not on the edit being smaller.
-    // A shrinking rewrite still replaces the symbol's text and stays blocked —
-    // without this, "deletion" could be read as "any edit that removes more than it
-    // adds", which would reopen the whole rewrite route.
-    let old = "fn doomed() {\n    a();\n    b();\n}";
-    let new = "fn doomed() {}";
-    assert!(guard_structural_rewrite("x.rs", old, new).is_err());
-}
-
-#[test]
-fn guard_still_blocks_a_rewrite_down_to_whitespace() {
-    // Whitespace is not emptiness. `" "` splices a line into the symbol's place, so
-    // it is a rewrite and must stay blocked — a `trim().is_empty()` test here would
-    // silently widen the exemption.
-    let old = "fn doomed() {\n    body();\n}";
-    assert!(guard_structural_rewrite("x.rs", old, " ").is_err());
-    assert!(guard_structural_rewrite("x.rs", old, "\n").is_err());
+    assert!(guard_structural_rewrite("x.rs", old, "").is_err());
 }
 
 #[test]

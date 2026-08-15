@@ -318,10 +318,10 @@ branching on the boolean alone.
 ### Drift scoring is not part of this response
 
 Earlier versions of this page documented a `drift` array here and a `drift_summary`
-on `index(action: build)`, gated by `drift_detection_enabled` in
-`.codescout/project.toml`. **Neither field is emitted.** The config key still
-parses — `src/config/project.rs` defines it and `src/config/global.rs` merges it —
-but no code in `src/` reads it, so setting it changes nothing on the codescout side.
+on `index(action: build)`, gated by a `drift_detection_enabled` key in
+`.codescout/project.toml`. **Neither field is emitted, and the key is gone** —
+retired 2026-08-15 once it was confirmed that nothing in `src/` had ever read it.
+An existing `project.toml` that still sets it parses fine; the key is ignored.
 
 What exists today is narrower and lives on `semantic_search`: `drift_note`, which
 fires when a worktree's delta index is older than the main index it overlays. See
