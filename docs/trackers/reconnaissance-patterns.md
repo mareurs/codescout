@@ -1890,6 +1890,57 @@ list of config layers (the layers are project-specific; the control generalises)
 enumeration that had silently readmitted something), R-6 (scout the substrate before
 mechanism design), R-59 (a repo artifact that already knew the answer, unconsulted).
 
+## R-87 — Hit: before designing an abstraction, scout for the dispatch point that already exists
+
+**Observed:** 2026-08-15, SD-1b. Asked how to generalise doc-ref extraction
+across "the other supported languages" and how to "abstract it away".
+
+**The scout, in three calls.** `grep tree-sitter Cargo.toml` → nine grammars
+vendored. `grep 'LANGUAGE.into()'` → one dispatch site,
+`src/ast/mod.rs::get_ts_language`, whose own doc comment reads *"the single
+source of truth for tree-sitter language resolution. Both the AST parser and
+the embedding chunker use this function."* `grep 'fn detect_language'` → the
+extension→language half, with a `detect_language_vs_get_ts_language_contract`
+test already keeping the pair honest.
+
+**Verdict: hit.** The abstraction existed, documented, with two consumers and a
+contract test. The feature became its **third consumer** — zero per-language
+code — rather than a fourth language mapping to keep in sync. Designing before
+scouting would have produced a `trait CommentExtractor` with an impl per
+language: one-implementor bureaucracy, and precisely what this project's
+`tool-registration-rule-of-three` memory exists to prevent.
+
+**The generalisable move:** an "abstract across N variants" request is a
+*seam*, and the far side is whether the variants already resolve through one
+place. Three greps answer it: the dependency manifest (how many variants are
+there), the `.into()` / registry / match site (is there one door), and a
+contract test (does anything hold the halves together). A codebase that has
+solved this once usually says so in a doc comment — `get_ts_language`
+literally did.
+
+**Two things the scout did NOT settle, and both mattered:**
+
+- *The uniformity assumption underneath the abstraction.* Comment node kinds
+  differ per grammar (`line_comment`, `comment`, `block_comment`), and the
+  in-tree evidence covered only **five of nine**. `kind().contains("comment")`
+  unifies them, but that was a hypothesis until a test drove all ten language
+  keys. **Scouting a dispatch point tells you the door exists, not that
+  everything behind it has the same shape.**
+- *A variant that documents differently in kind.* Python's docstrings are
+  `expression_statement > string`, not comments at all — a comment-only
+  extractor returns its `#` notes and silently drops every docstring. The
+  scout found the dispatch; the user caught the shape. Worth adding to the
+  seam checklist: for any "all N languages" feature, ask which language does
+  the thing *differently in kind*, not just differently in name.
+
+**Evidence:** `experiments:450880c7`. W-42 in
+`docs/trackers/bug-fix-session-log.md`.
+
+**Verdict:** hit — promoted-when a second "abstract across variants" request is
+answered by finding the existing dispatch. At two datapoints this belongs in
+the reconnaissance skill file (in the codescout-companion repo, so not a path
+resolvable from here) as a named seam class: *the variant-dispatch seam*.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

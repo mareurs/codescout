@@ -89,6 +89,7 @@ time_scope: open-ended
 | F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 | F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
+| F-50 | 2026-08-15 | **high** | tooling | fixed-verified | Three unrelated tools answered about a subset while looking like they answered about the whole — a markdown auditor pointed at Rust (7 vs the real 95), a grep capped at 50 whose footer read "Showing 50 of 50" (vs 266), and a `head -8` buffer I grepped and reported as a corpus. Instance 3 put a false claim into a shipped commit body |
 | F-49 | 2026-08-15 | **high** | self-friction | fixed-verified | A fix I shipped and archived as done was **inert on the transport the project actually uses** — its end-to-end test drove the one transport where the defect cannot appear, and live verification on the rebuilt server reproduced the original bug unchanged |
 | F-47 | 2026-08-15 | med | self-friction | fixed-verified | Implemented a guard exemption, shipped it, and reverted it within the hour — the bug file described the refusal as an oversight, and it had both a dedicated test and purpose-built hint machinery, each one `grep` away |
 | F-48 | 2026-08-15 | med | tooling | fixed-verified | A name-filtered `cargo test` gave false confidence: `--lib guard_` did not match `edit_file_warns_hint_suggests_remove_when_new_empty`, so the change that broke it passed its own targeted run and was committed |
@@ -133,6 +134,7 @@ time_scope: open-ended
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 | W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
 | W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-42 | 2026-08-15 | **high** | When a finding is "we cannot see class X of drift", build the seeing BEFORE finishing the sweep | SD-1 found 95 stale citations and 3 residuals needing judgment; SD-1b built the gate in between; SD-8's verification was then the gate reporting `verdict=resolved`, not me re-reading comments — the same eyeballing that let 95 rot. It also found drift outside the filed backlog, and caught three self-inflicted refs in the tracker prose describing the work | validated |
 | W-41 | 2026-08-15 | **high** | Live-verify on the running server after every rebuild, even when the suite is green and the bug is already archived | The stale-symbols fix passed a real-rust-analyzer end-to-end test, cleared a 3814-test gate, was documented, archived, and reported as verified. It did nothing. The post-`/mcp` probe — external write, then `symbols()` with no flush — took under a minute and reproduced the original bug exactly. Without it, a closed bug file, a CHANGELOG entry and a promotion to master would all have asserted a fix that was not there | validated |
 | W-39 | 2026-08-15 | high | Reproduce before trusting the filing — measured across a whole backlog | Fourteen bugs closed in one drive; **eleven had a filing whose reasoning was weaker than its own code**. Not wrong about the symptom — wrong about cause, scope, or what was already true. Three recurring shapes: absence claims ("no test discriminates", "no workaround exists", "reproduces only on Windows"), count-vs-category generalisation, and false comments about a peer component. Trusting any one filing's fix section would have produced the wrong change | validated |
 | W-40 | 2026-08-15 | med-high | Time the subject against a trivial control on the same connection | A ~990 ms `semantic_search` was filed with ~950 ms unaccounted. Measuring it alone would have produced another bare number; measuring it beside `tools/list` (1 ms) and `tree depth=1` (39.5 ms) over one MCP session turned it into a breakdown — and showed the headline finding, that the figure is now **127 ms** and its largest identified slice is per-call dispatch shared by every tool | validated |
@@ -3374,6 +3376,106 @@ have passed here.
 
 **Status:** validated — one save, and it prevented a false "fixed" from reaching
 `master`.
+
+## F-50 — Three tools answered about a subset while looking like they answered about the whole
+
+**Observed:** 2026-08-15, across the structural-debt refactor stream
+(SD-1, SD-1b). Same failure three times in one session, from three unrelated
+tools, and it put a false claim into a shipped commit body.
+
+**When:** Each time I needed a COUNT — how many citations are stale, how many
+matches exist, how many findings were capped.
+
+**Expected:** That a tool asked for a measurement returns the measurement, or
+says it cannot.
+
+**Got:** Three confident answers about samples, none of them labelled as such.
+
+1. **A markdown auditor pointed at Rust.** `audit_doc_refs --paths
+   'src/**/*.rs'` reported 7 stale bug-file citations. The real number was
+   **95 of 111**. `pulldown_cmark` reads `tokio::sync::Semaphore` as a link and
+   yields 33,105 "refs", so the handful of `docs/`-shaped findings that surface
+   are an arbitrary fraction. **A tool used outside its domain does not fail
+   loudly — it answers.**
+2. **A grep capped at 50 with a footer that read as a total.** Default-mode
+   `grep` returned *"50 matches in 20 files"* and *"Showing 50 of 50"*;
+   `mode="files"` on the identical pattern returned **266 in 94**. Building the
+   substitution list from the first would have swept a fifth of the sites and
+   reported done. The parallel session independently filed this as a bug file
+   the same day.
+3. **A truncated buffer read as a corpus.** I ran a scan as `… | head -8`,
+   grepped the resulting eight-line `@cmd_` buffer for `code_comment_capped`,
+   got zero, and wrote "the cap never fires" into commit `450880c7` and the
+   tracker. It fires. Re-run bare, the findings array itself says
+   `"shown": 50, "total": 51833` — so the second attempt was a 0.1% sample and
+   equally worthless.
+
+**Probable cause:** Every one of these returns a *well-formed* answer. There is
+no error, no empty result, no warning — the shape of a truncated answer is
+identical to the shape of a complete one. Three different truncation mechanisms
+(domain mismatch, result cap, pipe) converge on the same silence.
+
+**Workaround:** Before believing a count, establish what the denominator is
+*from a second source*. Enumerate into a file and classify against the
+filesystem; ask for `mode="files"`; run bare and query the buffer rather than
+piping to a trimmer. For a sweep, re-classify afterwards and require the
+residual to be **zero** — that check is what actually proved the 95 landed.
+
+**Severity:** high — not for the wasted effort but because instance 3 reached a
+commit body and a tracker as a stated fact, and instance 1 nearly scoped the
+work at 7% of its real size.
+
+**Status:** fixed-verified — all three corrected (`1f29fc9b`, `3a366d29`), and
+the corrections cite the method rather than just the number.
+
+**Fix idea / Pointer:** Generalises W-39's shape ("a count and a category are
+two claims") one level out: *a count is a claim about a denominator, and the
+denominator is the part tools silently substitute.*
+
+## W-42 — A gate built in the morning verified the afternoon's work, on drift a human reading would have missed
+
+**Observed:** 2026-08-15, SD-1b then SD-8, same session.
+
+**Pattern:** When a work stream's finding is "we cannot see class X of drift",
+build the seeing FIRST and let it verify everything after — including the
+remaining items of the very backlog that motivated it.
+
+SD-1 found 95 stale bug-file citations in Rust comments and three that resolved
+nowhere. The sweep was mechanical; the three residuals needed judgment and were
+deliberately deferred as SD-8. In between, SD-1b taught `audit_doc_refs` to
+read documentation nodes in every language codescout has a grammar for. When
+SD-8 came around, its verification was not me re-reading files — it was
+`--paths` over the three touched files, checking `verdict=resolved`.
+
+**Counterfactual:** Without the gate, SD-8's check is eyeballing three
+comments, which is exactly the process that let 95 citations rot in the first
+place. And it did more than confirm: it *found* drift I had not filed —
+`src/fs/mod.rs:3` cites a path that no longer exists, and one of SD-8's own
+items (the 2026-03-24 kotlin-lsp concurrent-instances slug, named without its
+extension here because spelled in full it is itself an unresolvable citation)
+surfaced from the gate rather than from my reading. It also caught **three separate self-inflicted
+refs in the tracker prose describing the work** — writing about a dead
+reference creates a dead reference, every time, and I would have shipped all
+three.
+
+**Confirming data points:**
+1. SD-8 verified by the gate rather than by eye; both surviving citations
+   report `verdict=resolved` (`c692f901`).
+2. The gate found `src/fs/mod.rs:3` unprompted — real drift outside the filed
+   backlog.
+3. Three tracker-prose false refs caught pre-commit across `1f29fc9b`,
+   `3a366d29`, `587b9681`.
+
+**Impact:** high — converts a class of drift from "noticed when someone happens
+to follow a link" into "reported on every run".
+
+**Promote-when:** A second work stream builds its detector before finishing its
+backlog and the detector catches something the backlog missed. At two
+datapoints, promote to CLAUDE.md as: *when a finding is "we cannot see X",
+build the seeing before finishing the sweep — the sweep is then verified rather
+than asserted.*
+
+**Status:** validated — single stream, three confirming data points within it.
 
 ## Template for new entries
 
