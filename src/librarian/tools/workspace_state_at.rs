@@ -3,9 +3,8 @@ use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::scope::{apply_scope, Scope};
+use super::scope::{apply_scope, resolve_scope, Scope, UmbrellaPolicy};
 use super::state_at::{replay_state_at, resolve_cutoff_ts};
-use super::RecoverableError;
 use super::ToolContext;
 use crate::librarian::filter::FilterNode;
 use crate::librarian::freshness::Freshness;
@@ -95,35 +94,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
 
-    let requested_scope = a.scope.unwrap_or_default();
-    if a.scope == Some(Scope::All) {
-        if let Some(cp) = ctx.current_project.as_deref() {
-            if cp.umbrella.is_none() {
-                return Err(RecoverableError::new(
-                    "scope=\"all\" requires a configured umbrella — without one it crosses into \
-                     unrelated workspace projects. Use scope=\"repo\" to widen to your repo, or \
-                     configure [[umbrella]] in workspace.toml to group related projects.",
-                ));
-            }
-        }
-    }
-    // scope=all is an alias for umbrella when the current project has one;
-    // without a current project or umbrella, All passes through (no-cwd fallback path).
-    let requested_scope = if requested_scope == Scope::All
-        && ctx
-            .current_project
-            .as_deref()
-            .and_then(|c| c.umbrella.as_deref())
-            .is_some()
-    {
-        Scope::Umbrella
-    } else {
-        requested_scope
-    };
-    let (effective_scope, scope_fallback) = match (requested_scope, ctx.current_project.is_some()) {
-        (Scope::Project | Scope::Repo, false) => (Scope::All, true),
-        (s, _) => (s, false),
-    };
+    let (effective_scope, scope_fallback) = resolve_scope(
+        a.scope,
+        ctx.current_project.as_deref(),
+        UmbrellaPolicy::Require,
+    )?;
 
     let base_filter = build_base_filter(a.kinds.as_deref(), a.include_archived);
     let current = ctx.current_project.as_deref();

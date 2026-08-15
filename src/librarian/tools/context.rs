@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::librarian::catalog::{artifact, augmentation, links};
 use crate::librarian::filter::FilterNode;
 
-use super::scope::{apply_scope, Scope};
+use super::scope::{apply_scope, resolve_scope, Scope, UmbrellaPolicy};
 use super::ToolContext;
 
 use super::HIDDEN_STATUSES;
@@ -53,12 +53,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let max_tokens = a.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
     let char_cap = max_tokens * 4;
 
-    let requested_scope = a.scope.unwrap_or_default();
-    let (effective_scope, scope_fallback) = match (requested_scope, ctx.current_project.is_some()) {
-        (Scope::Project | Scope::Repo, false) => (Scope::All, true),
-        (s, _) => (s, false),
-    };
     let current = ctx.current_project.as_deref();
+    // Literal, not Require: `context` is an orientation surface and reaching
+    // across every project on an explicit `scope="all"` is the point of it.
+    let (effective_scope, scope_fallback) =
+        resolve_scope(a.scope, current, UmbrellaPolicy::Literal)?;
     // Set when candidate DISCOVERY (not the token budget) hit its cap — more
     // artifacts may match than were even considered.
     let mut candidates_capped = false;
@@ -863,6 +862,88 @@ mod tests {
         assert_eq!(included.len(), 1);
         assert_eq!(included[0], "in");
         assert_eq!(v["scope"]["applied"], "repo");
+    }
+
+    #[tokio::test]
+    async fn scope_all_stays_literal_and_reaches_outside_the_umbrella() {
+        // Pins the behaviour `librarian(action="context")` deliberately has and
+        // `artifact(action="find")` deliberately does not: an explicit `scope="all"`
+        // is NOT aliased to `umbrella`, so orientation can reach a project the
+        // umbrella does not contain. Confirmed by a live A/B against the running
+        // server, then ruled intentional by the owner — see
+        // docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md.
+        //
+        // Before `UmbrellaPolicy` this behaviour was defended by nothing: it existed
+        // only as the ABSENCE of a block two sibling handlers carried, which is why
+        // it was reported as a bug before it was recognised as a choice.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let proj_dir = root.join("codescout");
+        std::fs::create_dir_all(&proj_dir).unwrap();
+        std::fs::write(proj_dir.join("auth.md"), "# auth\nbody").unwrap();
+        let outside_dir = root.join("unrelated");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        std::fs::write(outside_dir.join("auth.md"), "# auth\nbody").unwrap();
+
+        let mut inside = sample_row(
+            "in",
+            "claude",
+            "codescout/auth.md",
+            "auth notes",
+            Some("auth"),
+        );
+        inside.abs_path = proj_dir.join("auth.md");
+        let mut outside = sample_row(
+            "out",
+            "claude",
+            "unrelated/auth.md",
+            "auth elsewhere",
+            Some("auth"),
+        );
+        outside.abs_path = outside_dir.join("auth.md");
+        artifact::upsert(&cat, &inside).unwrap();
+        artifact::upsert(&cat, &outside).unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "claude".into(),
+                path: root.clone(),
+            })
+            // The umbrella contains the active project ONLY, so `out` is a
+            // non-member — precisely the row `find` would narrow away.
+            .with_umbrellas(vec![crate::librarian::workspace::Umbrella {
+                name: "main".into(),
+                members: vec![proj_dir.clone()],
+            }])
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: proj_dir.clone(),
+                    git_root: proj_dir.clone(),
+                    main_root: None,
+                    umbrella: Some("main".into()),
+                },
+            ))
+            .build();
+
+        let v = call(&ctx, json!({"topic": "auth", "scope": "all"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            v["scope"]["applied"], "all",
+            "an explicit scope=all must NOT be aliased to umbrella on context"
+        );
+        let included: Vec<&str> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_str().unwrap())
+            .collect();
+        assert!(
+            included.contains(&"out"),
+            "context must reach the non-member project under scope=all; got {included:?}"
+        );
     }
 
     #[tokio::test]
