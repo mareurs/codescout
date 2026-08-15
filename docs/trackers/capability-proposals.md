@@ -214,18 +214,69 @@ spec draft ([`modelcontextprotocol/ext-tasks`](https://github.com/modelcontextpr
   then decides per request whether to return a task or an ordinary result.
 - Lifecycle: `working` → optional `input_required` → terminal `completed` | `failed` | `cancelled`.
 - The completed `result` has the same shape as the original call's normal result (`CallToolResult`).
-- **Directly relevant to code we already have:** the draft states that `notifications/progress` and
-  `notifications/message` **MUST NOT** be sent for a task; tasks use `inputRequests`/`inputResponses`
-  instead. codescout already implements throttled `notifications/progress`
-  (`src/tools/progress.rs`), so adopting tasks means those two paths must not overlap.
+- **Correction to an earlier reading in this entry (2026-08-15).** A first pass here said the draft
+  forbids `notifications/progress` for a task outright, and concluded tasks and our existing
+  progress code would be mutually exclusive. That is wrong and would have misled an implementer.
+  The prohibition is scoped to the **`subscriptions/listen` stream**: request-scoped notifications
+  (`notifications/progress`, `notifications/message`) still flow on **the response stream of the
+  request they belong to**. So `src/tools/progress.rs` is not in conflict with adopting tasks.
 - Status: **draft extension**, not core spec. Revises a `2025-11-25` predecessor.
 
-**What is NOT yet known — and how to find out.** The one observation is ambiguous: Claude Code
-backgrounded the call "after 120s" on a `run_command` where `timeout_secs` was *also* 120, so
-whether the client threshold is 120s, configurable, or tied to the server's own timeout cannot be
-read off that datapoint. Measure it deliberately: issue a `run_command` with `timeout_secs: 600`
-running `sleep 300` and record when the backgrounding message appears. Until then, treat the
-threshold as unmeasured rather than assumed — the whole point of writing this entry before acting.
+**Threshold — SETTLED 2026-08-15, no experiment needed.** This entry originally recorded the
+backgrounding threshold as unmeasured, because the one observation was ambiguous (the client
+backgrounded "after 120s" on a call whose own `timeout_secs` was also 120). The Claude Code
+changelog answers it directly:
+
+> **2.1.212** — "MCP tool calls running longer than 2 minutes now move to the background"
+
+So it is a fixed **2-minute client-side rule**, independent of the server's own timeout — the
+coincidence with `timeout_secs: 120` was exactly that. Worth noting the discipline paid: had the
+ambiguous datapoint been written up as fact, it would have been *right by accident* and for the
+wrong reason, and the next person tuning a server-side timeout would have drawn a false
+conclusion from it.
+
+**The client has moved much further than this entry assumed — re-scoped 2026-08-15.**
+
+MCP shipped a **2026-07-28 specification** that makes the protocol **stateless** and adds a formal
+**extensions framework**. Tasks moved *out of* experimental core and *into* the
+`io.modelcontextprotocol/tasks` extension: a server may answer `tools/call` with a **task handle**,
+and the client drives it with `tasks/get` / `tasks/update` / `tasks/cancel`. A new
+`subscriptions/listen` stream carries opted-in server→client change notifications and **replaces
+the HTTP GET endpoint and `resources/subscribe` / `resources/unsubscribe`**; servers may also push
+`notifications/tasks` on it, each carrying the full task state.
+
+And Claude Code already implements it. From the changelog:
+
+> **2.1.233** — "Fixed MCP v2 connections endlessly reopening the subscriptions/listen stream"
+
+A bug fix for MCP v2 connections is only possible where MCP v2 connections exist. **So item (3) is
+no longer "a draft nobody implements" — the client implements it and codescout does not.** That
+inverts the entry's original framing, where (3) looked like speculative early adoption.
+
+**The new gating question is rmcp.** codescout is pinned to rmcp 1.3.0, which predates the
+2026-07-28 spec; whether the Rust SDK has shipped stateless/extensions/tasks support, and at what
+version, is the first thing to check before any of (3) is scoped. That is a cheap lookup and
+nobody has done it.
+
+**Other client-side MCP changes since this repo's notes were written** (codescout memory
+`claude-code-mcp-env` was captured at CC v2.1.177; this session ran 2.1.227 with 2.1.233 installed):
+
+| Version | Entry | Why it matters here |
+|---|---|---|
+| 2.1.212 | MCP calls >2 min move to the background | settles the threshold above |
+| 2.1.214 | "Added a periodic progress heartbeat for long-running tool calls" | client-side UI heartbeat; distinct from MCP `notifications/progress` — do not conflate |
+| 2.1.219 | `mcp_server_errors` added to the headless stream-json init event | a diagnostic surface for MCP failures in headless runs |
+| 2.1.232 | Fixed MCP connections hanging for the full 30-second connect timeout | there is a 30s connect timeout; relevant to slow codescout startup |
+| 2.1.233 | MCP v2 / `subscriptions/listen` fix | the client speaks MCP v2 |
+| 2.1.233 | "Todo/task-tracking tools (TaskCreate/Get/Update/List, TodoWrite) are no longer available" | **not** the MCP background-task controls; the backgrounding message points at `TaskStop`. Whether `TaskStop`/`TaskOutput` survive the removal is unverified — do not assume either way |
+
+**Still genuinely unknown.** Whether Claude Code sends `_meta.progressToken` on tool calls at all.
+codescout builds a `ProgressReporter` only when it receives one (`src/server.rs:977-979`), and
+nothing logs the outcome — the live diagnostic logs are tracing output, not raw JSON-RPC, so their
+zero hits for `progressToken` say nothing about the client (the only `_meta` matches in them are
+`body_meta` fields inside response bodies). Settle it with one temporary `tracing::info!` on the
+`get_progress_token()` branch, one rebuild, one tool call — not by reading logs that cannot carry
+the field.
 
 **Open questions.**
 
