@@ -5,13 +5,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CORPUS=/home/marius/work/claude/code-explorer/.worktrees/retrieval-stack
+# Defaults to THIS repo (we cd'd to the repo root above). run-tc-benchmark.py
+# scores against expected files in codescout's own tree, so any other corpus
+# yields meaningless numbers. The previous default named a worktree under
+# ".../code-explorer" -- codescout's pre-rename name -- and had been dead since
+# the rename plus the worktree cleanup.
+CORPUS="${CORPUS:-$PWD}"
 BIN_SYNC=./target/release/sync_project
 BIN_CC=./target/release/codescout
 OUT=results-bm25-cr1200.tsv
 
-export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:43300
-export CODESCOUT_SPARSE_EMBEDDER_URL=http://127.0.0.1:8091
+# This cell measures CodeRankEmbed at chunk 1200 -- it needs an endpoint actually
+# serving that model, which is NOT the stack docker-compose.yml publishes. The
+# ports below are the ad-hoc ones this experiment was run against; override them
+# to point at wherever you serve CodeRankEmbed.
+export CODESCOUT_EMBEDDER_URL="${CODESCOUT_EMBEDDER_URL:-http://127.0.0.1:43300}"
+export CODESCOUT_SPARSE_EMBEDDER_URL="${CODESCOUT_SPARSE_EMBEDDER_URL:-http://127.0.0.1:8091}"
 export CODESCOUT_MODEL_DIM=768
 export CODESCOUT_EMBEDDER_PROTOCOL=openai
 export CODESCOUT_EMBEDDER_MODEL_NAME=CodeRankEmbed

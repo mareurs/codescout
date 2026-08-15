@@ -86,12 +86,13 @@ pub(super) fn format_hover(val: &Value) -> String {
         out.push_str("\n\n");
     }
 
-    let mut in_code_block = false;
     let mut first_content_line = true;
     for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
+        // Drop the delimiter, keep what it wraps. An LSP hover's fenced region is
+        // the symbol's SIGNATURE, not an example — skipping fenced content would
+        // discard the most useful part of the hover. Hence a plain delimiter strip
+        // and no fence-state tracking. Pinned by `hover_with_code_fence`.
+        if line.trim().starts_with("```") {
             continue;
         }
         if !first_content_line {

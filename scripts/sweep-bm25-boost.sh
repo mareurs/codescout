@@ -3,7 +3,13 @@
 set -euo pipefail
 
 BINARY="${1:-./target/release/codescout}"
-PROJECT_PATH="${2:-/home/marius/work/claude/code-explorer}"
+# The corpus defaults to THIS repo, not a path on the author's machine:
+# run-tc-benchmark.py's expected-file lists name codescout's own tree
+# (src/lsp/client.rs, src/embed/index.rs, docs/FEATURES.md, ...), so scores are
+# only meaningful against this checkout. The previous default pointed at
+# ".../code-explorer" -- codescout's pre-rename name -- and had resolved to
+# nothing since the rename.
+PROJECT_PATH="${2:-$(cd "$(dirname "$0")/.." && pwd)}"
 BOOSTS="${3:-0.25 0.5 1.0 1.5 2.0 3.0 5.0}"
 
 export CODESCOUT_QDRANT_URL="http://127.0.0.1:6334"
