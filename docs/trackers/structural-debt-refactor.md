@@ -81,3 +81,34 @@ rendered from params at the top of the file._
 Survey run on `1911af3d` after the backlog drive closed 14 of 15 bugs. Five
 findings recorded (SD-1..SD-5). No code touched — the survey was read-only, and
 the merge to `master` (a clean fast-forward, 0/690) is on the user's hold.
+
+### 2026-08-15 — SD-5 and SD-6 closed; SD-6 and SD-7 discovered while working
+
+SD-5 fixed in `experiments:121a2263` (not-yet-on-master). The memory was stale
+twice over: it described the `escape_like_pattern` extraction as an owed plan,
+and it named `src/librarian/filter.rs` line 230 as the canonical inline idiom
+when that line is now a *call* to the helper. Rewritten into a settled Rust half
+and an open SQL half, the latter routed to SD-2.
+
+**SD-6 was found by pulling on SD-5's thread**, and is the sharper half of
+SD-1. Every memory anchor sidecar citing a bug file pointed at the pre-archive
+path — 3 of 3. Because `check_path_staleness` (`src/memory/anchors.rs`) tests
+`!full.exists()` *before* comparing hashes, an archived bug file is reported as
+`Deleted` rather than `Changed`: a strictly false verdict, and the more damaging
+one, since `Changed` says "re-read this" while `Deleted` says "the thing this
+memory rests on is gone." Fixed in `experiments:04891bd3` (not-yet-on-master).
+Content survives `git mv` — proven byte-for-byte, as one anchor's recorded hash
+matched the archived file exactly — so two repairs were path-only. The third
+hash was left deliberately mismatched: that file's content really did change and
+nobody has reconciled the memory, so the mismatch is a true warning, and
+silencing it to make a checklist green would have been the wrong trade.
+
+**SD-7 was found by trying to close SD-5 in this tracker.** Flipping one row's
+status requires re-sending the entire `items` array, because `artifact`
+dispatches `append_entry` and nothing else at entry grain. The operation a
+status tracker performs most often is the one it does least safely. Worked
+around here via `params_path` plus a post-write verification that all seven ids
+survived; recorded rather than fixed, because an entry-grain update is a feature.
+
+Baseline re-run after both fixes: **3818 passed / 0 failed / 50 ignored** —
+unchanged, as a behaviour-preserving change requires.
