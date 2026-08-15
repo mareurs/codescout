@@ -89,6 +89,8 @@ time_scope: open-ended
 | F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 | F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
+| F-46 | 2026-08-15 | med-high | self-friction | fixed-verified | An existing integration test asserted `msg.contains("AST parse failed")` on a **syntactically perfect** fixture — it had been corroborating a false explanation of its own scenario since it was written, and made correcting the message look like a regression |
+| F-45 | 2026-08-15 | low | codescout-tool | wontfix-by-design | The `edit_file` string-literal residual I documented an hour earlier bit me writing the very next hint: prose containing `impl ` inside a string literal was refused. Cost one rephrase. Evidence FOR the deliberate over-block, not against it |
 | F-44 | 2026-08-14 | med | codescout-tool | fixed-verified (half) | `edit_file` and `edit_code` deadlock on "add a method to a trait impl nested in a test fn". `edit_file` half **fixed** in `138de7c5` (unanchored per-line keyword match — `via_trait ` matched `trait `); `edit_code` half open. **Two of my own claims in this entry were overstated and are corrected in its body** |
 
 ## Wins Index
@@ -128,6 +130,7 @@ time_scope: open-ended
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 | W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
 | W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-38 | 2026-08-15 | high | Separate a safety guard's REFUSAL from its DIAGNOSIS | `insert position="after"` looked broken. Split three ways it wasn't: the refusal is correct (BUG-051, would splice mid-body), the *message* was the defect (asserted "AST parse failed" on files that parse), and the real limit is an LSP/AST asymmetry belonging to the extractor. Treating it as one bug would have reopened a closed corruption bug. Also: the codebase already had `has_syntax_errors` sitting next to an error that *guessed* about syntax errors | validated |
 | W-37 | 2026-08-14 | high | Mutation-test the TEST, not only the code | The first version of the prefix regression test exercised the inherent `dense_query`/`dense_document` and would have passed with the trait method wired to `dense_query` — which is precisely where the defect lived. Mutation exposed the wrong-layer coverage; the fixed test then failed with mockito reporting the QUERY mock hit twice | validated |
 | W-36 | 2026-08-14 | high | Refuse a default trait impl and the compiler becomes your enumerator | Adding `embed_document`/`embed_document_one` with NO default made `cargo check` list all five implementors, exactly matching the prediction. A default would have compiled silently and left every implementor free to keep inheriting the query method — i.e. the bug. The repo already had this precedent in `known_dim`'s doc comment | validated |
 | W-35 | 2026-08-14 | med | A prompt-surface byte cap is a design reviewer | `every_tool_description_under_cap` rejected the doctor change twice (1960, then 1846 vs an 1800 cap) and was right both times: parameter detail belongs in the uncapped parameter descriptions, not the action list. Also revealed the `librarian` description sits at ~1790/1800 — 99.4% of budget | validated |
@@ -3001,6 +3004,120 @@ Relation to W-33/W-34: those mutate the *implementation* to check the tests can 
 **Impact:** high — an on-target-looking test that cannot see the defect is worse than no test, because it stops anyone looking again.
 
 **Promote-when:** a third instance where asking "what layer does this assert on?" relocates a test. Then fold into the recon SKILL alongside W-33/W-34 as one mutation-discipline rule with three faces: can it fail, is it aimed at the right layer, does it sample the class.
+
+**Status:** validated.
+
+## F-45 — My own documented residual bit me within the hour
+
+**Observed:** 2026-08-15, writing the replacement hint for `edit_code`'s
+insert-after refusal — roughly an hour after shipping `138de7c5`.
+
+**Got:** `edit_file` refused the edit with
+`edit contains a symbol definition ("impl ")`. The offending text was **prose
+inside a string literal**: "a method of an impl nested inside a function body".
+
+**Why this is not a regression:** it is the exact residual documented at
+`contains_def_keyword_at_word_start` when the word-boundary fix shipped — *"a
+keyword inside a string literal still matches: the preceding `"` is not a word
+character."* The boundary rule fixed identifiers (`via_trait`), and string
+literals were left over-blocking **on purpose**, because the guard's errors are
+asymmetric: a false positive costs one rejected edit, a false negative risks the
+LSP range corruption of BUG-027.
+
+**Cost:** one rephrase — `impl` → `impl-block`. About thirty seconds.
+
+**Severity:** low, and recorded as *evidence for* the trade rather than against it.
+The prediction made when the residual was documented ("rarer than identifiers,
+cheap to work around") held on its first real encounter. Narrowing it needs
+literal-awareness (`crate::util::text::scan_line` has it) and would trade a
+thirty-second workaround for risk in a corruption guard.
+
+**Status:** wontfix-by-design. Re-open only if the literal case starts costing
+more than a rephrase — e.g. if it blocks an edit that cannot be reworded.
+
+**Fix idea / Pointer:** `src/tools/edit_file/mod.rs` —
+`contains_def_keyword_at_word_start` § "Two known residuals".
+
+## F-46 — A test pinned a false diagnosis, keeping the wrongness alive
+
+**Observed:** 2026-08-15, fixing `edit_code` insert-after's misleading error.
+
+**When:** The full gate failed after the message change — one integration test,
+`insert_code_after_refuses_when_ast_cannot_pin_symbol_end` (`tests/symbol_lsp.rs`).
+
+**Expected:** a test guarding the refusal behaviour.
+
+**Got:** it asserted `msg.contains("cannot determine end") && msg.contains("AST
+parse failed")` — on a fixture that is **syntactically perfect**. Its own doc
+comment describes the scenario accurately (the LSP reports a stale name `a` where
+the AST has `alpha`), so nothing about it involves a parse failure. The test was
+corroborating a false explanation of its own scenario, and had been since it was
+written.
+
+**Why it matters more than a stale assertion:** a test that pins a *wrong message*
+inverts the incentive. Correcting the message shows up as a **failing gate**, which
+reads as "my change broke something" — the exact signal that discourages fixing
+it. The wrongness is not merely unguarded; it is actively defended.
+
+This is a cousin of the `tests-that-cannot-fail` class, one step over: the test
+*can* fail, and does — it just fails for the improvement rather than the
+regression.
+
+**Severity:** med-high. No user impact, but it kept a misleading diagnostic in
+place across every session that hit it, and would have kept doing so.
+
+**Status:** fixed-verified. The assertion now checks the message says "parses
+cleanly", does **not** say "has syntax errors", and names the workaround — plus a
+new counterweight test proving the broken-parse branch still fires.
+
+**Fix idea / Pointer:** `tests/symbol_lsp.rs` —
+`insert_code_after_refuses_when_ast_cannot_pin_symbol_end` and its new sibling
+`insert_code_after_blames_syntax_errors_only_when_there_are_some`. Worth a sweep:
+grep the suite for assertions on error *text* that encodes a CAUSE rather than a
+behaviour, since each is a candidate for the same trap.
+
+## W-38 — Separate a safety guard's refusal from its diagnosis
+
+**Observed:** 2026-08-15, working the `edit_code` insert-after failure that had
+deadlocked an edit the day before.
+
+**Pattern:** When a safety guard produces a bad experience, ask which of three
+things is actually defective before changing anything: **the refusal**, **the
+explanation it gives**, or **the underlying capability** it is compensating for.
+They have different owners and different risk.
+
+**Counterfactual — concrete.** The bug file framed this as "`insert`'s
+end-of-symbol bound fails", which invites making insert work. Split three ways:
+
+| piece | verdict |
+|---|---|
+| the refusal | **correct, keep** — BUG-051's residual closure; trusting a short LSP end splices new code mid-body |
+| the message | **the defect** — asserted "AST parse failed" + "the file likely has syntax errors" for every cause, false whenever the file parses |
+| the capability | **an LSP/AST asymmetry** — tree-sitter's extractor does not surface methods of an impl nested in a function body; the LSP resolves them fine |
+
+Had I treated it as one bug and "fixed insert", I would have reopened a closed
+corruption bug (BUG-051) to solve a message problem.
+
+**Sub-pattern worth its own line:** the fix for the message was to **call a
+predicate the codebase already had**. `crate::ast::has_syntax_errors` existed, was
+already used by `syntax_regressed` in the same subsystem, and answers exactly the
+question the hint was guessing at. When an error message asserts a cause, look for
+an existing check that can test it — an assertion is a hypothesis, and hypotheses
+in this codebase are usually testable in one call.
+
+**Confirming data points:**
+1. This session — three-way split prevented reopening BUG-051; the message now
+   discriminates, with a counterweight test per branch.
+2. Kin: the `2c8690b5` gap-2 fix the same day, where the sibling-drop *check* was
+   right and only its **scope** (descendants counted as siblings) was wrong — the
+   same "the guard is fine, its inputs/output are not" shape.
+
+**Impact:** high. The failure mode it avoids is un-fixing a corruption guard in
+pursuit of ergonomics, which is the most expensive direction to be wrong in.
+
+**Promote-when:** a third instance. Then fold into the recon SKILL as a triage
+question: *"is the guard wrong, or is its explanation wrong, or is it compensating
+for a missing capability?"*
 
 **Status:** validated.
 
