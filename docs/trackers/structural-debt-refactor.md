@@ -112,3 +112,39 @@ survived; recorded rather than fixed, because an entry-grain update is a feature
 
 Baseline re-run after both fixes: **3818 passed / 0 failed / 50 ignored** —
 unchanged, as a behaviour-preserving change requires.
+
+### 2026-08-15 — SD-1a swept; SD-1's own measurement was wrong by an order of magnitude
+
+`experiments:53796432` (not-yet-on-master) repointed **95** archived bug-file
+citations across 86 `.rs` files. SD-1 had recorded "7 distinct stale paths, 12
+occurrences." The true figure: **111 unique bug files cited across 94 files — 10
+live, 95 archived-and-stale, 6 nonexistent. 86% stale.**
+
+The method is the lesson, and it failed twice in one sitting, both times
+silently:
+
+1. The 7/12 figure came from running `audit_doc_refs` over
+   `--paths 'src/**/*.rs'` — a markdown parser pointed at Rust. It reads
+   `tokio::sync::Semaphore` as a link and reports 33,105 refs, so the handful of
+   `docs/`-shaped findings that surface are an arbitrary fraction, not a count.
+   **A tool used outside its domain does not fail loudly; it answers.**
+2. The follow-up sweep nearly repeated it. A default-mode `grep` reported "50
+   matches in 20 files" with a footer reading "Showing 50 of 50"; `mode="files"`
+   on the identical pattern reported **266 in 94**. Building the substitution
+   list from the first would have swept a fifth of the sites and reported done.
+
+Both are the shape W-39 already tabulated — a count asserted from a method that
+cannot produce it. The correction here is not a bigger number but a different
+instrument: enumerate, classify against the filesystem, then re-classify
+afterwards and require the residual to be zero.
+
+Verification, because a 236-line substitution deserves it: the diff is
+**symmetric** (236 insertions, 236 deletions across 86 files — a pure path
+substitution cannot add or remove a line); post-sweep classification reads
+`live=10 stale=0 gone=6`; a grep for a doubled archive segment returns zero; baseline
+**3818 / 0 / 50** unchanged, `fmt --check` and `clippy --all-targets -D warnings`
+clean.
+
+SD-1 stays **open** on purpose. The sweep fixes today's state; only the gate
+(SD-1b) stops the next archive wave from re-opening it, and that is a feature
+needing a design pass rather than a sweep.
