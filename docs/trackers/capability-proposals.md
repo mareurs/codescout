@@ -330,6 +330,49 @@ and `mcp-integration-ideas-2026-04.md` §5 ("Lifecycle resilience / kill the `/m
 both touch long-running-call behaviour and may already record decisions this entry would otherwise
 rediscover.
 
+
+### Evidence, 2026-08-16 — the missing primitive is *await*, not *background*
+
+Measured over the live-DB corpus (21,638 calls, `user_version >= 2`); full working in
+`docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16.
+
+**This proposal is narrower than it looks.** Latency is one tool: of 1,455 calls over 10s,
+**1,425 are `run_command`**, and all 31 calls over 120s are. No other tool reaches 30s more than
+once. So there is no general async problem to solve — and `run_command` **already has
+`run_in_background`**.
+
+**A reading to avoid.** `run_in_background` shows 140 uses, *every one* under 10s, which invites
+the conclusion "it is never used where it is needed." That is wrong — a backgrounded call returns
+immediately by design, so `<10s` is precisely where it must appear. The feature is working.
+
+**What is actually missing** is the other half of the pair. Backgrounding a job creates a need to
+*wait for it*, and there is no primitive for that — so the wait becomes a **second, foreground,
+blocking call** that hand-rolls a polling loop:
+
+```
+for i in $(seq 1 60); do grep -qE '...' @bg_00000011 && break; sleep 5; done
+gh run watch "$RUN" --interval 20
+```
+
+| >60s `run_command` calls | Calls | Blocked time |
+|---|---|---|
+| All | 95 | 15,707s |
+| Hand-rolled wait loops | **35 (37%)** | **10,075s (64%)** |
+
+One third of the calls consume two thirds of the blocked time. **18 of them (2,371s ≈ 40 min) were
+spent polling a `@bg_` buffer for a job the agent had already backgrounded** — the exact shape of
+"background exists, await does not." The single longest call in the corpus is 25 minutes of
+`gh run watch`.
+
+**Implication for the spec.** Specify an await/wait-for-completion surface over existing background
+jobs — something the client can hold open or poll cheaply — rather than a new async execution
+model. Concretely: a way to block on `@bg_<id>` with a timeout, returning the job's status and
+buffer handle. That converts 35 blocking foreground calls into 35 cheap waits and removes the
+incentive to write `sleep` loops.
+
+**Scope note:** the remaining 90% of the >10s band (1,287 calls, ≈9.1h) is `cargo`
+build/test/clippy. Those are genuine long work, not hand-rolled waiting — but they are the primary
+*consumer* of an await primitive, since they are what a caller would background first.
 ## Anti-goals
 
 - Not a wishlist. An entry without a substrate check ("what exists today, what is missing") is not
