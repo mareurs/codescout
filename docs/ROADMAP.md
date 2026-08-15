@@ -479,8 +479,9 @@ across sessions until OS reboot clears `/tmp`.
 **Context:** the Kotlin concurrent-instance bug file this cited was pruned as a duplicate
 in `c6184884`, after the fix landed in `dc44ac3d` (per-instance system-path, circuit
 breaker, diagnostics). The canonical account is now codescout memory `gotchas` § LSP; the
-one still-open Kotlin bug is
-`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
+last Kotlin bug in that family closed on
+2026-08-15 and is archived at
+`docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
 
 ### Dangerous-Command Audit Log
 

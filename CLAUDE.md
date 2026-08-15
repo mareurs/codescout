@@ -201,8 +201,10 @@ cold start behavior, circuit breaker, and LSP mux details.
 
 **Tracking:** the concurrent-instance failures were fixed in `dc44ac3d` (per-instance
 system-path, circuit breaker, diagnostics); that bug file was pruned as a dupe in
-`c6184884`, so the memory above is the canonical account. Still open:
-`docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
+`c6184884`, so the memory above is the canonical account. The heap/OOM bug is now
+closed too — `-Xmx2g` (`3adb66e7`), watchdog actuation, and a mem-kill that counts
+toward the LSP circuit breaker (`89f5d591`) — archived at
+`docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
 
 ## Docs
 

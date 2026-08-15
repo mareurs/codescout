@@ -89,6 +89,8 @@ time_scope: open-ended
 | F-41 | 2026-08-14 | high | plan-prose | fixed-verified | A bug file's argument for **not** fixing was itself false: `c7ba92f5` called both cases "status-string-only" and reasoned that widening the shared classifier was "strictly riskier". The classifier had 4 consumers, 3 of them live; the live path was already wrong, so widening was the fix, not the risk |
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 | F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
+| F-47 | 2026-08-15 | med | self-friction | fixed-verified | Implemented a guard exemption, shipped it, and reverted it within the hour — the bug file described the refusal as an oversight, and it had both a dedicated test and purpose-built hint machinery, each one `grep` away |
+| F-48 | 2026-08-15 | med | tooling | fixed-verified | A name-filtered `cargo test` gave false confidence: `--lib guard_` did not match `edit_file_warns_hint_suggests_remove_when_new_empty`, so the change that broke it passed its own targeted run and was committed |
 | F-46 | 2026-08-15 | med-high | self-friction | fixed-verified | An existing integration test asserted `msg.contains("AST parse failed")` on a **syntactically perfect** fixture — it had been corroborating a false explanation of its own scenario since it was written, and made correcting the message look like a regression |
 | F-45 | 2026-08-15 | low | codescout-tool | wontfix-by-design | The `edit_file` string-literal residual I documented an hour earlier bit me writing the very next hint: prose containing `impl ` inside a string literal was refused. Cost one rephrase. Evidence FOR the deliberate over-block, not against it |
 | F-44 | 2026-08-14 | med | codescout-tool | fixed-verified (half) | `edit_file` and `edit_code` deadlock on "add a method to a trait impl nested in a test fn". `edit_file` half **fixed** in `138de7c5` (unanchored per-line keyword match — `via_trait ` matched `trait `); `edit_code` half open. **Two of my own claims in this entry were overstated and are corrected in its body** |
@@ -130,6 +132,8 @@ time_scope: open-ended
 | W-24 | 2026-07-07 | med | Trace actual code (WAL pragma, absence of `wal_checkpoint`/`Drop`) before asserting a cross-project causal hypothesis, and label confidence explicitly | Without tracing `Catalog::open`, the answer to "could our force-kills cause the Mercury BOM catalog bug" would have been unciteable speculation; code + this session's own 3-concurrent-process observation produced a specific, appropriately-hedged (medium confidence) hypothesis addition instead | validated |
 | W-31 | 2026-08-14 | med | `references` before instrumenting, when the question is "which path reaches X at runtime" | The bug prescribed a temporary `tracing::warn!` + full-suite run + revert; `references` returned ONE production caller in one call, and following it explained why the leak is specific to the default cargo-test lane — which the instrumentation would not have shown | validated |
 | W-32 | 2026-08-14 | high | Run the bug's reproduction BEFORE reading its fix plan — the plan is a hypothesis about the reproduction | Three fixes changed on contact: a 1-field bug was 5 fields (a per-field fix would have repeated the July defect), a "parses fine" claim split into loud vs silent by the neighbouring key, and one fix direction INVERTED once fastembed's real 512-token ceiling was measured | validated |
+| W-39 | 2026-08-15 | high | Reproduce before trusting the filing — measured across a whole backlog | Fourteen bugs closed in one drive; **eleven had a filing whose reasoning was weaker than its own code**. Not wrong about the symptom — wrong about cause, scope, or what was already true. Three recurring shapes: absence claims ("no test discriminates", "no workaround exists", "reproduces only on Windows"), count-vs-category generalisation, and false comments about a peer component. Trusting any one filing's fix section would have produced the wrong change | validated |
+| W-40 | 2026-08-15 | med-high | Time the subject against a trivial control on the same connection | A ~990 ms `semantic_search` was filed with ~950 ms unaccounted. Measuring it alone would have produced another bare number; measuring it beside `tools/list` (1 ms) and `tree depth=1` (39.5 ms) over one MCP session turned it into a breakdown — and showed the headline finding, that the figure is now **127 ms** and its largest identified slice is per-call dispatch shared by every tool | validated |
 | W-38 | 2026-08-15 | high | Separate a safety guard's REFUSAL from its DIAGNOSIS | `insert position="after"` looked broken. Split three ways it wasn't: the refusal is correct (BUG-051, would splice mid-body), the *message* was the defect (asserted "AST parse failed" on files that parse), and the real limit is an LSP/AST asymmetry belonging to the extractor. Treating it as one bug would have reopened a closed corruption bug. Also: the codebase already had `has_syntax_errors` sitting next to an error that *guessed* about syntax errors | validated |
 | W-37 | 2026-08-14 | high | Mutation-test the TEST, not only the code | The first version of the prefix regression test exercised the inherent `dense_query`/`dense_document` and would have passed with the trait method wired to `dense_query` — which is precisely where the defect lived. Mutation exposed the wrong-layer coverage; the fixed test then failed with mockito reporting the QUERY mock hit twice | validated |
 | W-36 | 2026-08-14 | high | Refuse a default trait impl and the compiler becomes your enumerator | Adding `embed_document`/`embed_document_one` with NO default made `cargo check` list all five implementors, exactly matching the prediction. A default would have compiled silently and left every implementor free to keep inheriting the query method — i.e. the bug. The repo already had this precedent in `known_dim`'s doc comment | validated |
@@ -3120,6 +3124,166 @@ question: *"is the guard wrong, or is its explanation wrong, or is it compensati
 for a missing capability?"*
 
 **Status:** validated.
+
+## F-47 — Implemented and shipped a guard exemption, then reverted it within the hour
+
+**Observed:** 2026-08-15, working the `edit_code`-cannot-remove-a-non-empty-module
+bug down to its last two gaps.
+
+**When:** Gap 3 — *"`edit_file`'s filter refusing pure deletions"*. The bug file
+presented it as an oversight (*"the filter fires on deletions just as much as
+insertions"*) and recommended a narrow exemption for `new_string.is_empty()`. I
+agreed, implemented it, wrote five tests, ran a targeted suite, and committed
+(`80350afe`).
+
+**Expected:** a small ergonomic fix to an over-broad guard.
+
+**Got:** the full-workspace run failed on
+`edit_file_warns_hint_suggests_remove_when_new_empty`, which asserts that exact
+refusal — and `infer_edit_hint` turned out to carry machinery built *specifically*
+to route the deletion case to `edit_code(action='remove')`. **The block was a
+contract with purpose-built support, not an oversight.** Reverted in `9b902e0a`.
+
+**Probable cause:** I took the filing's framing at face value on a *refusal*. Both
+pieces of counter-evidence — the test and the hint branch — were one `grep` on the
+error string away. My supporting argument was also backwards: I reasoned that
+`edit_code(remove)` is unavailable exactly when its naming fails, so the fallback
+must work — but those naming failures were two separate open bugs, and **the fix
+for a dead end is to open the road, not remove the guardrail beside it.** (Both
+were then fixed properly in `b2bc8edb`.)
+
+**Workaround / correction:** exemption reverted; the refusal is now recorded as a
+decision by `guard_blocks_pure_deletion_of_a_nonempty_module`, which points at its
+hint sibling so the next reader finds both halves together.
+
+**Severity:** med — two commits and roughly an hour, no shipped defect. The suite
+caught it, which is the system working; the cost was avoidable by one search.
+
+**Status:** fixed-verified — reverted, documented in the archived bug file's § Gap 3,
+and generalised as R-85.
+
+**Fix idea / Pointer:** before *removing or widening* a refusal, grep the refusal's
+message string across the repo. A refusal with a dedicated test, a dedicated error
+branch, or bespoke hint text is a designed contract. Absence of all three is the
+only evidence that it was incidental.
+
+## F-48 — A name-filtered test run gave false confidence and let F-47 reach a commit
+
+**Observed:** 2026-08-15, immediately downstream of F-47.
+
+**When:** After changing `guard_structural_rewrite`, I verified with
+`cargo test --lib guard_` — 29 tests, all green, including the five I had just
+written.
+
+**Expected:** the filter `guard_` covers the guard's tests.
+
+**Got:** it covers the tests *named* `guard_*`. The test that actually pinned the
+behaviour I changed is called
+`edit_file_warns_hint_suggests_remove_when_new_empty` — named for the **hint** it
+asserts, not for the guard it exercises. The filter missed it, the targeted run was
+green, and the change was committed. Only `cargo test --workspace` caught it.
+
+**Probable cause:** a name filter selects by *naming convention*, not by
+blast radius, and the two diverge exactly where a test is named for its subject
+(the hint) rather than its mechanism (the guard) — which is usually the *better*
+test name.
+
+**Workaround:** run the full suite before committing a change to shared code, and
+treat a filtered run as a fast inner loop only.
+
+**Severity:** med — it is the mechanism that let a wrong change reach a commit. On
+its own it is cheap; combined with F-47 it converted a search-first mistake into a
+revert.
+
+**Status:** fixed-verified — every subsequent fix this session ran
+`cargo test --workspace` before commit.
+
+**Fix idea / Pointer:** when the change is to a *shared guard or helper*, derive the
+test set from `references(symbol=...)`, not from a name filter. The callers are the
+blast radius; the name is a guess about it.
+
+## W-39 — Reproduce before trusting the filing — measured across a fourteen-bug drive
+
+**Observed:** 2026-08-15, closing the `docs/issues/` backlog to its floor.
+
+**Pattern:** For every bug, reproduce the reported condition on HEAD *before*
+reading its § Fix as guidance. Treat the filing's cause, scope and counts as
+hypotheses to re-derive, not as findings to build on.
+
+**Counterfactual:** Of fourteen bugs closed, **eleven had reasoning weaker than
+their own code**, and following the filing would have produced the wrong change in
+each:
+
+| Filing said | Code said |
+|---|---|
+| "no test asserts either behaviour" (`format_hover`) | `hover_with_code_fence` asserted the discriminating pair already |
+| "machine-specific path" (sweep scripts) | `code-explorer` is **this repo's** pre-rename name — the default meant the repo root |
+| "reproduces only on a Windows host" (clippy) | reproduced on Linux via an installed cross target, and 1 of 3 lints was already gone |
+| "no workarounds found" (CyberArk) | `default` features carry no `ort` at all |
+| "insert cannot place a module at file scope" | `find_parent_symbol` returns `None` for top-level anchors — documented in its own doc comment |
+| "companion behaves as if drift is on" (state-protocol) | the match is fail-**closed**; removal disables it |
+| "the 8 highs are historical sections" | 10 highs, three classes, one a real broken ref |
+| "symbols is lax / edit_code is strict" | three producers disagree; a **false code comment** said two of them agreed |
+| "~950 ms unaccounted" | 127 ms, and the largest slice is dispatch shared by every tool |
+
+The three recurring shapes are worth naming: **absence claims** (cheapest to write,
+most expensive to trust, because checking one means searching rather than reading);
+**count-vs-category generalisation** (R-84); and **false comments about a peer
+component** — `// This matches how LSP reports symbols` was not a stale note, it was
+the root cause, because nobody reconciled the two producers *while the comment said
+they already agreed*.
+
+**Confirming data points:** eleven of fourteen, this session. Prior: R-59, R-78,
+R-80 record the same failure with smaller samples.
+
+**Impact:** high — the discipline is what separated "close 14 bugs" from "make 11
+wrong changes and close 14 bugs".
+
+**Promote-when:** already load-bearing. CLAUDE.md's bug-tracking section should gain
+one line: *a bug file's § Root cause and § Fix are hypotheses until re-derived on
+HEAD; its § Symptom is the only part written from observation.* Promote at the next
+CLAUDE.md edit.
+
+**Status:** validated — nine tabulated instances in a single work stream.
+
+## W-40 — Time the subject against a trivial control on the same connection
+
+**Observed:** 2026-08-15, closing the `semantic_search` latency bug.
+
+**Pattern:** To attribute latency, measure the subject *and* a deliberately trivial
+case over the **same** live connection, warm, median of N. The control is what turns
+a number into a breakdown.
+
+**Counterfactual:** The bug asked where ~950 ms of a ~990 ms call went. Measuring
+`semantic_search` alone yields *127 ms* — better, and still uninterpretable: is that
+retrieval, dispatch, or transport? With two controls on the same session the answer
+is structural rather than speculative:
+
+| case | median ms | what it bounds |
+|---|---|---|
+| `tools/list` | 1.0 | JSON-RPC transport floor |
+| `tree` depth=1 | 39.5 | tool dispatch + context, common to every tool |
+| `semantic_search` limit=1 | 122.2 | fixed per-call cost |
+| `semantic_search` limit=10 | 126.9 | + per-hit cost (only 4.7 ms) |
+
+The limit=1/limit=10 pair **refuted** the filed overfetch-payload hypothesis with
+four lines of output. The `tree` control produced the finding that outlived the bug:
+~39 ms of dispatch is paid by *every* tool, and is now the largest identified slice
+of a search — filed separately, because calling it "semantic_search is slow" would
+repeat the exact mis-attribution the bug was opened to correct.
+
+**Confirming data points:** one, but decisive — it closed a bug that had been open
+since 2026-08-07 with four untested hypotheses.
+
+**Impact:** med-high — cheap (a ~120-line probe script), and it converts "X is slow"
+into "X costs A + B + C, of which B is not X's".
+
+**Promote-when:** a second performance investigation uses the control pattern and
+reaches a component-level attribution. At two datapoints, promote to the recon SKILL
+as a measurement rule.
+
+**Status:** validated — single datapoint, but it produced both a refutation and a
+new separately-filed finding.
 
 ## Template for new entries
 
