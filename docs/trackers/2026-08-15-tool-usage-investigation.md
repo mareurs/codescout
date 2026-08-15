@@ -54,7 +54,7 @@ Overall error rate by month — improving:
 | TU-2 | IL1's always-loaded text grants line-range reads without the overlap condition | **filed** — `docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md` (`32984694`, corrected `9746a5f0`) |
 | TU-3 | A write-scope denial does not name `approve_write` | **filed** — `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md` (`32984694`) |
 | TU-4 | Conditionally-required params are advertised as optional | **filed** — `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md` (`70d3ad76`) |
-| TU-5 | 31% of errors carry no `err_family` — the ranking's own blind spot | **open**, not filed |
+| TU-5 | 31% of errors carry no `err_family` — the ranking's own blind spot | **fixed** — taxonomy extended + `BACKFILL_VERSION` bumped. **Headline corrected: 31% was a lifetime figure; live-DB rate was 19.8%, now 2.9%.** See § History |
 | TU-6 | `ast_extent_fail`'s hint blamed syntax errors on files that parse | **already fixed** `cafa4b37`, same day — near-miss, see § Method caveats |
 | TU-7 | Two high-volume guards are healthy and must not be "fixed" | **no action** — negative result, recorded so it is not re-litigated |
 | TU-8 | Routing is 45% of all errors — and is broadly working | **no action** — negative result, see § Tool sweep |
@@ -370,3 +370,91 @@ One method caveat was added from this pass and is worth applying elsewhere: **ad
 compliance systematically understates any guard whose correct recovery involves a lookup first.**
 Measured on the next call alone, `edit_file`→`edit_code` compliance is 45%; within three calls it is
 74%. The first number would have justified a redesign that the second shows is unnecessary.
+
+### 2026-08-15 — TU-5 closed, and its own headline corrected
+
+**The 31% was wrong in the direction this document warns about.** § Method caveats 1–2 say
+lifetime aggregates are project-confounded and hide trajectories — and TU-5's headline was a
+lifetime aggregate. Splitting the corpus by `PRAGMA user_version` separates two populations that
+must not be added together:
+
+| Population | DBs | Unclassified | Why |
+|---|---|---|---|
+| **Frozen** | `code-explorer.old`, `headroom`, `hermes-agent`, `topictracker`, `opencode` | **660 (77%)** | `user_version=0`, last written May/Jun. `backfill_legacy_rows` only runs *on open*, and nothing opens them again — they never received the iron-law taxonomy and never will. |
+| **Live** | `codescout`, `prompt-engineering`, `claude-plugins`, `pi`, `researcher`, `whatsapp` | **197** | `user_version=2`, actively written. |
+
+660 + 197 = 857 exactly. So the actionable rate was **197/997 = 19.8%**, not 31% — the lifetime
+figure measured dead history, not the current surface. **Rank on live DBs only.**
+
+**The load-bearing repair was not the arms — it was the version bump.** `backfill_legacy_rows` is
+gated on `PRAGMA user_version >= BACKFILL_VERSION`, so extending `normalize_err_family` without
+bumping the constant leaves every already-backfilled DB's history NULL and tags only future rows.
+That coupling is now pinned by `backfill_reruns_when_the_taxonomy_version_advances`, which seeds a
+DB at the *previous* version and asserts a new family appears on reopen. `BACKFILL_VERSION` 2 → 3.
+
+**13 families added**, sized against the live population, covering 168/197 (85%):
+`missing_required_param` (38) · `json_path_key_miss` (27) · `librarian_managed_artifact` (25) ·
+`target_already_exists` (17) · `heading_not_found` widened to artifact's `body_edits` (14) ·
+`path_not_found` (13) · `unknown_enum_value` (8) · `ambiguous_heading` (7) · `buffer_ref_expired` (6) ·
+`invalid_regex` (5) · `ambiguous_old_string` (4) · `destructive_replace_blocked` (3) ·
+`edit_would_break_syntax` (3) · `edit_markdown_wrong_ext` (1).
+
+Two splits were deliberate, because the *repair* differs and a merged family would make the ranking
+undecidable:
+
+- `old_string **not found**` (→ `edit_stale_match`, re-read the file) vs `old_string **found N
+  times**` (→ `ambiguous_old_string`, add context).
+- `unsupported json_path` (bad syntax) vs `path segment not found` (valid syntax, wrong key for
+  *this* buffer's shape).
+
+The residual 29 are genuine one-offs; a family per message would break the low-cardinality contract
+the function documents.
+
+**Post-fix ranking (live, 997 errors).** Routing guards still dominate — TU-8's negative result
+holds, and strengthens: `il1` 245 · `il3_pipe` 223 · `il3_shell` 111 · `il2` 53. The reordering that
+matters is below them: **`missing_required_param` (38 hits / 20 sessions) is now the largest
+non-routing family**, which is the priority evidence TU-4 and TU-9's filed bug previously lacked.
+`json_path_key_miss` (27 / 17 sessions) is new and **compounds TU-1** — it is the overflow-recovery
+hint failing at the next step, where the agent guesses a key (`$.summary` most often) against a
+buffer shape that has none.
+
+**Not added, deliberately:** `edit_file is blocked for source code files (debug_enforce_symbol_tools
+is enabled)` — 26 lifetime hits but **0 on live DBs**. The message text changed; an arm for it would
+be dead code on arrival. Same for `file has no frontmatter block` (14 lifetime, 0 live).
+
+**Still open from § Still unpulled:** latency/timeout profile, per-tool overflow rates,
+`friction_target` aggregation. Unchanged by this pass.
+
+#### Verified end-to-end, then a second gap found in the fix itself
+
+After `cargo rb` + `/mcp`, codescout's own DB re-backfilled to `user_version=3`: **184 → 26
+unclassified of 923 errors (2.8%)**, against a predicted 2.9%. All 13 families populate on real
+rows. The other live DBs remain at v2 until their projects are next activated.
+
+Reading the *new* residual surfaced a defect class the first pass had seen only once and not
+named: **the taxonomy was written tool-by-tool, so wherever two tools share a failure mode, only
+the first-written tool got an arm.** Three instances, not one:
+
+| Has an arm | Twin with none | Shared failure |
+|---|---|---|
+| `read_markdown` wrong-ext | `edit_markdown` | non-`.md` path (fixed in v3) |
+| `grep` “buffer reference not found” | `run_command` “background job ref not found” | expired `@ref` — *identical hint text* |
+| `read_markdown` invalid-line-range | `read_file` | range past EOF / inverted |
+
+v4 closes the latter two: **7 more rows, residual 26 → 19 (2.1%)**. Takes effect on the next
+release build. When adding any arm, check the twin tool first — this is now 3-for-3.
+
+#### Correction — what the version test does NOT guarantee
+
+The v3 entry above claimed `backfill_reruns_when_the_taxonomy_version_advances` “fails if someone
+adds an arm and forgets the bump.” **That is false, and the weakness survived a rewrite of the
+test.** Seeding at `BACKFILL_VERSION - 1` guarantees the backfill runs, so the probe family fills
+whether or not the constant was bumped for the new arms. The test proves the *mechanism* re-runs on
+advance; it cannot detect a taxonomy that grew without advancing.
+
+No unit test can, while the gate is a hand-maintained integer — the coupling is between the
+classifier's *content* and a number no code derives from it. The sound fix is to stop maintaining
+it: gate the backfill on a **fingerprint of the emittable family set** rather than an integer, so
+adding an arm changes the fingerprint and triggers re-classification with no human step at all.
+Until then the bump is a convention held by the comment on `BACKFILL_VERSION`, not by the suite —
+and it should be treated as such.
