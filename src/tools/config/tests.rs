@@ -378,7 +378,7 @@ async fn status_reports_the_live_backend_and_what_is_compiled_in() {
 /// network config for one that cannot build anything, so the expectation is now
 /// feature-aware. I1's original assertion is preserved verbatim for every build
 /// that has the feature — which is every default build, including CI's.
-/// docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
+/// docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
 #[tokio::test]
 async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends() {
     let dir = tempdir().unwrap();
@@ -452,7 +452,7 @@ async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_co
 }
 
 /// The sibling above covers the `ollama:` half of
-/// `docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md`.
+/// `docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md`.
 /// This covers the other half: a **bare** model name with no url. Arm 6 of
 /// `create_embedder_with_config` resolves such a name as a local ONNX model, so
 /// with `local-embed` compiled in the live backend really is `LocalEmbedder` and
@@ -1807,7 +1807,7 @@ fn format_activate_project_prepends_warning_with_none_stored_version() {
 /// is false in the shipped configuration: `cargo rb` compiles `server-stack`, and with
 /// a reachable Qdrant the probe does real work. It then failed for a real reason (the
 /// probe enumerated the whole corpus — see
-/// `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`),
+/// `docs/issues/archive/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`),
 /// and after that fix it still failed under full-suite load, because "a network round
 /// trip finishes inside two seconds" is not a property a unit test controls.
 ///

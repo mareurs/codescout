@@ -345,7 +345,7 @@ pub fn collect_all_name_paths(
 /// overshot into adjacent code (likely a stale LSP range)" is a wrong diagnosis of
 /// a correct operation. It also rolled the removal back, so removing a non-empty
 /// module was not possible at all. See
-/// `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md` gap 2.
+/// `docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md` gap 2.
 ///
 /// Descendancy is decided by the `<target>/` name-path prefix, which is how the
 /// AST extractor nests them (`mod foo` → `foo/bar`, `impl X for Y` → `impl X for
@@ -423,7 +423,7 @@ pub fn syntax_regressed(pre_source: &str, post_source: &str, lang: &str) -> bool
 /// then skipped the sibling-drop check too (it was gated on `post_ast` being `Some`).
 /// Both safety nets silently disengaged in exactly the case where the file was most
 /// suspicious, and `.ok()` threw away the reason. See omnibus
-/// `docs/issues/2026-07-10-subagent-bughunt-omnibus-medium-low-findings.md`, F10.
+/// `docs/issues/archive/2026-07-10-subagent-bughunt-omnibus-medium-low-findings.md`, F10.
 ///
 /// A failure to re-extract is now its own verdict (`Unverified`) rather than being
 /// laundered into `Clean`.
@@ -706,7 +706,7 @@ pub fn text_sweep(
 
     // Pre-cap file total, so callers can signal truncation instead of deriving
     // counts from the already-truncated vec (silent-cap family — see
-    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
     let total_files = file_matches.len();
     file_matches.truncate(max_matches);
 
@@ -1047,7 +1047,7 @@ mod tests {
     /// The bug this exists for: a removed module's own children were reported as
     /// dropped siblings, which both misdiagnosed a correct operation and rolled it
     /// back — so a non-empty module could not be removed at all.
-    /// docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md gap 2
+    /// docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md gap 2
     #[test]
     fn removing_a_module_does_not_report_its_own_children_as_dropped_siblings() {
         let pre = set(&["mod_a", "mod_a/inner", "keep_me"]);

@@ -722,7 +722,7 @@ fn pipeline_segments(command: &str) -> Vec<String> {
 /// wastes a tool call. Server-side enforcement covers all MCP clients (Claude
 /// Code, Copilot, Gemini, …) — companion-plugin hooks are Claude-Code-specific
 /// and miss subagent contexts (see
-/// `docs/issues/2026-05-18-il3-pipe-violation-subagent.md`).
+/// `docs/issues/archive/2026-05-18-il3-pipe-violation-subagent.md`).
 ///
 /// **Pure aggregators on the RHS are allowed** — they collapse output to a
 /// bounded summary you cannot reconstruct from a partial view, so piping to them
@@ -737,7 +737,7 @@ fn pipeline_segments(command: &str) -> Vec<String> {
 /// **Bounded LHS is allowed.** The original rule blocked any allowlisted LHS
 /// piped to a trimmer; this over-triggered on ad-hoc finite probes
 /// (`ls <dir> | head`, `grep <pat> <one-file> | wc`, `cat <file> | grep`) —
-/// see `docs/issues/2026-05-18-il3-overtriggers-bounded-lhs.md`. Only LHS
+/// see `docs/issues/archive/2026-05-18-il3-overtriggers-bounded-lhs.md`. Only LHS
 /// shapes known to produce arbitrarily large output are blocked now:
 ///
 ///   - **Unbounded prefixes:** `cargo`, `npm`, `pnpm`, `yarn`, `python`,
@@ -1385,11 +1385,11 @@ mod tests {
 
     #[cfg_attr(
         target_os = "windows",
-        ignore = "Windows lacks /tmp; absolute Unix-path test inputs need a portable rewrite. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+        ignore = "Windows lacks /tmp; absolute Unix-path test inputs need a portable rewrite. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
     )]
     #[cfg_attr(
         target_os = "macos",
-        ignore = "/tmp → /private/tmp symlink; allowlist comparison happens before canonicalization on macOS, see docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md"
+        ignore = "/tmp → /private/tmp symlink; allowlist comparison happens before canonicalization on macOS, see docs/issues/archive/2026-05-24-ci-macos-tempdir-canonicalization.md"
     )]
     #[test]
     fn write_to_tmp_allowed() {
@@ -2433,7 +2433,7 @@ mod tests {
 
     #[cfg_attr(
         target_os = "windows",
-        ignore = "/ is not the Windows filesystem root; needs platform-specific drive-root rejection logic. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+        ignore = "/ is not the Windows filesystem root; needs platform-specific drive-root rejection logic. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
     )]
     #[test]
     fn validate_approve_path_rejects_filesystem_root() {
@@ -2544,7 +2544,7 @@ mod tests {
     #[test]
     fn il3_allows_grep_single_file_pipe_sort() {
         // Bounded LHS — single file arg, no recursive flag. Allowed per
-        // docs/issues/2026-05-18-il3-overtriggers-bounded-lhs.md.
+        // docs/issues/archive/2026-05-18-il3-overtriggers-bounded-lhs.md.
         assert!(detect_il3_violation("grep -oE 'pat' src/lib.rs | sort -u").is_none());
     }
 

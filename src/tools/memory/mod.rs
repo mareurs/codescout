@@ -352,7 +352,7 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
 
     // `embed_document`, not `embed`: this is a document being stored. `embed` is
     // the query side and carries an asymmetric model's query prefix.
-    // docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    // docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
     let dense = ctx
         .agent
         .memory_embedder()
@@ -965,7 +965,7 @@ impl Tool for Memory {
                 let store = ctx.agent.semantic_memory_store().await?;
                 // Overfetch limit+1 to detect that more memories match than the
                 // page shows (silent-cap family — see
-                // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+                // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
                 let mut hits = store
                     .search(&project_id, &query_vec, limit + 1, bucket_filter)
                     .await?;

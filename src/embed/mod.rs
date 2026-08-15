@@ -26,7 +26,7 @@ pub use codescout_embed::{Embedder, Embedding};
 /// on this one function is what guarantees the guard counts exactly the files
 /// the indexer will embed — the two previously diverged (the guard walked a
 /// different tree and counted every file regardless of extension; see
-/// `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`).
+/// `docs/issues/archive/2026-06-02-preflight-sync-walker-divergence.md`).
 ///
 /// Matching is case-sensitive on the raw extension, mirroring `sync_project`'s
 /// historical behaviour (e.g. `README.MD` is *not* treated as markdown here).

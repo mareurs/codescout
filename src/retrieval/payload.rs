@@ -34,7 +34,7 @@ pub struct CodePayload {
 /// embedder: the legacy `embed::index` path that prepended it was deleted in
 /// `66db4c70`, and the test that pinned the `{header}\n{content}` contract
 /// (`embed_text_format_includes_metadata_prefix`) went with the module it lived in.
-/// See `docs/issues/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`.
+/// See `docs/issues/archive/2026-08-08-metadata-header-computed-but-never-embedded-or-stored.md`.
 ///
 /// Changing what a chunk looks like to the embedder means changing this function and
 /// nothing else.

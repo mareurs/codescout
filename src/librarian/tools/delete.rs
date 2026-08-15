@@ -205,7 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_succeeds_for_active_project_absent_from_legacy_roots() {
-        // Regression for docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md:
+        // Regression for docs/issues/archive/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md:
         // under the `[[project]]` model the active project lives in `current_project`,
         // not in `workspace.roots`. The guard must honor it, else every delete in such
         // a project fails with "outside every workspace root".

@@ -165,7 +165,7 @@ fn build_hints(
     // More matched in THIS scope than were returned on this page? The result
     // set is capped by `limit`/`offset`; without this signal an agent reads the
     // returned page as the complete set (silent-cap bug — see
-    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
     let shown_through = offset.saturating_add(returned_count);
     let more_in_scope = here.saturating_sub(shown_through);
     if more_in_scope > 0 {
@@ -220,7 +220,7 @@ fn build_hints(
     // suggesting scope="all" there just re-aliases to umbrella (self-referential,
     // and it counts extra-umbrella catalog rows the alias can never reach).
     // Excluding Umbrella keeps this hint reachable and non-self-referential.
-    // See docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md (sub-finding #2).
+    // See docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md (sub-finding #2).
     if !matches!(applied.scope, Scope::All | Scope::Umbrella)
         && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
@@ -956,7 +956,7 @@ mod tests {
 
     #[tokio::test]
     async fn scope_all_does_not_self_reference_expand_hint() {
-        // BUG (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md,
+        // BUG (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md,
         // sub-finding #2): passing scope="all" aliases to umbrella
         // (applied="umbrella"). build_hints counted rows OUTSIDE the umbrella —
         // unreachable, since "all" always re-aliases to umbrella — and emitted
@@ -1030,7 +1030,7 @@ mod tests {
     #[tokio::test]
     async fn more_in_scope_signals_capped_page() {
         // Regression for the silent-cap family: a limit-capped page must signal
-        // that more match in scope. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        // that more match in scope. docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
         let cat = Catalog::open_in_memory().unwrap();
         for i in 0..3 {
             artifact::upsert(&cat, &sample_row(&format!("id{i}"), &format!("t{i}"))).unwrap();

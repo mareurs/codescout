@@ -144,7 +144,7 @@ fn apply_frontmatter_patch(
 /// its section's children; the flag only decides whether that is an error or a
 /// permitted operation, so without this list the caller gets no signal at all
 /// when the whole-file shrink guard is satisfied by a net-larger write.
-/// See `docs/issues/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
+/// See `docs/issues/archive/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
 fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) -> Result<String> {
     let mut buf = working.to_string();
     for (i, edit) in edits.iter().enumerate() {
@@ -443,7 +443,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // file or upserting the row. merge_params (below) re-validates and persists;
     // pre-checking here keeps the update atomic — a schema violation must abort
     // before any mutation, never after the body has already been written.
-    // docs/issues/2026-06-13-artifact-update-body-applies-before-params-validation.md
+    // docs/issues/archive/2026-06-13-artifact-update-body-applies-before-params-validation.md
     if let Some(params_patch) = &patch.params {
         crate::librarian::catalog::augmentation::validate_params_patch(&cat, &a.id, params_patch)?;
     }
@@ -735,7 +735,7 @@ mod tests {
         assert_eq!(row.status, "archived");
     }
 
-    /// Regression: docs/issues/2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md
+    /// Regression: docs/issues/archive/2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md
     /// The tool schema documents `create/update: set status` as a top-level
     /// param. `create` honored it; `update` dropped it via serde while still
     /// returning `updated: true` — a silent partial success.
@@ -1315,7 +1315,7 @@ mod tests {
     /// to notice "replace is about to wipe a nested heading" was skipped by
     /// the very flag that permits the wiping, and the whole-file shrink guard
     /// cannot compensate: a net-larger write passes it by construction.
-    /// See `docs/issues/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
+    /// See `docs/issues/archive/2026-08-06-body-edits-section-replace-silent-data-loss.md`.
     #[test]
     fn body_edits_include_subsections_reports_what_it_destroyed() {
         let body = "## Wins\n\n### W-1 — first win\n\nBody of W-1.\n\n### W-2 — second win\n\nBody of W-2.\n";
@@ -1559,7 +1559,7 @@ mod tests {
     }
     #[tokio::test]
     async fn params_schema_violation_leaves_body_unchanged() {
-        // Regression: docs/issues/2026-06-13-artifact-update-body-applies-before-params-validation.md
+        // Regression: docs/issues/archive/2026-06-13-artifact-update-body-applies-before-params-validation.md
         // A schema-violating params patch must abort BEFORE the body write, so a
         // combined {body, params} update is atomic — never body-written-but-params-stale.
         let tmp = TempDir::new().unwrap();

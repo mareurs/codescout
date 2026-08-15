@@ -31,7 +31,7 @@ use anyhow::Result;
 /// Exists so tests can *inject* these instead of calling `std::env::set_var`. Mutating
 /// process env in a parallel test binary is UB (glibc may `realloc` `environ` under a
 /// concurrent `getenv`), and the reader set is effectively the whole suite. See
-/// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+/// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
 #[derive(Debug, Clone, Default)]
 pub struct LibrarianEnv {
     /// `LIBRARIAN_WORKSPACE` — path to workspace.toml. `None` → the default config path.
@@ -478,7 +478,7 @@ mod tests {
     // No `#[serial]`: these tests take their workspace/db/registry paths as ARGUMENTS
     // now, so they are isolated by construction. They used to serialize only because
     // they mutated process env, which is UB in a parallel test binary. See
-    // docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
+    // docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
     #[test]
     fn imports_codescout_projects() {

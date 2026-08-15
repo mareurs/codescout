@@ -4,7 +4,7 @@
 //! the full `stream_index` pipeline against the same Qdrant collection and
 //! `project_id`, duplicating the entire embedding workload. Observed 2026-07-27
 //! with four simultaneous runs (3h24m / 2h02m / 1h08m / 1h05m), all orphaned to
-//! `systemd --user`. See docs/issues/2026-07-25-concurrent-index-no-project-lock.md
+//! `systemd --user`. See docs/issues/archive/2026-07-25-concurrent-index-no-project-lock.md
 //!
 //! Deliberately NOT `.codescout/write.lock`: that lock is taken per write-tool
 //! call by `crate::agent::write_guard::WriteGuard`. An index holding it for hours
@@ -122,7 +122,7 @@ pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
 /// `sha256(project_id)`, and its mtime dates the run. That is how a 28-minute
 /// index of an unrelated project was identified on 2026-07-28 after the process
 /// had already exited. See
-/// docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+/// docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
 pub fn acquire(project_id: &str) -> Result<IndexLock> {
     acquire_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
 }
@@ -141,7 +141,7 @@ mod tests {
     /// 2026-07-28: 7 leaked files per `cargo test`, 203 accumulated. A scratch
     /// dir gives strictly better isolation (a different directory, not merely a
     /// different name), so the ids below can be plain literals.
-    /// See docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+    /// See docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
     fn scratch() -> tempfile::TempDir {
         tempfile::tempdir().expect("scratch dir for lock files")
     }
@@ -291,7 +291,7 @@ mod tests {
     /// ("already-per-user `temp_dir()` on Windows"). Asserting the Unix
     /// invariant there fails against a *correct* implementation, which is what
     /// it did: see
-    /// `docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`.
+    /// `docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`.
     /// The platform-independent half of the invariant is
     /// `lock_path_is_sited_in_the_per_user_runtime_dir` below.
     #[cfg(unix)]

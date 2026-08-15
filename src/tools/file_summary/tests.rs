@@ -243,7 +243,7 @@ fn toml_summary_handles_nested_tables() {
 #[test]
 fn markdown_summary_signals_truncated_headings() {
     // Silent-cap regression: >30 headings are capped, so the summary must
-    // report the true total. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+    // report the true total. docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
     let content: String = (0..40)
         .map(|i| format!("## H{i}"))
         .collect::<Vec<_>>()
@@ -471,7 +471,7 @@ fn extract_yaml_key_not_found() {
 fn extract_toml_key_table_past_summary_cap() {
     // >30 tables: a table past the 30-section summary cap must still resolve,
     // not false-error. Regression for the summary-cap false-"not found" bug
-    // (docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md).
+    // (docs/issues/archive/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md).
     let mut content = String::new();
     for i in 0..40 {
         content.push_str(&format!("[table{i:02}]\nval = {i}\n\n"));
@@ -489,7 +489,7 @@ fn extract_toml_key_top_level_scalar_in_mixed_file() {
     // Mixes top-level scalars with tables: summarize_toml emits `sections`
     // (tables exist), so the pre-fix sections-first-then-error path never reached
     // the flat/dotted fallback. The top-level scalar must resolve. Regression for
-    // docs/issues/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md.
+    // docs/issues/archive/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md.
     let content = "edition = \"2021\"\nname = \"foo\"\n\n[deps]\nserde = \"1\"\n";
     let result = extract_toml_key(content, "edition").unwrap();
     assert!(
@@ -544,7 +544,7 @@ fn parse_all_headings_skips_code_blocks() {
 /// four-backtick block. When it did, the phantom heading terminated the
 /// enclosing section early and scoped edits reported `old_string not found`
 /// for text that was byte-present.
-/// docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+/// docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md
 #[test]
 fn parse_all_headings_respects_nested_fence_run_length() {
     let content = "\
@@ -723,7 +723,7 @@ fn resolve_section_range_last_section() {
 fn resolve_section_range_last_h2_in_multi_heading_doc() {
     // Bug-shape: 7 headings (1 H1 + 6 H2), last section is "## Resume" with body
     // and trailing blank line. Regression for
-    // docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md.
+    // docs/issues/archive/2026-05-21-edit-markdown-last-heading-unaddressable.md.
     let content = "# Title\n\
                    intro\n\
                    ## Root cause\n\
@@ -757,7 +757,7 @@ fn resolve_section_range_last_h2_in_multi_heading_doc() {
 
 #[test]
 fn resolve_section_range_last_heading_with_unbalanced_code_fence() {
-    // Regression for docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md.
+    // Regression for docs/issues/archive/2026-05-21-edit-markdown-last-heading-unaddressable.md.
     // If an earlier batch edit leaves an unmatched ``` fence open, the naive
     // toggle-on-every-``` parser flips in_code_block and hides every heading
     // after the unclosed fence. parse_all_headings now detects unbalanced

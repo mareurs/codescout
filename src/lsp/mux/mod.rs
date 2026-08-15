@@ -27,7 +27,7 @@ pub use crate::socket_discovery::workspace_hash;
 /// argument to thread through without pushing a test concern into the LSP
 /// manager's public surface, and an env-var override is off the table (`set_var`
 /// in a parallel test runner is the unsoundness this project has already fixed
-/// twice). See docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+/// twice). See docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
 ///
 /// Nested INSIDE `per_user_mux_dir()` rather than in bare `temp_dir()` so the
 /// `0o700` protection still applies — a predictable path in world-writable `/tmp`

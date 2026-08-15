@@ -7,7 +7,7 @@
 //! one-character lookbehind — which stripped path literals inside file
 //! content and collapsed root-valued fields to the empty string.
 //!
-//! See `docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`
+//! See `docs/issues/archive/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md`
 //! and `docs/superpowers/specs/2026-08-09-field-aware-path-strip-design.md`.
 
 use serde_json::Value;

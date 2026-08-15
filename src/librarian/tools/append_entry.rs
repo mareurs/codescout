@@ -141,7 +141,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_warns_when_params_lags_the_body() {
-        // Regression: docs/issues/2026-07-20-append-entry-id-drift-params-vs-body.md
+        // Regression: docs/issues/archive/2026-07-20-append-entry-id-drift-params-vs-body.md
         // Skipping the colliding id is only half the repair — params is still
         // missing the rows the body documents, so say so.
         let dir = tempfile::tempdir().unwrap();

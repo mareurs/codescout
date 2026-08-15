@@ -65,7 +65,7 @@ mod tests {
     // co-located. Since 2026-07-28 they are not: `lsp::mux::mux_dir()` redirects
     // to a per-process scratch subdirectory under `cfg(test)` so unit tests stop
     // leaking mux lock files into the shared runtime dir
-    // (docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md). The
+    // (docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md). The
     // assertions below only ever concerned the peer path, so they still hold.
     //
     // Name kept despite the imprecision: it is cited as a copy-pasteable

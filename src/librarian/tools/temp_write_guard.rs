@@ -1,7 +1,7 @@
 //! Prevention guard: refuse artifact writes that would land a temp-dir-rooted
 //! artifact in the real/shared (file-backed, outside-temp) catalog — the vector
 //! that polluted the global catalog with /tmp probe rows.
-//! See docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
+//! See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
 
 use std::path::Path;
 

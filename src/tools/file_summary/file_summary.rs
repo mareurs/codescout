@@ -146,12 +146,12 @@ pub fn parse_all_headings(content: &str) -> Vec<HeadingInfo> {
     // contains one). CommonMark would extend that fence to EOF, hiding every
     // heading after it. For an editor tool, that's brittle: we'd rather treat
     // unbalanced fences as plain text and still find the headings. Bug:
-    // docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md
+    // docs/issues/archive/2026-05-21-edit-markdown-last-heading-unaddressable.md
     //
     // This is a real fence scan, not a parity count — a nested shorter run is
     // content, not a delimiter, so counting fence-ish lines called balanced
     // files unbalanced and silently disabled tracking. See
-    // docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+    // docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md
     let fences_balanced = crate::util::markdown_fence::fences_balanced(content.lines());
 
     let mut fence = crate::util::markdown_fence::FenceState::new();
@@ -930,8 +930,8 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     // summarize_toml's 30-section display cap and its sections-XOR-keys
     // branching. Fixes false "not found" for tables past the cap, and the
     // dead dotted/flat-key fallback for files mixing top-level scalars with
-    // tables. See docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
-    // and docs/issues/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md.
+    // tables. See docs/issues/archive/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
+    // and docs/issues/archive/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md.
     let table = content.parse::<toml::Table>().map_err(|e| {
         RecoverableError::with_hint(
             format!("failed to parse TOML: {e}"),
@@ -967,7 +967,7 @@ pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     // Resolve against the FULL (uncapped) top-level key scan, not
     // summarize_yaml's 30-key display cap — fixes false "not found" for keys
     // past position 30. See
-    // docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md.
+    // docs/issues/archive/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md.
     // (Nested-key resolution remains unsupported — a pre-existing feature gap,
     // not a regression; no YAML deserializer is a dependency here.)
     let keys = yaml_top_level_keys(content);

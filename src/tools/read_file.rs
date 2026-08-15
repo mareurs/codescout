@@ -823,7 +823,7 @@ pub(super) fn format_read_file(val: &Value) -> String {
     // Auto-chunked response: shown_lines present means partial read with content.
     // Line numbers are intentionally NOT prefixed — the caller supplied the range,
     // so per-line numbers are redundant noise (and were slice-relative/wrong here
-    // before). See docs/issues/2026-05-21-read-file-slice-relative-line-numbers.md.
+    // before). See docs/issues/archive/2026-05-21-read-file-slice-relative-line-numbers.md.
     if val.get("shown_lines").and_then(|v| v.as_array()).is_some() {
         let total = val["total_lines"].as_u64().unwrap_or(0);
         let complete = val["complete"].as_bool().unwrap_or(true);
@@ -1345,7 +1345,7 @@ mod tests {
         // the default Tool::call_content path because ReadFile did not declare
         // OutputForm::Text. Now both axes reach format_read_file, so sub-threshold
         // reads come through as raw text. Line-number prefixes were removed
-        // (docs/issues/2026-05-21-read-file-slice-relative-line-numbers.md), so the
+        // (docs/issues/archive/2026-05-21-read-file-slice-relative-line-numbers.md), so the
         // content is shown verbatim with no `N| ` prefixes.
         let content = "alpha\nbeta\ngamma".to_string();
         let ctx = test_ctx().await;

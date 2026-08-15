@@ -438,7 +438,7 @@ impl ProjectConfig {
     ///
     /// Pure — takes the values rather than reading `CODESCOUT_EMBED_*` itself, so the
     /// precedence rule is testable without `set_var`. See
-    /// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+    /// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
     pub(crate) fn apply_embed_overrides(&mut self, model: Option<String>, url: Option<String>) {
         if let Some(model) = model {
             self.embeddings.model = model;
@@ -1111,7 +1111,7 @@ model = "local:test"
 
     #[test]
     fn default_ignores_cover_dependency_trees_but_never_plausible_source_dirs() {
-        // docs/issues/2026-07-10-oom-blast-radius-cgroup-cap.md, item 3: broaden the
+        // docs/issues/archive/2026-07-10-oom-blast-radius-cgroup-cap.md, item 3: broaden the
         // default-ignore set so more dependency/cache trees are pruned out of the box.
         let d = default_ignored_patterns();
 

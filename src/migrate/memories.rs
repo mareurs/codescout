@@ -56,7 +56,7 @@ impl MigrationEmbedder for HttpMigrationEmbedder {
         // content, so it must use the document side. `embed_one` is the query
         // seam and applies an asymmetric model's query prefix — routing a
         // migration through it re-creates the very defect a re-embed exists to
-        // repair. docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+        // repair. docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
         Ok(self.inner.embed_document_one(text).await?)
     }
 }
@@ -171,7 +171,7 @@ pub async fn migrate_memories(
 /// store itself holds.
 ///
 /// This is the repair half of
-/// `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`. Fixing
+/// `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`. Fixing
 /// the write path only fixes *future* writes; vectors already stored under the
 /// old convention stay where they are, and once queries move to the corrected
 /// convention those rows are stranded — a real mismatch where before there was
@@ -541,7 +541,7 @@ mod tests {
     /// The vector is replaced; the identity and payload are not. Asserted through
     /// `search` rather than by reaching into the store: a query equal to the fresh
     /// vector must score ~1.0, and one equal to the (orthogonal) seed ~0.0.
-    /// docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    /// docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
     #[tokio::test]
     async fn reembed_in_place_replaces_the_vector_and_preserves_everything_else() {
         let seed = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];

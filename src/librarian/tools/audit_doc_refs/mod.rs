@@ -196,7 +196,7 @@ pub const FAIL_ON_VALUES: [&str; 5] = ["high", "med", "low", "any", "never"];
 /// category error, not drift — one such file supplied 28 of 50 high-severity
 /// findings on 2026-08-06, every one of them correct prose
 /// (`src/pc_kb/corpus.py`, `docs/trackers/mrv-chat-watch/**`, …). See
-/// docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md.
+/// docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md.
 ///
 /// The `src/prompts` payload files are agent-facing instruction text whose
 /// example paths (`src/foo.rs`, `docs/plans/foo.md`, `docs/trackers/foo.md`)
@@ -656,7 +656,7 @@ async fn find_tracker_path(ctx: &ToolContext, id: &str) -> Option<String> {
 /// Pure — takes the count and the cap rather than reading `LIBRARIAN_AUDIT_MAX_FILES`
 /// itself, so the "glob explosion is RECOVERABLE, not a hard failure" contract can be
 /// tested without `set_var`. See
-/// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+/// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
 fn enforce_file_cap(file_count: usize, max_files: usize) -> Result<()> {
     if file_count > max_files {
         return Err(RecoverableError::with_hint(

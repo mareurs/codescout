@@ -461,7 +461,7 @@ async fn onboarding_creates_config() {
 
 #[tokio::test]
 async fn onboarding_honors_workspace_override_pin() {
-    // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+    // BUG (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
     // finding 6): onboarding.rs was never wired for per-request pinning at all —
     // all 16 call sites used the plain require_project_root / with_project /
     // reload_config_if_project_toml. Onboarding WRITES (.codescout/project.toml,
@@ -1742,7 +1742,7 @@ async fn run_command_cwd_rejects_nonexistent_path() {
 
 #[cfg_attr(
     target_os = "windows",
-    ignore = "test uses /var as 'outside project but exists'; no Windows analog (allowed-roots vary). See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+    ignore = "test uses /var as 'outside project but exists'; no Windows analog (allowed-roots vary). See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
 )]
 #[tokio::test]
 async fn run_command_cwd_rejects_path_escaping_root() {

@@ -646,7 +646,7 @@ fn coalesce_small_chunks(
 /// container's body. Both gap branches derive their content from this window, so a
 /// recursion cannot re-emit lines before or after its container that the outer
 /// call has already chunked — see
-/// `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`.
+/// `docs/issues/archive/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`.
 #[allow(clippy::too_many_arguments)]
 fn nodes_to_chunks(
     source: &str,
@@ -1941,7 +1941,7 @@ mod tests {
     /// `prev_end` reset to 0, so its leading-gap branch re-emitted every line
     /// before the container and its trailing-gap branch re-emitted every line
     /// after it. Both are already chunked by the outer call.
-    /// See `docs/issues/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`.
+    /// See `docs/issues/archive/2026-08-06-ast-chunker-recursion-duplicates-leading-gap.md`.
     #[test]
     fn container_recursion_does_not_duplicate_lines_outside_the_container() {
         let source = concat!(

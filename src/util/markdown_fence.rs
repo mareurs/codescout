@@ -18,7 +18,7 @@
 //! rules are enforced here — they are what distinguish a real delimiter from a
 //! line that merely *starts* with backticks.
 //!
-//! See `docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md`.
+//! See `docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md`.
 //!
 //! # Indentation is the caller's business
 //!
@@ -126,7 +126,7 @@ impl FenceState {
 /// and CommonMark would extend it to EOF, hiding every heading after it; an
 /// editor would rather treat unbalanced fences as plain text and keep those
 /// headings addressable. See
-/// `docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md`.
+/// `docs/issues/archive/2026-05-21-edit-markdown-last-heading-unaddressable.md`.
 ///
 /// Pass the lines exactly as the main scan will see them (same trimming), or
 /// the pre-scan and the scan can disagree.

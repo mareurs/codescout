@@ -76,7 +76,7 @@ mod tests {
     /// `escape_like_pattern` itself. A second occurrence means someone
     /// copy-pasted the idiom instead of calling the helper, which is exactly
     /// the footgun that produced the unescaped-LIKE bug in `resolve_cite_ref`
-    /// (see docs/issues/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md).
+    /// (see docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md).
     /// SQL-side `REPLACE(REPLACE(REPLACE(col, ...)))` haystack-escaping
     /// (worktree.rs / merge_worktree.rs) uses SQL string literals, not this
     /// Rust `.replace` signature, so it never false-matches here.
@@ -93,7 +93,7 @@ mod tests {
         // Windows), and walkdir appends OS separators to it, so the actual hit
         // came out mixed (`...codescout/src\librarian\util.rs`) while the
         // expected value used forward slashes throughout. See
-        // docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md
+        // docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md
         let root = normalize_rel_path(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let mut hits: Vec<String> = Vec::new();
         for entry in walkdir::WalkDir::new(&root)

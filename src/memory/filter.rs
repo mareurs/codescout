@@ -46,7 +46,7 @@ fn heading_at(line: &str) -> Option<(usize, &str)> {
 /// nested inside them) keeps `###` boundaries and `####` as body. A fixed `###`
 /// was the original bug — it made `sections=` a no-op on the 15 `##`-only
 /// memories, 87 headings in total.
-/// See docs/issues/2026-07-28-memory-sections-filter-matches-h3-only.md.
+/// See docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md.
 fn boundary_level(content: &str) -> Option<usize> {
     content
         .lines()
@@ -316,7 +316,7 @@ Python patterns here.
         // Escaped newlines, not a multi-line literal: `edit_code insert` re-indents
         // the interior of a raw multi-line string, which silently turns column-0
         // headings into indented body and makes this test fail for the wrong reason.
-        // See docs/issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md.
+        // See docs/issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents.md.
         let content = "# Gotchas\n\nPreamble line.\n\n## MCP Binary Symlink\n\n\
              `~/.cargo/bin/codescout` is a symlink.\n\n## LSP\n\nKotlin notes here.\n";
         let r = filter_sections(content, &["MCP Binary Symlink"]);

@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn many_errors_report_plus_more_suffix() {
         // Silent-cap regression: >3 validation errors were capped at 3 with no
-        // sign there were more. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        // sign there were more. docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
         let schema = json!({
             "type": "object",
             "required": ["a", "b", "c", "d", "e"]

@@ -173,7 +173,7 @@ pub trait CodeVectorStore: Send + Sync {
     /// `project_index_stats` would make that exact defect the behaviour a new backend
     /// inherits by not thinking about it.
     ///
-    /// See `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
+    /// See `docs/issues/archive/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
     async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool>;
 
     /// Dense dimension this project's collection was created with, or `None`

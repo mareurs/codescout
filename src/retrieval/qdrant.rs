@@ -18,7 +18,7 @@ use qdrant_client::Qdrant;
 /// reachable-but-hung Qdrant (TCP accepts, no reply) would otherwise block a
 /// caller for the full 120s (or longer — connection establishment isn't
 /// covered by that timeout at all), which can exceed a host's session-init
-/// budget. See docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md.
+/// budget. See docs/issues/archive/2026-06-24-qdrant-hang-wedges-mcp-startup.md.
 pub const QDRANT_BOOTSTRAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct QdrantWrap {
@@ -135,7 +135,7 @@ impl QdrantWrap {
     /// yield point, so an `await`-side `tokio::time::timeout` around it cannot
     /// preempt it. Routing it through `spawn_blocking` moves that blocking work
     /// off the async executor and makes it interruptible via `timeout` here.
-    /// See docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md.
+    /// See docs/issues/archive/2026-06-24-qdrant-hang-wedges-mcp-startup.md.
     pub async fn connect(url: &str) -> Result<Self> {
         let owned_url = url.to_string();
         let client = tokio::time::timeout(
@@ -150,7 +150,7 @@ impl QdrantWrap {
                     // whenever Qdrant is unreachable — and it blocks on a
                     // health check inside the very `build()` this function
                     // already wraps to survive. Both failure modes, one knob.
-                    // docs/issues/2026-08-08-qdrant-compat-check-printlns-to-stdout.md
+                    // docs/issues/archive/2026-08-08-qdrant-compat-check-printlns-to-stdout.md
                     .skip_compatibility_check()
                     .build()
                     .context("qdrant connect")

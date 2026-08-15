@@ -243,7 +243,7 @@ impl RangeRepair {
 /// tree under-reports spans), the AST has no matching symbol, or the LSP range
 /// was already correct.
 ///
-/// Regression: docs/issues/2026-07-10-edit-code-impl-method-selection-range-refusal.md
+/// Regression: docs/issues/archive/2026-07-10-edit-code-impl-method-selection-range-refusal.md
 pub fn repair_symbol_range(sym: &mut SymbolInfo) -> Option<RangeRepair> {
     let source = std::fs::read_to_string(&sym.file).ok()?;
     let lang = crate::ast::detect_language(&sym.file);
@@ -435,8 +435,8 @@ pub fn is_lead_in_line(line: &str) -> bool {
 /// separate `impl` blocks). If proximity can't single out one symbol, returns
 /// `None` rather than guessing.
 ///
-/// Regression: docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md
-/// (annotation gap) and docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md
+/// Regression: docs/issues/archive/2026-06-16-kotlin-edit-code-annotation-line-gap.md
+/// (annotation gap) and docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md
 /// (backtick normalization).
 pub fn find_ast_end_line_in(
     symbols: &[SymbolInfo],
@@ -505,7 +505,7 @@ fn collect_by_name<'a>(symbols: &'a [SymbolInfo], name: &str, out: &mut Vec<&'a 
 /// sibling-guard matchers resolve LSP names the same way the symbol-resolution
 /// path already does. Only pays the allocation cost when a backtick is present.
 ///
-/// Regression: docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md.
+/// Regression: docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md.
 pub(crate) fn names_match_ignoring_backticks(a: &str, b: &str) -> bool {
     a == b || ((a.contains('`') || b.contains('`')) && a.replace('`', "") == b.replace('`', ""))
 }
@@ -932,7 +932,7 @@ mod backtick_match_tests {
     use super::*;
     use std::path::Path;
 
-    /// Regression for docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md:
+    /// Regression for docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md:
     /// the AST stores Kotlin backtick fn names WITH backticks (pinned by
     /// `parser::tests::kotlin_backtick_function_names`), while kotlin-lsp reports
     /// them WITHOUT. `find_ast_end_line_in` must resolve the LSP-style (no-backtick)
@@ -963,7 +963,7 @@ mod backtick_match_tests {
         );
     }
 
-    /// Regression for docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md:
+    /// Regression for docs/issues/archive/2026-06-16-kotlin-edit-code-annotation-line-gap.md:
     /// a Kotlin test method carrying 2+ annotation lines (`@Test` + `@DisplayName`)
     /// has an AST start line that points at the FIRST annotation, while kotlin-lsp
     /// reports the `fun` keyword line. The gap equals the annotation count (here 2),
@@ -1015,7 +1015,7 @@ mod backtick_match_tests {
         );
     }
 
-    /// Regression for docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md:
+    /// Regression for docs/issues/archive/2026-06-04-kotlin-ast-drops-nested-classes.md:
     /// a nested class and a method inside it must resolve to their AST end
     /// lines. Before the fix the nested class was dropped from the AST tree, so
     /// `find_ast_end_line_in` returned `None` and `edit_code` refused inserts on

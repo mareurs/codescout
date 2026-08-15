@@ -257,7 +257,7 @@ impl Tool for ProjectStatus {
             // Re-arm guide hints: compaction summarized the guide bodies out
             // of context, so allow them to re-inject. A bare /mcp restart keeps
             // them (persisted ledger); only compaction clears. See
-            // docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md.
+            // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md.
             ctx.guide_hints_emitted.lock().clear();
             tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");
             return Ok(json!({
@@ -345,7 +345,7 @@ impl Tool for ProjectStatus {
             // `create_embedder_with_config` has no compiled path and bails with
             // "Unknown model". Reporting "remote-http" claimed a working network
             // config for one that cannot build anything.
-            // docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
+            // docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
             "unavailable"
         } else {
             "remote-http"
@@ -500,7 +500,7 @@ enum HintScenario {
 /// `FIRST_PROBE_TIMEOUT` on a real corpus — so this reported every large project as
 /// unindexed and, because a timeout is deliberately not cached, repeated the whole
 /// scan on every activation. See
-/// `docs/issues/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
+/// `docs/issues/archive/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`.
 async fn check_has_index(project_id: &str, project_root: &std::path::Path) -> bool {
     match crate::retrieval::client::RetrievalClient::from_env(Some(project_root)).await {
         Ok(client) => {

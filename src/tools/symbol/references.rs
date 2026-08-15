@@ -21,7 +21,7 @@ pub struct References;
 /// `textDocument/references` returned references, references is provably
 /// incomplete — a known rust-analyzer quirk for some symbol shapes (e.g.
 /// `pub(super)` free fns referenced from a sibling `#[cfg(test)]` module).
-/// See `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+/// See `docs/issues/archive/2026-05-21-references-undercounts-vs-call-graph.md`.
 pub(crate) fn references_completeness_hint(refs_total: usize, call_sites: usize) -> Option<String> {
     if call_sites > refs_total {
         Some(format!(

@@ -231,7 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn move_succeeds_for_active_project_absent_from_legacy_roots() {
-        // Regression for docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md
+        // Regression for docs/issues/archive/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md
         // (mv shares delete's guard): under the `[[project]]` model the active project is in
         // `current_project`, not `workspace.roots`. `new_rel_path` must resolve relative to the
         // active project's git_root.

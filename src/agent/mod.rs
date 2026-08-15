@@ -110,7 +110,7 @@ pub struct AgentInner {
     /// guard (`Agent::note_activation`): if a *different* root is activated
     /// under this shared server within a short window, the activate response
     /// carries a `concurrent_activation_warning`. See
-    /// docs/issues/2026-05-30-shared-server-global-active-project-race.md
+    /// docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md
     pub last_activation: Option<(PathBuf, std::time::Instant)>,
 }
 
@@ -810,7 +810,7 @@ impl Agent {
     /// fingerprint of concurrent multi-workspace use on a single shared server
     /// (parallel subagents that each `activate` a different workspace). Same-root
     /// re-activation and slow sequential switches (outside `window`) are silent.
-    /// See docs/issues/2026-05-30-shared-server-global-active-project-race.md
+    /// See docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md
     fn concurrent_switch_warning(
         prev: Option<(&std::path::Path, std::time::Duration)>,
         new_root: &std::path::Path,
@@ -1432,7 +1432,7 @@ impl Agent {
     /// Takes the pin directly rather than offering an unpinned twin: every call
     /// site sits next to an already-pinned `require_project_root_for`, so an
     /// unpinned variant would only be a footgun (see
-    /// `docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
+    /// `docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
     /// finding 5 — this helper resolved a *different* project's LSP config than
     /// the root it was about to be used with).
     pub async fn lsp_mux_override(
@@ -1538,7 +1538,7 @@ impl Agent {
         // memory-safe, but auto-indexing a dependency tree (e.g. a `.venv` with tens
         // of thousands of files) still wastes embed-server work and pollutes the
         // code index. Mirror the `index` tool's preflight; on "needs confirmation",
-        // decline. (docs/issues/2026-06-19-mcp-server-oom-68gb.md)
+        // decline. (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md)
         let scope_root = entry_path.clone();
         let pf_patterns = ignore_patterns.clone();
         let verdict = tokio::task::spawn_blocking(move || {
@@ -1843,7 +1843,7 @@ mod tests {
     ///
     /// Closing it properly means threading a `RetrievalConfig` through `Agent` — worth
     /// doing, not done here. Tracked in
-    /// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+    /// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
     /// Do NOT copy this pattern into a default-feature test.
     #[cfg(feature = "server-stack")]
     struct EnvGuard {
@@ -2033,7 +2033,7 @@ mod tests {
 
     #[tokio::test]
     async fn lsp_mux_override_resolves_pin_over_default() {
-        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // BUG (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
         // finding 5): lsp_mux_override read the config via the plain, unpinned
         // with_project. Every call site sits one line below an already-pinned
         // require_project_root_for — so a pinned call started an LSP server at
@@ -2074,7 +2074,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_resident_upgrades_read_only_pin_to_writable() {
-        // FINDING (docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
+        // FINDING (docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
         // "Live-verification finding"): ensure_resident's non-home default is
         // read-only, and every internal caller passed None — so a workspace
         // pin could never become writable without a full `activate` (which
@@ -2179,7 +2179,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn semantic_memory_store_bootstrap_times_out_on_hung_qdrant() {
-        // Regression for docs/issues/2026-06-24-qdrant-hang-wedges-mcp-startup.md:
+        // Regression for docs/issues/archive/2026-06-24-qdrant-hang-wedges-mcp-startup.md:
         // a reachable-but-unresponsive Qdrant (TCP accepts, no reply) must not
         // block semantic_memory_store() anywhere near the client's 120s operation
         // timeout. Black-hole listener mirrors the bug file's own `socat`/`nc -l`

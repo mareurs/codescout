@@ -161,7 +161,7 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
     // `artifact` + `commits` forward, so those children would be lost.
     // (Before this guard, the migration silently wiped all augmentations +
     // event history for every artifact present when it ran — see
-    // docs/issues/2026-07-05-v6-migration-cascade-deletes-child-rows.md.)
+    // docs/issues/archive/2026-07-05-v6-migration-cascade-deletes-child-rows.md.)
     // `PRAGMA foreign_keys` is a no-op INSIDE a transaction, so it must be
     // toggled OUTSIDE the BEGIN/COMMIT below. On error we ROLLBACK first so
     // the re-enable below is not swallowed by a still-open transaction.
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn migration_v6_preserves_augmentation_and_events() {
-        // Regression for docs/issues/2026-07-05-v6-migration-cascade-deletes-child-rows.md:
+        // Regression for docs/issues/archive/2026-07-05-v6-migration-cascade-deletes-child-rows.md:
         // drop_legacy_and_stamp's table-copy ran under foreign_keys=ON, so
         // `DROP TABLE artifact` cascade-deleted every artifact_augmentation /
         // events row (the copy carries only artifact + commits forward). Seed a

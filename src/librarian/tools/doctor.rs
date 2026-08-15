@@ -782,7 +782,7 @@ fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result
     // change when an index is added or the DB is VACUUMed, with no content
     // change at all. A stable order is also what makes the `offset` parameter
     // mean anything. See
-    // docs/issues/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
+    // docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -1478,7 +1478,7 @@ mod tests {
     /// The elided rows must be reachable. Before this, `doctor` announced N
     /// elided violations and exposed no parameter that could return any of them,
     /// while the hint instructed the reader to inspect exactly those rows.
-    /// docs/issues/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
+    /// docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
     #[tokio::test]
     async fn outside_managed_roots_limit_reaches_every_elided_row() {
         let ctx = ctx_with_outside_rows(25);

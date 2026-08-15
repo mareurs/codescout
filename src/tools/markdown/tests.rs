@@ -587,7 +587,7 @@ fn smart_replace_detection_non_heading() {
 }
 #[test]
 fn replace_with_deeper_heading_preserves_target_heading() {
-    // Regression for docs/issues/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md:
+    // Regression for docs/issues/archive/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md:
     // new content whose first line is a heading at a DEEPER level than the
     // target is a subsection of the target, not a replacement for the
     // target's own heading line -- the target heading must survive.
@@ -912,7 +912,7 @@ fn code_block_at_end_of_file() {
 /// Unclosed code fence — historically (CommonMark-conformant) everything from
 /// ``` to EOF was treated as inside the code block, so `# looks like heading`
 /// was masked and `## Broken`'s section extended to EOF. As of the
-/// last-heading-unaddressable fix (docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md),
+/// last-heading-unaddressable fix (docs/issues/archive/2026-05-21-edit-markdown-last-heading-unaddressable.md),
 /// unbalanced ``` is treated as plain text — otherwise an unmatched fence
 /// dropped into a batch edit silently hides every subsequent heading. With
 /// the new rule, `# looks like heading` is parsed as a real H1, so it
@@ -1006,7 +1006,7 @@ fn scoped_edit_in_section_with_code_block() {
 /// the outer one, so the `#` line after it became a phantom heading, the section
 /// ended early, and a scoped edit targeting text past the outer fence failed
 /// with `old_string not found` on byte-present text.
-/// docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+/// docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md
 #[test]
 fn scoped_edit_reaches_text_after_a_nested_fence() {
     let content = "\

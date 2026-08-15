@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn heading_truncation_is_signaled() {
         // Regression: the cap must be loud so preview.headings and line_count
-        // don't silently disagree — docs/issues/2026-07-10-preview-headings-silent-cap-20.md.
+        // don't silently disagree — docs/issues/archive/2026-07-10-preview-headings-silent-cap-20.md.
         let mut body = String::new();
         for i in 0..25 {
             body.push_str(&format!("## H{i}\n"));

@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn bootstrap_emits_keys_in_caller_order() {
         // Regression for the HashMap iteration-order non-determinism bug
-        // (docs/issues/2026-05-18-frontmatter-bootstrap-key-order-nondeterminism.md).
+        // (docs/issues/archive/2026-05-18-frontmatter-bootstrap-key-order-nondeterminism.md).
         // The bootstrap path must emit keys in the order the caller inserted
         // them — guaranteed by serde_json::Map's preserve_order feature.
         let block: Vec<String> = vec![];

@@ -1275,7 +1275,7 @@ impl LspManager {
         // client's shutdown(). Holding `clients` across every shutdown().await
         // blocks all concurrent LSP navigation (and a post_compact flush) for
         // the full shutdown duration.
-        // (docs/issues/2026-07-10-lsp-shutdown-all-holds-clients-lock-across-await.md)
+        // (docs/issues/archive/2026-07-10-lsp-shutdown-all-holds-clients-lock-across-await.md)
         let drained: Vec<(LspKey, Arc<LspClient>)> = {
             let mut clients = self.clients.lock().await;
             clients.drain().collect()
@@ -2327,7 +2327,7 @@ mod tests {
         // must see it as held. Acquiring right after drop(guard) races the same
         // flock-release-visibility latency as the reclaim step below — retry
         // rather than asserting instant acquisition (recurrence 2026-07-05 in
-        // docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
+        // docs/issues/archive/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
         let holder = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -2354,7 +2354,7 @@ mod tests {
         // Released → claimable again. Under heavy parallel test load the OS can take
         // a moment to make the released flock visible to a fresh fd, so retry briefly
         // rather than asserting instant reclaim (fixes the parallel-suite flake,
-        // docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
+        // docs/issues/archive/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
         drop(holder);
         let reclaimed = (0..50).find_map(|_| match super::claim_mux_lock(&lock).unwrap() {
             Some(guard) => Some(guard),

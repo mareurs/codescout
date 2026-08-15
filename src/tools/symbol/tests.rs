@@ -3694,7 +3694,7 @@ fn editing_end_line_strict_returns_none_when_ast_cannot_find_symbol() {
 ///
 /// If a future extractor change starts exposing them, this test fails — and that
 /// is the signal to revisit the refusal, because the end would then be knowable.
-/// docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md
+/// docs/issues/archive/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md
 #[test]
 fn ast_does_not_expose_methods_of_an_impl_nested_in_a_function() {
     let source = "\
@@ -5041,7 +5041,7 @@ fn symbols_with_long_body_inlines_full_content() {
     // `… (truncated)` marker AND emits a `read_file("@tool_xxx", json_path=...)`
     // hint via call_content — so the truncation is recoverable in the buffered
     // case while the inline case stays self-sufficient.
-    // Regression for docs/issues/2026-05-18-symbols-body-hint-unreachable.md.
+    // Regression for docs/issues/archive/2026-05-18-symbols-body-hint-unreachable.md.
     // (Test name kept for git history; previous behavior was the bug.)
     let long_body = "fun convert() {\n".to_string() + &"    val x = 1\n".repeat(50) + "}";
     assert!(long_body.len() > 500, "test body should be > 500 bytes");
@@ -6406,11 +6406,11 @@ fn find_matching_symbol_returns_none_when_line_too_far() {
 
 #[cfg_attr(
     target_os = "windows",
-    ignore = "Windows path/canon shape differs from Linux; needs investigation. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+    ignore = "Windows path/canon shape differs from Linux; needs investigation. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
 )]
 #[cfg_attr(
     target_os = "macos",
-    ignore = "fallback succeeds on macOS where Linux fails — needs investigation, see docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md"
+    ignore = "fallback succeeds on macOS where Linux fails — needs investigation, see docs/issues/archive/2026-05-24-ci-macos-tempdir-canonicalization.md"
 )]
 #[tokio::test]
 async fn symbols_propagates_error_when_fallback_also_fails() {
@@ -6590,7 +6590,7 @@ async fn edit_code_replace_repairs_truncated_lsp_range_from_ast() {
     );
 }
 
-/// gap 2 of `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md`:
+/// gap 2 of `docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md`:
 /// removing a non-empty module reported the module's OWN children as "dropped
 /// sibling symbols … the range overshot into adjacent code (likely a stale LSP
 /// range)" and rolled the removal back — a wrong diagnosis of a correct operation,
@@ -7733,7 +7733,7 @@ async fn edit_code_replace_appends_caller_hint() {
 /// physical file the bug actually touches. A correctly pin-aware `edit_code`
 /// must write the inserted marker into A and leave B untouched. Currently it
 /// does the opposite — this test is expected to FAIL until the bug is fixed
-/// (see docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md).
+/// (see docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md).
 #[tokio::test]
 async fn edit_code_insert_honors_workspace_override_pin() {
     if !std::process::Command::new("rust-analyzer")

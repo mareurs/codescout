@@ -66,7 +66,7 @@ impl PathEvidence {
 /// so in `severity_reason` rather than leaving `policy_default` to imply the
 /// classification was certain.
 ///
-/// See `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
+/// See `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
 pub fn cap_inferred_path(
     verdict: Verdict,
     evidence: PathEvidence,

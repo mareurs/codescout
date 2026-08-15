@@ -274,7 +274,7 @@ pub async fn run(
     // analyzer and grows unbounded; codescout redirects user.home per-workspace
     // (JAVA_TOOL_OPTIONS=-Duser.home=<cache>/codescout/kotlin-lsp-home/<hash>)
     // and reclaims it here so the churning RocksDB store can't accumulate across
-    // sessions. See docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
+    // sessions. See docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
     reclaim_kotlin_analyzer_home(server_env);
 
     info!("mux process shutting down");
@@ -286,7 +286,7 @@ pub async fn run(
 /// kotlin-lsp's analyzer index ignores `--system-path` and grows unbounded in
 /// `<user.home>/.config/JetBrains/analyzer`; codescout redirects user.home into
 /// a per-workspace cache dir, swept here on mux exit. See
-/// `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
+/// `docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
 fn reclaim_kotlin_analyzer_home(server_env: &[(String, String)]) {
     let Some(home) = kotlin_home_from_env(server_env) else {
         return;
@@ -597,7 +597,7 @@ fn registration_ids(msg: &Value) -> Vec<String> {
 /// cached entry whose registration ids are all present in `msg`. LSP re-registration
 /// replaces a prior registration of the same id, so the previous append-only cache grew
 /// without bound on every re-registration
-/// (docs/issues/2026-06-23-mux-cached-capabilities-unbounded.md).
+/// (docs/issues/archive/2026-06-23-mux-cached-capabilities-unbounded.md).
 fn cache_registration(cache: &mut Vec<Value>, msg: &Value) {
     let new_ids: std::collections::HashSet<String> = registration_ids(msg).into_iter().collect();
     if !new_ids.is_empty() {
@@ -774,7 +774,7 @@ fn extract_text_document_uri(msg: &Value) -> Option<String> {
 /// Periodically samples RSS+swap for the LSP server process and **kills the LSP
 /// process group** when it balloons, to bound native (off-heap) memory growth the
 /// JVM `-Xmx` heap cap does not constrain
-/// (docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md, Fix 2). Logs warn at
+/// (docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md, Fix 2). Logs warn at
 /// 4 GiB and error at 8 GiB. Kills when rss+swap crosses an absolute ceiling
 /// (`CODESCOUT_LSP_KILL_RSS_CEIL_MB`, default 24 GiB) or when host `MemAvailable`
 /// falls below a floor (`CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB`, default 15 GiB) while

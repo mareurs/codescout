@@ -307,7 +307,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
     let mut included_ids: Vec<String> = Vec::new();
     // A large anchor otherwise consumes the whole budget before any neighbor is
-    // even considered (docs/issues/2026-07-05-context-anchor-starves-neighbors.md):
+    // even considered (docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md):
     // reserve half of char_cap for neighbors whenever the anchor actually has any.
     let anchor_reserve_cap =
         (a.anchor_id.is_some() && candidate_ids.len() > 1).then_some(char_cap / 2);
@@ -541,7 +541,7 @@ mod tests {
     async fn topic_search_hides_retired_artifacts() {
         // Regression for the HIDDEN_STATUSES split-brain: the context topic
         // branch must hide `retired` artifacts exactly as find() does.
-        // See docs/issues/2026-05-25-hidden-statuses-context-missing-retired.md
+        // See docs/issues/archive/2026-05-25-hidden-statuses-context-missing-retired.md
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
 
@@ -625,7 +625,7 @@ mod tests {
     async fn omitted_signal_when_budget_truncates() {
         // Silent-cap regression: candidates dropped by the char budget must be
         // reported, so the bundle is not read as the complete set.
-        // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::write(root.join("auth_a.md"), "# Auth A\n".repeat(5)).unwrap();

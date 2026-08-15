@@ -25,7 +25,7 @@ impl UsageRecorder {
     /// `workspace_override`, falling back to the session default when `None`.
     /// The pin MUST match the one the tool body itself resolved, or a pinned
     /// call's stats land in the wrong project's `usage.db` (see
-    /// `docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
+    /// `docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`,
     /// finding 4).
     pub async fn record_content<F, Fut>(
         &self,
@@ -318,7 +318,7 @@ mod content_tests {
 
     #[tokio::test]
     async fn record_content_honors_workspace_override_pin() {
-        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // BUG (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
         // finding 4): write_content resolved the usage-db root via the plain,
         // unpinned with_project. call_tool_inner already computed the pin and
         // threaded it into check_tool_access/timeout_secs/the write guard — but

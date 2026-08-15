@@ -240,7 +240,7 @@ pub fn index_repo_sync(
             // `librarian(reindex, reembed=true)` a silent no-op on any
             // already-indexed project: it reported `unchanged: N` with
             // `backfill_error_count: 0` while sending the embedder nothing.
-            // See docs/issues/2026-07-25-reindex-reembed-noop-without-force.md.
+            // See docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md.
             //
             // The row stays `unchanged` on purpose: nothing about it changed,
             // only its vector needs recomputing. Falling through to the upsert
@@ -466,7 +466,7 @@ fn force_include_candidates(abs_root: &Path) -> Result<Vec<std::path::PathBuf>> 
 /// `set_var`-in-tests race that `a656f8cec220d347` removed project-wide. Keeping the
 /// decision a value means the mapping is testable without touching env at all, and
 /// the only untestable line left is the `env::var` read itself.
-/// See `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+/// See `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
 fn migrate_opt_in(raw: Option<&str>) -> bool {
     raw == Some("1")
 }
@@ -1146,7 +1146,7 @@ kind = "memory"
     /// The env value → opt-in mapping, tested as a pure function so no test in
     /// this module mutates process-global env. `set_var` in a concurrently-run
     /// test is the UB that `a656f8cec220d347` removed project-wide; see
-    /// `docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
+    /// `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`.
     #[test]
     fn migrate_opt_in_requires_exactly_one() {
         assert!(migrate_opt_in(Some("1")));
@@ -1269,7 +1269,7 @@ kind = "memory"
         // The sibling test above passes force_rewalk=true in every pass, so it
         // proved force_embed works GIVEN force_rewalk and never covered the
         // combination the `reindex(reembed=true)` tool call actually produces.
-        // See docs/issues/2026-07-25-reindex-reembed-noop-without-force.md.
+        // See docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md.
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("docs/specs")).unwrap();

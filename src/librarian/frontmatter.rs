@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// unset `Option` came back out as an explicit `null` and an empty `Vec` as
 /// `[]`, so any update churned the frontmatter of every file it touched with
 /// keys the author never wrote. See
-/// `docs/issues/2026-07-13-artifact-update-frontmatter-null-churn.md`.
+/// `docs/issues/archive/2026-07-13-artifact-update-frontmatter-null-churn.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Frontmatter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,7 +51,7 @@ pub struct Frontmatter {
 /// unparseable — at which point the artifact loses its kind, status, title, owners
 /// and tags in one step and silently drops out of its own ledger.
 ///
-/// See `docs/issues/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+/// See `docs/issues/archive/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
 pub const RESERVED_KEYS: &[&str] = &[
     "id",
     "kind",
@@ -111,7 +111,7 @@ pub fn write(fm: &Frontmatter, body: &str) -> String {
     // a quoted scalar silently fails. Emit each extra scalar bare when — and only
     // when — doing so round-trips as the identical string, so we shed spurious
     // quotes without ever turning a `"30"`/`"true"` string into a number/bool.
-    // See docs/issues/2026-07-17-artifact-extra-quotes-frontmatter-scalars.md.
+    // See docs/issues/archive/2026-07-17-artifact-extra-quotes-frontmatter-scalars.md.
     let mut first_class = fm.clone();
     let extra = std::mem::take(&mut first_class.extra);
     let mut yaml = serde_yml::to_string(&first_class).expect("frontmatter serializes");
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn extra_scalar_date_is_emitted_bare_not_quoted() {
-        // BUG (docs/issues/2026-07-17-artifact-extra-quotes-frontmatter-scalars.md):
+        // BUG (docs/issues/archive/2026-07-17-artifact-extra-quotes-frontmatter-scalars.md):
         // serde_yml quoted date-like extra scalars ('2026-07-17'), breaking raw-text
         // regex consumers (the SessionStart next-sweep-due nudge tests
         // /^\d{4}-\d{2}-\d{2}$/). Date-like and plain strings must serialize BARE;
@@ -427,7 +427,7 @@ mod tests {
         // Regression: `#[serde(default)]` governs deserialization only, so an
         // unset Option round-tripped back out as an explicit `null`, churning
         // the frontmatter of every file an update touched.
-        // See docs/issues/2026-07-13-artifact-update-frontmatter-null-churn.md.
+        // See docs/issues/archive/2026-07-13-artifact-update-frontmatter-null-churn.md.
         let fm = Frontmatter {
             kind: Some("bug".into()),
             status: Some("open".into()),

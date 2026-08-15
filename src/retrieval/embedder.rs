@@ -53,7 +53,7 @@ pub trait CodeEmbedder: BatchEmbedder {
     /// [`Self::known_dim`] has none: a backend that silently inherited the query
     /// method would reintroduce exactly the defect this exists to fix, and no
     /// test would fail. See
-    /// `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`.
+    /// `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`.
     async fn embed_document_one(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 
     /// This embedder's own dense dimension, when it can answer synchronously
@@ -377,7 +377,7 @@ impl EmbedderHttp {
     /// `new()` reads it from process env, mirroring `api_key`. Tests use this to
     /// set (`Some("4".into())`) or explicitly clear (`None`) the override without
     /// ever mutating real process env — see `resolve_batch_size` and
-    /// docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+    /// docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
     /// for why that matters (a prior thread-local-based version of this fix was
     /// superseded by this injected-field version on review).
     pub fn with_batch_override(mut self, batch_override: Option<String>) -> Self {
@@ -455,7 +455,7 @@ impl EmbedderHttp {
     /// this is deliberately the one place that difference is expressed — an
     /// asymmetric model wants the prefix on the query side and never on the
     /// document side. See
-    /// `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`.
+    /// `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`.
     pub async fn dense_query(&self, text: &str) -> Result<Vec<f32>> {
         if self.query_prefix.is_empty() {
             return self.dense_document(text).await;
@@ -764,7 +764,7 @@ impl EmbedderHttp {
             // Reads `self.batch_override` — the SAME field the hybrid path uses. Do NOT
             // reintroduce a raw `std::env::var` read here. One variable with two sources
             // is a divergence waiting to happen, and it re-opens the test-env race that
-            // docs/issues/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
+            // docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md
             // documents.
             const DENSE_ONLY_BATCH: usize = 32;
             let batch = self
@@ -822,7 +822,7 @@ pub trait DenseEmbedder: Send + Sync {
     /// of prefix policy silently stranded the whole corpus.
     ///
     /// No default implementation on purpose: inheriting `embed` here is the bug.
-    /// See `docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md`.
+    /// See `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`.
     async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 
     /// Test-only downcast seam. Lets a test recover the concrete impl behind
@@ -931,7 +931,7 @@ mod tests {
     /// are disjoint, each `expect(1)`. A regression that sends prefixed text to
     /// the document path fails twice over — the document mock goes unmatched and
     /// the query mock is hit twice.
-    /// docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    /// docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
     #[tokio::test]
     async fn dense_document_omits_the_query_prefix_that_dense_query_applies() {
         let mut dense_server = mockito::Server::new_async().await;
@@ -2227,7 +2227,7 @@ mod adapter_tests {
     /// query side to `embed_query`, this pins the document side to `embed`.
     /// Either alone would pass while the other direction was wrong — which is
     /// exactly how memory writes came to run through the query seam.
-    /// docs/issues/2026-08-11-memory-documents-stored-query-prefixed.md
+    /// docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
     #[tokio::test]
     async fn document_embedding_uses_embed_not_the_query_path() {
         struct PrefixedEmbedder(usize);

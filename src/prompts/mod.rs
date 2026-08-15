@@ -967,7 +967,7 @@ mod tests {
         // always-on injection's read path (`Agent::project_status`). It must NOT route
         // through `memory(write, topic="system-prompt")`, which lands in
         // `.codescout/memories/` and never reaches `server_instructions`.
-        // See docs/issues/2026-06-12-onboarding-writes-system-prompt-to-memory-not-root.md.
+        // See docs/issues/archive/2026-06-12-onboarding-writes-system-prompt-to-memory-not-root.md.
         // The corrective prompts mention the prohibited call inside a "Do NOT" clause,
         // so we assert the POSITIVE `create_file` instruction plus absence of the
         // affirmative `topic: "system-prompt", content: ...)` form, not bare absence.

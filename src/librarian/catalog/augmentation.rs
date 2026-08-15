@@ -135,7 +135,7 @@ fn validate_rule_globs(entry_collection: &str, params: &Value) -> Result<()> {
 /// other mutations (notably the body write in artifact `update`). A schema
 /// violation must abort before anything is persisted — otherwise the body is
 /// written but the params are not, leaving the artifact half-updated. See
-/// docs/issues/2026-06-13-artifact-update-body-applies-before-params-validation.md.
+/// docs/issues/archive/2026-06-13-artifact-update-body-applies-before-params-validation.md.
 fn merge_params_dry(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<Option<String>> {
     let Some(existing) = get(cat, artifact_id)? else {
         return Ok(None);
@@ -237,7 +237,7 @@ pub fn append_entry(
     // (body section -> index row -> append_entry) lets params legitimately lag
     // the body when a session skips step 3. Folding the body's max in makes the
     // reissue impossible instead of silent.
-    // See docs/issues/2026-07-20-append-entry-id-drift-params-vs-body.md
+    // See docs/issues/archive/2026-07-20-append-entry-id-drift-params-vs-body.md
     let abs_path: Option<String> = tx
         .query_row(
             "SELECT abs_path FROM artifact WHERE id = ?1",
@@ -436,7 +436,7 @@ pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
 /// `"type": "object"` covers only the inline `params` argument, and
 /// `params_path` reads a file that never passes through it. That gap let a bare
 /// top-level array report success while discarding the whole payload
-/// (docs/issues/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md).
+/// (docs/issues/archive/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md).
 pub fn apply_merge_patch(target: &mut Value, patch: &Value) {
     if let (Value::Object(t), Value::Object(p)) = (target, patch) {
         for (k, v) in p {
@@ -899,7 +899,7 @@ mod tests {
 
     #[test]
     fn append_entry_skips_ids_already_claimed_by_the_body() {
-        // Regression: docs/issues/2026-07-20-append-entry-id-drift-params-vs-body.md
+        // Regression: docs/issues/archive/2026-07-20-append-entry-id-drift-params-vs-body.md
         // The documented 3-step tracker flow (body section -> index row ->
         // append_entry) lets params lag the body whenever a session skips step 3.
         // Next-id must be max(params_max, body_max) + 1, not params_max + 1.

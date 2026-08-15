@@ -174,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_usage_stats_honors_workspace_override_pin() {
-        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // BUG (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
         // finding 3): GetUsageStats::call resolved the project root via the plain,
         // unpinned `with_project`, so a pinned call read the SESSION-DEFAULT
         // project's usage.db instead of the pinned workspace's. Telemetry-only,

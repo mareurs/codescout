@@ -4,7 +4,7 @@
 //! `tracing_appender::non_blocking` tail never flushes and the per-instance
 //! diagnostic log (written under an unknown server-cwd) is unfindable
 //! post-mortem. That is exactly why the 68 GB OOM left no usable trace — see
-//! `docs/issues/2026-06-19-mcp-server-oom-68gb.md`.
+//! `docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md`.
 //!
 //! This module writes a **synchronous, flushed, one-line-per-tick** RSS
 //! heartbeat to a **central, predictable** path —
@@ -33,7 +33,7 @@ const KEEP_FILES: usize = 64;
 /// freezes at death and it sorts as the *oldest* file — the first prune target
 /// exactly when it is the most valuable. The age floor guarantees a recent
 /// victim's log survives long enough to be read.
-/// See `docs/issues/2026-06-26-heartbeat-prune-evicts-oom-victim.md`.
+/// See `docs/issues/archive/2026-06-26-heartbeat-prune-evicts-oom-victim.md`.
 const RETAIN: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Most recently dispatched tool name + the unix-seconds it started. Lets a
@@ -78,7 +78,7 @@ pub fn note_tool(name: &str) {
 /// [`note_tool`]. A background op and concurrent foreground tool calls overwrite
 /// each other, so the heartbeat names whichever was set most recently — enough to
 /// surface a long-running background ramp (the 68 GB OOM op was a background
-/// auto-index with no tool-call row; docs/issues/2026-06-19-mcp-server-oom-68gb.md),
+/// auto-index with no tool-call row; docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md),
 /// but not a precise concurrent view.
 pub fn note_background_op(label: &str) {
     if let Ok(mut g) = CURRENT_OP.lock() {
@@ -186,7 +186,7 @@ fn append(path: &Path, line: &str) {
 /// younger than `min_age` (relative to `now`) — a SIGKILLed crash victim's mtime
 /// freezes at death and sorts oldest, so the age floor stops it being pruned out
 /// from under a pending post-mortem. Pure so it is testable without fs timing.
-/// See `docs/issues/2026-06-26-heartbeat-prune-evicts-oom-victim.md`.
+/// See `docs/issues/archive/2026-06-26-heartbeat-prune-evicts-oom-victim.md`.
 fn stale_to_remove(
     mut entries: Vec<(PathBuf, SystemTime)>,
     keep: usize,
@@ -314,7 +314,7 @@ mod tests {
     /// is a live writer of this process-global slot; a plain `note_*` followed
     /// by a separate `current_op()` read can have another test's write land in
     /// the gap (that was the flake). Holding the lock across write+read closes
-    /// the window. See docs/issues/2026-07-02-heartbeat-current-op-test-race.md.
+    /// the window. See docs/issues/archive/2026-07-02-heartbeat-current-op-test-race.md.
     fn set_current_op_and_read(entry: (String, u64)) -> String {
         let mut g = CURRENT_OP.lock().expect("CURRENT_OP poisoned");
         *g = Some(entry);

@@ -755,7 +755,7 @@ fn extract_go_type_children(
 /// in [`extract_java_symbols`] for top-level types. Returns `None` for an unnamed
 /// or unhandled node.
 ///
-/// See `docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md` (Java twin): the
+/// See `docs/issues/archive/2026-06-04-kotlin-ast-drops-nested-classes.md` (Java twin): the
 /// nested arm previously called `extract_java_symbols(body)` on the *parent* body,
 /// re-scanning it once per nested type — duplicating every nested type, which then
 /// tripped `find_ast_end_line_in`'s ambiguity guard and broke `edit_code` for
@@ -1022,7 +1022,7 @@ fn extract_java_enum_constants(
 /// (nested types) so both paths emit identical shapes. Returns `None` when the node
 /// has no name.
 ///
-/// See `docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md`: the nested arm
+/// See `docs/issues/archive/2026-06-04-kotlin-ast-drops-nested-classes.md`: the nested arm
 /// previously called `extract_kotlin_symbols(node)` on the declaration node itself,
 /// which iterates the *node's children* for declarations and so matched none —
 /// silently dropping every nested class/object (and its methods) from the symbol
@@ -2733,7 +2733,7 @@ class MyTest {
 
     #[test]
     fn kotlin_nested_classes_and_members_are_extracted() {
-        // Regression for docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md:
+        // Regression for docs/issues/archive/2026-06-04-kotlin-ast-drops-nested-classes.md:
         // nested class/object declarations (and their members) must appear in the
         // AST symbol tree. Before the fix, the nested arm of
         // extract_kotlin_class_members called extract_kotlin_symbols(node) on the
@@ -2800,7 +2800,7 @@ class Outer {
 
     #[test]
     fn java_nested_types_are_extracted_without_duplication() {
-        // Java twin of docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md:
+        // Java twin of docs/issues/archive/2026-06-04-kotlin-ast-drops-nested-classes.md:
         // the nested arm called extract_java_symbols(body) on the PARENT body,
         // re-scanning it once per nested type → each nested type duplicated (2
         // nested → each appears 2×), which tripped find_ast_end_line_in's

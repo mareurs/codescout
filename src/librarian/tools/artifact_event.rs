@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn payload_schema_declares_object_type() {
-        // Regression: docs/issues/2026-05-21-artifact-event-create-payload-rejected.md
+        // Regression: docs/issues/archive/2026-05-21-artifact-event-create-payload-rejected.md
         // A `payload` property with no declared type caused MCP clients to
         // transport the value as a stringified JSON, which the server's
         // `.as_object()` guard then rejected with "payload must be object".

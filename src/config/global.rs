@@ -45,7 +45,7 @@ pub struct GlobalIgnoredPathsSection {
 /// other test threads call `getenv` is UB (glibc may `realloc` `environ` under a
 /// concurrent reader), and *every* test that builds an `Agent` reads `HOME` through
 /// this function. See
-/// `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+/// `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
 pub(crate) fn global_config_dir_from(
     xdg_config_home: Option<&std::ffi::OsStr>,
     home: Option<&std::ffi::OsStr>,
@@ -222,7 +222,7 @@ impl GlobalConfig {
 // inputs explicitly (global_config_dir_from, GlobalConfig::load_from_dir,
 // ProjectConfig::load_with_global_base, ProjectConfig::apply_embed_overrides), so tests
 // inject instead of mutating. See
-// docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
+// docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
 #[cfg(test)]
 mod tests {
@@ -235,7 +235,7 @@ mod tests {
     // `Agent` reads HOME through `global_config_dir`. Serializing a subset cannot fix
     // that (serial_test has no lock that unannotated tests participate in), so the
     // writes are GONE rather than coordinated. See
-    // docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
+    // docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
     #[test]
     fn config_dir_prefers_xdg_config_home() {

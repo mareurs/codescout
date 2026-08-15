@@ -753,7 +753,7 @@ mod tests {
         assert_eq!(e.callee_sym, "foo");
     }
 
-    /// Regression test for docs/issues/2026-05-25-call-graph-tree-sitter-self-edges.md.
+    /// Regression test for docs/issues/archive/2026-05-25-call-graph-tree-sitter-self-edges.md.
     /// Pre-fix: resolve_one_hop emits a spurious self-edge when references
     /// returns a location inside the queried symbol's own body (which happens
     /// for symbols RA cannot fully model, e.g. #[test] fns).

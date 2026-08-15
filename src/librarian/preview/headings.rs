@@ -49,7 +49,7 @@ pub fn parse(body: &str) -> Vec<Heading> {
 ///
 /// Pair with [`stamp_truncation`] so a preview signals the cut instead of
 /// silently disagreeing with `line_count` — see
-/// `docs/issues/2026-07-10-preview-headings-silent-cap-20.md`.
+/// `docs/issues/archive/2026-07-10-preview-headings-silent-cap-20.md`.
 pub fn cap(mut headings: Vec<Heading>, max: usize) -> (Vec<Heading>, Option<usize>) {
     let total = headings.len();
     if total > max {
@@ -124,7 +124,7 @@ mod tests {
     /// Regression: a nested three-backtick fence must not close the enclosing
     /// four-backtick block, or every `#` line after it becomes a phantom
     /// heading and section scoping ends early.
-    /// docs/issues/2026-08-11-artifact-nested-fence-closes-outer-fence.md
+    /// docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md
     #[test]
     fn a_nested_shorter_fence_does_not_leak_headings_from_the_outer_block() {
         let body = "\

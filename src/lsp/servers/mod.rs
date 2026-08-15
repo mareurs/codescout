@@ -61,7 +61,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             // system dir by the workspace hash so different worktrees of one repo
             // don't alias a single shared system/index dir (silent cache corruption
             // + JVM multiplication). See
-            // docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md
+            // docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md
             let ws_hash = crate::lsp::mux::workspace_hash(workspace_root);
             // Gradle home is keyed by the *repo* (main checkout) so worktrees of the
             // same repo share one dependency cache instead of re-downloading deps.
@@ -77,7 +77,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             // (it ignores --system-path / XDG / idea.config.path and grows
             // unbounded) into a codescout-owned, per-workspace cache HOME that
             // the mux reclaims on shutdown. See
-            // docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
+            // docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
             let analyzer_home = kotlin_analyzer_home(&ws_hash);
             // Best-effort: the analyzer's PathManager creates the tree, but make
             // sure user.home itself exists before the JVM starts.
@@ -98,7 +98,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             // next occurrence, which is the difference between diagnosing that
             // growth and guessing at it. Cost is a few percent and a small
             // bookkeeping overhead — cheap against re-waiting for a rare event.
-            // See docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
+            // See docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
             let cs_opts = format!(
                 "-Duser.home={} -XX:NativeMemoryTracking=summary -Xmx2g",
                 analyzer_home.display()
@@ -246,7 +246,7 @@ pub fn has_lsp_config(lang: &str) -> bool {
 /// redirect `user.home` per workspace into a codescout-owned cache dir so the
 /// index (a) leaves the user's real `~/.config`, and (b) can be reclaimed
 /// wholesale on mux shutdown. See
-/// `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
+/// `docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
 #[cfg(feature = "librarian")]
 pub(crate) fn kotlin_lsp_home_root() -> std::path::PathBuf {
     dirs::cache_dir()
@@ -337,7 +337,7 @@ mod tests {
     fn kotlin_system_path_is_per_workspace() {
         // Regression: distinct worktree paths must NOT share one IntelliJ
         // system dir (cross-worktree index aliasing). See
-        // docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md
+        // docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md
         let a = default_config("kotlin", Path::new("/tmp/codescout-test-repo-a")).unwrap();
         let b = default_config("kotlin", Path::new("/tmp/codescout-test-repo-b")).unwrap();
         assert_ne!(
@@ -403,7 +403,7 @@ mod tests {
         // 2026-06-03) and grows unbounded. We redirect user.home into a
         // codescout-owned per-workspace cache HOME so it (a) leaves the user's
         // real ~/.config and (b) is reclaimable on mux shutdown. See
-        // docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
+        // docs/issues/archive/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
         let ws = Path::new("/tmp/codescout-test-kt-redirect");
         let cfg = default_config("kotlin", ws).unwrap();
         let ws_hash = crate::lsp::mux::workspace_hash(ws);
@@ -425,7 +425,7 @@ mod tests {
         // (~31 GiB on a 125 GiB host) and kotlin-lsp grows to fill it — a
         // host-OOM hazard that scales with RAM, not workload. The launch config
         // must pin an explicit -Xmx so the cap is absolute and RAM-independent.
-        // See docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
+        // See docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
         let cfg = default_config("kotlin", Path::new("/tmp/codescout-test-kt-heap")).unwrap();
         let jto = kotlin_java_tool_options(&cfg);
         assert!(

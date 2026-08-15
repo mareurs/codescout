@@ -31,7 +31,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Overfetch one past `limit` so a full-but-complete page is distinguishable
     // from a truncated one; without the `truncated` flag an agent reads a capped
     // page as the complete event history (silent-cap family — see
-    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
     let mut rows = {
         let cat = ctx.catalog.lock();
         events::timeline_for_artifact(
@@ -221,7 +221,7 @@ mod tests {
     async fn truncation_signals_capped_page() {
         // Silent-cap regression: a limit-capped timeline must flag that more
         // events exist, so an agent does not read the page as the complete
-        // history. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        // history. docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
         seed_artifact(&ctx, "a");

@@ -62,7 +62,7 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     }
     // Basename fallback: conversational mentions of files without their full
     // path (e.g. `docling_reader.py` instead of `src/mrv/readers/docling_reader.py`).
-    // See `docs/issues/2026-05-17-audit-doc-refs-basename-false-positives.md`.
+    // See `docs/issues/archive/2026-05-17-audit-doc-refs-basename-false-positives.md`.
     if let Some(r) = try_basename_fallback(&c.raw_ref, ctx) {
         return r;
     }
@@ -181,7 +181,7 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // `process.rs`, and range-checking it is more useful than calling it
     // missing. Without this the two ref kinds disagree about identical path
     // parts — see
-    // `docs/issues/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
+    // `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
     let path = if direct.exists() {
         direct
     } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
@@ -381,7 +381,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     let ast_path = path.clone();
     // `client_within_budget` bounds cold-start latency instead of an unbounded
     // wait a hung/slow LSP could otherwise stall on (see
-    // docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md).
+    // docs/issues/archive/2026-07-05-audit-doc-refs-lsp-stubbed-off.md).
     let fut = async move {
         let client = crate::lsp::client_within_budget(
             lsp,
@@ -1568,7 +1568,7 @@ mod tests {
     /// Basename fallback: bare basename (no `/`) that exists as exactly one
     /// file in the workspace resolves with `ResolvedBasename` + severity Low.
     /// Closes the false-positive class called out in
-    /// `docs/issues/2026-05-17-audit-doc-refs-basename-false-positives.md`.
+    /// `docs/issues/archive/2026-05-17-audit-doc-refs-basename-false-positives.md`.
     #[test]
     fn resolver_resolves_by_basename_when_unique() {
         let tmp = TempDir::new().unwrap();

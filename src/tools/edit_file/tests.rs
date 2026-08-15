@@ -1639,7 +1639,7 @@ async fn read_file_binary_content_does_not_panic() {
 
 #[cfg_attr(
     target_os = "windows",
-    ignore = "test passes /nonexistent/directory; Tree validates against project root differently on Windows. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+    ignore = "test passes /nonexistent/directory; Tree validates against project root differently on Windows. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
 )]
 #[tokio::test]
 async fn tree_nonexistent_path_errors() {
@@ -1901,7 +1901,7 @@ async fn read_file_gates_markdown_files() {
 
 #[tokio::test]
 async fn edit_file_replace_all_on_markdown_passes_through() {
-    // Regression for docs/issues/2026-05-18-edit-file-replace-all-on-markdown-rejected.md
+    // Regression for docs/issues/archive/2026-05-18-edit-file-replace-all-on-markdown-rejected.md
     // The .md gate must allow replace_all=true (file-wide find/replace), since
     // edit_markdown's heading-scoped editor adds friction without safety for that case.
     let (dir, ctx) = project_ctx().await;

@@ -667,7 +667,7 @@ impl OutputBuffer {
 /// expansion, and treating `~`, `$HOME` and `*` as non-paths let a command carrying a
 /// buffer ref skip BOTH the dangerous-command gate and the source-file block — `rm -rf
 /// ~/x` next to a `@cmd_*` ref read as buffer-only. See
-/// `docs/issues/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
+/// `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md`.
 ///
 /// **Sigils count only at the START of a word, not anywhere in it.** `contains` was
 /// tried first and over-blocked the buffer workflows this classifier exists to serve:

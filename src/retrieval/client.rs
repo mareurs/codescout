@@ -39,7 +39,7 @@ pub(crate) fn model_names_remote_backend(model: &str) -> bool {
 /// Mirrors `create_embedder_with_config`'s resolution ladder
 /// (`crates/codescout-embed/src/lib.rs`) on the no-url path. Two ways to select
 /// local, and the second one is the fix for
-/// `docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md`:
+/// `docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md`:
 ///
 /// 1. An explicit `local:` / `local-dir:` prefix — arm 2.
 /// 2. A **bare** name, when a local backend is compiled in — arm 6 resolves it
@@ -584,7 +584,7 @@ mod selection_tests {
     /// emits no sparse vector — the silent recall loss `guard_sparse` exists to
     /// make loud. Asserting only the predicate would not catch a future caller
     /// that stops consulting it.
-    /// docs/issues/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
+    /// docs/issues/archive/2026-08-11-project-status-backend-misreports-bare-model-and-lean-build.md
     #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
     #[test]
     fn no_url_with_a_bare_model_name_selects_the_local_backend_when_compiled_in() {

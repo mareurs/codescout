@@ -200,7 +200,7 @@ impl EditCode {
     ///
     /// The rule is `references`' own `completeness_warning` (`src/tools/symbol/references.rs`)
     /// applied to the write path, which had strictly more information and said nothing.
-    /// See `docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+    /// See `docs/issues/archive/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
     pub(super) fn rename_under_reached(
         lsp_files: &std::collections::HashSet<PathBuf>,
         declaration: &std::path::Path,
@@ -476,7 +476,7 @@ impl EditCode {
         // happens to share the name — trading a silent under-reach for a silent over-reach.
         // The writes below already landed; what was wrong was calling that a success.
         //
-        // See `docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
+        // See `docs/issues/archive/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md`.
         let under_reached = Self::rename_under_reached(&lsp_files, &full_path, &textual);
         let uncovered_sources: Vec<String> = textual
             .iter()
@@ -595,7 +595,7 @@ impl EditCode {
             // last child's last body line, so the first line NOT in the parent body
             // is `end_line + 1`. A bare `end_line` clamped a replace/remove of the
             // LAST child back by one, dropping its trailing statement — a sibling of
-            // the do_insert fix (docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md).
+            // the do_insert fix (docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md).
             // Brace languages are unaffected: a child's end is always strictly below
             // the parent closer, so the clamp never binds.
             let parent_body_end_exclusive = parent.end_line as usize + 1;
@@ -654,7 +654,7 @@ impl EditCode {
         // module reported its own children as dropped siblings — a wrong diagnosis of
         // a correct operation — and rolled the removal back, so a non-empty module
         // could not be removed at all.
-        // docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md gap 2
+        // docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md gap 2
         let (sibling_set, removed_descendants) =
             match (pre_set.as_ref(), target_ast_name_path.as_deref()) {
                 (Some(set), Some(target)) => {
@@ -786,7 +786,7 @@ impl EditCode {
             // last child's last body line, so the first line NOT in the parent body
             // is `end_line + 1`. A bare `end_line` clamped a replace/remove of the
             // LAST child back by one, dropping its trailing statement — a sibling of
-            // the do_insert fix (docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md).
+            // the do_insert fix (docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md).
             // Brace languages are unaffected: a child's end is always strictly below
             // the parent closer, so the clamp never binds.
             let parent_body_end_exclusive = parent.end_line as usize + 1;

@@ -131,7 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn peer_tool_honors_workspace_override_pin() {
-        // BUG (docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
+        // BUG (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md,
         // finding 1): PeerTool never overrides Tool::pinnable(), so its schema
         // advertises a `workspace` param and ctx.workspace_override IS populated —
         // but the body resolved `.codescout/peers.toml` via the plain, unpinned

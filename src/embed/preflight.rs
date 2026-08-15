@@ -100,7 +100,7 @@ pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
 /// indexed. They previously diverged (the guard used `hidden(true)` and applied an
 /// `ignored_paths` filter the indexer didn't honour); the indexer now honours
 /// `ignored_paths` too, via the same `build_ignore_matcher`. See
-/// `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`.
+/// `docs/issues/archive/2026-06-02-preflight-sync-walker-divergence.md`.
 ///
 /// Per-file `metadata()` errors are silently skipped (matching `WalkBuilder::flatten`).
 /// Only failure to read the root itself propagates as an error.

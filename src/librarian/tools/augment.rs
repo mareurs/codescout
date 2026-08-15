@@ -296,7 +296,7 @@ impl Tool for ArtifactAugment {
             // this check a bare top-level array is valid JSON, reaches
             // `apply_merge_patch`, misses its `(Object, Object)` arm, and is
             // discarded while the call reports "ok".
-            // See docs/issues/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
+            // See docs/issues/archive/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
             if !parsed.is_object() {
                 let shape = match &parsed {
                     Value::Array(_) => "array",
@@ -1043,7 +1043,7 @@ mod tests {
         );
     }
 
-    /// Regression: docs/issues/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
+    /// Regression: docs/issues/archive/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md
     /// A bare top-level array is valid JSON, so it slipped past the only two
     /// guards (mutual exclusion + JSON validity) and reached
     /// `apply_merge_patch`, whose `(Object, Object)` match arm silently fell

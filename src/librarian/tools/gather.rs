@@ -333,7 +333,7 @@ fn gather_git_log(
     // from a truncated one, then trim back to `limit`. Without the `truncated`
     // signal an agent synthesizing a tracker refresh reads a capped gather as
     // the complete set (silent-cap family — see
-    // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
+    // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
     let mut commits: Vec<Value> = revwalk
         .filter_map(|oid| oid.ok())
         .filter_map(|oid| repo.find_commit(oid).ok())
@@ -666,7 +666,7 @@ mod tests {
         // Silent-cap regression: a limit-capped gather must surface a warning so
         // an agent synthesizing a tracker refresh does not read the capped page as
         // the complete set. Companion to the find.rs `more_in_scope` fix.
-        // docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+        // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
         let tmp = tempfile::tempdir().unwrap();
         let content = (0..10)
             .map(|i| format!("match line {i}"))

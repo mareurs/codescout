@@ -305,7 +305,7 @@ async fn handle_tool_call_inner(
     // loadable project on the host. The per-request `workspace` override is an
     // in-process pinning feature (parallel subagents), never peer-controllable —
     // a peer is addressed by its registry id, which maps to exactly one workspace.
-    // See docs/issues/2026-06-01-peer-workspace-arg-pin-escape.md.
+    // See docs/issues/archive/2026-06-01-peer-workspace-arg-pin-escape.md.
     if let Some(obj) = args.as_object_mut() {
         obj.remove("workspace");
     }
@@ -455,7 +455,7 @@ mod tests {
     async fn connect_with_retry(sock: &std::path::Path) -> UnixStream {
         // Generous budget (~5s): under nproc-wide parallel test load the spawned
         // server can be CPU-starved past a tight window even though it will bind
-        // (docs/issues/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
+        // (docs/issues/archive/2026-07-03-parallel-test-suite-peer-and-mux-lock-flakiness.md).
         for _ in 0..250 {
             if let Ok(s) = UnixStream::connect(sock).await {
                 return s;

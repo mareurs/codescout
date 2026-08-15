@@ -79,7 +79,7 @@ impl crate::tools::Tool for LibrarianAdapter {
         // this, a librarian call pinned to a foreign workspace silently scoped to
         // the session project and returned the wrong repo's rows (fails
         // silent-wrong). An unresolvable pin surfaces loudly instead of falling
-        // back. See docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md.
+        // back. See docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md.
         let active_root: Option<std::path::PathBuf> =
             if let Some(pin) = ctx.workspace_override.as_deref() {
                 Some(
@@ -217,8 +217,8 @@ impl LibrarianAdapter {
 /// entirely — leaving an agent to extract `$.body`, see ~500 lines, and never
 /// learn the body was truncated. That silent loss caused real downstream damage
 /// (duplicate sections written from a short-read line count); see
-/// `docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md` and
-/// `docs/issues/2026-07-09-artifact-get-full-true-body-silent-truncation.md`.
+/// `docs/issues/archive/2026-07-07-artifact-get-full-body-silent-truncation.md` and
+/// `docs/issues/archive/2026-07-09-artifact-get-full-true-body-silent-truncation.md`.
 ///
 /// Promote the warning into the summary so it survives buffering. `output_id` and
 /// `hint` are set independently of the summary, so buffer navigation is unaffected.
@@ -247,7 +247,7 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
 /// recoverable condition falls through to the fatal branch in `route_tool_error`
 /// and hard-fails, aborting sibling parallel calls — exactly what the type
 /// exists to prevent. See
-/// docs/issues/2026-07-10-librarian-recoverable-error-downcast-never-matches.md.
+/// docs/issues/archive/2026-07-10-librarian-recoverable-error-downcast-never-matches.md.
 fn bridge_recoverable_error(e: anyhow::Error) -> anyhow::Error {
     match e.downcast::<crate::librarian::tools::RecoverableError>() {
         Ok(lib) => match lib.hint {

@@ -199,7 +199,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Reported in the response envelope. Without it, `unchanged: N` renders
     // identically whether N files legitimately needed no work or N files were
     // skipped by mistake — which is exactly how the `reembed` no-op stayed
-    // invisible (docs/issues/2026-07-25-reindex-reembed-noop-without-force.md).
+    // invisible (docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md).
     let mut total_embedded = 0usize;
 
     let want_embeddings = ctx.embedding.is_some();
@@ -321,7 +321,7 @@ mod tests {
     /// Before these fields existed, `unchanged: N` rendered identically whether
     /// N files legitimately needed no work or N files were skipped by mistake —
     /// which is how the `reembed` no-op stayed invisible through two apparently
-    /// clean reindexes (docs/issues/2026-07-25-reindex-reembed-noop-without-force.md).
+    /// clean reindexes (docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md).
     ///
     /// Covers the no-embedder branch only. Asserting a NON-zero `embedded`
     /// needs a mock `EmbeddingService` + artifact store, and

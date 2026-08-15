@@ -1708,7 +1708,7 @@ mod tests {
         // immediately if the component isn't installed for the active toolchain.
         // Pre-fix the LSP launch path swallowed it and reported the opaque
         // "LSP server disconnected" instead of pointing at the rustup fix.
-        // See docs/issues/2026-05-20-lsp-launch-opaque-disconnected-error.md.
+        // See docs/issues/archive/2026-05-20-lsp-launch-opaque-disconnected-error.md.
         let lines = vec![
             "error: Unknown binary 'rust-analyzer' in official toolchain \
                  'stable-x86_64-unknown-linux-gnu'."

@@ -6,7 +6,7 @@
 //! restarts** — a `/mcp` reconnect re-spawns the codescout process, which would
 //! otherwise reborn an empty in-memory set and re-inject every guide body the
 //! conversation already holds. Fix for
-//! `docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
+//! `docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
 //!
 //! Keyed by `CLAUDE_CODE_SESSION_ID` (set by Claude Code in the MCP subprocess
 //! env since v2.1.154) — per-process, so concurrent CC windows on one project

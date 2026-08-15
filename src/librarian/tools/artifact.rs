@@ -249,7 +249,7 @@ mod tests {
         // call through the Tool surface. Unit tests of update::call directly
         // missed this because they passed args without `action`. Going through
         // Artifact.call exercises the dispatcher pass-through.
-        // See docs/issues/2026-05-25-augmented-artifact-body-overwrite.md.
+        // See docs/issues/archive/2026-05-25-augmented-artifact-body-overwrite.md.
         let err = Artifact
             .call(
                 &mk_ctx(),
@@ -286,7 +286,7 @@ mod tests {
         // owner/activeForm/addBlocks/addBlockedBy were copy-pasted from the
         // harness's unrelated TaskUpdate tool schema and never had any backing
         // implementation in update.rs — see
-        // docs/issues/2026-07-13-artifact-update-phantom-schema-fields.md.
+        // docs/issues/archive/2026-07-13-artifact-update-phantom-schema-fields.md.
         let schema = Artifact.input_schema();
         let props = &schema["properties"];
         for phantom in ["owner", "activeForm", "addBlocks", "addBlockedBy"] {

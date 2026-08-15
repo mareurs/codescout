@@ -813,7 +813,7 @@ mod tests {
     /// callee is defined in a sibling file, `lookup_pos` must fall back to a
     /// bounded workspace tree-sitter walk to find it. Closes the cross-file
     /// edge-drop residual called out in
-    /// `docs/issues/2026-05-01-call-graph-callees-ts-fallback.md`.
+    /// `docs/issues/archive/2026-05-01-call-graph-callees-ts-fallback.md`.
     #[tokio::test]
     async fn lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file() {
         // Two-file fixture: `a()` in caller.rs references `b()` defined in

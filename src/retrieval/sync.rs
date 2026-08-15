@@ -36,7 +36,7 @@ pub struct SyncOpts {
     /// A test seam, and the only one available here: `sync_project` takes the lock
     /// internally, so a test that drives it end-to-end otherwise writes into the
     /// real runtime dir, and lock files are deliberately never unlinked. See
-    /// docs/issues/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
+    /// docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
     pub index_lock_dir: Option<std::path::PathBuf>,
 }
 
@@ -73,7 +73,7 @@ pub fn content_hash(text: &str) -> String {
 /// field of its own payload (which normalizes one line below), and (c) make the id
 /// platform-dependent, so the `local_ids` / `server_ids` delete-set diff cannot be
 /// compared across hosts. See
-/// `docs/issues/2026-07-07-display-audit-scope-gap-non-to-string-sites.md`.
+/// `docs/issues/archive/2026-07-07-display-audit-scope-gap-non-to-string-sites.md`.
 pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String {
     format!("{project_id}:{}:{content_hash}", to_forward_slash(rel_path))
 }
@@ -309,7 +309,7 @@ fn indexable_files(
 /// Split out of [`RetrievalClient::sync_project`] both as a test seam (driven by
 /// `&dyn BatchEmbedder` + `&dyn CodeVectorStore`) and to bound the index pass: the
 /// previous whole-tree materialisation grew to 68 GB and OOM-killed the host
-/// (docs/issues/2026-06-19-mcp-server-oom-68gb.md). `chunk_id` encodes the content
+/// (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md). `chunk_id` encodes the content
 /// hash, so the delete-set needs only the cheap id sets — never the chunk content.
 ///
 /// Also the single caller of `indexable_files` on the main-project sync path --
@@ -379,7 +379,7 @@ async fn stream_index(
             });
             // Flush when the buffer fills so peak memory stays O(flush_batch), not
             // O(all_files) — the whole-tree materialisation grew to 68 GB and
-            // OOM-killed the host (docs/issues/2026-06-19-mcp-server-oom-68gb.md).
+            // OOM-killed the host (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md).
             if pending.len() >= flush_batch {
                 added += flush_pending(embedder, store, collection, &mut pending).await?;
             }
@@ -445,7 +445,7 @@ async fn stream_index(
 ///
 /// A single-pass design that keeps every chunk's content in memory until the
 /// dirty decision is known would reproduce the exact whole-tree materialisation
-/// that OOM-killed the host at 68 GB (docs/issues/2026-06-19-mcp-server-oom-68gb.md)
+/// that OOM-killed the host at 68 GB (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md)
 /// -- the worktree delta's entire premise is that embedding cost is proportional
 /// to the diff, and that guarantee is worthless if peak memory still scales with
 /// the corpus.
@@ -689,7 +689,7 @@ impl crate::retrieval::client::RetrievalClient {
         // Flush the embed/upsert buffer every FLUSH_BATCH chunks so peak memory is
         // O(batch), not O(all_files). The previous whole-tree materialisation here
         // grew to 68 GB and OOM-killed the host
-        // (docs/issues/2026-06-19-mcp-server-oom-68gb.md).
+        // (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md).
         const DEFAULT_FLUSH_BATCH: usize = 256;
         let flush_batch: usize = std::env::var("CODESCOUT_INDEX_FLUSH_BATCH")
             .ok()
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn chunk_id_normalizes_native_separators() {
-        // BUG (docs/issues/2026-07-07-display-audit-scope-gap-non-to-string-sites.md):
+        // BUG (docs/issues/archive/2026-07-07-display-audit-scope-gap-non-to-string-sites.md):
         // chunk_id was built with `rel_path.display()`, which renders a PathBuf's
         // internal string VERBATIM. rel_path is OS-derived (strip_prefix of a
         // filesystem-walk path), so on Windows it carries backslashes — persisting
@@ -1013,7 +1013,7 @@ mod tests {
     #[derive(Default)]
     /// Records every `upsert_chunks` batch size + the refs it upserted, so a test
     /// can assert the indexer flushes in bounded batches (regression guard for the
-    /// 68 GB OOM: docs/issues/2026-06-19-mcp-server-oom-68gb.md).
+    /// 68 GB OOM: docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md).
     struct RecordingStore {
         upsert_batches: Mutex<Vec<usize>>,
         upserted: Mutex<Vec<ChunkRef>>,

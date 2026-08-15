@@ -86,7 +86,7 @@ const BUG_STATUSES: &[&str] = &[
 /// [`crate::librarian::frontmatter::write`] additionally drops these on the way out
 /// so an internal caller cannot write an unreadable file either.
 ///
-/// See `docs/issues/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
+/// See `docs/issues/archive/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
 pub(crate) fn reject_reserved_extra_keys(
     extra: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Result<()> {
@@ -130,7 +130,7 @@ pub(crate) fn reject_reserved_extra_keys(
 /// `active | draft | archived | superseded` but the guide also states that
 /// unrecognised values "appear as active", i.e. free-form is load-bearing there.
 ///
-/// See `docs/issues/2026-08-06-artifact-create-bug-defaults-to-invalid-draft-status.md`.
+/// See `docs/issues/archive/2026-08-06-artifact-create-bug-defaults-to-invalid-draft-status.md`.
 fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String> {
     match requested {
         Some(s) if kind == "bug" && !BUG_STATUSES.contains(&s) => {
@@ -186,7 +186,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
 
     // Prevention: refuse writing a temp-dir-rooted artifact into the real shared
-    // catalog. See docs/issues/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
+    // catalog. See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
     super::temp_write_guard::guard_temp_workspace_write(&base_dir, &ctx.catalog.lock().conn)?;
 
     validate_rel_path(&a.rel_path)?;

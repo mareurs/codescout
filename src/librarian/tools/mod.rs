@@ -19,7 +19,7 @@ pub mod scope;
 /// Single source of truth shared by `find.rs` and `context.rs` so the two
 /// surfaces cannot drift — they did once: `retired` was added to `find` but
 /// not `context` (see
-/// docs/issues/2026-05-25-hidden-statuses-context-missing-retired.md).
+/// docs/issues/archive/2026-05-25-hidden-statuses-context-missing-retired.md).
 ///
 /// - `archived` / `superseded`: terminal; the file is physically moved to an
 ///   `archive/` path.
@@ -97,7 +97,7 @@ pub struct ToolContext {
     /// The same shared LSP manager instance the core MCP `ToolContext` uses —
     /// threaded in at construction (`build_tool_context`), never a second
     /// independent instance. See
-    /// docs/issues/2026-07-05-audit-doc-refs-lsp-stubbed-off.md for why this
+    /// docs/issues/archive/2026-07-05-audit-doc-refs-lsp-stubbed-off.md for why this
     /// field exists and why reuse (not duplication) is load-bearing.
     pub lsp: Arc<dyn crate::lsp::LspProvider>,
 }
@@ -178,7 +178,7 @@ impl TestToolContextBuilder {
 /// into `current_project` and is usually ABSENT from the legacy `roots`
 /// registry. A guard that consults only `workspace.roots` therefore rejects
 /// every delete/move performed in such a project — see
-/// `docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md`.
+/// `docs/issues/archive/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md`.
 ///
 /// The active `current_project` (its `git_root`, then `abs_path`) is listed
 /// FIRST — ahead of the legacy `workspace.roots` — so `containing_root`'s

@@ -184,7 +184,7 @@ pub fn format_search_symbols(val: &Value) -> String {
             // so large bodies are still reachable. The inline path
             // (`OutputForm::Text`, ≤ 10 KB JSON) returns this text verbatim
             // with no `@tool_*` ref — eliding here strands the agent.
-            // See docs/issues/2026-05-18-symbols-body-hint-unreachable.md.
+            // See docs/issues/archive/2026-05-18-symbols-body-hint-unreachable.md.
             for line in body.lines() {
                 row.push_str("\n      ");
                 row.push_str(line);
@@ -469,7 +469,7 @@ pub(super) fn format_rename_symbol(result: &Value) -> String {
     // excludes every file the LSP edited. Summing them into one "sites" figure reported an
     // under-reach as a larger success: a rename that changed 2 sites and left 45 behind
     // rendered as `47 sites`. That is the number an agent sees, since this is the compact
-    // surface. See docs/issues/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md.
+    // surface. See docs/issues/archive/2026-08-08-edit-code-rename-under-reaches-and-reports-ok.md.
     let head = if files > 1 {
         format!("→ {new_name} · {total_edits} sites · {files} files")
     } else {

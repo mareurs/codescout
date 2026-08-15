@@ -416,7 +416,7 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
 #[tokio::test]
 async fn memory_recall_signals_has_more_when_capped() {
     // Silent-cap regression: a limit-capped recall must flag that more memories
-    // match. docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
+    // match. docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md
     use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
     use crate::memory::semantic_store::SemanticMemoryStore;
     use crate::retrieval::embedder::DenseEmbedder;

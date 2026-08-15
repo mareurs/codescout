@@ -130,7 +130,7 @@ pub(crate) fn plan_section_edit(
             // first line is an H3) is a subsection under H2, not a replacement
             // for H2 -- checking "is this any heading" instead of "is this the
             // same level as the target" silently deleted the target heading.
-            // See docs/issues/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md.
+            // See docs/issues/archive/2026-07-02-edit-markdown-replace-drops-target-heading-on-heading-shaped-content.md.
             let replace_heading = new
                 .lines()
                 .next()

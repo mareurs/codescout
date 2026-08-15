@@ -50,7 +50,7 @@ use crate::util::fs::to_forward_slash;
 /// Tests must never call `std::env::set_var`: mutating `environ` while other test
 /// threads call `getenv` is UB (glibc may `realloc` it under a concurrent reader), and
 /// the reader set is effectively the whole suite — every `Agent::new` reads `HOME`.
-/// See `docs/issues/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
+/// See `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`.
 #[derive(Debug, Clone, Default)]
 pub struct ServerEnv {
     /// `CODESCOUT_PROBE` — registers the oversized-description probe tool.
@@ -129,7 +129,7 @@ pub struct CodeScoutServer {
     /// preserves as system-prompt content. The per-response annotation
     /// becomes redundant after the first eligible call. See U-25 in
     /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
-    /// `docs/issues/2026-05-28-path-annotation-spam.md`.
+    /// `docs/issues/archive/2026-05-28-path-annotation-spam.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
     /// Tokio-clock instant of the most recent `call_tool`, watched by the optional
     /// idle-shutdown watchdog in `run()`.
@@ -229,7 +229,7 @@ impl CodeScoutServer {
         // the MCP subprocess env since CC v2.1.154; per-process, so concurrent
         // CC windows don't collide), fall back to the companion's
         // .codescout/cc_session_id file, then a random uuid. See
-        // docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md and
+        // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md and
         // memory `claude-code-mcp-env`.
         let guide_project_root = agent.project_root().await;
         let cc_session_id = env
@@ -476,7 +476,7 @@ impl CodeScoutServer {
                     // Suppress response after cancel: Claude Code closes the MCP
                     // stdio connection if it receives ANY response for a cancelled
                     // request (confirmed 2026-04-16 by pending() experiment — see
-                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
+                    // docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md).
                     //
                     // We park the task here permanently instead. tool_call_fut was
                     // dropped by select!, so the shell child is already reaped via
@@ -504,7 +504,7 @@ impl CodeScoutServer {
                     // Suppress response after cancel: Claude Code closes the MCP
                     // stdio connection if it receives ANY response for a cancelled
                     // request (confirmed 2026-04-16 by pending() experiment — see
-                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
+                    // docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md).
                     //
                     // We park the task here permanently instead. tool_call_fut was
                     // dropped by select!, so the shell child is already reaped via
@@ -527,7 +527,7 @@ impl CodeScoutServer {
     /// on rendered text, meant guessing from a one-character lookbehind: it
     /// stripped path literals out of file content and collapsed root-valued
     /// fields to `""`
-    /// (docs/issues/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md).
+    /// (docs/issues/archive/2026-08-09-path-strip-corrupts-file-content-and-root-fields.md).
     ///
     /// `run_command` needs no special case any more. Its payload is
     /// `{"exit_code", "stdout", ...}` and `stdout` is not an allowlisted path
@@ -1443,7 +1443,7 @@ pub async fn run(
     // Always-on durable OOM-forensics heartbeat: a synchronous, SIGKILL-proof
     // RSS line per tick to <cache>/codescout/heartbeats/<pid>.log. Survives the
     // kill and the unknown-cwd discoverability gap that lost the 68 GB instance's
-    // diagnostic log. See docs/issues/2026-06-19-mcp-server-oom-68gb.md.
+    // diagnostic log. See docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md.
     crate::heartbeat::spawn_durable(instance_tag.to_owned(), project_display);
 
     // Heartbeat: distinguishes idle from hung. (Rich fields, --debug only; rides
@@ -2806,7 +2806,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_tool_inner_grants_write_access_to_a_fresh_pinned_workspace() {
-        // FINDING (docs/issues/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
+        // FINDING (docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
         // "Live-verification finding"): a workspace pin defaulted to read-only
         // on first residency (Agent::ensure_resident's documented default),
         // and Agent::activate clears every other resident workspace on every
@@ -2856,7 +2856,7 @@ mod tests {
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_find_honors_workspace_pin() {
-        // BUG (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md): the
+        // BUG (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md): the
         // librarian adapter derived current_project from the session-default
         // active_project() and ignored ctx.workspace_override, so artifact(find)
         // pinned to a foreign workspace silently returned the SESSION project's
@@ -2962,7 +2962,7 @@ mod tests {
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_create_honors_workspace_pin() {
-        // Whole-family pin (docs/issues/2026-07-17-artifact-find-ignores-workspace-pin.md):
+        // Whole-family pin (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md):
         // resolving the pin in the adapter's call() covers writes too — a pinned
         // artifact(create) must land in the PINNED workspace, not the default.
         let dir_a = tempdir().unwrap();
@@ -3194,7 +3194,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_command_output_keeps_absolute_project_paths() {
-        // Regression: docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md
+        // Regression: docs/issues/archive/2026-05-21-run-command-strips-project-root-from-path-literals.md
         // run_command stdout is raw shell output; an absolute path literal under
         // the project root (e.g. from readlink/realpath) must be returned
         // verbatim, not silently rewritten to a relative-looking string.
@@ -3661,7 +3661,7 @@ mod guide_hint_tests {
     /// - **workspace:** without it, `build_tool_context` falls back to
     ///   `dirs::config_dir()/librarian/workspace.toml`, which is absent under
     ///   wine/windows-gnu — the deterministic cause of the 8-test guide_hint wine
-    ///   cluster (`docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md`): the
+    ///   cluster (`docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md`): the
     ///   missing file fails the build, `try_build_runtime` returns None, and the
     ///   `artifact` tool never registers. An empty file is valid — `WorkspaceConfig`
     ///   is `#[derive(Default)]` with all fields `#[serde(default)]`.
@@ -3740,7 +3740,7 @@ mod guide_hint_tests {
             "expected _guide_hint mentioning 'librarian' on first artifact call"
         );
     }
-    /// Regression for docs/issues/2026-06-01-librarian-adapter-stale-is-write.md:
+    /// Regression for docs/issues/archive/2026-06-01-librarian-adapter-stale-is-write.md:
     /// LibrarianAdapter::is_write matched dead tool names, so every librarian tool
     /// classified as a read and the main server's write-guard never engaged for
     /// catalog mutations. Pins the real names + per-action classification.
@@ -3924,7 +3924,7 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    /// The fix for docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md:
+    /// The fix for docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md:
     /// the guide-hint ledger is persisted per CLAUDE_CODE_SESSION_ID, so a `/mcp`
     /// reconnect (which re-spawns the codescout process) reloads it instead of
     /// re-injecting every guide body the conversation already holds.
