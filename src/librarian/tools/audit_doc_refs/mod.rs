@@ -197,7 +197,30 @@ pub const FAIL_ON_VALUES: [&str; 5] = ["high", "med", "low", "any", "never"];
 /// findings on 2026-08-06, every one of them correct prose
 /// (`src/pc_kb/corpus.py`, `docs/trackers/mrv-chat-watch/**`, …). See
 /// docs/issues/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md.
-pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &["docs/agents/**", "docs/lessons/**"];
+///
+/// The `src/prompts` payload files are agent-facing instruction text whose
+/// example paths (`src/foo.rs`, `docs/plans/foo.md`, `docs/trackers/foo.md`)
+/// are teaching placeholders, not citations — 26 broken refs, 9 of them high,
+/// measured 2026-08-08. They are already silent today only because no entry in
+/// `DEFAULT_AUDIT_GLOBS` happens to reach them; listing them here turns an
+/// accident of the include set into a decision, so widening the globs later
+/// cannot pull the placeholders into the gate.
+///
+/// `src/prompts/README.md` is deliberately NOT excluded, which is why the
+/// payloads are enumerated rather than matched with `src/prompts/**`. It is the
+/// one file in that directory whose refs are real citations to real codescout
+/// files (28 refs, 24 resolved, 0 high), and `**/README.md` already scans it —
+/// excluding the subtree wholesale would drop live coverage in order to
+/// document a silence that never covered this file. `globset` has no negation,
+/// so a broad pattern plus a carve-out is not expressible.
+pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &[
+    "docs/agents/**",
+    "docs/lessons/**",
+    "src/prompts/guides/**",
+    "src/prompts/source.md",
+    "src/prompts/memory-templates.md",
+    "src/prompts/workspace_onboarding_prompt.md",
+];
 
 pub const MAX_FILES_DEFAULT: usize = 10_000;
 
@@ -1417,6 +1440,61 @@ mod tests {
                 "default scan should exclude docs/agents/** — only docs/other/guide.md should be scanned"
             );
     }
+
+    #[test]
+    fn prompt_payload_excludes_survive_a_glob_widening_but_spare_the_readme() {
+        // The four src/prompts entries are inert under today's
+        // DEFAULT_AUDIT_GLOBS — no include pattern reaches that directory
+        // except `**/README.md`, so the payloads are already silent. They
+        // exist for the widening that would END that silence, so the widening
+        // is what this test simulates: a default-scan assertion would pass
+        // just as happily with the four entries deleted.
+        let tmp = TempDir::new().unwrap();
+        let prompts = tmp.path().join("src/prompts");
+        std::fs::create_dir_all(prompts.join("guides")).unwrap();
+        for payload in [
+            "source.md",
+            "memory-templates.md",
+            "workspace_onboarding_prompt.md",
+        ] {
+            std::fs::write(prompts.join(payload), "# Payload\n").unwrap();
+        }
+        std::fs::write(prompts.join("guides/iron-laws-detail.md"), "# Guide\n").unwrap();
+        std::fs::write(prompts.join("README.md"), "# Prompts\n").unwrap();
+
+        let widened = vec!["src/prompts/**/*.md".to_string()];
+        let excludes: Vec<String> = DEFAULT_AUDIT_EXCLUDES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let kept: Vec<String> = collect_markdown_files(tmp.path(), &widened, &excludes)
+            .unwrap()
+            .iter()
+            .map(|p| {
+                p.strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            kept,
+            vec!["src/prompts/README.md"],
+            "a widened include set must still drop the four payload patterns, \
+             and must still keep the README — its refs are real citations"
+        );
+
+        // Discriminator: the same widening without the excludes pulls in all five.
+        let unguarded = collect_markdown_files(tmp.path(), &widened, &[]).unwrap();
+        assert_eq!(
+            unguarded.len(),
+            5,
+            "sanity: the widened glob really does reach all five files, so the \
+             assertion above is measuring the excludes and not the glob"
+        );
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn default_scan_covers_changelog_and_contributing() {
