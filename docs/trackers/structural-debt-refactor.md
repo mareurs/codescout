@@ -360,7 +360,66 @@ scans files, cannot see them. That is a third citation surface, after prose
 (SD-1) and code comments (SD-1b), and it is the one the project's most heavily
 cited trackers actually use. Recorded, not fixed: no params citation has been
 observed stale yet, and all three candidate fixes have real costs — see SD-11.
+**Partly superseded the same day — read the next entry before acting on this
+one.** The heading's "already broken" was wrong: the owner confirms `context`'s
+wider reach is intended. The duplication finding survives; the defect reading
+does not.
+
 The gap is bounded, though: only *augmented* trackers are affected.
 `docs/trackers/bug-fix-session-log.md` and
 `docs/trackers/reconnaissance-patterns.md` are plain markdown, verified
 not-augmented this session, and are scanned in full.
+
+### 2026-08-15 — the behaviour was intended; the structure was still duplicated
+
+Owner decision on the question the previous entry raised:
+`librarian(action="context")` **can and should** reach across everything when
+asked for `scope="all"`. Broad, cross-project, cross-session visibility is the
+point of an orientation tool — it should be able to look at other sessions'
+state and whatever else orientation needs. The two handlers are not inconsistent
+once read as different kinds of surface: `find` narrowing `all` to the umbrella
+is a safety default for a *search* tool, and `context` taking `all` literally is
+correct for an *orientation* one.
+
+So `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md` is
+closed `wontfix`, its Hypothesis 2 moved from `deferred` to `confirmed`, and the
+file kept rather than deleted — it was right about the mechanism and wrong about
+what the mechanism meant, which is worth being able to read back.
+
+**What survived the reversal, and why.** SD-10 lost none of its substance.
+`src/librarian/tools/find.rs:524` and `src/librarian/tools/workspace_state_at.rs:98`
+are still two verbatim copies of the same ~30-line block carrying the same
+user-facing error string; edit the message in one and they diverge in silence.
+That finding was measured *structurally* — two copies, one string — not inferred
+from the behavioural symptom, and structural findings and behavioural ones have
+independent lifetimes. A `wontfix` on the symptom is not a `wontfix` on the
+structure. Worth stating plainly because the opposite mistake is the cheap one:
+close the bug, close the row behind it, and lose the duplication that was real
+all along.
+
+**What the reversal did change is the fix shape.** Not "restore the missing
+steps in `src/librarian/tools/context.rs`" but "make the difference
+declarable". Extracting one prologue and handing `context` a trimmed variant
+would re-encode the divergence as an omission a second time — the same shape
+that produced this investigation. The extraction should instead take the
+umbrella handling as an explicit parameter, `Require` for `find` and
+`workspace_state_at`, `Literal` for `context`, so the choice is stated in the
+signature at each call site. A comment rots; an absence says nothing; a named
+policy argument cannot be misread as an accident. Severity drops `high` → `med`
+accordingly: no user-visible defect remains, only a co-change hazard.
+
+**And one finding is neither.** `apply_scope` deliberately over-selects in a
+worktree session — both `Scope::Project` and `Scope::Repo` OR the worktree
+prefix with the main prefix — and both arms carry the same comment saying
+*"shadow-vs-main dedup happens post-query in find"*
+(`src/librarian/tools/scope.rs:80`, `src/librarian/tools/scope.rs:91`).
+`shadow_main_pairs` is called in `src/librarian/tools/find.rs` and
+`src/librarian/tools/get.rs` only. `src/librarian/tools/context.rs` contains no
+call to it and no occurrence of the string `worktree` at all;
+`src/librarian/tools/workspace_state_at.rs` likewise. So a shared helper
+documents an obligation that two of its callers never discharge, and one
+artifact can be rendered twice into a budgeted bundle with nothing marking the
+pair. That is orthogonal to scope width and outlived the decision unchanged:
+`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
+Inferred from the code, **not** measured — the bug file says so and carries the
+reproduction that would settle it.

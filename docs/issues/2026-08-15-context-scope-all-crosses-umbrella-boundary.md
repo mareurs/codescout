@@ -1,7 +1,7 @@
 ---
 id: '66e8a27d0ed97a90'
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: librarian(action="context") drops the umbrella alias and the no-umbrella guard, so scope="all" crosses into non-member projects'
 tags:
 - librarian
@@ -10,9 +10,11 @@ tags:
 - duplication-drift
 - context
 topic: librarian scope resolution
+closed: 2026-08-15
 opened: 2026-08-15
 owner: marius
-related: []
+related:
+- b5080e6c7a73ab44
 severity: high
 ---
 
@@ -20,14 +22,23 @@ severity: high
 
 ## Summary
 
-Three librarian handlers resolve `scope` from the same `Scope` enum, but only two
-of them run the full scope-resolution prologue. `src/librarian/tools/context.rs` carries a truncated
-copy: it keeps the no-current-project fallback and drops both the `scope="all"`
-umbrella guard and the `All → Umbrella` alias. The result is that
-`librarian(action="context", scope="all")` applies **no scope clause at all** and
-pulls artifacts from unrelated workspace projects into the returned bundle —
-including projects that are not members of the configured umbrella.
+**Closed `wontfix` — the behaviour is intended. See Fix.**
 
+`librarian(action="context", scope="all")` applies no scope clause and draws
+candidates from every project in the catalog, where
+`artifact(action="find", scope="all")` narrows to the configured umbrella. The
+divergence is real and was measured; the *judgement* that it is a defect was
+wrong. `context` is an orientation tool, and reaching across everything when
+explicitly asked for `all` is the point of it.
+
+What this investigation leaves behind is not this behaviour but two things it
+uncovered on the way: the `find` / `workspace_state_at` prologue duplication
+(SD-10 in `docs/trackers/structural-debt-refactor.md`) and an un-deduplicated
+worktree overlay, which has its own file —
+`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
+
+The original report is kept below unedited. It was right about the mechanism and
+wrong about what the mechanism means, which is worth being able to read back.
 ## Symptom (Effect)
 
 Same server, same active project, same word passed for `scope`, two different
@@ -145,50 +156,57 @@ The error text names precisely the failure that `context` then performs silently
    **Test:** looked for a comment, test, or doc stating it. `src/librarian/tools/context.rs` has one
    scope test (`repo_scope_excludes_other_repos`); nothing covers `all` or the
    umbrella alias, and no comment marks the omission.
-   **Verdict:** deferred — cannot be confirmed from the code. If it *is*
-   deliberate it needs a comment and a test, because the two sibling handlers
-   encode the opposite intent in a shared error string.
+   **Verdict:** CONFIRMED by the owner, 2026-08-15 — it is deliberate, and the
+   rationale is broader than "read-only bundler": `context` exists to give
+   cross-project, cross-session visibility. The code genuinely could not settle
+   it, and that half of the finding stands — nothing in the file said so. Both
+   consequences named here still apply: it wants a statement of intent (better
+   still, a typed policy at the call site than a comment) and a test.
 
 ## Fix
 
-Not yet implemented. The shape the evidence points at: extract the prologue
-(steps 1–4 above) into one function beside `apply_scope` in
-`src/librarian/tools/scope.rs`, and call it from all three handlers. That
-collapses the drift and the duplicated error string together, and it is the same
-move already validated for the SQL-side descendant predicate in `31609aa5`
-(`descendant_path_like`) — extract the whole shared unit, not the eye-catching
-fragment.
+**WONTFIX — the wider reach is intentional.** Owner decision, 2026-08-15:
+`librarian(action="context")` can and should reach across every project when
+asked for `scope="all"`. The whole value of an orientation tool is
+cross-project, cross-session visibility — other sessions' state, recorded
+sessions, and whatever else orientation needs to see.
 
-Deliberately **not** done in the same change: whether `context` should also
-exclude worktree shadow rows, and whether `scope_summary` should be retired in
-favour of `ScopeApplied::to_json`. Both are behaviour changes to a second tool
-and want their own decision.
+The two handlers are not inconsistent once you read them as different kinds of
+tool. `find` narrowing `all` to the umbrella is a safety default appropriate to a
+*search* surface, where a caller usually wants their own work and a silent
+cross-project hit is noise. `context` taking `all` literally is appropriate to an
+*orientation* surface, where the caller has explicitly asked to look further than
+usual. Both are correct for what they are; what was missing was any statement
+that this was a choice.
 
+So two pieces of work survive the decision — tracked on SD-10, not here:
+
+1. **Make the divergence explicit at the call site.** When the prologue is
+   extracted, give it a policy parameter (e.g. `UmbrellaPolicy::Require` for
+   `find` and `workspace_state_at`, `UmbrellaPolicy::Literal` for `context`) so
+   the intent is stated in the signature. A comment can rot; an absence says
+   nothing at all, which is precisely how this file came to be opened.
+2. **Pin the behaviour with a test.** An intended behaviour that nothing defends
+   is indistinguishable from an accident — and will be re-reported.
 ## Tests added
 
-None yet. The regression test this needs is a scope-parity test asserting that
-`find`, `context`, and `workspace_state_at` resolve an identical
-`(requested_scope, has_current_project, has_umbrella)` triple to the same
-effective scope — a per-handler test would not have caught this, because each
-handler is self-consistent.
-
+N/A for a `wontfix` — but see Fix item 2, which is a real gap rather than a
+formality. `src/librarian/tools/context.rs` carries exactly one scope test
+(`repo_scope_excludes_other_repos`); nothing covers `all`, and nothing covers the
+umbrella alias in either direction. The behaviour this file now blesses is held
+up by no assertion anywhere.
 ## Workarounds
 
-Pass `scope="umbrella"` explicitly to `librarian(action="context")` rather than
-`scope="all"`. That reaches the `Scope::Umbrella` arm of `apply_scope` directly
-and applies the member-prefix clause, which is what `find` would have done with
-`scope="all"` anyway.
-
+N/A — nothing to work around. A caller who wants the narrower pool can pass
+`scope="umbrella"` to `librarian(action="context")` and get exactly what
+`artifact(action="find", scope="all")` would have given.
 ## Resume
 
-Decide whether `context`'s wider reach is intentional (Hypothesis 2 is deferred,
-not rejected). If it is not, extract the prologue from
-`src/librarian/tools/find.rs:524` into `src/librarian/tools/scope.rs` beside
-`apply_scope`, call it from all three handlers, and add the parity test named
-under "Tests added". Run `cargo test --workspace` and re-run the two-call A/B
-from "Reproduction" against a rebuilt server (`cargo rb`, then `/mcp`) to confirm
-both report the same `scope.applied`.
-
+N/A — closed. Follow-up lives in two places: SD-10 in
+`docs/trackers/structural-debt-refactor.md` (extract the prologue with an
+explicit umbrella policy; add the `context`-literal-`all` test), and
+`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`
+for the one finding this decision does not settle.
 ## References
 
 - `docs/trackers/structural-debt-refactor.md` — SD-3, whose "read the other three
