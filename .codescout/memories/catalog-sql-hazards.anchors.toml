@@ -14,5 +14,9 @@ path = "src/librarian/filter.rs"
 hash = "210de3612245e26c618a86f52f5e5381f40d455b16059778da3f111a3b2be5d5"
 
 [[anchors]]
-path = "docs/issues/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md"
-hash = "743400d5ff7c36c32a30385a7e7a0a30782044a212780be83dac30263496e64d"
+path = "docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md"
+hash = "6b6d9840b41a4548c3102acf5c6d94e682a41a661ac891d7ed6fe8a075ff34cb"
+
+[[anchors]]
+path = "src/librarian/util.rs"
+hash = "bc5fcbd61322db9d05727c728840490200ea2ce91298c3c8a3191846f1ce0664"
