@@ -90,6 +90,14 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Got:** `ERROR: session not found` — `CLAUDE_DIR = Path.home() / ".claude"` is hardcoded (cc.py:23), so `~/.claude-sdd` / `~/.claude-kat` sessions can't be inspected. This machine runs three profiles by design.
 **Workaround:** sed-copied cc.py to scratchpad with the profile dir patched.
 **Fix idea:** honor `$CLAUDE_CONFIG_DIR` (or add `--claude-dir`), and let `sessions`/`stats` fall back to globbing all three known profile roots when the session id isn't found in the default.
+**RECURRED 2026-08-15** (2nd occurrence, ~5 weeks later) — restoring kat session `4ba7e23c` from a `~/.claude-sdd` session. Same hardcode, same workaround cost. Escalating: this is not a one-off, it is structural on a three-profile machine, and the skill's own description advertises profile identification ("which CC profile (~/.claude vs ~/.claude-sdd) made a request") — so the documented capability is *unreachable* for two of the three profiles via `cc.py`.
+**Better workaround than sed-copying (use this one):** a wrapper importing cc.py as a module and repointing the globals — `PROJECTS_DIR` is read at call time, so no source patch is needed and the shared symlinked script stays untouched:
+```python
+import sys; sys.path.insert(0, "<skill>/scripts"); import cc
+cc.CLAUDE_DIR = Path(profile); cc.PROJECTS_DIR = Path(profile) / "projects"
+sys.argv = ["cc.py"] + sys.argv[1:]; cc.main()
+```
+**Second gap found on this pass:** `cc.py trace` truncates message bodies to ~200 chars, so the intent thread of a long session is not recoverable from it — the compaction-summary and multi-paragraph user prompts are exactly the high-value turns, and they are exactly the ones cut. Restoring a session needs an untruncated per-role message dump; there is no cc.py subcommand for it. **Fix idea:** add `cc.py messages <session_id> [--role user] [--since TS] [--full]`.
 ## `/analyze-usage`
 
 ### F-005 — `find ~/work` assumption not portable
