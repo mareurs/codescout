@@ -191,3 +191,53 @@ convention, not by blast radius. Only `--workspace` tells the truth.
 
 Baseline: **3823 / 0 / 50** (from 3818, +5 tests), `fmt --check` and
 `clippy --all-targets -D warnings` clean.
+
+### 2026-08-15 — SD-1 closed: the gate can now see citations in code
+
+`experiments:450880c7` (not-yet-on-master). The scan went **947 → 1390 files**,
+**50,206 → 51,310 refs**, exit 0.
+
+**The abstraction was not built, because it already existed.** `get_ts_language`
+is documented in-tree as the single source of truth for tree-sitter language
+resolution, shared by the AST parser and the embedding chunker — this is its
+**third** consumer. A trait with one impl per language would have been a fourth
+language mapping to keep in sync, which is the one-implementor bureaucracy
+`tool-registration-rule-of-three` exists to prevent. There is therefore **no
+per-language code**: one predicate, `kind().contains("comment")`, covers all
+nine grammars.
+
+That predicate was the load-bearing unknown — confirmed from working code for
+only five of nine. `every_supported_language_yields_its_doc_text` now proves it
+for all ten language keys and fails loudly if a grammar upgrade renames a node.
+That guard earns its keep because **a scanner that finds nothing is
+indistinguishable from a codebase with nothing to find.**
+
+**Python needed a second shape and would otherwise have been silently
+half-covered.** It documents in *string literals* — a docstring is
+`expression_statement > string`, carrying no comment node — so a comment-only
+extractor returns its `#` notes and drops every docstring. One explicit,
+language-gated special case, guarded from both sides: docstrings extracted;
+assigned and non-leading strings NOT treated as documentation; and the rule
+proven not to leak into TypeScript, where a leading bare string is a directive.
+
+Two integration notes worth keeping. The discriminator is *"has a grammar"*,
+not *"is a source file"* — `detect_language` answers `Some("markdown")` for
+`.md`, so the obvious test would have routed every markdown file into the
+comment extractor and found nothing anywhere. And dispatching inside the
+existing loop incidentally fixed the `--paths 'src/**/*.rs'` footgun that
+produced 33,105 bogus refs earlier today; restricting to documentation nodes
+is a measured **~30×** noise reduction (443 source files → 1,104 refs, against
+33,105 from 275 files parsed whole).
+
+**The cap is tested rather than assumed, and the reason is the lesson.** The
+first live scan produced **zero** `code_comment_capped` findings — good news
+about the corpus, and no evidence at all that the cap works. Exit 0 there means
+nothing needed capping, not that capping happens. So the policy moved into a
+pure function beside `cap_released_history` and is pinned by a discriminating
+pair: a no-op fails the High→Med assertion, a blanket always-Med fails the
+reasons-survive assertion.
+
+The three citations that resolve to nothing are split out as **SD-8** — no rule
+can fix them, so they were deliberately left out of the sweep.
+
+Baseline: **3835 / 0 / 50** (from 3818, +17 tests), fmt and clippy clean.
