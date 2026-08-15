@@ -57,19 +57,39 @@ corpus (21,638 calls, `user_version >= 2`).
 
 ## Root cause
 
-`inferred from the parameter's own contract — not yet traced to the truncation site.` `limit` is
-documented as "Max matching lines" and is applied as a row count. Nothing in the path bounds the
-*bytes* of each emitted line, so total output is `limit × (unbounded line length)`. For source code
-the two are correlated closely enough that the proxy holds; for minified JSON, bundled JS, CSV, or
-any generated single-line file, the correlation collapses entirely.
+**Confirmed at the bytes 2026-08-16** (the entry below previously read *inferred from the
+parameter's own contract*; it is now read, and the mechanism is exactly as inferred).
+
+`limit` is a **row count** from schema to enforcement, and no stage measures the size of what a
+row contains:
+
+- `src/tools/grep.rs:36` — schema: `"limit": { "type": "integer", "default": 50, "description":
+  "Max matching lines" }`
+- `src/tools/grep.rs:81` — `let max = optional_u64_param(&input, "limit").unwrap_or(50) as usize;`
+- `src/tools/grep.rs:207` — `if matches.len() >= max` — the cap, on the **count of matches**
+- `src/tools/grep.rs:322-323` — `let budget = max;` then `cap_grouped(matches, budget)`
+
+That penultimate line is the defect in miniature: **the variable is named `budget` while holding a
+row count.** A budget bounds a resource; this bounds cardinality. Total emitted output is therefore
+`max × (unbounded line length)`.
+
+The only size-like limits anywhere in the file bound something else entirely:
+
+- `src/tools/grep.rs:590-591` — `.size_limit(1 << 20)` / `.dfa_size_limit(1 << 20)` bound the
+  **compiled regex**, not the output;
+- `src/tools/grep.rs:147` — `bytes.iter().take(8192)` is the binary-detection peek, not a read cap;
+  `src/tools/grep.rs:143` reads the whole file (`std::fs::read`) regardless.
+
+`grep_in_buffer` carries the identical shape independently — `src/tools/grep.rs:652` (`max` from
+`limit`) and `:708` (`if matches.len() >= max`) — so the buffer-search path needs the same fix, not
+just the filesystem path.
 
 `measured 2026-08-16: SELECT overflow_tokens, input_json FROM tool_calls WHERE tool_name='grep'
 ORDER BY overflow_tokens DESC` → top row 4,427,639 tokens under `limit: 40`.
 
-Note this is *not* the same failure as an unbounded pipe (IL3): the guard for that is about shell
-composition, and this call was a well-formed `grep` tool invocation with an explicit limit set. The
-agent did the documented thing and still got 4.4M tokens.
-
+Note this is *not* the IL3 unbounded-pipe failure: that guard is about shell composition, and this
+was a well-formed `grep` tool invocation with an explicit limit set. The agent did the documented
+thing and still got 4.4M tokens.
 ## Evidence
 
 ### Overflow tokens by tool (live DBs, 2026-08-16)
@@ -126,10 +146,22 @@ emitted output is bounded and marked truncated.
 
 ## Resume
 
-Locate grep's result-assembly site and confirm where line collection happens relative to any byte
-accounting (the root cause above is inferred from the parameter contract, not yet read at the
-bytes — verify before designing the cap). Then add the per-line and total-byte budgets.
+Root cause is now read at the bytes (§ Root cause) — the verification step this section previously
+called for is **done**, and the inference held.
 
+Next: add the byte budget. Two call sites need it, not one — `Grep::call`
+(`src/tools/grep.rs:207`, `:322`) and `grep_in_buffer` (`src/tools/grep.rs:708`) cap independently
+and would otherwise diverge. Suggested order:
+
+1. Per-line byte cap with an explicit elision marker, so one pathological line cannot dominate.
+2. Total emitted-byte cap independent of `limit`, against the `INLINE_BYTE_BUDGET` /
+   `TOOL_OUTPUT_BUFFER_THRESHOLD` constants in `get_guide("progressive-disclosure")`.
+3. Report which cap fired, so "40 matches, all shown" is distinguishable from "40 matches, each
+   truncated."
+
+Regression test asserts on **bytes, not lines**: grep a fixture with one very long matching line at
+`limit` well above 1, assert output is bounded and marked truncated. Rename `budget`
+(`src/tools/grep.rs:322`) while you are there — it is the name that made the confusion natural.
 ## References
 
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16, *Overflow*.

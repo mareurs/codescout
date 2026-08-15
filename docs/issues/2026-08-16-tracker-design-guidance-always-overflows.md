@@ -60,28 +60,59 @@ Linux, codescout `v0.15.0`, branch `experiments`, MCP stdio. Live-DB corpus, 21,
 
 ## Root cause
 
-`inferred from the actions' contracts and the measured rates — emitting sites not yet read.`
-These three actions return *inherently large* payloads: `tracker_design` returns a teaching prompt
-plus an archetype library; `link_scan` returns a per-citation report; `audit_doc_refs` returns a
-per-finding report. Each is assembled in full and handed to the same
-`TOOL_OUTPUT_BUFFER_THRESHOLD` gate as any other result, so it buffers essentially every time.
+**Confirmed at the bytes 2026-08-16** (previously *inferred from the actions' contracts*). The
+mechanism is sharper than inferred, and it has a name:
 
-`measured 2026-08-16: SELECT json_extract(input_json,'$.action'), count(*), sum(overflowed) FROM
-tool_calls WHERE tool_name='librarian' GROUP BY 1`.
+**The payload caps its smallest component and leaves its largest uncapped.**
+
+`tracker_design::call` (`src/librarian/tools/tracker_design.rs:532-578`) assembles:
+
+| Component | Source | Capped? |
+|---|---|---|
+| `system_prompt` | `SYSTEM_PROMPT`, `tracker_design.rs:428-531` (103 lines) | **no** |
+| `archetypes` | `archetypes()`, `tracker_design.rs:29-426` — all **nine** built unconditionally | **no** |
+| `existing_trackers` | catalog walk | **yes** — `EXISTING_TRACKERS_CAP`, `tracker_design.rs:27` |
+
+The one component with a cap, and the one with an overflow hint
+(`existing_trackers_overflow_hint`), is the small variable list. The ~400 lines of static content
+that actually blow the budget have neither.
+
+**Measured, and the near-constancy is the proof.** `overflow_tokens` for the six
+`tracker_design` calls in the corpus:
+
+```
+2026-07-16  10260      2026-08-06  10310
+2026-07-17  10276      2026-08-15  10187
+2026-08-03  10328      2026-08-15  10256
+```
+
+**10,270 tokens mean, against a `MAX_INLINE_TOKENS` of 2,500 — 4.1× the budget.** A 1.4% spread
+across 13 months, while the catalog's tracker count grew substantially, is direct evidence that
+the variable component contributes almost nothing: the number is the static payload.
+
+(`overflow_tokens` is in tokens, not bytes — confirmed independently by `link_scan` at 4,614
+overflowing 8/8, which a 10,000-**byte** threshold could not explain.)
+
+**This resolves the open question this file previously carried.** The Fix section asked whether the
+payload was marginal (trim) or far over (split). At 4.1×, **the split is required** — trimming the
+archetype library cannot recover a 4× overshoot.
+
+`measured 2026-08-16: SELECT json_extract(input_json,'$.action'), count(*), avg(overflow_tokens)
+FROM tool_calls WHERE tool_name='librarian' GROUP BY 1` — `tracker_design` 6 calls, avg 10,270;
+`audit_doc_refs` 37, avg 9,947 (max 18,724); `link_scan` 8, avg 4,614; `doctor` 7 of 47, avg 10,113
+(max 45,088).
 
 **The hypothesis this refutes matters for triage.** A 39.7% tool-level rate reads at first like
-`context` — which packs a semantic bundle to a `max_tokens` budget and would be *expected* to be
-large. `context` was called once and did not overflow. The rate is entirely the three actions
-above, none of which take a budget parameter.
+`context`, which packs to a `max_tokens` budget and would be *expected* to be large. `context` was
+called once and did not overflow. None of the three actions that do overflow takes a budget
+parameter.
 
 **Why `tracker_design` is worse than the other two.** `link_scan` and `audit_doc_refs` return
-*findings* — a buffer is a reasonable place for a long report, and the caller queries it for what
-they need. `tracker_design` returns *instructions the caller is supposed to follow before acting*.
-Buffering those inverts the intent: the guide's purpose is to be read before `artifact(create)`,
-and CLAUDE.md directs callers to `librarian(tracker_design)` for exactly that. A caller who skips
-the extra fetch proceeds unguided — and per the filed overflow-recovery bug, that extra fetch is
-itself a step where agents measurably fail.
-
+*findings* — a buffer is a reasonable home for a long report, and the caller queries it for what
+they need. `tracker_design` returns *instructions the caller is meant to follow before acting*.
+Buffering those inverts the intent: CLAUDE.md directs callers here before `artifact(create)`, and a
+caller who skips the extra fetch proceeds unguided — a step where agents measurably fail
+(`docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`).
 ## Evidence
 
 ### Comparison with the tools that solved this
@@ -127,12 +158,18 @@ inline (no `output_id`) for the default invocation.
 
 ## Resume
 
-Read `tracker_design`'s emitting site and measure the payload against
-`TOOL_OUTPUT_BUFFER_THRESHOLD` (9KB inline / 10KB threshold per
-`get_guide("progressive-disclosure")`) to see how far over it lands. If it is marginal, trimming
-the archetype library may be enough; if it is far over, the split in Fix step 1 is required. Root
-cause above is inferred from contracts — read the bytes first.
+Measurement is **done** — the sizing this section previously called for returned 10,270 tokens,
+4.1× the 2,500-token inline budget, so Fix step 1's conditional is resolved in favour of the
+**split**; trimming cannot close a 4× gap.
 
+Next action: split `tracker_design::call`
+(`src/librarian/tools/tracker_design.rs:532-578`) so `system_prompt` returns inline and
+`archetypes()` (`tracker_design.rs:29-426`) moves behind an explicit follow-up — e.g. an
+`archetype` argument returning one by name, with the inline response listing the names and when to
+use each. Size the trimmed envelope against `MAX_INLINE_TOKENS` before committing: `SYSTEM_PROMPT`
+alone (103 lines) may still be close to the 2,500-token line.
+
+Regression test: assert the default `tracker_design` invocation returns **no** `output_id`.
 ## References
 
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16, *Overflow*.
