@@ -3540,6 +3540,67 @@ fn editing_end_line_strict_returns_none_when_ast_cannot_find_symbol() {
     );
 }
 
+/// Measures WHY `insert position="after"` refuses a method inside an `impl` that
+/// is nested in a function body — the shape that made `edit_code` and `edit_file`
+/// deadlock while adding a method to a local test fake.
+///
+/// The refusal itself is correct (BUG-051: falling back to a short LSP end splices
+/// mid-body). What was wrong is the diagnosis it reported: *"AST parse failed"*
+/// with the hint *"the file likely has syntax errors"*. Both assertions below show
+/// that is false — the file parses cleanly, and the LSP resolves the symbol fine.
+/// The real cause is that tree-sitter's extractor does not surface methods of an
+/// impl nested inside a function body, so there is nothing for the AST end-line
+/// resolver to match.
+///
+/// If a future extractor change starts exposing them, this test fails — and that
+/// is the signal to revisit the refusal, because the end would then be knowable.
+/// docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md
+#[test]
+fn ast_does_not_expose_methods_of_an_impl_nested_in_a_function() {
+    let source = "\
+trait Seam {
+    fn one(&self) -> u8;
+}
+
+fn outer() {
+    struct Fake;
+    impl Seam for Fake {
+        fn one(&self) -> u8 {
+            1
+        }
+    }
+}
+";
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("nested.rs");
+    std::fs::write(&file, source).unwrap();
+
+    // 1. The file is syntactically perfect — so "the file likely has syntax
+    //    errors" was never a true explanation.
+    assert!(
+        !crate::ast::has_syntax_errors(source, "rust"),
+        "fixture must parse cleanly, or it would not isolate the real cause"
+    );
+
+    // 2. The AST does surface the top-level items...
+    let ast = crate::ast::extract_symbols(&file).expect("extraction must succeed");
+    let paths = crate::symbol::edit::collect_all_name_paths(&ast);
+    assert!(
+        paths.iter().any(|p| p == "outer"),
+        "the enclosing fn must be in the AST; got {paths:?}"
+    );
+
+    // 3. ...but NOT the method of the impl nested inside `outer`. This is the
+    //    whole reason the strict end-line resolver returns None here.
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.contains("impl") && p.ends_with("/one")),
+        "if the AST now exposes the nested impl's method, revisit the insert \
+         refusal — the end is knowable; got {paths:?}"
+    );
+}
+
 /// Happy path: a clean file with a real symbol — strict and lenient agree.
 #[test]
 fn editing_end_line_strict_returns_some_when_ast_finds_symbol() {

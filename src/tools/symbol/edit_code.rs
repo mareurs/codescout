@@ -1057,16 +1057,42 @@ impl EditCode {
                     // top-level and parented cases prevents silent file
                     // corruption; the BUG-029 happy path is unaffected because
                     // it relies on AST returning Some, which strict still does.
-                    return Err(RecoverableError::with_hint(
-                        format!(
-                            "cannot determine end of '{}' for insert-after — AST parse failed",
-                            sym.name
-                        ),
-                        "The file likely has syntax errors that broke tree-sitter's parse, \
-                         or the symbol has duplicate-name siblings without a clear name_path. \
-                         Fix the syntax errors first, or use edit_file with explicit context.",
-                    )
-                    .into());
+                    //
+                    // Diagnose the cause instead of guessing it. The old message
+                    // asserted "AST parse failed" and hinted "the file likely has
+                    // syntax errors" for EVERY cause — wrong whenever the file
+                    // parses fine, which is the common case: a symbol the
+                    // tree-sitter extractor does not surface at all (a method of an
+                    // `impl` nested in a function body is the measured example, see
+                    // `ast_does_not_expose_methods_of_an_impl_nested_in_a_function`)
+                    // while the LSP resolves it happily. That hint sent a session
+                    // hunting for syntax errors that did not exist.
+                    let (msg, hint) = if crate::ast::has_syntax_errors(&content, &lang) {
+                        (
+                            format!(
+                                "cannot determine end of '{}' for insert-after — the file has \
+                                 syntax errors, so its AST is incomplete",
+                                sym.name
+                            ),
+                            "Fix the syntax errors first, then retry — confirming a symbol's \
+                             end line needs a clean parse.",
+                        )
+                    } else {
+                        (
+                            format!(
+                                "cannot determine end of '{}' for insert-after — the file parses \
+                                 cleanly, but the AST does not pinpoint this symbol's end",
+                                sym.name
+                            ),
+                            "The AST extractor does not surface every symbol the LSP does; a \
+                             method inside an impl-block nested in a function body is the known \
+                             case. Insert-after refuses rather than trust the LSP end, which can \
+                             be short and would splice the new code mid-body (BUG-051). Use \
+                             edit_code(action='replace') on the ENCLOSING symbol to add the \
+                             sibling, or edit_file with unique anchors.",
+                        )
+                    };
+                    return Err(RecoverableError::with_hint(msg, hint).into());
                 }
             },
         };

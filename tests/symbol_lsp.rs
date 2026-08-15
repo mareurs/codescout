@@ -1781,6 +1781,13 @@ async fn insert_code_after_stale_parent_lsp_end_clamps_into_multiline_macro_body
 /// parent clamp — but the clamp only catches *over*-extension, not
 /// *under*-extension into the same body. The fix removes that fallback;
 /// insert-after now refuses with a RecoverableError naming the workarounds.
+///
+/// The refusal is right; its *diagnosis* used to be wrong. This fixture is
+/// syntactically perfect — the AST simply holds `alpha` where the LSP said `a` —
+/// yet the error claimed "AST parse failed" and the hint told the reader to fix
+/// syntax errors that do not exist. So this test was corroborating a false
+/// explanation of its own scenario. It now asserts the diagnosis actually
+/// distinguishes a broken parse from a symbol the AST cannot pinpoint.
 #[tokio::test]
 async fn insert_code_after_refuses_when_ast_cannot_pin_symbol_end() {
     let src = "\
@@ -1837,8 +1844,97 @@ impl Foo {
 
     let msg = err.to_string();
     assert!(
-        msg.contains("cannot determine end") && msg.contains("AST parse failed"),
-        "error must explain why it refused; got: {msg}"
+        msg.contains("cannot determine end"),
+        "error must name the operation it refused; got: {msg}"
+    );
+    assert!(
+        msg.contains("parses cleanly"),
+        "this fixture is syntactically valid — the diagnosis must say so; got: {msg}"
+    );
+    assert!(
+        !msg.contains("has syntax errors"),
+        "must not blame syntax errors on a file that has none; got: {msg}"
+    );
+    assert!(
+        msg.contains("ENCLOSING symbol"),
+        "the hint must name a workaround that actually works; got: {msg}"
+    );
+
+    let unchanged = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert_eq!(
+        unchanged, src,
+        "refused insert-after must leave the file unchanged"
+    );
+}
+
+/// Counterweight to the test above: when the file really IS broken, the refusal
+/// must still say so. Without this, the diagnosis could collapse to always
+/// reporting "parses cleanly" and the sibling test would stay green while the
+/// message became wrong in the other direction.
+#[tokio::test]
+async fn insert_code_after_blames_syntax_errors_only_when_there_are_some() {
+    // Unclosed brace: the enclosing block is never terminated, so tree-sitter's
+    // parse carries an error node.
+    let src = "\
+struct Foo;
+
+impl Foo {
+    fn alpha(&self) {
+}
+";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        let alpha = SymbolInfo {
+            name: "a".to_string(),
+            name_path: "impl Foo/a".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 3,
+            end_line: 10,
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(3),
+            detail: None,
+        };
+        let impl_block = SymbolInfo {
+            name: "impl Foo".to_string(),
+            name_path: "impl Foo".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 2,
+            end_line: 4,
+            start_col: 0,
+            children: vec![alpha],
+            range_start_line: Some(2),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![impl_block])
+    })
+    .await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "impl Foo/a",
+                "position": "after",
+                "action": "insert",
+                "body": "    fn beta(&self) {}\n"
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("insert-after must still refuse on a broken file");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("has syntax errors"),
+        "a file with a genuine parse error must be diagnosed as such; got: {msg}"
+    );
+    assert!(
+        !msg.contains("parses cleanly"),
+        "must not claim a broken file parses; got: {msg}"
     );
 
     let unchanged = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
