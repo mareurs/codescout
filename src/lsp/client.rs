@@ -167,6 +167,30 @@ fn detect_fatal_stderr(lines: &[String]) -> Option<RecoverableError> {
     None
 }
 
+/// `(len, mtime)` — the cheap pair used to notice a file changing behind our back.
+type DiskSignature = (u64, Option<std::time::SystemTime>);
+
+/// Read a file's [`DiskSignature`], or `None` if it cannot be stat'd.
+///
+/// Both fields, deliberately. `len` alone misses a same-size change — exactly what
+/// reverting one character with `git checkout` produces. `mtime` alone has
+/// filesystem-dependent granularity.
+///
+/// **The pair narrows the blind spot; it does not close it.** A same-size change
+/// landing inside one mtime tick still reads as unchanged. That residual is
+/// accepted: it requires a filesystem with coarse mtime AND a byte-identical-length
+/// edit AND sub-tick timing, and its cost is one stale answer — which is the
+/// behaviour without any of this. A content hash would close it and would mean
+/// hashing every file on every navigation call.
+///
+/// So this is a staleness *hint*: a false negative costs one stale answer, a false
+/// positive costs one redundant `didChange`. The asymmetry is why the cheap check
+/// is the right one.
+fn disk_signature(path: &Path) -> Option<DiskSignature> {
+    let md = std::fs::metadata(path).ok()?;
+    Some((md.len(), md.modified().ok()))
+}
+
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
 fn convert_document_symbols(
     symbols: &[lsp_types::DocumentSymbol],
@@ -255,6 +279,14 @@ pub struct LspClient {
     /// The spec prohibits sending didOpen for an already-open file without an
     /// intervening didClose; some servers (e.g. kotlin-lsp) error on duplicates.
     open_files: StdMutex<HashMap<PathBuf, i32>>,
+    /// On-disk signature of the content last SENT to the server, per file.
+    ///
+    /// Separate from `open_files` (which tracks LSP document versions) because it
+    /// answers a different question: not "does the server know this file" but "does
+    /// the server have its current bytes". `did_open` returns early for an
+    /// already-open file, so without this an external `git checkout` leaves the
+    /// server answering from pre-checkout content indefinitely.
+    synced_sigs: StdMutex<HashMap<PathBuf, DiskSignature>>,
     /// Collects stderr lines from the server process. Checked during init retries
     /// to detect fatal errors (e.g. kotlin-lsp "Multiple editing sessions").
     stderr_lines: Arc<StdMutex<Vec<String>>>,
@@ -504,6 +536,7 @@ impl LspClient {
             transport: LspTransport::Process { child_pid },
             init_timeout,
             open_files: StdMutex::new(HashMap::new()),
+            synced_sigs: StdMutex::new(HashMap::new()),
             stderr_lines,
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
@@ -585,6 +618,7 @@ impl LspClient {
             },
             init_timeout: std::time::Duration::from_secs(30),
             open_files: StdMutex::new(HashMap::new()),
+            synced_sigs: StdMutex::new(HashMap::new()),
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
@@ -968,6 +1002,45 @@ impl LspClient {
             .collect())
     }
 
+    /// Record the on-disk signature we are about to hand the server.
+    fn record_synced(&self, path: &Path) {
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Some(sig) = disk_signature(&canonical) {
+            self.synced_sigs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(canonical, sig);
+        }
+    }
+
+    /// Re-send a file the server already has if it changed on disk behind our back.
+    ///
+    /// codescout's own writes notify the server. An external `git checkout`, `git
+    /// stash`, a rebase, or a plain editor save does not — and `did_open` returns
+    /// early for an already-open file, so nothing re-syncs it. The server then keeps
+    /// answering from the old content, which is the expensive failure: not an error,
+    /// a confident wrong answer, with symbol bodies and line numbers describing a
+    /// version of the file that no longer exists.
+    ///
+    /// Only fires when a signature was previously recorded. A file we have never
+    /// sent is `did_open`'s business, not this function's.
+    async fn resync_if_drifted(&self, path: &Path) {
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let Some(current) = disk_signature(&canonical) else {
+            return;
+        };
+        let drifted = {
+            let sigs = self.synced_sigs.lock().unwrap_or_else(|e| e.into_inner());
+            sigs.get(&canonical).is_some_and(|last| *last != current)
+        };
+        if drifted {
+            tracing::debug!(path = %canonical.display(), "resyncing file changed outside codescout");
+            // did_change re-reads from disk and records the new signature, so a
+            // failure here simply leaves the drift recorded for the next attempt.
+            let _ = self.did_change(path).await;
+        }
+    }
+
     /// Send textDocument/didOpen notification for a file.
     pub async fn did_open(&self, path: &Path, language_id: &str) -> Result<()> {
         // For socket transport, the mux handles document state dedup — skip
@@ -1002,6 +1075,7 @@ impl LspClient {
 
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read file for didOpen: {:?}", path))?;
+        self.record_synced(path);
         let uri = path_to_uri(path)?;
 
         self.notify(
@@ -1029,6 +1103,10 @@ impl LspClient {
     ) -> Result<Vec<super::SymbolInfo>> {
         // Ensure the file is open in the server
         self.did_open(path, language_id).await?;
+        // ...and that what it has open is what is on disk NOW. did_open is a no-op
+        // for an already-open file, so this is the only thing standing between an
+        // external `git checkout` and a confidently stale answer.
+        self.resync_if_drifted(path).await;
 
         let uri = path_to_uri(path)?;
         let params = lsp_types::DocumentSymbolParams {
@@ -1329,6 +1407,7 @@ impl LspClient {
 
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read file for didChange: {:?}", path))?;
+        self.record_synced(path);
         let uri = path_to_uri(path)?;
         self.notify(
             "textDocument/didChange",
@@ -2073,71 +2152,6 @@ struct Point {
         );
     }
 
-    /// Reproduce the stale-position bug: after editing a file on disk without sending
-    /// didChange, the LSP returns positions from the old content. did_change fixes it.
-    #[tokio::test]
-    async fn did_change_refreshes_stale_symbol_positions() {
-        if !rust_analyzer_available() {
-            eprintln!("Skipping: rust-analyzer not installed");
-            return;
-        }
-
-        let dir = tempdir().unwrap();
-        create_test_cargo_project(dir.path());
-        let main_rs = dir.path().join("src/main.rs");
-
-        let config = LspServerConfig {
-            command: "rust-analyzer".into(),
-            args: vec![],
-            workspace_root: dir.path().to_path_buf(),
-            init_timeout: None,
-            mux: false,
-            env: vec![],
-            idle_timeout_secs: None,
-        };
-        let client = LspClient::start(config).await.unwrap();
-
-        // Step 1: query symbols — fn add is at line 4 (0-indexed) in the original file.
-        let syms = client.document_symbols(&main_rs, "rust").await.unwrap();
-        let add_before = syms
-            .iter()
-            .find(|s| s.name == "add")
-            .expect("fn add not found");
-        let original_line = add_before.start_line;
-
-        // Step 2: prepend 3 blank lines on disk — shifts fn add to line 7.
-        let original = std::fs::read_to_string(&main_rs).unwrap();
-        std::fs::write(&main_rs, format!("\n\n\n{}", original)).unwrap();
-
-        // Step 3: query again WITHOUT did_change — LSP returns stale positions.
-        let syms_stale = client.document_symbols(&main_rs, "rust").await.unwrap();
-        let add_stale = syms_stale
-            .iter()
-            .find(|s| s.name == "add")
-            .expect("fn add not found");
-        assert_eq!(
-            add_stale.start_line, original_line,
-            "without did_change, LSP should still return the old (stale) line number"
-        );
-
-        // Step 4: notify the LSP about the disk change.
-        client.did_change(&main_rs).await.unwrap();
-
-        // Step 5: query again — LSP should now return the shifted position.
-        let syms_fresh = client.document_symbols(&main_rs, "rust").await.unwrap();
-        let add_fresh = syms_fresh
-            .iter()
-            .find(|s| s.name == "add")
-            .expect("fn add not found");
-        assert_eq!(
-            add_fresh.start_line,
-            original_line + 3,
-            "after did_change, LSP should return the updated line number (shifted by 3)"
-        );
-
-        client.shutdown().await.unwrap();
-    }
-
     /// BUG-028: did_change on a file not yet opened should fall back to did_open,
     /// so create_file on a new path registers the file with the LSP immediately.
     #[tokio::test]
@@ -2190,6 +2204,141 @@ struct Point {
         assert!(
             syms.iter().any(|s| s.name == "helper_v2"),
             "after two did_change calls (open fallback + update), helper_v2 must be visible"
+        );
+
+        client.shutdown().await.unwrap();
+    }
+    /// `disk_signature` must notice the change `git checkout` actually makes.
+    ///
+    /// The interesting case is a **same-length** edit — reverting one character
+    /// leaves `len` identical, so if the signature were length-only the drift would
+    /// be invisible and `symbols()` would keep serving pre-checkout content. mtime
+    /// is forced explicitly rather than relying on wall-clock, or the test would be
+    /// flaky on exactly the coarse-granularity filesystems the pair exists for.
+    #[test]
+    fn disk_signature_detects_a_same_length_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f.rs");
+
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        let t0 = filetime::FileTime::from_unix_time(1_600_000_000, 0);
+        filetime::set_file_mtime(&file, t0).unwrap();
+        let before = disk_signature(&file).unwrap();
+
+        // Same byte count, different content — the `git checkout` shape.
+        std::fs::write(&file, "fn b() {}\n").unwrap();
+        filetime::set_file_mtime(&file, filetime::FileTime::from_unix_time(1_600_000_060, 0))
+            .unwrap();
+        let after = disk_signature(&file).unwrap();
+
+        assert_eq!(
+            before.0, after.0,
+            "fixture must be same-length to be the case"
+        );
+        assert_ne!(before, after, "a same-length change must still register");
+
+        // Stable when nothing changes: a signature that drifted on its own would
+        // fire a redundant didChange on every single navigation call.
+        assert_eq!(disk_signature(&file).unwrap(), after);
+
+        // Restoring both content and mtime reproduces the signature exactly. This is
+        // the documented residual, asserted rather than left implicit: a same-length
+        // edit inside one mtime tick is invisible to this check by design.
+        std::fs::write(&file, "fn a() {}\n").unwrap();
+        filetime::set_file_mtime(&file, t0).unwrap();
+        assert_eq!(
+            disk_signature(&file).unwrap(),
+            before,
+            "same length + same mtime is the accepted blind spot"
+        );
+    }
+
+    #[test]
+    fn disk_signature_is_none_for_a_missing_file() {
+        // Drives `resync_if_drifted`'s early return — a path that cannot be stat'd
+        // must not be treated as "changed" and trigger an endless resync.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(disk_signature(&dir.path().join("nope.rs")).is_none());
+    }
+    /// `document_symbols` must reflect a write made outside codescout's edit tools.
+    ///
+    /// This replaces `did_change_refreshes_stale_symbol_positions`, which asserted
+    /// the OPPOSITE at its step 3 — that a query after an external write returns
+    /// stale positions — as a demonstration of why callers had to flush themselves.
+    /// That demonstration WAS the bug: `symbols()` kept serving pre-checkout content
+    /// after a `git checkout`, and a caller only escaped it by already knowing to
+    /// call `post_compact`. `resync_if_drifted` now closes it inside
+    /// `document_symbols`, so the old assertion documented a defect rather than a
+    /// contract, and was rewritten with it rather than worked around.
+    ///
+    /// Step 4 keeps the explicit `did_change` path covered: it is still the repair
+    /// primitive, and the auto-resync is only its first caller.
+    #[tokio::test]
+    async fn document_symbols_reflects_a_write_made_outside_codescout() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+
+        let dir = tempdir().unwrap();
+        create_test_cargo_project(dir.path());
+        let main_rs = dir.path().join("src/main.rs");
+
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let client = LspClient::start(config).await.unwrap();
+
+        // Step 1: fn add sits at some line in the original file.
+        let syms = client.document_symbols(&main_rs, "rust").await.unwrap();
+        let original_line = syms
+            .iter()
+            .find(|s| s.name == "add")
+            .expect("fn add not found")
+            .start_line;
+
+        // Step 2: prepend 3 blank lines on disk, the way `git checkout` or an editor
+        // save would — with no notification to the server.
+        let original = std::fs::read_to_string(&main_rs).unwrap();
+        std::fs::write(&main_rs, format!("\n\n\n{}", original)).unwrap();
+
+        // Step 3: query again with NO explicit flush. The drift must be noticed and
+        // repaired before the request goes out.
+        let line_after = client
+            .document_symbols(&main_rs, "rust")
+            .await
+            .unwrap()
+            .iter()
+            .find(|s| s.name == "add")
+            .expect("fn add not found")
+            .start_line;
+        assert_eq!(
+            line_after,
+            original_line + 3,
+            "an external write must be picked up without the caller flushing"
+        );
+
+        // Step 4: the explicit primitive still works, and re-sending an already-synced
+        // file must not shift anything.
+        client.did_change(&main_rs).await.unwrap();
+        let line_fresh = client
+            .document_symbols(&main_rs, "rust")
+            .await
+            .unwrap()
+            .iter()
+            .find(|s| s.name == "add")
+            .expect("fn add not found")
+            .start_line;
+        assert_eq!(
+            line_fresh,
+            original_line + 3,
+            "explicit did_change on an already-synced file must be a no-op"
         );
 
         client.shutdown().await.unwrap();
