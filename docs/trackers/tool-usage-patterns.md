@@ -309,6 +309,62 @@ mention of feature configs or of consulting CI at all. Partially closed: `docs/R
 now carries a *Large-Cohort Promotion* section listing all five steps with the ancestry
 check first. Residual is a single local alias that runs all five — ROADMAP standing backlog;
 narrative in F-3.
+## read_file observations
+
+### T-17 — Following the overflow hint literally, into an unsupported grammar
+
+`artifact(find)` overflowed and returned `@tool_f99fdcd8` with the hint *"read_file("@tool_f99fdcd8",
+json_path="$.field") to extract a specific field"*. Applying that hint to an array payload —
+`json_path="$.artifacts[*].title"` — was rejected as `unsupported json_path segment '[*]'`.
+
+The tool choice was **right**: `read_file` on the buffer is the documented recovery. The grammar is
+a proper subset of JSONPath (`parse_bracket`, `src/tools/file_summary/file_summary.rs:570-626`,
+accepts `.key`, `["key"]`, `[N]`, `[-N]`, `[-N:]` and nothing else). The working recovery was
+`run_command("grep -o '\"title\": \"[^\"]*\"' @tool_f99fdcd8")` — leaving the tool surface for the
+shell.
+
+Not idiosyncratic. Across 13 merged `usage.db` corpora, `[*]` is **22 of 30** rejected segments
+(73%), and two more used multi-field selection (`['id','title','rel_path']`) — so agents want
+*projection*, not merely a wildcard. Tracing six instances showed **every** recovery the sequence
+view scored as successful was a degraded workaround: 393 raw lines read to obtain one field;
+`$.entries[4].id` one element per call; abandoning the buffer to re-run the upstream query.
+
+The compounding matters more than the count: the tools with the **highest overflow rates**
+(`librarian` 40.3%, `semantic_search` 20.9%, `artifact` 7.7%) are precisely the ones whose payload
+is a list of records. The highest-overflow tools feed the weakest recovery path.
+
+### T-18 — The guard refuses the read Iron Law 1 says is correct
+
+`read_file(path, start_line, end_line)` on source was refused twice in one session with *"source
+range overlaps named symbol(s)"* — on a 27-line slice of a method and a 95-line slice of a test
+module. `force=true` returned both exactly.
+
+The corpus makes the shape precise. Of 244 refusals carrying arguments (July onward): 97 small
+slices (≤40 lines), **84 file-head reads** (`start_line` ≤ 5) of which **69 stop by line 60**, 56
+medium, 7 large. The head reads are unambiguous:
+
+    read_file("src/librarian/catalog/mod.rs",     1, 20)   refused
+    read_file("src/librarian/workspace.rs",       1, 20)   refused
+    read_file("src/librarian/current_project.rs", 1, 30)   refused
+
+Lines 1–20 is the canonical *"show me the imports"* read — named in Iron Law 1 as permitted — and
+it is refused because a `mod` or struct begins inside it. For these, `symbols` **cannot**
+substitute: `iron-laws-detail.md:12-16` states it is a definition projection that does not return
+imports/`use`/`package`. So on ~28% of refusals the hint's primary suggestion is structurally
+incapable, and `force=true` — the only thing that works — is offered second.
+
+**But the guard is healthy for the larger population,** and that is worth recording so nobody
+relaxes it wholesale. Traced sequences show agents refused a blind line range going on to fetch the
+exact symbols they wanted, by name:
+
+    ERR  read_file("src/embed/ast_chunker.rs", 2076, 2189)
+      N1 symbols(name="tests/split_file_rust_populates_metadata_headers", include_body=true)  ok
+      N2 symbols(name="tests/inner_method_signature_skips_doc_comments", include_body=true)   ok
+
+That is the guard working as designed — and the "same-tool recovery" metric scores it as a failure,
+because the correct answer is a *different* tool. One guard, two populations: healthy for
+symbol-body reads, structurally wrong for non-definition text.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
@@ -343,6 +399,49 @@ Add to decision tree:
 | `grep("a\|b\|c")` across a dir to find concept files | `grep` with `path=` scope ✓ (if dir known); `semantic_search` only for whole-codebase | Semantic search adds noise when scope is already known |
 | `semantic_search("concept")` when you already know the directory | `grep(pattern, path=<dir>)` | Embeddings rank by whole-codebase similarity; grep is a hard path filter |
 
+### Iron Law 1 — state the overlap condition, not just the permission (2026-08-15)
+
+**Surface:** `src/prompts/source.md:8-9` (the `server_instructions` slice — always loaded).
+
+**Current text:** *"Line-range read_file is fine for imports/glue."*
+
+**Problem:** a permission with its condition dropped. The gate refuses any range overlapping any
+named symbol, which in a source file is nearly every line. The on-demand
+`get_guide("iron-laws-detail")` is *correct* (*"Gate is overlap-based, not absolute"*) — so this is a
+**compression defect**, not doc-vs-code drift: the condition lives only on the surface an agent has
+to ask for, while planning happens against the one always in context. Measured cost: the largest
+error family in the corpus (416 lifetime; 87 in August across 15 sessions).
+
+**Candidate wording**, condition included and escape named:
+
+    Line-range read_file is fine for imports/glue; on source a range
+    overlapping a symbol is refused - pass force=true for an exact slice.
+
+**Constraint:** the slice is capped at 2200 bytes (`src/prompts/README.md`), so something else in it
+has to give. That trade is the open decision, not the wording.
+
+**Do not pair this with relaxing the gate.** T-18 records that the guard is healthy for the
+symbol-body population; only the non-definition minority is mis-served, and that is better fixed at
+the gate's head-read case than by weakening it.
+
+Evidence: `docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md`,
+`docs/trackers/2026-08-15-tool-usage-investigation.md` TU-2 / TU-11b.
+
+### Progressive-disclosure guide — document the handle addressing grammar (2026-08-15)
+
+**Surface:** `get_guide("progressive-disclosure")` (guide topic, not the byte-capped slice).
+
+**Problem:** it documents the handle families (`@cmd_*`, `@tool_*`, `@file_*`, `@ack_*`) and never
+the grammar for addressing into them, so the supported `json_path` subset is discoverable only by
+rejection. Separately, the overflow envelope's hint models recovery as a scalar extraction
+(`$.field`) while the payloads that overflow are lists — the hint cannot work for the result it is
+attached to.
+
+**Candidates:** (a) state the supported forms in the guide; (b) have the envelope emit a
+list-shaped example when the buffered payload's top level is an array; (c) support `[*]` in the
+parser, which alone covers 73% of observed rejections.
+
+Evidence: `docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`, T-17.
 ## History
 
 ### 2026-05-08 — filter.rs rel_path alias fix (T-010)

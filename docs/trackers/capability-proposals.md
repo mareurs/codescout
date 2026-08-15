@@ -62,6 +62,27 @@ In an ordinary session `input_json` and `output_json` are NULL, so the target is
 Turning `--debug` on globally is the wrong fix: it persists the full input **and output** of every
 call, which is both large and a disclosure surface (outputs contain file contents).
 
+> **Correction, 2026-08-15 — the gap above is real in the code and absent on this machine.**
+> Measured while investigating tool usage: **51,164 of 53,916 recorded rows (95%) DO carry
+> `input_json`**, because every live server here runs `codescout start --debug` (verified via
+> `ps -o args=`, all three Claude Code profiles). So on this host the debug branch is not an
+> exception — it is the deployed configuration, and the cost this entry warned about is already
+> being paid: full inputs **and outputs** of every call, retained 30 days.
+>
+> Two consequences, both good for the proposal:
+>
+> 1. **It is prototypable today with no code change.** The touch ledger can be written as a query
+>    over existing rows — `json_extract(input_json, '$.id')` / `'$.path'` keyed by `cc_session_id`
+>    — and evaluated for usefulness before anything is built. Do that first.
+> 2. **The productionisation is decoupling it from `--debug`,** not adding capture. Users on the
+>    shipped default get NULL, so a feature built on `input_json` would work here and silently
+>    do nothing for them. That is the argument for the narrow extracted `touch_target` below —
+>    it is what makes the capability real off this machine.
+>
+> Worth raising separately with the operator: running `--debug` permanently means every file's
+> contents that any tool returned sits in `.codescout/usage.db` for 30 days. That may be intended
+> (it is what made this investigation possible) but it should be a decision, not a leftover.
+
 **Therefore the shape is narrow.** Add an always-on extracted `touch_target` (artifact id or
 rel_path) plus an `access` class, rather than storing whole payloads. There is precedent in the
 same function: `friction_target` is already an extracted-not-dumped field
