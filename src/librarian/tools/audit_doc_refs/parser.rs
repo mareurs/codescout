@@ -129,6 +129,203 @@ fn is_line_or_range(s: &str) -> bool {
     false
 }
 
+/// Extract refs from **plain prose**, for callers whose text is a source comment.
+///
+/// `parse_refs` deliberately scans only three places — inline code spans,
+/// fenced blocks, and link targets — because in a *document* a path mentioned
+/// in a sentence is as often an example as a citation, and admitting prose
+/// would drown the report. That trade-off inverts in a **code comment**:
+/// `// see docs/issues/foo.md` is a pointer, and whether the author reached
+/// for backticks is a style habit, not a statement of intent.
+///
+/// Measured on this repo the day the code path shipped: 699 `docs/…md`
+/// citations live in `.rs` files and only **140** are backticked. Scanning
+/// code spans alone therefore saw 20% of what it was built to see.
+///
+/// Markdown must never call this. The caller separation is the whole safety
+/// argument, and `mod.rs` enforces it by calling this only from
+/// `scan_code_comments`.
+pub fn parse_prose_refs(text: &str, md_path: &Path) -> Vec<RefCandidate> {
+    let md_file = crate::util::fs::RepoPath::from(md_path).into_string();
+    let mut out = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        // Strip the comment marker before tokenizing. Without this the marker
+        // itself is a candidate: `//` and `///` contain a slash, and in prose
+        // there is no backtick to say "this is not a path".
+        let line = line.trim_start();
+        let line = line
+            .strip_prefix("///")
+            .or_else(|| line.strip_prefix("//!"))
+            .or_else(|| line.strip_prefix("//"))
+            .or_else(|| line.strip_prefix("#"))
+            .or_else(|| line.strip_prefix("*"))
+            .unwrap_or(line);
+        for raw in tokenize_code_span(line) {
+            // Prose puts sentence punctuation against the path — `see
+            // docs/a.md).` — which a citation never includes. Trailing-only:
+            // a LEADING '(' has already been split off by the tokenizer, and
+            // stripping from the front would eat a leading './'.
+            let raw =
+                raw.trim_end_matches(['.', ',', ';', ':', ')', ']', '}', '"', '\'', '!', '?']);
+            if raw.is_empty() {
+                continue;
+            }
+            // Prose needs its own admission rule, and this is the whole
+            // false-positive defence. In a code span the backticks ARE the
+            // signal that a token is a path; prose has no such signal, so
+            // `classify` alone admits any slash-bearing word — measured before
+            // this guard, one file went from 2 refs to 106, reporting
+            // `overview/read` and `generated/vendored` as paths.
+            //
+            // Requiring a file extension is deliberately strict, and it has a
+            // known cost: a citation written without one
+            // (`docs/issues/2026-06-11-symbols-search-include-docs-and-focus`)
+            // is missed. That is a malformed citation and better fixed in the
+            // comment than accommodated by a fuzzier matcher here — a rule a
+            // reader can predict beats a rule that catches slightly more.
+            if !has_file_extension(raw) {
+                continue;
+            }
+            if let Some(kind) = classify(raw, false) {
+                out.push(RefCandidate {
+                    md_file: md_file.clone(),
+                    md_line: (idx + 1) as u32,
+                    raw_ref: raw.to_string(),
+                    ref_kind: kind,
+                    position: RefPosition::Prose,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Does this token's last segment end in something that looks like a file
+/// extension — `.md`, `.rs`, `.toml`?
+///
+/// Only [`parse_prose_refs`] uses this. A dot alone is not enough: prose is
+/// full of sentence-final dots and version numbers, so the extension must be
+/// short and alphanumeric, and must not be the whole segment (`.gitignore`
+/// is a filename, not an extension, and carries no path to resolve).
+fn has_file_extension(token: &str) -> bool {
+    let last = token.rsplit('/').next().unwrap_or(token);
+    let Some((stem, ext)) = last.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && !ext.is_empty()
+        && ext.len() <= 8
+        && ext.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod prose_tests {
+    use super::*;
+
+    fn refs(text: &str) -> Vec<(u32, String)> {
+        parse_prose_refs(text, Path::new("src/x.rs"))
+            .into_iter()
+            .map(|c| (c.md_line, c.raw_ref))
+            .collect()
+    }
+
+    #[test]
+    fn a_bare_citation_in_a_comment_is_found() {
+        // The whole point: only 140 of this repo's 699 in-source citations are
+        // backticked, so a code-span-only scan saw a fifth of them.
+        assert_eq!(
+            refs("// see docs/issues/2026-01-01-a.md for why\n"),
+            vec![(1, "docs/issues/2026-01-01-a.md".to_string())]
+        );
+    }
+
+    #[test]
+    fn sentence_punctuation_does_not_become_part_of_the_path() {
+        // Prose writes `(see docs/a.md).` — a citation never contains the
+        // trailing `).`, and leaving it attached makes every such ref
+        // unresolvable for a reason that has nothing to do with drift.
+        for line in [
+            "// eviction cycle, see docs/a.md).",
+            "// see docs/a.md.",
+            "// see docs/a.md;",
+            "/// see docs/a.md!",
+        ] {
+            assert_eq!(
+                refs(line),
+                vec![(1, "docs/a.md".to_string())],
+                "failed for: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn comment_markers_are_not_reported_as_paths() {
+        // `//` and `///` contain a slash, and prose has no backticks to say
+        // "not a path". Measured before the marker strip: one file reported
+        // 106 refs, dozens of them the marker itself.
+        assert!(refs("// nothing here\n").is_empty());
+        assert!(refs("/// nothing here\n").is_empty());
+        assert!(refs("//! nothing here\n").is_empty());
+        assert!(refs("# nothing here\n").is_empty());
+    }
+
+    #[test]
+    fn slash_bearing_prose_without_an_extension_is_not_a_path() {
+        // The discriminator for `has_file_extension`. These are real strings
+        // from this repo's comments that the unguarded version reported as
+        // broken paths.
+        for line in [
+            "// the overview/read distinction",
+            "// generated/vendored trees are skipped",
+            "// references/symbol_at/call_graph/edit_code all do this",
+        ] {
+            assert!(refs(line).is_empty(), "false positive on: {line}");
+        }
+    }
+
+    #[test]
+    fn the_extension_rule_admits_real_extensions_and_rejects_prose_dots() {
+        for good in ["docs/a.md", "src/main.rs", "a/b/c.toml", "x.py"] {
+            assert!(has_file_extension(good), "{good} should pass");
+        }
+        for bad in [
+            "docs/issues/2026-06-11-symbols-search-include-docs",
+            "overview/read",
+            "//",
+            ".gitignore", // a filename, not an extension — no path to resolve
+            "nodothere",
+        ] {
+            assert!(!has_file_extension(bad), "{bad} should NOT pass");
+        }
+    }
+
+    #[test]
+    fn the_extension_pre_filter_is_not_the_whole_decision() {
+        // `has_file_extension` is deliberately cheap and permissive: it admits
+        // `e.g` (stem `e`, ext `g`) and `1.2.3`, because tightening it enough
+        // to reject those would also reject the genuine one-character
+        // extensions `.c` and `.h`. `classify` is the second gate, and THIS is
+        // the assertion that matters — that prose dots do not become findings.
+        assert!(has_file_extension("e.g"), "the pre-filter admits it …");
+        assert!(
+            refs("// e.g. this one, see below").is_empty(),
+            "… and classify is what rejects it"
+        );
+        assert!(refs("// bumped to version 1.2.3 today").is_empty());
+        assert!(refs("// costs ~0.5ms per call").is_empty());
+    }
+
+    #[test]
+    fn line_numbers_are_one_based_within_the_text_given() {
+        // scan_code_comments rebases these onto the file; getting the origin
+        // wrong here shifts every finding in a multi-line comment.
+        assert_eq!(
+            refs("// nothing\n// docs/b.md\n"),
+            vec![(2, "docs/b.md".to_string())]
+        );
+    }
+}
+
 fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
     // Split on whitespace AND on punctuation that wraps path-like tokens in
     // realistic code shapes — function-call parens, quotes, commas, backticks.

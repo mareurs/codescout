@@ -21,6 +21,15 @@ pub enum RefPosition {
     InlineSpan,
     FencedBlock,
     LinkTarget,
+    /// Bare prose — a path written without backticks or link markup.
+    ///
+    /// Produced only by `parser::parse_prose_refs`, which only the source-comment
+    /// path calls. Markdown deliberately does not scan prose: in a document, a
+    /// path mentioned in a sentence is as often an example as a citation, and
+    /// admitting them would drown the report. In a **code comment** the reverse
+    /// holds — `// see docs/issues/foo.md` is a pointer, and the backticks are
+    /// a style habit rather than a signal of intent.
+    Prose,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -756,7 +765,20 @@ fn scan_code_comments(
         // Warnings are dropped rather than collected: they describe markdown
         // fence structure, and a comment is a fragment, so every one would be
         // an artefact of slicing rather than a fact about the file.
-        let (cands, _warns) = parser::parse_refs(&block.text, rel);
+        let (mut cands, _warns) = parser::parse_refs(&block.text, rel);
+        // Prose too — see `parse_prose_refs`. Only 140 of this repo's 699
+        // in-source citations are backticked, so code spans alone would see a
+        // fifth of them. Deduped on (line, raw_ref) because a path that IS
+        // backticked is found by both passes and must be reported once.
+        let seen: std::collections::HashSet<(u32, String)> = cands
+            .iter()
+            .map(|c| (c.md_line, c.raw_ref.clone()))
+            .collect();
+        cands.extend(
+            parser::parse_prose_refs(&block.text, rel)
+                .into_iter()
+                .filter(|c| !seen.contains(&(c.md_line, c.raw_ref.clone()))),
+        );
         for mut c in cands {
             c.md_line = block.line + c.md_line.saturating_sub(1);
             let mut r = resolver::resolve_ref(&c, resolve_ctx);
