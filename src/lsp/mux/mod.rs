@@ -129,6 +129,20 @@ pub fn lock_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf
         workspace_hash(workspace_root)
     ))
 }
+/// Where the mux records that it killed an LSP for memory, for the manager to find.
+///
+/// The kill happens in the **mux process**; the respawn is driven by `LspManager` in
+/// the codescout process. Without a marker between them the manager only ever sees a
+/// *successful* start — which resets the circuit breaker — so kill → respawn → grow →
+/// kill repeats unthrottled. A file is the signal because the two sides share no
+/// channel that survives the mux exiting, which is exactly what a mem-kill causes.
+///
+/// Derived from the lock path rather than recomputed from `(language, workspace)`, so
+/// both sides cannot drift apart: the mux has only the lock path, and a second
+/// `*_for_workspace` helper would be a second place to get the hash wrong.
+pub fn memkill_path_for_lock(lock_path: &Path) -> PathBuf {
+    lock_path.with_extension("memkill")
+}
 
 #[cfg(test)]
 mod tests {

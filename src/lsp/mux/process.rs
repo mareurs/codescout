@@ -125,9 +125,11 @@ pub async fn run(
         });
     }
 
-    // Spawn memory watcher — warns when RSS+swap exceeds expected bounds
+    // Spawn memory watcher — warns when RSS+swap exceeds expected bounds, and kills
+    // past the ceiling. The marker path lets that kill outlive this process so the
+    // manager can throttle a respawn loop; see `memkill_path_for_lock`.
     if let Some(pid) = child.id() {
-        tokio::spawn(watch_memory(pid));
+        tokio::spawn(watch_memory(pid, super::memkill_path_for_lock(lock_path)));
     }
 
     // 3. LSP initialize handshake
@@ -778,7 +780,7 @@ fn extract_text_document_uri(msg: &Value) -> Option<String> {
 /// falls below a floor (`CODESCOUT_LSP_KILL_AVAIL_FLOOR_MB`, default 15 GiB) while
 /// this process is itself large (>= 8 GiB). Set `CODESCOUT_LSP_MEM_KILL_DISABLE=1`
 /// to log only. Exits when the process dies.
-async fn watch_memory(pid: u32) {
+async fn watch_memory(pid: u32, memkill_marker: std::path::PathBuf) {
     let thresholds = MemThresholds::from_env();
 
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
@@ -803,6 +805,16 @@ async fn watch_memory(pid: u32) {
                     "LSP server memory watchdog KILLING process group (pid={} reason={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB avail={:.1} GiB)",
                     pid, reason, total_gib, rss_gib, swap_gib, avail_gib
                 );
+                // Leave a breadcrumb the manager can find AFTER this process is gone.
+                // Written before the kill: killing the group can take this mux down
+                // with it, and a marker that only lands on the happy path is a marker
+                // that never lands on the path that matters.
+                if let Err(e) = std::fs::write(&memkill_marker, reason) {
+                    warn!(
+                        target: "mux::memory",
+                        "could not record mem-kill marker at {}: {e}", memkill_marker.display()
+                    );
+                }
                 // PGID == PID (child spawned with process_group(0)).
                 kill_process_group(pid as libc::pid_t).await;
                 break;

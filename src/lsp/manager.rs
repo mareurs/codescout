@@ -554,6 +554,56 @@ impl LspManager {
         }
     }
 
+    /// Fold a mux-side memory kill into the startup circuit breaker, then clear it.
+    ///
+    /// The mem-kill watchdog lives in the mux process and the respawn is driven from
+    /// here, so the two never met: every respawn after a kill *succeeds*, which resets
+    /// the breaker, and the kill → respawn → grow → kill cycle runs at whatever rate
+    /// the LSP can reach the ceiling. The `-Xmx` cap and the kill ceiling bound how
+    /// much memory one instance takes; nothing bounded how often.
+    ///
+    /// Counted as a startup failure rather than given its own counter so a mixed run
+    /// (two mem-kills, three failed starts) trips at five, not at neither. They are
+    /// the same thing from a caller's side: this language is not staying up.
+    ///
+    /// The marker is consumed even when it is too old to count — a stale file left by
+    /// a kill an hour ago must not sit there and inflate the next unrelated burst.
+    fn count_mem_kill_marker(
+        &self,
+        key: &LspKey,
+        language: &str,
+        workspace_root: &std::path::Path,
+    ) {
+        let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root);
+        let marker = crate::lsp::mux::memkill_path_for_lock(&lock_path);
+        let Ok(meta) = std::fs::metadata(&marker) else {
+            return;
+        };
+        let fresh = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age < Self::CIRCUIT_BREAKER_WINDOW);
+        let _ = std::fs::remove_file(&marker);
+        if !fresh {
+            return;
+        }
+        let mut failures = self
+            .startup_failures
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let entry = failures
+            .entry(key.clone())
+            .or_insert((0, std::time::Instant::now()));
+        entry.0 += 1;
+        tracing::warn!(
+            "LSP {} was killed by the memory watchdog; counting toward the circuit-breaker ({}/{})",
+            language,
+            entry.0,
+            Self::CIRCUIT_BREAKER_MAX_FAILURES
+        );
+    }
+
     /// Get an existing client for the language, or start one.
     ///
     /// If the existing client has a different workspace root or has crashed,
@@ -591,6 +641,14 @@ impl LspManager {
                 }
             }
         }
+
+        // A mem-kill by the mux's watchdog is a failure the breaker never saw. The
+        // kill happens in another process and the respawn that follows SUCCEEDS, so
+        // `do_start` resets the counter and kill -> respawn -> grow -> kill repeats
+        // unthrottled: bounded in blast radius by the ceiling, but not in frequency.
+        // Consume the marker here, before the check below, so the existing breaker
+        // does the throttling rather than a second mechanism competing with it.
+        self.count_mem_kill_marker(&key, language, workspace_root);
 
         // Circuit-breaker: if this language has failed too many times recently,
         // stop spawning processes and return a clear error.
@@ -1846,6 +1904,60 @@ mod tests {
             None,
             "circuit-breaker must not be incremented during cold-start grace"
         );
+    }
+    /// A mux-side mem-kill must reach the breaker, and must not linger.
+    ///
+    /// The kill happens in another process and the respawn after it SUCCEEDS, so
+    /// before the marker there was nothing for the breaker to count and
+    /// kill -> respawn -> grow -> kill ran unthrottled. Three arms, because each
+    /// failure mode is silent on its own:
+    ///
+    /// * fresh marker counts AND is consumed — a marker that counted but stayed
+    ///   would re-count on every subsequent call and trip the breaker instantly;
+    /// * stale marker is consumed WITHOUT counting — an hour-old kill must not
+    ///   inflate an unrelated burst later;
+    /// * absent marker is a no-op, or every ordinary start would look like a kill.
+    #[tokio::test]
+    async fn mem_kill_marker_counts_toward_the_breaker_then_is_consumed() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let mgr = LspManager::new();
+        let key = LspKey::new("kotlin", ws);
+        let marker = crate::lsp::mux::memkill_path_for_lock(
+            &crate::lsp::mux::lock_path_for_workspace("kotlin", ws),
+        );
+        let count = || mgr.startup_failures.lock().unwrap().get(&key).map(|e| e.0);
+
+        // Absent marker: nothing happens. Establishes the baseline, so the next
+        // arm's increment is attributable to the marker and not to the call itself.
+        let _ = std::fs::remove_file(&marker);
+        mgr.count_mem_kill_marker(&key, "kotlin", ws);
+        assert_eq!(count(), None, "no marker must not touch the breaker");
+
+        // Fresh marker: counts once, and the file is gone afterwards.
+        std::fs::write(&marker, "rss_ceiling").unwrap();
+        mgr.count_mem_kill_marker(&key, "kotlin", ws);
+        assert_eq!(count(), Some(1), "a fresh mem-kill must count");
+        assert!(
+            !marker.exists(),
+            "the marker must be consumed, not re-counted"
+        );
+
+        // ...and a second call with no new marker does not keep counting.
+        mgr.count_mem_kill_marker(&key, "kotlin", ws);
+        assert_eq!(count(), Some(1), "consumed marker must not count twice");
+
+        // Stale marker: consumed, not counted. Backdated well past the window.
+        std::fs::write(&marker, "rss_ceiling").unwrap();
+        let stale = filetime::FileTime::from_system_time(
+            std::time::SystemTime::now()
+                - LspManager::CIRCUIT_BREAKER_WINDOW
+                - std::time::Duration::from_secs(60),
+        );
+        filetime::set_file_mtime(&marker, stale).unwrap();
+        mgr.count_mem_kill_marker(&key, "kotlin", ws);
+        assert_eq!(count(), Some(1), "a stale mem-kill must not count");
+        assert!(!marker.exists(), "a stale marker must still be cleared");
     }
 
     /// Option C: once the grace period expires, failures ARE counted.
