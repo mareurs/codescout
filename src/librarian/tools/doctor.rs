@@ -530,22 +530,52 @@ async fn run_fix(
             }
         }
         "reseat_worktree" => reseat_worktree(ctx),
-        // Sweep-all, dry-run by default. Reuses `mv`'s repair so the invariant has
-        // exactly one implementation: a move writes the new id going forward, this
-        // rewrites the ones written before that shipped. BL-23.
+        // Sweep-all WITHIN ONE ROOT, dry-run by default. Reuses `mv`'s repair so the
+        // invariant has exactly one implementation: a move writes the new id going
+        // forward, this rewrites the ones written before that shipped. BL-23.
+        //
+        // The scope is mandatory because this fix WRITES and the catalog is
+        // machine-global. Measured on a live dry-run before this guard existed: 207
+        // files across FIVE unrelated repositories (backend-kotlin, eduplanner-ui,
+        // two southpole projects, claude-plugins), only ~90 of them the active
+        // project's. `prune_missing` and `rehome` are root-scoped for the same
+        // reason. "Sweep-all" means don't make me name each artifact — not cross
+        // into another repository.
         "repair_frontmatter_id" => {
-            let stale = {
+            let scope_root = match root {
+                Some(r) => std::path::PathBuf::from(r),
+                None => match ctx.current_project.as_deref() {
+                    Some(cp) => cp.git_root.clone(),
+                    None => {
+                        return Err(RecoverableError::new(
+                            "fix=repair_frontmatter_id needs a scope — activate a project, \
+                             or pass root=<repo root>. The catalog spans every repo indexed \
+                             on this machine, and this fix rewrites files.",
+                        ))
+                    }
+                },
+            };
+            let roots = [scope_root.clone()];
+            let stale: Vec<Violation> = {
                 let cat = ctx.catalog.lock();
                 scan_frontmatter_id_mismatches(&cat.conn)?
-            };
+            }
+            .into_iter()
+            // Component-boundary containment, the same predicate
+            // `abs_path_outside_managed_roots` uses — a prefix match would let
+            // `/repo-backup` pass as `/repo`.
+            .filter(|v| super::containing_root(&roots, std::path::Path::new(&v.path)).is_some())
+            .collect();
             if !confirm {
                 return Ok(json!({
                     "fix": "repair_frontmatter_id", "mode": "dry_run",
+                    "root": scope_root.to_string_lossy(),
                     "files": stale.iter()
                         .map(|v| json!({ "path": v.path, "detail": v.detail }))
                         .collect::<Vec<_>>(),
                     "totals": { "files": stale.len() },
-                    "hint": "re-run with confirm=true to rewrite these frontmatter ids",
+                    "hint": "re-run with confirm=true to rewrite these frontmatter ids. \
+                             Only files under `root` are touched; pass root=<other repo> to sweep another.",
                 }));
             }
             let mut repaired = Vec::new();
@@ -562,6 +592,7 @@ async fn run_fix(
             }
             Ok(json!({
                 "fix": "repair_frontmatter_id", "mode": "applied",
+                "root": scope_root.to_string_lossy(),
                 "repaired": repaired,
                 "failed": failed,
                 "totals": { "files": repaired.len(), "failed": failed.len() },
@@ -1489,10 +1520,15 @@ mod tests {
             scan["summary"]["by_check"]
         );
 
-        // Dry run: previews, still mutates nothing.
-        let dry = call(&ctx, json!({ "fix": "repair_frontmatter_id" }))
-            .await
-            .unwrap();
+        // Dry run: previews, still mutates nothing. `root` scopes the sweep — the
+        // catalog is machine-global, so an unscoped write would reach other repos.
+        let scope = tmp.path().to_str().unwrap();
+        let dry = call(
+            &ctx,
+            json!({ "fix": "repair_frontmatter_id", "root": scope }),
+        )
+        .await
+        .unwrap();
         assert_eq!(dry["mode"], "dry_run");
         assert_eq!(dry["totals"]["files"], 2);
         assert!(
@@ -1503,7 +1539,7 @@ mod tests {
         // Confirm: repairs both, in one sweep.
         let applied = call(
             &ctx,
-            json!({ "fix": "repair_frontmatter_id", "confirm": true }),
+            json!({ "fix": "repair_frontmatter_id", "root": scope, "confirm": true }),
         )
         .await
         .unwrap();
@@ -1544,11 +1580,90 @@ mod tests {
         // Idempotent: a second sweep finds nothing left to do.
         let again = call(
             &ctx,
-            json!({ "fix": "repair_frontmatter_id", "confirm": true }),
+            json!({ "fix": "repair_frontmatter_id", "root": scope, "confirm": true }),
         )
         .await
         .unwrap();
         assert_eq!(again["totals"]["files"], 0);
+    }
+
+    /// The sweep WRITES, and the catalog is machine-global.
+    ///
+    /// Caught by running the dry-run for real before confirming it: on this machine
+    /// it listed **207 files across five unrelated repositories** — backend-kotlin,
+    /// eduplanner-ui, two southpole projects, claude-plugins — of which only ~90
+    /// were codescout's. An unscoped `confirm=true` would have rewritten tracked
+    /// files in repos the caller does not have open, in one call, silently.
+    ///
+    /// `prune_missing` and `rehome` are both root-scoped for exactly this reason.
+    /// "Sweep-all" means *don't make me name each artifact*, not *cross into other
+    /// repositories*.
+    #[tokio::test]
+    async fn repair_frontmatter_id_never_writes_outside_the_scoped_root() {
+        let inside = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let mk = |dir: &std::path::Path, name: &str| -> String {
+            let p = dir.join(name);
+            std::fs::write(&p, "---\nid: deaddeaddeaddead\nkind: bug\n---\n\n# x\n").unwrap();
+            crate::util::fs::RepoPath::from_path(&p).into_string()
+        };
+        let in_path = mk(inside.path(), "in.md");
+        let out_path = mk(outside.path(), "out.md");
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "1111111111111111", &in_path);
+        seed_artifact(&cat, "2222222222222222", &out_path);
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let applied = call(
+            &ctx,
+            json!({
+                "fix": "repair_frontmatter_id",
+                "root": inside.path().to_str().unwrap(),
+                "confirm": true
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            applied["totals"]["files"], 1,
+            "only the in-scope file may be rewritten, got: {applied}"
+        );
+
+        let declared = |p: std::path::PathBuf| -> Option<String> {
+            let t = std::fs::read_to_string(p).unwrap();
+            crate::librarian::frontmatter::parse(&t)
+                .unwrap()
+                .0
+                .and_then(|fm| fm.id)
+        };
+        assert_eq!(
+            declared(inside.path().join("in.md")).as_deref(),
+            Some("1111111111111111")
+        );
+        assert_eq!(
+            declared(outside.path().join("out.md")).as_deref(),
+            Some("deaddeaddeaddead"),
+            "a file in another repository must be left exactly as it was"
+        );
+    }
+
+    /// With no `root=` and no active project there is no scope to infer, and the
+    /// catalog spans every indexed repo on the machine. Refusing beats guessing:
+    /// the wrong guess here edits files in someone else's repository.
+    #[tokio::test]
+    async fn repair_frontmatter_id_refuses_when_it_cannot_tell_what_to_sweep() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let err = call(&ctx, json!({ "fix": "repair_frontmatter_id" }))
+            .await
+            .expect_err("an unscoped write sweep must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("root="),
+            "the refusal must name the parameter that supplies a scope, got: {msg}"
+        );
     }
 
     /// The check exists because `containing_root` silently failed for every
