@@ -5,7 +5,7 @@ closed:
 severity: low
 owner: marius
 related:
-  - docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+  - docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
   - docs/trackers/open-issue-work-queue.md
 tags:
   - librarian
@@ -25,7 +25,7 @@ file's YAML frontmatter, so from the moment the move returns, the file asserts a
 id that resolves to nothing.
 
 Split out of
-`docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md`
+`docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md`
 (BL-22), which fixed the data loss. This is the cosmetic residue of the same
 re-key, left deliberately rather than folded in.
 
@@ -126,5 +126,5 @@ hash of content the move is about to change.
 
 - `src/librarian/tools/mv.rs` — the move, which rewrites the row but not the file
 - `src/librarian/indexer.rs:120-180` — identity derived from path, frontmatter `id:` unread
-- `docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md` — BL-22
+- `docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md` — BL-22
 - `docs/trackers/open-issue-work-queue.md` — BL-23

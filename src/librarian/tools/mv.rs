@@ -100,7 +100,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // row. `graft_rows` re-points `artifact_link` on BOTH endpoints, so a
     // `worktree_of` lineage edge survives whether it was the shadow or the main
     // twin that moved.
-    // docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+    // docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
     let new_id = crate::librarian::ids::artifact_id_from_abs(&new_full);
     let updated_row = crate::librarian::catalog::artifact::ArtifactRow {
         id: new_id.clone(),
@@ -250,7 +250,7 @@ mod tests {
     /// Measured 2026-08-16 against the live catalog: one reindex following a
     /// 22-tracker archive sweep took the event count from 1845 to 1834 while
     /// reporting `removed: 0`.
-    /// docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+    /// docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
     ///
     /// **The reindex step is the whole test.** Asserting only that history
     /// follows the move passes the moment `graft_rows` is wired up, and would

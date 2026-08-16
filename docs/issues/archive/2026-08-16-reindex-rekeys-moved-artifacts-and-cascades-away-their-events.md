@@ -435,28 +435,61 @@ Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
 
 ## Resume
 
-**Fixed on `experiments`.** Verify live after the next `cargo rb` + `/mcp`: archive
-any bug through `artifact(action="move", …)` and check the response carries
-`id_changed: true` with a non-null `history_grafted`, then run
-`librarian(action="reindex")` and confirm `artifact_event(action="list",
-artifact_id=<new id>)` still returns the artifact's events.
+**Verified live 2026-08-16, and this file is its own test case.** Archiving it was
+the verification: the move that put it in `docs/issues/archive/` is the call under
+test.
 
-The corpus-wide acceptance measurement is the event-density gap in § Evidence:
-bugs archived *after* this fix should carry events at roughly the live-file rate
-(~0.65/row), not 0.02. That needs a fresh cohort, so it is a later check, not a
-blocker.
+```
+artifact(action="move", id="0dc35c5053dabcee", new_rel_path="docs/issues/archive/…")
+-> {"id": "18a637f59289192c", "previous_id": "0dc35c5053dabcee", "id_changed": true,
+    "history_grafted": {"events": 4, "observations": 0, "links": 2, "event_edges": 0}}
 
-**Not repaired by this fix, and not repairable:** the history already destroyed —
-11 events in the measured call, and whatever the 348 previously-archived bug files
-and the `docs/trackers/archive/` cohort lost before it. Those rows were
-cascade-deleted, not orphaned (0 orphans of 1845), so there is nothing to
-re-point. The bodies are in git; the event logs are gone.
+librarian(action="reindex")
+-> {"added": 0, "updated": 0, "removed": 0, "unchanged": 1002}
+```
 
-**Follow-up worth its own bug, not fixed here:** a moved file's frontmatter still
-asserts the id it had before the move, so an archived artifact's `id:` line is
-wrong the moment `move` returns. Nothing rewrites it and nothing reads it for
-identity, so this is drift rather than breakage — but it is drift that reads as
-authoritative.
+`added: 0` is the proof. The archived file registered as **unchanged**, not
+`added` — its id already matched its path, so the walk hit `ON CONFLICT(id)`
+instead of the abs_path pre-clean. Compare the pre-fix reindex in § Evidence:
+`added: 25`, of which 24 were re-keys.
+
+The catalog, before the move and after the reindex:
+
+| | before | after |
+|---|---:|---:|
+| events on this artifact | 4 | **4** (on the new id) |
+| total catalog events | 1843 | **1843** |
+| rows / events under the old id | 1 / 4 | 0 / 0 |
+| orphaned events, catalog-wide | 0 | 0 |
+
+The same sequence under the old code destroyed 4 events. Zero loss.
+
+**A note on how this was verified, because the first attempt was bad evidence.**
+`codescout_sha` on this session's rows said `536b9581` — a commit *before* the
+fix — which read as "the fix is not live." I then ran `strings` on
+`target/release/codescout`, found the new response fields, and concluded it was.
+That check was invalid: the on-disk binary is not necessarily the image a
+long-lived server process is running, which is the very reason the json_path bug's
+archive recommends ranking on `codescout_sha`. What actually settled it was the
+**behavioural** check — calling `move` and reading `previous_id` /
+`history_grafted` out of the response. The build had been made from a dirty tree
+containing the fix, seconds before the commit that named it. Filed as BL-24
+(`docs/issues/2026-08-16-usage-db-records-a-sha-that-need-not-describe-the-built-code.md`):
+`build.rs` already computes a dirty flag and `usage.db` never records it.
+
+**Not repaired, and not repairable:** the history already destroyed — 11 events in
+the measured call, plus whatever the 348 previously-archived bug files and the
+`docs/trackers/archive/` cohort lost before this. Cascade-deleted, not orphaned (0
+of 1845), so there is nothing to re-point. The bodies are in git; the event logs
+are gone.
+
+**Follow-up, filed separately:** BL-23 — a moved file's frontmatter still asserts
+its pre-move id
+(`docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`).
+
+Fix SHA on **`experiments`**: `2d8c7f39`. `git rev-list --left-right --count
+master...experiments` has 0 on the left, so promotion is a fast-forward and this
+SHA is the master SHA — no second SHA to record.
 ## References
 
 - `src/librarian/catalog/artifact.rs:137-187` — `upsert`, and the abs_path DELETE at 152

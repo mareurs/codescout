@@ -491,7 +491,7 @@ mod tests {
     /// It does, because `graft::repoint_history` re-points `artifact_link` on
     /// BOTH endpoints (`src_id` and `dst_id`) — the shadow keeps pointing at the
     /// main row under its new id, and `merge_worktree` still finds the pair.
-    /// docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+    /// docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
     #[test]
     fn shadow_main_pairs_follows_a_main_twin_re_keyed_by_a_move() {
         let mut cat = Catalog::open_in_memory().unwrap();
