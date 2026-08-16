@@ -284,15 +284,37 @@ permission is not.** A gate that fires tells you something real about the file; 
 that stays quiet tells you only that its predicate returned false.
 ## Resume
 
-N/A — fixed. Pending only: live MCP verification after `cargo rb` + `/mcp`, then archive
-with the SHA.
+N/A — fixed in `29f0c015` and verified live against the running MCP server, 2026-08-16.
+Fast-forward promotion (`git rev-list --left-right --count master...experiments` = `0` on
+the left), so this SHA is the master SHA; no second one to record.
 
-One residual, deliberately not closed: an artifact that is neither augmented nor carrying
-a stamped id stays directly editable — e.g. a bug file copied from
-`docs/issues/_TEMPLATE.md`. That is correct as it stands (nothing lives outside the file),
-and the class is shrinking on its own since `artifact(create)` stamps an id. Do not
-"fix" it by guarding catalog membership; see *Correction to the numbers above* for the
-measurement showing that would refuse `docs/RELEASE.md` and the whole documentation set.
+All four cases checked through the real tool surface, the two negatives mattering as much
+as the positives:
+
+```
+read_markdown("docs/trackers/artifact-augmentation-followups.md")   # augmented, NO id
+-> REFUSED: '…' is a librarian-managed artifact (augmented — its params live in the
+   catalog, and this file is only a rendered snapshot of them)
+
+read_markdown("docs/trackers/open-issue-work-queue.md")            # augmented, quoted id
+-> REFUSED (same message)
+
+read_markdown("docs/trackers/skill-frictions.md")                  # catalog row, prose
+-> ---\nkind: tracker\nstatus: active\ntitle: Skill Frictions Tracker …
+
+read_markdown("docs/RELEASE.md")                                   # catalog row, plain doc
+-> # Release & Ship Procedures …
+```
+
+The first is the case no amount of string-parsing could reach. The last two are the ones a
+catalog-membership guard would have broken.
+
+One residual, deliberately not closed: an artifact that is neither augmented nor carrying a
+stamped id stays directly editable — e.g. a bug file copied from
+`docs/issues/_TEMPLATE.md`. Correct as it stands (nothing lives outside the file), and the
+class shrinks on its own since `artifact(create)` stamps an id. Do **not** "fix" it by
+guarding catalog membership; see *Correction to the numbers above* for the measurement
+showing that would refuse `docs/RELEASE.md` and the whole documentation set.
 ## References
 
 - `src/util/librarian_guard.rs:31-45` — `is_librarian_artifact`

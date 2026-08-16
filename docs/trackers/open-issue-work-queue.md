@@ -73,7 +73,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | open | `63d36f5da3b200a7` |
 | BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | `5f6cfe1acdfda38d` |
 | BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
-| BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | open | `a2899c126f1e7771` |
+| BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -324,6 +324,50 @@ concurrent session had uncommitted edits under `src/librarian/tools/audit_doc_re
 reformatting of their in-progress files landed in *their* diff. Pathspec-scoped commits
 protect the index; they do not protect against a whole-crate formatter. Prefer
 `cargo fmt -- <file>` on a shared tree.
+
+### 2026-08-16 — BL-33: the convention was hiding the answer
+
+| BL | What shipped | SHA |
+|----|--------------|-----|
+| BL-33 | guard keys on what is actually managed, not on YAML quoting | `29f0c015` |
+
+**Filed as a quoting bug; fixed as a predicate bug.** `is_librarian_artifact` tested the
+frontmatter text for a 16-lowercase-hex `id:`, and a quoted `'…'` is 18 characters, so
+protection depended on which serialiser last wrote the file — 12 guarded trackers, 15 not,
+the queue among the unguarded. The quoting fix alone closes 86 files repo-wide.
+
+**The user's course-correction is the entry worth keeping.** My first pass concluded the
+id-less trackers were *not* a defect: the stamped id looked like an intentional opt-in
+marker, and a catalog-backed guard would refuse `edit_markdown` on
+`docs/trackers/skill-frictions.md`, which CLAUDE.md documents. That reasoning deferred to a
+convention instead of testing it — *"lets correct it properly not follow a rule written 10
+years ago"*. Two queries then settled the design:
+
+```
+docs/RELEASE.md, CONTRIBUTING.md, PROGRESSIVE_DISCOVERABILITY.md, TAXONOMY.md, ROADMAP.md
+  -> ALL catalog rows                       (so membership is the WRONG predicate)
+artifact(find, augmented=true, scope="repo")
+  -> count: 16, all trackers                (so augmentation is the RIGHT one)
+```
+
+Augmentation is exactly the set where state lives *outside* the file. It keeps
+`skill-frictions.md` editable — but now because that is correct, not because it is written
+down — and it catches `artifact-augmentation-followups.md`, augmented with **no** frontmatter
+id, which no amount of string-parsing could ever reach.
+
+**Cost of the naive route, measured before rejecting it:** the core `ToolContext`
+(`src/tools/core/types.rs`) has no catalog handle, and adding a field means editing **124
+construction sites across 21 files**. A trait object installed once at server construction
+costs one line in `server.rs`. `guard_with_oracle` takes the oracle explicitly so no test
+installs into the `OnceLock` and none can poison another in the same binary.
+
+**Verified live on four cases**, the two negatives mattering as much as the positives:
+augmented-with-no-id refused, augmented-with-quoted-id refused, prose tracker readable,
+`docs/RELEASE.md` readable.
+
+**A closing loop.** This queue is now guarded against the direct `read_markdown` that
+T-22 caught me making — the observation and the fix landed in the same session, and
+`artifact(get, entry_filter=…)` is now the only way in.
 
 ### Resume — state at compaction, 2026-08-16
 

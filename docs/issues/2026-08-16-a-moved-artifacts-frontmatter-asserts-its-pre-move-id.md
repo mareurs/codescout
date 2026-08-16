@@ -77,6 +77,31 @@ Every artifact under `docs/issues/archive/` and `docs/trackers/archive/` that wa
 moved through the catalog carries this. The measured case above is one of 348
 archived bug files.
 
+
+### 2026-08-16 — and it is now unfixable through the tools
+
+Archiving `2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md` re-keyed it
+`a2899c126f1e7771` → `e7353641aafe0098`. The file's own frontmatter still reads:
+
+```
+id: a2899c126f1e7771
+```
+
+which resolves to nothing. Every route to repair it in place is now closed:
+
+- `edit_markdown(..., frontmatter={set: {id: …}})` — refused, the file carries a 16-hex id
+  so the librarian guard fires (`29f0c015` did not change this; the shape check always did).
+- `edit_file` — refused on the same predicate, all write paths (`47abcb6d`).
+- `artifact(update, patch={extra: …})` — writes custom frontmatter keys but **not** `id`.
+
+So a moved artifact's frontmatter id can currently only be corrected by the mover, at move
+time. Any fix should write the new id into the frontmatter inside `artifact(action="move")`
+itself, in the same transaction as the graft — not as a later repair pass, because by then
+nothing can reach the file.
+
+Note the interaction with the guard's shape-not-value check: a stale-but-well-formed id
+keeps the file *protected*, so this bug is invisible from the outside. It fails safe, which
+is also why it has survived this long.
 ## Hypotheses tried
 
 1. **Hypothesis:** the indexer reconciles `id:` on the next reindex.
