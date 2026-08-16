@@ -331,7 +331,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // never holds one to delete — and answering a mistaken repair attempt with an error
     // that names the right parameter beats answering it with silence.
     if let Some(extra) = &patch.extra {
-        super::create::reject_reserved_extra_keys(extra)?;
+        super::create::reject_reserved_extra_keys(extra, super::create::ExtraKeySurface::Update)?;
     }
 
     let body_changing = patch.body.is_some() || patch.body_edits.is_some();

@@ -87,6 +87,47 @@ const BUG_STATUSES: &[&str] = &[
     "zombie",
 ];
 
+/// Which tool surface is validating `extra` — the *defect* is shared, the *remedy* is not.
+///
+/// `create` takes every reserved key but `id` as its own top-level parameter. `update`
+/// takes its six settable ones inside `patch`, and takes `id` and `kind` nowhere at all.
+/// One fixed hint cannot be true on both surfaces, and the original was written looking
+/// at `create`: it told every `update` caller to "pass `kind=` as its own parameter", a
+/// parameter `update` does not have. That costs a round-trip to discover, and still does
+/// not reveal the actual constraint — that `kind` is unreachable there by design.
+///
+/// See `docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`.
+#[derive(Clone, Copy)]
+pub(crate) enum ExtraKeySurface {
+    Create,
+    Update,
+}
+
+impl ExtraKeySurface {
+    /// Why this surface cannot set `key` through any channel, or `None` when it can.
+    ///
+    /// Per-key rather than a flat list: a caller told only "not settable" cannot tell
+    /// whether that is a wrong-channel mistake or a permanent property of the field.
+    fn unsettable_reason(self, key: &str) -> Option<&'static str> {
+        match (self, key) {
+            (_, "id") => Some("`id` is derived from the artifact's path, never caller-supplied"),
+            (Self::Update, "kind") => Some(
+                "`kind` is fixed once the artifact exists — it drives catalog \
+                 classification, and `patch` does not accept it",
+            ),
+            _ => None,
+        }
+    }
+
+    /// The channel a settable reserved key travels on here, rendered for a hint.
+    fn channel(self, key: &str) -> String {
+        match self {
+            Self::Create => format!("`{key}=` as its own parameter"),
+            Self::Update => format!("`patch={{{key}: …}}`"),
+        }
+    }
+}
+
 /// Refuse an `extra` map that names a field the frontmatter already models.
 ///
 /// `extra` exists for keys the schema does not know. Passing a known one — most
@@ -103,29 +144,54 @@ const BUG_STATUSES: &[&str] = &[
 /// [`crate::librarian::frontmatter::write`] additionally drops these on the way out
 /// so an internal caller cannot write an unreadable file either.
 ///
+/// The hint is `surface`-dependent; see [`ExtraKeySurface`] for why it has to be.
+///
 /// See `docs/issues/archive/2026-08-08-artifact-extra-key-collision-unclassifies-silently.md`.
 pub(crate) fn reject_reserved_extra_keys(
     extra: &std::collections::BTreeMap<String, serde_json::Value>,
+    surface: ExtraKeySurface,
 ) -> Result<()> {
     let clashes = crate::librarian::frontmatter::reserved_keys_in_extra(extra);
     if clashes.is_empty() {
         return Ok(());
     }
+
+    let (unsettable, settable): (Vec<&str>, Vec<&str>) = clashes
+        .iter()
+        .copied()
+        .partition(|k| surface.unsettable_reason(k).is_some());
+
+    let mut hint = String::new();
+    if !settable.is_empty() {
+        hint.push_str(&format!(
+            "pass {} instead. ",
+            settable
+                .iter()
+                .map(|k| surface.channel(k))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ));
+    }
+    for key in &unsettable {
+        // `unsettable` was partitioned on this returning Some, so the fallback is
+        // unreachable — kept total rather than unwrapping on an invariant held elsewhere.
+        let reason = surface
+            .unsettable_reason(key)
+            .unwrap_or("this field is not caller-settable here");
+        hint.push_str(&format!("{reason}. "));
+    }
+    hint.push_str(&format!(
+        "Reserved: {}. `extra` is for keys outside the schema (opened, closed, \
+         severity, owner, related, …).",
+        crate::librarian::frontmatter::RESERVED_KEYS.join(", ")
+    ));
+
     Err(RecoverableError::with_hint(
         format!(
             "extra must not contain frontmatter field(s) the schema already models: {}",
             clashes.join(", ")
         ),
-        format!(
-            "pass {} as its own parameter instead. Reserved: {}. `extra` is for keys \
-             outside the schema (opened, closed, severity, owner, related, …).",
-            clashes
-                .iter()
-                .map(|k| format!("`{k}=`"))
-                .collect::<Vec<_>>()
-                .join(" / "),
-            crate::librarian::frontmatter::RESERVED_KEYS.join(", ")
-        ),
+        hint,
     ))
 }
 
@@ -219,7 +285,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         std::fs::create_dir_all(parent)?;
     }
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
-    reject_reserved_extra_keys(&a.extra)?;
+    reject_reserved_extra_keys(&a.extra, ExtraKeySurface::Create)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
     let fm = Frontmatter {
         id: Some(id.clone()),
@@ -801,6 +867,60 @@ mod tests {
             !tmp.path().join("issues/x.md").exists(),
             "the artifact must not be created"
         );
+    }
+
+    /// The hint is the whole point of this check — a caller who cannot act on it pays a
+    /// wasted round-trip. The message used to be written for `create` and emitted on both
+    /// surfaces, so it told every `update` caller to pass a `kind=` parameter that
+    /// `update` does not have. Neither existing test could catch that: both assert only
+    /// that the message names the clashing key, which the wrong hint also did.
+    ///
+    /// See `docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`.
+    #[test]
+    fn reserved_key_hint_names_a_remedy_that_exists_on_the_calling_surface() {
+        let hint_for = |key: &str, surface: ExtraKeySurface| {
+            let mut extra = std::collections::BTreeMap::new();
+            extra.insert(key.to_string(), serde_json::json!("x"));
+            reject_reserved_extra_keys(&extra, surface)
+                .expect_err("a reserved key in `extra` is always refused")
+                .to_string()
+        };
+
+        // create: every reserved key but `id` really is a top-level parameter.
+        let create_kind = hint_for("kind", ExtraKeySurface::Create);
+        assert!(
+            create_kind.contains("own parameter"),
+            "create must still route to the top-level parameter: {create_kind}"
+        );
+
+        // update: `kind` is reachable through no channel at all, so the hint must say
+        // that rather than name a parameter the caller will go looking for and not find.
+        let update_kind = hint_for("kind", ExtraKeySurface::Update);
+        assert!(
+            !update_kind.contains("own parameter"),
+            "update has no top-level `kind=` parameter to route to: {update_kind}"
+        );
+        assert!(
+            update_kind.contains("fixed once the artifact exists"),
+            "update must explain that `kind` is not settable: {update_kind}"
+        );
+
+        // update: the six settable reserved keys live inside `patch`, not as bare
+        // parameters — the old hint was wrong for these too, not only for `kind`.
+        let update_status = hint_for("status", ExtraKeySurface::Update);
+        assert!(
+            update_status.contains("patch={status"),
+            "update must route settable keys through `patch`: {update_status}"
+        );
+
+        // `id` is caller-supplied on neither surface.
+        for surface in [ExtraKeySurface::Create, ExtraKeySurface::Update] {
+            let h = hint_for("id", surface);
+            assert!(
+                h.contains("derived from the artifact's path"),
+                "`id` is never caller-settable: {h}"
+            );
+        }
     }
 
     #[tokio::test]
