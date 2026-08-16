@@ -178,6 +178,10 @@ pub(super) fn repair_frontmatter_id(
 ) -> anyhow::Result<String> {
     let content = std::fs::read_to_string(path)?;
 
+    // READ through the parser — it is authoritative about what YAML actually sees,
+    // including quoting and type coercion. WRITE through a line splice: re-emitting
+    // the block would reformat every other key, and a `{Placeholder}` would stop
+    // being one. BL-34.
     let needs_repair = match crate::librarian::frontmatter::parse(&content) {
         Ok((Some(fm), _)) => fm.id.as_deref().is_some_and(|id| id != new_id),
         Ok((None, _)) => false,
@@ -193,16 +197,18 @@ pub(super) fn repair_frontmatter_id(
         return Ok(content);
     }
 
-    match crate::librarian::frontmatter::update_in_place(&content, |fm| {
-        fm.id = Some(new_id.to_string());
-    }) {
-        Ok(rewritten) => {
+    match crate::librarian::frontmatter::replace_id_line(&content, new_id) {
+        Some(rewritten) => {
             std::fs::write(path, &rewritten)?;
             Ok(rewritten)
         }
-        Err(err) => {
+        // The parser found an id the line scan could not: a shape neither anticipated
+        // (a folded or flow-mapped `id`, say). Leave the file alone rather than fall
+        // back to a whole-block rewrite — the catalog re-key still stands on its own.
+        None => {
             tracing::warn!(
-                "move: could not rewrite frontmatter id at {}: {err:#}",
+                "move: frontmatter declares an id at {} that is not on a plain `id:` line \
+                 — left unrepaired",
                 path.display()
             );
             Ok(content)
@@ -419,6 +425,71 @@ mod tests {
             fm.expect("frontmatter block preserved").id.is_none(),
             "a file with no id must not gain one — stamping it would newly subject a \
              prose tracker to the librarian guard. Got: {text:?}"
+        );
+    }
+
+    /// BL-34, asserted at the caller.
+    ///
+    /// `frontmatter::replace_id_line`'s own tests prove the splice; they cannot prove
+    /// `move` *reaches for* it. That gap is exactly how the re-serialization shipped —
+    /// `move_rewrites_the_frontmatter_id_it_just_invalidated` was green throughout,
+    /// because it only ever asserted that the id changed.
+    ///
+    /// The fixture is hand-authored YAML: flow sequence, double-quoted title, a
+    /// `{Placeholder}` (valid YAML for a flow mapping), a null key. Every one is
+    /// something a parse→write round-trip rewrites.
+    #[tokio::test]
+    async fn move_preserves_hand_authored_frontmatter_outside_the_id_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let original = concat!(
+            "---\n",
+            "kind: tracker\n",
+            "title: \"Foo Tracker\"\n",
+            "id: aabbccdd11223344\n",
+            "tags: [alpha, beta]\n",
+            "created: {YYYY-MM-DD}\n",
+            "topic: null\n",
+            "---\n",
+            "\n# Foo\n",
+        );
+        std::fs::write(tmp.path().join("docs/trackers/foo.md"), original).unwrap();
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+        let new_id = result["id"].as_str().unwrap().to_string();
+
+        let moved = std::fs::read_to_string(tmp.path().join("docs/archive/foo.md")).unwrap();
+
+        let before: Vec<&str> = original.lines().collect();
+        let after: Vec<&str> = moved.lines().collect();
+        assert_eq!(
+            before.len(),
+            after.len(),
+            "the line count must not change — a re-serialized block drops null keys and \
+             expands flow values. Got:\n{moved}"
+        );
+        for (b, a) in before.iter().zip(&after) {
+            if b.starts_with("id:") {
+                continue;
+            }
+            assert_eq!(b, a, "only the id line may change. Got:\n{moved}");
+        }
+
+        // Quoting is the splice's call (`scalar_can_be_bare`), so accept either form —
+        // what matters is that the line now names the id the move minted.
+        assert!(
+            moved.contains(&format!("id: {new_id}")) || moved.contains(&format!("id: '{new_id}'")),
+            "the id line must carry the new id, got:\n{moved}"
         );
     }
 

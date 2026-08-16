@@ -184,6 +184,65 @@ pub fn update_in_place(doc: &str, edit: impl FnOnce(&mut Frontmatter)) -> Result
     Ok(write(&fm, body))
 }
 
+/// Swap the frontmatter's top-level `id:` line for `new_id`, leaving every other
+/// byte of the document untouched.
+///
+/// [`update_in_place`] is the wrong primitive for a one-field repair: it re-emits
+/// the whole block from the parsed struct, so a hand-authored file comes back
+/// requoted, reordered, with flow sequences rendered as block ones and null keys
+/// dropped. Worse, a `{Placeholder}` is valid YAML for a *flow mapping*, so an ADR
+/// template's `created: {YYYY-MM-DD}` round-trips into `created:\n  YYYY-MM-DD: null`
+/// — semantically identical, and no longer a placeholder.
+///
+/// Measured 2026-08-16 through the identical call: 3.5 changed lines per file on a
+/// librarian-written corpus, **30** on a hand-authored one. Value-preserving and
+/// form-preserving are different properties; a repair owes both. BL-34.
+///
+/// Returns `None` when there is no frontmatter, or none carrying a top-level `id:`
+/// — a file that declares nothing is not declaring anything wrong.
+pub fn replace_id_line(doc: &str, new_id: &str) -> Option<String> {
+    // Same delimiter scan `parse` performs, so the two agree on where the
+    // frontmatter ends — a splice that disagreed would edit body text.
+    let after_open = if doc.starts_with("---\r\n") {
+        5
+    } else if doc.starts_with("---\n") {
+        4
+    } else {
+        return None;
+    };
+
+    let rest = &doc[after_open..];
+    let mut idx = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed == "---" {
+            // Closing delimiter with no top-level `id:` above it. Any `id:` below
+            // is body text.
+            return None;
+        }
+        // `trimmed`, not `line`, and no trim_start: an indented `id:` belongs to a
+        // nested mapping, not the artifact.
+        if trimmed.starts_with("id:") {
+            let start = after_open + idx;
+            // `trimmed.len()` stops before the line ending, so the original `\n` or
+            // `\r\n` is carried through untouched by the tail splice.
+            let end = start + trimmed.len();
+            let rendered = if scalar_can_be_bare(new_id) {
+                format!("id: {new_id}")
+            } else {
+                format!("id: '{new_id}'")
+            };
+            let mut out = String::with_capacity(doc.len() + rendered.len());
+            out.push_str(&doc[..start]);
+            out.push_str(&rendered);
+            out.push_str(&doc[end..]);
+            return Some(out);
+        }
+        idx += line.len();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,5 +533,89 @@ mod tests {
             once, twice,
             "a second identical update must be a no-op; churn is not allowed to recur"
         );
+    }
+
+    /// BL-34 / `docs/issues/2026-08-16-frontmatter-id-repair-reserializes-the-whole-block.md`.
+    ///
+    /// The fixture is deliberately hostile to normalization — a flow sequence, a
+    /// double-quoted title, a `{Placeholder}` (valid YAML for a flow *mapping*),
+    /// and two null/empty keys. Every one of those is something
+    /// `update_in_place` rewrites, and the reason this needs a different primitive.
+    ///
+    /// The assertion is byte equality against the document with only that one line
+    /// substituted. Asserting merely that the id changed is what let the
+    /// re-serialization through in the first place.
+    #[test]
+    fn replace_id_line_touches_only_the_id_line() {
+        let doc = concat!(
+            "---\n",
+            "kind: adr\n",
+            "title: \"Unified Error Dialog System\"\n",
+            "id: aaaaaaaaaaaaaaaa\n",
+            "tags: [solver, iel, prod]\n",
+            "created: {YYYY-MM-DD}\n",
+            "topic: null\n",
+            "owners: []\n",
+            "---\n",
+            "\n# Body\n\nSome prose with an id: like token.\n",
+        );
+
+        let out = replace_id_line(doc, "bbbbbbbbbbbbbbbb").expect("a top-level id: line exists");
+
+        assert_eq!(
+            out,
+            doc.replace("id: aaaaaaaaaaaaaaaa", "id: bbbbbbbbbbbbbbbb"),
+            "only the id line may change — the flow sequence, the double-quoted title, \
+             the {{YYYY-MM-DD}} placeholder, the null keys and the body must all survive \
+             verbatim"
+        );
+    }
+
+    /// The one thing a line splice must not lose relative to `write`: an id YAML
+    /// would resolve to a non-string still has to come back quoted.
+    #[test]
+    fn replace_id_line_quotes_an_id_yaml_would_misread() {
+        let out = replace_id_line("---\nid: abc\nkind: bug\n---\n", "1234567890123456")
+            .expect("an id line exists");
+        assert_eq!(
+            out, "---\nid: '1234567890123456'\nkind: bug\n---\n",
+            "an all-digit id must be quoted or YAML reads it back as a number"
+        );
+    }
+
+    #[test]
+    fn replace_id_line_declines_when_there_is_nothing_to_replace() {
+        for (label, doc) in [
+            (
+                "no frontmatter at all",
+                "# Just a doc\nid: aaaaaaaaaaaaaaaa\n",
+            ),
+            (
+                "frontmatter without an id",
+                "---\nkind: tracker\n---\n# x\n",
+            ),
+            (
+                "indented id is a nested key, not the artifact's",
+                "---\nmeta:\n  id: aaaaaaaaaaaaaaaa\n---\n",
+            ),
+            (
+                "id after the closing delimiter is body text",
+                "---\nkind: bug\n---\nid: aaaaaaaaaaaaaaaa\n",
+            ),
+        ] {
+            assert!(
+                replace_id_line(doc, "bbbbbbbbbbbbbbbb").is_none(),
+                "{label}: must decline rather than rewrite"
+            );
+        }
+    }
+
+    /// CRLF documents exist in this corpus (`handles_trailing_crlf` above), and a
+    /// splice that assumed `\n` would eat the `\r` and corrupt every following line.
+    #[test]
+    fn replace_id_line_preserves_crlf_line_endings() {
+        let out = replace_id_line("---\r\nid: abc\r\nkind: bug\r\n---\r\n", "ffffffffffffffff")
+            .expect("an id line exists");
+        assert_eq!(out, "---\r\nid: ffffffffffffffff\r\nkind: bug\r\n---\r\n");
     }
 }
