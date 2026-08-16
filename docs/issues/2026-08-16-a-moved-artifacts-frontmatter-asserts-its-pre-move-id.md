@@ -133,8 +133,26 @@ wrote through the old hole — here, nothing did yet, which is precisely why it 
 
 ## Fix
 
-**Half fixed 2026-08-16 on `experiments`.** New moves no longer create the defect; the
-existing population is untouched and still needs a repair path (see *Resume*).
+**Half fixed 2026-08-16 on `experiments` in `ec9e63d0`.** New moves no longer create the
+defect; the existing population is untouched and still needs a repair path (see *Resume*).
+Status stays `open` for that reason — the mechanism is fixed, the bug's stated population is
+not, and marking it `fixed` would make it indistinguishable from the genuinely-done ones in
+any later triage sweep.
+
+Verified live against the running MCP server, on a throwaway artifact created and deleted
+in the same turn (archiving a real bug to satisfy a verification ritual would be
+manufacturing tracker work):
+
+```
+artifact(create, rel_path="docs/tmp-bl23-move-verify.md")   -> id ceb2c39e67335191
+artifact(move,   new_rel_path="docs/archive/…")            -> id e308b7f1e150d81f,
+                                                               previous_id ceb2c39e67335191
+head -3 docs/archive/tmp-bl23-move-verify.md
+  ---
+  id: e308b7f1e150d81f          <- the new id, not the old one
+  kind: note
+artifact(delete)                                           -> deleted, no residue
+```
 
 `artifact(action="move")` now rewrites the frontmatter `id:` to the id it just minted, in
 the same call as the graft — `repair_frontmatter_id` in `src/librarian/tools/mv.rs`. Three
