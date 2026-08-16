@@ -1,17 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- grep
+- progressive-disclosure
+- overflow
+- unbounded-output
+closed: null
 opened: 2026-08-16
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/trackers/2026-08-15-tool-usage-investigation.md
-tags:
-  - grep
-  - progressive-disclosure
-  - overflow
-  - unbounded-output
-kind: bug
+- docs/trackers/2026-08-15-tool-usage-investigation.md
+severity: medium
 ---
 
 # BUG: grep's `limit` bounds matching lines, not output size — one call buffered 4.4M tokens under `limit: 40`
@@ -116,27 +116,50 @@ overflow by call count — as TU-10 did — hides this completely.
 
 ## Fix
 
-**Plan.** Add a byte budget alongside the line budget, and truncate on whichever binds first:
+**Implemented 2026-08-16.** Two bounds, because the per-match clamp and the aggregate cap catch
+different shapes:
 
-- cap each emitted line at N bytes with an explicit elision marker, so a single pathological line
-  cannot dominate;
-- cap total emitted bytes independently of `limit`, matching the `INLINE_BYTE_BUDGET` /
-  `TOOL_OUTPUT_BUFFER_THRESHOLD` constants documented in `get_guide("progressive-disclosure")`;
-- surface which cap fired in the response, so the caller can tell "40 matches, all shown" from
-  "40 matches, each truncated at 2KB".
+| Bound | Value | Catches |
+|---|---|---|
+| `MAX_MATCH_BYTES` | 2,000 B per emitted match | one pathological line (the minified-JSON case) |
+| `MAX_TOTAL_MATCH_BYTES` | 60,000 B summed | many individually-reasonable matches |
 
-The third point matters for the same reason as the filed `read_file` incompleteness bug: a result
-that was silently cut reads as complete.
+`clamp_match()` walks back to a UTF-8 char boundary before cutting and appends
+`… [truncated: N of M bytes shown]`. **The marker is the fix, not decoration** — a silently
+truncated result reads as complete, which is the same defect class as the buffered-summary bug, so a
+caller who needs the rest has to be able to see that there is a rest.
 
-**Consider:** `mode="files"` already exists as the tame path for broad searches. The hint on an
-oversized result could name it.
+**Applied at all six emission sites**, three per call site — simple mode, context-mode mid-block, and
+context-mode final block — in both `Grep::call` and `grep_in_buffer`. The bug predicted two call
+sites; each turned out to have three emission points. A fix at the obvious one would have left the
+context-mode paths unbounded.
 
+**Renamed `budget` → `max_matches`.** The variable held a row count while being named for a size
+bound, which is exactly the confusion that let a caller set `limit: 40` and receive 4.4M tokens.
+Naming a proxy after the thing it proxies is how the proxy stops being questioned.
+
+**The overflow envelope now says which cap fired** — `reason: "byte budget"` plus
+`truncated_bytes: true` when the aggregate cap stopped collection. "40 of 900 matches" and "stopped
+at 60KB" call for different next moves.
+
+One deliberate asymmetry: the aggregate cap is enforced in `Grep::call` but not at
+`grep_in_buffer`'s final in-flight block, where nothing reads the running total afterwards — the
+compiler flagged the dead accumulation. The per-match clamp still applies there, which is the part
+that bounds the payload.
 ## Tests added
 
-`N/A — not yet fixed.` A regression test is straightforward and should assert on bytes, not lines:
-grep a fixture containing one very long matching line with `limit` well above 1, and assert the
-emitted output is bounded and marked truncated.
+In `src/tools/grep.rs`:
 
+| Test | Mutation it catches |
+|---|---|
+| `grep_bounds_output_bytes_not_only_matching_lines` | removing either budget — restores unbounded output under a correctly-set `limit` |
+| `grep_marks_a_clamped_line_instead_of_silently_cutting` | dropping the marker — a cut result then reads as complete |
+
+The first reproduces production shape directly: five 200KB single-line `*.json` files under
+`limit: 40`. **Pre-fix it emitted 1,000,527 bytes**; post-fix it is bounded well under 64KB. That is
+the 4.4M-token incident in miniature, now a regression test.
+
+Gate: **3836 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 
 - Pass `mode="files"` first to see where matches are before pulling content.
@@ -146,22 +169,20 @@ emitted output is bounded and marked truncated.
 
 ## Resume
 
-Root cause is now read at the bytes (§ Root cause) — the verification step this section previously
-called for is **done**, and the inference held.
+Fixed, tested, gate green on `experiments`. **Two things before archiving:**
 
-Next: add the byte budget. Two call sites need it, not one — `Grep::call`
-(`src/tools/grep.rs:207`, `:322`) and `grep_in_buffer` (`src/tools/grep.rs:708`) cap independently
-and would otherwise diverge. Suggested order:
+1. **Verify live after the next `cargo rb` + `/mcp`** — this session's pattern, and it has earned its
+   keep twice: a green suite and a working tool are different claims. Re-run the original shape
+   (`grep` over a `*.json` glob with a small `limit`) against the running server and confirm the
+   emitted payload is bounded and marked.
+2. **Record the fix SHA and archive** via `artifact(action="move", …)` — never a bare `git mv`.
+   Check the promotion path first (`git rev-list --left-right --count master...experiments`): a `0`
+   on the left means fast-forward, in which case the `experiments` SHA already IS the master SHA and
+   **no pending-master-SHA line should be written**.
 
-1. Per-line byte cap with an explicit elision marker, so one pathological line cannot dominate.
-2. Total emitted-byte cap independent of `limit`, against the `INLINE_BYTE_BUDGET` /
-   `TOOL_OUTPUT_BUFFER_THRESHOLD` constants in `get_guide("progressive-disclosure")`.
-3. Report which cap fired, so "40 matches, all shown" is distinguishable from "40 matches, each
-   truncated."
-
-Regression test asserts on **bytes, not lines**: grep a fixture with one very long matching line at
-`limit` well above 1, assert output is bounded and marked truncated. Rename `budget`
-(`src/tools/grep.rs:322`) while you are there — it is the name that made the confusion natural.
+Acceptance signal for a later corpus pass: `grep`'s share of buffered tokens should fall sharply
+from 68% (5,775,117 of 8,451,310), and no single call should exceed ~60KB. Date-bound any
+re-measurement to after the rebuild.
 ## References
 
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16, *Overflow*.

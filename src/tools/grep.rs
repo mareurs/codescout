@@ -100,6 +100,11 @@ impl Tool for Grep {
         let mut matches: Vec<Value> = vec![];
         let mut total_match_count = 0usize;
         let mut hit_cap = false;
+        // Output size is bounded independently of `max`, which counts matches, not
+        // bytes. See MAX_MATCH_BYTES for why the two diverge catastrophically on
+        // generated single-line files.
+        let mut emitted_bytes = 0usize;
+        let mut byte_capped = false;
         let mut skipped_binary = 0usize;
 
         let mut wb = ignore::WalkBuilder::new(&search_path);
@@ -199,13 +204,16 @@ impl Tool for Grep {
                 for (i, line) in text.lines().enumerate() {
                     if re.is_match(line) {
                         total_match_count += 1;
+                        let content = clamp_match(line);
+                        emitted_bytes += content.len();
                         matches.push(json!({
                             "file": to_forward_slash(entry.path()),
                             "line": i + 1,
-                            "content": line
+                            "content": content
                         }));
-                        if matches.len() >= max {
+                        if matches.len() >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                             hit_cap = true;
+                            byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                             break 'outer;
                         }
                     }
@@ -239,6 +247,8 @@ impl Tool for Grep {
                                 let content = file_lines[blk_start..=blk_end].join("\n");
                                 let match_lines: Vec<u64> =
                                     blk_matches.iter().map(|&m| (m + 1) as u64).collect();
+                                let content = clamp_match(&content);
+                                emitted_bytes += content.len();
                                 matches.push(json!({
                                     "file": to_forward_slash(entry.path()),
                                     "match_lines": match_lines,
@@ -250,8 +260,9 @@ impl Tool for Grep {
                         }
                     }
 
-                    if total_match_count >= max {
+                    if total_match_count >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                         hit_cap = true;
+                        byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                         break;
                     }
                 }
@@ -261,6 +272,8 @@ impl Tool for Grep {
                     let content = file_lines[blk_start..=blk_end].join("\n");
                     let match_lines: Vec<u64> =
                         blk_matches.iter().map(|&m| (m + 1) as u64).collect();
+                    let content = clamp_match(&content);
+                    emitted_bytes += content.len();
                     matches.push(json!({
                         "file": to_forward_slash(entry.path()),
                         "match_lines": match_lines,
@@ -269,8 +282,9 @@ impl Tool for Grep {
                     }));
                 }
 
-                if total_match_count >= max {
+                if total_match_count >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                     hit_cap = true;
+                    byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                     break 'outer;
                 }
             }
@@ -319,8 +333,11 @@ impl Tool for Grep {
         // Build grouped output (simple mode) or keep flat (context mode).
         let mut result = if context_lines == 0 {
             use crate::tools::file_group::{cap_grouped, group_by_file, groups_to_json};
-            let budget = max;
-            let (visible, total, files) = cap_grouped(matches, budget);
+            // Named for what it is: a cap on the NUMBER of matches. It was called
+            // `budget`, which reads as a size bound and is how a `limit: 40` search
+            // came to emit 4.4M tokens.
+            let max_matches = max;
+            let (visible, total, files) = cap_grouped(matches, max_matches);
             let truncated = hit_cap || total > visible.len();
             let groups = group_by_file(&visible);
             let file_groups = groups_to_json(&groups);
@@ -357,11 +374,18 @@ impl Tool for Grep {
                         top.join(", ")
                     )
                 };
-                r["overflow"] = json!({
+                let mut overflow = json!({
                     "shown": visible.len(),
                     "total": total,
                     "hint": hint,
                 });
+                if byte_capped {
+                    // Say WHICH cap fired: "40 of 900 matches" and "stopped at 60KB"
+                    // call for different next moves.
+                    overflow["reason"] = json!("byte budget");
+                    overflow["truncated_bytes"] = json!(true);
+                }
+                r["overflow"] = overflow;
             }
             r
         } else {
@@ -630,6 +654,42 @@ fn enclosing_symbol(symbols: &[crate::lsp::symbols::SymbolInfo], line0: u32) -> 
     None
 }
 
+/// Byte ceiling for a single emitted match (one line, or one merged context block).
+///
+/// `limit` bounds the NUMBER of matches, which is only a proxy for output size —
+/// and the proxy collapses on generated single-line files. Measured 2026-08-16: a
+/// real call with `limit: 40` over a `*.json` glob buffered 4,427,639 tokens,
+/// because a minified JSON file is one line and forty of them is megabytes.
+/// `grep` is fourth by overflow *count* and first by overflow *tokens* by 5.7x.
+/// See docs/issues/2026-08-16-grep-limit-bounds-lines-not-bytes.md
+const MAX_MATCH_BYTES: usize = 2_000;
+
+/// Ceiling on the summed size of all emitted matches. Backstop for the case the
+/// per-match clamp cannot reach: many matches, each individually reasonable.
+const MAX_TOTAL_MATCH_BYTES: usize = 60_000;
+
+/// Clamp one emitted match to `MAX_MATCH_BYTES`, marking the cut.
+///
+/// The marker is not decoration. A silently truncated result reads as complete —
+/// the same defect class as the buffered-summary bug — so a caller who needs the
+/// rest has to be able to see that there is a rest.
+fn clamp_match(s: &str) -> String {
+    if s.len() <= MAX_MATCH_BYTES {
+        return s.to_string();
+    }
+    // Never split a UTF-8 code point; walk back to the nearest boundary.
+    let mut cut = MAX_MATCH_BYTES;
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}… [truncated: {} of {} bytes shown]",
+        &s[..cut],
+        cut,
+        s.len()
+    )
+}
+
 /// Collect `glob` param values (single string or array of strings).
 fn parse_globs(input: &Value) -> Vec<String> {
     match input.get("glob") {
@@ -695,17 +755,23 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     let mut matches: Vec<Value> = vec![];
     let mut total_match_count = 0usize;
     let mut hit_cap = false;
+    // The buffer path carries the same line-count-is-not-a-size-bound defect as
+    // the filesystem path above and needs the same clamp — a buffered command's
+    // output can be one enormous line just as easily as a minified file can.
+    let mut emitted_bytes = 0usize;
 
     if context_lines == 0 {
         for (i, line) in text.lines().enumerate() {
             if re.is_match(line) {
                 total_match_count += 1;
+                let content = clamp_match(line);
+                emitted_bytes += content.len();
                 matches.push(json!({
                     "file": raw_path,
                     "line": i + 1,
-                    "content": line,
+                    "content": content,
                 }));
-                if matches.len() >= max {
+                if matches.len() >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                     hit_cap = true;
                     break;
                 }
@@ -734,6 +800,8 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
                         let content = file_lines[blk_start..=blk_end].join("\n");
                         let match_lines: Vec<u64> =
                             blk_matches.iter().map(|&m| (m + 1) as u64).collect();
+                        let content = clamp_match(&content);
+                        emitted_bytes += content.len();
                         matches.push(json!({
                             "file": raw_path,
                             "match_lines": match_lines,
@@ -745,7 +813,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
                 }
             }
 
-            if total_match_count >= max {
+            if total_match_count >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                 hit_cap = true;
                 break;
             }
@@ -754,6 +822,10 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         if let Some((blk_start, blk_matches, blk_end)) = current {
             let content = file_lines[blk_start..=blk_end].join("\n");
             let match_lines: Vec<u64> = blk_matches.iter().map(|&m| (m + 1) as u64).collect();
+            // No accumulation here: this is the final block emitted and nothing
+            // reads the running total afterwards. The per-match clamp still applies,
+            // which is the part that bounds the payload.
+            let content = clamp_match(&content);
             matches.push(json!({
                 "file": raw_path,
                 "match_lines": match_lines,
@@ -1216,6 +1288,71 @@ mod tests {
         assert!(
             hint.contains("matches"),
             "hint must include match counts so the model can pick, got: {hint}"
+        );
+    }
+
+    /// `limit` counts matching LINES, which is only a proxy for output size — and
+    /// the proxy collapses on generated single-line files. Measured 2026-08-16: one
+    /// real call with `limit: 40` over a `*.json` glob buffered 4,427,639 tokens,
+    /// and `grep` accounts for 68% of all buffered tokens in the corpus on a mere
+    /// 3.0% overflow rate. The rate is low; the blast radius per incident is not.
+    ///
+    /// Mutation caught: removing the byte budget restores unbounded output under a
+    /// limit the caller set correctly.
+    #[tokio::test]
+    async fn grep_bounds_output_bytes_not_only_matching_lines() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        // Minified-JSON shape: the whole file is one enormous line.
+        let huge = format!("{{\"needle\":\"{}\"}}", "x".repeat(200_000));
+        for i in 0..5 {
+            std::fs::write(dir.path().join(format!("min{i}.json")), &huge).unwrap();
+        }
+
+        let ctx = test_ctx().await;
+        let result = Grep
+            .call(
+                json!({ "pattern": "needle", "path": dir.path().to_str().unwrap(), "limit": 40 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let payload = serde_json::to_string(&result).unwrap();
+        assert!(
+            payload.len() < 64_000,
+            "grep output must be bounded by BYTES, not only by matching-line count; \
+             limit=40 over five 200KB single-line files produced {} bytes",
+            payload.len()
+        );
+    }
+
+    /// A silently cut result reads as complete — the same defect class as the
+    /// buffered-summary bug. If a line is clamped, the payload must say so.
+    #[tokio::test]
+    async fn grep_marks_a_clamped_line_instead_of_silently_cutting() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("min.json"),
+            format!("{{\"needle\":\"{}\"}}", "x".repeat(50_000)),
+        )
+        .unwrap();
+
+        let ctx = test_ctx().await;
+        let result = Grep
+            .call(
+                json!({ "pattern": "needle", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let payload = serde_json::to_string(&result).unwrap();
+        assert!(
+            payload.contains("truncated"),
+            "a clamped line must SAY it was clamped, got: {}",
+            &payload[..payload.len().min(400)]
         );
     }
 
