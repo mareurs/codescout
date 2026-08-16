@@ -385,6 +385,33 @@ impl Availability {
     }
 }
 
+/// Derive a recovery `json_path` from a buffered payload's actual shape.
+///
+/// The old default was the constant `"$.field"`, which models recovery as a
+/// single-value extraction. But the results that actually overflow are
+/// overwhelmingly *lists of records*, where the useful projection is "this field
+/// from every element" — so the hint recommended a shape the payload did not
+/// have. Measured 2026-08-15 across 13 usage.db files: `[*]`, which the parser
+/// then rejected, was 73% of all rejected segments, and agents fell back to
+/// shelling out. A hint that cannot work for the result it is attached to is
+/// worse than no hint: it converts a lookup into a failed call.
+///
+/// Now: an array payload gets `$[*]`, an object gets its largest array field
+/// projected, and only a genuinely scalar-shaped payload gets `$.field`.
+/// docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+pub(crate) fn default_json_path_hint(val: &Value) -> String {
+    match val {
+        Value::Array(_) => "$[*]".to_string(),
+        Value::Object(map) => map
+            .iter()
+            .filter_map(|(k, v)| v.as_array().map(|a| (k, a.len())))
+            .max_by_key(|(_, n)| *n)
+            .map(|(k, _)| format!("$.{k}[*]"))
+            .unwrap_or_else(|| "$.field".to_string()),
+        _ => "$.field".to_string(),
+    }
+}
+
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Tool name as exposed over MCP (e.g. "symbols")
@@ -516,11 +543,11 @@ pub trait Tool: Send + Sync {
     /// Returns the JSON path to the most useful field in a buffered result.
     ///
     /// Used to build a specific, actionable hint when the tool result is stored
-    /// in an `@tool_*` buffer. The default (`"$.field"`) is a generic placeholder;
-    /// override to guide agents directly to the right extraction path (e.g.
-    /// `"$.symbols[0].body"` for `symbols` with `include_body=true`).
-    fn json_path_hint(&self, _val: &Value) -> String {
-        "$.field".to_string()
+    /// in an `@tool_*` buffer. Override to guide agents directly to the right
+    /// extraction path (e.g. `"$.symbols[0].body"` for `symbols` with
+    /// `include_body=true`); the default derives one from the payload's shape.
+    fn json_path_hint(&self, val: &Value) -> String {
+        default_json_path_hint(val)
     }
 
     /// Returns MCP content blocks for this tool call.

@@ -992,6 +992,109 @@ fn extract_negative_index_returns_last_element() {
     assert_eq!(ty, "string");
 }
 
+// ── json_path `[*]` wildcard projection ──────────────────────────────────────
+//
+// The overflow envelope tells callers to recover a buffered result with
+// `read_file("@tool_xyz", json_path="$.field")`. But the results that actually
+// overflow are overwhelmingly *arrays of records*, where the useful projection is
+// "this field from every element" — and `[*]` was rejected. Measured 2026-08-15
+// across 13 usage.db files: `[*]` was 22 of 30 rejected segments (73%), and agents
+// fell back to shelling out.
+// docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+
+#[test]
+fn wildcard_projects_a_field_from_every_element() {
+    let content = r#"{"observations": [{"id": "T-1", "n": 1}, {"id": "T-2", "n": 2}]}"#;
+    let (result, ty, count) = extract_json_path(content, "$.observations[*].id").unwrap();
+    assert_eq!(ty, "array");
+    assert_eq!(count, Some(2));
+    assert!(result.contains("T-1"), "got: {result}");
+    assert!(result.contains("T-2"), "got: {result}");
+    assert!(
+        !result.contains("\"n\""),
+        "only the named field projects: {result}"
+    );
+}
+
+#[test]
+fn wildcard_works_on_a_root_array() {
+    let content = r#"[{"name": "a"}, {"name": "b"}]"#;
+    let (result, ty, count) = extract_json_path(content, "$[*].name").unwrap();
+    assert_eq!(ty, "array");
+    assert_eq!(count, Some(2));
+    assert!(
+        result.contains('a') && result.contains('b'),
+        "got: {result}"
+    );
+}
+
+#[test]
+fn trailing_wildcard_yields_the_elements_themselves() {
+    let content = r#"{"items": ["x", "y", "z"]}"#;
+    let (result, ty, count) = extract_json_path(content, "$.items[*]").unwrap();
+    assert_eq!(ty, "array");
+    assert_eq!(count, Some(3));
+    assert!(
+        result.contains('x') && result.contains('z'),
+        "got: {result}"
+    );
+}
+
+#[test]
+fn nested_wildcards_project_through_both_levels() {
+    let content = r#"{"groups": [{"rows": [{"v": 1}, {"v": 2}]}, {"rows": [{"v": 3}]}]}"#;
+    let (result, ty, _) = extract_json_path(content, "$.groups[*].rows[*].v").unwrap();
+    assert_eq!(ty, "array");
+    // Nesting is preserved rather than flattened: [[1,2],[3]]. Flattening would
+    // lose which group a value came from, which is the question a grouped
+    // projection is usually asked to answer.
+    assert!(
+        result.contains('1') && result.contains('3'),
+        "got: {result}"
+    );
+    assert!(
+        result.matches('[').count() >= 3,
+        "expected nested arrays: {result}"
+    );
+}
+
+#[test]
+fn wildcard_on_a_non_array_says_so() {
+    let content = r#"{"cfg": {"a": 1}}"#;
+    let err = extract_json_path(content, "$.cfg[*]").expect_err("[*] needs an array");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("array") || msg.contains("object"),
+        "got: {msg}"
+    );
+}
+
+/// A projection that silently dropped rows would be the same defect class as the
+/// self-refuting "Showing N of N" and the unmarked buffered summary: a short result
+/// that reads as complete. So a missing key fails loudly and names the element.
+#[test]
+fn wildcard_names_the_element_when_a_key_is_missing() {
+    let content = r#"{"rows": [{"id": "a"}, {"other": 1}]}"#;
+    let err = extract_json_path(content, "$.rows[*].id")
+        .expect_err("missing key must not be silently dropped");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains('1'),
+        "the error must name which element failed: {msg}"
+    );
+}
+
+#[test]
+fn the_unsupported_segment_hint_advertises_the_wildcard() {
+    let err = extract_json_path(r#"{"a":[]}"#, "$.a[1:3]").expect_err("slices stay unsupported");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("[*]"),
+        "the rejection hint must name the form that IS supported, since that is \
+         where the grammar is discovered: {msg}"
+    );
+}
+
 #[test]
 fn extract_negative_slice_returns_tail() {
     let (content, ty, count) =

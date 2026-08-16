@@ -1,7 +1,7 @@
 ---
 id: '875e5d03d980ceac'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the overflow hint''s own recommended recovery needs `[*]`, which json_path rejects — agents fall back to shelling out, 11% of handle recoveries fail'
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - agent-guidance
 - usage-db-evidence
 topic: progressive-disclosure
+closed: 2026-08-16
 ---
 
 ## Summary
@@ -153,27 +154,57 @@ immediate next call 5 times in `code-explorer.old`. The agent is guessing at the
 
 ## Fix
 
-Not implemented. Three candidate levels, not mutually exclusive:
+**Implemented 2026-08-16.** All three levels, since the bug's own note applies: the parser and the
+two guidance surfaces taught the wrong shape together and had to move together.
 
-1. **Support `[*]`** in `parse_bracket` as a projection segment (map the remaining path over every
-   element). This alone addresses 73% of observed rejections and makes the printed hint true for
-   list payloads. Forward slices (`[a:b]`) are a smaller, mechanical follow-on; filter expressions
-   (`[?(...)]`) are a much larger surface and should probably stay unsupported.
-2. **Make the hint match the payload.** The envelope knows whether the buffered result's top level
-   is an array; when it is, the emitted hint should show the list-shaped projection rather than
-   `json_path="$.field"`. A hint that cannot work for the result it is attached to is worse than no
-   hint — it converts a lookup into a failed call.
-3. **Say what is supported at the point of offer, not only on rejection.** The full grammar is
-   currently discoverable only by getting it wrong; `get_guide("progressive-disclosure")` documents
-   the handle families but not the addressing grammar.
+**1. `[*]` is supported.** `Segment::Wildcard` parses from `[*]`, and evaluation was restructured
+from a sequential fold into `eval_segments`, which **splits the path on the first wildcard**: the
+prefix narrows normally, the result must be an array, and the suffix is evaluated against every
+element and collected. A wildcard is not a narrowing step like the others — it changes how the
+*remaining* path is evaluated — which is why a fold could not express it.
 
-Whatever is chosen, `get_guide("progressive-disclosure")` and the envelope hint must be updated
-together — they are the two surfaces that taught the wrong shape.
+Two semantics chosen deliberately:
 
+- **Nesting is preserved, not flattened.** `$.groups[*].rows[*].v` yields `[[1,2],[3]]`. Flattening
+  would discard which group a value came from, usually the question a grouped projection is asked.
+- **A missing key errors, naming the element**, rather than skipping it as strict JSONPath would. A
+  projection that silently dropped rows returns a *short array that reads as complete* — the same
+  defect class as the self-refuting "Showing N of N" and the unmarked buffered summary, and harder
+  to notice because the result is still well-formed.
+
+Forward slices and filters remain unsupported, as the Fix recommended.
+
+**2. The hint now derives from the payload's shape.** The trait default was the constant
+`"$.field"`; it is now `default_json_path_hint` (`src/tools/core/types.rs`) — an array payload gets
+`$[*]`, an object gets **its largest array field** projected (`$.rows[*]`), and only a genuinely
+scalar-shaped payload still gets `$.field`. The hint names a real field from the real payload
+instead of a placeholder.
+
+**3. Both rejection hints and the guide advertise the grammar.** `parse_bracket`'s and
+`unsupported_bracket`'s hints now name `[*]`, and
+`get_guide("progressive-disclosure")` § *The @ref buffer* shows the list-shaped call beside the
+scalar one, states the full supported subset, and says slices/filters are out. Previously the
+grammar was discoverable only by getting it wrong.
 ## Tests added
 
-None yet — filed on discovery.
+In `src/tools/file_summary/tests.rs`:
 
+| Test | Mutation it catches |
+|---|---|
+| `wildcard_projects_a_field_from_every_element` | removing the projection — the 73% case |
+| `wildcard_works_on_a_root_array` | handling only the object-rooted form |
+| `trailing_wildcard_yields_the_elements_themselves` | requiring a segment after `[*]` |
+| `nested_wildcards_project_through_both_levels` | flattening, which loses group provenance |
+| `wildcard_on_a_non_array_says_so` | a confusing error when `[*]` meets an object |
+| `wildcard_names_the_element_when_a_key_is_missing` | switching to silent skip — a short result reading as complete |
+| `the_unsupported_segment_hint_advertises_the_wildcard` | leaving the grammar discoverable only by failing |
+
+The compiler caught one thing the tests could not: adding the enum variant made
+`resolve_json_segment`'s match non-exhaustive. It is unreachable by construction, so the arm is
+stated explicitly rather than swept up by a catch-all — a future segment kind then still fails to
+compile until handled.
+
+101 passed in `file_summary::`, 2138 in `tools::`, `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 
 - Project a field from a list with `run_command` against the handle:
@@ -185,12 +216,20 @@ None yet — filed on discovery.
 
 ## Resume
 
-Add a `Segment::Wildcard` arm to `parse_bracket` (`src/tools/file_summary/file_summary.rs:570-626`)
-and make evaluation map the remaining segments over each element, returning an array. Then re-run
-the histogram query in Evidence against a fresh usage.db window and confirm `[*]` rejections drop to
-zero — the 73% figure is the acceptance test. Separately, decide on fix (2): find where the overflow
-envelope's `hint` is built and make the list case emit a list-shaped example.
+Fixed on `experiments`, gate green. Before archiving:
 
+1. **Verify live after the next `cargo rb` + `/mcp`**: overflow a result, then recover it with
+   `read_file("@tool_…", json_path="$.<field>[*].<key>")`, and check the envelope's own `hint` now
+   names a list-shaped path rather than `$.field`.
+2. **Re-run the acceptance measurement.** The histogram query in § Evidence against a fresh
+   `usage.db` window should show `[*]` rejections at **zero** — the 73% figure is the acceptance
+   test. Date-bound to after the rebuild, and rank on live DBs only.
+3. Record the fix SHA and archive via `artifact(action="move", …)`; fast-forward promotion means no
+   pending-master-SHA line.
+
+Still unsupported by design: forward slices (`[a:b]`, 5 observed) and filters (`[?(...)]`, 2). The
+filter surface is large; slices are a mechanical follow-on if they recur — with `[*]` available, a
+caller can project and slice the returned array instead.
 ## References
 
 - `src/tools/file_summary/file_summary.rs:570-626` — `parse_bracket`, the grammar
@@ -198,4 +237,3 @@ envelope's `hint` is built and make the list case emit a list-shaped example.
 - `docs/issues/archive/2026-07-10-read-file-buffer-refs-silently-drop-navigation-params.md` — fixed ancestor (params dropped on refs)
 - `get_guide("progressive-disclosure")` — documents handle families, not the addressing grammar
 - Evidence source: 13 `.codescout/usage.db` files, ~54,000 tool calls, read 2026-08-15
-

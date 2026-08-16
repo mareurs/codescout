@@ -451,6 +451,65 @@ pub(crate) enum Segment {
     NegIndex(usize),
     /// Negative-start open-end slice: `[-N:]` where N ≥ 1, last N elements.
     NegSliceFrom(usize),
+    /// `[*]` — project the REMAINING path over every element of an array.
+    ///
+    /// Unlike the other segments this one is not a simple narrowing step: it
+    /// changes how the rest of the path is evaluated, so `resolve_json_segment`
+    /// never sees it. `eval_segments` splits on it instead.
+    Wildcard,
+}
+
+/// Evaluate a parsed path against a value.
+///
+/// Without a `Wildcard` this is the original sequential narrowing: each segment
+/// resolves against the previous result. `[*]` is different in kind — it changes
+/// how the *remaining* path is evaluated — so the list is split on the first one:
+/// the prefix narrows normally, the result must be an array, and the suffix is
+/// evaluated against every element and collected.
+///
+/// Recursion handles nesting, and nesting is **preserved rather than flattened**:
+/// `$.groups[*].rows[*].v` yields `[[1,2],[3]]`, not `[1,2,3]`. Flattening would
+/// discard which group a value came from, which is usually the question a grouped
+/// projection is being asked.
+fn eval_segments(root: &Value, segments: &[Segment]) -> Result<Value, RecoverableError> {
+    let Some(pos) = segments.iter().position(|s| matches!(s, Segment::Wildcard)) else {
+        let mut current: Cow<'_, Value> = Cow::Borrowed(root);
+        for seg in segments {
+            current = match current {
+                Cow::Borrowed(v) => resolve_json_segment(v, seg)?,
+                Cow::Owned(v) => Cow::Owned(resolve_json_segment(&v, seg)?.into_owned()),
+            };
+        }
+        return Ok(current.into_owned());
+    };
+
+    let base = eval_segments(root, &segments[..pos])?;
+    let Some(arr) = base.as_array() else {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "json_path '[*]' needs an array, found {}",
+                json_type_name(&base)
+            ),
+            "Use '[*]' only where the value is an array. Drop it to address the value itself.",
+        ));
+    };
+
+    let rest = &segments[pos + 1..];
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, el) in arr.iter().enumerate() {
+        // Fail loudly, naming the element. A projection that silently skipped rows
+        // would return a short array that reads as complete — the same defect class
+        // as an unmarked truncation, and harder to notice because the result is
+        // still well-formed.
+        let projected = eval_segments(el, rest).map_err(|e| {
+            RecoverableError::with_hint(
+                format!("json_path '[*]' failed at element {i}: {e}"),
+                "Every element must satisfy the path after '[*]'. Inspect one with '[N]' first.",
+            )
+        })?;
+        out.push(projected);
+    }
+    Ok(Value::Array(out))
 }
 
 /// Extract a JSON subtree by path. Returns (pretty-printed content, type name, optional count).
@@ -471,17 +530,8 @@ pub fn extract_json_path(
         )
     })?;
     let segments = parse_json_path_segments(path)?;
-    let mut current: Cow<'_, Value> = Cow::Borrowed(&parsed);
-    for seg in &segments {
-        current = match current {
-            Cow::Borrowed(v) => resolve_json_segment(v, seg)?,
-            Cow::Owned(v) => {
-                let r = resolve_json_segment(&v, seg)?;
-                Cow::Owned(r.into_owned())
-            }
-        };
-    }
-    let final_ref: &Value = current.as_ref();
+    let resolved = eval_segments(&parsed, &segments)?;
+    let final_ref: &Value = &resolved;
     let pretty = match final_ref {
         Value::String(s) => s.clone(),
         _ => serde_json::to_string_pretty(final_ref).unwrap_or_else(|_| final_ref.to_string()),
@@ -568,7 +618,14 @@ pub(crate) fn parse_json_path_segments(path: &str) -> Result<Vec<Segment>, Recov
 }
 
 fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
-    let supported_hint = "Supported forms: '.key', '[\"key\"]' / '['key']' (quoted key — use for keys containing '.'), '[N]' (non-negative integer), '[-N]' (negative integer), '[-N:]' (last N elements). Other slice/filter forms not supported.";
+    let supported_hint = "Supported forms: '.key', '[\"key\"]' / '['key']' (quoted key — use for keys containing '.'), '[N]' (non-negative integer), '[-N]' (negative integer), '[-N:]' (last N elements), '[*]' (every element — projects the rest of the path over the array). Forward slices '[a:b]' and filters '[?(...)]' are not supported.";
+    // `[*]` projects the remaining path over every element. The results that
+    // overflow are overwhelmingly arrays of records, so "this field from every
+    // element" is the common recovery — measured 2026-08-15 as 73% of all rejected
+    // segments, while the printed hint recommended a scalar extraction.
+    if inner == "*" {
+        return Ok(Segment::Wildcard);
+    }
     if inner.is_empty() {
         return Err(RecoverableError::with_hint(
             "unsupported json_path segment '[]'".to_string(),
@@ -629,7 +686,7 @@ fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
 fn unsupported_bracket(s: &str) -> RecoverableError {
     RecoverableError::with_hint(
         format!("unsupported json_path segment near '{}'", s),
-        "Supported forms: '.key', '[\"key\"]' / '['key']' (quoted key), '[N]', '[-N]', '[-N:]'.",
+        "Supported forms: '.key', '[\"key\"]' / '['key']' (quoted key), '[N]', '[-N]', '[-N:]', '[*]' (every element).",
     )
 }
 
@@ -721,6 +778,13 @@ fn resolve_json_segment<'a>(
                 "Slice requires an array.",
             )),
         },
+        // Unreachable by construction: `eval_segments` splits the path on the
+        // first Wildcard and never passes one down here. Stated explicitly rather
+        // than swept up by a catch-all arm, so that adding a future segment kind
+        // still fails to compile until it is handled.
+        Segment::Wildcard => Err(RecoverableError::new(
+            "internal: '[*]' reached the per-segment resolver".to_string(),
+        )),
     }
 }
 

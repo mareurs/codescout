@@ -36,10 +36,23 @@ When a tool returns an overflow envelope (typical fields: `output_id`,
 Query the buffer instead of re-running the tool:
 
 ```
-grep PATTERN @cmd_abc                       # search the buffer
-read_file("@tool_xyz", json_path="$.foo")   # extract a JSON field
+grep PATTERN @cmd_abc                             # search the buffer
+read_file("@tool_xyz", json_path="$.foo")         # one field
+read_file("@tool_xyz", json_path="$.rows[*].id")  # that field from EVERY row
 read_file("@tool_xyz", start_line=N, end_line=M)  # slice lines
 ```
+
+**Buffered results are usually arrays of records, so `[*]` is the common form** — it projects the
+rest of the path over every element and returns an array. Nesting is preserved, not flattened:
+`$.groups[*].rows[*].v` gives `[[1,2],[3]]`. Every element must satisfy the path after `[*]`; a
+missing key errors naming the element rather than silently dropping the row.
+
+The addressing grammar is a deliberate subset: `.key`, `["key"]` (for keys containing `.`), `[N]`,
+`[-N]`, `[-N:]` (last N), and `[*]`. Forward slices (`[1:3]`) and filters (`[?(...)]`) are **not**
+supported — project with `[*]` and filter the returned array yourself.
+
+The envelope's `hint` names a concrete path derived from the payload's actual shape; prefer it over
+guessing a key.
 
 `@cmd_*` buffers come from `run_command`. `@tool_*` buffers come from
 other tools. Both are addressable by any tool that accepts a path.
