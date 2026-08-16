@@ -2338,6 +2338,68 @@ inevitable, five of them are normal.
 
 **Kin:** R-3, R-73b, R-77, R-79 (the chain), R-50 (the view is not the set), R-87
 (the hit), R-89 (the unreachable case audited alongside).
+
+## R-94 — A wiring inventory is not a delivery inventory, and it is wrong in both directions
+
+**Verdict:** hit ×1, miss ×2 (self-caught) · **Observed:** 2026-08-16, fixing BL-25
+(guide topics nothing triggers)
+
+The bug was found by counting `relevant_guide_topic()` implementations against the
+`GUIDE_TOPICS` registry: 7 of 10 topics had no trigger, so 47,343 bytes of authored
+guidance reached nobody. That count was **right**, and acting on it was right. But the same
+count is wrong twice over, and both errors surfaced while fixing it.
+
+| # | What the registry said | What was true | Why the inventory could not tell |
+|---|---|---|---|
+| 1 | 7 topics untriggered → undelivered | correct — 47,343 bytes reached nobody | the hit; this is the bug |
+| 2 | `project-activation-bootstrap` untriggered → undelivered | **delivered on every session's first call** | a *second* delivery path — `call_content`'s empty-ledger branch fires it from any tool, naming no topic in any impl |
+| 3 | `symbols` triggers `progressive-disclosure` → delivered | **delivered nothing on any result that fits** | the call site gates that topic on overflow having actually occurred, so the trigger fires into a downstream `false` |
+
+**A trigger and a delivery are independent facts.** Row 2 is a trigger-less delivery; row 3
+is a delivery-less trigger. A scan of the wiring registry produces false negatives and
+false positives at the same time, and nothing in the registry hints at either — both
+mechanisms live in the *consumer*, one branch above and one branch below the lookup.
+
+**Rows 2 and 3 were caught by the gate written for row 1**, which is the part worth
+keeping. The gate enumerated tool impls and failed `project-activation-bootstrap`; had I
+trusted it, I would have re-added a redundant trigger to fix a non-problem. Reading the
+consumer to find out *why* it failed is what surfaced both the second delivery path and the
+downstream gate — and row 3 turned into free value, since a slot that delivered silence
+now carries `symbol-navigation` at no cost.
+
+**The rule.** Before concluding anything from a registry, wiring table, or
+implementation count, **read the consumer** — the code that reads the registry — and answer
+two questions:
+
+1. *Can this thing be delivered by a path that does not appear in the registry?* (row 2)
+2. *Is a registry entry sufficient for delivery, or is it gated further downstream?* (row 3)
+
+An inventory answers "what is wired". Only the consumer answers "what arrives", and those
+differ in both directions.
+
+**Corollary for the gate you write.** A test that enumerates one mechanism will report the
+other mechanism's output as missing. Encode the second path explicitly (here:
+`SESSION_OPENING_GUIDE` is seeded as triggered-by-construction, with the reason in a
+comment) — otherwise the gate generates exactly the false alarm it was built to prevent,
+and the natural "fix" is to add redundancy.
+
+**Relation to the laws.** Law C says a search that finds nothing is evidence about the
+search; this is its structural twin — *a lookup that finds something is evidence about the
+lookup*. Law D's "a test that cannot fail is not coverage" covers row 3 from the test side;
+row 3 is the production-code version: a trigger that cannot fire is not delivery. Nearest
+kin is R-91 (a probe that cannot observe the thing the claim is about), of which this is
+the registry-grain case.
+
+**Also seen this session, same shape, no ID of its own:**
+`first_artifact_call_emits_librarian_hint` runs `find kind=tracker` and expects the
+`librarian` guide — which now holds **only** because its fixture catalog is empty, so
+`items: []` names no tracker path. It passes for a reason unrelated to its name. Left in
+place with the dependency stated in the neighbouring test's doc comment rather than
+silently depended on.
+
+**Promote-when:** a second instance where reading the consumer overturns a registry-derived
+conclusion. At that point rule 1 ("can it arrive by a path not in the registry?") is the
+craft-shaped half and belongs in the `reconnaissance` memory topic.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

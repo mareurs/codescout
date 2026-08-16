@@ -412,6 +412,39 @@ instinct applied to the wrong field: the scan's coverage was genuinely reduced, 
 because anything was down.
 
 
+## HY-7 — Zombie-open is a throughput problem, not a time problem: two in one day, both self-inflicted
+
+**Kind:** miss (×2, self-caught) · **Observed:** 2026-08-16, outside any sweep · **Status:** closed
+
+The verify-open cadence in `CLAUDE.md` is framed around entries *"older than 14 days"*, on
+evidence of a 75% zombie rate in one tracker (W-7, 2026-05-25). Both of today's zombies were
+hours old, and both were mine:
+
+- **BL-10 / `772fff57`** — fixed in `148aabe6`; its bug file still read *"Not implemented"*
+  **four commits later**. Code shipped, paperwork did not.
+- **BL-25 / `cfcbee6f7d047a55`** — all three parts shipped and verified live; the bug file
+  and the queue row were both still `open` when I went to answer "what's open?".
+
+A third, inverted: I archived the conditionally-required-params bug recording *"Class B —
+not done"* while a concurrent session was landing exactly that (`c057ff5a`). The record was
+false **when written**, not merely stale.
+
+**What this corrects.** Age is a proxy for the real driver, which is the count of
+fix-then-record boundaries crossed since the last reconciliation. A session that closes six
+bugs crosses six of them in an afternoon; the 14-day framing would not have flagged any of
+today's, and all three were found only because the cadence's *other* trigger fired — **run
+verify-open before any "what's open?" report**. That clause did the whole job today, and it
+is the one to keep prominent.
+
+**Sharpened by the concurrent-session case:** two agents sharing a checkout compress the
+window from days to minutes, and neither one's commit message names the other's tracker
+entry, so no automated gate catches it. Where two sessions run, reconcile before reporting
+— not on a schedule.
+
+**No change proposed to the skill.** D3 (stale-active) is the file-grain detector and it
+remains correct; this is about entry-grain reconciliation, which is D6 territory (v2, not
+yet built). Recorded as evidence for D6's eventual scoping rather than as a proposal.
+
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:
