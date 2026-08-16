@@ -138,6 +138,72 @@ pub const GUIDE_TOPICS: &[&str] = &[
     "project-activation-bootstrap",
 ];
 
+/// Guide topics reachable **only** by an explicit `get_guide(topic)` call, each with the
+/// reason it has no `relevant_guide_topic()` trigger.
+///
+/// Authoring a guide and wiring its trigger are two separate edits, and nothing used to
+/// prompt for the second. `src/prompts/README.md` rule 8 tells an author to move content
+/// into a guide when `server_instructions` overflows its 2200-byte cap — so "move it to a
+/// guide" read as *filed* when, absent a trigger, it is closer to *deleted from the
+/// agent's view*. Measured 2026-08-16: 7 of 10 topics, 47,343 of 75,441 bytes — 63% of the
+/// guide corpus — fired for nothing.
+///
+/// Being on this list is a **decision**, not a default. `every_guide_topic_is_triggered_or_declared_pull_only`
+/// (`src/server.rs`) fails the build for any topic that is neither triggered nor listed
+/// here, which is what stops the omission recurring silently. It also fails on a stale
+/// entry — a topic listed here that later gains a trigger, or that no longer exists.
+///
+/// Entries marked `PENDING BL-25` are honest about the current state rather than
+/// retrofitting a rationale: they are candidates for a trigger whose wiring is blocked on
+/// a byte-budget decision, because `librarian` alone is 19.9 KB and already auto-injects on
+/// a routine `artifact` call. Wiring more triggers before cutting the corpus trades one
+/// problem for another.
+///
+/// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
+    (
+        "librarian-runtime",
+        "By design. It is the spill-out half of `librarian` (19.9 KB, auto-injected), and \
+         the parent guide ends by naming it. Wiring it would add 9.4 KB to a call that \
+         already receives 19.9 KB, which is the byte problem this whole bug is about.",
+    ),
+    (
+        "error-handling",
+        "Authoring guidance for contributors writing a new tool — RecoverableError vs \
+         anyhow::bail — not runtime guidance a caller acts on. No tool call implies it.",
+    ),
+    (
+        "iron-laws-detail",
+        "The gate text and its exceptions, expanding rules the always-loaded \
+         `server_instructions` slice already states. A caller who needs the detail has \
+         already read the pointer.",
+    ),
+    (
+        "tracker-conventions",
+        "PENDING BL-25: candidate trigger is `artifact`/`librarian` when the target is \
+         under docs/issues/ or docs/trackers/, which needs per-call granularity the \
+         tool-level hook does not have. 10.4 KB, and `librarian` already fires 19.9 KB on \
+         the same tools.",
+    ),
+    (
+        "workspace-state",
+        "PENDING BL-25: candidate trigger is the `workspace` tool, which today fires \
+         `project-activation-bootstrap` instead. `a926fdf5` moved the subagent \
+         workspace-pinning rule here out of the always-loaded slice, so this is the \
+         measured instance of the eviction.",
+    ),
+    (
+        "symbol-navigation",
+        "PENDING BL-25: the obvious triggers (symbols/references/call_graph) already fire \
+         `progressive-disclosure`, and a tool emits at most one topic per call.",
+    ),
+    (
+        "untrusted-content",
+        "PENDING BL-25: not yet classified. The candidate trigger is whichever surface \
+         first admits third-party text, which has not been identified.",
+    ),
+];
+
 /// The guide that opens a session.
 ///
 /// Delivered on the first guide-eligible tool call of a session, whatever that

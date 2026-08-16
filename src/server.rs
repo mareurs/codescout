@@ -2290,6 +2290,65 @@ mod tests {
         }
     }
 
+    /// Every registered guide topic must either fire from some tool, or be declared
+    /// pull-only with a reason.
+    ///
+    /// Authoring a guide and wiring its trigger are two separate edits, and nothing
+    /// prompted for the second — so `src/prompts/README.md` rule 8's cap remedy ("move it
+    /// into a `get_guide` topic") quietly meant "remove it from the agent's view". Measured
+    /// 2026-08-16: 7 of 10 topics and 47,343 of 75,441 bytes fired for nothing.
+    ///
+    /// This is the recurrence gate, and it is deliberately the FIRST part of that bug's
+    /// fix: it does not decide which topics deserve triggers — that is a byte-budget
+    /// judgement — it only makes the omission impossible to introduce silently.
+    ///
+    /// Both directions are checked. A topic that is neither triggered nor listed fails;
+    /// so does a stale allowlist entry, whether it names a topic that has since gained a
+    /// trigger or one that no longer exists.
+    ///
+    /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    #[tokio::test]
+    async fn every_guide_topic_is_triggered_or_declared_pull_only() {
+        use crate::prompts::{GUIDE_TOPICS, PULL_ONLY_GUIDE_TOPICS};
+
+        let (_dir, server) = make_server().await;
+        let triggered: std::collections::BTreeSet<&str> = server
+            .tools
+            .iter()
+            .filter_map(|t| t.relevant_guide_topic())
+            .collect();
+
+        for topic in GUIDE_TOPICS {
+            let declared = PULL_ONLY_GUIDE_TOPICS.iter().any(|(t, _)| t == topic);
+            assert!(
+                triggered.contains(topic) || declared,
+                "guide topic `{topic}` has no `relevant_guide_topic()` trigger and is not \
+                 declared pull-only. Authoring a guide nothing fires is the same as \
+                 deleting it: either wire a trigger, or add it to \
+                 prompts::PULL_ONLY_GUIDE_TOPICS with the reason."
+            );
+            assert!(
+                !(triggered.contains(topic) && declared),
+                "guide topic `{topic}` is declared pull-only but IS triggered — remove the \
+                 stale entry from prompts::PULL_ONLY_GUIDE_TOPICS, or the list stops \
+                 describing reality."
+            );
+        }
+
+        for (topic, reason) in PULL_ONLY_GUIDE_TOPICS {
+            assert!(
+                GUIDE_TOPICS.contains(topic),
+                "prompts::PULL_ONLY_GUIDE_TOPICS names `{topic}`, which is not a registered \
+                 guide topic — a rename or removal left it behind."
+            );
+            assert!(
+                reason.len() > 40,
+                "the reason for `{topic}` must say why it is pull-only; a placeholder \
+                 turns this gate back into the silent default it replaced. Got: {reason:?}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn get_info_contains_instructions() {
         let (_dir, server) = make_server().await;
