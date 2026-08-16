@@ -55,27 +55,18 @@ Activation clears these per-session sets:
 
 ## Path-relative annotation
 
-Paths in tool responses are project-relative. The response to each
-`activate_project` call carries a trailing `[codescout] paths are relative
-to <root>` note naming the root they resolve against; every later response
-in that activation window omits it, because the same fact lives in the
-`Active project` line of `server_instructions`. The gate also fires on the
-first eligible response after **server start**, not only after an explicit
-`activate_project` call — launching codescout with `--project <path>`
-(`src/main.rs:23-25`) activates a project before any tool call, so that
-first response carries the banner too.
+After `workspace(action="activate")`, path fields in responses resolve against
+the **new** root, and that first response carries a `[codescout] paths are
+relative to <root>` banner naming it. Root-valued fields (`cwd`, `git_root`,
+`project_root`, `repo_root`, …) stay absolute — they are the anchor the rest
+resolve against.
 
-Relativization is **field-aware and allowlist-driven**: only keys in a
-fixed list of path-valued JSON fields (`PATH_KEYS`) are relativized — a
-key outside that allowlist keeps its absolute path by design (verbose,
-never corrupt; do not assume every path-looking field in a response is
-relative). Root-valued fields (`ROOT_KEYS`: `cwd`, `git_root`, `new_root`,
-`old_root`, `project_root`, `repo_root`, `root`) stay absolute. The
-catalog itself always stores absolute paths; this is a display-time
-transform, not a change to what's on disk.
-
-See `get_guide("progressive-disclosure")` for the full mechanics.
-
+That is the whole workspace-facing consequence. The canonical statement — the
+`PATH_KEYS` / `ROOT_KEYS` allowlists, what is never rewritten (file content,
+shell output, prose, error text), and how to read a path against catalog state —
+is `get_guide("progressive-disclosure")` § Path-relative annotation, which
+auto-injects the first time a call overflows into a buffer and so is usually
+already in context.
 ## Cross-project workflow pattern
 
 When you need to work in a sibling project briefly:

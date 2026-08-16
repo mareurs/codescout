@@ -652,7 +652,20 @@ fn looks_like_path(s: &str) -> bool {
             // `/foo` with no further structure (no second segment, no extension)
             // is almost always a slash-command or shell shorthand in prose, not a
             // file path. Require either a second path segment or a known extension.
-            let single_root_segment = s.starts_with('/') && !s[1..].contains('/');
+            //
+            // "Segment" means a NON-EMPTY one. Testing for a second *slash*
+            // instead admitted bare Rust comment markers — `//`, `///`, `//!` —
+            // whose second segment is empty, and an empty segment is evidence of
+            // nothing. Each then surfaced as an `unknown` finding carrying
+            // "path outside active project; scope=umbrella required": advice that
+            // reads as actionable about a token that is not a path in any scope.
+            //
+            // A trailing slash still counts as a second segment, because it is
+            // the directory marker (`/docs/`), and a UNC-style `//server/share`
+            // still has two non-empty segments — so neither of those regresses.
+            let segments = s.split('/').filter(|seg| !seg.is_empty()).count();
+            let has_second_segment = segments >= 2 || (segments == 1 && s.ends_with('/'));
+            let single_root_segment = s.starts_with('/') && !has_second_segment;
             if single_root_segment {
                 return has_known_ext(s);
             }
@@ -853,6 +866,44 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
         let (cands, _) = parse("Check `/usr/local/bin/codescout`.");
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].raw_ref, "/usr/local/bin/codescout");
+    }
+
+    #[test]
+    fn parser_rejects_bare_comment_markers() {
+        // `//`, `///` and `//!` appear in almost every Rust snippet. Each used to
+        // classify as a file_path and surface as an `unknown` finding carrying
+        // "path outside active project; scope=umbrella required" — advice that
+        // reads as actionable about a token that is not a path in any scope.
+        // docs/issues/2026-08-15-audit-doc-refs-classifies-comment-markers-as-paths.md
+        let (cands, _) = parse("Doc comments use `///`, inner ones `//!`, plain ones `//`.");
+        let kinds: Vec<_> = cands
+            .iter()
+            .map(|c| (c.raw_ref.as_str(), c.ref_kind))
+            .collect();
+        assert!(kinds.is_empty(), "expected no path candidates, got {kinds:?}");
+    }
+
+    #[test]
+    fn parser_keeps_anchored_paths_the_marker_fix_could_have_broken() {
+        // The discriminating set. Each is accepted for a DIFFERENT reason, so a
+        // regression in any one of them is legible from which assert fails:
+        // two real segments, a trailing-slash directory marker, and a Windows UNC
+        // share — the last being why the broader "reject slash-only strings" fix
+        // was rejected in favour of counting non-empty segments.
+        let (cands, _) = parse("See `/etc/hosts`, the `/docs/` tree, and `//server/share`.");
+        let refs: Vec<&str> = cands.iter().map(|c| c.raw_ref.as_str()).collect();
+        assert!(
+            refs.contains(&"/etc/hosts"),
+            "two non-empty segments must still be a path; got {refs:?}"
+        );
+        assert!(
+            refs.contains(&"/docs/"),
+            "a trailing slash is the directory marker; got {refs:?}"
+        );
+        assert!(
+            refs.contains(&"//server/share"),
+            "UNC still has two non-empty segments; got {refs:?}"
+        );
     }
 
     #[test]
