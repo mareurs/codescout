@@ -79,6 +79,70 @@ pub struct ToolContext {
     pub workspace_override: Option<std::path::PathBuf>,
 }
 
+/// Ledger key for [`worktree_read_notice`]. Lives in the ledger's `notices`
+/// set, never in its guide-topic set — see `GuideLedger::notices`.
+const WORKTREE_READ_NOTICE: &str = "worktree-read-root";
+
+/// One-shot notice that reads are resolving against a tree the caller never chose.
+///
+/// `guard_worktree_write` refuses WRITES on exactly these two facts. Reads had
+/// no equivalent, so after a session switched into a linked worktree, `symbols`,
+/// `grep` and `read_file` kept answering from the main checkout and said nothing
+/// about it — a silent wrong answer, which is the expensive kind: the agent reads
+/// plausible code from the wrong tree and acts on it. The asymmetry was the bug;
+/// the write guard proved the condition is cheaply detectable and then spent the
+/// detection on half the surface.
+///
+/// **A notice, not a refusal.** Refusing reads would fire while the agent is
+/// still orienting — exactly when it cannot yet know which tree it wants — and a
+/// guard that fires before the caller can plausibly satisfy it trains callers to
+/// route around it. Same philosophy as `removed_attributes`: the operation is
+/// allowed, and it says what it did.
+///
+/// **Agent-agnostic by construction.** Both facts are git/filesystem
+/// observations; nothing here learns any harness's worktree tool by name.
+///
+/// Ordered cheapest-check-first, and the ledger is touched LAST so the key is
+/// only consumed on a call that actually emits. The lock is taken after every
+/// `.await` — `parking_lot` guards must not cross one.
+///
+/// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
+async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>) -> Option<String> {
+    if ctx.agent.is_project_chosen_this_session().await {
+        // The caller already made the choice this notice would ask for.
+        //
+        // Deliberately NOT `is_project_explicitly_activated`, which the write
+        // guard uses: that one is set at startup from the `current_dir()`
+        // fallback, so it is true in essentially every session and would
+        // suppress this notice everywhere. Measured 2026-08-16 — see
+        // docs/issues/2026-08-16-worktree-write-guard-is-dead-code-in-production.md
+        // for what that means for `guard_worktree_write` itself.
+        return None;
+    }
+    let root = root?;
+    let worktrees = crate::util::path_security::list_git_worktrees(root);
+    if worktrees.is_empty() {
+        return None;
+    }
+    if !ctx
+        .guide_hints_emitted
+        .lock()
+        .notice_once(WORKTREE_READ_NOTICE)
+    {
+        return None;
+    }
+    let list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
+    Some(format!(
+        "Reads are resolving against \"{}\". This repo also has linked git \
+         worktrees [{}] and no project has been explicitly activated, so results \
+         describe the main checkout even if you are working in a worktree. Call \
+         workspace(action='activate', path=\"{}\") to pin the tree you mean.",
+        root.display(),
+        list.join(", "),
+        list[0],
+    ))
+}
+
 /// MCP client identity resolved from the `initialize` handshake's `clientInfo`.
 /// This is the protocol-proper, agent-agnostic source — every MCP client sends
 /// it. Verified live for Claude Code: name="claude-code", version="2.1.177"
@@ -609,12 +673,15 @@ pub trait Tool: Send + Sync {
         // so a `workspace=` pin cannot be mismatched here the way it could
         // when `post_process` had to be handed the pin separately
         // (docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md).
-        let root_prefix = ctx
+        let project_root = ctx
             .agent
             .project_root_for(ctx.workspace_override.as_deref())
-            .await
-            .map(|p| format!("{}/", crate::util::fs::to_forward_slash(&p)))
+            .await;
+        let root_prefix = project_root
+            .as_ref()
+            .map(|p| format!("{}/", crate::util::fs::to_forward_slash(p)))
             .unwrap_or_default();
+        let workspace_notice = worktree_read_notice(ctx, project_root.as_deref()).await;
         crate::tools::core::path_strip::strip_paths_in_value(&mut val, &root_prefix);
         let val = val;
         let form = self.output_form();
@@ -675,6 +742,15 @@ pub trait Tool: Send + Sync {
                 None
             }
         };
+
+        fn inject_notice(val: &mut Value, notice: &str) {
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert(
+                    "_workspace_notice".to_string(),
+                    Value::String(notice.to_string()),
+                );
+            }
+        }
 
         fn inject_hint(val: &mut Value, topic: &str) {
             if let Some(obj) = val.as_object_mut() {
@@ -744,6 +820,9 @@ pub trait Tool: Send + Sync {
             if let Some(topic) = &hint_topic {
                 inject_hint(&mut buffered, topic);
             }
+            if let Some(notice) = &workspace_notice {
+                inject_notice(&mut buffered, notice);
+            }
             Content::text(
                 serde_json::to_string_pretty(&buffered)
                     .unwrap_or_else(|_| format!("{{\"output_id\":\"{ref_id}\"}}")),
@@ -753,6 +832,9 @@ pub trait Tool: Send + Sync {
             let mut val = val;
             if let Some(topic) = &hint_topic {
                 inject_hint(&mut val, topic);
+            }
+            if let Some(notice) = &workspace_notice {
+                inject_notice(&mut val, notice);
             }
             if form == OutputForm::Text {
                 if let Some(text) = self.format_compact(&val) {

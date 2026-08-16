@@ -52,7 +52,8 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-9 | 2 | `server_instructions` arrives truncated mid-word, dropping the guide pointers | open | `f366e93249f7babd` |
 | BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | open | `772fff5739620581` |
 | BL-11 | 2 | `context`/`workspace_state_at`/`link_scan` never dedup the worktree overlay | done | `d31233700ca979c2` |
-| BL-12 | 2 | worktree divergence guard covers writes but not reads | open | `320b97eb87548663` |
+| BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
+| BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | open | `1523556488a95de2` |
 | BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | blocked | `ce1447504150b25b` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | blocked | `30365fe50974fa6b` |

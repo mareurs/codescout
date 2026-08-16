@@ -565,6 +565,104 @@ impl Tool for EchoTool {
     }
 }
 
+/// Make `root` look like a checkout with one linked worktree, the way
+/// `list_git_worktrees` reads it: `.git/worktrees/<n>/gitdir` holds the
+/// absolute path of the worktree's own `.git`.
+fn seed_linked_worktree(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let wt_root = root.parent().unwrap().join(format!("wt-{name}"));
+    std::fs::create_dir_all(&wt_root).unwrap();
+    let entry = root.join(".git").join("worktrees").join(name);
+    std::fs::create_dir_all(&entry).unwrap();
+    std::fs::write(
+        entry.join("gitdir"),
+        format!("{}/.git\n", wt_root.display()),
+    )
+    .unwrap();
+    wt_root
+}
+
+async fn echo_once(ctx: &ToolContext) -> String {
+    let tool = EchoTool {
+        result: serde_json::json!({"key": "value"}),
+        user_summary: None,
+    };
+    let content = tool.call_content(serde_json::json!({}), ctx).await.unwrap();
+    content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default()
+}
+
+/// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
+///
+/// `guard_worktree_write` refuses writes on these two facts; reads used to
+/// resolve against the main checkout and say nothing. One-shot, or it becomes
+/// noise on every call — the failure mode `removed_attributes` was designed
+/// around.
+#[tokio::test]
+async fn a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    let wt = seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+
+    let first = echo_once(&ctx).await;
+    assert!(
+        first.contains("_workspace_notice"),
+        "the first read must say which tree it resolved against, got: {first}"
+    );
+    assert!(
+        first.contains(&wt.display().to_string()),
+        "the notice must name the worktree the caller might mean, got: {first}"
+    );
+    assert!(
+        first.contains("workspace(action='activate'"),
+        "the notice must name a call the caller can actually run, got: {first}"
+    );
+
+    let second = echo_once(&ctx).await;
+    assert!(
+        !second.contains("_workspace_notice"),
+        "one-shot: a notice on every call is noise, got: {second}"
+    );
+}
+
+/// The other half of the pair: once the caller HAS chosen, the notice has
+/// nothing to ask for and must not fire at all — not even once.
+#[tokio::test]
+async fn an_explicitly_activated_project_gets_no_worktree_notice() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+    ctx.agent.activate(root.clone(), None).await.unwrap();
+
+    let text = echo_once(&ctx).await;
+    assert!(
+        !text.contains("_workspace_notice"),
+        "the caller already made the choice the notice would ask for, got: {text}"
+    );
+}
+
+/// The notice must not fire in the overwhelmingly common case — a repo with no
+/// linked worktrees at all — or every session in every ordinary checkout pays
+/// for it.
+#[tokio::test]
+async fn a_repo_without_worktrees_gets_no_notice() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let ctx = rooted_ctx(&root).await;
+
+    let text = echo_once(&ctx).await;
+    assert!(
+        !text.contains("_workspace_notice"),
+        "no worktrees means no ambiguity to report, got: {text}"
+    );
+}
+
 #[tokio::test]
 async fn call_content_passthrough_small_output() {
     let ctx = bare_ctx().await;

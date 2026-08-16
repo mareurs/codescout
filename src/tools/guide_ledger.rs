@@ -24,6 +24,23 @@ pub struct GuideLedger {
     /// Per-session file (`<dir>/<session_id>.json`). `None` ⇒ ephemeral.
     path: Option<PathBuf>,
     emitted: HashSet<String>,
+    /// One-shot session notices that are NOT guide topics.
+    ///
+    /// Deliberately a SEPARATE set from `emitted`, and not persisted:
+    ///
+    /// - `emitted.is_empty()` is the session-opening guide's trigger in
+    ///   `Tool::call_content`. A sentinel key stashed in `emitted` would make
+    ///   that false and silently suppress `SESSION_OPENING_GUIDE` — for
+    ///   exactly the sessions a notice fires in, since notices fire on the
+    ///   first eligible call.
+    /// - keeping it out of `emitted` also keeps it out of the topic
+    ///   namespace, so a notice key can never collide with a future guide
+    ///   topic, and out of the persisted JSON, whose on-disk shape stays a
+    ///   bare `Vec<String>` with no migration.
+    ///
+    /// Ephemeral by design: a notice describes this process's view of the
+    /// tree, not something the model has been taught.
+    notices: HashSet<String>,
 }
 
 impl GuideLedger {
@@ -38,7 +55,11 @@ impl GuideLedger {
             .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
             .map(|v| v.into_iter().collect())
             .unwrap_or_default();
-        Self { path, emitted }
+        Self {
+            path,
+            emitted,
+            notices: HashSet::new(),
+        }
     }
 
     /// Has this topic already been surfaced this session?
@@ -87,9 +108,23 @@ impl GuideLedger {
     pub fn clear(&mut self) {
         let was_nonempty = !self.emitted.is_empty();
         self.emitted.clear();
+        // Notices re-arm with the guides: an `activate` is precisely the act a
+        // worktree notice asks the caller to perform, and a post-compact
+        // re-arm means the model no longer remembers being told.
+        self.notices.clear();
         if was_nonempty {
             self.persist();
         }
+    }
+
+    /// Record a one-shot session notice. Returns `true` the FIRST time this
+    /// key is seen and `false` forever after (until [`clear`](Self::clear)),
+    /// so the caller can write `if ledger.notice_once(K) { emit }`.
+    ///
+    /// Notices live beside guide topics, never inside them — see the `notices`
+    /// field for why that separation is load-bearing rather than tidy.
+    pub fn notice_once(&mut self, key: &str) -> bool {
+        self.notices.insert(key.to_string())
     }
 
     /// Best-effort write-through. Persistence is an optimization, not a

@@ -105,6 +105,10 @@ pub struct AgentInner {
     /// "the one workspace" identity of the old single `workspace` slot.
     pub default_workspace_root: Option<PathBuf>,
     pub project_explicitly_activated: bool,
+    /// True only after an in-session `activate` call. See
+    /// `Agent::is_project_chosen_this_session` for why the startup flag above
+    /// cannot answer that question.
+    pub project_chosen_this_session: bool,
     pub home_root: Option<PathBuf>,
     /// Last `activate()` as (root, when). Drives the concurrent-activation
     /// guard (`Agent::note_activation`): if a *different* root is activated
@@ -493,6 +497,8 @@ impl Agent {
                 workspaces,
                 default_workspace_root,
                 project_explicitly_activated,
+                // Startup never counts as a choice, however the root was found.
+                project_chosen_this_session: false,
                 home_root,
                 last_activation: None,
             })),
@@ -533,6 +539,7 @@ impl Agent {
             inner.workspaces.insert(root.clone(), ws);
             inner.default_workspace_root = Some(root);
             inner.project_explicitly_activated = true;
+            inner.project_chosen_this_session = true;
         }
         Ok(())
     }
@@ -1357,6 +1364,23 @@ impl Agent {
 
     pub async fn is_project_explicitly_activated(&self) -> bool {
         self.inner.read().await.project_explicitly_activated
+    }
+
+    /// Did the CALLER choose this project during the session, via `activate`?
+    ///
+    /// Distinct from [`is_project_explicitly_activated`](Self::is_project_explicitly_activated),
+    /// which is also true for a project resolved at startup. That is the right
+    /// reading for `--project` — an operator did choose it — but not for the
+    /// `current_dir()` fallback in `run_server`, which is a default, not a
+    /// choice. Since the fallback fires whenever a cwd resolves, the startup
+    /// flag is true before any tool runs in essentially every session.
+    ///
+    /// Ask THIS when the question is "has the caller picked a tree yet?" — for
+    /// worktree ambiguity the startup cwd is no evidence at all: it describes
+    /// where the process launched, and a harness that switches worktrees
+    /// afterwards never touches it.
+    pub async fn is_project_chosen_this_session(&self) -> bool {
+        self.inner.read().await.project_chosen_this_session
     }
 
     /// Return the home project root (the first project activated in this session).
