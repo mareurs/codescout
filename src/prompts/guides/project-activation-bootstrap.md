@@ -27,6 +27,10 @@ bug is the one you never re-investigate because the project already documented i
 
 ## Phase 2 — verify at the bytes, not from belief
 
+**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a
+prior belief says the code does — open the artifact or run the command, and ALWAYS
+VERIFY.**
+
 - A finding needs lines you actually read (`symbols include_body` / `read_file`),
   not a grep hit alone.
 - A claim about how a TOOL behaves needs the call run once and the real output
