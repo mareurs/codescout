@@ -31,6 +31,38 @@ row says `open` and the bug says `fixed`, the bug is right and the row is stale.
 from here — and never treat the one-line `next` as the instruction. It is a pointer to that bug's
 `## Resume`, which carries the real next action along with the caveats.
 
+## Queue — rendered snapshot (2026-08-16)
+
+> **`params` is the source of truth; this table is a snapshot of it.** Params live in the librarian
+> catalog (`~/.local/share/librarian/catalog.db`), which is **not** in the repo — so without this
+> section the queue would be invisible to git and to any other checkout. Re-render it when rows
+> change. Query the live rows with
+> `artifact(get, id="9a892c2a5976e296", entry_filter={"status":{"eq":"open"}})`.
+
+| ID | Ph | Task | Status | Bug |
+|----|---:|------|--------|-----|
+| BL-1 | 1 | json_path: add a `Segment::Wildcard` arm so the overflow hint's own recovery works | **done** | `875e5d03d980ceac` |
+| BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | open | `4059035cf39e6aab` |
+| BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | open | `365b599f3573b1c0` |
+| BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | open | `dbebda84901961c0` |
+| BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | **done** | `3f88d49c38ced0c1` |
+| BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | open | `a9644b964edac789` |
+| BL-7 | 1 | Write-scope denial should name `approve_write` | open | `0a15c81150c4cce7` |
+| BL-8 | 2 | `truncate_compact` cuts from the tail, destroying the overflow signal | open | `c320b6564d1cb003` |
+| BL-9 | 2 | `server_instructions` arrives truncated mid-word, dropping the guide pointers | open | `f366e93249f7babd` |
+| BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | open | `772fff5739620581` |
+| BL-11 | 2 | `context`/`workspace_state_at` never dedup the worktree overlay | open | `b5080e6c7a73ab44` |
+| BL-12 | 2 | worktree divergence guard covers writes but not reads | open | `320b97eb87548663` |
+| BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
+| BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | blocked | `ce1447504150b25b` |
+| BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | blocked | `30365fe50974fa6b` |
+| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology | blocked | `403e3fad0356f171` |
+| BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | open | `897fb0fbd6eb2546` |
+| BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
+| BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | open | `e557d0f2c9429b5d` |
+
+Next actions per row live in each bug's `## Resume`, and in the live params — not duplicated here,
+because a snapshot that carries instructions goes stale in the way that matters most.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
@@ -138,3 +170,24 @@ the bug.** Written against an empty catalog it read 10,396 bytes; the same code 
 catalog read 17,456. `existing_trackers` is empty in a bare fixture and populated in production, so
 the test would have gone green while every real call still overflowed. A size assertion has to be
 made against the shape that ships — the same *wrong population* error TU-5 was corrected for.
+
+### 2026-08-16 — BL-1 fixed; BL-19 filed; the queue was not actually in git
+
+**BL-1** — `[*]` now parses and projects, the recovery hint is derived from the payload's shape
+instead of the constant `$.field`, and both rejection hints plus
+`get_guide("progressive-disclosure")` advertise the grammar. Verified live: the exact call that used
+to be rejected, `read_file("@tool_…", json_path="$.augmentation.params.tasks[*].id")`, returned all
+18 BL ids from a buffered handle.
+
+**BL-19** — filed from a complaint about the fix's own output. The hint is now correct, but the
+*envelope* still costs a whole call to return nothing: `artifact(get)` answers with `output_id`, a
+byte count and a hint, and nothing about the artifact. The librarian adapter's `format_compact` has
+exactly one case — a body-truncation warning — so every other response falls through to the generic
+"Result stored in …". Fixing the hint makes the second call land; it does not make it unnecessary.
+
+**And this file was not what it appeared to be.** The BL rows are `params`, and params live in the
+librarian catalog under `~/.local/share/`, **not in the repo**. The markdown carried frontmatter and
+prose only — so the queue existed on this machine and nowhere else, which is the opposite of why a
+tracker was chosen over Claude Code's per-profile memory in the first place. The rendered snapshot
+above fixes that. Worth knowing when creating any augmented tracker: writing a good body does not
+make its live state durable, and the file will not look wrong.
