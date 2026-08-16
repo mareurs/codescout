@@ -34,7 +34,7 @@ result and then asks a second question:
 |---|---|---|---|
 | Recovery | Did the agent fix the call? | 85% recovery, 3% immediate repeat | **replicated** — 96% / 3% |
 | Learning | Did the agent learn the rule? | not measured | **47% per-session repeat** |
-| Firing correctness | *Should the gate have fired?* | not measured | **30% of IL-3 pipe refusals are self-bounded `git`** |
+| Firing correctness | *Should the gate have fired?* | not measured | **24% of IL-3 pipe refusals are self-bounded `git`** |
 
 A guard can have an excellent corrective message *and* fire on commands its own rationale
 says to allow. Those are independent properties. TU-7 established the first; this establishes
@@ -49,8 +49,8 @@ the third.
 
 | ID | Finding | Sev | Status | Target |
 |---|---|---|---|---|
-| GF-1 | `git` is unconditionally unbounded — 64% of its IL-3 refusals are self-bounded (30% of the family). **Incomplete fix** of `2026-05-18-il3-overtriggers-bounded-lhs`, whose remedy created this very list | high | open | `src/util/path_security.rs` |
-| GF-2 | The flag-conditional mechanism already exists for `grep`/`find` — `git` never got it; the fix extends, not invents | high | open | `src/util/path_security.rs` |
+| GF-1 | `git` is unconditionally unbounded — 50% of its IL-3 refusals are self-bounded (24% of the family). **Incomplete fix** of `2026-05-18-il3-overtriggers-bounded-lhs`, whose remedy created this very list | high | **fixed** `06a53ad3` | `src/util/path_security.rs` |
+| GF-2 | The flag-conditional mechanism already exists for `grep`/`find` — `git` never got it; the fix extends, not invents | high | **fixed** `06a53ad3` | `src/util/path_security.rs` |
 | GF-3 | `shell_on_source` refuses 22% out-of-project paths where the suggested `symbols` alternative cannot serve, plus 24% read-only metadata | med | open | `docs/issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md` |
 | GF-4 | Refusals teach the CALL, not the PREDICATE: 96% immediate compliance, 3% immediate repeat, **47% per-session repeat** | med | open | `src/prompts/guides/iron-laws-detail.md` |
 | GF-5 | Guide delivery is success-path-only, so `iron-laws-detail` cannot arrive when a gate fires — 1 fetch vs 557 violations. **Contradicts** the shipped pull-only rationale *"a caller who needs the detail has already read the pointer"* | high | open | `src/tools/core/types.rs` |
@@ -135,10 +135,18 @@ IL-3 volume tripled while intensity fell — more sessions, not worse behaviour.
 **Right-hand side (the trimmer):** `tail` 98 · `head` 60 · `grep` 34 · `sort` 6 · `wc` 6.
 **61% (117) also redirect stderr** (`2>&1`) — the agent wants the failure summary.
 
-**The finding: 58 of the 91 `git` refusals (64%) carry a self-bounding flag** —
-`--oneline`, `--short`, `--porcelain`, `--show-current`, `--stat`, `-1`/`-2`/`-3`/`-5`.
-That is **30% of all IL-3 pipe refusals** landing on commands whose output is already a
-handful of lines.
+**The finding: 47 of the 94 `git` refusals (50%) carry a self-bounding flag** — an explicit
+count (`-n`, `--max-count`, or the `-3` shorthand: 22), `--stat` (19), `--porcelain`/`--short`
+(13), `--show-current` (2). That is **24% of all IL-3 pipe refusals** landing on commands
+whose output is already a handful of lines.
+
+**Corrected 2026-08-16 — the first number was 58/91 (64%), and it was wrong twice.** It
+matched against the whole command string, so the trimmer's own `head -60` counted as the
+producer's limit; and it counted `--oneline` (25 of 94), which bounds line *width*, not line
+*count* — `git log --oneline` still emits one line per commit for every commit. Re-measured
+against the left-hand side only, with `--oneline` excluded. The inflated figure reached a
+commit message and this file before the LHS check was run; it is the same wrong-query-shape
+class this audit is otherwise about.
 
 Representative refused commands, all self-bounded:
 
@@ -220,7 +228,10 @@ Everything a change to `is_unbounded_lhs` needs:
 
 - **Target:** `src/util/path_security.rs:906`, `UNBOUNDED_PREFIXES`.
 - **Highest-yield single change:** make `git` flag-conditional like `grep`/`find`. Expected
-  effect: **−58 refusals (30% of IL-3 pipe)** over a comparable window.
+  effect: **−47 refusals (24% of IL-3 pipe)** over a comparable window.
+  **SHIPPED 2026-08-16 — `06a53ad3`**, as `git_output_is_bounded`. Nine tests, mutation-verified
+  (restoring `git` to `UNBOUNDED_PREFIXES` turns all five positive cases red while the
+  quoted-separator case stays green).
 - **Bounding flags observed in the corpus:** `--oneline`, `--short`, `--porcelain`,
   `--show-current`, `--stat`, `-1`, `-2`, `-3`, `-5`. Note `git log` without a count is
   genuinely unbounded — the predicate is *"does a count/format flag bound it?"*, not
@@ -273,7 +284,7 @@ Re-run on codescout only, same window length.
 | Iron-Law share of all errors | 62% (557/894) |
 | `err_family` unclassified | 2.9% (26/894) |
 | IL-3 pipe: `git` share of LHS | 47% (91/192) |
-| IL-3 pipe: self-bounded `git` | 64% of git, 30% of family (58/192) |
+| IL-3 pipe: self-bounded `git` | 50% of git, 24% of family (47/94) — LHS only, `--oneline` excluded |
 | IL-3 pipe: immediate repeat | 3% (6/193) |
 | IL-3 pipe: per-session repeat | 47% (22/47 sessions) |
 | IL-1: per-session repeat | 71% (17/24 sessions) |
