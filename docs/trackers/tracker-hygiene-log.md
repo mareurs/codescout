@@ -445,6 +445,70 @@ entry, so no automated gate catches it. Where two sessions run, reconcile before
 remains correct; this is about entry-grain reconciliation, which is D6 territory (v2, not
 yet built). Recorded as evidence for D6's eventual scoping rather than as a proposal.
 
+## HY-8 — Proposal: a detector class the sweep cannot see, now implemented in the substrate ahead of the skill
+
+**Type:** proposal (substrate-first) · **Observed:** 2026-08-16, BL-29.
+
+**The gap.** Every detector D1–D10 compares a *declaration* to an *observation*
+that both live on disk — index rows, frontmatter, git dates, catalog rows. None
+of them can see the case where a tracker's **entry rows exist only in the
+catalog**. `params` is machine-local and git-ignored; `append_entry` /
+`update_entry` write there and report success while the committed file stays
+byte-identical. `git status` is clean, the tool returned a row id, and the row is
+in no repo. A sweep looking at files cannot detect an absence that leaves no
+trace in any file.
+
+Measured on this machine: **3 of 28** augmented trackers were affected, across 7
+repos — worst 54 of 68 rows (79%) existing nowhere but one SQLite file on one of
+three profiles. Two of the missing rows were load-bearing outside their tracker:
+`A-21` is cited by `CLAUDE.md` as the measurement behind the Conclude Last iron
+rule, and `A-22` by R-90.
+
+**Why this entry is a proposal and not a miss.** The skill's own Growth path
+anticipates *substrate promotion* — "when D1/D2/D4 hold sustained zero-reject
+records, their detection graduates to a Rust `librarian(action="audit_trackers")`
+… the skill then consumes its output." This detector arrived by the **reverse**
+route: it was built in Rust first (`librarian(action="doctor")` → check
+`snapshot_drift`, `0dbfd0ee`) because the bug that motivated it was a code defect,
+not a sweep finding. The skill has nothing to promote; it has something to
+**consume**.
+
+**Proposed D11 — snapshot-drift.**
+
+| | |
+|---|---|
+| **Fires when** | `librarian(action="doctor")` reports a `snapshot_drift` violation for a tracker under the sweep's scope |
+| **Evidence pair** | *declared:* the body's rendered table · *observed:* `params` holds ids the body line-anchors nowhere |
+| **Proposed fix** | re-render the missing rows into the body's table section — **mechanically, from params**, never paraphrased |
+| **Confidence** | high on detection, **low on the fix** — see the gate below |
+| **Cost** | one `doctor` call already made by other detectors; no new scan |
+
+**Two conditions the skill must carry, both learned by getting them wrong:**
+
+1. **Filter to the sweep's scope.** `doctor` scans the **whole catalog across all
+   repos** — the same caveat the skill already states for `missing_file`. The
+   first run of this audit reported "3 of 28 drifted" inside a single-project
+   conversation; the 28 spanned seven repos and one of the three findings
+   belonged to a different project entirely.
+2. **A finding is not automatically a fix.** A tracker can be **params-canonical
+   by design** — rows deliberately in `params`, body carrying narrative only for
+   entries needing more than a row — and still anchor a few ids incidentally.
+   `provenance-subsystem.md` states this in its own § *PV-N entries*.
+   Reconciling it would have duplicated in what its author kept out. The
+   substrate gate now requires **majority coverage** for exactly this reason, but
+   D11 should still be triaged one finding at a time (never batched), and the
+   tracker's own conventions section read before any re-render is proposed.
+
+**Promote-when:** one sweep runs D11 and its findings are triaged. If the
+reject reason is ever "params-canonical by design", that is a substrate
+false-positive to feed back to `body_keeps_snapshot`, not a skill-level reject —
+record it as such.
+
+**Evidence:** `99aaf83f` (detection + write-time signal), `6ff00eee` (first
+reconciliation, 11 → 23 rows), `0dbfd0ee` (majority gate + the false positive it
+fixed), `af2508b4` (scope correction). Kin: HY-5 (a Phase-5 action creating drift
+Phase 5 does not repair), R-97, R-95.
+
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:
