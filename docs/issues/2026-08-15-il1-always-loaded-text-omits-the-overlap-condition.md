@@ -257,8 +257,39 @@ shape instead of offering it second. 69 of 244 refusals in the window are this c
 with `symbols(include_body=true)` returns strictly more than was requested — the opposite of Iron
 Law 1's intent. The requested extent is known at refusal time; use it to pick which escape leads.
 
-**3. Then the wording.** State the condition on the always-loaded surface
-(`src/prompts/source.md:8-9`), respecting the 2200-byte slice cap (`src/prompts/README.md`).
+**3. Then the wording. — AUTHORED 2026-08-16, not yet eval-validated.** The always-loaded IL1 text
+now states the condition:
+
+    read_file is right for imports/glue — refused only when the
+    range overlaps a symbol; force=true reads it anyway.
+
+**How the 2200-byte cap was paid.** The slice had **11 bytes of headroom** (2189/2200), so this
+required a near-equal cut. Measured trade:
+
+| | Bytes |
+|---|---|
+| Before | 2189 |
+| IL1 wording | **+82** |
+| Workspace-gate ¶2 (parallel-subagent pinning) removed | **−144** |
+| After | **2127** (73 spare) |
+
+The cut is near-free: `src/prompts/guides/workspace-state.md:119-130` § *Per-call workspace pinning*
+carries the same rule in more detail, and the `"workspace-state"` row in § Deeper guidance still
+points there — verified before deleting, so nothing became unreachable.
+
+Two alternatives were costed and rejected: paying with the quickref row that restates Iron Law 2
+(−70, leaves only 9 bytes spare) and a fuller wording paying by compressing IL6 (−145, but loses
+*"a dispatch defect — yours, not theirs"*, the clause that assigns blame).
+
+**No `ONBOARDING_VERSION` bump** — `server_instructions` is re-read at every MCP session start
+(`src/prompts/README.md` § Versioning).
+
+**⚠ The subtract-and-measure protocol has NOT been run.** `src/prompts/README.md` § *Measure before
+shipping* states that whether a prompt-surface change ships is governed by P-1..P-8
+(`docs/trackers/prompt-hamsa-audit-log.md`) — base arm first, numeric pre-registered ship/no-ship
+rule, via the `prompt-tdd` harness in `../prompt-engineering/`. This change is authored and on
+`experiments` with the gate green; it is **not** cleared for promotion to `master` until that run
+exists. Treat the wording as a candidate, not a validated fix.
 
 **Do not relax the gate wholesale.** The traced sequences show it is genuinely useful for the
 symbol-body population — agents refused a blind line range go on to fetch the exact symbols they
@@ -275,20 +306,25 @@ None yet — filed on discovery.
 
 ## Resume
 
-Start with Fix (1), which is the measurable one. In `src/tools/read_file.rs:544-565`, the refusal
-has both the requested range and the overlapping symbols in hand; add the file-head exemption (or
-the hint reordering) there.
+Step 3 (wording) is authored — `src/prompts/source.md`, slice 2189 → 2127, gate green (3829 tests,
+clippy clean). **The bug stays `open`: steps 1 and 2 are the substantive fix and are untouched.**
 
-Acceptance test: re-run the range-shape query in Evidence and confirm the `file HEAD` bucket drops
-from 84 (of which 69 are ≤60 lines) to ~0, while the `small slice` and `medium slice` buckets are
-unchanged — those are the healthy population and must keep being refused.
+Next, in order:
 
-Secondary baseline, per the earlier correction: `codescout` August reach/intensity of 29% / 5.8,
-measured on a single project.
+1. **Run the subtract-and-measure protocol on the wording change** before it goes anywhere near
+   `master` — `artifact(action="get", id="59ebeebb6ed05c89", heading="Protocol —
+   subtract-and-measure (P-1..P-8)")`, harness `../prompt-engineering/`. Run the **base arm first**;
+   if it is already at ceiling, revert rather than ship.
+2. **Step 1 — exempt the case the guard cannot serve** (`src/tools/read_file.rs:544-565`): a
+   file-head range (`start_line` ≤ 5, modest extent) cannot be served by
+   `symbols(include_body=true)` because `symbols` does not surface imports. **69 of 244** refusals
+   in the window are this shape. Either allow it, or lead the hint with `force=true` for it.
+3. **Step 2 — order the hint by the requested extent**, which is known at refusal time: for a small
+   slice of a large symbol, leading with `symbols(include_body=true)` returns strictly more than was
+   asked for — the opposite of Iron Law 1's intent.
 
-The range-shape query needs `input_json`, which is `--debug`-gated (`src/tools/../usage/mod.rs:85-89`)
-but in practice populated on 95% of recorded rows on this machine. Confirm it is still being
-captured before re-measuring, or the query silently returns nothing.
+**Do not relax the gate wholesale** — traced sequences show it genuinely helps the symbol-body
+population, and the wording change does nothing for the 69/244 that steps 1–2 address.
 ## References
 
 - `src/tools/read_file.rs:544-565` — the gate

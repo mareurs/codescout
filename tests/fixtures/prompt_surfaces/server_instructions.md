@@ -5,7 +5,8 @@ Subagents inherit these rules. Pass them along.
 
 1. NEVER full-read source → symbols(path) overview,
    symbols(name=..., include_body=true) bodies. Line-range
-   read_file is fine for imports/glue.
+   read_file is right for imports/glue — refused only when the
+   range overlaps a symbol; force=true reads it anyway.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
    (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk,
@@ -30,9 +31,6 @@ Subagents inherit these rules. Pass them along.
 
 After workspace(activate, path=foreign), call workspace(activate, path=home)
 before finishing the turn. Foreign-project state otherwise leaks.
-
-Parallel subagents on DIFFERENT workspaces: pin each call with
-workspace=<abs path>, don't activate. Full rules: get_guide("workspace-state").
 
 ## Deeper guidance
 
