@@ -51,7 +51,7 @@ the third.
 |---|---|---|---|---|
 | GF-1 | `git` is unconditionally unbounded — 50% of its IL-3 refusals are self-bounded (24% of the family). **Incomplete fix** of `2026-05-18-il3-overtriggers-bounded-lhs`, whose remedy created this very list | high | **fixed** `06a53ad3` | `src/util/path_security.rs` |
 | GF-2 | The flag-conditional mechanism already exists for `grep`/`find` — `git` never got it; the fix extends, not invents | high | **fixed** `06a53ad3` | `src/util/path_security.rs` |
-| GF-3 | `shell_on_source` refuses 22% out-of-project paths where the suggested `symbols` alternative cannot serve, plus 24% read-only metadata | med | open | `docs/issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md` |
+| GF-3 | `shell_on_source` refuses 23% out-of-project paths where the suggested `symbols` alternative cannot serve, plus 16% `wc` | med | **fixed** `be4a679b` + `433100bd` | `src/util/path_security.rs` |
 | GF-4 | Refusals teach the CALL, not the PREDICATE: 96% immediate compliance, 3% immediate repeat, **47% per-session repeat** | med | open | `src/prompts/guides/iron-laws-detail.md` |
 | GF-5 | Guide delivery is success-path-only, so `iron-laws-detail` cannot arrive when a gate fires — 1 fetch vs 557 violations. **Contradicts** the shipped pull-only rationale *"a caller who needs the detail has already read the pointer"* | high | open | `src/tools/core/types.rs` |
 | GF-6 | IL-1 is the sick family on the learning axis — 71% per-session repeat, 7.4 per session, worst 33 over 7 hours | med | open | `src/util/path_security.rs` |
@@ -158,12 +158,24 @@ git show --stat --oneline <sha> | head -20
 
 ## IL-3 `shell_on_source` — composition (110)
 
+**Re-measured by leading verb** — the first pass used overlapping `LIKE`s and counted
+`head`/`tail` as "read-only metadata". They are content reads and stay blocked; `ls`/`stat`
+were never in the blocklist at all. Corrected classification of the 111:
+
 | Class | Count | Share | Verdict |
 |---|---:|---:|---|
-| Mutating (`sed -i`, `>`) | 39 | 35% | **correct** — e.g. `sed -i '258,269d' src/librarian/catalog/gc.rs` |
-| Read-only metadata (`wc`, `ls`, `stat`) | 26 | 24% | false positive — already filed, `30365fe50974fa6b` |
-| Target outside the project | 24 | 22% | false positive — `~/.cargo/registry`, `~/.config`, sibling repos |
-| `grep` as LHS | 74 | 67% | mixed (overlaps the above) |
+| Target outside the project | 25 | 23% | false positive — **fixed `433100bd`** |
+| `wc` (returns a count, not content) | 18 | 16% | false positive — **fixed `be4a679b`** |
+| Mutating (`sed -i`, `>`, `tee`) | 16 | 15% | **correct** — e.g. `sed -i '258,269d' src/librarian/catalog/gc.rs` |
+| In-project content reads (`grep`/`cat`/`head`/`tail`/`sed`/`awk`) | rest | ~46% | **correct** — the gate's premise holds |
+
+Leading verbs, for reference: `grep` 39, `cd` 21 (compound), `git` 12, `wc` 8, `sed` 6,
+`echo` 5, `cat` 5, `ls` 4, `awk` 2, `ps` 2. The non-reader heads (`cd`, `git`, `echo`, `ps`)
+are blocked by a *later* segment, not by themselves.
+
+**43 of 111 (39%) retired**, not the 44% first claimed. The distinction the two fixes encode:
+*content vs a measurement of content* (`wc` allowed, `head` not), and *a remedy that exists vs
+one that does not* (`symbols` cannot serve a path outside the active project).
 
 The outside-project class matters because the gate's whole premise is *"route to `symbols`
 instead"* — and `symbols` cannot navigate a crate in `~/.cargo/registry`, a `.py` file in
