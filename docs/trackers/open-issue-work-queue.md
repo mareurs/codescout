@@ -43,7 +43,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 |----|---:|------|--------|-----|
 | BL-1 | 1 | json_path: add a `Segment::Wildcard` arm so the overflow hint's own recovery works | **done** | `875e5d03d980ceac` |
 | BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | **done, archived** | `8e665c2d041ebb04` |
-| BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | open | `365b599f3573b1c0` |
+| BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | **done, archived** | `02d2d9d8a7eeec2e` |
 | BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | open | `dbebda84901961c0` |
 | BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | **done** | `3f88d49c38ced0c1` |
 | BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | open | `a9644b964edac789` |
@@ -375,7 +375,7 @@ T-22 caught me making — the observation and the fix landed in the same session
 BL-29/BL-30 are the other session's. BL-31 is new (phase 2).
 
 **BL-3 is the natural next** — "Tool schemas: stop advertising conditionally-required
-params as optional" (`365b599f3573b1c0`), the last Phase 1 row with no open questions.
+params as optional" (`02d2d9d8a7eeec2e`) — **since closed**; see the BL-3 History entry.
 BL-6 and BL-19 are both progressive-disclosure siblings of the BL-2 fix (incompleteness
 signals on buffered output) and would batch well together if you prefer momentum over
 order.

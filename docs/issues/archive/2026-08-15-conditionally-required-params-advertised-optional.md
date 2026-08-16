@@ -246,11 +246,34 @@ Pass `body` whenever `action` is `replace` or `insert`; pass `patch` whenever `a
 
 ## Resume
 
-Edit the two descriptions named in Fix (1) and re-measure: Class A should fall from 14 per
-~34 live schema errors toward zero, and the per-1,000-call rate from 1.36. Both queries are in
-Evidence/Scoping. Then decide on Fix (2) — it is a wording sweep across the `missing 'X' parameter`
-emitters, not a behaviour change.
+Classes A and B are done — `1a54b5a6` + `6ba720bc` (A), `c057ff5a` + `ab94c33f` (B). The
+previous text here (*"edit the two descriptions named in Fix (1) and re-measure"*) predated
+the fix and is superseded.
 
+**Two remainders, both real, neither blocking:**
+
+1. **Class C — leniency on a one-sided line range.** `read_file` / `read_markdown` reject
+   when exactly one of `start_line`/`end_line` is given (strict XOR,
+   `src/tools/markdown/read_markdown.rs:531-537`). Both readings are unambiguous and both
+   are reads, so this qualifies under the policy above. 11 historical occurrences, none
+   since May — cheap insurance, not urgent.
+2. **The serde half of Class B.** `require_param`'s emitter now teaches the call, but the
+   *other* Class B emitter is serde's `missing field 'X'` — `artifact(action="update")`
+   without `patch` being the case the librarian tool description already documents as a
+   wart. That needs error mapping in the librarian adapter, not the shared params helper,
+   which is why `c057ff5a` deliberately stopped short of it.
+
+**Then re-measure**, which the original Resume was right about: Class A should fall from 14
+per ~34 live schema errors toward zero, and the per-1,000-call rate from 1.36. Both queries
+are in *Evidence* / *Scoping*. Do the measurement **before** attempting Class C — if Class A
+and B took the rate to near zero, Class C's 11 stale occurrences are not worth a behaviour
+change.
+
+**One lesson from Class B worth carrying into the serde half:** its first commit passed its
+own tests while the live server still emitted the generic hint, because
+`require_topic_param` bypassed the shared helper the tests exercised. When the fix lands in
+a shared helper, drive at least one real call site in the test — otherwise the test proves
+the helper works, not that anything uses it.
 ## References
 
 - `src/tools/symbol/edit_code.rs:44-53` — `edit_code` schema; `body` optional, description silent on requiredness

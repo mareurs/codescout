@@ -102,6 +102,28 @@ nothing can reach the file.
 Note the interaction with the guard's shape-not-value check: a stale-but-well-formed id
 keeps the file *protected*, so this bug is invisible from the outside. It fails safe, which
 is also why it has survived this long.
+
+### 2026-08-16, later — the guard fix widened this bug's blast radius
+
+`29f0c015` (BL-33) made the librarian guard quoting-insensitive, taking it from 12 to 27
+protected trackers and **86 more files repo-wide**. Every one of those files was previously
+reachable by `edit_markdown(frontmatter={set: {id: …}})` — the one route that could have
+repaired a stale frontmatter id in place. They are now refused.
+
+Concrete instance found the same afternoon:
+`docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`
+carries `id: '365b599f3573b1c0'` — quoted, stale (live id `02d2d9d8a7eeec2e`), and as of
+`29f0c015` guarded. Before that commit it was editable; now it is not.
+
+This is not an argument against the guard fix — protection is the right default, and a
+stale-but-well-formed id fails safe. It is an argument that **the repair must move into
+`artifact(action="move")`**, which the previous section already concluded on other grounds.
+What changed is the cost of not doing it: the population of unrepairable stale ids grew by
+roughly 7× in one commit, and every future archive adds to it.
+
+The generalisable shape, worth stating once: *a guard that closes a write path also closes
+the repair path that used that write.* When widening a guard, enumerate what legitimately
+wrote through the old hole — here, nothing did yet, which is precisely why it was invisible.
 ## Hypotheses tried
 
 1. **Hypothesis:** the indexer reconciles `id:` on the next reindex.
