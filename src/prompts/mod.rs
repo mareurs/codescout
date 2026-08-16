@@ -225,6 +225,64 @@ pub fn topic_body(topic: &str) -> Option<&'static str> {
     }
 }
 
+/// The gate condition behind a refusal, for the error families where knowing it
+/// is what prevents the next one.
+///
+/// Not a guide body — a **predicate**. `iron-laws-detail` holds the full text and
+/// is 9.9 KB; these are ~150 bytes each and state the rule *and its exceptions*,
+/// which is the part a refused caller cannot infer from the refusal itself.
+///
+/// **Why this exists.** Measured 2026-08-16 over codescout's own `usage.db`
+/// (2026-07-17..2026-08-16): agents comply with an Iron-Law refusal on the very
+/// next call **96%** of the time, and **47%** of sessions re-offend on the same
+/// law later. They are not ignoring the gate — they cannot predict it, because
+/// what makes an input refusable lives in `path_security.rs` and no surface
+/// exposes it. `iron-laws-detail` does, and was fetched **once in 30 days
+/// against 557 Iron-Law violations**: A-10's "never fetched" failure mode, since
+/// guide injection sits after the `?` in `Tool::call_content` and so cannot ride
+/// a refusal at all.
+///
+/// Delivered once per family per session via [`GuideLedger::notice_once`], which
+/// keeps the key out of the topic namespace — a sentinel in `emitted` would
+/// suppress [`SESSION_OPENING_GUIDE`].
+///
+/// (GF-4 / GF-5 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`.)
+///
+/// [`GuideLedger::notice_once`]: crate::tools::guide_ledger::GuideLedger::notice_once
+pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
+    Some(match err_family {
+        "il1_read_overlaps_symbol" => {
+            "IL-1 gate condition: a line-range read is refused only when the range OVERLAPS a \
+             named symbol. Ranges over imports, `use` blocks, consts and other glue are allowed, \
+             and `force=true` reads the range anyway. A whole-file read of source is always \
+             refused — `symbols(path)` for the overview, \
+             `symbols(name=..., include_body=true)` for one body."
+        }
+        "il2_structural_edit" => {
+            "IL-2 gate condition: `edit_file` is refused when the edit spans a symbol DEFINITION \
+             in a source file. Imports, string literals, comments and config are allowed. \
+             Structural changes go through `edit_code` \
+             (action=replace|insert|remove|rename)."
+        }
+        "il3_pipe_to_trimmer" => {
+            "IL-3 gate condition: the check reads the LEFT side of the pipe. Unbounded producers \
+             are cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd, recursive grep, and \
+             `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \
+             (-n, --max-count, -3, --show-current, --porcelain/--short, --stat) — `--oneline` is \
+             NOT a limiter, it bounds width rather than line count. On the RIGHT, aggregators \
+             (wc, grep -c) are allowed; trimmers (head, tail, grep, sort) are not."
+        }
+        "il3_shell_on_source" => {
+            "IL-3 source condition: refused when a CONTENT reader \
+             (cat/head/tail/sed/awk/less/more/grep) names a source file INSIDE this project. \
+             `wc` is allowed — it returns a count, not content. A path outside the project root \
+             is allowed, because `symbols`/`read_file` resolve against the active project and \
+             cannot serve it. `acknowledge_risk: true` bypasses."
+        }
+        _ => return None,
+    })
+}
+
 /// One row in the workspace project table injected into server instructions.
 #[derive(Debug)]
 pub struct WorkspaceProjectSummary {

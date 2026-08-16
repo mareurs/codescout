@@ -798,7 +798,36 @@ impl CodeScoutServer {
         // so we can apply post-processing in one place.
         let call_result = match result {
             Ok(blocks) => CallToolResult::success(blocks),
-            Err(e) => route_tool_error(e),
+            Err(e) => {
+                // Attach the gate CONDITION to the first refusal of each family
+                // per session. This is the only point where it can be done:
+                // `Tool::call_content`'s guide hook sits after `self.call(..)?`,
+                // so an `Err` never reaches it, and `post_process` returns early
+                // for `run_command` — which is exactly where IL-3 fires.
+                //
+                // Agents obey an Iron-Law refusal on the next call 96% of the
+                // time and re-offend later in 47% of sessions: the message
+                // teaches the CALL, never the PREDICATE. See
+                // `prompts::refusal_predicate`. GF-4 / GF-5 in
+                // docs/trackers/2026-08-16-iron-law-gate-firing-audit.md.
+                let family = crate::usage::db::normalize_err_family(&req.name, &e.to_string());
+                let mut result = route_tool_error(e);
+                if let Some(text) =
+                    family
+                        .and_then(crate::prompts::refusal_predicate)
+                        .filter(|_| {
+                            // `notice_once`, not `insert`: a key in `emitted` would
+                            // make `is_empty()` false and suppress the session
+                            // opener — see `GuideLedger::notices`.
+                            ctx.guide_hints_emitted
+                                .lock()
+                                .notice_once(&format!("refusal-predicate:{}", family.unwrap_or("")))
+                        })
+                {
+                    result.content.push(Content::text(text));
+                }
+                result
+            }
         };
 
         let ok = call_result.is_error.is_none_or(|e| !e);
@@ -3838,6 +3867,109 @@ mod guide_hint_tests {
         ctx.guide_hints_emitted
             .lock()
             .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+    }
+
+    /// Concatenate every content block of a result, for asserting on the
+    /// second (appended) block without indexing past the end on failure.
+    fn all_text(r: &CallToolResult) -> String {
+        r.content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test]
+    async fn a_refusal_carries_the_gate_condition_once_per_family() {
+        let (_dir, server) = make_server().await;
+
+        // IL-3: refused pre-execution, so nothing actually runs.
+        let first = server
+            .call_tool_by_name(
+                "run_command",
+                json!({"command": "cargo test | grep FAILED"}),
+            )
+            .await
+            .expect("dispatch ok");
+        assert_eq!(
+            first.content.len(),
+            2,
+            "a refusal must carry the gate condition as a second block: {}",
+            all_text(&first)
+        );
+        let predicate = all_text(&first);
+        assert!(
+            predicate.contains("IL-3 gate condition"),
+            "got: {predicate}"
+        );
+        assert!(
+            predicate.contains("--oneline"),
+            "the predicate must name the EXCEPTION, which is the part a refusal \
+             cannot convey: {predicate}"
+        );
+
+        // Same family again: the condition is not repeated.
+        let second = server
+            .call_tool_by_name("run_command", json!({"command": "cargo build | head -5"}))
+            .await
+            .expect("dispatch ok");
+        assert_eq!(
+            second.content.len(),
+            1,
+            "second refusal of the same family must not repeat it: {}",
+            all_text(&second)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_does_not_suppress_the_session_opening_guide() {
+        // The hazard this design had to avoid. `GuideLedger::emitted.is_empty()`
+        // is the session opener's trigger, so stashing the refusal key there
+        // would silently cost every session that happens to start with a
+        // refusal its orientation guide. `notice_once` keeps it in the separate
+        // `notices` set for exactly this reason.
+        let (_dir, server) = make_server().await;
+
+        let refused = server
+            .call_tool_by_name(
+                "run_command",
+                json!({"command": "cargo test | grep FAILED"}),
+            )
+            .await
+            .expect("dispatch ok");
+        assert_eq!(refused.content.len(), 2, "precondition: predicate attached");
+
+        // Now the first SUCCESSFUL call. The opener must still fire.
+        let ok = server
+            .call_tool_by_name("tree", json!({"path": "."}))
+            .await
+            .expect("dispatch ok");
+        let text = all_text(&ok);
+        assert!(
+            text.contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "a prior refusal must not consume the session-opening slot: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unrecognised_error_family_attaches_nothing() {
+        // The table is deliberately partial — only families whose gate
+        // condition is not inferable from the refusal get an entry. Everything
+        // else must be untouched, so this cannot become a per-error tax.
+        let (_dir, server) = make_server().await;
+        let r = server
+            .call_tool_by_name("read_markdown", json!({"path": "does-not-exist.md"}))
+            .await
+            .expect("dispatch ok");
+        let text = all_text(&r);
+        // Asserted on TEXT, not block count: `post_process` appends its own
+        // path banner to every non-`run_command` result, so a count here would
+        // measure that instead. (The two cases above CAN count, because
+        // `post_process` returns early for `run_command`.)
+        assert!(
+            !text.contains("gate condition"),
+            "an unrecognised family must attach no predicate: {text}"
+        );
     }
 
     #[tokio::test]
