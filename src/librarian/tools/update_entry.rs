@@ -64,14 +64,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &a.entry_id,
         a.fields,
     )?;
-    Ok(json!({
+    let mut out = json!({
         "entry_id": outcome.entry_id,
         "artifact_id": target,
         "changed_fields": outcome.changed_fields,
         // Reported so a caller can assert cheaply that an entry update did not
         // change the row count — the failure mode this action exists to remove.
         "entries_total": outcome.entries_total,
-    }))
+    });
+    // The catalog is machine-local and git-ignored, so a params change that
+    // never reaches the body is a change no repo has. Advisory, and only for
+    // trackers that demonstrably keep a body snapshot.
+    if let Some(note) = outcome.snapshot_stale {
+        out["snapshot_stale"] = json!(note);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -114,6 +121,130 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    /// Seed a tracker whose file really exists. The default `seed` points at
+    /// `/repo/docs/trackers/<id>.md`, which does not — fine for params-only
+    /// assertions, useless for anything that reads the body.
+    fn seed_with_body(ctx: &ToolContext, id: &str, path: &std::path::Path, body: &str) {
+        std::fs::write(path, body).unwrap();
+        let cat = ctx.catalog.lock();
+        artifact::upsert(
+            &cat,
+            &artifact::TestArtifactRowBuilder::new(id)
+                .with_abs_path(crate::util::fs::RepoPath::from(path).into_string())
+                .with_kind("tracker")
+                .build(),
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &augmentation::AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "p".into(),
+                params: r#"{"tasks":[{"id":"T-1","status":"open"},{"id":"T-2","status":"open"}]}"#
+                    .to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                // None on purpose — the signal must not depend on it.
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("tasks".into()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    ///
+    /// The sub-shape no id comparison can see: the row IS in the body, showing
+    /// its previous values. `append_entry`'s missing-id check would report
+    /// nothing here, which is why this path needed its own signal.
+    #[tokio::test]
+    async fn patching_a_rendered_row_says_the_committed_table_now_disagrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID | status |\n| T-1 | open |\n| T-2 | open |\n",
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["changed_fields"], json!(["status"]));
+        let note = result["snapshot_stale"]
+            .as_str()
+            .expect("a rendered row that changed value must say so");
+        assert!(
+            note.contains("PREVIOUS"),
+            "the row is present but outdated — that is the distinguishing case: {note}"
+        );
+        assert!(note.contains("T-1"), "{note}");
+    }
+
+    /// The other branch: the row is not rendered at all, so it exists only in
+    /// the git-ignored catalog.
+    #[tokio::test]
+    async fn patching_an_unrendered_row_says_it_is_absent_from_the_body_entirely() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID | status |\n| T-1 | open |\n",
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-2", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        let note = result["snapshot_stale"].as_str().unwrap();
+        assert!(
+            note.contains("not in it at all"),
+            "T-2 is absent, not merely stale — the two need different remedies: {note}"
+        );
+    }
+
+    /// The gate again: a prose-only tracker keeps its rows in params by design.
+    #[tokio::test]
+    async fn patching_a_prose_only_tracker_says_nothing_about_snapshots() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("prose.md");
+        let ctx = mk_ctx();
+        seed_with_body(&ctx, "art1", &path, "# Notes\n\nprose only.\n");
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.get("snapshot_stale").is_none(),
+            "no body snapshot means nothing can be behind, got: {result}"
+        );
     }
 
     #[tokio::test]

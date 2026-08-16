@@ -170,6 +170,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(scan_artifact_paths(&cat.conn, &roots)?);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
+    all_violations.extend(scan_snapshot_drift(&cat.conn)?);
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -1221,6 +1222,119 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     ))
 }
 
+/// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
+/// markdown body line-anchors nowhere.
+///
+/// Entry rows live in `params`, and params live in the catalog — which is
+/// machine-local and git-ignored. A tracker that also keeps a rendered snapshot
+/// in its body is the only way those rows reach git, and nothing re-renders it:
+/// `append_entry`/`update_entry` write params and return success while the
+/// committed file stays byte-identical, so `git status` is clean and the row
+/// exists on exactly one machine.
+/// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+///
+/// **The gate is the body, not the augmentation config.** A tracker is treated
+/// as snapshot-keeping iff its body already line-anchors at least one
+/// `PREFIX-N`. That is self-configuring and precise: a prose-only tracker
+/// (rows deliberately only in params, `render_template` projecting them into
+/// `librarian(context)` instead) anchors none and is silent here. Gating on
+/// `render_template != NULL` would be the wrong test in both directions — 26 of
+/// 28 augmented trackers declare one, and its documented purpose is precisely
+/// that the body does NOT carry the rows.
+///
+/// Reports only; there is no `fix=`. Re-rendering a body is a content decision
+/// (which section, what column order, how much of the row to include) that
+/// belongs to whoever maintains the tracker.
+fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    // Ordered for the same reason as `scan_artifact_paths` — a report whose row
+    // order shifts after a VACUUM is one nobody can diff against a prior run.
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path, g.entry_collection, g.params \
+         FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
+         WHERE g.entry_collection IS NOT NULL ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path, collection, params_text) in rows {
+        let Ok(params) = serde_json::from_str::<serde_json::Value>(&params_text) else {
+            continue;
+        };
+        let ids: Vec<&str> = params
+            .get(&collection)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.get("id").and_then(|v| v.as_str()))
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        // A single prefix per collection is the tracker convention. A mixed set
+        // is a different defect (or a deliberately heterogeneous collection),
+        // and guessing which prefix "owns" the body would manufacture findings.
+        let mut split = ids.iter().filter_map(|i| i.rsplit_once('-'));
+        let Some((prefix, _)) = split.next() else {
+            continue;
+        };
+        if ids
+            .iter()
+            .any(|i| i.rsplit_once('-').map(|(p, _)| p) != Some(prefix))
+        {
+            continue;
+        }
+        let claimed: std::collections::BTreeSet<u64> = ids
+            .iter()
+            .filter_map(|i| i.rsplit_once('-'))
+            .filter_map(|(_, n)| n.parse::<u64>().ok())
+            .collect();
+
+        // A file that is gone is `missing_file`'s finding, not this one.
+        let Ok(body) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(&body, prefix);
+        if in_body.is_empty() {
+            continue; // prose-only by design — see the doc comment
+        }
+        let missing: Vec<String> = claimed
+            .difference(&in_body)
+            .map(|n| format!("{prefix}-{n}"))
+            .collect();
+        if missing.is_empty() {
+            continue;
+        }
+        // Name a bounded sample; the count carries the magnitude. An unbounded
+        // list of 54 ids buries every other finding in the report, which is the
+        // failure `abs_path_outside_managed_roots` already had to cap for.
+        const SAMPLE: usize = 8;
+        let shown = missing.iter().take(SAMPLE).cloned().collect::<Vec<_>>();
+        let suffix = if missing.len() > SAMPLE {
+            format!(" … (+{} more)", missing.len() - SAMPLE)
+        } else {
+            String::new()
+        };
+        out.push(Violation::new(
+            "snapshot_drift",
+            Some(id),
+            abs_path,
+            format!(
+                "{} of {} `{}` rows exist only in the catalog — the body line-anchors none of \
+                 them, so they are absent from git: {}{}. The catalog is machine-local and \
+                 git-ignored; re-render the snapshot section from params.",
+                missing.len(),
+                claimed.len(),
+                collection,
+                shown.join(", "),
+                suffix
+            ),
+        ));
+    }
+    Ok(out)
+}
+
 /// The `frontmatter_id_mismatch` rows on their own, for `fix=repair_frontmatter_id`.
 /// Ordered by `abs_path` for the same reason [`scan_artifact_paths`] is — a stable
 /// order is what makes a reported sweep reproducible.
@@ -2060,6 +2174,135 @@ mod tests {
             "fixture must exceed the emitted cap or this test cannot fail; \
              total={total}, shown={shown}"
         );
+    }
+
+    /// Seed an augmented tracker: a real file with `body`, plus an augmentation
+    /// row whose `entry_collection` holds `ids`.
+    fn seed_tracker(cat: &Catalog, id: &str, dir: &std::path::Path, body: &str, ids: &[&str]) {
+        let path = dir.join(format!("{id}.md"));
+        std::fs::write(&path, body).unwrap();
+        let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+        seed_artifact(cat, id, &abs);
+        let rows: Vec<serde_json::Value> = ids
+            .iter()
+            .map(|i| serde_json::json!({"id": i, "status": "open"}))
+            .collect();
+        augmentation::upsert(
+            cat,
+            &augmentation::AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "p".into(),
+                params: serde_json::json!({ "tasks": rows }).to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                // Deliberately Some for EVERY fixture here, including the ones
+                // that must NOT be flagged. `render_template` was the gate the
+                // bug report proposed, and 26 of 28 real trackers declare one —
+                // if it were the gate, the prose-only and in-sync cases below
+                // would fire too and these tests would be vacuous.
+                render_template: Some("{{ tasks }}".into()),
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("tasks".into()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    ///
+    /// Rows live in `params`, params live in the catalog, and the catalog is
+    /// machine-local and git-ignored. A tracker that keeps a rendered snapshot
+    /// in its body is the only way they reach git, and nothing re-renders it.
+    #[test]
+    fn snapshot_drift_reports_rows_that_reached_params_but_never_the_body() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "queue",
+            tmp.path(),
+            "# Queue\n\n| ID | task |\n| BL-1 | a |\n| BL-2 | b |\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4"],
+        );
+
+        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "expected exactly one drifted tracker, got {v:?}"
+        );
+        assert_eq!(v[0].check, "snapshot_drift");
+        assert!(
+            v[0].detail.contains("BL-3") && v[0].detail.contains("BL-4"),
+            "the detail must name the rows that are absent from git, got: {}",
+            v[0].detail
+        );
+        assert!(
+            !v[0].detail.contains("BL-1"),
+            "BL-1 IS in the body — naming it would make the finding untrustworthy: {}",
+            v[0].detail
+        );
+    }
+
+    /// The gate that keeps this check from being noise. A prose-only tracker
+    /// keeps its rows in `params` on purpose and anchors none in its body;
+    /// reporting every row as missing would be wrong for 5 of the 28 augmented
+    /// trackers on the authoring machine.
+    #[test]
+    fn snapshot_drift_stays_silent_for_a_tracker_that_keeps_no_body_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "prose",
+            tmp.path(),
+            "# Notes\n\nAll prose. The rows live in params by design.\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "a tracker anchoring no ids keeps no snapshot — nothing can be behind"
+        );
+    }
+
+    #[test]
+    fn snapshot_drift_stays_silent_when_the_body_carries_every_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "synced",
+            tmp.path(),
+            "# Queue\n\n## BL-1 — a\n\n## BL-2 — b\n",
+            &["BL-1", "BL-2"],
+        );
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "params and body agree — there is nothing to report"
+        );
+    }
+
+    /// Prose mentions must not count as the body carrying a row, or the check
+    /// silently under-reports exactly the drift it exists to find.
+    #[test]
+    fn snapshot_drift_does_not_accept_a_prose_mention_as_a_snapshot_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "prosey",
+            tmp.path(),
+            "# Queue\n\n## BL-1 — a\n\nWe should also look at BL-2 sometime.\n",
+            &["BL-1", "BL-2"],
+        );
+        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "BL-2 is mentioned, not rendered: {v:?}");
+        assert!(v[0].detail.contains("BL-2"), "{}", v[0].detail);
     }
 
     #[tokio::test]

@@ -59,6 +59,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(w) = outcome.warning {
         out["warning"] = json!(w);
     }
+    if !outcome.snapshot_missing.is_empty() {
+        out["snapshot_missing"] = json!(outcome.snapshot_missing);
+        out["snapshot_hint"] = json!(format!(
+            "This tracker keeps a rendered snapshot in its body, and {} row(s) are not in it. \
+             Entry rows live in the catalog, which is machine-local and git-ignored — a row \
+             absent from the body is in no repo. Add the row(s) to the body's table/section \
+             via artifact(action=\"update\", patch={{body_edits: [...]}}).",
+            outcome.snapshot_missing.len()
+        ));
+    }
     Ok(out)
 }
 
@@ -117,6 +127,130 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    /// Seed a tracker whose markdown file really exists, so the body-reading
+    /// half of `append_entry` has something to read. The default `seed` points
+    /// at `/test/<id>.md`, which does not exist — fine for id allocation,
+    /// useless for snapshot checks.
+    fn seed_with_body(
+        ctx: &ToolContext,
+        id: &str,
+        path: &std::path::Path,
+        body: &str,
+        rows: &[&str],
+    ) {
+        std::fs::write(path, body).unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let cat = ctx.catalog.lock();
+        art_upsert(
+            &cat,
+            &ArtifactRow {
+                id: id.to_string(),
+                abs_path: path.to_path_buf(),
+                kind: "tracker".to_string(),
+                status: "active".to_string(),
+                title: Some("T".to_string()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "x".to_string(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+        let entries: Vec<Value> = rows
+            .iter()
+            .map(|r| json!({"id": r, "status": "open"}))
+            .collect();
+        aug_upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "test".to_string(),
+                params: json!({ "failures": entries }).to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                // None on purpose: the signal must NOT depend on
+                // `render_template`, whose job is to project params into
+                // `librarian(context)` so the body can stay prose-only.
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("failures".to_string()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    ///
+    /// The append succeeds and the row lands in the catalog, which is
+    /// machine-local and git-ignored. Without this the response was a bare
+    /// `{id, artifact_id}` — indistinguishable from a row that reached git.
+    #[tokio::test]
+    async fn append_names_the_rows_the_body_snapshot_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        // Body renders F-1 only; params already ran ahead with F-2.
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID |\n| F-1 |\n",
+            &["F-1", "F-2"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"}}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id"], "F-3");
+        let missing: Vec<String> = serde_json::from_value(result["snapshot_missing"].clone())
+            .expect("snapshot_missing must be present when the body is behind");
+        assert_eq!(
+            missing,
+            vec!["F-2".to_string(), "F-3".to_string()],
+            "F-2 was already adrift and F-3 was just created; F-1 is rendered"
+        );
+        assert!(result["snapshot_hint"].as_str().unwrap().contains("git"));
+    }
+
+    /// The gate. A tracker whose body anchors no ids keeps its rows in params
+    /// deliberately — flagging it would fire on every append forever.
+    #[tokio::test]
+    async fn append_says_nothing_about_snapshots_for_a_prose_only_tracker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("prose.md");
+        let ctx = mk_ctx();
+        seed_with_body(&ctx, "art1", &path, "# Notes\n\nprose only.\n", &["F-1"]);
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"}}),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.get("snapshot_missing").is_none(),
+            "no body snapshot means nothing can be behind, got: {result}"
+        );
     }
 
     #[tokio::test]

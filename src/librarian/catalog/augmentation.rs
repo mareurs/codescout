@@ -230,6 +230,15 @@ pub struct UpdateEntryOutcome {
     /// Row count after the write. An entry update never changes it — reported so
     /// a caller can assert that cheaply.
     pub entries_total: usize,
+    /// Set when this tracker keeps a rendered snapshot in its body and that
+    /// snapshot is now behind for the patched row. `None` for a prose-only
+    /// tracker, whose rows deliberately live in `params` alone.
+    ///
+    /// This is the harder half of the drift: `append_entry` can name a missing
+    /// ID, but a patched row is usually *present* in the body showing its
+    /// previous values — no id comparison can see that, so the signal is
+    /// "you changed fields the body still renders the old way".
+    pub snapshot_stale: Option<String>,
 }
 
 /// Patch the fields of ONE entry in `params.<entry_collection>`, leaving every
@@ -385,10 +394,68 @@ pub fn update_entry(
     )?;
     tx.commit()?;
 
+    // Unlike `append_entry`, this path never read the body — so the third
+    // instance of the drift (a status flipped in params while the committed
+    // table still shows the old value) had nothing that could have noticed.
+    // One read, after the write is committed: the signal is advisory and must
+    // never be able to fail the mutation the caller asked for.
+    // docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    let snapshot_stale = snapshot_stale_note(cat, artifact_id, entry_id);
+
     Ok(UpdateEntryOutcome {
         entry_id: entry_id.to_string(),
         changed_fields,
         entries_total,
+        snapshot_stale,
+    })
+}
+
+/// Whether `entry_id`'s tracker keeps a body snapshot that is now behind.
+///
+/// Gated on the body line-anchoring at least one id of the same prefix — that,
+/// not `render_template`, is what distinguishes a snapshot-keeping tracker from
+/// a prose-only one. (`render_template` projects params into
+/// `librarian(context)` precisely SO the body can stay prose-only, and 26 of 28
+/// augmented trackers here declare one, so it would fire almost always and mean
+/// almost nothing.)
+///
+/// Best-effort throughout: an unreadable file or an unparseable id yields
+/// `None`. A missing advisory is a far smaller harm than a failed update, and
+/// this runs after the transaction has already committed.
+fn snapshot_stale_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> Option<String> {
+    let (prefix, num) = entry_id.rsplit_once('-')?;
+    let num: u64 = num.parse().ok()?;
+    let abs_path: String = cat
+        .conn
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE id = ?1",
+            [artifact_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    let body = std::fs::read_to_string(&abs_path).ok()?;
+    let claimed = body_claimed_indices(&body, prefix);
+    if claimed.is_empty() {
+        return None; // prose-only tracker — nothing in the body to fall behind
+    }
+    Some(if claimed.contains(&num) {
+        // The hard half: the row IS in the body, showing its previous values.
+        // No id comparison can see this, which is why `append_entry`'s
+        // missing-id check would have reported nothing here.
+        format!(
+            "This tracker renders a snapshot in its body, and its `{entry_id}` row still shows \
+             the PREVIOUS field values — params changed, the file did not. Update the row via \
+             artifact(action=\"update\", patch={{body_edits: [...]}}), or the committed table \
+             disagrees with the catalog."
+        )
+    } else {
+        format!(
+            "This tracker renders a snapshot in its body, but `{entry_id}` is not in it at all — \
+             the row exists only in the catalog, which is machine-local and git-ignored. Add it \
+             via artifact(action=\"update\", patch={{body_edits: [...]}})."
+        )
     })
 }
 
@@ -400,6 +467,11 @@ pub struct AppendOutcome {
     /// Set when the body claimed ids the params array does not carry — the
     /// append itself succeeded, but the structured index is incomplete.
     pub warning: Option<String>,
+    /// The mirror of `warning`: ids `params` carry that the body line-anchors
+    /// nowhere, so they live only in the machine-local, git-ignored catalog.
+    /// Always includes the id just assigned. Empty for a prose-only tracker
+    /// (one whose body claims no ids at all) — see `body_claimed_indices`.
+    pub snapshot_missing: Vec<String>,
 }
 
 /// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
@@ -465,9 +537,15 @@ pub fn append_entry(
             |r| r.get(0),
         )
         .optional()?;
-    let body_max = abs_path
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|body| body_max_index(&body, id_prefix));
+    let body_text = abs_path.and_then(|p| std::fs::read_to_string(p).ok());
+    // One read, both directions. The set answers the id-allocation question
+    // (its max) AND the durability question (what the body is missing); reading
+    // only the max is what left the second one unanswerable for a month.
+    let body_claimed = body_text
+        .as_deref()
+        .map(|b| body_claimed_indices(b, id_prefix))
+        .unwrap_or_default();
+    let body_max = body_claimed.iter().next_back().copied();
 
     let params_next = next_index(&existing_ids, id_prefix);
     let next = params_next.max(body_max.map_or(0, |m| m + 1));
@@ -486,6 +564,41 @@ pub fn append_entry(
              rows from the body so the structured index matches."
         )
     });
+
+    // The mirror direction, and the common one. The warning above fires when the
+    // BODY runs ahead of params; this fires when params run ahead of the body —
+    // i.e. rows that exist only in the catalog, which is machine-local and
+    // git-ignored, so they are in no repo at all.
+    //
+    // Gated on the body already claiming at least one id: that, not the
+    // augmentation config, is what distinguishes a tracker keeping a rendered
+    // snapshot from a prose-only one whose rows deliberately live in params
+    // alone. `render_template` is the wrong test — its documented job is to
+    // project params into `librarian(context)` precisely SO the body can stay
+    // prose-only, and 26 of 28 augmented trackers declare one.
+    //
+    // The id just assigned is included on purpose: at this moment the body does
+    // not carry it, and naming it is the reminder to write the row while the
+    // caller still has the context to do it.
+    // docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    let snapshot_missing: Vec<String> = if body_claimed.is_empty() {
+        Vec::new()
+    } else {
+        let mut claimed: Vec<u64> = existing_ids
+            .iter()
+            .filter_map(|i| i.rsplit_once('-'))
+            .filter(|(p, _)| *p == id_prefix)
+            .filter_map(|(_, n)| n.parse::<u64>().ok())
+            .collect();
+        claimed.push(next);
+        claimed.sort_unstable();
+        claimed.dedup();
+        claimed
+            .into_iter()
+            .filter(|n| !body_claimed.contains(n))
+            .map(|n| format!("{id_prefix}-{n}"))
+            .collect()
+    };
 
     if let Some(obj) = entry.as_object_mut() {
         obj.insert("id".to_string(), json!(new_id));
@@ -537,6 +650,7 @@ pub fn append_entry(
     Ok(AppendOutcome {
         id: new_id,
         warning,
+        snapshot_missing,
     })
 }
 
@@ -616,7 +730,7 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
     }
 }
 
-/// Highest `<id_prefix>-N` index already claimed by an artifact's markdown body.
+/// Every `<id_prefix>-N` index an artifact's markdown body line-anchors.
 ///
 /// Only line-anchored occurrences count: a markdown heading (`## F-12`) or the
 /// leading cell of an index-table row (`| F-12 | ... |`), optionally wrapped in
@@ -624,15 +738,22 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
 /// documented 3-step tracker flow writes. Prose mentions are deliberately
 /// ignored — an aside like "planned F-999" must not blow a hole in the
 /// numbering, and over-allocating is only safe when the trigger is precise.
-pub(crate) fn body_max_index(body: &str, id_prefix: &str) -> Option<u64> {
+///
+/// An **empty** set is itself the signal that this artifact keeps no body
+/// snapshot at all — a prose-only tracker whose rows live purely in `params`.
+/// That is a legitimate design (5 of 28 augmented trackers here), so callers
+/// checking for snapshot drift must treat empty as "nothing to reconcile"
+/// rather than "everything is missing".
+pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collections::BTreeSet<u64> {
     let esc = regex::escape(id_prefix);
-    let re = regex::Regex::new(&format!(
+    let Ok(re) = regex::Regex::new(&format!(
         r"(?m)^(?:#{{1,6}}[ \t]+|\|[ \t]*)[`*\[]*{esc}-(\d+)\b"
-    ))
-    .ok()?;
+    )) else {
+        return Default::default();
+    };
     re.captures_iter(body)
         .filter_map(|c| c[1].parse::<u64>().ok())
-        .max()
+        .collect()
 }
 
 pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
@@ -1333,29 +1454,39 @@ mod tests {
     }
 
     #[test]
-    fn body_max_index_reads_headings_and_index_rows() {
+    fn body_claimed_indices_reads_headings_and_index_rows() {
         let body =
             "## F-3 — a\n\n| ID | x |\n| `F-7` | y |\n###### **F-5** z\n| [F-4](#f-4) | w |\n";
-        assert_eq!(body_max_index(body, "F"), Some(7));
+        // The whole set, not just its max: snapshot-drift detection asks WHICH
+        // ids the body carries, and a max-only assertion cannot tell a
+        // contiguous run from one with holes in it.
+        assert_eq!(
+            body_claimed_indices(body, "F"),
+            [3, 4, 5, 7].into_iter().collect()
+        );
     }
 
     #[test]
-    fn body_max_index_ignores_prose_mentions() {
-        // A speculative aside must not blow a hole in the numbering.
+    fn body_claimed_indices_ignores_prose_mentions() {
+        // A speculative aside must not blow a hole in the numbering — nor count
+        // as the body "carrying" that row for snapshot-drift purposes.
         let body = "## F-3 — a\n\nWe should file F-999 for this later. See also F-500.\n";
-        assert_eq!(body_max_index(body, "F"), Some(3));
+        assert_eq!(body_claimed_indices(body, "F"), [3].into_iter().collect());
     }
 
     #[test]
-    fn body_max_index_respects_prefix_boundaries() {
+    fn body_claimed_indices_respects_prefix_boundaries() {
         // `F` must not match `FX-9`, and `F-12x` is not `F-12`.
         let body = "## FX-900 — other tracker\n## F-12x — malformed\n## F-2 — real\n";
-        assert_eq!(body_max_index(body, "F"), Some(2));
+        assert_eq!(body_claimed_indices(body, "F"), [2].into_iter().collect());
     }
 
     #[test]
-    fn body_max_index_returns_none_when_body_claims_nothing() {
-        assert_eq!(body_max_index("# Tracker\n\nno entries yet\n", "F"), None);
+    fn body_claimed_indices_is_empty_when_body_claims_nothing() {
+        // Empty is load-bearing: it is how a prose-only tracker is recognised,
+        // so snapshot-drift checks stay silent instead of reporting every row
+        // as missing. See `body_claimed_indices`.
+        assert!(body_claimed_indices("# Tracker\n\nno entries yet\n", "F").is_empty());
     }
 
     #[test]
