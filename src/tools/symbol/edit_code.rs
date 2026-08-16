@@ -148,7 +148,17 @@ impl Tool for EditCode {
         guard_worktree_write(ctx).await?;
         let name_path = require_str_param(&input, "symbol")?;
         let rel_path = require_path_param(&input)?;
-        let action = require_str_param(&input, "action")?;
+        // `action` indexes a different enum per tool, so the shared table has no entry.
+        // The per-action requirements themselves are Class A, already in the schema
+        // description via `required_for()`. BL-3 Class B.
+        let action = crate::tools::require_str_param_or_hint(
+            &input,
+            "action",
+            &[],
+            "Pass the operation, e.g. action=\"replace\". One of: rename, remove, replace, \
+         insert. `replace` and `insert` also require `body`; `rename` also requires \
+         `new_name`.",
+        )?;
         // Optional tie-breaker for two symbols whose name_paths are byte-identical
         // (two inherent impl blocks for one type, two #[cfg]-gated definitions).
         // No more specific name exists for those, so a line is the only key left.

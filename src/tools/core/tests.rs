@@ -186,6 +186,121 @@ fn require_str_param_or_hint_non_string_surfaces_custom_hint() {
     );
 }
 
+/// BL-3 Class B / `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`.
+///
+/// Class A put the *requirement* in the schema description. Class B is the other
+/// half: when the tool refuses anyway, the refusal must teach the call rather than
+/// restate the error. Roughly 13 of 34 live schema errors carried the generic
+/// template, which says only what the reader already knows:
+///
+/// ```text
+/// missing 'symbol' parameter — Add the required 'symbol' parameter to the tool call.
+/// ```
+///
+/// The project already ruled on this principle in
+/// `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md`:
+/// a bare "not found" was a defect *because the tool was holding the content needed
+/// to help*. The server knows the parameter's name, type and purpose at the moment
+/// it rejects.
+///
+/// Runs through the real emitter, so a name that loses its hint fails here.
+#[test]
+fn a_missing_required_param_teaches_the_call_instead_of_restating_the_error() {
+    use serde_json::json;
+
+    for name in [
+        "symbol",
+        "old_string",
+        "command",
+        "pattern",
+        "query",
+        "content",
+        "topic",
+    ] {
+        let err = crate::tools::require_str_param(&json!({}), name)
+            .expect_err("an absent required param must be refused")
+            .to_string();
+        assert!(
+            !err.contains("Add the required"),
+            "{name}: the generic template restates the error instead of teaching the \
+             call — got: {err}"
+        );
+        assert!(
+            err.contains(&format!("{name}=")),
+            "{name}: the hint must show a concrete call shape, e.g. `{name}=…` — got: {err}"
+        );
+    }
+}
+
+/// The half a shared name→hint table provably cannot cover, and the reason this
+/// fix is not one table lookup.
+///
+/// `path` is three different things across its three `require_str_param` call
+/// sites: a file awaiting approval (`approve_write`), a project **directory**
+/// (`workspace(activate)`), and a library root (`library(register)`). A single
+/// global hint for `path` would be confidently wrong in two of the three — worse
+/// than the generic template it replaces, because it reads as authoritative.
+///
+/// Asserting the hints are pairwise DISTINCT is what pins that: no shared table
+/// entry can satisfy this test.
+#[tokio::test]
+async fn one_param_name_meaning_three_things_gets_three_hints() {
+    use serde_json::json;
+    let ctx = bare_ctx().await;
+
+    // `approve_write` runs `guard_worktree_write` and requires an active project
+    // *before* it reads `path`, so a bare ctx never reaches the param check — it
+    // fails with "No active project" instead, which would pass a laxer assertion
+    // for entirely the wrong reason.
+    let dir = tempfile::tempdir().unwrap();
+    let rooted = rooted_ctx(dir.path()).await;
+    let approve = crate::tools::approve_write::ApproveWrite
+        .call(json!({}), &rooted)
+        .await
+        .expect_err("approve_write without `path` must be refused")
+        .to_string();
+    let activate = crate::tools::config::ActivateProject
+        .call(json!({}), &ctx)
+        .await
+        .expect_err("workspace(activate) without `path` must be refused")
+        .to_string();
+    let register = crate::tools::library::RegisterLibrary
+        .call(json!({}), &ctx)
+        .await
+        .expect_err("library(register) without `path` must be refused")
+        .to_string();
+
+    for (label, err) in [
+        ("approve_write", &approve),
+        ("activate_project", &activate),
+        ("register_library", &register),
+    ] {
+        // Assert the refusal is the one under test. Without this the row can pass
+        // on an unrelated early error — `approve_write` runs `guard_worktree_write`
+        // before reading `path`, and did exactly that on the first run.
+        assert!(
+            err.contains("missing 'path'"),
+            "{label}: expected the missing-`path` refusal, got something else: {err}"
+        );
+        assert!(
+            !err.contains("Add the required"),
+            "{label}: still emitting the generic template — got: {err}"
+        );
+    }
+
+    assert_ne!(
+        approve, activate,
+        "approve_write wants a file, workspace(activate) wants a directory — one hint \
+         cannot be right for both"
+    );
+    assert_ne!(
+        activate, register,
+        "workspace(activate) wants a project root, library(register) wants a library \
+         root — one hint cannot be right for both"
+    );
+    assert_ne!(approve, register, "these want different things too");
+}
+
 #[test]
 fn require_path_param_accepts_unified_aliases() {
     use serde_json::json;

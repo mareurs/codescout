@@ -133,7 +133,15 @@ impl Tool for ActivateProject {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         ctx.guide_hints_emitted.lock().clear();
-        let path = super::require_str_param(&input, "path")?;
+        // Not the shared `path` hint: this one is a project root, not a file. BL-3 Class B.
+        let path = super::require_str_param_or_hint(
+            &input,
+            "path",
+            &[],
+            "Pass the project directory, e.g. path=\"/home/me/work/myrepo\" — a workspace \
+             project id also works. This is a directory, not a file; \
+             workspace(action=\"list_projects\") shows the configured ones.",
+        )?;
         let read_only = optional_bool_param(&input, "read_only");
 
         // Focus-switch path: bare project ID (no path separator)

@@ -113,7 +113,15 @@ impl Tool for RegisterLibrary {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let raw_path = super::require_str_param(&input, "path")?;
+        // Not the shared `path` hint: this one is a library root. BL-3 Class B.
+        let raw_path = super::require_str_param_or_hint(
+            &input,
+            "path",
+            &[],
+            "Pass the library's root directory — the sources to index, e.g. \
+             path=\"/usr/lib/python3.12/site-packages/requests\". A directory, not a file, \
+             and outside the active project.",
+        )?;
         let lib_path = std::path::PathBuf::from(raw_path);
 
         if !lib_path.exists() {

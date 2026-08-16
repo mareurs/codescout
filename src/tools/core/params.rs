@@ -2,6 +2,75 @@
 
 use super::types::RecoverableError;
 
+/// A concrete call shape for parameters whose meaning is identical at every call
+/// site, replacing the generic *"Add the required 'X' parameter to the tool call"*
+/// — a sentence that restates the error rather than teaching the call.
+///
+/// BL-3 Class B measured ~13 of 34 live schema errors shipping that template. The
+/// principle was already settled in
+/// `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md`:
+/// a bare "not found" is a defect *because the tool holds the content needed to
+/// help*. The server knows the parameter's name, type and purpose when it rejects.
+///
+/// **Deliberately absent: `path` and `action`.** Both name different things in
+/// different tools — `path` is a directory to approve (`approve_write`), a project
+/// root (`workspace(activate)`) and a library root (`library(register)`); `action`
+/// indexes a different enum per tool. A shared entry would be confidently wrong at
+/// two sites out of three and would read as authoritative, which is worse than
+/// saying little. Those call sites pass their own hint through
+/// [`require_str_param_or_hint`].
+fn param_hint(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "symbol" => {
+            "Name the symbol, e.g. symbol=\"MyStruct/my_method\" for a method or \
+             symbol=\"my_fn\" for a free function. Run symbols(name=\"...\") first if you \
+             need the exact name-path."
+        }
+        "old_string" => {
+            "Pass the exact text to find, e.g. old_string=\"let x = 1;\". It is \
+             whitespace-sensitive and must match exactly once unless replace_all=true."
+        }
+        "command" => {
+            "Pass the shell command as one string, e.g. command=\"cargo test --lib\". Run it \
+             bare and query the @cmd_* buffer rather than piping to a log-trimmer."
+        }
+        "pattern" => {
+            "Pass the regex to search for, e.g. pattern=\"fn my_func\" — 'query' and 'regex' \
+             are also accepted. Add glob=\"*.rs\" to narrow by file type."
+        }
+        "query" => {
+            "Pass the natural-language query, e.g. query=\"how are LSP clients restarted\". \
+             This is meaning-based search, so a phrase beats a bare keyword."
+        }
+        "content" => {
+            "Pass the text to write as a string, e.g. content=\"# Title\\n\\nBody\". The value \
+             is written verbatim."
+        }
+        "topic" => {
+            "Pass the memory topic key, e.g. topic=\"architecture\". Path-like keys such as \
+             topic=\"conventions/testing\" are valid, and memory(action=\"list\") shows what \
+             exists."
+        }
+        _ => return None,
+    })
+}
+
+/// The hint for a missing `name`, falling back to the generic template for
+/// parameters [`param_hint`] does not cover.
+fn missing_param_hint(name: &str) -> String {
+    param_hint(name)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Add the required '{name}' parameter to the tool call."))
+}
+
+/// The hint for a `name` that is present but not a string. Same table — knowing
+/// the shape helps just as much when the value was sent as a number or an object.
+fn wrong_type_hint(name: &str) -> String {
+    param_hint(name)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Provide '{name}' as a string value."))
+}
+
 /// Convenience: extract a required parameter from a JSON `Value`, returning
 /// `RecoverableError` (not a fatal error) if it is missing.
 pub fn require_param<'a>(
@@ -10,8 +79,8 @@ pub fn require_param<'a>(
 ) -> anyhow::Result<&'a serde_json::Value> {
     input.get(name).ok_or_else(|| {
         RecoverableError::with_hint(
-            format!("missing '{}' parameter", name),
-            format!("Add the required '{}' parameter to the tool call.", name),
+            format!("missing '{name}' parameter"),
+            missing_param_hint(name),
         )
         .into()
     })
@@ -34,8 +103,8 @@ pub fn require_param_or<'a>(
         }
     }
     Err(RecoverableError::with_hint(
-        format!("missing '{}' parameter", name),
-        format!("Add the required '{}' parameter to the tool call.", name),
+        format!("missing '{name}' parameter"),
+        missing_param_hint(name),
     )
     .into())
 }
@@ -49,11 +118,8 @@ pub fn require_str_param_or<'a>(
     require_param_or(input, name, aliases)?
         .as_str()
         .ok_or_else(|| {
-            RecoverableError::with_hint(
-                format!("'{}' must be a string", name),
-                format!("Provide '{}' as a string value.", name),
-            )
-            .into()
+            RecoverableError::with_hint(format!("'{name}' must be a string"), wrong_type_hint(name))
+                .into()
         })
 }
 
@@ -92,11 +158,8 @@ pub fn require_str_param_or_hint<'a>(
 /// Convenience: extract a required string parameter from a JSON `Value`.
 pub fn require_str_param<'a>(input: &'a serde_json::Value, name: &str) -> anyhow::Result<&'a str> {
     require_param(input, name)?.as_str().ok_or_else(|| {
-        RecoverableError::with_hint(
-            format!("'{}' must be a string", name),
-            format!("Provide '{}' as a string value.", name),
-        )
-        .into()
+        RecoverableError::with_hint(format!("'{name}' must be a string"), wrong_type_hint(name))
+            .into()
     })
 }
 

@@ -700,7 +700,16 @@ impl Tool for Memory {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let action = super::require_str_param(&input, "action")?;
+        // `action` indexes a different enum in every tool that has one, so the shared
+        // table has no entry — name this tool's own set. BL-3 Class B.
+        let action = super::require_str_param_or_hint(
+            &input,
+            "action",
+            &[],
+            "Pass the operation, e.g. action=\"read\". One of: read, write, list, delete, \
+             remember, recall, forget, refresh_anchors. Topic-based actions take `topic`; \
+             semantic ones take `query` or `content`.",
+        )?;
         match action {
             "write" => {
                 let topic = require_topic_param(&input)?;

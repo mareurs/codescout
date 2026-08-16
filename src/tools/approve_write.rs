@@ -38,7 +38,16 @@ impl Tool for ApproveWrite {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
-        let raw = super::require_str_param(&input, "path")?;
+        // `path` means three different things across its three call sites, so the
+        // shared table in params.rs deliberately has no entry for it. BL-3 Class B.
+        let raw = super::require_str_param_or_hint(
+            &input,
+            "path",
+            &[],
+            "Pass the directory to approve for writing, e.g. path=\"docs/notes\" — absolute \
+             or project-relative. Approval is scoped to that directory; the denial you are \
+             answering names the path it wanted.",
+        )?;
 
         let root = ctx
             .agent
