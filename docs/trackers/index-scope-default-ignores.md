@@ -1,9 +1,15 @@
 ---
-status: open
+status: active
+tags:
+- indexing
+- config
+- memory
+- ux
 opened: 2026-06-30
 owner: marius
-tags: ["indexing", "config", "memory", "ux"]
-related: ["docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md", "docs/issues/archive/2026-04-18-memory-leak-x-session-freeze.md"]
+related:
+- docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md
+- docs/issues/archive/2026-04-18-memory-leak-x-session-freeze.md
 ---
 
 # Tracker: indexing scope — default-ignore globs (deferred)

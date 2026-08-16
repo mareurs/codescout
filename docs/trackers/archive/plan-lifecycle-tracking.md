@@ -1,7 +1,7 @@
 ---
-title: Plan Lifecycle Tracking
-status: draft
 kind: tracker
+status: archived
+title: Plan Lifecycle Tracking
 ---
 
 # Plan Lifecycle Tracking

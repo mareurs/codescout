@@ -1,12 +1,11 @@
 ---
 kind: tracker
-status: draft
+status: archived
 title: CC notifications/tools/list_changed Support
-owners: []
 tags:
-  - mcp
-  - claude-code
-  - monitoring
+- mcp
+- claude-code
+- monitoring
 ---
 
 # Tracker: CC `notifications/tools/list_changed` Support

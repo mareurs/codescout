@@ -367,7 +367,7 @@ augmentation (`augmentation: null`) while the Issue-index comment + "How to appe
 instruct maintenance via `artifact_augment(id="42dfdfc8b1522192")` — an id absent
 from the catalog (this artifact is `52451519052d207c`). The documented
 merge+entry_filter protocol is currently impossible; tracked as F-2 in
-`docs/trackers/perf-windows-session-log.md`. Remaining genuinely-open rows: WIN-5
+`docs/trackers/archive/perf-windows-session-log.md`. Remaining genuinely-open rows: WIN-5
 (deferred), WIN-18 (open, AV out of our control).
 
 

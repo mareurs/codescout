@@ -37,7 +37,7 @@ work stream — not project-wide ID namespaces. The session log defines them
 in its own header; they don't need slots here.
 
 - **S-NN** — Session residuals: open follow-ups when a multi-session work
-  stream wraps. Example: `docs/trackers/2026-05-07-retrieval-session-residuals.md`.
+  stream wraps. Example: `docs/trackers/archive/2026-05-07-retrieval-session-residuals.md`.
 - **D-NN** — Design decisions inside a spec. Example: a multi-decision
   spec uses D-1 through D-N for the decisions enumerated in that document.
 

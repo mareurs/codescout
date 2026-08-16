@@ -1,11 +1,10 @@
 ---
 kind: tracker
-status: draft
+status: archived
 title: Multi-Agent Concurrent Coordination
-owners: []
 tags:
-  - multi-agent
-  - scoping
+- multi-agent
+- scoping
 ---
 
 # Multi-Agent Concurrent Coordination

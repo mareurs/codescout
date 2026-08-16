@@ -1,12 +1,11 @@
 ---
 kind: tracker
-status: draft
+status: archived
 title: LanceDB Upgrade Path
-owners: []
 tags:
-  - lancedb
-  - deps
-  - watching
+- lancedb
+- deps
+- watching
 topic: LanceDB upgrade path — monitoring upstream for breaking changes and watchpoints
 time_scope: open-ended
 ---

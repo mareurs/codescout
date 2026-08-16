@@ -1,3 +1,7 @@
+---
+status: archived
+title: Session Log — edit_markdown Batch Ordering
+---
 # Session Log — Template
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.

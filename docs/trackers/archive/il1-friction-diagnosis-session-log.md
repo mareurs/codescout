@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # IL1 Friction Diagnosis — Session Log
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.

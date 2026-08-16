@@ -1,12 +1,14 @@
 ---
+kind: tracker
+status: archived
 title: Goal-Tracker Dogfood Log
+tags:
+- goal-tracker
+- dogfood
+- eval-fixture
 date: 2026-05-17
 parent: docs/trackers/goal-tracker-cross-pollination.md
 purpose: Tier-3 eval fixture set — observations from real use of the goal-tracker on its own implementation work.
-status: active
-owners: []
-kind: tracker
-tags: ["goal-tracker", "dogfood", "eval-fixture"]
 ---
 
 # Goal-Tracker Dogfood Log

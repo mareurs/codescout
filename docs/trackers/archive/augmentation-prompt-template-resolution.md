@@ -1,11 +1,10 @@
 ---
 kind: tracker
-status: draft
+status: archived
 title: Augmentation Prompt Template Resolution
-owners: []
 tags:
-  - augmentation
-  - scoping
+- augmentation
+- scoping
 ---
 
 # Augmentation Prompt Template Resolution

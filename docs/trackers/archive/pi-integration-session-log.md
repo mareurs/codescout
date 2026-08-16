@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — pi-integration
 
 > Two-sided observation log for the codescout<->Pi integration work stream.

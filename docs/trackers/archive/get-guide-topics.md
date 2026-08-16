@@ -1,12 +1,11 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Get-guide topic candidates (Surface D)
-owners: []
 tags:
-  - prompts
-  - get_guide
-  - surface-d
+- prompts
+- get_guide
+- surface-d
 Last updated: 2026-05-19
 ---
 

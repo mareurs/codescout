@@ -4,7 +4,7 @@ Makes codescout's code-intelligence tools the primary read/search/edit path
 inside the Pi coding agent (pi.dev). Design rationale:
 `docs/superpowers/specs/2026-06-19-codescout-pi-integration-design.md`.
 Reconnaissance findings (grep collision, PATH, setActiveTools) live as F-1/F-2
-in `docs/trackers/pi-integration-session-log.md`.
+in `docs/trackers/archive/pi-integration-session-log.md`.
 
 ## How it works
 

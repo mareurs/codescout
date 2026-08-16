@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — Perf + Windows Work Stream
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.
@@ -199,7 +202,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** high — CI has provided no gate signal on experiments for 9+ days; any regression in non-default configs lands silently.
 
-**Status:** open
+**Status:** fixed-verified — verify-open pass, tracker-hygiene sweep 2026-08-16. CI on `experiments` is green: last failure was run 31271255156 (2026-08-08T18:10Z); four successful CI runs since, most recent 31671178978 (2026-08-13T05:41Z, success, 7m14s). The entry was zombie-open — the rot was fixed under commits that did not name F-3.
 
 **Fix idea / Pointer:** Needs its own triage stream (bug files per failing cluster). Not this plan.
 

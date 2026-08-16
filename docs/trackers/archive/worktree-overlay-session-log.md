@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — worktree-overlay
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.

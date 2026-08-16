@@ -17,7 +17,7 @@ topic: tracker lifecycle stage 1
 
 **Goal:** Implement TMR-3 (push-based maintenance) and TMR-6 (session-log decay policy) from `docs/trackers/tracker-management-redesign.md` on the current catalog model — by activating the *existing, dormant* SessionStart hygiene trigger in codescout and adding a session-log decay detector (D10) to the tracker-hygiene skill.
 
-**Architecture:** No new machinery. Recon (F-1, `docs/trackers/tracker-redesign-session-log.md`) found the push trigger already shipped in `codescout-companion/hooks/session-start.mjs:115-128`: it nudges when `docs/trackers/tracker-hygiene-log.md` has an overdue `next-sweep-due:` date — codescout just never created that file. Stage 1 = (1) extend the hygiene skill with detector **D10 session-log-decay** carrying the TMR-6 distill-then-archive procedure, (2) bootstrap codescout's hygiene ledger (which activates the nudge), (3) wire the plan into the TMR tracker. Decay *detection* is automatic (sweep-driven); every mutation stays human-gated per the skill's Phase 4.
+**Architecture:** No new machinery. Recon (F-1, `docs/trackers/archive/tracker-redesign-session-log.md`) found the push trigger already shipped in `codescout-companion/hooks/session-start.mjs:115-128`: it nudges when `docs/trackers/tracker-hygiene-log.md` has an overdue `next-sweep-due:` date — codescout just never created that file. Stage 1 = (1) extend the hygiene skill with detector **D10 session-log-decay** carrying the TMR-6 distill-then-archive procedure, (2) bootstrap codescout's hygiene ledger (which activates the nudge), (3) wire the plan into the TMR tracker. Decay *detection* is automatic (sweep-driven); every mutation stays human-gated per the skill's Phase 4.
 
 **Tech Stack:** Markdown skill files (claude-plugins repo), codescout librarian artifacts, existing bash test harness. **No Rust changes.**
 
@@ -253,4 +253,3 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ## Verification of the whole stage
 
 Start a fresh Claude Code session in codescout → SessionStart banner must show the `TRACKER HYGIENE: sweep overdue` line → run `/codescout-companion:tracker-hygiene` → D10 must list the ≥21-day session logs (survey predicts: codescout-lessons-2026-05-20, usage-analysis-improvements, vdi-reliability, dzo-legibility, pi-integration [has uncommitted branch changes — expect a `defer`], structural-edit-gate).
-

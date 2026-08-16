@@ -1,16 +1,13 @@
 ---
 id: '286ac62b5a821cec'
 kind: tracker
-status: active
+status: archived
 title: Index freshness signal for external consumers (re-enable companion auto-reindex)
-owners: []
 tags:
 - retrieval
 - companion
 - freshness
 - phase-7
-topic: null
-time_scope: null
 ---
 
 **Created:** 2026-06-09 · **Status:** draft

@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — Tracker Management Redesign
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.

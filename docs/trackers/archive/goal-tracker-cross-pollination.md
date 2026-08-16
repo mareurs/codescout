@@ -1,15 +1,12 @@
 ---
 id: d2cd00fc837e53f2
 kind: tracker
-status: draft
+status: archived
 title: Goal-Tracker × Audit-Doc-Refs Cross-Pollination
-owners: []
 tags:
 - goal
 - cross-pollination
 - dogfood
-topic: null
-time_scope: null
 ---
 
 ## Why this goal exists

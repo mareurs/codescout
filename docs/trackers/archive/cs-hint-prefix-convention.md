@@ -1,13 +1,12 @@
 ---
 kind: tracker
-status: draft
-title: "[cs-hint] prefix + (BUG-N) cross-reference convention"
-owners: []
+status: archived
+title: '[cs-hint] prefix + (BUG-N) cross-reference convention'
 tags:
-  - errors
-  - recoverable-error
-  - dx
-  - convention
+- errors
+- recoverable-error
+- dx
+- convention
 ---
 
 # Tracker — `[cs-hint]` prefix + `(BUG-N)` cross-reference

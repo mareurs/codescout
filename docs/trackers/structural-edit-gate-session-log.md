@@ -1,3 +1,7 @@
+---
+status: active
+title: Session Log — Structural Edit Gate
+---
 # Session Log — Template
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.

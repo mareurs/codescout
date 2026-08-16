@@ -1,12 +1,11 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: OutputForm::Text compaction sweep
-owners: []
 tags:
-  - output
-  - token-efficiency
-  - format_compact
+- output
+- token-efficiency
+- format_compact
 ---
 
 # OutputForm::Text compaction sweep

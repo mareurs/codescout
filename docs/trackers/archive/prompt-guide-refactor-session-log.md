@@ -1,13 +1,12 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Prompt + get_guide Refactor — Session Log
-owners: []
 tags:
-  - prompt-surfaces
-  - get_guide
-  - subagents
-  - mcp-channel-caps
+- prompt-surfaces
+- get_guide
+- subagents
+- mcp-channel-caps
 ---
 
 # Prompt + get_guide Refactor — Session Log
@@ -575,7 +574,7 @@ Symptoms:
 
 **Promote-when:** W-3's promote-when is now **met** (gate fired a second time). Promote to CLAUDE.md "Verification Patterns": *"The `source_md_under_cap` invariant (`src/prompts/mod.rs`) is load-bearing. Run `cargo test --lib prompt` before any prompt-surface edit is considered ready; on a shared branch, re-measure the slice on current HEAD because concurrent commits grow it under you."*
 
-**Status:** validated
+**Status:** promoted-to-permanent-docs — criterion fired, and the promotion was ALREADY satisfied by another route: the shared-branch re-measure hazard landed in `src/prompts/README.md` via `92eb2a3c` (recorded in `docs/issues/archive/2026-05-31-prompt-slice-over-cap-concurrent-commit.md`), and CLAUDE.md § Prompt Surface Consistency already points there. No duplicate written — one source of truth. Originally: validated
 ---
 
 ## F-9 — Tool-name drift guard scans 3 surfaces only — `get_guide` body files are ungated
@@ -594,7 +593,7 @@ Symptoms:
 
 **Severity:** low — latent coverage gap, not an active failure. Cost materializes only if a guide ships a stale/renamed tool name: it then misleads the model on every `get_guide(topic)` read, unguarded, until a human notices.
 
-**Status:** open — gap is real; the fix (add the 7 bodies to the guard, or a sibling test) is not yet decided. Mirror-image of F-4: that *missed* a gate that does apply; this *assumed* a gate that does not.
+**Status:** promoted-to-bug-tracker — REHOMED 2026-08-16 (tracker-hygiene sweep) to `docs/trackers/test-escape-hardening.md`. Verify-open re-confirmed the gap at the bytes: `prompt_surfaces_reference_only_real_tools` (`src/server.rs:1839`) builds its `surfaces` array from exactly three entries — `server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft` — and no `get_guide` body file appears in it. Original note: open — gap is real; the fix (add the 7 bodies to the guard, or a sibling test) is not yet decided. Mirror-image of F-4: that *missed* a gate that does apply; this *assumed* a gate that does not.
 
 **Fix idea / Pointer:** Extend `prompt_surfaces_reference_only_real_tools` to also iterate `GUIDE_TOPICS` → `topic_body(topic)`; grow the allowlist with the get_guide topic tokens that aren't tools. TBD pending user decision.
 

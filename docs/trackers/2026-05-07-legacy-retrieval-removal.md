@@ -90,7 +90,7 @@ the 2026-05-13 memory-port design landed and closed most items below.
 5. L-05/L-06/L-07/L-08 + L-11 — delete files + Cargo deps. Mechanical.
 
 ## Cross-references
-- **L-14 consumer requirement** → `docs/trackers/2026-06-09-index-freshness-signal-for-consumers.md` (id `286ac62b5a821cec`): expose a Qdrant-era freshness signal so an out-of-process consumer (the codescout-companion plugin) can re-enable session-start auto-reindex. `codescout index` now drives `sync_project` and never advances `project.db`'s `meta.last_indexed_commit`, so the old companion read surface is permanently frozen.
+- **L-14 consumer requirement** → `docs/trackers/archive/2026-06-09-index-freshness-signal-for-consumers.md` (id `286ac62b5a821cec`): expose a Qdrant-era freshness signal so an out-of-process consumer (the codescout-companion plugin) can re-enable session-start auto-reindex. `codescout index` now drives `sync_project` and never advances `project.db`'s `meta.last_indexed_commit`, so the old companion read surface is permanently frozen.
 
 - Plan: `docs/superpowers/plans/2026-05-06-retrieval-stack-plan.md` § Phase 7 (incomplete)
 - Spec: `docs/superpowers/specs/2026-05-06-retrieval-stack-design.md`

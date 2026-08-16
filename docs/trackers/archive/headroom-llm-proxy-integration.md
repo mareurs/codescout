@@ -1,7 +1,7 @@
 ---
 id: '3366f6ae253097bd'
 kind: tracker
-status: active
+status: archived
 title: Headroom + llm-proxy integration & trial
 owners:
 - marius
@@ -13,8 +13,6 @@ tags:
 - trial
 - infra
 - langfuse
-topic: null
-time_scope: null
 ---
 
 ## What this is

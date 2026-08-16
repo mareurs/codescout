@@ -1,16 +1,13 @@
 ---
 id: '4b6294bf495dbfb3'
 kind: tracker
-status: draft
+status: archived
 title: Goal-Tracker × Audit-Doc-Refs Cross-Pollination ADRs
-owners: []
 tags:
 - adr
 - goal-tracker
 - cross-pollination
 - reflective
-topic: null
-time_scope: null
 ---
 
 ## Why this exists

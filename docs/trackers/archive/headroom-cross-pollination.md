@@ -1,14 +1,13 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Headroom cross-pollination — codescout improvement candidates
-owners: []
 tags:
-  - headroom
-  - cross-pollination
-  - token-efficiency
-  - output-buffers
-  - compression
+- headroom
+- cross-pollination
+- token-efficiency
+- output-buffers
+- compression
 created: 2026-06-09
 ---
 

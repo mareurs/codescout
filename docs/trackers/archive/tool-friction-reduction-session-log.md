@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — Tool Friction Reduction (2026-07-09)
 
 > Work stream: implementing `docs/superpowers/plans/2026-07-09-tool-friction-reduction.md`

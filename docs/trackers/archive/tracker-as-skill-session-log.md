@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Session Log — Tracker-as-Skill / Prompt-Surface
 
 > **STATUS (2026-07-03) — for the next session.** This work stream ran a
@@ -177,7 +180,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — a naive inline edit fails `source_md_under_cap` and is reverted; controller absorbs the failed-gate round-trip, and any recommendation to “add an Iron Law” is unshippable as written.
 
-**Status:** open
+**Status:** promoted-to-bug-tracker — REHOMED 2026-08-16 (tracker-hygiene sweep) to the provenance programme tracker `docs/trackers/provenance-subsystem.md` (PV-N), which is the live owner of this design tension. Originally: open
 
 **Fix idea / Pointer:** get_guide topic for trust-provenance, gated on the persona eval (does false-distrust actually recur?) before spending any slice bytes. This session's persona thread; pairs with Hamsa memory `cap-forces-untested-wording-retest`.
 
@@ -325,7 +328,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** low — does not block any eval, but costs an extra manual-capture pass every time a multi-run rate matters, exactly the shape of friction F-2/F-3 already logged for this harness.
 
-**Status:** open
+**Status:** open — CROSS-REPO. Belongs to the sibling `prompt-engineering` repo's `prompt-tdd-harness-backlog` tracker, not codescout. Destination recorded by the tracker-hygiene sweep 2026-08-16; not written there because that repo was not activated in this session.
 
 **Fix idea / Pointer:** `report.py`'s scenario-line formatter could print `pass_rate` alongside the PASS/FAIL verdict whenever `scenario.runs > 1` (e.g. "FAIL (9/10)"). Same repo/PR as F-2's preflight+persist fix and F-3's per-run distribution idea — this is the third instance of the same underlying gap (the report renders a verdict, not the distribution behind it).
 

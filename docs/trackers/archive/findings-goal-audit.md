@@ -1,16 +1,13 @@
 ---
 id: '0df5ebc95d284b8e'
 kind: tracker
-status: draft
+status: archived
 title: Goal-Tracker Cross-Pollination Findings Audit
-owners: []
 tags:
 - audit
 - goal-tracker
 - cross-pollination
 - audit_issues
-topic: null
-time_scope: null
 ---
 
 ## Audit scope and methodology

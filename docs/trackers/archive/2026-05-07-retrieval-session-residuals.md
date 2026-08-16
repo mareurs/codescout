@@ -1,11 +1,10 @@
 ---
 kind: tracker
-status: draft
+status: archived
 title: Retrieval Stack — Session Residuals 2026-05-07
-owners: []
 tags:
-  - retrieval
-  - session-log
+- retrieval
+- session-log
 ---
 
 # Retrieval Stack — Session Residuals (2026-05-07)
