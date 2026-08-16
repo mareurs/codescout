@@ -290,6 +290,31 @@ silently re-keyed to that field.
 **Mutation-verified**, both prose-only gates independently: disabling either
 makes every prose-only tracker report a false missing/absent row on every write
 — which is precisely the noise the `render_template` gate would have shipped.
+
+### Second pass — the gate's own false positive (`0dbfd0ee`)
+
+The "anchors ≥1 id" gate was wrong, found on the second real tracker it was
+pointed at. The discriminator was **measured, not guessed**: across the 13
+snapshot-bearing trackers on this machine the two populations are bimodal and do
+not overlap — 11 maintained snapshots at 100% coverage in a contiguous prefix,
+`prompt-hamsa-audit-log.md` at 61% (also a contiguous prefix — a real lag), and
+`provenance-subsystem.md` at 21% scattered with holes throughout.
+
+A snapshot is appended to, so it falls behind at the TAIL and still carries most
+of its rows; a document that mentions ids carries a scattered minority.
+`body_keeps_snapshot` requires a majority, is shared by all three surfaces so
+they cannot disagree on what "keeps a snapshot" means, and fails safe.
+
+Two tests added, one per side of the threshold; mutation-verified by reverting
+to `intersection > 0`, which reproduces the provenance false positive and fails
+only that test.
+
+**Four existing fixtures failed against the new rule** — all sat AT or below the
+50% boundary (2-of-4, 1-of-2), so they had been expressing the ambiguous case
+rather than "a maintained snapshot that fell behind". Enlarged so the ratio is
+explicit. Worth noting as its own lesson: a fixture chosen for minimality can
+sit exactly on a threshold nobody has introduced yet, and then silently changes
+meaning when one is.
 ## Workarounds
 
 After every `append_entry` / `update_entry` on a tracker with a rendered table,
@@ -300,30 +325,37 @@ bug, not evidence against it.
 
 ## Resume
 
-**Mitigated, not fixed.** New drift is now visible at the moment it is created,
-and pre-existing drift is discoverable via `librarian(action="doctor")` — but
-params and body still do not reconcile automatically, and the 3 drifted trackers
-above are still drifted.
+**Mitigated, not fixed.** New drift is visible at the moment it is created,
+pre-existing drift is discoverable via `librarian(action="doctor")`, and after
+the two passes below **no tracker on this machine is currently drifted**.
 
-Remaining, in order:
+### Closed since filing
 
-1. **Reconcile the drifted trackers.** `prompt-hamsa-audit-log.md` was the
-   urgent one (A-21 backs an iron rule in `CLAUDE.md`) and is **done** —
-   `6ff00eee`, 11 rows → 23, regenerated mechanically from params. That pass
-   also caught A-2 rendering `pending measurement` while params said MEASURED /
-   HELD / CLOSED: the `update_entry` sub-shape, live, weeks stale.
-   **codescout's remaining drift is one tracker**: `provenance-subsystem.md`
-   (54 of 68 rows). A judgement call, not mechanical — a 54-row body rewrite,
-   and whether a provenance log belongs in git at all is the maintainer's
-   decision. (`innovaplan-export-tracker.md`, 3 of 6, belongs to
-   `mirela/backend-kotlin` — a different repo, listed only because the audit
-   query was machine-wide.)
-2. **Option 4** — create-time, for artifacts born with entries invisible to git.
-3. **Option 2** — re-render on write. The real fix; overlaps BL-30, scope together.
+- `prompt-hamsa-audit-log.md` — reconciled in `6ff00eee`, 11 rows → 23,
+  regenerated mechanically from params. A-21 (cited by `CLAUDE.md` for the
+  Conclude Last iron rule) and A-22 (cited by R-90) now resolve in git. That
+  pass also caught A-2 rendering `pending measurement` while params said
+  MEASURED / HELD / CLOSED — the `update_entry` sub-shape, live, weeks stale.
+- `provenance-subsystem.md` — **not drifted. It was a false positive**, and
+  fixing the gate is `0dbfd0ee`. That tracker is params-canonical by design; its
+  own § *PV-N entries* states *"The canonical PV-N rows live in the augmentation
+  params, not in this file"*, and its § *Conventions* says narrative goes in the
+  body only when a table row is insufficient. Its 14 anchored ids are incidental
+  — first cells of UNRELATED tables and four `### PV-N` write-ups. Reconciling it
+  would have duplicated into the file exactly what its author deliberately kept
+  out.
+- `innovaplan-export-tracker.md` — belongs to `mirela/backend-kotlin`, listed
+  only because the audit query was machine-wide. Also below the new gate.
+
+### Remaining
+
+1. **Option 4** — create-time, for artifacts born with entries invisible to git.
+2. **Option 2** — re-render on write. The real fix; overlaps BL-30, scope together.
 
 Do not re-derive the gate. `render_template` is **not** the signal (it means the
-opposite), and `append_entry` already reads the body — the machinery is present
-and `body_claimed_indices` is the shared entry point.
+opposite); mere presence of an anchored id is **not** the signal either (that was
+the false positive); `append_entry` already reads the body; and
+`body_claimed_indices` + `body_keeps_snapshot` are the shared entry points.
 ## References
 
 - `src/prompts/guides/librarian-runtime.md` § Where catalog state lives — the
