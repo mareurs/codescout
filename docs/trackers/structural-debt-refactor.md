@@ -472,3 +472,46 @@ Still open and deliberately untouched: neither `src/librarian/tools/context.rs`
 nor `src/librarian/tools/workspace_state_at.rs` dedups the worktree overlay that
 `apply_scope` documents as the caller's job —
 `docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
+
+### 2026-08-16 — the surface SD-1b built ran for the first time, and needed tuning
+
+Not an SD item, recorded here because it closes SD-1b's loop and because the
+first finding was about SD-1b itself.
+
+**The gate had never executed.** SD-1b extended `audit_doc_refs` to scan code
+comments, and every audit for the rest of that session went through a binary
+predating it — 958 files scanned instead of 1,402, markdown only. The feature was
+reported shipped and verified while never once running. On the first scan against
+a current build it immediately found two stale citations in
+`src/retrieval/config.rs` created **twenty minutes earlier**, by archiving a bug
+file through the librarian and leaving the doc comments that cited its old path.
+The fix-then-forget shape, committed by the session that spent the morning
+building the thing that catches it. Recorded as R-89.
+
+**Then the surface needed tuning, and the tuning nearly went wrong.** Measured on
+Rust alone (`src/librarian/catalog/**`, 41 refs): **56% `unknown`**, essentially
+all dotted identifiers naming SQL columns and struct fields. The obvious fix —
+suppress dotted tokens — was recommended and would have been wrong. Every
+non-Rust source file in the repo measured **5% unknown, 79% resolved**. The same
+token is a Rust field *and* a Python module; suppressing it globally would have
+deleted real references from five languages while improving the metric that
+motivated the change, since those refs were already `unknown`. W-44.
+
+**Built instead** (`experiments:9b3e1e76`): `PathSyntax`, threaded from
+`scan_code_comments` into the classifier — `ColonColonModules` for Rust,
+`DottedModules` for the dotted-path languages and for markdown (deliberately
+unchanged), `NoModules` for shell/CSS/HTML. Verified live on the rebuilt server:
+`src/librarian/catalog/**` went 56% unknown → **0**, all non-Rust came back
+**byte-identical**, and repo-wide Rust `resolved` went *up* (661 → 667) while
+`unknown` fell 358 → 116. Zero real references lost.
+
+**What this leaves.** The code-comment surface is now worth sweeping rather than
+triaging — the remaining 116 Rust `unknown` are absolute and out-of-project paths,
+not classifier noise. Three items are still open and each needs a decision, not
+more measurement: the `//` marker defect
+(`docs/issues/2026-08-15-audit-doc-refs-classifies-comment-markers-as-paths.md`,
+narrow vs broad), four real stale citations the non-Rust scan found in
+`scripts/` and `tests/`, and the sweep itself. And one measurement discipline
+carries forward: repo-wide scans report `degraded: true` at 276+ files while
+scoped ones do not, so subset scans are not merely cheaper but strictly more
+trustworthy.

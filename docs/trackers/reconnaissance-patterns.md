@@ -2055,6 +2055,70 @@ intent-vs-mechanics tell rather than as "read some rows", which is too weak to a
 **Kin:** R-50 (the view is not the set), R-75 (verify the artifact, not the exit code), R-59 (an
 artifact that presents as prior reconnaissance).
 
+## R-89 — Miss ×3: a tool's output is evidence about the code only if the running build contains it
+
+**Verdict:** miss — the same unchecked premise cost three separate conclusions in
+one session before it was named.
+
+**Seam:** any claim of the form "the code does X" backed by an MCP tool result.
+The tool runs inside a server process built at some unknown past moment; the
+source on disk and the code producing the answer are two different things, and
+nothing in the response says so.
+
+**What it cost, three times.**
+
+1. **A gate that had never run.** SD-1b extended `audit_doc_refs` to scan code
+   comments. For the rest of that session every audit went through a binary
+   predating it, scanning **958 files instead of 1,402** — markdown only. The
+   feature was reported as shipped and verified while never once executing. The
+   discrepancy was visible in the file count the whole time and read as noise.
+2. **A repo-wide number quoted from a degraded scan.** `broken: 10130` was taken
+   while `scan_meta.degraded == true` with rust offline, then nearly used to size
+   a sweep. Scoped scans of the same tree came back non-degraded — so the
+   degradation is a *scale* artefact, and repo-wide counts are systematically
+   less trustworthy than subset ones, which is the opposite of the intuition that
+   a bigger scan is a better measurement.
+3. **A verification plan that could not work on the host it was written for.**
+   The `#77` sqlite-vec fix was to be confirmed by watching `$HOME` stop growing.
+   But `cargo rb` builds `--features server-stack`, and its own alias comment says
+   that makes `VectorBackend::resolve()` return Qdrant — so the sqlite path is
+   never exercised here and the counter could not move whatever the code did. A
+   zero would have been read as success.
+
+**What actually settled it — a discriminating probe, not metadata.** Binary mtime
+and `git merge-base --is-ancestor` establish *when* and *from what commit*, which
+is weaker than it looks: it says the source was present, not that the feature is
+reachable. What worked was picking an input whose result differs between the two
+candidate builds and running it:
+
+- *Does a bare prose path get extracted?* Only post-SD-1b. It did not → binary was
+  stale, conclusively.
+- *Does scanning a `.rs` file return any refs at all?* Only with the code globs. It
+  did → binary was current.
+
+Each is one call and admits no interpretation.
+
+**The environment has the same problem.** `env | grep CODESCOUT_...` reads *this
+shell*, not the server, which self-loads `.env` at startup. Checking the server's
+actual configuration meant reading `.env` and `.cargo/config.toml` — the alias
+comment in the latter is what finally explained the backend.
+
+**Rule to apply next time.** Before citing tool output as evidence about code you
+have edited this session: (1) run a probe that can only succeed on the new build;
+(2) read `scan_meta.degraded` and treat a degraded result as an upper bound with
+unknown noise, never as a count; (3) if the claim depends on configuration,
+resolve it from what the *server* loads, not from your shell.
+
+**Evidence:** `docs/trackers/bug-fix-session-log.md` W-41 (live-verify after every
+rebuild) is the parent rule; this is the sharper form — *verify the build, not
+just the behaviour*. W-44 is the sibling failure at population grain rather than
+build grain.
+
+**Promote-when:** one more instance where a stale-build assumption reaches a
+committed claim. At two, promote the probe technique into this skill's Phase 1 as
+a named step for any session that edits a tool it also uses — which is the normal
+condition in this repo, and the reason the failure recurs.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
