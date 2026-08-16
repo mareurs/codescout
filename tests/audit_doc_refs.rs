@@ -5,3 +5,5 @@
 mod corpus;
 #[path = "librarian/audit_doc_refs/eval_on_codescout_self.rs"]
 mod eval_on_codescout_self;
+#[path = "librarian/audit_doc_refs/language_aware_classification.rs"]
+mod language_aware_classification;

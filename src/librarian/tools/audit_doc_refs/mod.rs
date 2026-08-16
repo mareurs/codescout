@@ -372,7 +372,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // Computed per file, not per ref: a changelog has one boundary and the
         // scan is line-ordered anyway.
         let history_from = severity::released_history_boundary(&text, &rel);
-        let (cands, warns) = parser::parse_refs(&text, &rel);
+        // Markdown has no language, and `DottedModules` is exactly what the
+        // classifier did before `PathSyntax` existed — this surface's verdicts
+        // are deliberately unchanged.
+        let (cands, warns) = parser::parse_refs(&text, &rel, parser::PathSyntax::DottedModules);
         for c in cands {
             let mut r = resolver::resolve_ref(&c, &resolve_ctx);
             let (sev, reason) = severity::cap_released_history(
@@ -761,11 +764,14 @@ fn scan_code_comments(
     resolve_ctx: &resolver::ResolveCtx,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
+    // The one thing classification needs from the language: whether a dotted
+    // token like `a.b.c` can be a module path at all. See `PathSyntax`.
+    let syntax = parser::PathSyntax::for_language(Some(language));
     for block in code_comments::extract_comments(text, language) {
         // Warnings are dropped rather than collected: they describe markdown
         // fence structure, and a comment is a fragment, so every one would be
         // an artefact of slicing rather than a fact about the file.
-        let (mut cands, _warns) = parser::parse_refs(&block.text, rel);
+        let (mut cands, _warns) = parser::parse_refs(&block.text, rel, syntax);
         // Prose too — see `parse_prose_refs`. Only 140 of this repo's 699
         // in-source citations are backticked, so code spans alone would see a
         // fifth of them. Deduped on (line, raw_ref) because a path that IS
@@ -775,7 +781,7 @@ fn scan_code_comments(
             .map(|c| (c.md_line, c.raw_ref.clone()))
             .collect();
         cands.extend(
-            parser::parse_prose_refs(&block.text, rel)
+            parser::parse_prose_refs(&block.text, rel, syntax)
                 .into_iter()
                 .filter(|c| !seen.contains(&(c.md_line, c.raw_ref.clone()))),
         );

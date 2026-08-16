@@ -5,7 +5,11 @@ use regex::Regex;
 use std::path::Path;
 use std::sync::OnceLock;
 
-pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWarning>) {
+pub fn parse_refs(
+    text: &str,
+    md_path: &Path,
+    syntax: PathSyntax,
+) -> (Vec<RefCandidate>, Vec<ParseWarning>) {
     // Forward-slash normalize so md_file keys are consistent across platforms.
     let md_file = crate::util::fs::RepoPath::from(md_path).into_string();
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
@@ -28,7 +32,7 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
             // reference looks like, not making one. See `is_markup_display`.
             Event::Code(content) if !suppressed && !is_markup_display(content.as_ref()) => {
                 for raw in tokenize_code_span(content.as_ref()) {
-                    if let Some(kind) = classify(raw, true) {
+                    if let Some(kind) = classify(raw, true, syntax) {
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
                             md_line: line,
@@ -43,7 +47,7 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
             Event::Text(content) if in_code_block && !suppressed => {
                 for raw in tokenize_code_span(content.as_ref()) {
-                    if let Some(kind) = classify(raw, true) {
+                    if let Some(kind) = classify(raw, true, syntax) {
                         candidates.push(RefCandidate {
                             md_file: md_file.clone(),
                             md_line: line,
@@ -75,7 +79,72 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
     }
     (candidates, warnings)
 }
-fn classify(s: &str, in_code_context: bool) -> Option<RefKind> {
+/// How the surrounding language spells a qualified name — the one thing the ref
+/// classifier needs from a language to judge a dotted token like `a.b.c`.
+///
+/// `is_module_path` accepts all-lowercase dotted tokens, which is simultaneously
+/// the shape of a Python module (`os.path`), a Go qualified name (`pkg.symbol`),
+/// and a Rust field or SQL column (`commits.git_root`, `report.remap`). The token
+/// alone cannot separate them; only the language can.
+///
+/// Measured 2026-08-16, and the reason this exists: across
+/// `src/librarian/catalog/**` (41 refs) **56% came back `unknown`**, essentially
+/// all of them dotted identifiers in Rust doc comments naming SQL columns and
+/// struct fields. The same scan over every non-Rust source file in the repo
+/// (51 files, 39 refs) reported **5% unknown and 79% resolved**. The noise was
+/// never a property of source comments in general — it was Rust doc comments
+/// discussing schemas, and a language-blind rule tuned on it would have deleted
+/// real module references from Python, Go, Java and Kotlin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathSyntax {
+    /// Dotted qualified names are real, so keep classifying them: Python, Go,
+    /// Java, Kotlin, TypeScript, JavaScript. Also the default for markdown,
+    /// which has no language — markdown behaviour is deliberately unchanged.
+    DottedModules,
+    /// Qualified names use `::`, so a dotted token is field access and never a
+    /// module path: Rust.
+    ColonColonModules,
+    /// No module concept at all: shell, CSS, HTML.
+    NoModules,
+}
+
+impl PathSyntax {
+    /// Map a `crate::ast::detect_language` key onto its qualified-name syntax.
+    ///
+    /// `None` — markdown, which reaches the classifier with no language — maps to
+    /// `DottedModules` because that is exactly what the classifier did before this
+    /// distinction existed. The markdown surface has already been swept once
+    /// (SD-1); changing its verdicts here would be an unrequested behaviour change
+    /// to the corpus with the most citations.
+    ///
+    /// An unrecognised key also maps to `DottedModules`: a new grammar should
+    /// arrive with today's behaviour and be tightened deliberately, not silently
+    /// lose refs the moment it is vendored.
+    pub fn for_language(language: Option<&str>) -> Self {
+        match language {
+            Some(l) if l.eq_ignore_ascii_case("rust") => Self::ColonColonModules,
+            // Keys exactly as `crate::ast::detect_language` emits them — it is the
+            // sole producer, so an alias it never returns (`sh`, `shell`) would be
+            // a dead arm that reads as coverage.
+            Some(l)
+                if matches!(
+                    l.to_ascii_lowercase().as_str(),
+                    "bash" | "css" | "scss" | "less" | "html"
+                ) =>
+            {
+                Self::NoModules
+            }
+            _ => Self::DottedModules,
+        }
+    }
+
+    /// Whether a dotted token may be classified as [`RefKind::ModulePath`].
+    fn admits_dotted_modules(self) -> bool {
+        matches!(self, Self::DottedModules)
+    }
+}
+
+fn classify(s: &str, in_code_context: bool, syntax: PathSyntax) -> Option<RefKind> {
     // Try Rust-style `path::symbol` first so the trailing colon doesn't leak
     // into the path part. Fall back to single `:` for python-style and line
     // refs (file.py:cmd, file.rs:42, file.rs:42-99).
@@ -97,7 +166,7 @@ fn classify(s: &str, in_code_context: bool) -> Option<RefKind> {
     if looks_like_path(s) {
         return Some(RefKind::FilePath);
     }
-    if in_code_context && is_module_path(s) {
+    if in_code_context && syntax.admits_dotted_modules() && is_module_path(s) {
         return Some(RefKind::ModulePath);
     }
     None
@@ -145,7 +214,7 @@ fn is_line_or_range(s: &str) -> bool {
 /// Markdown must never call this. The caller separation is the whole safety
 /// argument, and `mod.rs` enforces it by calling this only from
 /// `scan_code_comments`.
-pub fn parse_prose_refs(text: &str, md_path: &Path) -> Vec<RefCandidate> {
+pub fn parse_prose_refs(text: &str, md_path: &Path, syntax: PathSyntax) -> Vec<RefCandidate> {
     let md_file = crate::util::fs::RepoPath::from(md_path).into_string();
     let mut out = Vec::new();
     for (idx, line) in text.lines().enumerate() {
@@ -186,7 +255,7 @@ pub fn parse_prose_refs(text: &str, md_path: &Path) -> Vec<RefCandidate> {
             if !has_file_extension(raw) {
                 continue;
             }
-            if let Some(kind) = classify(raw, false) {
+            if let Some(kind) = classify(raw, false, syntax) {
                 out.push(RefCandidate {
                     md_file: md_file.clone(),
                     md_line: (idx + 1) as u32,
@@ -223,7 +292,7 @@ mod prose_tests {
     use super::*;
 
     fn refs(text: &str) -> Vec<(u32, String)> {
-        parse_prose_refs(text, Path::new("src/x.rs"))
+        parse_prose_refs(text, Path::new("src/x.rs"), PathSyntax::ColonColonModules)
             .into_iter()
             .map(|c| (c.md_line, c.raw_ref))
             .collect()
@@ -395,6 +464,116 @@ fn is_module_path(s: &str) -> bool {
             .all(|c| c.is_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
         && s.split('.').all(|part| !part.is_empty())
 }
+
+#[cfg(test)]
+mod path_syntax_tests {
+    use super::{classify, PathSyntax, RefKind};
+
+    #[test]
+    fn a_dotted_token_is_a_module_path_only_where_the_language_spells_them_that_way() {
+        // The discriminating triple: one token, three languages, three verdicts.
+        // `commits.git_root` is a SQL column named in a Rust doc comment; `os.path`
+        // is a real Python module. They are the same string.
+        let tok = "commits.git_root";
+        assert_eq!(
+            classify(tok, true, PathSyntax::DottedModules),
+            Some(RefKind::ModulePath),
+            "python/go/java/kotlin/ts spell qualified names with dots"
+        );
+        assert_eq!(
+            classify(tok, true, PathSyntax::ColonColonModules),
+            None,
+            "rust spells them `a::b`, so a dotted token is field access"
+        );
+        assert_eq!(
+            classify(tok, true, PathSyntax::NoModules),
+            None,
+            "shell/css/html have no module concept"
+        );
+    }
+
+    #[test]
+    fn narrowing_touches_only_the_module_branch() {
+        // The guard that matters: `PathSyntax` must not cost us a single FILE
+        // reference. Every kind below is classified before the module branch is
+        // reached, so all three syntaxes must agree on them.
+        for syntax in [
+            PathSyntax::DottedModules,
+            PathSyntax::ColonColonModules,
+            PathSyntax::NoModules,
+        ] {
+            assert_eq!(
+                classify("src/librarian/tools/scope.rs", true, syntax),
+                Some(RefKind::FilePath),
+                "{syntax:?} must still classify a plain path"
+            );
+            assert_eq!(
+                classify("src/retrieval/config.rs:61", true, syntax),
+                Some(RefKind::FileLine),
+                "{syntax:?} must still classify a file:line"
+            );
+            assert_eq!(
+                classify("src/ast/mod.rs::detect_language", true, syntax),
+                Some(RefKind::FileSymbol),
+                "{syntax:?} must still classify a file::symbol"
+            );
+            assert_eq!(
+                classify("docs/FEATURES.md", false, syntax),
+                Some(RefKind::FilePath),
+                "{syntax:?} must still classify a prose path"
+            );
+        }
+    }
+
+    #[test]
+    fn every_language_detect_language_emits_maps_deliberately() {
+        // Keys copied from `crate::ast::detect_language`, its sole producer. A new
+        // grammar arriving without a decision here lands on DottedModules — today's
+        // behaviour — rather than silently losing refs, and this table is where that
+        // decision gets made explicit.
+        let cases: &[(&str, PathSyntax)] = &[
+            ("rust", PathSyntax::ColonColonModules),
+            ("python", PathSyntax::DottedModules),
+            ("go", PathSyntax::DottedModules),
+            ("java", PathSyntax::DottedModules),
+            ("kotlin", PathSyntax::DottedModules),
+            ("typescript", PathSyntax::DottedModules),
+            ("tsx", PathSyntax::DottedModules),
+            ("javascript", PathSyntax::DottedModules),
+            ("jsx", PathSyntax::DottedModules),
+            ("bash", PathSyntax::NoModules),
+            ("css", PathSyntax::NoModules),
+            ("scss", PathSyntax::NoModules),
+            ("less", PathSyntax::NoModules),
+            ("html", PathSyntax::NoModules),
+        ];
+        for (lang, want) in cases {
+            assert_eq!(
+                PathSyntax::for_language(Some(lang)),
+                *want,
+                "language `{lang}`"
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_and_unknown_languages_keep_todays_behaviour() {
+        // Markdown reaches the classifier with no language and has already been
+        // swept once (SD-1); changing its verdicts here would be an unrequested
+        // behaviour change to the corpus carrying the most citations.
+        assert_eq!(
+            PathSyntax::for_language(None),
+            PathSyntax::DottedModules,
+            "markdown must be unchanged"
+        );
+        assert_eq!(
+            PathSyntax::for_language(Some("some-future-grammar")),
+            PathSyntax::DottedModules,
+            "an unvendored language must arrive with today's behaviour, not a silent loss"
+        );
+    }
+}
+
 /// A documentation placeholder rather than a concrete target.
 ///
 /// Two spellings, both of which this repo uses in naming-convention docs:
@@ -549,7 +728,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn parse(text: &str) -> (Vec<RefCandidate>, Vec<ParseWarning>) {
-        parse_refs(text, &PathBuf::from("test.md"))
+        parse_refs(text, &PathBuf::from("test.md"), PathSyntax::DottedModules)
     }
 
     #[test]
