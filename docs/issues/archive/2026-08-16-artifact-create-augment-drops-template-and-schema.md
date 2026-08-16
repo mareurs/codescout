@@ -6,7 +6,7 @@ tags:
 - artifact-create
 - silent-drop
 - doc-vs-code-drift
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -157,8 +157,12 @@ entirely.
 
 ## Fix
 
-**Implemented 2026-08-16 — all three parts, since fixes 1 and 2 are complementary rather than
-alternatives.**
+**Implemented 2026-08-16 — `0ca6891b` (`experiments`), with a follow-up correction in `7c31f87c`.**
+No pending-master-SHA line: the promotion path is fast-forward
+(`git rev-list --left-right --count master...experiments` → `0 750`), so these SHAs already *are*
+the master SHAs once promoted.
+
+All three parts landed, since fixes 1 and 2 are complementary rather than alternatives.
 
 **1. Reject unknown keys.** `AugmentSpec` now carries `#[serde(deny_unknown_fields)]`
 (`src/librarian/tools/create.rs`). A typo inside `augment` fails loudly naming the offending key,
@@ -181,7 +185,12 @@ discover it.
 section identified. It now prescribes the two-call shape explicitly, states that `prompt` and
 `params` were the only fields `create` accepted, warns that `merge=false` resets all seven, and tells
 the caller to read the artifact back. Done in the same pass as
-`docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md`, as that bug predicted.
+`docs/issues/archive/2026-08-16-tracker-design-guidance-always-overflows.md`, as that bug predicted.
+
+**One self-inflicted follow-up.** That Final-step rewrite described the *old* `create` contract, and
+part 2 above then made it false — both shipped in `0ca6891b` contradicting each other. Corrected in
+`7c31f87c`, caught by reading the live tool output after the rebuild rather than by re-reading the
+diff.
 ## Tests added
 
 In `src/librarian/tools/create.rs`:
@@ -207,23 +216,25 @@ Gate: **3842 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings` cle
 
 ## Resume
 
-Fixed on `experiments`, gate green. Before archiving:
+N/A — fixed, verified live, archived.
 
-1. **Verify live after the next `cargo rb` + `/mcp`** — create a throwaway tracker passing
-   `render_template` and `entry_collection` inside `augment`, read it back, and confirm both
-   persisted without a follow-up `artifact_augment`. Then pass a deliberate typo and confirm it
-   errors.
-2. **Record the fix SHA and archive** via `artifact(action="move", …)`, checking the promotion path
-   first (`0` on the left ⇒ fast-forward ⇒ no pending-master-SHA line).
+**Live verification, 2026-08-16** (after `cargo rb` + `/mcp`), both halves:
 
-**Still worth doing, and not blocking:** sweep for trackers already damaged by the old behaviour —
-augmented artifacts with a null `render_template` created before today. Some legitimately have none
-(`reflective` trackers omit it by design), so this needs judgment, not a blanket repair:
-`artifact(find, kind="tracker", augmented=true)` then check each. `docs/trackers/open-issue-work-queue.md`
-is one known case — it was created by this bug and repaired by hand.
+- `artifact(create, augment={… "render_tempalte": "oops"})` → **rejected**, naming all seven valid
+  fields, and no artifact created.
+- `artifact(create, augment={render_template, params_schema, entry_collection, history_cap})` →
+  **all four persisted in one call**, with `append_mode` correctly defaulting to false. The temp
+  artifact was deleted through the catalog afterwards.
+
+**One follow-up left open deliberately, not blocking:** trackers created *before* this fix may carry
+a null `render_template` from the old behaviour. This needs judgment rather than a blanket repair —
+`reflective` trackers legitimately have none by design (`tracker_design` Step 5). Sweep with
+`artifact(find, kind="tracker", augmented=true)` and check each.
+`docs/trackers/open-issue-work-queue.md` is one known case: it was created *by* this bug and repaired
+by hand.
 ## References
 
 - `docs/issues/archive/2026-07-13-artifact-create-drops-topic.md` — same file, same class, fixed.
-- `docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md` — the other defect in the
+- `docs/issues/archive/2026-08-16-tracker-design-guidance-always-overflows.md` — the other defect in the
   same `SYSTEM_PROMPT`.
 - `docs/trackers/open-issue-work-queue.md` — BL-18.

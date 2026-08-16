@@ -25,7 +25,7 @@ struct Args {
     /// all eight full specs put the response at ~10,270 tokens — 4.1x the inline
     /// budget — so it overflowed on every call, and the teaching content the
     /// caller is meant to read *before acting* only ever arrived behind a buffer
-    /// fetch. See docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md
+    /// fetch. See docs/issues/archive/2026-08-16-tracker-design-guidance-always-overflows.md
     #[serde(default)]
     archetype: Option<String>,
 }

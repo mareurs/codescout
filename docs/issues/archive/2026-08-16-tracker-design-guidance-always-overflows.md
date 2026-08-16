@@ -6,7 +6,7 @@ tags:
 - progressive-disclosure
 - overflow
 - agent-guidance
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -132,7 +132,12 @@ separate content blocks on first trigger. So the codebase already contains the p
 
 ## Fix
 
-**Implemented 2026-08-16.** The split landed as planned, but the sizing work found a second
+**Implemented 2026-08-16 — `0ca6891b` (`experiments`), with a follow-up correction in `7c31f87c`.**
+No pending-master-SHA line: the promotion path is fast-forward
+(`git rev-list --left-right --count master...experiments` → `0 750`), so these SHAs already *are*
+the master SHAs once promoted.
+
+The split landed as planned, but the sizing work found a second
 contributor the original Fix had not counted.
 
 **1. `tracker_design` is now two calls.** The default response carries the teaching prompt plus an
@@ -157,8 +162,15 @@ duplicate worded differently, which is the collision that actually happens.
 
 **3. The prompt was tightened** (Steps 2, 5, 5b, Anti-patterns) without dropping a single rule, and
 its Final step was corrected — that half belongs to
-`docs/issues/2026-08-16-artifact-create-augment-drops-template-and-schema.md`, fixed in the same pass
-as predicted.
+`docs/issues/archive/2026-08-16-artifact-create-augment-drops-template-and-schema.md`, fixed in the
+same pass as predicted.
+
+**A correction the same-pass fix caused.** The Final step was rewritten to describe the *old*
+`create` contract — "prompt and params are the ONLY fields, anything else is silently discarded" —
+and the sibling fix then made that false. Both shipped in `0ca6891b` contradicting each other, and it
+was caught by reading the live tool output after the rebuild rather than by re-reading the diff.
+Fixed in `7c31f87c`. When one fix edits documentation describing a surface another fix changes, the
+doc is written against a moving target; the check that catches it is running the shipped thing.
 
 **Result: ~41,000 → 9,358 bytes** with a full catalog, against a 10,000-byte buffering threshold.
 From overflowing on 6 of 6 calls to arriving inline.
@@ -189,22 +201,19 @@ Gate: **3842 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings` cle
 
 ## Resume
 
-Fixed on `experiments`, gate green. Before archiving:
+N/A — fixed, verified live, archived.
 
-1. **Verify live after the next `cargo rb` + `/mcp`** — call `librarian(action="tracker_design")` and
-   confirm it returns inline with no `output_id`, then
-   `librarian(action="tracker_design", archetype="task_list")` for the detail path.
-2. **Record the fix SHA and archive** via `artifact(action="move", …)`. Check the promotion path
-   first — a `0` on the left of `git rev-list --left-right --count master...experiments` means
-   fast-forward, so no pending-master-SHA line is written.
+**Live verification, 2026-08-16** (after `cargo rb` + `/mcp`): `librarian(action="tracker_design")`
+returned **inline with no `output_id`**, where the same call buffered 40,756 bytes before. The menu,
+the `archetype_detail` pointer and the 5-of-66 tracker sample all rendered as designed.
 
-**Margin is thin: 9,358 of 10,000 bytes, ~640 spare.** Growing `SYSTEM_PROMPT` or raising
-`EXISTING_TRACKERS_CAP` will re-break this. `default_response_fits_inline` is what will say so — do
-not "fix" it by relaxing the assertion.
+**Margin is ~640 bytes** (9,358 of 10,000). Growing `SYSTEM_PROMPT` or raising
+`EXISTING_TRACKERS_CAP` will re-break this; `default_response_fits_inline` is what will say so — do
+not "fix" a failure there by relaxing the assertion.
 
-Not addressed here: `link_scan` (8/8 overflow) and `audit_doc_refs` (37/50). Both return *findings*,
-where a buffer is defensible; their Fix step 2 — make the compact summary carry counts by severity so
-the common question needs no buffer read — remains open and is not filed separately.
+**Not addressed, and not filed separately:** `link_scan` (8/8 overflow) and `audit_doc_refs`
+(37/50). Both return *findings*, where a buffer is defensible — their open half is Fix step 2, making
+the compact summary carry counts by severity so the common question needs no buffer read.
 ## References
 
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16, *Overflow*.
