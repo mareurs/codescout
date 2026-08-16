@@ -57,6 +57,17 @@ Four rows accepted, four rows absent from git, clean working tree.
 
 ### Corpus-wide audit, 2026-08-16 — how much already drifted
 
+> **Scope correction (same day).** The table below is **machine-wide, not
+> codescout**. The audit read `~/.local/share/librarian/catalog.db` directly, and
+> the catalog holds every artifact from every repo on this host with no project
+> scoping — the same property `get_guide("tracker-conventions")` and the
+> tracker-hygiene skill warn about for `librarian(action="doctor")`. Of the 28
+> augmented trackers, only **11 are codescout's**; the corpus spans 7 repos.
+> Per repo: codescout 11 (7 in-sync, 1 drifted, 3 prose-only), backend-kotlin 6
+> (1 drifted), MRV-poc 5, ie-pal-engine 2, researcher 2, claude-plugins 1,
+> lang-pal-engine 1. `innovaplan-export-tracker.md` is
+> `mirela/backend-kotlin`'s and is not codescout's to reconcile.
+
 Every augmented tracker with an `entry_collection`, comparing params ids against
 the ids its body line-anchors. Buckets partition the corpus, so they reconcile:
 
@@ -296,10 +307,17 @@ above are still drifted.
 
 Remaining, in order:
 
-1. **Reconcile the 3 drifted trackers.** A judgement call, not mechanical: the
-   54 rows in `provenance-subsystem.md` are a large body rewrite, and whether
-   they belong in git at all is the maintainer's decision. `prompt-hamsa-audit-log.md`
-   is the urgent one — A-21 backs an iron rule in `CLAUDE.md`.
+1. **Reconcile the drifted trackers.** `prompt-hamsa-audit-log.md` was the
+   urgent one (A-21 backs an iron rule in `CLAUDE.md`) and is **done** —
+   `6ff00eee`, 11 rows → 23, regenerated mechanically from params. That pass
+   also caught A-2 rendering `pending measurement` while params said MEASURED /
+   HELD / CLOSED: the `update_entry` sub-shape, live, weeks stale.
+   **codescout's remaining drift is one tracker**: `provenance-subsystem.md`
+   (54 of 68 rows). A judgement call, not mechanical — a 54-row body rewrite,
+   and whether a provenance log belongs in git at all is the maintainer's
+   decision. (`innovaplan-export-tracker.md`, 3 of 6, belongs to
+   `mirela/backend-kotlin` — a different repo, listed only because the audit
+   query was machine-wide.)
 2. **Option 4** — create-time, for artifacts born with entries invisible to git.
 3. **Option 2** — re-render on write. The real fix; overlaps BL-30, scope together.
 
