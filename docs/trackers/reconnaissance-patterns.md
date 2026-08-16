@@ -40,12 +40,12 @@ skill).
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
 | R-1 | 2026-05-19 | hit → promoted | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
-| R-2 | 2026-05-19 | miss | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
+| R-2 | 2026-05-19 | **archived** → R-4 + R-34 | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
 | R-3 | 2026-05-19 | miss → promoted | Scout limited grep to one file/crate; cross-file asserts slipped | mcp-prompt-redesign F-2 |
 | R-4 | 2026-05-19 | miss | Grep undercounts struct-field construction sites by 2-3× | mcp-prompt-redesign F-3 + W-2 |
-| R-5 | 2026-05-19 | proposal | Add "compiler as scout" as a Phase-1 tool alongside grep | covers R-4 |
+| R-5 | 2026-05-19 | **archived** → R-34 | Add "compiler as scout" as a Phase-1 tool alongside grep | covers R-4 |
 | R-6 | 2026-05-28 | hit | Explicit recon invocation on substrate before mechanism design | prompt-guide-refactor F-2 + W-2 |
-| R-7 | 2026-05-28 | miss → applies-R-1 (promoted) | Invariant test on `include_str!`'d file not pre-enumerated | prompt-guide-refactor F-4 + W-3 |
+| R-7 | 2026-05-28 | **archived** → R-1 | Invariant test on `include_str!`'d file not pre-enumerated | prompt-guide-refactor F-4 + W-3 |
 | R-8 | 2026-05-28 | miss → proposal | `edit_markdown(action='replace')` shape unverified on marker-bearing section | prompt-guide-refactor F-7 |
 | R-9 | 2026-05-28 | proposal → drafted | Session-state recon for subagent dispatch | prompt-guide-refactor F-6 + W-4 |
 | R-10 | 2026-05-29 | miss → proposal | Buffered tool output parsed for structured extraction without a completeness scout | metadata-filtering F-4 + W-1 |
@@ -58,27 +58,27 @@ skill).
 | R-17 | 2026-06-05 | hit | Spot-check sibling callers of a just-fixed shared helper before closing the bug class (`references(clamp_range_to_parent)` found `do_remove`/`do_replace` shared the off-by-one) | bug-fix W-9 + issues/2026-06-05-edit-code-insert-after-last-python-method |
 | R-18 | 2026-06-05 | hit | Scout a classifier's actual return type AND domain coverage before keying a feature off it (`detect_language` returns `Option<&str>` not an enum, and does not recognize YAML → guard keyed on extension, not name) | edit_file indent-significant guard (this session); commit c99d4228 |
 | R-19 | 2026-06-09 | hit, miss, then cross-session hit (2026-06-21) | Scout home-project internals before presenting cross-project "B benefits from A" recommendations (claim `@ref` no-dedup → confirmed; claim "summarization generic" → drift: `format_compact` is per-tool; 2026-06-21 re-scout re-confirmed all 3 shapes + caught line-citation drift) | this session + 2026-06-21 re-scout; `output_buffer.rs:251`, `types.rs:435`, `sync.rs:34`; kin R-14 |
-| R-20 | 2026-06-09 | hit (validates R-3) | A bug-file's hand-cited fix-plan line list is not the blast radius (workspace-root grep found a 3rd build-breaking assert at `tests.rs:257` + a 0-match fixture lead) | bug-fix F-15 + W-10 |
+| R-20 | 2026-06-09 | **archived** → R-49 + R-3 | A bug-file's hand-cited fix-plan line list is not the blast radius (workspace-root grep found a 3rd build-breaking assert at `tests.rs:257` + a 0-match fixture lead) | bug-fix F-15 + W-10 |
 | R-21 | 2026-06-09 | hit | Verify a side-effect through its real production entry point (CLI/MCP), not a unit harness that bypasses `main.rs`; `references()` the operation to enumerate ALL call sites before placing it (`sync_project`: 5 sites, write reached 1 of 3 project paths) | index-freshness F-1 + W-1; commit 10dcfb9f |
 | R-22 | 2026-06-11 | hit | Scout the LSP call path to confirm a staleness mechanism before choosing the fix layer (references false-zero: `did_open` syncs def-file only, no barrier; all LSP signals share the staleness so the fix must be LSP-independent) | issues/2026-06-09-references-false-zero; commit ddc7e3f1; kin R-21 |
 | R-23 | 2026-06-11 | hit, then miss | Re-derive an inherited diagnosis from usage.db telemetry (hit); verify a shared single-holder-resource recovery by READING lock/process state, not by issuing a call from a 2nd client which re-creates the contention (miss) | bug-fix F-16 + W-12; issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision |
 | R-24 | 2026-06-11 | hit | Scout the resource-key derivation before designing a concurrency test; path-keyed hashing makes worktrees a safe fan-out fixture | bug-fix W-13 + F-18; issues/2026-06-11-lsp-tools-ignore-workspace-pin-path |
 | R-25 | 2026-06-11 | hit | Scout the catalog's status source + id-keying before archiving a librarian tracker (status lives in the catalog row not the file; `id=sha256(abs_path)` so `git mv`+reindex orphans history) → `artifact(update)`+`artifact(move)` | this session; commit `b487a69c`; kin R-24/R-15 |
 | R-26 | 2026-06-11 | hit | A grep line-match locates a symbol; it doesn't confirm a mechanism — read the body before narrating "confirmed" (`kill_on_drop`→SIGKILL-orphan verified at `process.rs:66-135`, no reaper in the spawn path) | this session — mux-LSP-sharing brainstorm; kin R-19/R-5/R-23 |
-| R-27 | 2026-06-12 | hit | A subagent's prose control-flow claim is a hypothesis, not a finding — read the fn body before a fix rests on its mechanism (Explore report: "`OutputForm::Text` forces inline always" + recommended it as the fix; `call_content` gates the buffer on `exceeds_inline_limit` UNCONDITIONALLY before the form branch) | bug-fix F-19 + W-14; kin R-26/R-19/R-9 |
+| R-27 | 2026-06-12 | **archived** → R-26 | A subagent's prose control-flow claim is a hypothesis, not a finding — read the fn body before a fix rests on its mechanism (Explore report: "`OutputForm::Text` forces inline always" + recommended it as the fix; `call_content` gates the buffer on `exceeds_inline_limit` UNCONDITIONALLY before the form branch) | bug-fix F-19 + W-14; kin R-26/R-19/R-9 |
 | R-28 | 2026-06-12 | hit + miss | Enumerate a prompt surface's full gate set before editing (byte-for-byte slice, snapshot fixture, cap, ONBOARDING_VERSION pin, content tests); targeted `cargo test --lib <module>` filters miss cross-cutting gates in `server::tests` (over-budget get_guide description shipped via a narrow filter) | bug-fix F-20 + W-15; kin R-1/R-7/R-27 |
 | R-29 | 2026-06-13 | hit | Verify a flight-recorder-harvested target exists in the active repo before ranking/acting on it — `.codescout/usage.db` is keyed by commit-SHA and mixes every project the process served (40 project_shas; a mirela `CalendarService` phantom surfaced in a codescout survey) | dzo-legibility F-1 + W-1; kin R-23 |
-| R-31 | 2026-06-14 | hit (validates R-3 + R-26) | A bug-file's "param never parsed anywhere" claim, evidenced by a grep scoped to the modified file(s), missed a parser one call-hop away — `read_file`'s "offset/limit never parsed" missed `OutputGuard::from_input` (`output.rs:96`), which `read_full_file` calls. Follow the param into callees; don't trust the file-scoped audit. | bug-fix F-22; issues/2026-06-14-read-file-offset-limit; kin R-3/R-26 |
+| R-31 | 2026-06-14 | **archived** → R-49 + R-3 | A bug-file's "param never parsed anywhere" claim, evidenced by a grep scoped to the modified file(s), missed a parser one call-hop away — `read_file`'s "offset/limit never parsed" missed `OutputGuard::from_input` (`output.rs:96`), which `read_full_file` calls. Follow the param into callees; don't trust the file-scoped audit. | bug-fix F-22; issues/2026-06-14-read-file-offset-limit; kin R-3/R-26 |
 | R-30 | 2026-06-13 | miss → proposal | When a structural feature appears to *block* a tool, test the tool's documented alternate addressing form before refactoring code around it — read `find_unique_symbol_by_name_path`/`symbol_name_matches` but never tried the qualified `impl Trait for Type/method` form the not-found hint itself *documents*, so concluded `edit_code` was blocked and relocated 11 trait impls for a non-block. Reading the resolver ≠ testing the escape hatch. | dzo-legibility F-9; ADR docs/adrs/2026-06-13-drop-name-collision-defect.md; kin R-26/R-27 (read ≠ verified) |
 | R-32 | 2026-06-14 | hit | An off-the-cuff root-cause unification across a bug cluster is a hypothesis, not a finding — read each bug's implicated code before presenting "they share one root cause / one fix" (3 open "catalog/path" bugs by title → 3 distinct files/mechanisms; only 2 shared a narrower root: global-abspath catalog reasoned-about-as-per-workspace) | bug-fix F-21; issues 2026-06-13 catalog trio; kin R-12/R-19/R-27 |
 | R-33 | 2026-06-15 | hit | A reconciliation audit marked two adjacent legacy-era symbols (`fusion::rrf_fuse`, `schema::SearchResult`) both "graduated to live — keep"; `references()` showed OPPOSITE liveness (rrf_fuse test-only → deleted; SearchResult live → kept). Dead-vs-live is per-symbol call-graph, not file-proximity. | legacy-retrieval-removal L-08; this session; kin R-26/R-27/R-21 |
 | R-34 | 2026-06-15 | hit | On a cross-platform branch, the host `cargo check` is necessary-not-sufficient for a rebase — it never compiles the gated target. After rebasing `vdi-windows` onto `experiments` (conflict in the `#[cfg(unix)]` peer gate itself), cross-compiled `--target x86_64-pc-windows-gnu` to confirm the incoming commits added no ungated unix-only code (EXIT=0). Compile the target the branch exists for, not just the host. | `vdi-windows` rebase this session; `src/tools/mod.rs` peer-gate; WIN-23; kin R-5 |
 | R-35 | 2026-06-16 | hit | A tool's own error diagnostic is a hypothesis, not ground truth. `edit_code`'s "AST parse failed — likely syntax errors or duplicate siblings" was falsified by `symbols()` (clean parse, unique name_path); the archived backtick bug was already fixed. A throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned the real cause in one run: AST start 214 (annotation line) vs LSP 216 (`fun` line), matcher flips Some→None at the ±1 gate. Reproduce the failing internal call when a cheaper read disagrees with the error text. | bug-fix W-17/F-23; issues/2026-06-16-kotlin-edit-code-annotation-line-gap; kin R-5/R-32 (diagnostic/claim ≠ ground truth) |
 | R-36 | 2026-06-28 | hit (validates R-3 / R-20) | Struct/config-field removal blast radius includes serde **data fixtures**, not just source — scope the verification drift-grep to `tests/` (incl. `tests/fixtures/**/*.toml`), not just `src/`. `SecuritySection` has no `#[serde(deny_unknown_fields)]`, so stale keys (`shell_enabled`, `shell_output_limit_bytes`) in two fixture `project.toml`s were silently dropped — `cargo test` stayed green; only the `src/ tests/` drift-grep surfaced them. Same serde-silent-ignore property that makes the user migration a footgun is what hid the fixture drift from compiler + tests. Promote-when (2 datapoints) → codescout memory `reconnaissance` (project-shaped: Rust+serde+TOML). | issues/2026-06-28-vestigial-shell-output-limit-bytes; tests/fixtures/{rust,kotlin}-library/.codescout/project.toml:18-19; kin R-3/R-20 |
-| R-37 | 2026-07-03 | miss (recurrence of R-28) | Adding a get_guide topic edits TWO gated surfaces beyond registration: the tool description (300-char budget test in `server::tests`) and the no-arg listing (hardcoded topic count). Scout the tests' assertions, not their names; convert hardcoded counts to derive from the canonical const. Full `--lib` gate absorbed the miss pre-commit. | tracker-as-skill session (untrusted-content topic, A-5); kin R-28/R-1/R-7 |
-| R-38 | 2026-07-03 | miss | Re-derived a finding a concurrent session had already MEASURED because the existing audit-log wasn't scouted first — independently built a precision gate for the tracker-hygiene D1 gap, then found the plugins Hamsa ledger had already measured it (n=5, both tiers). The seam for a derive/record-a-finding task includes the KNOWLEDGE state (ledger entries on the subject), not just the code. | A-8/A-9 session (#22); plugins Hamsa ledger; kin R-19 |
+| R-37 | 2026-07-03 | **archived** → R-28 | Adding a get_guide topic edits TWO gated surfaces beyond registration: the tool description (300-char budget test in `server::tests`) and the no-arg listing (hardcoded topic count). Scout the tests' assertions, not their names; convert hardcoded counts to derive from the canonical const. Full `--lib` gate absorbed the miss pre-commit. | tracker-as-skill session (untrusted-content topic, A-5); kin R-28/R-1/R-7 |
+| R-38 | 2026-07-03 | **archived** → R-55 | Re-derived a finding a concurrent session had already MEASURED because the existing audit-log wasn't scouted first — independently built a precision gate for the tracker-hygiene D1 gap, then found the plugins Hamsa ledger had already measured it (n=5, both tiers). The seam for a derive/record-a-finding task includes the KNOWLEDGE state (ledger entries on the subject), not just the code. | A-8/A-9 session (#22); plugins Hamsa ledger; kin R-19 |
 | R-39 | 2026-07-10 | hit | Adding a tool param/alias is additive-safe in codescout: every `*_schema_*` test is positive-presence (`props["x"].is_object()` / `contains_key`), none enumerate the exact prop set, and no `input_schema()` sets `additionalProperties:false` — so a new prop can't break a snapshot, and an unknown key flows through to `call()` (the very mechanism the alias fix relies on). | param-alias-ergonomics session (this session); 3038 lib passed / 0 failed; kin R-28/R-36 |
-| R-40 | 2026-07-10 | hit (extends R-29) | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
+| R-40 | 2026-07-10 | **archived** → R-69 | usage.db error COUNTS are commit-mixed AND time-spanning — a high-count friction may already be FIXED in current code; verify the candidate against today's substrate before fixing. The `json_path` quoted-key friction (~200 events, the largest non-alias cluster) was already closed 2026-07-01 (`split_on_unbracketed_dot` + `strip_matching_quotes`); a count-only ranking would have "fixed" it twice. | param-alias-ergonomics session (this session); `file_summary.rs`; kin R-29/R-23 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
 | R-55 | 2026-08-06 | miss → proposal | **A file's open-bug ledger is part of its shape — query it by FILE IDENTITY, not by task category.** The bootstrap guide already carries the rule ("Bug or regression work: `artifact(find, kind=bug, status=open)` … don't re-file a filed bug as new") and it was auto-injected into the session's FIRST tool response. It still missed, because its trigger is the task's self-classification: a session framed as *docs + merge prep* answers "am I doing bug work?" with no, right up until it edits a file that has an open high-severity bug against it. Retrigger on the edit instead: before the first change to any file, `artifact(action="find", kind="bug")` constrained to that path or subsystem. What the ledger holds is not reachable any other way — the code does not show it and neither does git log: **chosen-but-unimplemented fix candidates, preconditions on landing, and cross-change sequencing decisions.** | release-promotion F-2; `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` (open, high) named this exact fix as candidate 1 verbatim — reimplemented at `ca442498` with its stated precondition ("validated against the retrieval benchmark … must be measured, not assumed") unmet and its recorded ordering (throughput work first, being vector-identical) jumped; separately re-filed `2026-07-28-audit-doc-refs-json-pointer-false-positive` as new. Both surfaced ~60 tool calls late, by an unrelated verify-open pass, not by recon. Kin R-49 (re-scout your own bug file before implementing it), R-19 |
@@ -125,10 +125,10 @@ skill).
 | R-49 | 2026-07-28 | hit | Re-scout your OWN bug file / plan before implementing it — an artifact written during the observation is a hypothesis that acquires the authority of a record the moment it is committed. When a root cause cites two functions, read the layer BETWEEN them: a chain's middle is where the guards live, and a mechanism inferred from its two ends will never mention them. Three failures of session-authored artifacts in one session (inverted fix option, overstated doc guarantee, unsupported root cause) | bug-fix F-37 + W-29, F-34/W-26, F-35; issues/2026-07-28-edit-code-target-base-from-stale-lsp-range (mitigated); kin R-32/R-46 |
 | R-48 | 2026-07-28 | hit | A fix built from a bug report's reproduction inherits that reproduction's blind spots, and a test suite written against the same fixture inherits them too — seven tests all reused the report's `"\` shape and none could see that a plain `"` + raw newline (the commoner Rust form) was unprotected. Found by writing the end-to-end fixture the *natural* way and tracing the fix over it before running. For a syntax-level fix, enumerate the language's other syntaxes for the same construct before closing | bug-fix F-36 + W-28; issues/archive/2026-07-28-edit-code-reindent-shifts-string-literal-contents; kin R-26/R-27 (read ≠ verified), R-46 |
 | R-47 | 2026-07-28 | hit | Enumerate the callers of every function in the chain a fix touches, not only the symbol the report names — the report walked one call path. `reindent_to`'s 3 callers were all `edit_code`, but its delegate `reindent_block` had a second production caller (`edit_file/mod.rs:747`) with the same defect, reached without passing through `reindent_to`. Relocating the fix one level down doubled the surface closed at the same size of change | bug-fix W-27; issues/2026-07-28-edit-code-reindent-shifts-string-literal-contents (archived, `79cd1428`); kin R-17/R-31/R-44 |
-| R-46 | 2026-07-28 | hit | Choosing between candidate fixes needs the target's TEST module read, not just the target: the implementation shows what it does, only the tests show what may not change (a bug file's "cheapest, cannot break X" option was exactly inverted). Corpus census, not code, caught the companion H1 trap | bug-fix F-34 + W-26; kin R-19/R-44 |
+| R-46 | 2026-07-28 | **archived** → R-63 | Choosing between candidate fixes needs the target's TEST module read, not just the target: the implementation shows what it does, only the tests show what may not change (a bug file's "cheapest, cannot break X" option was exactly inverted). Corpus census, not code, caught the companion H1 trap | bug-fix F-34 + W-26; kin R-19/R-44 |
 | R-45 | 2026-07-28 | hit | Relocating a file needs a discovery-by-scan grep; caller enumeration is blind to it (generalises R-44: `cfg` on a value → callers are the consumer set; `cfg` on a location → callers are half of it) | bug-fix F-33 + W-25 |
 | R-44 | 2026-07-25 | hit | The write-side twin of R-43: before accepting a proposed `#[cfg]` gate on a `pub mod` declaration, enumerate the CONSUMER set (`grep <mod>::|use .*<mod>` at workspace root, `context_lines=2`) and check whether the config being gated OUT is the one the plan's own tests or invariants live in. Gating a module is a subtree delete; the declaration site cannot show its blast radius. | dependency-review session F-3 + W-2; `src/retrieval/mod.rs:3` + 14 ungated `RetrievalClient` consumers; kin R-43/R-5/R-17 |
-| R-43 | 2026-07-25 | miss | An attribute-binding claim (`#[cfg]`, `#[serde(...)]`, `#[tokio::test]`) can never be made from a grep hit: grep prints matching lines with line numbers but ELIDES the gap between them, and an attribute binds to the *next item* — usually not itself a match. Read the region before asserting the binding. | dependency-review session; `src/retrieval/mod.rs:1-17` (cfg at L1/L12 bound to `artifact`/`qdrant`, not `embedder` L7 / `reranker` L14); caught by `cargo check` (16× E0433); kin R-19/R-5/R-3 |
+| R-43 | 2026-07-25 | **archived** → R-26 + R-50 | An attribute-binding claim (`#[cfg]`, `#[serde(...)]`, `#[tokio::test]`) can never be made from a grep hit: grep prints matching lines with line numbers but ELIDES the gap between them, and an attribute binds to the *next item* — usually not itself a match. Read the region before asserting the binding. | dependency-review session; `src/retrieval/mod.rs:1-17` (cfg at L1/L12 bound to `artifact`/`qdrant`, not `embedder` L7 / `reranker` L14); caught by `cargo check` (16× E0433); kin R-19/R-5/R-3 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -169,40 +169,6 @@ pattern. Concrete addition: `SKILL.md § Phase 1 — Scout`, sub-bullet
 snapshot` to enumerate asserting tests."
 
 **Status:** promoted to SKILL.md (claude-plugins:f842848, 2026-05-28). Added as a 5th bullet under Phase 1 — Scout, citing R-1 + R-7 by name with the loophole-closing cross-reference from the "When NOT to Use" rewrite (same commit). Promote-when criterion fired with 2/2 datapoints — R-1 (mcp-prompt-redesign work stream, 2026-05-19) and R-7 (this session's prompt-guide-refactor F-4 + W-3, 2026-05-28).
-
----
-
-## R-2 — Scout missed constant-write patterns (`.replace(TOKEN, ...)`)
-
-**Verdict:** miss
-
-**Observed:** 2026-05-19, same work stream
-(`mcp-prompt-redesign-session-log.md` F-2).
-
-**Pattern that failed:** The scout grepped reads of the constant
-(`<CONST>.contains`, `.find`, etc.) but did NOT grep *writes into*
-the constant via runtime token substitution (`SERVER_INSTRUCTIONS
-.replace(SYMBOL_NAV_TOKEN, &nav_content)`). When the token left
-`source.md`, the `.replace` became a silent no-op — the
-language-specific nav block was dropped at runtime. Recon missed it;
-the spec reviewer flagged it during U4 review.
-
-**Cost absorbed:** 1 extra fix-up subagent dispatch (U4 fix-up).
-
-**Pattern proposal (folds into R-5):** Phase 1 grep should include
-constant **writes** as well as reads:
-
-```
-<CONST>.replace(<TOKEN>, ...)
-<CONST>.replacen(...)
-write_str! / format! using the constant
-```
-
-For string-substitution prompts, also enumerate every `TOKEN`-style
-constant declared near the surface and grep callers.
-
-**Promote-when:** R-2 + one more "write-side substitution missed"
-miss → promote the expanded grep vocabulary to SKILL.md.
 
 ---
 
@@ -261,43 +227,6 @@ expansion.
 
 ---
 
-## R-5 — Add "compiler as scout" as a Phase-1 tool alongside grep
-
-**Verdict:** proposal
-
-**Source:** R-4 + W-2 in
-`docs/trackers/archive/mcp-prompt-redesign-session-log.md`.
-
-**Proposal:** `SKILL.md § Phase 1 — Scout` currently lists grep,
-`symbols`, and `references` as the scout's tools. Add a fourth:
-
-> **For non-`Option` field additions and similar exhaustive
-> enumeration problems, use the compiler as scout.** Add the field
-> (or whatever forces every site to update), run `cargo build`, and
-> let the compiler enumerate every site via "missing field" errors.
-> This is exhaustive by construction. Grep is for *finding* a
-> representative site; the compiler is for *counting* all of them.
-
-**Why this is a phase-1 tool, not a phase-4 fallback:** the scout's
-job is to estimate blast radius before dispatch. Wrong blast radius
-estimate → wrong dispatch (one subagent vs N, or one prompt with 13
-enumerated sites vs the right "use compiler-driven enumeration"
-instruction). The compiler-as-scout pattern *informs the dispatch
-prompt itself*, not just the implementation.
-
-**Caveats:**
-- Works only when the change *forces* all sites to update (required
-  field, trait method without default, etc.). Default-`None`
-  optional trait methods don't trigger compile errors.
-- Cost: one `cargo build` cycle per scout pass. For codescout that's
-  ~30-60s — acceptable.
-
-**Threshold to promote:** R-4 + one more datapoint where a
-struct-field-style change benefits from this approach. Currently
-1/2.
-
----
-
 ## R-6 — Explicit recon invocation on substrate before mechanism design
 
 **Verdict:** hit
@@ -331,39 +260,6 @@ architectural reality that anchors Iron Law 6.
 produces win" — pair with R-1 type hits to argue for promoting "always
 scout substrate state before locking a design that assumes specific
 storage" to SKILL.md. Currently 1/2.
-
----
-
-## R-7 — Miss: invariant test on `include_str!`'d file not pre-enumerated (R-1 applies)
-
-**Verdict:** miss → applies-existing-pattern R-1
-
-**Observed:** 2026-05-28, same work stream
-(`docs/trackers/prompt-guide-refactor-session-log.md` F-4 + W-3).
-
-**Pattern that failed:** Added Iron Law 6 (+282 bytes) to
-`src/prompts/source.md` without first enumerating invariant tests on
-the rendered `server_instructions` slice. The 2200-byte cap test
-`source_md_under_cap` at `src/prompts/mod.rs:1037-1046` fired
-loudly on `cargo test --lib prompt`, blocking the edit. R-1
-("Pre-dispatch grep for asserts on `include_str!`'d constants",
-validated 2026-05-19) would have caught this — `MAX_INSTRUCTIONS_CHARS`
-and the `redesign_invariants` module both turn up in a 5-second grep.
-
-**Pattern proposal (folds into R-1 promotion):** R-1 was already
-validated as needing SKILL.md promotion; this is the second datapoint.
-Cost of skipping recon here: 1 failed `cargo test`, 1 surgical cut to
-make room (`Gate:` quote lines in Iron Laws 2/4/5), 1 amend cycle.
-Estimated time penalty: ~5 minutes vs. ~30 seconds for the grep.
-
-**Cost absorbed:** 1 minor scope expansion (gate-quote cut bundled
-into the Iron Law 6 commit) + 1 amend on a working-tree-recovery
-incident downstream. Recoverable.
-
-**Promote-when:** R-1 promotion is now 2/2 datapoints (R-1 + R-7).
-Ship the SKILL.md promotion this turn or next.
-
-**Status:** R-1 promotion triggered same turn (claude-plugins:f842848, 2026-05-28). R-7 serves as the second datapoint that closed R-1's promote-when criterion; the new SKILL.md Phase 1 Scout bullet names BOTH R-1 and R-7 as evidence.
 
 ---
 
@@ -711,42 +607,6 @@ closing the bug class."
 
 **Source:** `src/tools/output_buffer.rs:251`, `src/tools/core/types.rs:435`, `src/retrieval/sync.rs:34`, `src/tools/run_command/tests.rs:2034` (line numbers refreshed 2026-06-21; symbol names are the stable anchors); this session's headroom cross-pollination analysis. Kin: R-14.
 
-## R-20 — A bug-file's hand-cited fix-plan line list is not the blast radius
-
-**Verdict:** hit (validates R-3)
-
-**Observed:** 2026-06-09, scouting the only open bug
-(`issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`)
-before editing `src/prompts/builders.rs`.
-
-**Pattern that worked:** R-3's "grep the workspace root, not the file being
-changed" applied verbatim — here against a *bug file's* Fix section, not a
-formal plan doc. The bug file cited tests at `run_command/tests.rs:286-287`;
-a workspace-root `grep project=` surfaced a third assertion at `:257`
-(`build_per_project_prompt_contains_project_context`) that pins the OLD
-string and flips green→red once the builder emits `project_id=`. The same
-grep proved the cited fixture (`tests/fixtures/prompt_surfaces/onboarding_prompt.md`)
-has 0 matches — the builder prompts are ephemeral `.codescout/tmp/` files,
-not part of that snapshot surface, so no fixture/`ONBOARDING_VERSION` work.
-
-**New wrinkle vs R-3:** the stale line list lived in a `docs/issues/*` bug
-file's Fix/Resume prose, which reads as authoritative ("apply edits at lines
-X,Y,Z"). A subagent handed the bug file would treat its line list as the
-blast radius. Bug-file Fix sections deserve the same "line list is a starting
-point, not the contract" skepticism as plan docs.
-
-**Cost avoided:** ≥1 red `cargo test` cycle (line 257) + a fixture hunt on a
-0-match surface + a possibly-spurious `ONBOARDING_VERSION` bump.
-
-**Promote-when:** R-3 is already promoted; this is a confirming datapoint that
-extends its scope to bug-file Fix sections. If a 3rd such case lands, widen the
-SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
-
-**Status:** hit; logged. Extends promoted R-3 to bug-file fix plans.
-
-**Fix idea / Pointer:** bug-fix-session-log F-15 + W-10; this session.
-
----
 ## R-21 — Verify a side-effect through its real entry point; `references()` the operation before placing it
 
 **Verdict:** hit — live verification caught a gap that 46 unit tests + a functional test could not.
@@ -819,11 +679,6 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Evidence:** this session — backend-kotlin mux/RocksDB lock-contention brainstorm; claim verified read-only against `src/lsp/mux/process.rs:66-135` (no commit). Open edge (R-15 kin, still unscouted): the same brainstorm's *upgrade* recommendation rests on an upstream changelog line — kotlin-lsp v261.13587.0 "indices … properly shared between multiple projects and LS instances" — known only via a WebFetch fast-model paraphrase of `RELEASES.md`, not a raw read; explicitly flagged verify-before-acting and not yet acted on.
 
-## R-27 — A subagent's control-flow *mechanism* claim is a hypothesis; read the fn body before a fix depends on it
-
-(hit) `/reconnaissance` invoked mid-fix for `get_guide` returning a `@tool_*` handle instead of the full guide. An `Explore` subagent dispatched to map the buffer-routing mechanism returned a confident, internally-contradictory report: it claimed `OutputForm::Text` *"forces inline output always"*, listed `symbols`/`read_markdown`/`memory`/`call_graph` as proof, and recommended **"Option A: override `output_form()` to Text"** (marked *Recommended*) — yet in the same report also wrote *"the buffering check still applies (line 554)"*. Reading `Tool::call_content` (`src/tools/core/types.rs:485-615`) resolved the contradiction in reality's favour: the overflow gate `if exceeds_inline_limit(&json)` runs **unconditionally** at ~`:554`, *before* the `OutputForm` match — which only selects `format_compact` vs pretty-JSON inside the small-output `else` branch. So `Text` never bypasses buffering, the listed tools ARE buffered when large, and Option A would have left the 14 KB guide buffered exactly as filed. The real fix is orthogonal to `output_form`: a `force_inline()` trait hook (default `false`) gating the overflow branch (`exceeds_inline_limit(&json) && !self.force_inline()`), overridden `true` on `GetGuide`. Lesson: a subagent describing *how* code branches is doing Phase-1 location dressed as Phase-2 confirmation — the internal contradiction ("forces inline always" vs "check still applies") was the tell. Treat a delegated mechanism claim exactly like a grep hit (R-26): it locates the relevant function; it does not confirm the branch *order*. One `symbols(<fn>, include_body=true)` settles it. Kin R-26 (grep ≠ mechanism), R-19 (assert checkable facts only post-read), R-9 (session-state recon at the dispatch boundary — this is its consumption-side mirror).
-
-**Evidence:** bug-fix F-19 + W-14; verified read-only against `src/tools/core/types.rs:485-615` (`Tool/call_content`); fix + regression test in `src/tools/guide.rs` (commit pending).
 ## R-28 — Enumerate a prompt surface's full gate set before editing; targeted test filters miss cross-cutting gates
 
 (hit + miss) Editing the onboarding system-prompt instructions touched `source.md` (onboarding_prompt surface), `memory-templates.md` (`{{include}}`'d into both single + workspace flows), `workspace_onboarding_prompt.md`, and `builders.rs`. **Hit:** pre-edit recon enumerated the gate set — `extracts_onboarding_prompt_byte_for_byte`, the `prompt_surfaces_onboarding_snapshot` fixture, the 2200-byte `source_md_under_cap`, the `assert_eq!(ONBOARDING_VERSION, 28)` version-pin, the workspace-scope heading-presence test, and the `"6 memories"` content test — so every gate update landed in one commit and only the snapshot needed a legitimate re-bless. **Miss:** a sibling change earlier the same session (get_guide description, `c799e887`) was verified with a *targeted* `cargo test --lib guide::` that did not include `server::tests::tool_descriptions_stay_under_budget` (`src/server.rs:1598`); the 329-char (cap 300) description shipped and was caught only by the onboarding task's full-suite run (bug-fix F-20). Lesson: a tool/field's validating gate often lives in a DIFFERENT module (`server::tests`) than the code it guards; `cargo test --lib <module>` filters silently skip it. Enumerate gates by what they assert on, not by where the edit sits — and run the full suite (or `server::`) for anything a global budget/snapshot gate validates. Kin R-1/R-7 (include_str'd-constant invariants), R-27 (verify before building on a claim).
@@ -847,21 +702,6 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Evidence:** `docs/trackers/archive/dzo-legibility-session-log.md` F-1 + W-1.
 
-## R-31 — A bug-file's "never parsed" claim, evidenced by a file-scoped grep, missed a parser one call-hop away
-
-**Verdict:** hit (validates R-3 + R-26)
-
-**Observed:** 2026-06-14, pre-fix recon for the read_file `offset`/`limit` bug (`issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`).
-
-**Pattern:** When a bug file asserts a parameter is "never parsed anywhere" and backs it with a grep scoped to the file(s) being modified, that audit cannot see a parser reached one call-hop away in another module. Follow the param into the helpers the modified function *calls*, not just the file's own text.
-
-**What happened:** The bug's E-1/E-2 grepped `read_file.rs` + `output_buffer.rs` and concluded `offset`/`limit` "are never parsed." But `read_full_file` calls `OutputGuard::from_input(input)` (`src/tools/output.rs:89`), which DOES parse both (`optional_u64_param(input, "offset")`, `…"limit"`, L96-97). The scout caught it by reading the body of the *called* helper, not by re-grepping — R-26 ("read the body, don't trust the line-match") applied to a callee rather than to the symbol under edit.
-
-**Counterfactual:** Taking "never parsed" at face value, Fix A option (a) (add `offset`/`limit` to `read_file`'s schema + map to line semantics in the buffer path) would have shipped a schema that silently collides with `OutputGuard`'s page-offset/page-size semantics on the real-file path — two meanings for one param name, and a schema that advertises an `offset` the real-file path never honors for navigation. The scout redirected the fix to option (b) (path-local error) before any code changed.
-
-**Proposal:** none new — reinforces R-3 (grep workspace root, not the file) and R-26 (read callee bodies before narrating "confirmed"). Datapoint toward making "follow the param into callees" an explicit Phase-1 step whenever a claim is about whether a param is *read* (vs. *used*).
-
-**Evidence:** bug-fix F-22; `docs/issues/archive/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; `src/tools/output.rs:89-112`; `src/tools/read_file.rs:555-664` (`read_full_file` builds the guard).
 ## R-33 — Dead-vs-live is a per-symbol call-graph fact, not a file-proximity fact
 
 **Date:** 2026-06-15 · **Verdict:** hit
@@ -930,45 +770,6 @@ of the internal call corrects it → distill into codescout memory `reconnaissan
 dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression test
 `find_ast_end_line_in_bridges_annotation_line_gap`; `cargo test --lib` 2790 passed.
 
-## R-37 — Miss (recurrence of R-28): get_guide topic added without enumerating the description-budget + topic-count gates
-
-**Observed:** 2026-07-03, adding the `untrusted-content` get_guide topic (data-vs-directive rule, audit-log A-5).
-
-**Scout done:** grepped `GUIDE_TOPICS` references (2 files — correct seam for registration) and read the guide.rs test *names*, but did not read their *assertions* before editing. Two gates fired at `cargo test --lib`: `server::tests::tool_descriptions_stay_under_budget` (description 309/300 chars after appending the topic name) and `tools::guide::tests::get_guide_lists_topics_with_no_arg` (hardcoded `names.len() == 8`).
-
-**Cost:** one failed gate cycle (~2 min), pre-commit; zero shipped harm — the full `--lib` run caught what R-28's narrow filter once let ship.
-
-**Fixes:** trimmed the description (" + summaries" dropped, 297/300) and made the count assertion derive from `GUIDE_TOPICS.len()` so the next topic can't re-trip it (gate de-rot, not just gate compliance).
-
-**Generalization (validates R-28/R-1/R-7):** "enumerate the full gate set of a prompt surface" includes the *tool-description* surface, not just source.md slices — any string a tool exposes through the MCP schema has a budget test in `server::tests`. When adding to an enumerated surface (topics, tools, laws), also grep the tests for hardcoded counts (`len() == N`) and convert them to derive from the canonical const while you're there.
-
-**Verdict:** miss — downstream gate absorbed it. Second datapoint for R-28's promote-when: distill "before editing any tool description or enumerated prompt surface, run the surface's budget/count gates first (grep `server::tests` for the tool name)" into codescout memory `reconnaissance`.
-
-**Evidence:** gate2 output (309/300; `left: 9, right: 8`); fixes in `src/tools/guide.rs` (description + derived count); gate3 green (2868 passed).
-
-## R-38 — Miss: re-derived a finding a concurrent session had already MEASURED; the existing audit-log wasn't scouted first
-
-**Observed:** 2026-07-03, hardening the tracker-hygiene D1 eval (#22). Independently
-"discovered" the precision gap (could the skill flag `README`/`CONVENTIONS` meta-files as
-D1?) and built a tier-3 precision assertion — then, on finally reading the claude-plugins
-Hamsa audit-log, found a concurrent session had already audited AND measured exactly that
-concern (n=5 across sonnet + haiku; outcome: the false-positive doesn't reproduce).
-
-**Miss:** the "seam" for a *derive-a-finding* or *record-a-finding* task includes the
-existing KNOWLEDGE state — the audit-log / tracker entries on the same subject — not just
-the code + eval. I scouted the code and the scenario but not the ledger, so I re-derived a
-settled measurement. Not wasted (my net-new contribution was a standing regression gate
-over their one-time measurement), but the duplication was avoidable, and I flagged it in
-the plugins follow-up.
-
-**Verdict:** miss (caught downstream by reading the ledger).
-
-**Proposal:** before deriving OR recording a new finding — especially in a
-concurrently-edited shared ledger — scout the existing audit-log / tracker entries on that
-subject first (`artifact(action="find", semantic=...)` / read the ledger section). Treat
-"has this already been measured / recorded?" as a seam to scout, exactly like a struct's
-fields. Promote-when: a second re-derivation-of-prior-work miss → codescout memory
-`reconnaissance`. Kin: R-19 (scout home internals before cross-project claims).
 ## R-39 — Adding a tool param/alias is additive-safe (positive-presence schema tests, no `additionalProperties:false`)
 
 **Observed:** 2026-07-10, unifying the path-param alias set across the file/markdown/symbol tools and adding `file_path`/`output_id` schema properties (param-alias-ergonomics session, driven by a usage.db error-pattern sweep across 72 project DBs).
@@ -982,14 +783,6 @@ fields. Promote-when: a second re-derivation-of-prior-work miss → codescout me
 **Generalization:** before worrying that adding a tool param/alias will break a schema snapshot or be rejected by strict validation — in codescout neither risk exists. Schema tests guard *presence*, not exact shape; schemas are *open* (`additionalProperties` unset). A param/alias addition is additive-safe. The one real gate a *description* edit must still clear is `server::tests::tool_descriptions_stay_under_budget` (R-28/R-37) — but adding a schema *property* (not touching `description()`) doesn't approach it. Kin: R-36 (serde has no `deny_unknown_fields` → the sibling open-schema property at the config-data layer).
 
 **Evidence:** positive-presence tests in `src/tools/{memory,semantic,symbol,ast,run_command}/tests.rs` + `src/tools/peer.rs`; schema assembly in `src/server.rs` (no `additionalProperties`); gate: 3038 passed / 0 failed. Promote-when (2nd datapoint): distill "adding a tool param/alias is additive-safe — schema tests are presence-only, schemas are open" into codescout memory `reconnaissance`. param-alias-ergonomics session (this session); commit pending.
-
-## R-40 — usage.db error counts are commit-mixed AND time-spanning; verify a candidate against current code before fixing
-
-**Observed:** 2026-07-10, mining usage.db (72 DBs) for fixable input-shape frictions after shipping the param-alias unification.
-
-**Scout done:** ranked candidate frictions by error count, then — before writing any fix — read the current code for each. The `read_file` `json_path` quoted-key friction (`$["1.5"]`, `$["2.1.3"]`) had ~200 events, the LARGEST non-alias cluster. But `file_summary.rs::split_on_unbracketed_dot` (comment cites `Bug 2026-07-01-...dotted-object-keys-unreachable`) plus `parse_bracket`'s `strip_matching_quotes` branch already handle it — the friction was closed 2026-07-01. The telemetry spanned months and mixed pre- and post-fix commits.
-
-**Verdict:** hit — a count-only ranking would have sent me to "fix" an already-fixed bug. This is R-29's phantom one axis over: R-29 is cross-*project* mixing, R-40 is cross-*time* staleness — same commit-SHA-keyed DB, same root cause. The real target (`artifact` filter inversion, 22 events) was confirmed by a *live* re-repro; json_path was a ghost.
 
 ## R-41 — A table-rebuild migration's `INSERT … SELECT` column list is a silent allow-list
 
@@ -1028,21 +821,6 @@ fields. Promote-when: a second re-derivation-of-prior-work miss → codescout me
 **Evidence:** `src/tools/file_summary/file_summary.rs` `split_on_unbracketed_dot` / `strip_matching_quotes`; live re-repro of the filter inversion (`unknown field \`contains\``). param-alias-ergonomics session.
 
 
-## R-43 — Miss: `#[cfg]` gating claimed from a grep hit; attributes bind positionally and grep hides the gap
-
-**Verdict:** miss (downstream gate — the compiler — caught it; narrows R-19, backstopped by R-5)
-
-**Observed:** 2026-07-25, dependency leanness review (`git2` question → full manifest audit). No scout was run before the claim was stated.
-
-**Pattern:** An attribute-binding claim — "this module is `#[cfg]`-gated", "this field is `#[serde(skip)]`", "this test is `#[tokio::test]`" — can never be made from a grep hit. `grep` prints matching lines with their line numbers but **elides the gap between them**; an attribute binds to the *next item*, which may be several lines away and is usually not itself a match. Read the region (`read_file(start_line, end_line)`) before asserting the binding.
-
-**What happened:** grep over `src/retrieval/mod.rs` for `^(mod|pub mod) (embedder|reranker)|cfg\(feature` returned `L1: #[cfg(feature = "server-stack")]`, `L7: pub mod embedder;`, `L12: #[cfg(feature = "server-stack")]`, `L14: pub mod reranker;`. Read as "both modules are gated" and stated to the user as fact. The file is an alphabetized `pub mod` list: L1's cfg binds to L2 `pub mod artifact;`, L12's to L13 `pub mod qdrant;`. `embedder` and `reranker` are **ungated**. Filtering for two patterns in one grep made the interleaving look like pairing.
-
-**Counterfactual:** The review's headline recommendation would have shipped as "make `reqwest` optional — one-line manifest change, saves 48 crates." That version does not compile: `embedder.rs` mixes reqwest-dependent types (`EmbedderHttp`, `HttpDenseEmbedder`) with the reqwest-free `EmbedOutput` / `SparseVector` / `BatchEmbedder` / `DenseEmbedder` surface that six other modules import, so the real change is a module split. It was caught only because the measurement loop happened to include `cargo check --no-default-features`, which returned 16× `E0433 unresolved module reqwest` in exactly those two files — i.e. R-5 ("compiler as scout") is what saved it, not the grep.
-
-**Proposal:** add to SKILL.md Phase 1 — *"Attribute-binding claims can never be made from a grep hit: grep elides the gap between matching lines, and an attribute binds to the next item. Read the region."* This narrows R-19 (assert checkable facts only after reading this session) to a specific high-frequency substrate class, and pairs with R-5 as the backstop when the read is skipped.
-
-**Evidence:** `src/retrieval/mod.rs:1-17`; `cargo check --no-default-features` → 16 errors confined to `src/retrieval/embedder.rs` + `src/retrieval/reranker.rs`; work-stream narrative in `docs/trackers/dependency-review-session-log.md` F-1 / W-1; kin R-19 / R-5 / R-3.
 ## R-44 — Hit: a proposed `#[cfg]` gate needs its consumer set enumerated, not its declaration site read
 
 **Verdict:** hit (recon caught it pre-dispatch; no downstream gate was reached because no code was written) — write-side twin of R-43, backstopped by R-5
@@ -1157,49 +935,6 @@ failed, 3307 lib tests; index-lock leak 7→0 files per run, mux leak 18→1.
 collection name, cache key) where scan-vs-compute decides the design. Craft-shaped,
 not project-shaped — holds in any language with a shared runtime directory — so the
 destination is `SKILL.md` Phase 1 as a named seam class, not a project memory.
-
-## R-46 — Hit: a target's own test module encodes intent the implementation cannot reveal; read it before choosing between candidate fixes
-
-**Verdict:** hit.
-
-Implementing the memory section-filter fix, the bug file (written earlier the same
-session) offered "match any heading level" as its cheapest option and asserted it
-"cannot break `language-patterns.md`". Reading `filter_sections`'s **test module**
-killed it in one step: `filter_sections_nested_h4_included_in_body` exists to assert
-that `####` is *body* inside its `###` section, so promoting every level to a boundary
-breaks a deliberate behaviour — and `language-patterns.md`, the only memory with `###`
-+ `####`, is precisely the file it would have damaged. The claim was inverted.
-
-The generalisable point: reading `filter_sections` itself shows *what* it does
-(`strip_prefix("### ")`) but not *which parts are load-bearing*. Only the tests
-distinguish incidental behaviour from contracted behaviour. A fix chosen from the
-implementation alone is a fix chosen without knowing what may not change.
-
-Second finding from the same scout, in the data rather than the tests: counting heading
-levels across all 21 memories showed 19 carry exactly one H1 as their title. Any
-"shallowest level wins" variant that includes H1 therefore makes the title the sole
-section and nests everything inside it — filtering would report a match and return the
-whole document. Silent, and worse than the bug being fixed. The corpus census, not the
-code, is what surfaced that.
-
-Relation to kin entries: R-19 says don't assert a checkable fact about a symbol without
-reading it this session. R-46 extends the target from the symbol to its **tests** — and
-specifically for the decision "which of N candidate fixes", where the reading needed is
-not of the code being changed but of the assertions constraining it. Also kin to R-44
-(enumerate the consumer set, not the declaration site): tests are a consumer set that
-caller-enumeration does not surface.
-
-**Evidence:** `bug-fix-session-log.md` F-34 (the inverted claim, with severity
-rationale) and W-26 (the fixture-vs-implementation diagnosis from the same fix).
-Shipped `d668927e`; 19/19 in `memory::filter`, full gate 3439 passed / 0 failed. Bug:
-`docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md`.
-
-**Promote-when:** a second case where a candidate fix is rejected by a pre-existing
-test that reading the implementation would not have surfaced. Craft-shaped — true of
-any language with a test suite — so the destination is `SKILL.md` Phase 1 as a bullet:
-*"choosing between candidate fixes: read the target's test module, not just the target
-— tests are where 'must not change' lives."*
-
 
 ## R-47 — Hit: enumerate the delegate's callers too; the report walked one call path
 
@@ -1726,18 +1461,6 @@ The cheap check was a sweep of the population the claim generalises over. `~/.co
 
 **Promote-when:** a second instance where a single-host symptom was generalised without a sweep. Pairs with R-38 (a concurrent session had already measured it) — both are "widen the evidence base before theorising".
 
-## R-56b — Hit: a shared constructor with a side effect makes every caller a distinct seam
-
-**Verdict:** hit
-
-2026-08-08, tracing why an unvalidated `project_id` produced directory litter. The reported path was `memory(write)`. `references(from_dir)` returned five call sites — `write`, `read`, two list paths, `delete` — all constructing `MemoryStore::from_dir`, and that constructor calls `create_dir_all` on the path it is handed.
-
-Probing the *non*-reported caller (`read`) surfaced a second, worse symptom the report never mentioned: `available_topics: []` plus the hint "no memory topics exist yet" for a project that does not exist — an absent project reported as merely empty. It also explained an asymmetry two hosts had made look like a configuration difference: `write` leaves a file (visible `??`), `read` leaves an empty directory (invisible), so the same defect presents as 8 entries on one machine and 2 silent ones on another.
-
-**Rule:** when a side effect lives in a *constructor* rather than in the operation, the seam is not the reported call path — it is every caller of the constructor. `references()` the constructor, then probe at least one caller that the report did not name. Reading the constructor is not enough; the interesting variation is in what each caller does *after* it (write a file vs. list an empty dir), and that is what determines the observable symptom.
-
-**Promote-when:** a third instance (R-17 and R-47 are the first two, both via delegates rather than constructors). At three, the SKILL.md seam-class list earns an entry: *a shared construction with a side effect in it — enumerate callers, probe an unreported one*.
-
 ## R-57b — Miss: an identifier's shape says nothing about whether the thing exists — check its declared root
 
 > **Id split 2026-08-16.** This entry reused a number already taken by a
@@ -1819,43 +1542,6 @@ grep after `references()` came back complete. Closely related to the codescout m
 declaring module") — this is that law applied to a heuristic rather than a subprocess
 call, where the tell is a code shape rather than a syscall string.
 
-## R-59b — Miss ×3: implementing from a bug file is a seam, and its Root cause is someone else's unverified reading
-
-**Observed:** 2026-08-08. Three bug files worked back to back
-(`63279f39570cd44a`, `9f823aabb84378a0`, `0fad8145011692a9`). All three Root cause
-sections were wrong in a way that changed the fix. Full table in F-28,
-`docs/trackers/release-promotion-session-log.md`.
-
-**Why recon did not fire.** The skill's *When to Use* covers "before editing code whose
-shape you have not verified" — which this was, every time. It did not read as a seam
-because a bug file **presents as prior reconnaissance**: it has a Root cause section, a
-mechanism in mechanism-language, file paths, sometimes line numbers. It looks like the
-scout already happened. It usually did not: a bug file is written at the moment of
-discovery, from the response payload and the symptom, by someone who has just lost work.
-That is the right trade at capture time and it makes the artifact's confident register
-misleading later.
-
-The sharpest instance: the rename bug file said, in its own text, *"inferred from the
-response payload — the rename implementation was not read."* It was honest, it was
-prominent, and reading it still did not prevent planning a fix around the inference — the
-surrounding detail was specific enough to feel scouted.
-
-**Proposal.** Add to *When to Use*: **"Before implementing a fix from a bug file, plan, or
-spec someone else wrote."** Its Root cause is a hypothesis unless it cites a command and a
-date. Read the function the fix will change, then compare — the comparison is Phase 2, and
-in all three cases it produced a different fix, twice a safer one:
-
-- proposed "rename the union" → unsafe: `kind` classifies the FILE, so it rewrites comments
-- proposed "refuse and require opt-in" → unavailable: writes are already committed
-- assumed "the check ran and declined" → the check did not exist on that path
-
-**Also: a grep count finds candidates, it does not decide.** `grep -c '^kind:'` returned 2
-for the corrupted file **and** 2 for a healthy one whose second match sat inside a fenced
-example. Whatever the count says, read the block.
-
-**Verdict:** miss — three in one session, cited as F-28. Proposal pending; promote-when is
-one more instance of a bug-file Root cause being falsified by reading, at which point it
-is four and belongs in `SKILL.md` rather than here.
 ## R-75 — A process-level env scrub is not configuration isolation
 
 **Observed:** 2026-08-13, verifying end-to-end that the local ONNX embedding path runs
