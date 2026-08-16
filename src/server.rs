@@ -2312,11 +2312,35 @@ mod tests {
         use crate::prompts::{GUIDE_TOPICS, PULL_ONLY_GUIDE_TOPICS};
 
         let (_dir, server) = make_server().await;
-        let triggered: std::collections::BTreeSet<&str> = server
-            .tools
-            .iter()
-            .filter_map(|t| t.relevant_guide_topic())
-            .collect();
+
+        // A trigger may inspect the result, so one tool can reach different topics on
+        // different calls. Probe each tool with representative result shapes and take the
+        // union — a single probe under-reports and would let a wired topic look unwired,
+        // which is the failure this gate exists to prevent, inverted.
+        let probes = [
+            serde_json::json!({}),
+            serde_json::json!({"overflow": {"shown": 1, "total": 2}}),
+            serde_json::json!({"abs_path": "docs/trackers/x.md"}),
+            serde_json::json!({"abs_path": "docs/issues/x.md"}),
+            serde_json::json!({"abs_path": "src/main.rs"}),
+        ];
+        // There are TWO delivery paths, and scanning tool impls only sees one. The
+        // session opener fires from `call_content`'s empty-ledger branch on the first
+        // guide-eligible call of any session, whatever tool made it — so it is triggered
+        // by construction and no `relevant_guide_topic()` needs to name it. Omitting this
+        // made the gate fail a guide that is in fact delivered, which would have been
+        // "fixed" by re-adding a redundant trigger.
+        let mut triggered: std::collections::BTreeSet<&str> =
+            [crate::prompts::SESSION_OPENING_GUIDE]
+                .into_iter()
+                .collect();
+        for tool in &server.tools {
+            for probe in &probes {
+                if let Some(topic) = tool.relevant_guide_topic(probe) {
+                    triggered.insert(topic);
+                }
+            }
+        }
 
         for topic in GUIDE_TOPICS {
             let declared = PULL_ONLY_GUIDE_TOPICS.iter().any(|(t, _)| t == topic);
@@ -3831,6 +3855,55 @@ mod guide_hint_tests {
                 .unwrap_or_default()
                 .contains("librarian"),
             "expected _guide_hint mentioning 'librarian' on first artifact call"
+        );
+    }
+
+    /// An artifact call that touches a tracker or bug file delivers the guide about
+    /// tracker conventions, not the general librarian guide.
+    ///
+    /// `tracker-conventions` (10.4 KB: frontmatter, the status vocabulary,
+    /// archive-through-the-catalog) was authored, cited from prose, and wired to nothing
+    /// — one of the 7 of 10 topics BL-25 found firing for nobody. Two guides serve this
+    /// tool and only one is delivered per call, so the choice is made from what the call
+    /// actually touched.
+    ///
+    /// Note the coupling with `first_artifact_call_emits_librarian_hint` above: that test
+    /// runs `find kind=tracker` and still expects `librarian`, which holds because its
+    /// catalog is empty and `items: []` names no path. Populate that fixture and it would
+    /// route here instead. Stated so the dependency is visible rather than a trap.
+    ///
+    /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    #[tokio::test]
+    async fn an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
+        let tool = tool_by_name(&server, "artifact");
+
+        let result = tool
+            .call_content(
+                json!({
+                    "action": "create",
+                    "kind": "tracker",
+                    "title": "Guide routing probe",
+                    "rel_path": "docs/trackers/guide-routing-probe.md",
+                    "body": "probe",
+                    "augment": { "prompt": "keep the probe" }
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let hint = extract_hint(&result).unwrap_or_default();
+        assert!(
+            hint.contains("tracker-conventions"),
+            "a call creating a docs/trackers/ artifact must deliver the tracker guide, \
+             got: {hint}"
+        );
+        assert!(
+            !hint.contains("get_guide(\"librarian\")"),
+            "one guide per call — the general librarian guide must not also fire: {hint}"
         );
     }
 

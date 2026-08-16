@@ -179,25 +179,6 @@ pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
          already read the pointer.",
     ),
     (
-        "tracker-conventions",
-        "PENDING BL-25: candidate trigger is `artifact`/`librarian` when the target is \
-         under docs/issues/ or docs/trackers/, which needs per-call granularity the \
-         tool-level hook does not have. 10.4 KB, and `librarian` already fires 19.9 KB on \
-         the same tools.",
-    ),
-    (
-        "workspace-state",
-        "PENDING BL-25: candidate trigger is the `workspace` tool, which today fires \
-         `project-activation-bootstrap` instead. `a926fdf5` moved the subagent \
-         workspace-pinning rule here out of the always-loaded slice, so this is the \
-         measured instance of the eviction.",
-    ),
-    (
-        "symbol-navigation",
-        "PENDING BL-25: the obvious triggers (symbols/references/call_graph) already fire \
-         `progressive-disclosure`, and a tool emits at most one topic per call.",
-    ),
-    (
         "untrusted-content",
         "PENDING BL-25: not yet classified. The candidate trigger is whichever surface \
          first admits third-party text, which has not been identified.",

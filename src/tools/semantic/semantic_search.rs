@@ -417,7 +417,7 @@ impl Tool for SemanticSearch {
              Returns ranked chunks with file path and line range."
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
+    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
         Some("progressive-disclosure")
     }
 

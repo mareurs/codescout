@@ -68,8 +68,24 @@ impl Tool for Symbols {
         "symbols"
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
-        Some("progressive-disclosure")
+    fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
+        // Two guides, one slot, chosen by what this result is.
+        //
+        // On an overflowing result the buffer mechanics matter more than navigation, so
+        // `progressive-disclosure` still wins. On a result that fits, that topic is
+        // wasted: `call_content` gates it on overflow having actually happened, so
+        // returning it there delivers *nothing at all*. `symbol-navigation` was authored
+        // and never wired (BL-25), and this is the slot it costs nothing to occupy.
+        //
+        // `progressive-disclosure` keeps six other triggers (grep, tree, read_file,
+        // run_command, read_markdown, semantic_search), so a session still receives it.
+        //
+        // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        if result.get("overflow").is_some() || result.get("output_id").is_some() {
+            Some("progressive-disclosure")
+        } else {
+            Some("symbol-navigation")
+        }
     }
 
     fn description(&self) -> &str {

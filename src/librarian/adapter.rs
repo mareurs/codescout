@@ -179,7 +179,28 @@ impl crate::tools::Tool for LibrarianAdapter {
         }
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
+    fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
+        // Two guides serve this tool and only one can be delivered per call, so pick by
+        // what the call actually touched rather than always sending the bigger one.
+        //
+        // A response naming a path under `docs/issues/` or `docs/trackers/` is a
+        // bug-file or tracker operation, and `tracker-conventions` (frontmatter, the
+        // status vocabulary, archive-through-the-catalog) is what the caller is about to
+        // need. Nothing fired it before 2026-08-16 — it was authored, pointed at, and
+        // never connected. `librarian` remains the default for everything else.
+        //
+        // Result-based rather than input-based because `call_content` moves `input` into
+        // `call()` before the hint is computed, while the result is in scope and already
+        // carries `abs_path` on every artifact response. No clone, no plumbing.
+        //
+        // The ledger deduplicates per topic, so a session doing tracker work can receive
+        // both over its lifetime (10.4 KB + 19.9 KB). That is the byte tension BL-25
+        // records; the corpus cut is the answer to it, not withholding the guide.
+        //
+        // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        if names_tracker_path(result) {
+            return Some("tracker-conventions");
+        }
         Some("librarian")
     }
 
@@ -239,6 +260,35 @@ impl LibrarianAdapter {
             lsp: Arc::clone(&self.ctx.lsp),
         })
     }
+}
+
+/// Whether a librarian response names a path under the bug-file or tracker directories.
+///
+/// Scans `abs_path`/`rel_path` at the top level and one level into a `find`-style `items`
+/// array — deliberately shallow. A deep walk over an arbitrarily large response to choose
+/// a guide would cost more than the guide saves, and the shallow form covers the shapes
+/// that actually carry a path: `get`/`create`/`update`/`move` return one at the top level,
+/// `find` returns them per item.
+///
+/// Forward-slash comparison is safe here: `rel_path` is always stored forward-slash (see
+/// `librarian(action="doctor")`'s forward-slash check), and `abs_path` is relativized by
+/// the path-strip pass before `call_content` computes the hint.
+fn names_tracker_path(result: &Value) -> bool {
+    fn is_tracker_path(v: Option<&Value>) -> bool {
+        v.and_then(Value::as_str)
+            .is_some_and(|p| p.contains("docs/issues/") || p.contains("docs/trackers/"))
+    }
+    fn any_path_field(obj: &Value) -> bool {
+        is_tracker_path(obj.get("abs_path")) || is_tracker_path(obj.get("rel_path"))
+    }
+
+    if any_path_field(result) {
+        return true;
+    }
+    result
+        .get("items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(any_path_field))
 }
 
 /// Compact summary shown in place of a buffered librarian response.
@@ -329,6 +379,47 @@ mod tests {
         // must not be hijacked into an artifact-body message.
         let result = json!({ "overflow": { "shown_lines": 1, "total_lines": 2 } });
         assert!(librarian_compact_summary("librarian", &result).is_none());
+    }
+
+    /// The guide the librarian delivers depends on what the call touched.
+    ///
+    /// `tracker-conventions` was authored, pointed at from prose, and wired to nothing
+    /// (BL-25). It is the guide a bug-file or tracker operation actually needs, and this
+    /// is the discriminator that routes to it — result-based, because `call_content`
+    /// moves `input` into `call()` before the hint is computed while the result is still
+    /// in scope and already carries `abs_path`.
+    ///
+    /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    #[test]
+    fn tracker_paths_route_to_the_tracker_guide_and_nothing_else_does() {
+        // Top-level shapes — what get/create/update/move return.
+        assert!(names_tracker_path(&json!({
+            "abs_path": "docs/trackers/open-issue-work-queue.md"
+        })));
+        assert!(names_tracker_path(&json!({
+            "rel_path": "docs/issues/2026-08-16-some-bug.md"
+        })));
+
+        // `find` returns paths per item, not at the top level — the shape a
+        // top-level-only check would silently miss.
+        assert!(names_tracker_path(&json!({
+            "items": [
+                {"abs_path": "src/main.rs"},
+                {"abs_path": "docs/trackers/x.md"},
+            ]
+        })));
+
+        // Everything else keeps the default `librarian` guide.
+        assert!(!names_tracker_path(&json!({ "abs_path": "src/main.rs" })));
+        assert!(!names_tracker_path(
+            &json!({ "items": [{"abs_path": "README.md"}] })
+        ));
+        assert!(!names_tracker_path(&json!({})));
+        // A near-miss that must not match: the directory names have to be path
+        // segments, and a bare mention in some other field is not one.
+        assert!(!names_tracker_path(&json!({
+            "title": "how docs/trackers/ works"
+        })));
     }
 
     #[test]

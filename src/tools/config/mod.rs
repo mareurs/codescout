@@ -88,18 +88,22 @@ impl Tool for Workspace {
             Some(format_project_status(result))
         }
     }
-    fn relevant_guide_topic(&self) -> Option<&str> {
-        // Fires the project-activation-bootstrap guide via the V2 hard-injection
-        // path. Tool-granular (no access to `action`), but `activate` clears the
-        // guide ledger in `call()` before `call_content` re-checks it, so the
-        // guide re-injects on every activate. A pre-activate status/list call
-        // fires it once (harmless); post-activate calls are ledger-suppressed.
+    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
+        // `workspace-state` — the guide about home/foreign activation and the
+        // restore-before-you-finish rule — is the one this tool's caller is about to
+        // need. Until 2026-08-16 nothing fired it at all: `a926fdf5` moved the subagent
+        // workspace-pinning rule out of the always-loaded `server_instructions` slice
+        // into that file to fit the 2200-byte cap, and the file had no trigger, so the
+        // rule stopped reaching anyone. It is the measured instance of BL-25.
         //
-        // Since 2026-08-16 this is a backstop rather than the sole trigger: an
-        // empty ledger fires the same guide from any tool (`call_content` in
-        // src/tools/core/types.rs). This arm still matters because `activate`
-        // clears the ledger mid-session, re-arming the guide for the new project.
-        Some(crate::prompts::SESSION_OPENING_GUIDE)
+        // This arm used to return SESSION_OPENING_GUIDE. That was already redundant:
+        // `activate` clears the guide ledger inside `call()`, and `call_content`
+        // re-checks it afterwards — an empty ledger fires the opener from the
+        // empty-ledger branch regardless of what this returns. The re-arm is therefore
+        // unaffected, and `post_compact_rearms_guide_hints` covers it.
+        //
+        // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        Some("workspace-state")
     }
 }
 

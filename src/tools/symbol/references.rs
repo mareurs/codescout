@@ -117,8 +117,15 @@ impl Tool for References {
         "Find all usages of a symbol. Requires symbol and file."
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
-        Some("progressive-disclosure")
+    fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
+        // Same split as `symbols`: overflow → the buffer guide, otherwise the navigation
+        // guide, which `call_content` would have dropped anyway on a result that fits.
+        // See `Symbols::relevant_guide_topic` for the full rationale and BL-25.
+        if result.get("overflow").is_some() || result.get("output_id").is_some() {
+            Some("progressive-disclosure")
+        } else {
+            Some("symbol-navigation")
+        }
     }
 
     fn input_schema(&self) -> Value {

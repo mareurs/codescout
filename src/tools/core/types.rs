@@ -644,7 +644,7 @@ pub trait Tool: Send + Sync {
                 let topic = crate::prompts::SESSION_OPENING_GUIDE;
                 emitted.insert(topic.to_string());
                 Some(topic.to_string())
-            } else if let Some(topic) = self.relevant_guide_topic() {
+            } else if let Some(topic) = self.relevant_guide_topic(&val) {
                 if emitted.contains(topic) {
                     None
                 } else {
@@ -792,7 +792,7 @@ pub trait Tool: Send + Sync {
     ///
     /// Default None — most tools' rules fit in their description and
     /// don't need the hint.
-    fn relevant_guide_topic(&self) -> Option<&str> {
+    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
         None
     }
 }

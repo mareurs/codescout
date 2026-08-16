@@ -27,7 +27,7 @@ impl Tool for Tree {
         "Explore the filesystem. With `glob` set, returns matching files (e.g. '**/*.rs'). Without `glob`, lists directory entries (recursive optional). Respects .gitignore."
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
+    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
         Some("progressive-disclosure")
     }
 

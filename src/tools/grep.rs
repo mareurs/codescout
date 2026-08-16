@@ -21,7 +21,7 @@ impl Tool for Grep {
         "Regex search across files. Flags: ignore_case, whole_word, glob (\"*.rs\"), include_hidden. mode=\"files\" for per-file counts. Source hits carry their enclosing symbol. context_lines for surrounding code."
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
+    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
         Some("progressive-disclosure")
     }
 

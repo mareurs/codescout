@@ -465,7 +465,7 @@ impl Tool for ReadMarkdown {
          or targeted sections via heading/headings params."
     }
 
-    fn relevant_guide_topic(&self) -> Option<&str> {
+    fn relevant_guide_topic(&self, _result: &Value) -> Option<&str> {
         Some("progressive-disclosure")
     }
 
