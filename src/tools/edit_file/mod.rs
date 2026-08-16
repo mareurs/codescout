@@ -667,7 +667,7 @@ impl Tool for EditFile {
 /// resolve" — the handle is the thing you just passed, and the error names nothing
 /// else.
 ///
-/// That misreading is on record: `docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
+/// That misreading is on record: `docs/issues/archive/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
 /// concluded the ack mechanism was broken and filed it as a bug. Measured 2026-08-14,
 /// the mechanism works in both call shapes; the ENOENT was the *target file*. The
 /// report cost two extra round-trips and a bug file, and the only thing that made the

@@ -4,7 +4,7 @@ opened: 2026-08-08
 closed: 2026-08-08
 severity: high
 owner: marius
-related: [docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md]
+related: [docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md]
 tags: [windows, process-spawn, ci, wine]
 kind: bug
 ---

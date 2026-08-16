@@ -812,7 +812,7 @@ mod default_port_tests {
     /// container-internal ports. Nothing listens on them from the host, so
     /// `semantic_search`, semantic-memory cross-embedding, and anchor creation all
     /// failed to connect — each non-fatally, which is why it went unnoticed for
-    /// weeks. See `docs/issues/2026-08-06-retrieval-stack-default-endpoints-doc-drift.md`.
+    /// weeks. See `docs/issues/archive/2026-08-06-retrieval-stack-default-endpoints-doc-drift.md`.
     #[test]
     fn retrieval_default_ports_match_published_compose_ports() {
         let published = published_host_ports();

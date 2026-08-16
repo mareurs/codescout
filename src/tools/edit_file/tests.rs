@@ -5670,7 +5670,7 @@ async fn edit_file_outside_project_returns_pending_ack() {
 
 /// A missing target must name itself, and must say the ack handle is not the problem.
 ///
-/// `docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
+/// `docs/issues/archive/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`
 /// concluded the `@ack_*` mechanism was broken from a bare
 /// `No such file or directory (os error 2)`. Measured 2026-08-14, the mechanism works in
 /// both call shapes and the ENOENT was the target file — but the error named nothing, so

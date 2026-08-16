@@ -945,7 +945,7 @@ threaded through `with_config`, with a `with_inflight_override(...)` builder for
 anti-pattern Task 4's fix round removed for `CODESCOUT_EMBED_BATCH` — a test wanting to control
 it would have to mutate process env, racing `cargo test`'s parallel threads (reproducible 5/5;
 see `docs/issues/archive/2026-07-27-embedder-batch-env-test-race-reintroduces-fixed-ub.md`, and
-`docs/issues/2026-07-27-test-env-isolation-doc-prescribes-rejected-remedy.md` for why the
+`docs/issues/archive/2026-07-27-test-env-isolation-doc-prescribes-rejected-remedy.md` for why the
 convention doc keeps re-specifying it).
 
 Follow `api_key` and `batch_override` in this same file. Two env-derived overrides on one struct

@@ -174,7 +174,7 @@ pub fn shell_unavailable_hint() -> Option<String> {
 /// Removing the variables (rather than just declining to set them) keeps the
 /// shell deterministic when the parent process happens to export them, for the
 /// same reason `GIT_PAGER` is pinned.
-/// See `docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
+/// See `docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
 ///
 /// Sets `GIT_PAGER=cat`; the caller sets cwd, stdio, and kill_on_drop. stdin
 /// defaults to null (prevents inherited-pipe / REPL hangs on the MCP stdio
@@ -490,7 +490,7 @@ mod tests {
     /// This asserts on the *native* side of the boundary on purpose. A test
     /// that only ran MSYS builtins (`ls /c/...`) would pass either way — MSYS
     /// programs resolve MSYS paths themselves and never see the conversion.
-    /// See `docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
+    /// See `docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
     #[tokio::test]
     async fn msys_form_path_resolves_for_native_binaries() {
         let dir = std::env::temp_dir();

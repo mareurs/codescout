@@ -140,7 +140,7 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
         // Without this clamp the 8192-token entries above return 20 889 chars, and
         // everything past ~512 tokens of that is silently dropped by the tokenizer.
         // Measured 2026-08-14; see
-        // docs/issues/2026-08-11-chunk-size-for-model-dead-on-production-path.md.
+        // docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md.
         //
         // Raising `with_max_length` in local.rs is the prerequisite for lifting this,
         // not a reason to skip it: this function must describe what the embedder does,
@@ -393,7 +393,7 @@ mod smoke {
     /// window would have most of their content silently dropped by the tokenizer.
     ///
     /// Measured 2026-08-14 against `fastembed-5.13.4`; see
-    /// `docs/issues/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
+    /// `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
     #[test]
     fn local_models_are_clamped_to_fastembeds_actual_token_ceiling() {
         let ceiling = crate::chunk_size_for_model("local:BGESmallENV15Q");

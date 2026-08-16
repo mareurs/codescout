@@ -187,7 +187,7 @@ fn line_key(line: &str) -> Option<&str> {
 ///
 /// Two shapes, and both must be caught, or mutating the key above leaves orphans
 /// behind — see
-/// `docs/issues/2026-08-08-edit-markdown-frontmatter-set-orphans-block-sequence.md`:
+/// `docs/issues/archive/2026-08-08-edit-markdown-frontmatter-set-orphans-block-sequence.md`:
 ///
 /// - **indented** — nested maps and block scalars (`|`, `>`).
 /// - **`-` at column 0** — a block-sequence entry. YAML permits sequence items at the

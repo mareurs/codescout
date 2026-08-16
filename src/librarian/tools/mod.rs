@@ -218,7 +218,7 @@ pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
 /// only recognizes the backslash form, so the first path has no prefix
 /// component at all while the second parses as `VerbatimDisk('C')` — and
 /// `Path::starts_with`, which compares components, can never match them.
-/// See `docs/issues/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md`.
+/// See `docs/issues/archive/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md`.
 ///
 /// On Unix `\` is a legal filename byte, so only the trailing separator is
 /// trimmed there — rewriting separators would corrupt real names.

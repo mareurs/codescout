@@ -288,7 +288,7 @@ mod tests {
         // a SECOND time into the same mapping. A duplicate key makes the whole block
         // unparseable, so the artifact lost kind, status, title, owners and tags
         // together and silently left its own ledger — one live casualty
-        // (`docs/issues/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`),
+        // (`docs/issues/archive/2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md`),
         // invisible for a working day because the file reads fine to a human.
         let mut extra = std::collections::BTreeMap::new();
         extra.insert("kind".to_string(), serde_json::json!("bug"));

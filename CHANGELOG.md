@@ -383,13 +383,13 @@ All notable changes to codescout are documented here.
   `no managed root contains …` for every row on that platform. Both sides now go through a
   normalized comparable form, and the match is segment-aware — a sibling directory sharing
   a name prefix still does not match. See
-  `docs/issues/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md`.
+  `docs/issues/archive/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md`.
 
 - **MSYS argument conversion is no longer disabled on Windows.** `MSYS_NO_PATHCONV` and
   `MSYS2_ARG_CONV_EXCL` are now explicitly removed from the child environment rather than
   set, so MSYS-form paths (`/c/Users/...`) resolve for native binaries such as `git.exe`,
   and a value exported in the parent shell cannot change how commands resolve. See
-  `docs/issues/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
+  `docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md`.
 
 - **`librarian(action="context", anchor_id=…)` no longer starves the anchor's
   neighbours.** The packing loop's "always include the first item" guard

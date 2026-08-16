@@ -85,7 +85,7 @@ pub struct EmbeddingsSection {
     /// `split_file`. That function was removed on 2026-08-14 rather than wired up,
     /// because the model-derived budget it computed exceeds what the local embedder
     /// will actually tokenize — see
-    /// `docs/issues/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
+    /// `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
     ///
     /// **To change chunk size, set `CODESCOUT_CHUNK_TARGET`.** It is the only live
     /// knob. This field is retained solely so an existing `project.toml` carrying it
