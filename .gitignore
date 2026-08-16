@@ -61,8 +61,24 @@ tests/fixtures/*/.codescout/
 # vocabularies and path/prompt fragments from OTHER repositories (including
 # client work), so the working tree carries identifiers that must not land in
 # this repo's history. Durable findings belong in docs/trackers/, which are
-# privacy-scrubbed by construction.
+# privacy-scrubbed by construction — with the single declared exception below.
 /scratch/
+
+# Raw evidence behind docs/trackers/bistriceanu/ — an external user's bug reports,
+# delivered as a WhatsApp export. This is the one place under docs/trackers/ where
+# the "privacy-scrubbed by construction" claim above does NOT hold, which is exactly
+# why the payload is ignored rather than scrubbed in place. It carries three things
+# that are not ours to publish in a PUBLIC repo:
+#   - a two-year personal chat with a named third party (family, calls, private life);
+#   - his proprietary "HMM" trading-system plan + a full Claude Code session transcript
+#     from his machine (/Users/<him>/work/hmm), which quotes his source;
+#   - a security assessment of a THIRD party's platform naming an unremediated
+#     tenant-isolation weakness, its file paths, and a deploy poller that reports
+#     stalled rollouts as green.
+# The tracker beside it carries the codescout-relevant findings, scrubbed. If you
+# need the evidence, read it locally; do not un-ignore this and do not quote machine
+# paths, client names, or the third-party findings into any tracked file.
+/docs/trackers/bistriceanu/raw/
 
 # Retrieval-stack model weights (GGUF + HF source), bind-mounted into the
 # dense/reranker containers via CODESCOUT_MODEL_DIR. Fetched or built locally —

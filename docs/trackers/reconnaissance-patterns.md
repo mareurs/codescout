@@ -2114,10 +2114,43 @@ rebuild) is the parent rule; this is the sharper form — *verify the build, not
 just the behaviour*. W-44 is the sibling failure at population grain rather than
 build grain.
 
-**Promote-when:** one more instance where a stale-build assumption reaches a
-committed claim. At two, promote the probe technique into this skill's Phase 1 as
-a named step for any session that edits a tool it also uses — which is the normal
-condition in this repo, and the reason the failure recurs.
+**Fourth instance — the Promote-when fired the same day, from another session.**
+Added 2026-08-16, hours after this entry was written; the heading's `×3` is the
+original count. Session `28ea039a` committed `5917e37e`, which adds an
+ALWAYS-VERIFY imperative to `src/prompts/guides/project-activation-bootstrap.md`,
+and then reported to the user that the guidance was shipped and delivered once
+per session at first activation. That is a committed claim resting on a
+stale-build assumption, and it was wrong at the runtime layer: the guide body is
+`include_str!`'d into the binary (`src/prompts/mod.rs:160`), so the text a session
+receives is fixed at *build* time and frozen again at *process start*. The
+following session's own auto-injected bootstrap guide arrived **without** the new
+paragraph.
+
+What makes it a clean confirmation is that metadata pointed the wrong way and the
+probe pointed the right way — exactly the asymmetry this entry describes. Binary
+mtime (10:56) was *newer* than the commit (09:15), which reads as "the fix is in."
+It was: `grep -c "Do not hypothesise" target/release/codescout` → `1`. The build
+was fine. The stale layer was the **process**: this session's server is PID
+773774, started 09:28, i.e. before the 10:56 build that first compiled the string.
+A second, independent probe settled it without ambiguity — `json_path="$.items[*]"`
+was still refused, though `[*]` support landed in `7c91cdf7` at 10:50. Two probes,
+two different subsystems, same verdict.
+
+**This widens the rule.** The parent form is *verify the build, not just the
+behaviour*. The sharper form is: **build freshness and process freshness are two
+separate facts, and mtime answers neither.** A long-lived MCP session can outlive
+any number of rebuilds; `cargo rb` alone changes nothing until `/mcp` reconnects,
+which is precisely why memory `development-commands` pairs them. For anything
+`include_str!`'d — every guide, every prompt surface — the honest ship claim is
+"committed and compiled," and "live" needs a fresh process plus one probe.
+
+**Promote-when:** ~~one more instance~~ **FIRED 2026-08-16** (fourth instance
+above — a committed claim, from an independent session, on the same day). Promote
+the probe technique into the skill's Phase 1 as a named step for any session that
+edits a tool it also uses — the normal condition in this repo, and the reason the
+failure recurs. The Phase-1 step should name both freshness axes: run a probe that
+can only succeed on the new build, and confirm the serving process postdates that
+build.
 
 ## Template for new entries
 
