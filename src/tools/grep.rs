@@ -661,7 +661,7 @@ fn enclosing_symbol(symbols: &[crate::lsp::symbols::SymbolInfo], line0: u32) -> 
 /// real call with `limit: 40` over a `*.json` glob buffered 4,427,639 tokens,
 /// because a minified JSON file is one line and forty of them is megabytes.
 /// `grep` is fourth by overflow *count* and first by overflow *tokens* by 5.7x.
-/// See docs/issues/2026-08-16-grep-limit-bounds-lines-not-bytes.md
+/// See docs/issues/archive/2026-08-16-grep-limit-bounds-lines-not-bytes.md
 const MAX_MATCH_BYTES: usize = 2_000;
 
 /// Ceiling on the summed size of all emitted matches. Backstop for the case the

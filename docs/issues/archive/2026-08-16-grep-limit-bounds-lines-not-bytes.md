@@ -6,7 +6,7 @@ tags:
 - progressive-disclosure
 - overflow
 - unbounded-output
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -116,8 +116,11 @@ overflow by call count — as TU-10 did — hides this completely.
 
 ## Fix
 
-**Implemented 2026-08-16.** Two bounds, because the per-match clamp and the aggregate cap catch
-different shapes:
+**Implemented 2026-08-16 — `b9c78965` (`experiments`).** No pending-master-SHA line: the promotion
+path is fast-forward (`git rev-list --left-right --count master...experiments` → `0 743`), so this
+SHA already *is* the master SHA once promoted and there is no second one to record.
+
+Two bounds, because the per-match clamp and the aggregate cap catch different shapes:
 
 | Bound | Value | Catches |
 |---|---|---|
@@ -169,20 +172,23 @@ Gate: **3836 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings` cle
 
 ## Resume
 
-Fixed, tested, gate green on `experiments`. **Two things before archiving:**
+N/A — fixed and verified.
 
-1. **Verify live after the next `cargo rb` + `/mcp`** — this session's pattern, and it has earned its
-   keep twice: a green suite and a working tool are different claims. Re-run the original shape
-   (`grep` over a `*.json` glob with a small `limit`) against the running server and confirm the
-   emitted payload is bounded and marked.
-2. **Record the fix SHA and archive** via `artifact(action="move", …)` — never a bare `git mv`.
-   Check the promotion path first (`git rev-list --left-right --count master...experiments`): a `0`
-   on the left means fast-forward, in which case the `experiments` SHA already IS the master SHA and
-   **no pending-master-SHA line should be written**.
+**Live verification, 2026-08-16** (after `cargo rb` + `/mcp`), reproducing the incident shape — five
+200KB single-line `*.json` files, `limit: 40`:
+
+| | Bytes emitted |
+|---|---|
+| Pre-fix (same shape, unit test) | **1,000,527** |
+| Post-fix, running server | **11,137** |
+
+A 98.9% reduction, and the payload names its own cut:
+`… [truncated: 2000 of 200022 bytes shown]`. A green suite and a working tool are different claims;
+both now hold.
 
 Acceptance signal for a later corpus pass: `grep`'s share of buffered tokens should fall sharply
 from 68% (5,775,117 of 8,451,310), and no single call should exceed ~60KB. Date-bound any
-re-measurement to after the rebuild.
+re-measurement to after this rebuild.
 ## References
 
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16, *Overflow*.
