@@ -2188,8 +2188,16 @@ ownership marker.
 **Rule to apply next time.** In a repo where a second session may be live:
 
 1. Stage and commit in one call; never stage and then go do other work.
-2. Prefer `git commit <paths>` over `git add` then `git commit` — it closes the
-   window entirely rather than narrowing it.
+2. Prefer `git commit <paths>` over `git add` then `git commit` — but only for
+   files git already tracks. **Corrected minutes after this entry was written,
+   by trying to follow it:** `git commit -- <new file>` fails with `pathspec ...
+   did not match any file(s) known to git`, because commit-by-path resolves
+   against the index and a new file is not in it. For new files the window
+   cannot be closed, only narrowed — chain `git add <paths> && git commit` in a
+   single shell invocation so no tool call separates them. (Worth noting how
+   this was caught: the rule was wrong in the direction of *sounding* right, and
+   only executing it surfaced that. An advice entry nobody has run is a
+   hypothesis.)
 3. Read an empty `git status` after your own staging as evidence that *someone
    else committed*, not that your commit succeeded. `git log -1 --format=%s --
    <path>` names who took it.

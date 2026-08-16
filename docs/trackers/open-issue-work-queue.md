@@ -61,10 +61,16 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | open | `e557d0f2c9429b5d` |
 | BL-20 | 1 | params merge-patch wipes entry arrays wholesale — gave entries an update path (`update_entry`) + always-on counts | **done, archived** | `36eda0c2634dbea9` |
-| BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | open | `3fb33d4da0791fe6` |
+| BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | **done, archived** | `e52abced30ff1dbc` |
 | BL-22 | 1 | `move` broke the `id == hash(abs_path)` invariant, so the next reindex cascade-deleted the history | **done, archived** | `18a637f59289192c` |
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | open | `6149f4cfeaa6fab9` |
 | BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | open | `a68a76301714137f` |
+| BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | open | `cfcbee6f7d047a55` |
+| BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | open | `db02045fdbaaf860` |
+| BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | open | `ea21099f9d39f734` |
+| BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | open | `ffa936075f1f03fd` |
+| BL-29 | 1 | `append_entry` writes catalog-only state, so this very snapshot drifts silently — tool says success, git says clean | open | `0694a4a9946e10fe` |
+| BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | open | `63d36f5da3b200a7` |
 
 > **Params and body are reconciled** (2026-08-16). BL-1, BL-20 and BL-22 were
 > flipped with `artifact(action="update_entry", …)` — 24 rows before, 24 after,
