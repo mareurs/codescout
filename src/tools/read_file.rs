@@ -541,24 +541,79 @@ fn read_with_line_range(
         .into());
     }
 
+    // A file-head read is the canonical "show me the imports" operation, and the
+    // gate's recommended recovery cannot serve it: `symbols` is a *definition
+    // projection* and does not return `use` / `mod` / `package` lines
+    // (src/prompts/guides/iron-laws-detail.md). Refusing it routes the caller to a
+    // tool that structurally cannot answer, offering `force=true` only second.
+    //
+    // The window is measured, not chosen. Across 373 refused reads carrying a
+    // range: 131 start at line 1, and exactly ONE starts between lines 2 and 5.
+    // So `start == 1` is the real shape — it costs one call out of 103 versus a
+    // `start <= 5` window, and it avoids misreading a small file, where a read
+    // like lines 3-5 is a whole function body rather than a head read.
+    // 102 of those 103 also end by line 60; past that, a read that merely begins
+    // at line 1 is a whole-file read in disguise and Iron Law 1 still applies.
+    // Evidence: docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md
+    const HEAD_END_MAX: u64 = 60;
+    let is_head_read = start == 1 && end <= HEAD_END_MAX;
+
     if !force
+        && !is_head_read
         && crate::tools::file_summary::detect_file_type(path)
             == crate::tools::file_summary::FileSummaryType::Source
     {
         let matches = find_symbols_for_range(text, resolved, start, end);
         if !matches.is_empty() {
-            let names: Vec<_> = matches.iter().take(3).map(|s| format!("'{s}'")).collect();
+            let names: Vec<_> = matches
+                .iter()
+                .take(3)
+                .map(|(n, _, _)| format!("'{n}'"))
+                .collect();
             let mut label = names.join(", ");
             if matches.len() > 3 {
                 label.push_str(&format!(" and {} more", matches.len() - 3));
             }
-            let first = &matches[0];
-            return Err(RecoverableError::with_hint(
-                format!("source range overlaps named symbol(s): {label}"),
+            let (first, first_start, first_end) = &matches[0];
+
+            // Order the two escapes by what the caller actually asked for. The
+            // requested extent is known here, and when the overlapping symbol is far
+            // larger than the slice, `symbols(include_body=true)` returns strictly
+            // MORE than was requested — recommending it first inverts Iron Law 1,
+            // whose purpose is to stop oversized source reads.
+            //
+            // Two conditions, because a ratio alone misleads at small sizes:
+            // returning a 4-line body for a 2-line request is 2x but costs nothing,
+            // while returning 102 lines for 5 is the case worth reordering. So the
+            // symbol must be BOTH proportionally larger and absolutely larger.
+            //
+            // The 2x ratio is a judgment call (unlike the head-read window above,
+            // which is measured). The 40-line excess is the corpus's own boundary:
+            // its "small slice" bucket — 97 of 244 refusals, the largest — is defined
+            // as <= 40 lines, so an excess past that is more than a whole typical
+            // request's worth of unasked-for content.
+            const EXCESS_LINES_THAT_MATTER: u64 = 40;
+            let requested = end.saturating_sub(start) + 1;
+            let symbol_lines = u64::from(first_end.saturating_sub(*first_start)) + 1;
+            let symbols_returns_much_more = symbol_lines >= requested.saturating_mul(2)
+                && symbol_lines.saturating_sub(requested) > EXCESS_LINES_THAT_MATTER;
+
+            let hint = if symbols_returns_much_more {
+                format!(
+                    "Pass force=true to read exactly the {requested} line(s) you asked for \
+                     — '{first}' spans {symbol_lines} lines, so \
+                     symbols(name='{first}', include_body=true) would return the whole body."
+                )
+            } else {
                 format!(
                     "Use symbols(name='{first}', include_body=true) to read the body directly. \
                      Pass force=true to read the raw line range anyway."
-                ),
+                )
+            };
+
+            return Err(RecoverableError::with_hint(
+                format!("source range overlaps named symbol(s): {label}"),
+                hint,
             )
             .into());
         }
@@ -1051,18 +1106,21 @@ fn flatten_symbols<'a>(
     }
 }
 
-/// Return the `name_path` of every symbol whose body overlaps (inclusive) the
-/// read range: symbol contains range, range contains symbol, or they share a boundary.
+/// Return the `name_path` and 0-indexed line span of every symbol whose body
+/// overlaps (inclusive) the read range: symbol contains range, range contains
+/// symbol, or they share a boundary.
 ///
 /// `start` and `end` are 1-indexed (as received from tool input).
-/// `SymbolInfo.start_line` / `end_line` are 0-indexed.
+/// `SymbolInfo.start_line` / `end_line` are 0-indexed and are returned as such —
+/// the caller uses them only to compare *extents* (to decide which escape the
+/// refusal hint should lead with), never to render a line number.
 /// Returns an empty Vec on parse error (fail open).
 fn find_symbols_for_range(
     text: &str,
     resolved: &std::path::Path,
     start: u64,
     end: u64,
-) -> Vec<String> {
+) -> Vec<(String, u32, u32)> {
     let syms = match crate::ast::extract_symbols_from_text(text, resolved) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -1080,7 +1138,7 @@ fn find_symbols_for_range(
             // read range contains symbol body
             || (s0 <= sym.start_line && sym.end_line <= e0)
         })
-        .map(|sym| sym.name_path.clone())
+        .map(|sym| (sym.name_path.clone(), sym.start_line, sym.end_line))
         .collect()
 }
 
@@ -1500,6 +1558,202 @@ mod tests {
         assert!(
             !body.contains("line 199") && !body.contains("line 210"),
             "string-typed offset/limit must map to the exact window, got: {body:?}"
+        );
+    }
+
+    /// A source file whose first lines carry imports AND symbol declarations —
+    /// the shape that makes the overlap gate fire on a plain "show me the
+    /// imports" read. `mod` declarations and the struct all begin inside the
+    /// first 20 lines, so `find_symbols_for_range(1, 20)` is non-empty.
+    fn head_read_fixture() -> &'static str {
+        "\
+use std::collections::HashMap;
+use std::path::Path;
+
+mod helpers;
+mod util;
+
+/// Config for the thing.
+pub struct Config {
+    pub name: String,
+    pub value: u64,
+}
+
+impl Config {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            value: 0,
+        }
+    }
+}
+"
+    }
+
+    async fn ctx_with_file(dir: &std::path::Path, name: &str, body: &str) -> ToolContext {
+        std::fs::create_dir_all(dir.join(".codescout")).unwrap();
+        std::fs::write(dir.join(name), body).unwrap();
+        let mut ctx = test_ctx().await;
+        ctx.agent = Agent::new(Some(dir.to_path_buf())).await.unwrap();
+        ctx
+    }
+
+    /// Step 1 of the IL1 fix: a file-head read is the canonical "show me the
+    /// imports" operation, and the gate's recommended recovery
+    /// (`symbols(include_body=true)`) is STRUCTURALLY incapable of serving it —
+    /// `symbols` is a definition projection and does not return `use` lines.
+    /// Refusing it costs the caller a round trip and offers `force=true` only
+    /// second. Measured: 84 of 244 refused reads carried `start_line <= 5`, and
+    /// 69 of those ended by line 60.
+    ///
+    /// The mutation this catches: deleting the head-read exemption restores the
+    /// refusal on the single largest recoverable population of this error class.
+    #[tokio::test]
+    async fn head_read_of_imports_is_allowed_though_symbols_overlap() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "cfg.rs", head_read_fixture()).await;
+
+        let result = ReadFile
+            .call(
+                json!({ "path": "cfg.rs", "start_line": 1, "end_line": 20 }),
+                &ctx,
+            )
+            .await
+            .expect("a file-head read must not be refused by the overlap gate");
+
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("use std::collections::HashMap"),
+            "the head read must return the imports it asked for, got: {result}"
+        );
+    }
+
+    /// The exemption must NOT become a general hole. A read that overlaps a
+    /// symbol but does not start at the file head is still refused — this is the
+    /// symbol-body population the traced sequences show the gate genuinely helps.
+    #[tokio::test]
+    async fn non_head_read_overlapping_a_symbol_is_still_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "cfg.rs", head_read_fixture()).await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": "cfg.rs", "start_line": 13, "end_line": 20 }),
+                &ctx,
+            )
+            .await
+            .expect_err("a mid-file read overlapping a symbol must still be refused");
+
+        assert!(
+            err.to_string().contains("overlaps named symbol"),
+            "expected the overlap refusal, got: {err}"
+        );
+    }
+
+    /// The exemption is bounded by extent, not just by start line: a read that
+    /// begins at line 1 but runs past the window is a whole-file read wearing a
+    /// head read's clothes, and Iron Law 1 exists for exactly that.
+    #[tokio::test]
+    async fn head_read_past_the_window_is_still_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let long = format!("{}\n{}", head_read_fixture(), "// filler\n".repeat(80));
+        let ctx = ctx_with_file(dir.path(), "cfg.rs", &long).await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": "cfg.rs", "start_line": 1, "end_line": 61 }),
+                &ctx,
+            )
+            .await
+            .expect_err("a head read past the window must still be refused");
+
+        assert!(
+            err.to_string().contains("overlaps named symbol"),
+            "expected the overlap refusal, got: {err}"
+        );
+    }
+
+    /// A symbol spanning ~102 lines, starting past the head-read window.
+    fn large_symbol_fixture() -> String {
+        let mut s = String::from("// leading comment\n\npub fn big() {\n");
+        for i in 0..100 {
+            s.push_str(&format!("    let x{i} = {i};\n"));
+        }
+        s.push_str("}\n");
+        s
+    }
+
+    /// A small symbol, placed past the head-read window so the exemption does
+    /// not apply and the gate actually fires.
+    fn small_symbol_fixture() -> String {
+        let mut s = String::new();
+        for _ in 0..20 {
+            s.push_str("// filler\n");
+        }
+        s.push_str("pub fn small() {\n    let a = 1;\n    let b = 2;\n}\n");
+        s
+    }
+
+    /// Step 2 of the IL1 fix. When the caller asks for a small slice of a large
+    /// symbol, leading the hint with `symbols(include_body=true)` recommends a
+    /// call that returns STRICTLY MORE than was requested — the opposite of Iron
+    /// Law 1's intent, which is to stop oversized source reads. The requested
+    /// extent is known at refusal time, so the hint can order itself by it.
+    ///
+    /// Mutation caught: dropping the extent comparison restores a hint that
+    /// pushes a 5-line request toward a 102-line response.
+    #[tokio::test]
+    async fn hint_leads_with_force_for_a_small_slice_of_a_large_symbol() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "big.rs", &large_symbol_fixture()).await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": "big.rs", "start_line": 50, "end_line": 54 }),
+                &ctx,
+            )
+            .await
+            .expect_err("a mid-symbol read must still be refused");
+        let msg = err.to_string();
+
+        let force_at = msg.find("force=true").expect("hint must offer force=true");
+        let symbols_at = msg
+            .find("symbols(name=")
+            .expect("hint must still name symbols");
+        assert!(
+            force_at < symbols_at,
+            "for a 5-line slice of a ~102-line symbol the hint must LEAD with \
+                 force=true, since symbols(include_body=true) returns ~20x what was \
+                 asked for. Got: {msg}"
+        );
+    }
+
+    /// The converse, so the reordering is conditional rather than a blanket
+    /// preference for `force=true`: when the symbol is not much larger than the
+    /// requested range, `symbols(include_body=true)` is the better answer and
+    /// must stay first.
+    #[tokio::test]
+    async fn hint_leads_with_symbols_when_the_symbol_is_not_much_larger() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_with_file(dir.path(), "small.rs", &small_symbol_fixture()).await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": "small.rs", "start_line": 22, "end_line": 23 }),
+                &ctx,
+            )
+            .await
+            .expect_err("a mid-symbol read must still be refused");
+        let msg = err.to_string();
+
+        let symbols_at = msg.find("symbols(name=").expect("hint must name symbols");
+        let force_at = msg
+            .find("force=true")
+            .expect("hint must still offer force=true");
+        assert!(
+            symbols_at < force_at,
+            "when the symbol is close in size to the request, symbols() must stay \
+                 the leading suggestion. Got: {msg}"
         );
     }
 }

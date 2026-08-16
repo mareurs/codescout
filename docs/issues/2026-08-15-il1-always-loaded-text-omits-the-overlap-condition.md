@@ -225,7 +225,7 @@ non-definition text.
 ## Hypotheses tried
 
 1. **Hypothesis:** the guide is wrong and needs fixing (doc-vs-code drift, like the sibling bug
-   `docs/issues/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md`).
+   `docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md`).
    **Test:** read `iron-laws-detail.md:15-18`.
    **Verdict:** rejected — the detail guide is accurate, and explicitly states the overlap
    condition. The defect is in the compressed always-loaded surface, not the guide.
@@ -247,13 +247,24 @@ non-definition text.
 Not implemented. Revised 2026-08-15 after reading the refused arguments — the wording change alone
 is no longer the first move.
 
-**1. Exempt the case the guard cannot serve.** When the requested range is non-definition text — in
+> **Steps 1 and 2 IMPLEMENTED 2026-08-16** with regression tests (see § Tests added). Step 3 is
+> authored but not eval-validated — details below. The bug stays `open` on that last gate alone.
+
+**1. Exempt the case the guard cannot serve. — DONE.** When the requested range is non-definition text — in
 practice a file head, `start_line` ≤ 5 with a modest extent — the recommended alternative
 (`symbols(include_body=true)`) *cannot* return it, because `symbols` does not surface imports
 (`iron-laws-detail.md:12-16`). Either allow the read, or lead the hint with `force=true` for that
 shape instead of offering it second. 69 of 244 refusals in the window are this case.
 
-**2. Order the hint by what the caller asked for.** For a small slice of a large symbol, leading
+**Implemented as `start == 1 && end <= 60`, and the `start` bound is measured, not the `<= 5`
+written above.** Re-querying the corpus at implementation time: of **373** refused reads carrying a
+range, **131 start at line 1** and **exactly one** starts between lines 2 and 5. So `start <= 5` buys
+one extra call out of 103 — and it costs correctness: in a short file a read of lines 3-5 is a whole
+function body, not a head read, which is precisely what the pre-existing gate test
+(`read_file_source_range_blocked_when_symbol_overlaps`, `src/tools/edit_file/tests.rs`) asserts. A
+`start <= 5` window broke that test; `start == 1` keeps it green and still covers 102 of 103.
+
+**2. Order the hint by what the caller asked for. — DONE.** For a small slice of a large symbol, leading
 with `symbols(include_body=true)` returns strictly more than was requested — the opposite of Iron
 Law 1's intent. The requested extent is known at refusal time; use it to pick which escape leads.
 
@@ -291,13 +302,41 @@ rule, via the `prompt-tdd` harness in `../prompt-engineering/`. This change is a
 `experiments` with the gate green; it is **not** cleared for promotion to `master` until that run
 exists. Treat the wording as a candidate, not a validated fix.
 
+**Implemented with two conditions, because a ratio alone misleads.** The refusal now leads with
+`force=true` when the overlapping symbol is both **≥ 2×** the requested extent **and** more than **40
+lines** larger than it. The ratio alone was wrong and a test caught it: returning a 4-line body for a
+2-line request is 2× but costs nothing, while returning 102 lines for 5 is the case worth
+reordering. The 40-line figure is the corpus's own boundary — its "small slice" bucket (97 of 244
+refusals, the largest) is defined as ≤ 40 lines, so an excess past that exceeds a whole typical
+request's worth of unasked-for content.
+
+`find_symbols_for_range` now returns `(name, start_line, end_line)` rather than bare names so the
+extent is available at refusal time. It is private with a single caller, so the change is contained
+to this file.
+
 **Do not relax the gate wholesale.** The traced sequences show it is genuinely useful for the
 symbol-body population — agents refused a blind line range go on to fetch the exact symbols they
 wanted, by name. Fixing (1) and (2) preserves that while removing the population it cannot serve.
 ## Tests added
 
-None yet — filed on discovery.
+In `src/tools/read_file.rs` (the module had **no** gate tests of its own before this — the
+pre-existing coverage lives in `src/tools/edit_file/tests.rs`, which is where
+`read_file_source_range_blocked_when_symbol_overlaps` and
+`read_file_source_range_force_bypasses_gate` sit; both still pass):
 
+| Test | Mutation it catches |
+|---|---|
+| `head_read_of_imports_is_allowed_though_symbols_overlap` | deleting the head-read exemption — restores the refusal on the largest recoverable population |
+| `non_head_read_overlapping_a_symbol_is_still_refused` | widening the exemption into a general hole |
+| `head_read_past_the_window_is_still_refused` | dropping the `end <= 60` bound, letting a whole-file read pass as a head read |
+| `hint_leads_with_force_for_a_small_slice_of_a_large_symbol` | dropping the extent comparison — restores a hint pushing a 5-line request toward a 102-line response |
+| `hint_leads_with_symbols_when_the_symbol_is_not_much_larger` | making the reorder unconditional — this one **failed first** on a ratio-only threshold and is what forced the absolute-excess condition |
+
+The last row is the load-bearing one: without it, a ratio-only rule would have shipped and would
+have told callers to `force` past the gate on trivially-larger symbols.
+
+All green with the full suite: **3834 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings`
+clean.
 ## Workarounds
 
 - Pass `force=true` on the first call when an exact slice is wanted. It works and is the correct
@@ -306,25 +345,23 @@ None yet — filed on discovery.
 
 ## Resume
 
-Step 3 (wording) is authored — `src/prompts/source.md`, slice 2189 → 2127, gate green (3829 tests,
-clippy clean). **The bug stays `open`: steps 1 and 2 are the substantive fix and are untouched.**
+Steps 1 and 2 are implemented and regression-tested (§ Tests added); step 3's wording is authored.
+**One gate remains before this can be called fixed or archived:**
 
-Next, in order:
+1. **Run the subtract-and-measure protocol on the step-3 wording change** —
+   `artifact(action="get", id="59ebeebb6ed05c89", heading="Protocol — subtract-and-measure
+   (P-1..P-8)")`, harness `../prompt-engineering/`. Run the **base arm first**; if it is already at
+   ceiling, revert the `source.md` change rather than ship it. Steps 1-2 are code with tests and are
+   not subject to this gate; only the prompt edit is.
 
-1. **Run the subtract-and-measure protocol on the wording change** before it goes anywhere near
-   `master` — `artifact(action="get", id="59ebeebb6ed05c89", heading="Protocol —
-   subtract-and-measure (P-1..P-8)")`, harness `../prompt-engineering/`. Run the **base arm first**;
-   if it is already at ceiling, revert rather than ship.
-2. **Step 1 — exempt the case the guard cannot serve** (`src/tools/read_file.rs:544-565`): a
-   file-head range (`start_line` ≤ 5, modest extent) cannot be served by
-   `symbols(include_body=true)` because `symbols` does not surface imports. **69 of 244** refusals
-   in the window are this shape. Either allow it, or lead the hint with `force=true` for it.
-3. **Step 2 — order the hint by the requested extent**, which is known at refusal time: for a small
-   slice of a large symbol, leading with `symbols(include_body=true)` returns strictly more than was
-   asked for — the opposite of Iron Law 1's intent.
+2. **Then re-measure the refusal population.** The acceptance number is in § Evidence: 244 refused
+   reads carrying arguments, of which 103 match `start == 1 && end <= 60`. If the fix works, that
+   sub-population goes to zero and total IL1 refusals drop by roughly 40%. Re-run the § Method query
+   from `docs/trackers/2026-08-15-tool-usage-investigation.md` on a single project — month-over-month
+   across projects is confounded.
 
-**Do not relax the gate wholesale** — traced sequences show it genuinely helps the symbol-body
-population, and the wording change does nothing for the 69/244 that steps 1–2 address.
+Note the head-read exemption only takes effect for sessions running a build that carries it
+(`cargo rb` + `/mcp`), so any re-measurement must date-bound to after that rebuild.
 ## References
 
 - `src/tools/read_file.rs:544-565` — the gate
@@ -333,5 +370,5 @@ population, and the wording change does nothing for the 69/244 that steps 1–2 
 - `src/usage/db.rs:216-218` — `normalize_err_family`, where the class is named
 - `docs/issues/2026-08-15-read-file-force-ignored-on-full-reads.md` (open) — sibling: the `force=true`
   escape is discarded on whole-file reads; this bug relies on it working for line ranges, where it does
-- `docs/issues/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md` (open) — same
+- `docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md` (fixed `43fac6c8`, archived) — same
   family (IL surface vs gate), different law
