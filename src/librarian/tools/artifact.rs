@@ -116,12 +116,18 @@ impl Tool for Artifact {
                 },
                 "augment": {
                     "type": "object",
-                    "description": "create: attach augmentation atomically. Pass prompt + optional params.",
+                    "description": "create: attach the augmentation atomically. Accepts every caller-controlled augmentation field, so a tracker needs no follow-up artifact_augment call. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
                     "properties": {
-                        "prompt": { "type": "string" },
-                        "params": { "type": "object" }
+                        "prompt": { "type": "string", "description": "Required. Persistent instruction: what to maintain and how to format it." },
+                        "params": { "type": "object", "description": "Initial params payload." },
+                        "render_template": { "type": "string", "description": "MiniJinja template projecting params into the librarian(context) [LIVE] block. Omit and the tracker contributes no live state there." },
+                        "params_schema": { "type": "object", "description": "JSON Schema validating params on every merge." },
+                        "entry_collection": { "type": "string", "description": "Names the params array holding filterable entry rows; enables artifact(get, entry_filter=...)." },
+                        "append_mode": { "type": "boolean", "description": "artifact_update prepends a new dated section instead of replacing the body." },
+                        "history_cap": { "type": "integer", "description": "Max dated sections retained; oldest dropped beyond the cap." }
                     },
-                    "required": ["prompt"]
+                    "required": ["prompt"],
+                    "additionalProperties": false
                 },
                 "patch": {
                     "type": "object",

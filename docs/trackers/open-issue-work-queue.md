@@ -116,3 +116,25 @@ pass to `create` — guidance followed exactly here, with both fields lost.
 
 Worth noting for whoever works the queue: **BL-18 was found by using the tooling, not by reading
 it.** Three of this session's bugs came the same way. A queue built by hand is also a probe.
+
+### 2026-08-16 — BL-5 and BL-18 fixed together
+
+Taken as a pair because both edit `tracker_design`'s `SYSTEM_PROMPT`: BL-5 had to shrink it, BL-18
+had to correct its Final step. Doing them in one pass avoided touching the same 100-line constant
+twice.
+
+**BL-5** — `tracker_design` went from **~41,000 to 9,358 bytes**, from overflowing on 6 of 6 calls to
+arriving inline. The split (menu inline, one archetype per named fetch) was the planned half; the
+unplanned half was `existing_trackers`, which at a cap of 30 with six fields per row was ~7 KB —
+larger than the entire archetype menu. Capped at 5 rows of `{id, title, kind}`, with Step 7 rewritten
+to send the caller to a semantic `artifact(find)` for the collision check a title scan cannot do.
+
+**BL-18** — `AugmentSpec` widened from 2 fields to all 7 and gained `deny_unknown_fields`, so
+`create` both accepts the full augmentation shape and rejects typos instead of discarding them. The
+advertised schema and `tracker_design`'s Final step now say the same thing the code does.
+
+One lesson worth carrying: **BL-5's first regression test was wrong in a way that would have shipped
+the bug.** Written against an empty catalog it read 10,396 bytes; the same code against a full
+catalog read 17,456. `existing_trackers` is empty in a bare fixture and populated in production, so
+the test would have gone green while every real call still overflowed. A size assertion has to be
+made against the shape that ships — the same *wrong population* error TU-5 was corrected for.

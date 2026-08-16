@@ -7,7 +7,7 @@
 //! deferred until archetype selection proves frustrating in practice.
 
 use crate::librarian::catalog::{artifact, augmentation};
-use crate::librarian::tools::ToolContext;
+use crate::librarian::tools::{RecoverableError, ToolContext};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,13 +18,68 @@ struct Args {
     /// echoed back; reserved for future intent-driven tailoring.
     #[serde(default)]
     intent: Option<String>,
+    /// Fetch ONE archetype in full, by name. Omit for the teaching envelope
+    /// plus the archetype menu.
+    ///
+    /// The two-call shape exists because this action is *guidance*: returning
+    /// all eight full specs put the response at ~10,270 tokens — 4.1x the inline
+    /// budget — so it overflowed on every call, and the teaching content the
+    /// caller is meant to read *before acting* only ever arrived behind a buffer
+    /// fetch. See docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md
+    #[serde(default)]
+    archetype: Option<String>,
 }
 
 const DESIGN_VERSION: &str = "1";
 
-/// Cap for inline existing-trackers list. Above this, agent should call
+/// Cap for the inline existing-trackers sample. Above this, the agent should call
 /// `artifact_find {kind:"tracker"}` directly.
-const EXISTING_TRACKERS_CAP: usize = 30;
+///
+/// Deliberately small, and tied to the inline budget rather than to usefulness:
+/// at 30 this list alone was ~7 KB of a response that must fit in 10 KB — and it
+/// was never the right collision check anyway, since a title scan cannot catch a
+/// duplicate worded differently. Step 7 now sends the caller to a semantic
+/// `artifact(find)` for that.
+const EXISTING_TRACKERS_CAP: usize = 5;
+
+/// The archetype menu: `name` + `when_to_use` only.
+///
+/// This is what Step 1 of the system prompt selects on, and it is all Step 1
+/// needs. The bulky fields (`params_shape_example`, `params_schema_example`,
+/// `render_template_example`, `body_skeleton`, `prompt_template`) are the
+/// overwhelming majority of the payload and are fetched one at a time, by name,
+/// once a choice has been made.
+fn archetype_menu() -> Value {
+    let list: Vec<Value> = archetypes()
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|x| {
+                    // Criterion only. Each `when_to_use` ends with an "Examples: …"
+                    // clause that illustrates rather than discriminates; it stays in
+                    // the full spec, which is one call away once a choice is made.
+                    let full = x["when_to_use"].as_str().unwrap_or_default();
+                    let criterion = full.split(" Examples:").next().unwrap_or(full).trim();
+                    json!({ "name": x["name"], "when_to_use": criterion })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!(list)
+}
+
+/// Every archetype name — used to resolve a requested one and to name the valid
+/// options when resolution fails.
+fn archetype_names() -> Vec<String> {
+    archetypes()
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x["name"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 pub fn archetypes() -> Value {
     json!([
@@ -445,22 +500,23 @@ If you're unsure, ask the user which pattern fits before composing.
 
 ## Step 2 — Write the augmentation prompt
 
-The `prompt` field has **two readers**, and most authors brief only the first:
-1. the **refresh synthesizer** that maintains the tracker (writer), and
-2. **every agent that meets the tracker cold** via the `[LIVE]` block in `librarian(context)` (reader) — it sees this prompt verbatim as a standing instruction.
+The `prompt` has **two readers**, and most authors brief only the first: the **refresh synthesizer**
+that maintains the tracker, and **every agent that meets it cold** via the `[LIVE]` block in
+`librarian(context)` — which sees this prompt verbatim as a standing instruction.
 
-Write **reader-first**: lead with what a consuming agent should *do with* this tracker, then the maintenance rules. A tracker is a skill for its own state; the prompt is how that skill briefs its reader.
+Write **reader-first**: lead with what a consumer should *do with* this tracker, then how to
+maintain it. A tracker is a skill for its own state.
 
-- **Open with the read/act contract.** One or two sentences: what this tracker is, and the next action a reader takes from it — "To act: take the highest-severity `open` row, read its body section, verify against current code before fixing."
-- **Then the maintenance rules** (these serve the refresh synthesizer):
-  - **Imperative voice.** "Maintain the F-N table" not "this tracks failures".
-  - **Name the gather sources.** Which gather source feeds which field.
-  - **Conflict resolution.** When sources disagree, say which wins ("newer commit beats older params").
-  - **Body vs params boundary.** "narrative belongs in body, mechanical state in params".
-  - **Length budget hint.** "Body section under 200 lines, params under 50 entries."
-- **Escape hatch** — when a tracker's consumers outnumber its maintainers, one line earns its tokens: "Readers: the gather/refresh rules below are not yours."
+- **Open with the read/act contract.** "To act: take the highest-severity `open` row, read its body
+  section, verify against current code before fixing."
+- **Then the maintenance rules** (for the synthesizer): imperative voice ("Maintain the F-N table",
+  not "this tracks failures"); name which gather source feeds which field; say which source wins on
+  conflict ("newer commit beats older params"); state the body-vs-params boundary; give a length
+  budget ("body under 200 lines, params under 50 entries").
+- **Escape hatch** when consumers outnumber maintainers: "Readers: the gather/refresh rules below
+  are not yours."
 
-The archetype's `prompt_template` is a starting point and already leads reader-first — keep that order when you customize.
+The archetype's `prompt_template` already leads reader-first — keep that order.
 
 ## Step 3 — Design the params
 
@@ -479,18 +535,14 @@ The archetype's `prompt_template` is a starting point and already leads reader-f
 
 ## Step 5 — Compose the render_template
 
-- MiniJinja syntax. Common patterns:
-  - `{% for x in items %}...{% endfor %}` for lists
-  - `{% for k, v in dict|items %}...{% endfor %}` for dicts
-  - `{{ items|length }}` for counts
-  - `{{ items|selectattr(\"status\",\"equalto\",\"fail\")|list|length }}` for filtered counts
-  - `{{ value or \"—\" }}` for null fallback
+- MiniJinja: `{% for x in items %}`, `{% for k, v in dict|items %}`, `{{ items|length }}`,
+  `{{ items|selectattr(\"status\",\"equalto\",\"fail\")|list|length }}`, `{{ value or \"—\" }}`.
 - **Render output** is injected between the `[LIVE]` header and the body excerpt in `librarian_context`. Keep it scannable — tables and short status lines.
 - **No template** is fine for `reflective` trackers — omit the field.
 
 ## Step 5b — Make entries filterable (optional)
 
-If a tracker's per-entry rows should be queryable (e.g. "show only the open hardware items"), set `entry_collection` in the augmentation to the params key holding the array of entry objects (e.g. `"failures"`). This enables `artifact(get, id=..., entry_filter={field:{op:value}})`, which returns the matching rows using the same filter syntax as `artifact(find)`. Only archetypes that keep entries in params (e.g. `failure_table`, `task_list`) support this; `reflective` trackers keep entries in prose — retrofit them first (see `docs/conventions/retrofitting-trackers-for-filtering.md`).
+Set `entry_collection` to the params key holding your array of entry objects (e.g. `"failures"`). That enables `artifact(get, id=..., entry_filter={field:{op:value}})` — same filter syntax as `artifact(find)`. Only archetypes keeping entries in params (`failure_table`, `task_list`) support it; `reflective` keeps entries in prose — retrofit first (`docs/conventions/retrofitting-trackers-for-filtering.md`).
 
 ## Step 6 — Sketch the body skeleton
 
@@ -500,37 +552,58 @@ If a tracker's per-entry rows should be queryable (e.g. "show only the open hard
 
 ## Step 7 — Check for collisions
 
-The `existing_trackers` field in this response lists current trackers. Before creating:
+`existing_trackers` in this response is a **sample**, not the list. For a real check run
+`artifact(find, kind="tracker", semantic="<your concern>")` — scanning titles will not catch a
+duplicate that is worded differently, which is the collision that actually happens.
 
 - **Same concern already tracked?** Edit existing, don't fork.
 - **Related tracker exists?** Use `artifact_link` to wire them after creation.
-- **Naming collision?** Use a more specific title.
 
 ## Anti-patterns
 
 - ❌ **Narrative in params.** Multi-sentence strings = use body.
 - ❌ **Live state in body.** Flag values, F-N statuses, metric numbers = use params.
 - ❌ **Premature schema lock-in.** First 2-3 refreshes will reveal shape changes.
-- ❌ **Manual tracker file AND `kind: tracker` artifact for the same concern.** Pick one. Manual `docs/trackers/<name>.md` is for content where humans drive; `kind: tracker` augmented artifact is for content where gather+refresh drives.
-- ❌ **Over-gathering.** Each gather source costs tokens at refresh time. Only pull what the prompt actually needs.
-- ❌ **Empty render_template.** If you set it, make it useful. Don't ship a one-liner template that adds no value over the prompt blockquote.
+- ❌ **Manual tracker file AND `kind: tracker` artifact for one concern.** Pick one: manual for human-driven content, augmented artifact for gather+refresh-driven.
+- ❌ **Over-gathering.** Each gather source costs tokens per refresh. Pull only what the prompt needs.
+- ❌ **Empty render_template.** If you set it, make it earn its place.
 
 ## Final step
 
-Call `artifact_create` with `kind=tracker`, `status=active`, and `augment={prompt,params}`:
-- `path`: `docs/trackers/<slug>.md` (or project equivalent)
-- `title`: human-readable
-- `topic`: terse keyword for search
-- `prompt`: the augmentation prompt you wrote in Step 2
-- `params`: the initial params shape from Step 3 (matching schema if set)
-- `params_schema`: optional, per Step 4
-- `render_template`: optional, per Step 5
-- `body`: from Step 6's skeleton, filled with initial content
+**Two calls, and the split is not optional.**
 
-The artifact + augmentation are created atomically.
+1. `artifact_create` — `kind=tracker`, `status=active`, `rel_path` (`docs/trackers/<slug>.md`),
+   `title`, `topic`, `body` (Step 6), and `augment={prompt, params}`.
+   **`prompt` and `params` are the ONLY augmentation fields `create` accepts.** Anything else passed
+   inside `augment` is silently discarded.
+2. `artifact_augment(id=..., merge=true, ...)` — attach `render_template` (Step 5), `params_schema`
+   (Step 4) and `entry_collection` (Step 5b). **`merge=true` matters:** `merge=false` overwrites all
+   seven augmentation fields, resetting the `prompt`/`params` you just set.
+
+Then read the artifact back and confirm those fields are non-null before assuming it renders or
+filters.
 "#;
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).unwrap_or_default();
+
+    // Named fetch: one archetype in full. Returns early — a caller who has already
+    // chosen needs neither the teaching prompt again nor the catalog walk.
+    if let Some(want) = a.archetype.as_deref() {
+        let found = archetypes()
+            .as_array()
+            .and_then(|list| list.iter().find(|x| x["name"] == want).cloned());
+        let Some(found) = found else {
+            return Err(RecoverableError::with_hint(
+                format!("unknown archetype '{want}'"),
+                format!("Valid archetypes: {}.", archetype_names().join(", ")),
+            ));
+        };
+        return Ok(json!({
+            "design_version": DESIGN_VERSION,
+            "archetype": found,
+        }));
+    }
+
     let cat = ctx.catalog.lock();
 
     let tracker_ids = augmentation::list_all_ids(&cat)?;
@@ -547,21 +620,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if existing.len() >= EXISTING_TRACKERS_CAP {
             continue;
         }
-        let aug = augmentation::get(&cat, id)?;
+        // Only what Step 7 reads. `last_refreshed_at` / `refresh_count` were carried
+        // here but answer no question the collision check asks — and dropping them
+        // also drops an `augmentation::get` per tracker.
         existing.push(json!({
             "id": id,
             "title": art.title,
             "kind": art.kind,
-            "abs_path": art.abs_path.display().to_string(),
-            "last_refreshed_at": aug.as_ref().and_then(|a| a.last_refreshed_at.clone()),
-            "refresh_count": aug.as_ref().map(|a| a.refresh_count).unwrap_or(0),
         }));
     }
 
     let mut response = json!({
         "design_version": DESIGN_VERSION,
         "system_prompt": SYSTEM_PROMPT,
-        "archetypes": archetypes(),
+        // Menu only — name + when_to_use, which is what Step 1 selects on. The
+        // examples are ~95% of the payload and are fetched one at a time.
+        "archetypes": archetype_menu(),
+        "archetype_detail": "Once you have picked one, call librarian(action=\"tracker_design\", archetype=\"<name>\") for its params_shape_example, params_schema_example, render_template_example, body_skeleton and prompt_template.",
         "existing_trackers": existing,
         "existing_trackers_total": total_trackers,
         "intent": a.intent,
@@ -606,6 +681,147 @@ mod tests {
         assert!(v["system_prompt"].as_str().unwrap().len() > 1000);
         assert_eq!(v["archetypes"].as_array().unwrap().len(), 8);
         assert!(v["next_step"].as_str().unwrap().contains("artifact_create"));
+    }
+
+    /// BL-5. This action exists to *teach the caller before they act* — CLAUDE.md
+    /// and `get_guide("librarian")` both route here ahead of `artifact(create)`.
+    /// Measured 2026-08-16: it had overflowed on 6 of 6 calls in the corpus at a
+    /// near-constant ~10,270 tokens, 4.1x the inline budget, so the guidance has
+    /// **never once arrived inline** and every caller had to fetch it back out of
+    /// a buffer first — a step that measurably fails elsewhere.
+    ///
+    /// Mutation caught: folding the full archetype specs back into the default
+    /// response restores the permanent overflow.
+    #[tokio::test]
+    async fn default_response_fits_inline() {
+        let ctx = mk_ctx();
+        // Seed a FULL catalog. An empty one understates the payload by several
+        // KB, because `existing_trackers` is populated in production and not in
+        // a bare fixture — a test that passes at 9.9KB against zero trackers
+        // would still overflow on every real call. Titles and paths are sized
+        // from this repo's actual trackers, which run ~90 chars.
+        {
+            let cat = ctx.catalog.lock();
+            let now = chrono::Utc::now().timestamp_millis();
+            for i in 0..EXISTING_TRACKERS_CAP {
+                let id = format!("seed{i:04}");
+                artifact::upsert(
+                    &cat,
+                    &artifact::ArtifactRow {
+                        id: id.clone(),
+                        abs_path: std::path::PathBuf::from(format!(
+                            "/repo/docs/trackers/a-fairly-long-tracker-slug-{i}.md"
+                        )),
+                        kind: "tracker".into(),
+                        status: "active".into(),
+                        title: Some(format!(
+                            "Tracker {i} — a representative title of the length this repo actually uses (N-N)"
+                        )),
+                        owners: vec![],
+                        tags: vec![],
+                        topic: None,
+                        time_scope: None,
+                        source: None,
+                        created_at: now,
+                        updated_at: now,
+                        file_mtime: now,
+                        file_sha256: "x".into(),
+                        confidence: 1.0,
+                    },
+                )
+                .unwrap();
+                augmentation::upsert(
+                    &cat,
+                    &augmentation::AugmentationRow {
+                        artifact_id: id,
+                        prompt: "p".into(),
+                        params: "{}".into(),
+                        last_refreshed_at: None,
+                        refresh_count: 0,
+                        created_at: "2026-01-01T00:00:00.000Z".into(),
+                        updated_at: "2026-01-01T00:00:00.000Z".into(),
+                        render_template: None,
+                        params_schema: None,
+                        append_mode: false,
+                        history_cap: None,
+                        entry_collection: None,
+                        refreshed_at_commit: None,
+                    },
+                )
+                .unwrap();
+            }
+        }
+
+        let v = call(&ctx, json!({})).await.unwrap();
+        let bytes = serde_json::to_string(&v).unwrap().len();
+        // TOOL_OUTPUT_BUFFER_THRESHOLD is the actual buffering trigger
+        // (`exceeds_inline_limit`); INLINE_BYTE_BUDGET's 9 KB is the slice budget
+        // for content that has ALREADY overflowed, so it is not the bar here.
+        //
+        // Measured 2026-08-16: 9,358 bytes with a full catalog — ~640 bytes of
+        // headroom, down from ~41,000 pre-split. That margin is thin: growing the
+        // system prompt or raising EXISTING_TRACKERS_CAP will re-break this, and
+        // this assertion is what will say so.
+        assert!(
+            bytes < crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "tracker_design must arrive inline with a full catalog: {bytes} bytes \
+                 against a {} byte threshold",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+        );
+    }
+
+    /// The split must not cost Step 1. Picking an archetype is the first thing the
+    /// system prompt asks for, so every archetype stays listed by name and
+    /// `when_to_use` — only the bulky examples move behind a second call.
+    #[tokio::test]
+    async fn default_response_still_lists_every_archetype_to_choose_from() {
+        let ctx = mk_ctx();
+        let v = call(&ctx, json!({})).await.unwrap();
+        let list = v["archetypes"].as_array().expect("archetypes array");
+        assert_eq!(list.len(), 8, "all 8 must remain choosable inline");
+        for a in list {
+            assert!(a["name"].is_string(), "menu entry needs a name: {a}");
+            assert!(
+                a["when_to_use"].is_string(),
+                "menu entry needs when_to_use — that is what Step 1 selects on: {a}"
+            );
+            assert!(
+                a["params_shape_example"].is_null(),
+                "the heavy fields are what blew the budget; they must NOT be inline: {a}"
+            );
+        }
+    }
+
+    /// The other half of the split: one archetype, in full, on request.
+    #[tokio::test]
+    async fn named_archetype_returns_the_full_spec() {
+        let ctx = mk_ctx();
+        let v = call(&ctx, json!({ "archetype": "task_list" }))
+            .await
+            .unwrap();
+        let a = &v["archetype"];
+        assert_eq!(a["name"], "task_list");
+        assert!(
+            a["params_shape_example"].is_object(),
+            "a named fetch must carry the examples the menu omits, got: {a}"
+        );
+        assert!(a["body_skeleton"].is_string());
+        assert!(a["prompt_template"].is_string());
+    }
+
+    /// An unknown name must say what the valid ones are rather than returning an
+    /// empty envelope the caller has to diagnose.
+    #[tokio::test]
+    async fn unknown_archetype_names_the_valid_ones() {
+        let ctx = mk_ctx();
+        let err = call(&ctx, json!({ "archetype": "nope" }))
+            .await
+            .expect_err("an unknown archetype must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("task_list"),
+            "error must list valid names: {msg}"
+        );
     }
 
     #[tokio::test]

@@ -1,19 +1,19 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- artifact-create
+- silent-drop
+- doc-vs-code-drift
+closed: null
 opened: 2026-08-16
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-07-13-artifact-create-drops-topic.md
-  - docs/issues/archive/2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md
-  - docs/trackers/open-issue-work-queue.md
-tags:
-  - librarian
-  - artifact-create
-  - silent-drop
-  - doc-vs-code-drift
-kind: bug
+- docs/issues/archive/2026-07-13-artifact-create-drops-topic.md
+- docs/issues/archive/2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md
+- docs/trackers/open-issue-work-queue.md
+severity: medium
 ---
 
 # BUG: artifact(create)'s `augment` silently discards render_template, params_schema and entry_collection — and tracker_design tells you to pass them
@@ -157,33 +157,45 @@ entirely.
 
 ## Fix
 
-**1. Reject rather than discard (smallest, highest value).** Add
-`#[serde(deny_unknown_fields)]` to `AugmentSpec` (`src/librarian/tools/create.rs:39`). An unknown key
-then returns a `RecoverableError` naming the valid fields, matching `update`'s behaviour. This alone
-converts silent data loss into a self-correcting error, and the hint can name `artifact_augment` as
-the place those fields belong.
+**Implemented 2026-08-16 — all three parts, since fixes 1 and 2 are complementary rather than
+alternatives.**
 
-**2. Or accept them (better ergonomics, larger change).** Widen `AugmentSpec` to the full seven
-fields and thread them into the `AugmentationRow` at `create.rs:249-265`. This makes "created
-atomically with its augmentation" true as advertised and removes the mandatory second call. Prefer
-this if trackers are expected to be create-and-go.
+**1. Reject unknown keys.** `AugmentSpec` now carries `#[serde(deny_unknown_fields)]`
+(`src/librarian/tools/create.rs`). A typo inside `augment` fails loudly naming the offending key,
+matching `update`'s `patch`. This is worth having even with fix 2 in place, because fix 2 only helps
+fields that exist — `render_tempalte` still needs to error.
 
-**3. Either way, fix `tracker_design`'s Final step** (`src/librarian/tools/tracker_design.rs`,
-`SYSTEM_PROMPT`) so it does not list fields the named call cannot accept — either by moving
-`params_schema` / `render_template` into an explicit follow-up `artifact_augment` step, or by
-updating it once fix 2 lands.
+**2. Accept the full shape.** `AugmentSpec` widened from two fields to all seven caller-controlled
+ones (`prompt`, `params`, `render_template`, `params_schema`, `entry_collection`, `append_mode`,
+`history_cap`), each threaded into the `AugmentationRow` at the insert instead of being pinned to a
+literal. `refreshed_at_commit` stays server-computed and is deliberately **not** caller-supplied.
+"Created atomically with its augmentation" is now true rather than partly true, and the mandatory
+second call is gone.
 
-**Note the interaction:** fix 3 edits `SYSTEM_PROMPT`, which is the payload measured at 4.1× the
-inline budget in `docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md`. Doing both in
-one pass is cheaper than twice.
+**3. The advertised schema now matches**, in both directions. `artifact`'s `augment` property
+(`src/librarian/tools/artifact.rs`) documents all seven fields with per-field descriptions and sets
+`additionalProperties: false`, so the schema states the rejection rather than leaving callers to
+discover it.
 
+**4. `tracker_design`'s Final step is corrected** — the misleading surface this bug's Evidence
+section identified. It now prescribes the two-call shape explicitly, states that `prompt` and
+`params` were the only fields `create` accepted, warns that `merge=false` resets all seven, and tells
+the caller to read the artifact back. Done in the same pass as
+`docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md`, as that bug predicted.
 ## Tests added
 
-`N/A — not yet fixed.` A regression test should assert the *observable* contract, not the struct:
-create with `augment` carrying `render_template`, then `artifact(get)` and assert it is either
-present (fix 2) or that the create returned a `RecoverableError` (fix 1). Asserting on `AugmentSpec`'s
-fields would pass while the row still stored `None`.
+In `src/librarian/tools/create.rs`:
 
+| Test | Mutation it catches |
+|---|---|
+| `create_augment_accepts_the_full_augmentation_shape` | re-pinning any of the five fields to a literal at the insert |
+| `create_augment_rejects_an_unknown_field` | dropping `deny_unknown_fields`, restoring silent discard |
+
+The first asserts the **observable** contract — create, then read the row back and check each field
+persisted — rather than asserting on `AugmentSpec`'s shape, which would pass while the row still
+stored `None`. That distinction is the whole bug: the struct and the stored row disagreed.
+
+Gate: **3842 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 
 - **Always follow `artifact(create, augment=…)` with
@@ -195,15 +207,20 @@ fields would pass while the row still stored `None`.
 
 ## Resume
 
-Decide fix 1 (reject) or fix 2 (accept) — they are not exclusive, and fix 1 is worth doing even if
-fix 2 lands later, since it also catches genuine typos. Then fix 3 in the same pass as
-`docs/issues/2026-08-16-tracker-design-guidance-always-overflows.md`, since both edit `SYSTEM_PROMPT`.
+Fixed on `experiments`, gate green. Before archiving:
 
-Before fixing, sweep for already-damaged trackers — every augmented artifact with a null
-`render_template` is a candidate, though some legitimately have none (`reflective` trackers omit it
-by design, per `tracker_design` Step 5). `artifact(find, kind="tracker", augmented=true)` then check
-each.
+1. **Verify live after the next `cargo rb` + `/mcp`** — create a throwaway tracker passing
+   `render_template` and `entry_collection` inside `augment`, read it back, and confirm both
+   persisted without a follow-up `artifact_augment`. Then pass a deliberate typo and confirm it
+   errors.
+2. **Record the fix SHA and archive** via `artifact(action="move", …)`, checking the promotion path
+   first (`0` on the left ⇒ fast-forward ⇒ no pending-master-SHA line).
 
+**Still worth doing, and not blocking:** sweep for trackers already damaged by the old behaviour —
+augmented artifacts with a null `render_template` created before today. Some legitimately have none
+(`reflective` trackers omit it by design), so this needs judgment, not a blanket repair:
+`artifact(find, kind="tracker", augmented=true)` then check each. `docs/trackers/open-issue-work-queue.md`
+is one known case — it was created by this bug and repaired by hand.
 ## References
 
 - `docs/issues/archive/2026-07-13-artifact-create-drops-topic.md` — same file, same class, fixed.

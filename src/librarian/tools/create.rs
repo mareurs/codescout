@@ -36,9 +36,26 @@ fn validate_rel_path(rel: &str) -> Result<()> {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// The augmentation an artifact is created with. Mirrors `artifact_augment`'s
+/// caller-controlled fields so "created atomically with its augmentation" is true
+/// rather than partly true.
+///
+/// `deny_unknown_fields` is load-bearing. Without it serde silently discards a
+/// misspelled or unsupported key and the call still reports success — which is how
+/// this struct's previous two-field shape turned a user typo into silent data loss
+/// instead of an error. The sibling write surface (`update`'s `patch`) already
+/// rejects unknown keys by naming the valid ones; this makes the two agree.
 pub struct AugmentSpec {
     pub prompt: String,
     pub params: Option<Value>,
+    pub render_template: Option<String>,
+    /// Accepted as a JSON object and stored as text, matching `AugmentationRow`.
+    pub params_schema: Option<Value>,
+    pub entry_collection: Option<String>,
+    #[serde(default)]
+    pub append_mode: bool,
+    pub history_cap: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -256,11 +273,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 refresh_count: 0,
                 created_at: now_ts.clone(),
                 updated_at: now_ts,
-                render_template: None,
-                params_schema: None,
-                append_mode: false,
-                history_cap: None,
-                entry_collection: None,
+                render_template: aug_spec.render_template.clone(),
+                params_schema: aug_spec
+                    .params_schema
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+                append_mode: aug_spec.append_mode,
+                history_cap: aug_spec.history_cap,
+                entry_collection: aug_spec.entry_collection.clone(),
+                // Server-computed provenance: never caller-supplied.
                 refreshed_at_commit: None,
             },
         )?;
@@ -529,6 +551,90 @@ mod tests {
         assert_eq!(aug.prompt, "Keep this tracker up to date.");
         let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
         assert_eq!(params["threshold"], 5);
+    }
+
+    /// BL-18. `augment` accepted only `prompt` + `params`; the other five
+    /// augmentation fields were hardcoded to None/false at the insert, and serde
+    /// silently dropped them on the way in. The call still returned success, so a
+    /// tracker "created atomically with its augmentation" was half-configured with
+    /// nothing saying so — a missing `render_template` means it contributes no
+    /// `[LIVE]` block to `librarian(context)`, and a missing `entry_collection`
+    /// makes `entry_filter` fail with a message about a different problem.
+    ///
+    /// Mutation caught: re-pinning any of these to a literal at the insert.
+    #[tokio::test]
+    async fn create_augment_accepts_the_full_augmentation_shape() {
+        use crate::librarian::catalog::augmentation;
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let result = call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "trackers/full.md",
+                "kind": "tracker",
+                "title": "Full",
+                "body": "b",
+                "status": "active",
+                "augment": {
+                    "prompt": "p",
+                    "params": {"rows": []},
+                    "render_template": "| {{ rows|length }} |",
+                    "params_schema": {"type": "object"},
+                    "entry_collection": "rows",
+                    "append_mode": true,
+                    "history_cap": 12
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let id = result["id"].as_str().unwrap().to_string();
+        let cat = ctx.catalog.lock();
+        let aug = augmentation::get(&cat, &id)
+            .unwrap()
+            .expect("augmentation row");
+
+        assert_eq!(
+            aug.render_template.as_deref(),
+            Some("| {{ rows|length }} |")
+        );
+        assert_eq!(aug.entry_collection.as_deref(), Some("rows"));
+        assert!(aug.params_schema.is_some(), "params_schema must persist");
+        assert!(aug.append_mode, "append_mode must persist");
+        assert_eq!(aug.history_cap, Some(12));
+    }
+
+    /// The other half: a typo inside `augment` must fail loudly. `update`'s `patch`
+    /// already rejects unknown keys by naming the valid ones; `create` silently
+    /// discarded them, so the same user error was self-correcting on one write
+    /// surface and silent data loss on its sibling.
+    #[tokio::test]
+    async fn create_augment_rejects_an_unknown_field() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "trackers/typo.md",
+                "kind": "tracker",
+                "title": "Typo",
+                "body": "b",
+                "augment": { "prompt": "p", "render_tempalte": "oops" }
+            }),
+        )
+        .await
+        .expect_err("an unknown key inside augment must be rejected, not discarded");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("render_tempalte") || msg.contains("unknown field"),
+            "the error must name the offending key, got: {msg}"
+        );
     }
 
     #[tokio::test]

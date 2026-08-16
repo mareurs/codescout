@@ -1,18 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- progressive-disclosure
+- overflow
+- agent-guidance
+closed: null
 opened: 2026-08-16
-closed:
-severity: low
 owner: marius
 related:
-  - docs/trackers/2026-08-15-tool-usage-investigation.md
-  - docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
-tags:
-  - librarian
-  - progressive-disclosure
-  - overflow
-  - agent-guidance
-kind: bug
+- docs/trackers/2026-08-15-tool-usage-investigation.md
+- docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+severity: low
 ---
 
 # BUG: librarian's instructional actions always overflow — `tracker_design` has never been delivered inline
@@ -132,24 +132,55 @@ separate content blocks on first trigger. So the codebase already contains the p
 
 ## Fix
 
-**Plan, in priority order:**
+**Implemented 2026-08-16.** The split landed as planned, but the sizing work found a second
+contributor the original Fix had not counted.
 
-1. **`tracker_design`** — deliver inline like `get_guide` does. If the archetype library is what
-   pushes it over, split it: return the teaching prompt inline and the archetype library behind an
-   explicit follow-up, rather than buffering the whole thing.
-2. **`link_scan` / `audit_doc_refs`** — buffering a long report is defensible; the defect is that
-   the *summary* must then carry enough to act on. Ensure the compact summary names the finding
-   counts by severity so the common case ("did anything break?") needs no buffer read at all.
-3. Consider a `max_tokens`-style budget on the report actions, as `context` already has.
+**1. `tracker_design` is now two calls.** The default response carries the teaching prompt plus an
+**archetype menu** (`name` + `when_to_use`); `librarian(action="tracker_design", archetype="<name>")`
+returns one archetype in full. An unknown name errors and lists the valid ones rather than returning
+an empty envelope.
 
-**Not a fix:** raising the global threshold. The budget exists for the model's context health; the
-problem is these payloads' shape, not the cap.
+Step 1 of the system prompt is *"pick an archetype"*, so every archetype stays choosable inline —
+only the bulky per-archetype fields (`params_shape_example`, `params_schema_example`,
+`render_template_example`, `body_skeleton`, `prompt_template`) move behind the second call. The menu
+also trims each `when_to_use` at its `" Examples:"` clause: examples illustrate, they do not
+discriminate, so they belong with the full spec.
 
+**2. `existing_trackers` was the uncounted half.** At `EXISTING_TRACKERS_CAP = 30` with six fields
+per row it was **~7 KB of a 10 KB budget** — more than the entire archetype menu. Now capped at 5
+rows carrying `{id, title, kind}`. `last_refreshed_at` and `refresh_count` answered no question the
+collision check asks, and dropping them also removes an `augmentation::get` per tracker.
+
+Step 7 was rewritten to match: the sample is now described as a **sample**, with the real collision
+check being `artifact(find, kind="tracker", semantic="<concern>")` — scanning titles cannot catch a
+duplicate worded differently, which is the collision that actually happens.
+
+**3. The prompt was tightened** (Steps 2, 5, 5b, Anti-patterns) without dropping a single rule, and
+its Final step was corrected — that half belongs to
+`docs/issues/2026-08-16-artifact-create-augment-drops-template-and-schema.md`, fixed in the same pass
+as predicted.
+
+**Result: ~41,000 → 9,358 bytes** with a full catalog, against a 10,000-byte buffering threshold.
+From overflowing on 6 of 6 calls to arriving inline.
 ## Tests added
 
-`N/A — not yet fixed.` A regression test should assert `tracker_design`'s response is delivered
-inline (no `output_id`) for the default invocation.
+In `src/librarian/tools/tracker_design.rs`:
 
+| Test | Mutation it catches |
+|---|---|
+| `default_response_fits_inline` | folding the full specs back in, or growing the prompt past the margin |
+| `default_response_still_lists_every_archetype_to_choose_from` | splitting so hard that Step 1 can no longer choose |
+| `named_archetype_returns_the_full_spec` | a menu with no way to reach the detail |
+| `unknown_archetype_names_the_valid_ones` | an empty envelope the caller must diagnose |
+
+**The first test's fixture is the load-bearing part, and its first version was wrong.** Written
+against an empty catalog it measured 10,396 bytes; seeded with a full catalog the same code measured
+**17,456**. `existing_trackers` is populated in production and absent from a bare fixture, so the
+empty-catalog version would have passed CI while the tool still overflowed on every real call — the
+same *measuring the wrong population* error this investigation corrected in TU-5. The test now seeds
+`EXISTING_TRACKERS_CAP` trackers with titles sized from this repo's actual ones.
+
+Gate: **3842 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 
 - After `librarian(action="tracker_design")`, read the returned buffer immediately —
@@ -158,18 +189,22 @@ inline (no `output_id`) for the default invocation.
 
 ## Resume
 
-Measurement is **done** — the sizing this section previously called for returned 10,270 tokens,
-4.1× the 2,500-token inline budget, so Fix step 1's conditional is resolved in favour of the
-**split**; trimming cannot close a 4× gap.
+Fixed on `experiments`, gate green. Before archiving:
 
-Next action: split `tracker_design::call`
-(`src/librarian/tools/tracker_design.rs:532-578`) so `system_prompt` returns inline and
-`archetypes()` (`tracker_design.rs:29-426`) moves behind an explicit follow-up — e.g. an
-`archetype` argument returning one by name, with the inline response listing the names and when to
-use each. Size the trimmed envelope against `MAX_INLINE_TOKENS` before committing: `SYSTEM_PROMPT`
-alone (103 lines) may still be close to the 2,500-token line.
+1. **Verify live after the next `cargo rb` + `/mcp`** — call `librarian(action="tracker_design")` and
+   confirm it returns inline with no `output_id`, then
+   `librarian(action="tracker_design", archetype="task_list")` for the detail path.
+2. **Record the fix SHA and archive** via `artifact(action="move", …)`. Check the promotion path
+   first — a `0` on the left of `git rev-list --left-right --count master...experiments` means
+   fast-forward, so no pending-master-SHA line is written.
 
-Regression test: assert the default `tracker_design` invocation returns **no** `output_id`.
+**Margin is thin: 9,358 of 10,000 bytes, ~640 spare.** Growing `SYSTEM_PROMPT` or raising
+`EXISTING_TRACKERS_CAP` will re-break this. `default_response_fits_inline` is what will say so — do
+not "fix" it by relaxing the assertion.
+
+Not addressed here: `link_scan` (8/8 overflow) and `audit_doc_refs` (37/50). Both return *findings*,
+where a buffer is defensible; their Fix step 2 — make the compact summary carry counts by severity so
+the common question needs no buffer read — remains open and is not filed separately.
 ## References
 
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` § History → 2026-08-16, *Overflow*.
