@@ -734,6 +734,45 @@ fn read_full_file(
                 }
             };
         result["file_id"] = json!(file_id);
+
+        // This summary describes a file it does not contain — an outline, zero content
+        // lines. Until now it carried only `line_count`, which the renderer prints as a
+        // bare "1505 lines" header: indistinguishable from a complete read, so a caller
+        // could reasonably believe it had seen the file.
+        //
+        // Thirteen lines below, the milder case (exploring mode, file longer than
+        // max_results) builds a full OverflowInfo with a tailored hint. The worse case had
+        // none. That asymmetry is the bug — not a design philosophy, a local omission.
+        //
+        // `shown: 0` is literal, not a placeholder: zero lines of content are shown.
+        //
+        // See `docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
+        let summarised_lines = result["line_count"]
+            .as_u64()
+            .unwrap_or_else(|| text.lines().count() as u64) as usize;
+        let is_source = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy())
+            == crate::tools::file_summary::FileSummaryType::Source;
+        result["complete"] = json!(false);
+        result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
+            shown: 0,
+            total: summarised_lines,
+            hint: if is_source {
+                format!(
+                    "Outline only — no file content included. For source, prefer \
+                     symbols(path) then symbols(name='...', include_body=true). To read \
+                     lines: read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+                )
+            } else {
+                format!(
+                    "Outline only — no file content included. Read ranges from the buffer: \
+                     read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+                )
+            },
+            next_offset: None,
+            by_file: None,
+            by_file_overflow: 0,
+        });
+
         if path.ends_with(".md") || path.ends_with(".markdown") {
             if let Some(c) = markdown_coverage(text, resolved, ctx, None, None, None) {
                 result["coverage"] = c;
@@ -1077,15 +1116,21 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
         _ => {}
     }
 
-    // Buffer reference
+    // Incompleteness note, buffer handle and hint go BELOW THE HEADER, not after the
+    // outline. All three were tail-placed, and the outline they trailed is unbounded — a
+    // 300-symbol file pushes them past the compaction cut, so the one response that most
+    // needs to say "this is a summary, here is the handle to get the rest" lost both the
+    // statement and the handle. This bug's own fix note called that sequencing out.
+    // See `format::overflow_head`.
+    let mut head_extra = overflow_head(val);
     if let Some(file_id) = val["file_id"].as_str() {
-        out.push_str(&format!("\n\n  Buffer: {file_id}"));
+        head_extra.push_str(&format!("  Buffer: {file_id}\n"));
     }
     if let Some(hint) = val["hint"].as_str() {
-        out.push_str(&format!("\n  {hint}"));
+        head_extra.push_str(&format!("  {hint}\n"));
     }
 
-    out
+    insert_below_header(out, &head_extra)
 }
 
 /// Recursively flatten a symbol tree into a single Vec of references.

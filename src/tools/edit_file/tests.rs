@@ -5462,6 +5462,101 @@ async fn read_file_large_content_returns_file_id_not_inline() {
     );
 }
 
+/// A buffered full read must say it is incomplete, name the handle that recovers the
+/// rest, and keep both above the compaction cut.
+///
+/// Before this, the `exceeds_inline_limit` branch returned an outline plus `file_id` and
+/// nothing else: no `complete: false`, no shown-vs-total, no hint. The renderer printed
+/// `line_count` as a bare `"1505 lines"` header — indistinguishable from a complete read.
+/// Thirteen lines below it in the same function, the *milder* overflow case built a full
+/// `OverflowInfo` with a tailored hint, so this was a local omission rather than a design
+/// choice.
+///
+/// The fixture is a source file with 400 symbols on purpose. The outline is what pushed
+/// the tail-placed `Buffer:` line past `truncate_compact`'s cut, so the one response that
+/// most needed to hand back a handle was the one that lost it.
+///
+/// See `docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`
+/// and `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`,
+/// whose fix note called this sequencing out.
+#[tokio::test]
+async fn read_file_buffered_summary_says_it_is_incomplete_and_survives_the_cut() {
+    use crate::tools::core::types::truncate_compact;
+    use crate::tools::{COMPACT_SUMMARY_HARD_MAX_BYTES, COMPACT_SUMMARY_MAX_BYTES};
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: std::sync::Arc::new(crate::lsp::LspManager::new()),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let file = dir.path().join("big.rs");
+    let src: String = (0..400)
+        .map(|i| format!("pub fn generated_function_number_{i}() -> usize {{ {i} }}\n"))
+        .collect();
+    std::fs::write(&file, &src).unwrap();
+
+    let result = ReadFile
+        .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+
+    let file_id = result["file_id"]
+        .as_str()
+        .expect("a file this size must buffer")
+        .to_string();
+    assert_eq!(
+        result["complete"],
+        json!(false),
+        "an outline is not the file — the response must say so: {result}"
+    );
+    let hint = result["overflow"]["hint"]
+        .as_str()
+        .expect("the buffered branch must carry an overflow hint");
+    assert!(
+        hint.contains(&file_id),
+        "the hint must name the handle that recovers the content, or it is advice the \
+         reader cannot act on: {hint}"
+    );
+
+    // The signal is worthless if compaction eats it — this is the half the sibling bug
+    // is about, and the reason the note is emitted at the head.
+    let rendered = ReadFile
+        .format_compact(&result)
+        .expect("a summary has a compact form");
+    assert!(
+        rendered.len() > COMPACT_SUMMARY_HARD_MAX_BYTES,
+        "the 400-symbol outline must exceed the hard cap or this proves nothing — got {} bytes",
+        rendered.len()
+    );
+    let cut = truncate_compact(
+        &rendered,
+        COMPACT_SUMMARY_MAX_BYTES,
+        COMPACT_SUMMARY_HARD_MAX_BYTES,
+    );
+    assert!(
+        cut.contains(&file_id),
+        "the buffer handle must survive the cut — without it the reader cannot recover \
+         anything. Cut summary:\n{cut}"
+    );
+    assert!(
+        cut.contains("Outline only"),
+        "the incompleteness statement must survive the cut. Cut summary:\n{cut}"
+    );
+}
+
 #[tokio::test]
 async fn read_file_small_fat_file_returns_content_inline() {
     // Regression: a 10-line JSONL file with ~600 bytes/line (~6KB total,
