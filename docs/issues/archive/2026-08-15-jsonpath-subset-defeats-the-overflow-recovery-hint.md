@@ -214,22 +214,96 @@ compile until handled.
 - `[-N:]` (last N elements) IS supported and is easy to miss; it is the one list-shaped form that
   works today.
 
+## Verification
+
+**Verified live 2026-08-16** against build `7c91cdf7`, the running MCP server for the
+verifying session (confirmed by `codescout_sha` on that session's own `tool_calls` rows —
+not inferred from the binary mtime).
+
+### 1. `[*]` is accepted
+
+    read_file("@tool_09c0d647", json_path="$.items[*].title")   -> 42 titles
+    read_file("@tool_09c0d647", json_path="$.items[*].kind")    -> 42 kinds  (file_path alias)
+
+The one error the projection produced was the *designed* one:
+
+    read_file("@tool_09c0d647", json_path="$.items[*].rel_path")
+    -> json_path '[*]' failed at element 0: path segment 'rel_path' not found
+       — hint: Available keys: id, kind, status, title, abs_path, updated_at
+
+That is `json_path_key_miss`, not `json_path_unsupported` — the wildcard parsed, evaluated,
+and reported the missing key **naming the element**, which is the semantics § Fix chose over
+silently dropping rows. Both `path` aliases (`output_id`, `file_path`) behave identically.
+
+### 2. The hint is payload-derived
+
+An overflowing `artifact(action="find", kind="bug", …)` returned:
+
+    hint: read_file("@tool_09c0d647", json_path="$.items[*]")
+
+A real field of the real payload, list-shaped. The pre-fix constant was `$.field`.
+
+### 3. Acceptance measurement — `[*]` rejections
+
+Histogram re-run across all 16 live `usage.db` files, split on the rebuild cutoff
+(`2026-08-16 07:57:00Z`; `called_at` is UTC via sqlite `datetime('now')`):
+
+    [*] rejections BEFORE cutoff:  24
+    [*] rejections AFTER  cutoff:   1
+
+**On the fixed build, zero.** Grouping the same window by `codescout_sha` resolves the
+survivor:
+
+    7c91cdf7 | json_path [*] | 3 success, 1 error (the key-miss above)
+    b9c78965 | json_path [*] | 1 error          <- the lone rejection
+
+`b9c78965` is `fix(grep): bound output by bytes…`, committed 09:22 — **88 minutes before**
+the `[*]` fix at 10:50. The rejection came from a sibling session whose server process had
+been resident since before the rebuild. Not a fix failure: a pre-fix binary still running.
+
+### The measurement lesson (worth more than the number)
+
+**A date-bounded acceptance query silently mixes builds.** Long-lived MCP server processes
+keep whatever binary they exec'd resident indefinitely — 21 `codescout start` processes were
+alive during this measurement, the oldest 12 days old, and **three distinct `codescout_sha`
+values were writing rows in the same one-hour window**. The naive date-bounded count reads
+`1`, not `0`, and looks like a partial failure of the fix.
+
+Rank an acceptance measurement on `codescout_sha`, not on `called_at`. The column exists
+precisely for this and answers it in one `GROUP BY`.
+
+### Not verified live: `336d3b04`
+
+The depth-bounded hint refinement is committed but has **never run** — the on-disk binary
+(10:56:45) predates it (11:04:36), and no resident process carries it. It is covered by four
+unit tests in `src/tools/core/types.rs` (`json_path_hint_tests`), all green, the load-bearing
+one being `nested_payload_beats_a_shallow_but_smaller_array`.
+
+The live check above does not discriminate the two versions: `$.items[*]` is a **top-level**
+array, which `7c91cdf7`'s top-level-only scan and `336d3b04`'s depth walk both name. Its
+specific claim — a nested array beating a shallower one — awaits the next `cargo rb`. This
+does not gate the archive: the bug's symptom is `[*]` being rejected, and that is closed.
+
+### Gate
+
+    cargo test --lib json_path   15 passed, 0 failed
+    cargo test --lib wildcard    13 passed, 0 failed
+
 ## Resume
 
-Fixed on `experiments`, gate green. Before archiving:
+**Closed 2026-08-16.** Fix SHAs on **`experiments`**:
 
-1. **Verify live after the next `cargo rb` + `/mcp`**: overflow a result, then recover it with
-   `read_file("@tool_…", json_path="$.<field>[*].<key>")`, and check the envelope's own `hint` now
-   names a list-shaped path rather than `$.field`.
-2. **Re-run the acceptance measurement.** The histogram query in § Evidence against a fresh
-   `usage.db` window should show `[*]` rejections at **zero** — the 73% figure is the acceptance
-   test. Date-bound to after the rebuild, and rank on live DBs only.
-3. Record the fix SHA and archive via `artifact(action="move", …)`; fast-forward promotion means no
-   pending-master-SHA line.
+- `7c91cdf7` — `[*]` projection, payload-derived hint, guide + rejection-hint wording
+- `336d3b04` — depth-bounded hint walk (unit-tested; live check pending next rebuild)
 
-Still unsupported by design: forward slices (`[a:b]`, 5 observed) and filters (`[?(...)]`, 2). The
-filter surface is large; slices are a mechanical follow-on if they recur — with `[*]` available, a
-caller can project and slice the returned array instead.
+`git rev-list --left-right --count master...experiments` = `0  758` — 0 on the left, so
+promotion is a **fast-forward**: these SHAs *are* the master SHAs once `master` moves. No
+second SHA to record.
+
+Still unsupported by design: forward slices (`[a:b]`, 5 observed) and filters (`[?(...)]`,
+2). The filter surface is large; slices are a mechanical follow-on if they recur — with `[*]`
+available, a caller can project and slice the returned array instead.
+
 ## References
 
 - `src/tools/file_summary/file_summary.rs:570-626` — `parse_bracket`, the grammar

@@ -401,7 +401,7 @@ impl Availability {
 /// payload worth projecting further down — measured live 2026-08-16, an
 /// `artifact(get)` result advertised `$.tags[*]` (4 strings) for a buffer whose
 /// point was `$.augmentation.params.tasks[*]` (18 records).
-/// docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+/// docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
 pub(crate) fn default_json_path_hint(val: &Value) -> String {
     if val.is_array() {
         return "$[*]".to_string();

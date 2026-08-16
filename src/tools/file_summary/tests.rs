@@ -1000,7 +1000,7 @@ fn extract_negative_index_returns_last_element() {
 // "this field from every element" — and `[*]` was rejected. Measured 2026-08-15
 // across 13 usage.db files: `[*]` was 22 of 30 rejected segments (73%), and agents
 // fell back to shelling out.
-// docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+// docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
 
 #[test]
 fn wildcard_projects_a_field_from_every_element() {

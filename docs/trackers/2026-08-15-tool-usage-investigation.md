@@ -50,7 +50,7 @@ Overall error rate by month — improving:
 
 | ID | Finding | Disposition |
 |---|---|---|
-| TU-1 | The overflow hint's own recommended recovery needs `[*]`, which `json_path` rejects | **filed** — `docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` (`a7da09c6`) |
+| TU-1 | The overflow hint's own recommended recovery needs `[*]`, which `json_path` rejects | **filed** — `docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` (`a7da09c6`) |
 | TU-2 | IL1's always-loaded text grants line-range reads without the overlap condition | **filed** — `docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md` (`32984694`, corrected `9746a5f0`) |
 | TU-3 | A write-scope denial does not name `approve_write` | **filed** — `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md` (`32984694`) |
 | TU-4 | Conditionally-required params are advertised as optional | **filed** — `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md` (`70d3ad76`) |

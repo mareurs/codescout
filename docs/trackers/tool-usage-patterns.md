@@ -441,7 +441,7 @@ attached to.
 list-shaped example when the buffered payload's top level is an array; (c) support `[*]` in the
 parser, which alone covers 73% of observed rejections.
 
-Evidence: `docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`, T-17.
+Evidence: `docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`, T-17.
 ## History
 
 ### 2026-05-08 — filter.rs rel_path alias fix (T-010)

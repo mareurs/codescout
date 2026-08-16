@@ -5,7 +5,7 @@ closed:
 severity: medium
 owner: marius
 related:
-  - docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+  - docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
   - docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md
   - docs/trackers/open-issue-work-queue.md
 tags:
@@ -107,7 +107,7 @@ actionable.
 
 ### It compounds the hint bug
 
-`docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` fixed the *hint* so
+`docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` fixed the *hint* so
 the follow-up call is likely to succeed. That reduces the cost of the second call; it does not
 remove it. The two together define the shape of a good envelope: **carry enough that the second call
 is often unnecessary, and make it work when it is.**
@@ -162,7 +162,7 @@ librarian's cases well enough that bespoke per-action summaries are not worth th
 
 ## References
 
-- `docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` — the hint half of
+- `docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` — the hint half of
   the same envelope.
 - `docs/issues/archive/2026-07-09-artifact-get-full-true-body-silent-truncation.md` — why the one
   existing librarian summary is shaped the way it is.
