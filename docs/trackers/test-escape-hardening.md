@@ -77,7 +77,51 @@ Buildable cheaply from `call_graph(direction=callers)` + a `tests/` name-path he
 catches wholly-orphaned new functions — the degenerate case, not the actual #3/#4 shapes. Kept
 as deferred: mutation testing (I-3) dominates it on coverage-per-value.
 
+
+### I-7 — Deprecated-tool-name gate over the `get_guide` bodies (gate-scope)
+
+The ten `get_guide` bodies are the fourth prose surface the model reads, and were the
+only one with no drift gate at all. `prompt_surfaces_reference_only_real_tools`
+(`src/server.rs:1839`) builds its `surfaces` list from exactly three entries —
+`server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft` — and no
+guide body appears in it. A guide is auto-injected on the first call that triggers its
+topic, so a stale tool name there reaches the model exactly as one in
+`server_instructions` would.
+
+**Why denylist, not allowlist.** Measured 2026-08-16: the ten bodies carry **179
+distinct backticked snake_case tokens** against roughly 30 real tools. An allowlist
+would need ~150 non-tool entries, and the existing gate's two-way tripwire (every
+allowlist entry must still appear backticked in some surface) would turn every guide
+edit into a maintenance event. That is the trade F-9 left undecided; the measurement
+decides it. The same conclusion was already written in the codebase for `CLAUDE.md` at
+`src/prompts/mod.rs:1101-1105` — *"It is prose, so an allowlist guard is unusable
+here"* — and that comment cites F-9 by name.
+
+The gate iterates `GUIDE_TOPICS` and calls `topic_body`, rather than a hand-written
+list, so an eleventh guide is covered the moment it is registered — which is the exact
+failure mode the intervention exists to prevent.
+
+**Mutation-verified, not merely green.** Adding `semantic_search` to
+`DEPRECATED_TOOL_NAMES` fails the test with `get_guide body 'symbol-navigation'
+references deprecated tool name: semantic_search` — it names the guide and the token.
+Reverted after the check.
+
+Closes **F-9** in `docs/trackers/archive/prompt-guide-refactor-session-log.md`, open
+since the prompt-guide-refactor work stream.
 ## History
+
+### 2026-08-16 — I-7 opened and shipped same day (tracker-hygiene sweep → verify-open → fix)
+
+Route worth recording, because no single step would have found it. The tracker-hygiene
+sweep archived the prompt-guide-refactor session log; its distill step ran verify-open
+on that log's open frictions; F-9 re-confirmed **at the bytes** (the `surfaces` array is
+literally three entries) rather than being taken on trust; it was rehomed here as I-7
+because this tracker owns test-escape interventions; and I-7 was then the only
+`proposed` mechanical entry, which is what this tracker's own prompt says to take first.
+
+A friction that had sat open across a whole work stream closed within a day of the
+sweep that touched it — the argument for distill-then-archive doing verify-open rather
+than a bare archive.
 
 ### 2026-07-17 — created from the entry-graph Stage 2 self-reflection
 Four parallel deep-exploration subagents grounded the four defense layers (static-lint infra,

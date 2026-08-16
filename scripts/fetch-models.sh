@@ -38,7 +38,7 @@ fetch_dense() {
   # There is no published GGUF repo for this model. `nomic-ai/CodeRankEmbed-GGUF`
   # (which earlier revisions of the docs pointed at) returns HTTP 401 and does
   # not appear in HuggingFace search — see
-  # docs/issues/2026-07-25-coderankembed-gguf-source-404.md. Build the quant from
+  # docs/issues/archive/2026-07-25-coderankembed-gguf-source-404.md. Build the quant from
   # the official, ungated safetensors repo instead. Q4_K_M is deliberate: it is
   # the benchmarked champion (37) and beats f16 — see
   # docs/manual/src/concepts/retrieval-stack.md § Dense embedder.

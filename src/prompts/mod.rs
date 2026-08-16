@@ -1116,6 +1116,42 @@ mod tests {
         }
     }
 
+    /// The `get_guide` bodies are the fourth prose surface the model reads, and
+    /// until now the only one with no drift gate at all:
+    /// `prompt_surfaces_reference_only_real_tools` builds its `surfaces` list from
+    /// exactly three entries — `server_instructions.md`, `onboarding_prompt.md`,
+    /// and `build_system_prompt_draft` — and no guide body appears in it. A guide
+    /// is auto-injected into the session on the first call that triggers its
+    /// topic, so a stale tool name there reaches the model exactly like one in
+    /// `server_instructions` would.
+    ///
+    /// Denylist, for the same reason as the `CLAUDE.md` gate above: these are
+    /// prose. Measured 2026-08-16 — the ten bodies carry 179 distinct backticked
+    /// snake_case tokens against ~30 real tools, so an allowlist would need ~150
+    /// non-tool entries, and the two-way tripwire on that list would make every
+    /// guide edit a maintenance event. That is the trade F-9 left undecided.
+    ///
+    /// Iterates `GUIDE_TOPICS` rather than a hand-written list, so an eleventh
+    /// guide is covered the moment it is registered — the failure mode this whole
+    /// gate exists to prevent.
+    ///
+    /// (I-7 in `docs/trackers/test-escape-hardening.md`; friction F-9 in
+    /// `docs/trackers/archive/prompt-guide-refactor-session-log.md`.)
+    #[test]
+    fn guide_bodies_contain_no_deprecated_tool_names() {
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            let body = crate::prompts::topic_body(topic).unwrap_or_else(|| {
+                panic!("GUIDE_TOPICS lists '{topic}' but topic_body returned None")
+            });
+            for &dead in DEPRECATED_TOOL_NAMES {
+                assert!(
+                    !body.contains(dead),
+                    "get_guide body '{topic}' references deprecated tool name: {dead}"
+                );
+            }
+        }
+    }
+
     // ---------- Y-C: surface roundtrip snapshots (gates I-01) ----------
     //
     // These tests pin the rendered output of the three prompt surfaces so the

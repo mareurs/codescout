@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end MCP smoke test for codescout.
 # Calls the real binary over stdio via the `mcp` CLI tool.
-# Run from the project root: ./tests/mcp-smoke.sh
+# Run from the project root: ./tests/mcp-smoke-rust.sh
 set -euo pipefail
 
 PASS=0
