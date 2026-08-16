@@ -39,7 +39,7 @@ it simply cannot be started by an agent alone.
 ### Phase 1 — Ready
 
 The mechanism has been read at the bytes and the edit site is named. An agent can open the bug, go to
-the cited line, and work. Seven rows.
+the cited line, and work. Eight rows.
 
 Worth noting what makes these ready: each names a `path:line`. That is the difference between a bug
 someone can pick up and a bug someone must first re-investigate — and it is why the bug template asks
@@ -102,3 +102,17 @@ Context: this queue was created at the end of a session that fixed three bugs
 (`grep` byte budget — archived; IL1 steps 1-2 — verified live; plus the IL1 prompt wording) and filed
 three new ones. The remaining 17 are what was left standing.
 
+### 2026-08-16 — BL-18 added, found by building this file
+
+Creating this tracker surfaced its own bug. `artifact(create, augment={…})` accepts only `prompt`
+and `params`; the `render_template`, `params_schema` and `entry_collection` passed alongside them
+were silently discarded, and the call still returned success. Both had to be re-applied with a
+follow-up `artifact_augment(merge=true)`.
+
+Filed as `29f1ddf259562b7f` and queued as BL-18. It is a recurrence of a class already fixed once in
+the same file (`artifact(create)` dropping `topic`, archived 2026-07-13), and it is compounded by
+`tracker_design`'s own Final step listing `params_schema` and `render_template` among the fields to
+pass to `create` — guidance followed exactly here, with both fields lost.
+
+Worth noting for whoever works the queue: **BL-18 was found by using the tooling, not by reading
+it.** Three of this session's bugs came the same way. A queue built by hand is also a probe.
