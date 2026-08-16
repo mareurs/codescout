@@ -556,3 +556,33 @@ This is a negative result in the TU-7 sense: the field is doing its job as a per
 ranking surface and should not be turned into one.
 
 § Still unpulled is now empty.
+
+
+### 2026-08-16 — the fingerprint gate shipped; TU-5's residual convention is gone
+
+The § *Correction* entry above ended by naming the sound fix and admitting the project did not
+have it: *"gate the backfill on a **fingerprint of the emittable family set** rather than an
+integer … Until then the bump is a convention held by the comment on `BACKFILL_VERSION`, not
+by the suite."* That is now built (BL-4,
+`docs/issues/archive/2026-08-16-backfill-gate-not-derived-from-the-taxonomy.md`).
+
+`const BACKFILL_VERSION` is deleted. `PRAGMA user_version` now stores an FNV-1a fingerprint
+over `const ERR_FAMILIES: &[&str]` — the 38 families the classifier can emit, which are now
+*enumerable* for the first time. The gate compares for equality rather than `>=`, so any DB
+carrying an older marker (including the sequential v0–v4 values every real `usage.db` holds)
+re-classifies once on open and is then stamped.
+
+**The entry above was right that no unit test could catch this while the gate was an integer.
+The missing piece was not a better test but an enumerable family set** — once the list exists,
+a guard that reads the file's own source pins it to the classifier in both directions.
+Mutation-verified: adding an arm without listing its family fails that guard by name.
+
+Two consequences for anything re-running this investigation's method:
+
+- **"Is this DB current?"** is now `user_version == err_family_fingerprint()`, a derived
+  predicate. The § Method rule about filtering to live DBs before aggregating still holds, but
+  it no longer depends on trusting that someone bumped a constant.
+- **`err_family IS NULL` is no longer ambiguous for any DB that has been opened.** An open
+  converges it, so `NULL` means *the classifier has no arm for this*, not *this row predates
+  the arm*. The overloading that made TU-5's headline wrong by 11 points survives only in the
+  frozen corpora — which this tracker already excludes from ranking.

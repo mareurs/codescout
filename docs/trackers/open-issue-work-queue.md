@@ -44,7 +44,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-1 | 1 | json_path: add a `Segment::Wildcard` arm so the overflow hint's own recovery works | **done** | `875e5d03d980ceac` |
 | BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | **done, archived** | `8e665c2d041ebb04` |
 | BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | **done, archived** | `02d2d9d8a7eeec2e` |
-| BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | open | `dbebda84901961c0` |
+| BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | **done, archived** | `fc00c33f2403ae8a` |
 | BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | **done** | `3f88d49c38ced0c1` |
 | BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | open | `a9644b964edac789` |
 | BL-7 | 1 | Write-scope denial should name `approve_write` | open | `0a15c81150c4cce7` |

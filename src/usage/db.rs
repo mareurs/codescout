@@ -367,17 +367,96 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     None
 }
 
-/// Bump to force a one-time re-run of [`backfill_legacy_rows`] on the next open
-/// (e.g. after the [`normalize_err_family`] taxonomy is extended). Tracked via
-/// SQLite's `PRAGMA user_version`.
-// Bump whenever `normalize_err_family` gains or re-maps an arm: the backfill is
-// gated on `PRAGMA user_version >= BACKFILL_VERSION`, so without a bump every
-// already-backfilled DB keeps its historical rows NULL and the new families tag
-// only future rows. Pinned by `backfill_reruns_when_the_taxonomy_version_advances`.
-// v3 (2026-08-15): TU-5 unclassified-head families.
-// v4 (2026-08-15): twin-tool gaps — buffer_ref_expired widened to run_command,
-//                  invalid_line_range added for read_file.
-const BACKFILL_VERSION: i64 = 4;
+/// Every family [`normalize_err_family`] can emit, sorted and deduplicated.
+///
+/// The classifier is an if-chain returning string literals, so before this const
+/// existed the family set was not enumerable by anything — which is exactly why
+/// the backfill gate had to be a hand-maintained integer. Pinned to the classifier
+/// in both directions by `err_families_lists_exactly_what_the_classifier_can_emit`,
+/// which reads this file's own source: a new arm cannot ship without appearing
+/// here, and appearing here changes the fingerprint the gate derives. BL-4.
+const ERR_FAMILIES: &[&str] = &[
+    "ambiguous_heading",
+    "ambiguous_name_path",
+    "ambiguous_old_string",
+    "ast_extent_fail",
+    "buffer_ref_expired",
+    "destructive_replace_blocked",
+    "edit_markdown_wrong_ext",
+    "edit_stale_match",
+    "edit_would_break_syntax",
+    "heading_not_found",
+    "il1_read_overlaps_symbol",
+    "il2_structural_edit",
+    "il3_pipe_to_trimmer",
+    "il3_shell_on_source",
+    "il4_read_markdown_routing",
+    "il5_edit_markdown_routing",
+    "invalid_line_range",
+    "invalid_regex",
+    "json_path_key_miss",
+    "json_path_unsupported",
+    "librarian_managed_artifact",
+    "lsp_disconnect",
+    "lsp_index_locked",
+    "lsp_not_running",
+    "missing_required_param",
+    "mux_startup_fail",
+    "path_not_found",
+    "read_markdown_file_not_found",
+    "read_markdown_invalid_line_range",
+    "read_markdown_overflow_threshold",
+    "read_markdown_param_conflict",
+    "read_markdown_path_is_directory",
+    "read_markdown_wrong_ext",
+    "replace_dropped_sibling",
+    "symbol_not_found",
+    "target_already_exists",
+    "unknown_enum_value",
+    "write_scope_denied",
+];
+
+/// FNV-1a over a family list, mapped into `PRAGMA user_version`'s range.
+///
+/// Written out rather than delegated to `DefaultHasher`, whose output std does
+/// **not** guarantee across Rust releases. This value is *persisted*: a silent
+/// implementation change would re-run the backfill on every DB on every open,
+/// forever, and nothing would say why.
+///
+/// The result is forced odd and positive, so it is never `0` — `user_version`
+/// defaults to `0`, which must always read as "never backfilled".
+fn fingerprint_families(families: &[&str]) -> i64 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for family in families {
+        for byte in family.as_bytes() {
+            hash ^= u32::from(*byte);
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+        // Separator: without it, ["ab", "c"] and ["a", "bc"] fingerprint alike.
+        hash ^= u32::from(b'\n');
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    i64::from((hash >> 1) | 1)
+}
+
+/// The taxonomy marker stored in `PRAGMA user_version`, **derived** from
+/// [`ERR_FAMILIES`] rather than maintained by hand.
+///
+/// This replaces a `const BACKFILL_VERSION: i64` that a human had to remember to
+/// bump whenever [`normalize_err_family`] gained an arm. Nothing computed it from
+/// the classifier, so the invariant "the taxonomy changed ⇒ re-classify" was held
+/// by convention — and forgetting it silently froze every already-backfilled DB's
+/// history: no error, no warning, no failing test. Measured 2026-08-15: four
+/// distinct `user_version` values live at once across twelve DBs, with rows
+/// classified under four taxonomies pooled into one queryable corpus. BL-4.
+///
+/// The gate compares for **equality**, not `>=`, because a fingerprint is not
+/// ordered. A DB carrying any other value — including one of the old sequential
+/// versions — re-runs the backfill once and is then stamped. That re-run is
+/// idempotent (only `NULL` families are filled), so the migration costs one pass.
+fn err_family_fingerprint() -> i64 {
+    fingerprint_families(ERR_FAMILIES)
+}
 
 /// One-time, idempotent repair of rows written before the friction columns were
 /// populated. Gated on `PRAGMA user_version` so it runs once per DB and is a
@@ -397,7 +476,8 @@ const BACKFILL_VERSION: i64 = 4;
 /// under the 30-day retention sweep in `write_record`.
 fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
     let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if current >= BACKFILL_VERSION {
+    let fingerprint = err_family_fingerprint();
+    if current == fingerprint {
         return Ok(());
     }
 
@@ -423,7 +503,7 @@ fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
         }
     }
 
-    conn.execute_batch(&format!("PRAGMA user_version = {BACKFILL_VERSION};"))?;
+    conn.execute_batch(&format!("PRAGMA user_version = {fingerprint};"))?;
     Ok(())
 }
 
@@ -1846,15 +1926,22 @@ mod tests {
         }
     }
 
-    /// The coupling that silently freezes the corpus: `backfill_legacy_rows` is
-    /// gated on `PRAGMA user_version >= BACKFILL_VERSION`, so a DB that already
-    /// ran the backfill never re-runs it. Extending `normalize_err_family`
-    /// WITHOUT bumping `BACKFILL_VERSION` therefore leaves every live DB's
-    /// historical rows NULL, and the new families only ever tag future rows.
+    /// The coupling that silently freezes the corpus: `backfill_legacy_rows` skips
+    /// a DB whose stored marker already matches, so one that ran the backfill never
+    /// re-runs it. Under the old hand-maintained `BACKFILL_VERSION`, extending
+    /// `normalize_err_family` without also editing that integer left every live
+    /// DB's historical rows NULL, and new families tagged only future rows.
     ///
-    /// This test fails whenever arms are added and the version is not bumped.
+    /// This proves the *mechanism* re-runs on a marker mismatch. It does NOT prove
+    /// the marker moves when the taxonomy grows — that is
+    /// `err_families_lists_exactly_what_the_classifier_can_emit` plus
+    /// `extending_the_taxonomy_moves_the_backfill_fingerprint`, and that pair is
+    /// what actually closed BL-4. Said explicitly because the previous version of
+    /// this test was mistaken for coverage of the bug it structurally could not
+    /// see: it seeded below the constant, which makes the backfill run
+    /// unconditionally, so the probe family filled either way.
     #[test]
-    fn backfill_reruns_when_the_taxonomy_version_advances() {
+    fn backfill_reruns_when_the_stored_marker_does_not_match() {
         let dir = TempDir::new().unwrap();
         let conn = open_db(dir.path()).unwrap();
         conn.execute(
@@ -1864,12 +1951,9 @@ mod tests {
         )
         .unwrap();
 
-        // Simulate a DB already backfilled under the PREVIOUS taxonomy version —
-        // the state every actively-used usage.db is actually in. Derived from the
-        // constant rather than hardcoded, so this keeps testing the MOST RECENT
-        // bump: a literal would silently stop covering later extensions.
-        conn.execute_batch(&format!("PRAGMA user_version = {};", BACKFILL_VERSION - 1))
-            .unwrap();
+        // A marker from an older taxonomy — here one of the pre-fingerprint
+        // sequential versions, which is the state every real usage.db is in.
+        conn.execute_batch("PRAGMA user_version = 4;").unwrap();
         drop(conn);
 
         let conn = open_db(dir.path()).unwrap();
@@ -1879,8 +1963,140 @@ mod tests {
         assert_eq!(
             fam.as_deref(),
             Some("json_path_key_miss"),
-            "extending normalize_err_family must bump BACKFILL_VERSION, or \
-             already-backfilled DBs keep their historical rows unclassified"
+            "a DB whose stored marker differs from the current taxonomy fingerprint \
+             must re-classify its historical rows on open"
+        );
+
+        let stamped: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            stamped,
+            err_family_fingerprint(),
+            "and must then be stamped with the current fingerprint, so the next open \
+             is the cheap no-op this gate exists to be"
+        );
+    }
+
+    /// BL-4. The classifier's emittable families existed only as return values in
+    /// an if-chain, so nothing could enumerate them — which is why the backfill
+    /// gate had to be a hand-maintained integer, and why extending the taxonomy
+    /// without also editing that integer silently froze every already-backfilled
+    /// DB's history. No error, no warning, no failing test.
+    ///
+    /// This is the guard that deletes the human step. The const and the classifier
+    /// are pinned to each other in BOTH directions by reading this file's own
+    /// source, so a new arm cannot ship without appearing in `ERR_FAMILIES` — and
+    /// appearing there changes the fingerprint the gate derives from it.
+    #[test]
+    fn err_families_lists_exactly_what_the_classifier_can_emit() {
+        const SRC: &str = include_str!("db.rs");
+        // Scan the classifier only, never this test module: a `return Some("…")`
+        // written in a test would otherwise read as a family.
+        let classifier = SRC
+            .split("mod tests {")
+            .next()
+            .expect("source is non-empty");
+
+        let re = regex::Regex::new("return Some\\(\"([a-z0-9_]+)\"\\)").unwrap();
+        let emitted: std::collections::BTreeSet<&str> = re
+            .captures_iter(classifier)
+            .map(|c| c.get(1).unwrap().as_str())
+            .collect();
+        assert!(
+            !emitted.is_empty(),
+            "the source scan found no families at all — the classifier's shape changed \
+             and this guard is now vacuous, which is worse than a failing assert"
+        );
+
+        let listed: std::collections::BTreeSet<&str> = ERR_FAMILIES.iter().copied().collect();
+        assert_eq!(
+            emitted, listed,
+            "ERR_FAMILIES must equal the set normalize_err_family returns — add the new \
+             arm's family to the const, which is what re-runs the backfill on every DB"
+        );
+
+        assert_eq!(
+            ERR_FAMILIES.len(),
+            listed.len(),
+            "ERR_FAMILIES must not repeat a family — the fingerprint is multiplicity-sensitive"
+        );
+        let mut sorted = ERR_FAMILIES.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(
+            ERR_FAMILIES,
+            sorted.as_slice(),
+            "keep ERR_FAMILIES sorted so a pure reordering cannot change the fingerprint"
+        );
+    }
+
+    /// The other half of BL-4's fix, and the half the old test could not express:
+    /// growing the taxonomy must move the marker *by itself*. With a hand-edited
+    /// integer this was a convention; derived from `ERR_FAMILIES` it is arithmetic.
+    #[test]
+    fn extending_the_taxonomy_moves_the_backfill_fingerprint() {
+        let mut extended = ERR_FAMILIES.to_vec();
+        extended.push("a_newly_added_family");
+        extended.sort_unstable();
+
+        assert_ne!(
+            fingerprint_families(&extended),
+            err_family_fingerprint(),
+            "adding an arm must change the stored marker, or every already-backfilled \
+             DB keeps its historical rows unclassified"
+        );
+
+        // Renaming one family must move it too — a same-size taxonomy is still a
+        // different taxonomy, and the old sequential scheme could not see that
+        // either without a human noticing.
+        let mut renamed = ERR_FAMILIES.to_vec();
+        renamed[0] = "renamed_first_family";
+        renamed.sort_unstable();
+        assert_ne!(
+            fingerprint_families(&renamed),
+            err_family_fingerprint(),
+            "re-mapping a family must change the stored marker"
+        );
+    }
+
+    /// The fingerprint is PERSISTED, so its stability is part of the contract: if
+    /// the hash changed between builds, every DB would re-run the backfill on every
+    /// open, forever, and nothing would say why.
+    ///
+    /// Pinned against a fixed vector rather than against `ERR_FAMILIES`, so adding a
+    /// family is a one-line change here — while an accidental rewrite of the hash
+    /// itself still fails.
+    #[test]
+    fn the_family_fingerprint_is_stable_odd_and_never_zero() {
+        assert_eq!(
+            fingerprint_families(&["a"]),
+            fingerprint_families(&["a"]),
+            "the same input must fingerprint identically"
+        );
+        assert_eq!(
+            fingerprint_families(&["a"]),
+            0x1292_6369,
+            "FNV-1a over \"a\\n\", halved and forced odd — changing the hash \
+             implementation re-runs the backfill on every DB in existence"
+        );
+
+        // A separator has to be mixed in, or a list boundary is invisible.
+        assert_ne!(
+            fingerprint_families(&["ab", "c"]),
+            fingerprint_families(&["a", "bc"]),
+            "concatenating the families without a separator loses list boundaries"
+        );
+
+        let current = err_family_fingerprint();
+        assert!(
+            current > 0,
+            "`PRAGMA user_version` is signed, and 0 means `never backfilled` — a \
+             fingerprint that is negative or zero is not a usable marker"
+        );
+        assert_eq!(
+            current % 2,
+            1,
+            "the marker is forced odd so it can never be 0"
         );
     }
 
