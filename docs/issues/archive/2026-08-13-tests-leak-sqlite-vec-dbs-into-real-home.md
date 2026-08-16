@@ -267,9 +267,22 @@ does. `open_conn` therefore drops a self-ignoring `.gitignore` (`*`) into the
 directory on creation — best-effort, never clobbering an existing file — so a
 regenerated multi-megabyte index cannot surface in someone's `git status`.
 
-**Migration.** Stores written under the old default are orphaned in `$HOME`; each
-project re-indexes once. That was the accepted trade. The stale directory is safe
-to delete — 8,452 files, 2.8 GB at last count.
+**Migration — sqlite-vec backend only.** Stores written under the old default are
+orphaned in `$HOME` and each project re-indexes once. That was the accepted
+trade. The stale directory is then safe to delete — 8,452 files, 2.8 GB at last
+count.
+
+**It does not affect the Qdrant server stack at all**, which is worth stating
+because it also bounds what could be verified. `VectorBackend::resolve()` returns
+`Qdrant` whenever `server-stack` is compiled in (the `cargo rb` alias, i.e. this
+machine's live MCP binary); the sqlite path is what a plain lean
+`cargo build --release` produces. So on a server-stack host nothing exercises
+`sqlite_dir` in normal use, the `$HOME` counter cannot move whatever you do, and a
+zero delta measured there is evidence of nothing. The zero recorded above came
+from `cargo test`, whose fixtures do drive the sqlite path — that measurement
+stands. What has NOT been observed is a live MCP session indexing into
+`<root>/.codescout/embeddings/`; doing so needs a lean build or
+`CODESCOUT_VECTOR_BACKEND=sqlite-vec`.
 
 The original analysis and the rejected options are kept below, unedited.
 
