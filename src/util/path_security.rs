@@ -1198,7 +1198,7 @@ fn extract_grep_pattern(segment: &str) -> Option<String> {
 /// - Heredocs (`cat <<'EOF'`) read stdin, not a file; any source extension appearing
 ///   inside the heredoc body is not a filename argument. Segments containing `<<` are
 ///   skipped — the operator unambiguously means stdin redirection.
-pub fn check_source_file_access(command: &str) -> Option<String> {
+pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<String> {
     static CMD_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
     static EXT_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
     let cmd_re = CMD_RE
@@ -1225,9 +1225,9 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
         if !cmd_re.is_match(&first_token) {
             return false;
         }
-        // Check the full segment for a source extension so that quoted file paths
-        // (e.g. `cat "src/main.rs"`) are still caught.
-        ext_re.is_match(seg.as_str())
+        // The file must live inside the project, because the hint routes to
+        // symbols/read_file and those resolve against the active project.
+        segment_reads_project_source(seg, ext_re, project_root)
     })?;
 
     // Derive the hint from the specific command that triggered the block.
@@ -1263,6 +1263,49 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
     };
 
     Some(hint)
+}
+
+/// True if `seg` names a source file that lives inside `project_root`.
+///
+/// The gate's remedy is *"use symbols / read_file instead"*, and both resolve
+/// against the **active project** — they cannot serve a path the index does not
+/// cover. Until 2026-08-16 the extension match alone decided, so reading a
+/// dependency's source under `~/.cargo/registry`, a sibling repo, or a file in
+/// `~/.config` was refused with a suggestion that could not be followed. That is
+/// a worse failure than a strict gate: a strict gate at least leaves a correct
+/// path open. Measured: **25 of 111** `il3_shell_on_source` refusals in
+/// codescout's own `usage.db` named a path outside the project.
+///
+/// Token-level rather than whole-segment, which is what makes the path check
+/// possible at all. [`shell_tokens`] strips quoting, so `cat "src/main.rs"` is
+/// still caught — the case the previous whole-segment scan existed to cover.
+///
+/// (GF-3 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`.)
+fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path) -> bool {
+    shell_tokens(seg)
+        .iter()
+        .any(|tok| ext_re.is_match(tok) && path_is_within_project(tok, project_root))
+}
+
+/// Whether a path token resolves inside `project_root`.
+///
+/// Conservative in the blocking direction: anything that cannot be resolved
+/// counts as inside, so an unparseable or exotic path keeps the pre-2026-08-16
+/// behaviour rather than silently opening the gate. Relative paths are inside by
+/// construction — `run_command` executes with the project root as its cwd.
+fn path_is_within_project(tok: &str, project_root: &Path) -> bool {
+    let expanded: PathBuf = match tok.strip_prefix("~/") {
+        Some(rest) => match std::env::var_os("HOME") {
+            Some(home) => PathBuf::from(home).join(rest),
+            // No HOME to expand against — cannot tell, so keep blocking.
+            None => return true,
+        },
+        None => PathBuf::from(tok),
+    };
+    if expanded.is_relative() {
+        return true;
+    }
+    expanded.starts_with(project_root)
 }
 
 /// Returns true if the path refers to a source code file (by extension).
@@ -2100,15 +2143,15 @@ mod tests {
         // shell runs it, and each used to produce a first token the blocked-command
         // regex did not match, so the block was skipped entirely.
         assert!(
-            check_source_file_access("'cat' src/main.rs").is_some(),
+            check_source_file_access_at_root("'cat' src/main.rs").is_some(),
             "was: None"
         );
         assert!(
-            check_source_file_access(r"\cat src/main.rs").is_some(),
+            check_source_file_access_at_root(r"\cat src/main.rs").is_some(),
             "was: None"
         );
         assert!(
-            check_source_file_access(r#"c"at" src/main.rs"#).is_some(),
+            check_source_file_access_at_root(r#"c"at" src/main.rs"#).is_some(),
             "was: None"
         );
     }
@@ -2119,7 +2162,7 @@ mod tests {
         // error — returning an empty list, or the helpers bailing to their
         // permissive branch — an unclosed quote would be a universal bypass of
         // every check converted above. It must behave as the old model did.
-        assert!(check_source_file_access("cat 'src/main.rs").is_some());
+        assert!(check_source_file_access_at_root("cat 'src/main.rs").is_some());
         assert!(has_recursive_flag("grep -r 'pattern ."));
         assert!(stage_trims("head -50 'x"));
         assert!(is_unbounded_lhs("cargo test 'x"));
@@ -2159,17 +2202,73 @@ mod tests {
 
     #[test]
     fn source_file_access_blocks_cat_on_rs() {
-        assert!(check_source_file_access("cat src/main.rs").is_some());
+        assert!(check_source_file_access_at_root("cat src/main.rs").is_some());
     }
 
     #[test]
     fn source_file_access_blocks_head_on_ts() {
-        assert!(check_source_file_access("head -20 src/tools/mod.ts").is_some());
+        assert!(check_source_file_access_at_root("head -20 src/tools/mod.ts").is_some());
     }
 
     #[test]
     fn source_file_access_blocks_tail_on_go() {
-        assert!(check_source_file_access("tail -n 50 server.go").is_some());
+        assert!(check_source_file_access_at_root("tail -n 50 server.go").is_some());
+    }
+
+    /// Every pre-existing source-access case predates the `project_root`
+    /// parameter and uses a RELATIVE path, which is inside the project by
+    /// construction — so routing them through one root keeps their verdicts
+    /// unchanged while making the new dimension explicit where it matters.
+    fn check_source_file_access_at_root(command: &str) -> Option<String> {
+        check_source_file_access(command, Path::new("/home/u/work/myproj"))
+    }
+
+    #[test]
+    fn source_file_access_allows_a_source_read_outside_the_project() {
+        // The gate's remedy is "use symbols / read_file" — and both resolve
+        // against the ACTIVE project, so neither can serve a dependency's
+        // source, a sibling repo, or a config file elsewhere on disk. Refusing
+        // these named an alternative that does not exist, which is worse than a
+        // strict gate: a strict gate leaves a correct path open.
+        //
+        // 25 of 111 measured `il3_shell_on_source` refusals. GF-3 in
+        // docs/trackers/2026-08-16-iron-law-gate-firing-audit.md.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access(
+                "grep -n 'fn main' /home/u/.cargo/registry/src/foo-1.0/lib.rs",
+                root
+            )
+            .is_none(),
+            "a dependency's source is not reachable via symbols"
+        );
+        assert!(
+            check_source_file_access("cat /home/u/work/otherrepo/src/main.rs", root).is_none(),
+            "a sibling repo is not the active project"
+        );
+    }
+
+    #[test]
+    fn source_file_access_still_blocks_paths_inside_the_project() {
+        // The control for the carve-out above, on both path forms. A relative
+        // path is inside by construction (run_command's cwd IS the root), and an
+        // absolute path under the root is the same file named the long way.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(check_source_file_access("cat src/main.rs", root).is_some());
+        assert!(
+            check_source_file_access("cat /home/u/work/myproj/src/main.rs", root).is_some(),
+            "an absolute path INSIDE the project must still block"
+        );
+    }
+
+    #[test]
+    fn source_file_access_keeps_blocking_when_a_path_cannot_be_resolved() {
+        // Conservative direction. The carve-out must not become a bypass for
+        // anything merely unusual to parse — only for paths demonstrably outside
+        // the root. A bare relative path with no directory still blocks.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(check_source_file_access("cat main.rs", root).is_some());
+        assert!(check_source_file_access("sed -n '1,5p' ./src/lib.rs", root).is_some());
     }
 
     #[test]
@@ -2188,8 +2287,8 @@ mod tests {
         // arrived with the feature itself (`8dc6a18c`) as one row of a
         // per-verb matrix — it documented that `wc` was on the list, which is
         // the thing being changed, so it was retired rather than flipped.
-        assert!(check_source_file_access("wc -l src/tools/markdown/tests.rs").is_none());
-        assert!(check_source_file_access("wc -c src/lib.rs").is_none());
+        assert!(check_source_file_access_at_root("wc -l src/tools/markdown/tests.rs").is_none());
+        assert!(check_source_file_access_at_root("wc -c src/lib.rs").is_none());
     }
 
     #[test]
@@ -2197,50 +2296,50 @@ mod tests {
         // The control for the carve-out above. `head`/`tail`/`cat` return the
         // file's bytes, so they stay blocked — the distinction is content vs
         // a measurement OF content, not read-only vs mutating.
-        assert!(check_source_file_access("head -20 src/lib.rs").is_some());
-        assert!(check_source_file_access("tail -5 src/lib.rs").is_some());
-        assert!(check_source_file_access("cat src/lib.rs").is_some());
+        assert!(check_source_file_access_at_root("head -20 src/lib.rs").is_some());
+        assert!(check_source_file_access_at_root("tail -5 src/lib.rs").is_some());
+        assert!(check_source_file_access_at_root("cat src/lib.rs").is_some());
     }
 
     #[test]
     fn source_file_access_blocks_sed_on_py() {
-        assert!(check_source_file_access("sed -n '1,100p' lib.py").is_some());
+        assert!(check_source_file_access_at_root("sed -n '1,100p' lib.py").is_some());
     }
 
     #[test]
     fn source_file_access_blocks_awk_on_java() {
-        assert!(check_source_file_access("awk '{print}' Foo.java").is_some());
+        assert!(check_source_file_access_at_root("awk '{print}' Foo.java").is_some());
     }
 
     #[test]
     fn source_file_access_blocks_less_on_rs() {
-        assert!(check_source_file_access("less src/agent.rs").is_some());
+        assert!(check_source_file_access_at_root("less src/agent.rs").is_some());
     }
 
     #[test]
     fn source_file_access_allows_cat_on_markdown() {
         // markdown is excluded — it's not source code
-        assert!(check_source_file_access("cat README.md").is_none());
+        assert!(check_source_file_access_at_root("cat README.md").is_none());
     }
 
     #[test]
     fn source_file_access_allows_wc_on_txt() {
-        assert!(check_source_file_access("wc -l output.txt").is_none());
+        assert!(check_source_file_access_at_root("wc -l output.txt").is_none());
     }
 
     #[test]
     fn source_file_access_allows_sed_on_toml() {
-        assert!(check_source_file_access("sed 's/foo/bar/g' config.toml").is_none());
+        assert!(check_source_file_access_at_root("sed 's/foo/bar/g' config.toml").is_none());
     }
 
     #[test]
     fn source_file_access_allows_cat_without_source_ext() {
-        assert!(check_source_file_access("cat Makefile").is_none());
+        assert!(check_source_file_access_at_root("cat Makefile").is_none());
     }
 
     #[test]
     fn source_file_access_hint_mentions_read_file() {
-        let hint = check_source_file_access("cat src/main.rs").unwrap();
+        let hint = check_source_file_access_at_root("cat src/main.rs").unwrap();
         assert!(
             hint.contains("read_file"),
             "hint should mention read_file, got: {hint}"
@@ -2249,7 +2348,7 @@ mod tests {
 
     #[test]
     fn source_file_access_hint_mentions_symbols() {
-        let hint = check_source_file_access("head -5 lib.rs").unwrap();
+        let hint = check_source_file_access_at_root("head -5 lib.rs").unwrap();
         assert!(
             hint.contains("symbols"),
             "hint should mention symbols, got: {hint}"
@@ -2258,7 +2357,8 @@ mod tests {
 
     #[test]
     fn grep_on_source_with_identifier_gives_symbol_ladder() {
-        let hint = check_source_file_access("grep WriteMemory src/tools/memory.rs").unwrap();
+        let hint =
+            check_source_file_access_at_root("grep WriteMemory src/tools/memory.rs").unwrap();
         assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
         assert!(
             hint.contains("references(symbol='WriteMemory')"),
@@ -2272,7 +2372,7 @@ mod tests {
 
     #[test]
     fn grep_on_source_with_regex_gives_generic_hint() {
-        let hint = check_source_file_access("grep 'foo.*bar' src/main.rs").unwrap();
+        let hint = check_source_file_access_at_root("grep 'foo.*bar' src/main.rs").unwrap();
         assert!(hint.contains("grep(pattern"), "got: {hint}");
         // must NOT show symbol ladder for regex patterns
         assert!(!hint.contains("call_graph"), "got: {hint}");
@@ -2281,19 +2381,21 @@ mod tests {
     #[test]
     fn grep_pipe_alternation_uses_first_part_in_hint() {
         let hint =
-            check_source_file_access("grep 'WriteMemory|ReadMemory' src/tools/memory.rs").unwrap();
+            check_source_file_access_at_root("grep 'WriteMemory|ReadMemory' src/tools/memory.rs")
+                .unwrap();
         assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
     }
 
     #[test]
     fn grep_value_taking_flag_skipped_for_identifier() {
-        let hint = check_source_file_access("grep -A 3 WriteMemory src/tools/memory.rs").unwrap();
+        let hint =
+            check_source_file_access_at_root("grep -A 3 WriteMemory src/tools/memory.rs").unwrap();
         assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
     }
 
     #[test]
     fn source_file_access_sed_hint_mentions_grep() {
-        let hint = check_source_file_access("sed -n '1p' foo.ts").unwrap();
+        let hint = check_source_file_access_at_root("sed -n '1p' foo.ts").unwrap();
         assert!(
             hint.contains("grep"),
             "sed hint should mention grep, got: {hint}"
@@ -2303,20 +2405,20 @@ mod tests {
     #[test]
     fn source_file_access_allows_non_blocked_command() {
         // cp, mv, diff are not in the blocked command set
-        assert!(check_source_file_access("cp src/main.rs src/main2.rs").is_none());
+        assert!(check_source_file_access_at_root("cp src/main.rs src/main2.rs").is_none());
     }
 
     #[test]
     fn source_file_access_allows_git_diff_piped_to_head() {
         // `head` is in the second segment; the `.rs` file is in the first (git diff arg).
         // Per-segment check means this should NOT be blocked.
-        assert!(check_source_file_access("git diff src/server.rs | head -80").is_none());
+        assert!(check_source_file_access_at_root("git diff src/server.rs | head -80").is_none());
     }
 
     #[test]
     fn source_file_access_blocks_cat_in_same_segment_as_source_file() {
         // `cat` and `.rs` are in the same segment — still blocked.
-        assert!(check_source_file_access("cat src/main.rs | grep fn").is_some());
+        assert!(check_source_file_access_at_root("cat src/main.rs | grep fn").is_some());
     }
 
     #[test]
@@ -2325,7 +2427,7 @@ mod tests {
         // only in the heredoc body (e.g. a commit message), not as a filename
         // argument to cat. The `<<` operator marks the segment as stdin-reading
         // so it must not be blocked.
-        assert!(check_source_file_access(
+        assert!(check_source_file_access_at_root(
             "git commit -m \"$(cat <<'EOF'\nFix bug in path_security.rs\nEOF\n)\""
         )
         .is_none());
@@ -2335,7 +2437,10 @@ mod tests {
     fn source_file_access_blocks_cat_rs_file_after_heredoc_segment() {
         // A pipe AFTER a heredoc segment must still be checked independently.
         // `cat <<'EOF' ... EOF | cat src/main.rs` — second segment is a real read.
-        assert!(check_source_file_access("cat <<'EOF'\nhello\nEOF\n | cat src/main.rs").is_some());
+        assert!(
+            check_source_file_access_at_root("cat <<'EOF'\nhello\nEOF\n | cat src/main.rs")
+                .is_some()
+        );
     }
 
     #[test]
@@ -2422,7 +2527,7 @@ mod tests {
     #[test]
     fn git_commit_with_tail_in_message_not_blocked() {
         // "tail" and ".rs" appear inside the commit message — must NOT block
-        assert!(check_source_file_access(
+        assert!(check_source_file_access_at_root(
             r#"git commit -m "feat: tail-50 of log, output_buffer.rs, workflow.rs""#
         )
         .is_none());
@@ -2431,32 +2536,32 @@ mod tests {
     #[test]
     fn git_commit_with_ampersand_and_source_in_message_not_blocked() {
         // "&&" and "cat src/main.rs" inside the quoted message — must NOT block
-        assert!(
-            check_source_file_access(r#"git commit -m "fix && cat src/main.rs was broken""#)
-                .is_none()
-        );
+        assert!(check_source_file_access_at_root(
+            r#"git commit -m "fix && cat src/main.rs was broken""#
+        )
+        .is_none());
     }
 
     #[test]
     fn compound_and_then_cat_blocked() {
         // cat src/main.rs is a real command after &&
-        assert!(check_source_file_access("./build.sh && cat src/main.rs").is_some());
+        assert!(check_source_file_access_at_root("./build.sh && cat src/main.rs").is_some());
     }
 
     #[test]
     fn semicolon_then_cat_blocked() {
-        assert!(check_source_file_access("echo done; cat src/main.rs").is_some());
+        assert!(check_source_file_access_at_root("echo done; cat src/main.rs").is_some());
     }
 
     #[test]
     fn or_then_tail_blocked() {
-        assert!(check_source_file_access("cargo build || tail src/lib.rs").is_some());
+        assert!(check_source_file_access_at_root("cargo build || tail src/lib.rs").is_some());
     }
 
     #[test]
     fn pipe_chain_with_source_blocked() {
         // tail is the first token of its segment — blocked
-        assert!(check_source_file_access("tail src/main.rs | grep error").is_some());
+        assert!(check_source_file_access_at_root("tail src/main.rs | grep error").is_some());
     }
 
     // ── SecurityProfile tests ───────────────────────────────────────────

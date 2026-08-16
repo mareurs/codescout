@@ -304,7 +304,9 @@ pub(crate) async fn run_command_inner(
 
     // --- Step 2.5: Source file access block ---
     if !buffer_only && !acknowledge_risk {
-        if let Some(hint) = crate::util::path_security::check_source_file_access(resolved_command) {
+        if let Some(hint) =
+            crate::util::path_security::check_source_file_access(resolved_command, root)
+        {
             return Err(RecoverableError::with_hint(
                 "shell access to source files is blocked",
                 &hint,
