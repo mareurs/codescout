@@ -337,6 +337,23 @@ have told callers to `force` past the gate on trivially-larger symbols.
 
 All green with the full suite: **3834 passed, 0 failed**, `cargo clippy --all-targets -- -D warnings`
 clean.
+
+**Verified live on the running server** after `cargo rb` + `/mcp` — a passing unit test and a working
+tool are different claims, and this bug exists because the deployed behaviour diverged from what the
+docs said:
+
+    read_file("src/tools/read_file.rs", start_line=1, end_line=20)
+    → returns the imports. Previously refused: the `ReadFile` struct (line 10) and
+      `impl Tool for ReadFile` (line 13) both sit inside the range.
+
+    read_file("src/tools/read_file.rs", start_line=600, end_line=604)
+    → source range overlaps named symbol(s): 'read_with_line_range'
+      hint: Pass force=true to read exactly the 5 line(s) you asked for —
+      'read_with_line_range' spans 171 lines, so symbols(name=...,
+      include_body=true) would return the whole body.
+
+The second confirms the reorder fires on a real 34× mismatch and that the hint now *quantifies* the
+cost rather than asserting a preference.
 ## Workarounds
 
 - Pass `force=true` on the first call when an exact slice is wanted. It works and is the correct
