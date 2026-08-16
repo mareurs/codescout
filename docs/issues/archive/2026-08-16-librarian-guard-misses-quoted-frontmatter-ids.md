@@ -309,6 +309,14 @@ read_markdown("docs/RELEASE.md")                                   # catalog row
 The first is the case no amount of string-parsing could reach. The last two are the ones a
 catalog-membership guard would have broken.
 
+**Follow-up landed `053238cb`** (F-51 in `docs/trackers/bug-fix-session-log.md`). The
+`OnceLock` this fix introduced was first-writer-wins, so in a test binary — where
+`from_parts_with_env` builds a server with its own catalog at three call sites — whichever
+ran first pinned its catalog and every later install was silently discarded. Now
+last-writer-wins, matching `src/heartbeat.rs:47`, this project's only other global mutable
+state, whose doc had already chosen those semantics on purpose. No production difference:
+one server either way.
+
 One residual, deliberately not closed: an artifact that is neither augmented nor carrying a
 stamped id stays directly editable — e.g. a bug file copied from
 `docs/issues/_TEMPLATE.md`. Correct as it stands (nothing lives outside the file), and the
