@@ -57,7 +57,7 @@ pub(crate) fn parse_rerank_opt_in(raw: Option<&str>) -> bool {
 ///
 /// The cost is that stores written under the old default are orphaned: an
 /// existing project re-indexes once. That was the accepted trade —
-/// `docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md`.
+/// `docs/issues/archive/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md`.
 pub(crate) fn resolve_sqlite_dir(raw: Option<String>, root: Option<&Path>) -> Result<PathBuf> {
     if let Some(d) = raw.filter(|s| !s.is_empty()) {
         return Ok(PathBuf::from(d));
@@ -117,7 +117,7 @@ pub struct RetrievalConfig {
     /// merge. Two independently-named env vars reach the same effective
     /// setting at two different layers; `CODESCOUT_EMBEDDER_MODEL` (this
     /// field) is the one Task 6 introduced, `CODESCOUT_EMBED_MODEL` predates
-    /// it and lives in `config/project.rs`.
+    /// it and lives in `src/config/project.rs`.
     pub model: String,
     /// Embedding API key, used only when `embedder_url` is set.
     pub api_key: Option<String>,
@@ -356,7 +356,7 @@ fn resolve_embed_fields_with(
 /// already-loaded `ProjectConfig` instead of a root — the seam tests use
 /// (via `ProjectConfig::load_with_global_base` with an empty global
 /// layer, exactly like the sibling `load_or_default_*` tests in
-/// `config/project.rs`) so real project.toml file I/O is exercised
+/// `src/config/project.rs`) so real project.toml file I/O is exercised
 /// end-to-end without inheriting `load_or_default`'s own env overlay.
 fn resolve_embed_fields_from(
     env: EmbedEnv,
@@ -447,7 +447,7 @@ mod sqlite_dir_tests {
         // now the ONLY surviving path to `$HOME`; it used to be the default, and
         // that default is what produced the leak, the unbounded production
         // growth, and the basename collision.
-        // docs/issues/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md
+        // docs/issues/archive/2026-08-13-tests-leak-sqlite-vec-dbs-into-real-home.md
         let got = resolve_sqlite_dir(None, None).unwrap();
         let home = crate::platform::home_dir().unwrap();
         assert_eq!(got, home.join(".codescout").join("embeddings"));

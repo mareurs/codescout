@@ -402,9 +402,11 @@ mod tests {
     //
     // This matrix is the behaviour-preservation record for the extraction that
     // produced `resolve_scope` (SD-10). Before it, the `Require` behaviour sat
-    // verbatim in find.rs and workspace_state_at.rs, and `Literal` existed only
-    // as the ABSENCE of that block in context.rs — which is exactly why a
-    // deliberate choice was indistinguishable from a truncated copy.
+    // verbatim in src/librarian/tools/find.rs and
+    // src/librarian/tools/workspace_state_at.rs, and `Literal` existed only as
+    // the ABSENCE of that block in src/librarian/tools/context.rs — which is
+    // exactly why a deliberate choice was indistinguishable from a truncated
+    // copy.
 
     #[test]
     fn require_policy_refuses_all_when_the_project_has_no_umbrella() {

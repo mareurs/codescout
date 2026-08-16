@@ -193,9 +193,12 @@ All notable changes to codescout are documented here.
 - **sqlite-vec indexes now live under the project root, not `$HOME`.** The store
   directory resolves as `CODESCOUT_SQLITE_DIR` if set, else
   `<project_root>/.codescout/embeddings/`, else — for callers with no project root at
-  all — `<home>/.codescout/embeddings/`. **Existing indexes are orphaned: each project
-  re-indexes once.** The old `$HOME/.codescout/embeddings/` directory is safe to delete
-  afterwards.
+  all — `<home>/.codescout/embeddings/`. **This affects the sqlite-vec backend only** —
+  the lean default build. Anyone on the Qdrant server stack
+  (`--features server-stack`, or `CODESCOUT_VECTOR_BACKEND=qdrant`) keeps their index
+  where it is and needs to do nothing. **For sqlite-vec users, existing indexes are
+  orphaned: each project re-indexes once**, after which the old
+  `$HOME/.codescout/embeddings/` directory is safe to delete.
   Three problems went with the old default and only the first was visible: tests build
   projects in tempdirs, so every `cargo test` run minted fresh databases in the
   developer's home that nothing removed (~148 per run; 8,452 files and 2.7 GB
