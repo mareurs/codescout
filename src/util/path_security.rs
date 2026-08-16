@@ -1066,8 +1066,19 @@ fn git_output_is_bounded(tokens: &[String]) -> bool {
 /// not raw shell commands. Mirrors `crate::ast::detect_language()` minus markdown.
 const SOURCE_EXTENSIONS: &str = r"\.(rs|py|ts|tsx|js|cjs|mjs|jsx|go|java|kt|kts|c|cpp|cc|cxx|cs|rb|php|swift|scala|ex|exs|hs|lua|sh|bash)\b";
 
-/// Shell commands whose primary job is reading file content.
-const SOURCE_ACCESS_COMMANDS: &str = r"\b(cat|head|tail|sed|awk|less|more|wc|grep)\b";
+/// Shell commands whose primary job is reading file CONTENT.
+///
+/// `wc` was on this list until 2026-08-16 and is deliberately absent now: it
+/// emits a measurement OF the content, never the content itself, and codescout
+/// ships no tool that returns a line count — so the refusal named an alternative
+/// that does not exist. The pipe gate already applies the same reasoning to `wc`
+/// as an RHS aggregator. The distinction this list encodes is *content vs a
+/// measurement of content*, not read-only vs mutating: `head` and `tail` are
+/// read-only and stay blocked, because they return the file's bytes.
+///
+/// (GF-3 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`; 18 of 111
+/// measured `il3_shell_on_source` refusals.)
+const SOURCE_ACCESS_COMMANDS: &str = r"\b(cat|head|tail|sed|awk|less|more|grep)\b";
 
 /// Split `s` on any separator in `seps` that appears *outside* single- or
 /// double-quoted strings. Separators are checked in order — put longer
@@ -2162,6 +2173,36 @@ mod tests {
     }
 
     #[test]
+    fn source_file_access_allows_wc_on_source() {
+        // `wc` emits a COUNT, never content. This gate exists to route content
+        // reads to symbols/read_file — and codescout has no tool that returns a
+        // line count, so the refusal named an alternative that does not exist.
+        // Same reasoning the pipe gate already applies to `wc` as an RHS
+        // aggregator (`il3_allows_git_status_pipe_wc`).
+        //
+        // 18 of 111 measured `il3_shell_on_source` refusals. GF-3 in
+        // docs/trackers/2026-08-16-iron-law-gate-firing-audit.md.
+        //
+        // Supersedes `source_file_access_blocks_wc_on_rs`, which asserted the
+        // opposite on this exact input. That case carried no rationale and
+        // arrived with the feature itself (`8dc6a18c`) as one row of a
+        // per-verb matrix — it documented that `wc` was on the list, which is
+        // the thing being changed, so it was retired rather than flipped.
+        assert!(check_source_file_access("wc -l src/tools/markdown/tests.rs").is_none());
+        assert!(check_source_file_access("wc -c src/lib.rs").is_none());
+    }
+
+    #[test]
+    fn source_file_access_still_blocks_content_readers_after_the_wc_carve_out() {
+        // The control for the carve-out above. `head`/`tail`/`cat` return the
+        // file's bytes, so they stay blocked — the distinction is content vs
+        // a measurement OF content, not read-only vs mutating.
+        assert!(check_source_file_access("head -20 src/lib.rs").is_some());
+        assert!(check_source_file_access("tail -5 src/lib.rs").is_some());
+        assert!(check_source_file_access("cat src/lib.rs").is_some());
+    }
+
+    #[test]
     fn source_file_access_blocks_sed_on_py() {
         assert!(check_source_file_access("sed -n '1,100p' lib.py").is_some());
     }
@@ -2174,11 +2215,6 @@ mod tests {
     #[test]
     fn source_file_access_blocks_less_on_rs() {
         assert!(check_source_file_access("less src/agent.rs").is_some());
-    }
-
-    #[test]
-    fn source_file_access_blocks_wc_on_rs() {
-        assert!(check_source_file_access("wc -l src/lib.rs").is_some());
     }
 
     #[test]
