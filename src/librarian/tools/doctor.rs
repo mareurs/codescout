@@ -1296,8 +1296,12 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
             continue;
         };
         let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(&body, prefix);
-        if in_body.is_empty() {
-            continue; // prose-only by design — see the doc comment
+        // Not merely "anchors something" — anchors a MAJORITY. A tracker whose
+        // rows are canonical in params can still line-anchor a few ids in
+        // unrelated tables and narrative headings; reporting those as a lagging
+        // snapshot nags a deliberate design decision. See `body_keeps_snapshot`.
+        if !crate::librarian::catalog::augmentation::body_keeps_snapshot(&claimed, &in_body) {
+            continue;
         }
         let missing: Vec<String> = claimed
             .difference(&in_body)
@@ -2218,6 +2222,11 @@ mod tests {
     /// Rows live in `params`, params live in the catalog, and the catalog is
     /// machine-local and git-ignored. A tracker that keeps a rendered snapshot
     /// in its body is the only way they reach git, and nothing re-renders it.
+    ///
+    /// The fixture carries a MAJORITY of its rows (4 of 6) because that is what
+    /// a maintained snapshot lagging at the tail looks like — see
+    /// `body_keeps_snapshot`. A 50/50 fixture would sit exactly on the gate and
+    /// assert nothing about which side of it this case belongs to.
     #[test]
     fn snapshot_drift_reports_rows_that_reached_params_but_never_the_body() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2226,8 +2235,8 @@ mod tests {
             &cat,
             "queue",
             tmp.path(),
-            "# Queue\n\n| ID | task |\n| BL-1 | a |\n| BL-2 | b |\n",
-            &["BL-1", "BL-2", "BL-3", "BL-4"],
+            "# Queue\n\n| ID | task |\n| BL-1 | a |\n| BL-2 | b |\n| BL-3 | c |\n| BL-4 | d |\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
         );
 
         let v = scan_snapshot_drift(&cat.conn).unwrap();
@@ -2238,7 +2247,7 @@ mod tests {
         );
         assert_eq!(v[0].check, "snapshot_drift");
         assert!(
-            v[0].detail.contains("BL-3") && v[0].detail.contains("BL-4"),
+            v[0].detail.contains("BL-5") && v[0].detail.contains("BL-6"),
             "the detail must name the rows that are absent from git, got: {}",
             v[0].detail
         );
@@ -2270,6 +2279,65 @@ mod tests {
         );
     }
 
+    /// The false positive this check shipped with, found on the SECOND tracker
+    /// it was pointed at (`docs/trackers/provenance-subsystem.md`, 2026-08-16).
+    ///
+    /// That tracker is **params-canonical by design** — its own § "PV-N entries"
+    /// says *"The canonical PV-N rows live in the augmentation params, not in
+    /// this file"*, and narrative goes in the body only for entries needing more
+    /// than a row. It still line-anchors 14 of 68 ids incidentally: first cells
+    /// of UNRELATED tables (`| PV-25 | rule … |`) and four `### PV-N` write-ups.
+    /// The original "anchors ≥1 id" gate read that as a snapshot 79% behind.
+    ///
+    /// Majority coverage separates them, and the two populations were measured
+    /// to be bimodal with no overlap — see `body_keeps_snapshot`.
+    #[test]
+    fn snapshot_drift_stays_silent_for_a_params_canonical_tracker_that_merely_mentions_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // 3 of 12 anchored (25%), scattered — mentions, not an index.
+        seed_tracker(
+            &cat,
+            "canonical",
+            tmp.path(),
+            "# Programme\n\nThe canonical rows live in params, not in this file.\n\n\
+             | rule | when |\n| BL-2 | design time |\n| BL-7 | design time |\n\n\
+             ### BL-11 — needed more than a row\n\nprose.\n",
+            &[
+                "BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6", "BL-7", "BL-8", "BL-9", "BL-10",
+                "BL-11", "BL-12",
+            ],
+        );
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "a body anchoring a small scattered minority is mentioning ids, not \
+             maintaining a snapshot — reporting it nags a design decision"
+        );
+    }
+
+    /// The other side of the same threshold: a body carrying a MAJORITY is a
+    /// snapshot that fell behind, and must still be reported. Modelled on
+    /// `prompt-hamsa-audit-log.md` as it actually was — 14 of 23 anchored (61%),
+    /// a contiguous prefix missing only the tail.
+    #[test]
+    fn snapshot_drift_still_reports_a_majority_snapshot_that_fell_behind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let body = "# Q\n\n| ID |\n".to_string()
+            + &(1..=8).map(|n| format!("| BL-{n} |\n")).collect::<String>();
+        let ids: Vec<String> = (1..=12).map(|n| format!("BL-{n}")).collect();
+        let refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        seed_tracker(&cat, "lagging", tmp.path(), &body, &refs);
+
+        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "8 of 12 anchored is a maintained snapshot lagging at the tail: {v:?}"
+        );
+        assert!(v[0].detail.contains("BL-9"), "{}", v[0].detail);
+    }
+
     #[test]
     fn snapshot_drift_stays_silent_when_the_body_carries_every_row() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2289,6 +2357,10 @@ mod tests {
 
     /// Prose mentions must not count as the body carrying a row, or the check
     /// silently under-reports exactly the drift it exists to find.
+    ///
+    /// The three anchored rows keep this above the majority gate, so the test
+    /// isolates the prose-vs-anchored distinction rather than re-testing
+    /// `body_keeps_snapshot`.
     #[test]
     fn snapshot_drift_does_not_accept_a_prose_mention_as_a_snapshot_row() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2297,12 +2369,13 @@ mod tests {
             &cat,
             "prosey",
             tmp.path(),
-            "# Queue\n\n## BL-1 — a\n\nWe should also look at BL-2 sometime.\n",
-            &["BL-1", "BL-2"],
+            "# Queue\n\n## BL-1 — a\n\n## BL-2 — b\n\n## BL-3 — c\n\n\
+             We should also look at BL-4 sometime.\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4"],
         );
         let v = scan_snapshot_drift(&cat.conn).unwrap();
-        assert_eq!(v.len(), 1, "BL-2 is mentioned, not rendered: {v:?}");
-        assert!(v[0].detail.contains("BL-2"), "{}", v[0].detail);
+        assert_eq!(v.len(), 1, "BL-4 is mentioned, not rendered: {v:?}");
+        assert!(v[0].detail.contains("BL-4"), "{}", v[0].detail);
     }
 
     #[tokio::test]

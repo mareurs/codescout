@@ -197,18 +197,23 @@ mod tests {
     /// The append succeeds and the row lands in the catalog, which is
     /// machine-local and git-ignored. Without this the response was a bare
     /// `{id, artifact_id}` — indistinguishable from a row that reached git.
+    ///
+    /// The body carries a MAJORITY of the rows (3 of 5 after the append), which
+    /// is what a maintained snapshot lagging at the tail looks like; below that
+    /// the tracker is treated as params-canonical and stays silent (see
+    /// `body_keeps_snapshot`).
     #[tokio::test]
     async fn append_names_the_rows_the_body_snapshot_is_missing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("queue.md");
         let ctx = mk_ctx();
-        // Body renders F-1 only; params already ran ahead with F-2.
+        // Body renders F-1..F-3; params already ran ahead with F-4.
         seed_with_body(
             &ctx,
             "art1",
             &path,
-            "# Q\n\n| ID |\n| F-1 |\n",
-            &["F-1", "F-2"],
+            "# Q\n\n| ID |\n| F-1 |\n| F-2 |\n| F-3 |\n",
+            &["F-1", "F-2", "F-3", "F-4"],
         );
 
         let result = call(
@@ -219,13 +224,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result["id"], "F-3");
+        assert_eq!(result["id"], "F-5");
         let missing: Vec<String> = serde_json::from_value(result["snapshot_missing"].clone())
             .expect("snapshot_missing must be present when the body is behind");
         assert_eq!(
             missing,
-            vec!["F-2".to_string(), "F-3".to_string()],
-            "F-2 was already adrift and F-3 was just created; F-1 is rendered"
+            vec!["F-4".to_string(), "F-5".to_string()],
+            "F-4 was already adrift and F-5 was just created; F-1..F-3 are rendered"
         );
         assert!(result["snapshot_hint"].as_str().unwrap().contains("git"));
     }

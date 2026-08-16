@@ -400,7 +400,16 @@ pub fn update_entry(
     // One read, after the write is committed: the signal is advisory and must
     // never be able to fail the mutation the caller asked for.
     // docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
-    let snapshot_stale = snapshot_stale_note(cat, artifact_id, entry_id);
+    let claimed_indices: std::collections::BTreeSet<u64> = params
+        .get(entry_collection)
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("id").and_then(|v| v.as_str()))
+        .filter_map(|i| i.rsplit_once('-'))
+        .filter_map(|(_, n)| n.parse::<u64>().ok())
+        .collect();
+    let snapshot_stale = snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices);
 
     Ok(UpdateEntryOutcome {
         entry_id: entry_id.to_string(),
@@ -412,17 +421,22 @@ pub fn update_entry(
 
 /// Whether `entry_id`'s tracker keeps a body snapshot that is now behind.
 ///
-/// Gated on the body line-anchoring at least one id of the same prefix — that,
-/// not `render_template`, is what distinguishes a snapshot-keeping tracker from
-/// a prose-only one. (`render_template` projects params into
+/// Gated on [`body_keeps_snapshot`] — the body must line-anchor a MAJORITY of
+/// the ids in `claimed`, not merely one of them. `render_template` is the wrong
+/// test in the other direction: its documented job is to project params into
 /// `librarian(context)` precisely SO the body can stay prose-only, and 26 of 28
 /// augmented trackers here declare one, so it would fire almost always and mean
-/// almost nothing.)
+/// almost nothing.
 ///
 /// Best-effort throughout: an unreadable file or an unparseable id yields
 /// `None`. A missing advisory is a far smaller harm than a failed update, and
 /// this runs after the transaction has already committed.
-fn snapshot_stale_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> Option<String> {
+fn snapshot_stale_note(
+    cat: &Catalog,
+    artifact_id: &str,
+    entry_id: &str,
+    claimed: &std::collections::BTreeSet<u64>,
+) -> Option<String> {
     let (prefix, num) = entry_id.rsplit_once('-')?;
     let num: u64 = num.parse().ok()?;
     let abs_path: String = cat
@@ -436,11 +450,14 @@ fn snapshot_stale_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> Opti
         .ok()
         .flatten()?;
     let body = std::fs::read_to_string(&abs_path).ok()?;
-    let claimed = body_claimed_indices(&body, prefix);
-    if claimed.is_empty() {
-        return None; // prose-only tracker — nothing in the body to fall behind
+    let in_body = body_claimed_indices(&body, prefix);
+    // Majority coverage, not mere presence: a params-canonical tracker mentions
+    // a few ids in unrelated tables without maintaining a snapshot, and telling
+    // it that its rows are missing on every write is noise, not a signal.
+    if !body_keeps_snapshot(claimed, &in_body) {
+        return None;
     }
-    Some(if claimed.contains(&num) {
+    Some(if in_body.contains(&num) {
         // The hard half: the row IS in the body, showing its previous values.
         // No id comparison can see this, which is why `append_entry`'s
         // missing-id check would have reported nothing here.
@@ -581,23 +598,25 @@ pub fn append_entry(
     // not carry it, and naming it is the reminder to write the row while the
     // caller still has the context to do it.
     // docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
-    let snapshot_missing: Vec<String> = if body_claimed.is_empty() {
-        Vec::new()
-    } else {
-        let mut claimed: Vec<u64> = existing_ids
+    let snapshot_missing: Vec<String> = {
+        let mut claimed: std::collections::BTreeSet<u64> = existing_ids
             .iter()
             .filter_map(|i| i.rsplit_once('-'))
             .filter(|(p, _)| *p == id_prefix)
             .filter_map(|(_, n)| n.parse::<u64>().ok())
             .collect();
-        claimed.push(next);
-        claimed.sort_unstable();
-        claimed.dedup();
-        claimed
-            .into_iter()
-            .filter(|n| !body_claimed.contains(n))
-            .map(|n| format!("{id_prefix}-{n}"))
-            .collect()
+        claimed.insert(next);
+        // Majority coverage, not mere presence — a params-canonical tracker can
+        // line-anchor a few ids incidentally without maintaining a snapshot.
+        if body_keeps_snapshot(&claimed, &body_claimed) {
+            claimed
+                .into_iter()
+                .filter(|n| !body_claimed.contains(n))
+                .map(|n| format!("{id_prefix}-{n}"))
+                .collect()
+        } else {
+            Vec::new()
+        }
     };
 
     if let Some(obj) = entry.as_object_mut() {
@@ -754,6 +773,43 @@ pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collecti
     re.captures_iter(body)
         .filter_map(|c| c[1].parse::<u64>().ok())
         .collect()
+}
+
+/// Does this body actually MAINTAIN a snapshot of `params`, or does it merely
+/// mention a few ids in passing?
+///
+/// A non-empty [`body_claimed_indices`] is not enough on its own. A tracker can
+/// be **params-canonical by design** — rows live in `params`, the body carries
+/// narrative only for the entries that need more than a row — and still
+/// line-anchor a handful of ids incidentally: the first cell of an unrelated
+/// table (`| PV-25 | rule … |`), or a `### PV-2 —` write-up. Treating those as a
+/// lagging snapshot nags a tracker whose author deliberately kept the rows out
+/// of the file.
+///
+/// The discriminator is **majority coverage**: a snapshot that fell behind still
+/// carries most of its rows, because it is appended to and lags at the tail; a
+/// document that mentions ids carries a small minority, scattered.
+///
+/// Measured across the 13 snapshot-bearing trackers on the authoring machine,
+/// the two populations are bimodal and do not overlap:
+///
+/// | coverage | shape | what it was |
+/// |---|---|---|
+/// | 100% | contiguous prefix | 11 maintained snapshots, in sync |
+/// | 61% | contiguous prefix `1..14` | `prompt-hamsa-audit-log.md` — a real lag, caught |
+/// | 21% | scattered, holes throughout | `provenance-subsystem.md` — params-canonical, a false positive |
+///
+/// Fails safe: a genuinely maintained snapshot that has fallen more than half
+/// behind goes unreported, which is a smaller harm than telling every
+/// params-canonical tracker it is broken on every write.
+pub(crate) fn body_keeps_snapshot(
+    claimed: &std::collections::BTreeSet<u64>,
+    in_body: &std::collections::BTreeSet<u64>,
+) -> bool {
+    if claimed.is_empty() || in_body.is_empty() {
+        return false;
+    }
+    claimed.intersection(in_body).count() * 2 > claimed.len()
 }
 
 pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {

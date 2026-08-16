@@ -126,7 +126,17 @@ mod tests {
     /// Seed a tracker whose file really exists. The default `seed` points at
     /// `/repo/docs/trackers/<id>.md`, which does not — fine for params-only
     /// assertions, useless for anything that reads the body.
-    fn seed_with_body(ctx: &ToolContext, id: &str, path: &std::path::Path, body: &str) {
+    ///
+    /// `rows` is explicit because the snapshot signal gates on the body carrying
+    /// a MAJORITY of them; a fixture that leaves the ratio implicit lands on the
+    /// wrong side of that gate without saying so.
+    fn seed_with_body(
+        ctx: &ToolContext,
+        id: &str,
+        path: &std::path::Path,
+        body: &str,
+        rows: &[&str],
+    ) {
         std::fs::write(path, body).unwrap();
         let cat = ctx.catalog.lock();
         artifact::upsert(
@@ -137,13 +147,16 @@ mod tests {
                 .build(),
         )
         .unwrap();
+        let tasks: Vec<Value> = rows
+            .iter()
+            .map(|r| json!({"id": r, "status": "open"}))
+            .collect();
         augmentation::upsert(
             &cat,
             &augmentation::AugmentationRow {
                 artifact_id: id.to_string(),
                 prompt: "p".into(),
-                params: r#"{"tasks":[{"id":"T-1","status":"open"},{"id":"T-2","status":"open"}]}"#
-                    .to_string(),
+                params: json!({ "tasks": tasks }).to_string(),
                 last_refreshed_at: None,
                 refresh_count: 0,
                 created_at: "2026-01-01T00:00:00.000Z".into(),
@@ -174,7 +187,8 @@ mod tests {
             &ctx,
             "art1",
             &path,
-            "# Q\n\n| ID | status |\n| T-1 | open |\n| T-2 | open |\n",
+            "# Q\n\n| ID | status |\n| T-1 | open |\n| T-2 | open |\n| T-3 | open |\n",
+            &["T-1", "T-2", "T-3", "T-4"],
         );
 
         let result = call(
@@ -207,13 +221,14 @@ mod tests {
             &ctx,
             "art1",
             &path,
-            "# Q\n\n| ID | status |\n| T-1 | open |\n",
+            "# Q\n\n| ID | status |\n| T-1 | open |\n| T-2 | open |\n| T-3 | open |\n",
+            &["T-1", "T-2", "T-3", "T-4"],
         );
 
         let result = call(
             &ctx,
             json!({"id": "art1", "entry_collection": "tasks",
-                   "entry_id": "T-2", "fields": {"status": "done"}}),
+                   "entry_id": "T-4", "fields": {"status": "done"}}),
         )
         .await
         .unwrap();
@@ -221,7 +236,7 @@ mod tests {
         let note = result["snapshot_stale"].as_str().unwrap();
         assert!(
             note.contains("not in it at all"),
-            "T-2 is absent, not merely stale — the two need different remedies: {note}"
+            "T-4 is absent, not merely stale — the two need different remedies: {note}"
         );
     }
 
@@ -231,7 +246,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("prose.md");
         let ctx = mk_ctx();
-        seed_with_body(&ctx, "art1", &path, "# Notes\n\nprose only.\n");
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Notes\n\nprose only.\n",
+            &["T-1", "T-2"],
+        );
 
         let result = call(
             &ctx,
