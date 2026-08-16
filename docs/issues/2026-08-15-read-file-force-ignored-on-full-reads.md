@@ -124,4 +124,4 @@ add a test asserting a >10 KB source file returns `content` when forced. If B: e
 
 - `docs/trackers/bistriceanu/index.md` § B-1 — the external report and its provenance
 - `docs/trackers/bistriceanu/full-read-fidelity-design.md` § D1 — the reporter's own writeup
-- Related: `docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md` (B-2, same function)
+- Related: `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md` (B-2, same function)

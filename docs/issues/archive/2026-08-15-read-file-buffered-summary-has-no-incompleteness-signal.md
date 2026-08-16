@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- read_file
+- progressive-disclosure
+- external-report
+closed: null
 opened: 2026-08-15
-closed:
-severity: high
 owner: marius
 related: []
-tags: [read_file, progressive-disclosure, external-report]
-kind: bug
+severity: high
 ---
 
 # BUG: the buffered full-read summary carries no incompleteness signal
@@ -94,20 +97,43 @@ defect produced a wrong deliverable."* This is that one.
 
 ## Fix
 
-Not yet implemented. Populate the overflow branch with an incompleteness signal:
-`complete: false`, a shown-vs-total pair, and a `hint` naming the buffer handle and how
-to page it. Verify the `format_read_file_summary` claim first — if the renderer already
-handles `hint`, this is a source-population change only.
+Fixed on `experiments` in `16a6b561`. Both halves this section named.
 
-**Sequence with `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`:**
-that bug destroys tail-placed signals during compaction. Emit this hint at the **head**
-of the compact summary, or it will be the first thing cut.
+**Populate.** The `exceeds_inline_limit` branch now sets `complete: false` and a full
+`OverflowInfo`. `shown: 0` is literal rather than a placeholder — zero lines of *content*
+are shown; what comes back is an outline. The hint names the buffer handle and the call
+that pages it, tailored source-vs-prose exactly as its neighbour thirteen lines below
+already did.
 
+**Place.** The renderer-claim check this section asked for was run first, and the answer
+changed the fix. `format_read_file_summary` *does* render `hint` — but at the **tail**,
+together with the `Buffer:` line. The outline it trails is unbounded, so on a 400-symbol
+file both are pushed past `truncate_compact`'s cut: the one response that most needed to
+say *"this is a summary, here is how to get the rest"* lost the statement **and** the
+handle. So this was not a source-population change only.
+
+Both now sit below the header, via the `overflow_head` / `insert_below_header` helpers
+added for
+`docs/issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md` —
+which is the sequencing this section called for, and it landed first for that reason.
 ## Tests added
 
-None yet. Needs a test asserting the buffered full-read response carries an
-incompleteness marker, and one asserting it survives `truncate_compact`.
+`read_file_buffered_summary_says_it_is_incomplete_and_survives_the_cut`
+(`src/tools/edit_file/tests.rs`), end-to-end through `ReadFile.call`.
 
+It asserts `complete: false`, that `overflow.hint` **names the handle** (advice the reader
+cannot act on is not a fix), and then that both the handle and the words `Outline only`
+survive `truncate_compact` at the real caps.
+
+The fixture is a 400-symbol source file on purpose, and the test asserts the render
+exceeds the hard cap before checking anything else. A small file would pass on the
+populate half alone and prove only half the claim — the placement half is invisible until
+the outline is long enough to push the tail past the cut.
+
+Mutation-verified: dropping the `overflow` assignment fails on the hint.
+
+Gate: `cargo fmt` + `cargo clippy --all-targets -D warnings` clean, `cargo test --lib`
+3768 passed / 0 failed / 7 ignored.
 ## Workarounds
 
 Treat any `read_file` response containing `file_id` as incomplete by construction, and

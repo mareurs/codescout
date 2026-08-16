@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- progressive-disclosure
+- symbols
+- output-buffer
+- external-report
+closed: null
 opened: 2026-08-15
-closed:
-severity: high
 owner: marius
 related: []
-tags: [progressive-disclosure, symbols, output-buffer, external-report]
-kind: bug
+severity: high
 ---
 
 # BUG: `truncate_compact` cuts from the tail, destroying the overflow signal it should preserve
@@ -109,47 +113,65 @@ is unaudited against it.
 
 ## Fix
 
-Not yet implemented. The remedy is known and proven on one surface: **state/overflow
-fields go at the head of `format_compact` output, above the variable-length rows.**
+Fixed on `experiments` in `bb2a9625`. All nine sites, producer-side, as prescribed.
 
-The audit is already done. `format_overflow` is tail-appended at **nine call sites
-across five surfaces** (measured 2026-08-15 at `821f9d0d`, via
-`grep("push_str\(&format_overflow")`):
+**`truncate_compact` is untouched**, per this section's own instruction — a tail cut is
+correct for prose, and the cutter was the wrong layer.
 
-| Site | Function | Surface |
-|---|---|---|
-| `src/tools/read_file.rs:874` | `format_read_file` | `read_file` |
-| `src/tools/read_file.rs:888` | `format_read_file` | `read_file` |
-| `src/tools/symbol/display.rs:227` | `format_search_symbols` | `symbols` |
-| `src/tools/symbol/display.rs:252` | `format_overview_symbols` | `symbols` |
-| `src/tools/symbol/display.rs:288` | `format_overview_symbols` | `symbols` |
-| `src/tools/symbol/display.rs:335` | `format_overview_symbols` | `symbols` |
-| `src/tools/grep.rs:493` | `format_grep` | `grep` |
-| `src/tools/semantic/semantic_search.rs:893` | `format_semantic_search` | `semantic_search` |
-| `src/tools/tree.rs:332` | `format_list_dir` | `tree` |
+Two helpers in `src/tools/format.rs` carry it:
 
-**Note the last two carefully.** `semantic_search` is the surface that already carries
-the head-placement fix — yet its `format_overflow` call is *still* at the tail (`:893`).
-So the existing fix protects the state fields (`hint`, `truncated_hint`,
-`drift_note`, …) but **not** the overflow line itself. The generalisation is therefore
-broader than "copy what semantic_search did" — even the reference implementation is
-only half-protected.
+- `overflow_head(val)` renders the note, or `""` when there is no overflow object, so a
+  caller pushes it unconditionally with no surrounding `if let`.
+- `insert_below_header(body, extra)` slots it under the **first** line rather than above it.
 
-`tree` is the surface `get_guide("progressive-disclosure")` and the reporter both cite
-as the example of a tool that *does* announce its cap. If `:332` is tail-placed, that
-reputation holds only below the compaction threshold.
+That second helper exists because of a collision worth recording. Placing the note first
+broke `grep_capped_collection_never_renders_as_a_complete_result` (a concurrent session's
+BL-2 fix, `4b77dff5`), which requires the first line to carry the `capped` marker — it is
+the line a reader anchors on. Both requirements are real and both hold with the note
+**second**: the header keeps first place, and the note is metres from the top of a budget
+measured in kilobytes. Weakening the other guard would have been the easy, wrong move.
 
-Work per site: move the overflow/warning emission above the row rendering, and add a
-regression test modelled on
-`format_semantic_search_keeps_state_fields_above_the_truncation_cap`.
+**Three more tail-placed signals came along**, each hidden by the same cut on exactly the
+results that needed them, and none named in the original title:
 
-**Do not "fix" `truncate_compact` itself.** A tail cut is correct for prose, and the
-proven remedy is producer-side ordering. Changing the cutter would be the wrong layer.
+| Signal | Surface |
+|---|---|
+| `completeness_warning` | `grep` |
+| `depth_capped` note | `tree` |
+| `[lsp warming]` marker | `symbols` (file overview) |
+
+`tree` is the surface `get_guide("progressive-disclosure")` cites as the tool that *does*
+announce its cap — tail placement made that reputation hold only below the compaction
+threshold, exactly as this section predicted.
+
+The audit above was **re-derived before editing** rather than trusted: still nine sites
+across the same five surfaces at `64082e8e`, ~200 commits after the `821f9d0d` measurement.
+Only the line numbers had moved.
 ## Tests added
 
-None yet. Each surface needs its own above-the-cap test; the existing
-`semantic_search` one is the template.
+`every_surface_keeps_its_overflow_note_above_the_truncation_cap` (`src/tools/format.rs`)
+is the regression test, and it is deliberately end-to-end: it renders through each tool's
+real `format_compact`, applies the real `COMPACT_SUMMARY_*` caps `call_content` uses, and
+asserts the hint and the withheld-count are still present. It also asserts each fixture
+exceeds the hard cap, so it cannot pass vacuously.
 
+A test of `overflow_head` alone would have passed while all nine sites went on appending
+at the tail — which is precisely the state it replaced.
+
+Plus three unit tests: the no-overflow case contributes no stray newline; the header stays
+first; single-line bodies and empty extras behave.
+
+Mutation-verified on `read_file`, the sharpest surface. Restoring the tail append produces
+a cut summary reading `4321 lines`, 150 identical content lines, `… (truncated)` — and
+nothing whatever about the 4,271 lines withheld or how to reach them. That output is the
+bug, printed.
+
+**Verified live** on the rebuilt server, on a real 28,390-byte `symbols` result: the note
+renders second, immediately under the `src/tools/symbol/tests.rs (149)` header, and
+survives a cut that lands around row 44 of 149.
+
+Gate: `cargo fmt` + `cargo clippy --all-targets -D warnings` clean, `cargo test --lib`
+3765 passed / 0 failed / 7 ignored.
 ## Workarounds
 
 Do not trust a compact summary's completeness. Read the buffer's own overflow field
@@ -167,4 +189,4 @@ the comment from `src/tools/semantic/semantic_search.rs:783-820`.
 
 - `docs/trackers/bistriceanu/index.md` § B-3
 - `src/tools/semantic/semantic_search.rs:783-820` — the working remedy and its rationale
-- Related: `docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md` — its new hint must be head-placed or this bug eats it
+- Related: `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md` — its hint had to be head-placed or this bug would eat it, and it was (`16a6b561`, using the helpers this fix added)

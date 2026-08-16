@@ -74,7 +74,7 @@ design section (his D3) against the wrong mechanism.
 Both the reporter and the gate's own hint route the agent to `symbols` / `read_file`.
 Neither answers "how many bytes is this file", so the practical effect is an agent that
 estimates size instead of measuring it — the exact habit
-`docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`
+`docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`
 shows going wrong.
 
 ## Hypotheses tried

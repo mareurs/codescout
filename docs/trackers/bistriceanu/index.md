@@ -62,8 +62,8 @@ deliberately avoided — the ledger is for defects we have seen, and B-4 is exac
 | ID | Finding | Surface | Status here | Task |
 |---|---|---|---|---|
 | B-1 | `force=true` is silently discarded on whole-file reads | `read_file` | **reproduced** | [`…-read-file-force-ignored-on-full-reads`](../../issues/2026-08-15-read-file-force-ignored-on-full-reads.md) |
-| B-2 | Buffered full-read summary carries no incompleteness signal | `read_file` | **reproduced** | [`…-read-file-buffered-summary-has-no-incompleteness-signal`](../../issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md) |
-| B-3 | `truncate_compact` cuts from the tail — where the overflow line lives | core/types | **reproduced** on `symbols` | [`…-truncate-compact-tail-cut-destroys-overflow-signal`](../../issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md) |
+| B-2 | Buffered full-read summary carries no incompleteness signal | `read_file` | **fixed** `16a6b561` | [`…-read-file-buffered-summary-has-no-incompleteness-signal`](../../issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md) |
+| B-3 | `truncate_compact` cuts from the tail — where the overflow line lives | core/types | **fixed** `bb2a9625` | [`…-truncate-compact-tail-cut-destroys-overflow-signal`](../../issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md) |
 | B-4 | `format_semantic_search` discards its own `truncated` flag | `semantic_search` | **already fixed** — no task | — |
 | B-5 | `grep` prints a self-refuting `Showing 400 of 400` | `grep` | **reproduced** | [`…-grep-showing-n-of-n-when-collection-hit-cap`](../../issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md) |
 | B-6 | Read-only metadata blocked on source paths | `run_command` | **reproduced**, his mechanism wrong | [`…-read-only-metadata-commands-blocked-on-source-paths`](../../issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md) |
@@ -132,7 +132,15 @@ in the overflow branch.
 systemic"*, one root cause behind four surfaces.
 
 **Status here: REPRODUCED on the `symbols` surface, 2026-08-15.** Filed as
-[`docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`](../../issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md).
+[`docs/issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`](../../issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md).
+
+**Fixed 2026-08-16 (`bb2a9625`), and the report was right about more than it claimed.**
+Nine call sites across five surfaces tail-appended the overflow line; the cutter itself
+was left alone, since a tail cut is correct for prose and the defect was producer-side
+ordering. Three further signals turned out to be riding the same cut, none of them in the
+report: `grep`'s completeness warning, `tree`'s depth-cap note, and `symbols`' `[lsp
+warming]` marker. B-2 (`16a6b561`) depended on this landing first — its new hint would
+otherwise have been eaten by the very defect B-3 describes.
 
 Both halves verified from source:
 

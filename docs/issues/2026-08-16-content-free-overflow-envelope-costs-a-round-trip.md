@@ -1,19 +1,19 @@
 ---
+kind: bug
 status: open
+tags:
+- progressive-disclosure
+- buffer-handles
+- librarian
+- round-trip-cost
+closed: null
 opened: 2026-08-16
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
-  - docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md
-  - docs/trackers/open-issue-work-queue.md
-tags:
-  - progressive-disclosure
-  - buffer-handles
-  - librarian
-  - round-trip-cost
-kind: bug
+- docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+- docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md
+- docs/trackers/open-issue-work-queue.md
+severity: medium
 ---
 
 # BUG: an overflow envelope with no compact summary spends a whole call returning nothing — `artifact(get)` answers with a handle and a byte count

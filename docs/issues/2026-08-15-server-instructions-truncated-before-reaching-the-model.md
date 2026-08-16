@@ -111,10 +111,15 @@ Not yet implemented. Three parts, in order:
    so truncation lands on less critical text.
 
 Point 3 is the same head-placement principle as
-`docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`: when a
-channel truncates from the tail, ordering is the cheap fix and the budget is the
+`docs/issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`:
+when a channel truncates from the tail, ordering is the cheap fix and the budget is the
 expensive one. Two independent surfaces in this codebase lose their most important
 content to a tail cut for the same reason.
+
+That sibling is now **fixed** (`bb2a9625`), which makes it a worked precedent rather than
+just an analogy: nine call sites across five surfaces, producer-side ordering only, with
+the cutter deliberately left alone. It also found three further signals riding the same
+cut that its own title never mentioned — worth expecting the same here.
 ## Tests added
 
 None yet — **but a test already exists and passes, which is the sharpest part of this
