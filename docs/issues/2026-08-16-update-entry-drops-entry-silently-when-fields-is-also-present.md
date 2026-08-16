@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- silent-failure
+- api-ergonomics
+- follow-up
+closed: 2026-08-16
 opened: 2026-08-16
-closed:
-severity: low
 owner: marius
 related: []
-tags: [librarian, silent-failure, api-ergonomics, follow-up]
-kind: bug
+severity: low
 ---
 
 # BUG: `update_entry`'s `entry`-param guard only fires when `fields` is absent
@@ -29,17 +33,31 @@ silent ignore, and it still has one.
 
 ## Symptom (Effect)
 
-Not yet observed in a session — found by reading the guard while reviewing
-`47abcb6d`. Predicted shape:
+**Measured 2026-08-16**, as this file's own Resume required — the mechanism below
+was inferred from source when filed, and has now been executed. Against the live
+queue tracker, sending both parameters with deliberately divergent payloads:
 
 ```
-artifact(action="update_entry", …, fields={"status":"done"}, entry={"owner":"x"})
--> {"entry_id": "...", "changed_fields": ["status"], "entries_total": N}
+artifact(action="update_entry", id="9a892c2a5976e296", entry_collection="tasks",
+         entry_id="BL-27",
+         entry={"status":"done", "task":"SENTINEL-entry-was-applied"},
+         fields={"status":"open"})
+->
+{"entry_id":"BL-27", "artifact_id":"9a892c2a5976e296",
+ "changed_fields":["status"], "entries_total":30}
 ```
 
-`owner` is never written and nothing says so. `changed_fields` naming only
-`status` is the sole hint, and it reads as a correct report of a one-field patch.
+Success. `changed_fields` names only `status`, from **`fields`**. Reading the row
+back confirms the sentinel never landed:
 
+```
+$.entries[0].task -> "update_entry's entry-param guard only fires when fields is
+                      absent — send both and `entry` is silently dropped again"
+```
+
+Unchanged. So `entry`'s payload — both the `status: done` and the `task` rewrite —
+was discarded with no signal, which is precisely the silence the parent bug was
+filed to remove.
 ## Reproduction
 
 Not yet reproducible against a live call — the prediction above is read from
@@ -83,21 +101,46 @@ The `&& args.get("fields").is_none()` conjunct is the hole.
 
 ## Fix
 
-Drop the `&& args.get("fields").is_none()` conjunct so `entry` is refused
-whenever present. The existing error text already reads correctly for the
-both-present case — it names `fields` as the accepted parameter, which is still
-the right instruction.
+**Implemented 2026-08-16 on `experiments`.** One conjunct, as this file proposed.
 
-The alternative, rejecting all undeclared top-level keys on the librarian
-surface, is the general form and was already noted as the larger change in the
-parent bug's Resume.
+`src/librarian/tools/update_entry.rs`:
 
+```rust
+- if args.get("entry").is_some() && args.get("fields").is_none() {
++ if args.get("entry").is_some() {
+```
+
+The existing error text already read correctly for the both-present case, so no
+wording change was needed.
+
+**Why the conjunct was there, and why that matters more than the line.** It
+narrowed the guard to exactly the case that had been reported and tested. That is
+the same defect shape as the bug fixed in the commit immediately before it
+(`47abcb6d`), where `edit_file`'s librarian guard covered one write path out of
+three — a guard scoped to the observed instance rather than to the condition it is
+meant to enforce. Two in one day is worth naming as a pattern: **when writing a
+guard, state the condition, not the reproduction.**
 ## Tests added
 
-None yet. One row added to the existing table in
-`src/librarian/tools/update_entry.rs`'s tests: `entry` **and** `fields` both
-present must be a `RecoverableError`, not a partial write.
+`call_rejects_the_entry_param_and_names_fields`
+(`src/librarian/tools/update_entry.rs`) was widened from a single case to a table:
 
+- `entry` alone — passed before this change
+- `entry` alongside `fields` — **failed** before it
+
+Both rows assert the error names `fields` *and* that the row was not written on
+the way to the error. The first row is what makes the second meaningful: it proves
+the table discriminates rather than refusing everything.
+
+Run red before the fix, on exactly the reported shape:
+
+```
+entry alongside fields: `entry` must be refused:
+  Object {"changed_fields": Array [String("status")], "entries_total": Number(2)}
+```
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test --lib` 3742 passed / 0 failed.
 ## Workarounds
 
 Never send `entry` to `update_entry`. Read `changed_fields` after every call and
@@ -106,13 +149,16 @@ variant.
 
 ## Resume
 
-Delete the `&& args.get("fields").is_none()` conjunct in
-`src/librarian/tools/update_entry.rs`, add the both-present test row, run
-`cargo test --lib -- update_entry`. Before doing so, run the call once and record
-the real output in *Symptom* — this file's mechanism is currently inferred from
-source and has not been executed, which is exactly the premise a later session
-should not inherit unchecked.
+**Closed 2026-08-16.** Fast-forward promotion, so the `experiments` SHA is the
+master SHA — no second SHA to record.
 
+Verify live after the next `cargo rb` + `/mcp` by re-running the call in
+§ Symptom: it must now return the `\`entry\` is append_entry's parameter` error
+rather than a success envelope.
+
+**Housekeeping from the measurement:** the probe left BL-27's `status` explicitly
+set to `open` (its prior value), so no cleanup is owed — but note that the queue
+row will need flipping to `done` once this is verified.
 ## References
 
 - `src/librarian/tools/update_entry.rs` — the guard

@@ -32,7 +32,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Catch it by name so the error can say which parameter to use, instead of the
     // generic "nothing to patch" the catalog layer would give.
     // docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
-    if args.get("entry").is_some() && args.get("fields").is_none() {
+    //
+    // Refused whenever `entry` is present, not only when `fields` is absent. The
+    // first version carried an `&& args.get("fields").is_none()` conjunct, which
+    // narrowed the guard to the case that had been tested and let the both-present
+    // call drop `entry` exactly as before — measured 2026-08-16:
+    // `entry={"status":"done","task":"SENTINEL"}` + `fields={"status":"open"}`
+    // returned `changed_fields: ["status"]` with the row's `task` untouched. Same
+    // defect shape as the edit_file guard that covered one write path of three.
+    if args.get("entry").is_some() {
         return Err(RecoverableError::with_hint(
             "update_entry: `entry` is append_entry's parameter — this action takes `fields`"
                 .to_string(),
@@ -165,35 +173,52 @@ mod tests {
     /// Reported from a real session: ~1.4 KB of text sent as `entry=`, exit
     /// success, row unchanged.
     /// docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    ///
+    /// **Both rows matter.** The first guard shipped as
+    /// `entry.is_some() && fields.is_none()`, which left the both-present case
+    /// dropping `entry` exactly as before — measured 2026-08-16:
+    /// `entry={"status":"done","task":"SENTINEL"}` + `fields={"status":"open"}`
+    /// returned `changed_fields: ["status"]` with the row's `task` untouched. A
+    /// conjunct that narrows a guard to the case you happened to test is the same
+    /// defect shape as the edit_file guard that covered one write path of three.
     #[tokio::test]
     async fn call_rejects_the_entry_param_and_names_fields() {
-        let ctx = mk_ctx();
-        seed(&ctx, "art1");
+        for (label, extra) in [
+            ("entry alone", json!({"entry": {"status": "done"}})),
+            (
+                "entry alongside fields",
+                json!({"entry": {"status": "done"}, "fields": {"status": "open"}}),
+            ),
+        ] {
+            let ctx = mk_ctx();
+            seed(&ctx, "art1");
 
-        let err = call(
-            &ctx,
-            json!({
+            let mut args = json!({
                 "action": "update_entry",
                 "id": "art1",
                 "entry_collection": "tasks",
                 "entry_id": "T-1",
-                "entry": {"status": "done"}
-            }),
-        )
-        .await
-        .unwrap_err();
+            });
+            for (k, v) in extra.as_object().unwrap() {
+                args[k] = v.clone();
+            }
 
-        let msg = format!("{err:?}");
-        assert!(
-            msg.contains("fields"),
-            "the error must name the parameter that IS accepted: {msg}"
-        );
+            let err = call(&ctx, args)
+                .await
+                .expect_err(&format!("{label}: `entry` must be refused"));
 
-        // And it must not have written anything on the way to that error.
-        let cat = ctx.catalog.lock();
-        let row = augmentation::get(&cat, "art1").unwrap().unwrap();
-        let params: Value = serde_json::from_str(&row.params).unwrap();
-        assert_eq!(params["tasks"][0]["status"], "open");
+            let msg = format!("{err:?}");
+            assert!(
+                msg.contains("fields"),
+                "{label}: the error must name the parameter that IS accepted: {msg}"
+            );
+
+            // And it must not have written anything on the way to that error.
+            let cat = ctx.catalog.lock();
+            let row = augmentation::get(&cat, "art1").unwrap().unwrap();
+            let params: Value = serde_json::from_str(&row.params).unwrap();
+            assert_eq!(params["tasks"][0]["status"], "open", "{label}");
+        }
     }
 
     #[tokio::test]

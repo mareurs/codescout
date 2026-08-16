@@ -129,4 +129,4 @@ Only then remove the directory.
 
 ## References
 
-- `docs/issues/2026-08-16-librarian-runtime-guide-claims-move-preserves-id.md` — unrelated, but same session's find
+- `docs/issues/archive/2026-08-16-librarian-runtime-guide-claims-move-preserves-id.md` — unrelated, but same session's find

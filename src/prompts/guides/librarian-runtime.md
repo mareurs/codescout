@@ -104,7 +104,14 @@ filterable `params`):
   no disk form, so it preserves augmentation rows keyed by artifact `id`.
 - **They do NOT survive a file delete+recreate.** A recreated file gets a
   new `id`, orphaning the old augmentation. Use `artifact(action="move")`
-  to relocate a tracker (preserves `id`), never delete+recreate.
+  to relocate a tracker, never delete+recreate.
+
+  **`move` also mints a new `id`** — identity is `sha256(abs_path)`, so it
+  cannot do otherwise. What makes it the right call is that it *grafts* the
+  augmentation, events, links and observations onto the new id and drops the
+  old row, all in one transaction; delete+recreate leaves them orphaned. The
+  response reports `previous_id` and `id_changed` so prose citing the old id
+  can be re-pointed.
 - **To share a filterable index with teammates**, the structured rows would
   need to be persisted into the file (frontmatter/body) — the catalog alone
   is local tooling state. As of 2026-05, retrofits are local-only by design.

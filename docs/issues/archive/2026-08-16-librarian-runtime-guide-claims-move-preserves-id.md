@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- prompt-surfaces
+- librarian
+- doc-vs-code
+- guide-duplication
+closed: 2026-08-16
 opened: 2026-08-16
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [prompt-surfaces, librarian, doc-vs-code, guide-duplication]
-kind: bug
+severity: medium
 ---
 
 # BUG: `get_guide("librarian-runtime")` says `artifact(action="move")` preserves the id; a move mints a new one
@@ -122,26 +126,54 @@ different defect: this one is a doc error in a prompt surface, not a state skew.
 
 ## Fix
 
-Plan — two parts, matching the two failure modes:
+**Implemented 2026-08-16 on `experiments`.** Both parts, as this file required —
+and the second is the one that matters.
 
-1. **Immediate:** correct the sentence in `src/prompts/guides/librarian-runtime.md`
-   § *Where catalog state lives*. Keep the recommendation, replace the reason:
-   `move` is right because the catalog grafts events/links/observations/
-   augmentation onto the new id, whereas delete+recreate drops them.
-2. **Structural:** this fact should have exactly one home. Folding catalog-identity
-   semantics into a shared core that all three librarian-family guides reference is
-   the open design work — see the guide-dedup design doc, where this bug is the
-   motivating case (one fact, four files, a same-day fix that missed one).
+### 1. The sentence
 
+`src/prompts/guides/librarian-runtime.md` § *Where catalog state lives*. The
+recommendation is unchanged (prefer `move` over delete+recreate); the **reason** is
+replaced:
+
+> **`move` also mints a new `id`** — identity is `sha256(abs_path)`, so it cannot
+> do otherwise. What makes it the right call is that it *grafts* the augmentation,
+> events, links and observations onto the new id and drops the old row, all in one
+> transaction; delete+recreate leaves them orphaned. The response reports
+> `previous_id` and `id_changed` so prose citing the old id can be re-pointed.
+
+The old text — "use `artifact(action="move")` to relocate a tracker (preserves
+`id`)" — gave the right advice for the wrong reason, which is the harder kind of
+drift to notice: the recommendation kept working, so nothing forced a re-read.
+
+### 2. The guard test
+
+`no_guide_claims_a_move_preserves_the_id`
+(`src/prompts/mod.rs`, beside `iron_laws_detail_gate_claim_matches_path_predicate`).
+Scans **every** registered `GUIDE_TOPICS` body for `preserves \`id\``,
+`preserves the \`id\``, `preserves id`.
+
+This is the half this file correctly insisted on. Correcting one file is what
+`2d8c7f39` already did — it repaired three copies of this claim and missed the
+fourth, which is why this bug exists. A per-file fix cannot prevent a per-file
+omission; only a scan over the whole set can.
 ## Tests added
 
-None yet. A regression test in the shape of
-`prompts::tests::iron_laws_detail_gate_claim_matches_path_predicate`
-(`src/prompts/mod.rs`) is the right form: assert no guide body contains a
-"preserves `id`" claim about `move`, and that the corrected wording is present.
-That test is what makes the fix durable rather than another one-file correction
-the next drift undoes.
+`no_guide_claims_a_move_preserves_the_id` (`src/prompts/mod.rs`).
 
+**Confirmed to discriminate, not merely to pass.** A test written after the
+correction is green by construction and proves nothing, so the claim was
+temporarily reintroduced into `librarian-runtime.md` and the test re-run:
+
+```
+FAILED — guide 'librarian-runtime' says a move preserves `id` — it mints a new
+         one and grafts the history onto it.
+```
+
+Then removed again and re-run green. Without that step this would be a guard whose
+ability to guard was never established.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test --lib` 3742 passed / 0 failed.
 ## Workarounds
 
 Trust the tool schema over the guide: `artifact`'s `new_rel_path` description is
@@ -150,13 +182,12 @@ generated from the same code path that performs the move. After any
 
 ## Resume
 
-Apply Fix step 1 to `src/prompts/guides/librarian-runtime.md` § *Where catalog
-state lives* (the bullet beginning "**They do NOT survive a file
-delete+recreate.**"), then add the guard test described in *Tests added* to
-`src/prompts/mod.rs` next to the B-9 regression test. Re-run
-`cargo test --lib -- prompts`. Do not close until the guard test exists — a bare
-text fix leaves the four-copy drift mechanism fully intact.
+**Closed 2026-08-16.** Fast-forward promotion, so the `experiments` SHA is the
+master SHA — no second SHA to record.
 
+No live verification needed: the artifact is a guide body, and the invariant test
+is the check. `get_guide("librarian-runtime")` will serve the corrected text from
+the next build.
 ## References
 
 - `src/prompts/guides/librarian-runtime.md` § *Where catalog state lives*

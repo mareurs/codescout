@@ -1273,6 +1273,32 @@ mod redesign_invariants {
         assert!(body.contains("acknowledge_risk: true"));
     }
 
+    /// BL-26 regression: `artifact(action="move")` mints a NEW id — catalog
+    /// identity is `sha256(abs_path)`, so a move cannot preserve it. What makes
+    /// `move` the right call over delete+recreate is that it *grafts* the
+    /// augmentation, events, links and observations onto the new id.
+    ///
+    /// The commit that made the graft work (`2d8c7f39`) corrected three of the
+    /// four guide surfaces carrying the opposite claim and missed
+    /// `librarian-runtime.md`. Scanning **every** registered guide, rather than the
+    /// one that happened to drift, is the part that stops a fourth copy — the same
+    /// reasoning as guarding every `edit_file` write path instead of the one that
+    /// was reported.
+    #[test]
+    fn no_guide_claims_a_move_preserves_the_id() {
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            let body = crate::prompts::topic_body(topic).expect("guide registered");
+            for phrase in ["preserves `id`", "preserves the `id`", "preserves id"] {
+                assert!(
+                    !body.contains(phrase),
+                    "guide '{topic}' says a move {phrase} — it mints a new one and grafts \
+                     the history onto it. Say that instead; the response carries \
+                     previous_id / id_changed."
+                );
+            }
+        }
+    }
+
     #[test]
     fn every_iron_law_has_do_instead() {
         let rendered = build_server_instructions(None);
