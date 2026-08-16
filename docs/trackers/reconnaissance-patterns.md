@@ -183,17 +183,22 @@ be treated as findings, not as a summary to re-derive.
    annexation). If it has, the ratified policy says promote — and R-90's
    promotion target is adopting per-session git worktrees as the default for
    concurrent sessions. That is a workflow change and needs a human call.
-3. **The promotion protocol is written but NOT DEPLOYED.** The reconnaissance
-   skill's Sync flow gained a third destination (the session-opening surface, for
-   laws with a measured base arm) and an audit-on-promote step —
-   `claude-plugins:c889e83`. That edit is in **source only**: all three CC
-   profiles load codescout-companion from
-   `~/<profile>/plugins/cache/sdd-misc-plugins/codescout-companion/1.16.4/`, and
-   none of those cached copies contains it (verified by grepping all three). It
-   needs a plugin version bump + reinstall across `.claude`, `.claude-sdd` and
-   `.claude-kat` per that repo's `docs/trackers/version-bump-checklist.md`. Until
-   then the protocol governs nothing — the same source-vs-running-artifact gap
-   R-89 is about, and the third instance of it in one day.
+3. ~~**The promotion protocol is written but NOT DEPLOYED.**~~ **DEPLOYED and
+   verified 2026-08-16.** The reconnaissance skill's Sync flow gained a third
+   destination (the session-opening surface, gated on a measured base arm and a
+   one-to-two slot budget) and an audit-on-promote step with four staleness modes
+   — `claude-plugins:c889e83`. Bumped 1.16.4 → 1.16.5 and reinstalled to all three
+   profiles; each cache copy is 30,078 bytes and `diff -q` against the source repo
+   reports identical. The protocol now governs.
+
+   *Verification note worth keeping.* The first check reported the third
+   destination MISSING — `grep "three destinations"` returned 0 because the source
+   reads `**three** destinations` and the markup breaks a literal match. A false
+   negative produced by query shape, which is law C exactly, on the very pass that
+   deployed law C's home. What settled it was `diff -q` against source: a whole-file
+   comparison cannot be defeated by pattern shape, whereas a grep is only ever
+   evidence about the pattern. **When verifying that a deployment landed, compare
+   the artifact, do not search it.**
 
 4. **C is promoted in its weakest form, and that explains its recurrence.** The
    skill carries *"Grep scope: workspace root, not the file being modified"*,
