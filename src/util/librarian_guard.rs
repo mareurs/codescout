@@ -13,7 +13,10 @@ pub fn guard_not_librarian_managed(
     text: &str,
     abs_path: Option<&std::path::Path>,
 ) -> Result<(), anyhow::Error> {
-    guard_with_oracle(path, text, abs_path, oracle())
+    // Clone the Arc out first — see `read_from` on why the lock must not be held
+    // across `is_augmented`.
+    let oracle = oracle();
+    guard_with_oracle(path, text, abs_path, oracle.as_deref())
 }
 
 /// Answers whether a path is an **augmented** librarian artifact — one whose
@@ -30,18 +33,48 @@ pub trait AugmentedArtifactOracle: Send + Sync {
     fn is_augmented(&self, abs_path: &std::path::Path) -> bool;
 }
 
-static ORACLE: std::sync::OnceLock<std::sync::Arc<dyn AugmentedArtifactOracle>> =
-    std::sync::OnceLock::new();
+/// The slot an oracle lives in. Named so a test can own one and prove the
+/// install semantics without touching the process-wide `ORACLE`.
+type OracleSlot = std::sync::RwLock<Option<std::sync::Arc<dyn AugmentedArtifactOracle>>>;
+
+/// Last-writer-wins, mirroring `src/heartbeat.rs`'s `CURRENT_OP` — this project's
+/// only other global mutable state, which chose those semantics deliberately.
+///
+/// The value is per-**server**, not per-process, and the difference is observable:
+/// `CodeScoutServer::from_parts_with_env` has three test-helper callers
+/// (`src/server.rs:1686`, `:3713`, `:4084`), each building a server with its own
+/// catalog many times per test binary. A first-writer-wins `OnceLock` pinned
+/// whichever ran first and silently discarded every later install, so a safety
+/// guard's behaviour depended on test ordering. Production is unaffected either
+/// way — one server, built at `src/server.rs:1510` (stdio) or `:1571` (HTTP, which
+/// builds once and clones per session). F-51 in `docs/trackers/bug-fix-session-log.md`.
+static ORACLE: OracleSlot = std::sync::RwLock::new(None);
 
 /// Install the process-wide oracle. Called once, when the librarian runtime is
 /// built; later calls are ignored. Left unset (tests, `--no-default-features`)
 /// the guard degrades to its frontmatter check rather than failing open loudly.
 pub fn install_augmented_oracle(oracle: std::sync::Arc<dyn AugmentedArtifactOracle>) {
-    let _ = ORACLE.set(oracle);
+    install_into(&ORACLE, oracle);
 }
 
-fn oracle() -> Option<&'static dyn AugmentedArtifactOracle> {
-    ORACLE.get().map(|o| o.as_ref())
+/// Write an oracle into `slot`. Split out from [`install_augmented_oracle`] so the
+/// replacement semantics can be tested against a caller-owned slot — no test ever
+/// mutates the process-wide `ORACLE`, so no test can perturb another.
+fn install_into(slot: &OracleSlot, oracle: std::sync::Arc<dyn AugmentedArtifactOracle>) {
+    if let Ok(mut current) = slot.write() {
+        *current = Some(oracle);
+    }
+}
+
+/// Read the oracle out of `slot`, cloning the `Arc` so the lock is released before
+/// the caller uses it. Load-bearing: `is_augmented` takes the catalog lock, and
+/// holding this one across that call would nest two locks for no reason.
+fn read_from(slot: &OracleSlot) -> Option<std::sync::Arc<dyn AugmentedArtifactOracle>> {
+    slot.read().ok().and_then(|current| current.clone())
+}
+
+fn oracle() -> Option<std::sync::Arc<dyn AugmentedArtifactOracle>> {
+    read_from(&ORACLE)
 }
 
 /// The testable core: same decision, with the oracle passed explicitly so a test
@@ -322,5 +355,49 @@ mod tests {
                 "{label}: a catalogued but unaugmented file must stay directly editable"
             );
         }
+    }
+
+    /// F-51 / `docs/trackers/bug-fix-session-log.md`.
+    ///
+    /// The oracle is per-**server**, not per-process. `OnceLock` made it the latter:
+    /// `install` discarded every call after the first (`let _ = ORACLE.set(…)`), so
+    /// in a test binary — where `from_parts_with_env` builds a fresh server with its
+    /// own catalog at three call sites — whichever ran first pinned its catalog for
+    /// the whole run, and the discarded `Err` meant nothing surfaced it.
+    ///
+    /// `heartbeat.rs`'s `CURRENT_OP` had already chosen last-writer-wins for this
+    /// project's only other global, with the reasoning written beside it. This test
+    /// pins the same semantics here.
+    ///
+    /// Runs against a caller-owned slot, never the process-wide `ORACLE`, so it
+    /// cannot perturb a concurrent test — the same discipline as
+    /// `guard_with_oracle` taking its oracle explicitly.
+    #[test]
+    fn installing_an_oracle_replaces_the_one_before_it() {
+        use std::sync::Arc;
+
+        struct Tagged(&'static str);
+        impl AugmentedArtifactOracle for Tagged {
+            fn is_augmented(&self, p: &std::path::Path) -> bool {
+                p.ends_with(self.0)
+            }
+        }
+
+        let slot: OracleSlot = std::sync::RwLock::new(None);
+        let first: Arc<dyn AugmentedArtifactOracle> = Arc::new(Tagged("first.md"));
+        let second: Arc<dyn AugmentedArtifactOracle> = Arc::new(Tagged("second.md"));
+
+        install_into(&slot, Arc::clone(&first));
+        assert!(
+            Arc::ptr_eq(&read_from(&slot).expect("installed"), &first),
+            "the first install must land"
+        );
+
+        install_into(&slot, Arc::clone(&second));
+        assert!(
+            Arc::ptr_eq(&read_from(&slot).expect("still installed"), &second),
+            "a later install must REPLACE the earlier one — a discarded second install \
+             makes the guard's behaviour depend on which server was built first"
+        );
     }
 }

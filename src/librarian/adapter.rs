@@ -17,15 +17,12 @@ use serde_json::Value;
 
 use crate::librarian::tools::{all_tools as lib_all_tools, ToolContext as LibToolContext};
 
-pub async fn try_build_runtime(
-    lsp: Arc<dyn crate::lsp::LspProvider>,
-) -> Option<Arc<LibToolContext>> {
-    try_build_runtime_with(lsp, &crate::librarian::LibrarianEnv::from_env()).await
-}
-
-/// [`try_build_runtime`] with the environment inputs supplied explicitly, so tests can
-/// point the librarian at a tempdir workspace/db without `set_var`. See
+/// Build the librarian runtime, with the environment inputs supplied explicitly so
+/// tests can point it at a tempdir workspace/db without `set_var`. See
 /// [`crate::librarian::LibrarianEnv`].
+///
+/// There was an env-reading `try_build_runtime` wrapper beside this; it had zero
+/// callers and was deleted 2026-08-16. Every caller already has a `LibrarianEnv`.
 pub async fn try_build_runtime_with(
     lsp: Arc<dyn crate::lsp::LspProvider>,
     env: &crate::librarian::LibrarianEnv,

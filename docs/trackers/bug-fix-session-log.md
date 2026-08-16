@@ -90,6 +90,7 @@ time_scope: open-ended
 | F-42 | 2026-08-14 | med | self-friction | fixed-verified | Two `ProjectStatus` tests are vacuous on this host — ambient `CODESCOUT_EMBED_*` vars trip their skip guards, so a mutation run reported a false PASS until re-run under `env -u` |
 | F-43 | 2026-08-14 | med | self-friction | fixed-verified | `cargo run --bin codescout` builds with DEFAULT features, which exclude `server-stack` — so `migrate-memories --in-place` resolved the sqlite-vec lite store and reported `read: 0`. Nearly reported as "this project has no semantic memories"; one `memory(recall)` call refuted it, and `cargo rb` showed `read: 15` |
 | F-50 | 2026-08-15 | **high** | tooling | fixed-verified | Three unrelated tools answered about a subset while looking like they answered about the whole — a markdown auditor pointed at Rust (7 vs the real 95), a grep capped at 50 whose footer read "Showing 50 of 50" (vs 266), and a `head -8` buffer I grepped and reported as a corpus. Instance 3 put a false claim into a shipped commit body |
+| F-51 | 2026-08-16 | med | architectural | open | Shipped a process-global whose semantics contradict the project's only precedent for one — `OnceLock` (first-writer-wins) where `heartbeat.rs` had already chosen last-writer-wins on purpose; "one catalog per process" was verified in production and never in tests, where three helpers build a server each |
 | F-49 | 2026-08-15 | **high** | self-friction | fixed-verified | A fix I shipped and archived as done was **inert on the transport the project actually uses** — its end-to-end test drove the one transport where the defect cannot appear, and live verification on the rebuilt server reproduced the original bug unchanged |
 | F-47 | 2026-08-15 | med | self-friction | fixed-verified | Implemented a guard exemption, shipped it, and reverted it within the hour — the bug file described the refusal as an oversight, and it had both a dedicated test and purpose-built hint machinery, each one `grep` away |
 | F-48 | 2026-08-15 | med | tooling | fixed-verified | A name-filtered `cargo test` gave false confidence: `--lib guard_` did not match `edit_file_warns_hint_suggests_remove_when_new_empty`, so the change that broke it passed its own targeted run and was committed |
@@ -3605,6 +3606,67 @@ before generalising a fix from it, measure a second one.*
 
 **Status:** validated — the corrective was built, and both the intended effect
 and the invariance were measured on the running server rather than argued.
+
+## F-51 — Shipped a process-global whose semantics contradict the project's only precedent for one
+
+**Observed:** 2026-08-16, architecture review of `29f0c015` — the BL-33 librarian-guard fix
+landed roughly an hour earlier in the same session.
+
+**When:** Post-ship, before the pattern gets reused. Triggered by a request to survey the
+core/librarian boundary, not by any failure.
+
+**Expected (my own design note, written into the commit body *and* the bug file):** "There
+is one catalog per process" — offered as the justification for reaching for a `OnceLock`
+instead of threading a field through the core `ToolContext` (124 construction sites across
+21 files).
+
+**Got (scouted reality):** true in production, false in tests, and the wrong semantics
+either way.
+
+- `references(try_build_runtime_with)` → exactly **one** production caller,
+  `src/server.rs:228`. It is reached via `CodeScoutServer::from_parts` from two entry
+  points, `src/server.rs:1510` (stdio) and `:1571` (HTTP, whose own comment reads *"Build
+  the server once (async), then clone per session"*). The production half of the claim
+  holds.
+- But `from_parts_with_env` has **three test-helper callers** (`src/server.rs:1686`,
+  `:3713`, `:4084`), each building a fresh server with its own catalog, many times per test
+  binary. `install_augmentation_guard_oracle` does `let _ = ORACLE.set(…)`, and
+  `OnceLock::set` returns `Err` on every call after the first — discarded. **The first
+  librarian-enabled server constructed in a `cargo test` process pins its catalog for the
+  whole binary**; every later test's guard then consults a foreign catalog.
+- Incidental from the same sweep: `try_build_runtime`
+  (`src/librarian/adapter.rs:20`) has **zero callers**.
+
+**Probable cause:** I verified the production call graph and stopped there. "One catalog per
+process" is a claim about current state, and I checked only the half that supported the
+design I had already chosen — the test half is precisely where a process-global's lifetime
+stops matching a server's.
+
+The sharper miss is the precedent. `src/heartbeat.rs:47` is this project's **only** other
+global mutable state, and its doc comment reads *"Last-writer-wins and never cleared"* — a
+deliberate choice with the reasoning written down beside it. I cited that file in the commit
+body as precedent **for having a global at all**, without reading which semantics it picked.
+It picked the ones that make this defect impossible. Reading a precedent for its existence
+rather than for its content is the whole failure in one line.
+
+**Workaround:** none needed — no live misbehaviour. Fix direction: `OnceLock` →
+last-writer-wins (`RwLock<Option<Arc<dyn AugmentedArtifactOracle>>>`, `install` overwrites).
+Production is unchanged (one server); in tests each construction replaces, so the guard
+tracks the server under test rather than whichever happened to run first. ~5 lines, no
+call-site churn.
+
+**Severity:** med — the guard can only *under*-fire: a foreign path yields no catalog row,
+`is_augmented` returns `false`, and it degrades to the frontmatter check that shipped in the
+same commit. No data loss, no false refusal. But a **safety guard whose behaviour depends on
+test ordering is not a guard you can cite**, and `let _ = set()` makes the second install
+silent — nothing would ever surface it.
+
+**Status:** open — fix direction agreed, not yet implemented.
+
+**Fix idea / Pointer:** `src/util/librarian_guard.rs` (`ORACLE`,
+`install_augmented_oracle`); precedent to copy verbatim: `src/heartbeat.rs:41-47`. Shipped
+in `29f0c015`; bug file
+`docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
 
 ## Template for new entries
 
