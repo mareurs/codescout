@@ -144,6 +144,7 @@ time_scope: open-ended
 | W-35 | 2026-08-14 | med | A prompt-surface byte cap is a design reviewer | `every_tool_description_under_cap` rejected the doctor change twice (1960, then 1846 vs an 1800 cap) and was right both times: parameter detail belongs in the uncapped parameter descriptions, not the action list. Also revealed the `librarian` description sits at ~1790/1800 — 99.4% of budget | validated |
 | W-34 | 2026-08-14 | high | Mutation-test a SHARED helper before converting its call sites | Building `FenceState` and mutating it twice, before touching any of 7 boolean sites, showed the run-length rule alone does NOT reject the line that triggered the report — the backtick info-string rule does. Without that run I would have shipped the "obvious" one-rule fix and left the actual trigger unfixed across all 7 | validated |
 | W-33 | 2026-08-14 | med | Mutate each new guard and check WHICH assertion fires | 3 mutations, 3 catches; one showed the control test correctly still passing (under- vs over-blocking arms), another showed two assertions cover distinct properties rather than restating one. Also surfaced that no warning catches a struct field that never existed | validated |
+| W-44 | 2026-08-16 | **high** | A sample from one language is not a sample of the corpus | Rust-only measurement said 56% of ref findings were dotted-identifier noise; the obvious fix was to suppress them. Every non-Rust file in the repo measured 5%. The same token is a Rust field AND a Python module — suppressing it globally would have deleted real refs from five languages while IMPROVING the metric that motivated it, since those refs were already `unknown`. Built `PathSyntax` instead; verified live: Rust unknown 56% → 0%, non-Rust byte-identical, resolved slightly up | validated |
 | W-43 | 2026-08-15 | **high** | A backlog row's instruction can outlive its own hypothesis; run the instruction | SD-3 claimed four over-budget `::call` handlers should give up a shared extraction, and in the same field admitted the shape was UNVERIFIED — read the other three first. Reading falsified it (two pairs, on a different axis) and found the duplication that IS there: a scope-resolution prologue written three times, one copy drifted, whose live effect is `librarian(context, scope="all")` crossing the umbrella boundary. Acting on the hypothesis would have refactored ~1460 lines toward a shape that does not exist, and buried two of the three real sites | validated |
 
 ## Category conventions
@@ -3537,6 +3538,73 @@ conclusion and a check, the check is the load-bearing half — and prefer
 
 **Status:** validated — two adjacent data points (W-32, W-39) already support the
 general shape; this is the first at backlog-row grain.
+
+## W-44 — A sample from one language is not a sample of the corpus
+
+**Observed:** 2026-08-16, tuning `audit_doc_refs`' ref classifier after SD-1b's
+code-comment surface finally ran against a current binary.
+
+**Pattern:** Before tuning a rule that applies across N populations, measure the
+thing you are tuning on in **at least two** of them. A rate computed on one
+population is a fact about that population, not about the rule.
+
+The first measurement was Rust only — `src/librarian/catalog/**`, 41 refs, **56%
+`unknown`**, essentially all dotted identifiers (`commits.git_root`,
+`artifact.id`, `report.remap`). The obvious reading, which is the one I wrote
+down and recommended, was "the classifier over-produces on dotted tokens; suppress
+them."
+
+The second measurement — every non-Rust source file in the repo, 51 files, 39
+refs — came back **5% unknown and 79% resolved**. Same classifier, same corpus,
+one-eleventh the noise.
+
+**Counterfactual.** `is_module_path` accepts all-lowercase dotted tokens, which is
+simultaneously a Rust field, a Python module (`os.path`), a Go qualified name, and
+a Java package segment. The token cannot distinguish them. Suppressing it
+globally — the fix the Rust-only sample recommended — would have silently deleted
+**real module references from Python, Go, Java, Kotlin and TypeScript**, in
+service of a Rust habit of naming SQL columns in doc comments. Nothing would have
+failed: the suppressed refs were already `unknown`, so the metric would have
+*improved* while the tool got worse.
+
+**What was built instead** (`experiments:9b3e1e76`): `PathSyntax`, threaded from
+`scan_code_comments` into `classify`. Rust spells qualified names `a::b`, so a
+dotted token is never a module path there; the dotted-module languages keep
+theirs; shell/CSS/HTML have no module concept at all. Markdown maps to today's
+behaviour, deliberately.
+
+**Verified live on the rebuilt server, both directions:**
+
+| corpus | refs | resolved | unknown |
+|---|---|---|---|
+| `src/librarian/catalog/**` before | 41 | 12 (29%) | **23 (56%)** |
+| `src/librarian/catalog/**` after | 18 | 14 (78%) | **0** |
+| all non-Rust before | 39 | 31 | 2 |
+| all non-Rust after | 39 | 31 | 2 |
+
+The non-Rust row is byte-identical — not one ref moved. Repo-wide Rust went
+1,334 → 1,096 refs with `unknown` 358 → 116 and **resolved slightly UP** (661 →
+667). The narrowing cost zero real references, which was the property most worth
+proving and the one a metrics-only view would have hidden.
+
+**Confirming data points:**
+1. This session — a Rust-only noise rate of 56% vs 5% everywhere else.
+2. F-50 (2026-08-15) — three tools answering about a subset while looking like
+   they answered about the whole. Same failure at instrument grain rather than
+   population grain.
+3. The retracted 296-file measurement earlier the same day — a number taken from
+   one window on a shared machine and read as a property of the subject.
+
+**Impact:** high — prevented a change that would have deleted real references
+across five languages while improving the metric that motivated it.
+
+**Promote-when:** a third instance where a per-population measurement contradicts
+a whole-corpus inference. At three, promote to `CLAUDE.md` beside the Conclude
+Last rule: *a rate measured on one population is evidence about that population;
+before generalising a fix from it, measure a second one.*
+
+**Status:** validated — the corrective was built, and both the intended effect
+and the invariance were measured on the running server rather than argued.
 
 ## Template for new entries
 
