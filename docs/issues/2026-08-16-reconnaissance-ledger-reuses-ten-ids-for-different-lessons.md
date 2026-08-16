@@ -13,7 +13,7 @@ kind: bug
 
 ## Summary
 
-The R-N ledger contains **153 entry instances under 91 distinct ids**. Ten ids
+The R-N ledger contains **153 entry instances under 91 distinct ids**. Nine ids
 carry more than one *different* lesson — not a summary and its body, but two
 unrelated laws recorded on different dates under the same number. The ledger's
 entries cite each other 57 times, and a citation like "kin R-57" now resolves to
@@ -45,8 +45,26 @@ ids where the index row and the body section carry DIFFERENT dates:
    R-76   2026-08-14   2026-08-15        91       1997
 ```
 
-Union of affected ids: **R-35, R-55, R-56, R-57, R-58, R-59, R-72, R-73, R-74,
-R-76** — ten, about 11% of the ledger.
+**Corrected 2026-08-16, before any fix was applied.** The date test above is a
+*screen*, not a verdict: two of its ten hits are false positives, found by reading
+each pair rather than trusting the comparison.
+
+- **R-35 is NOT a collision.** Row and body state the same law ("a tool's own
+  error diagnostic is a hypothesis, not ground truth"). The body's prose cites an
+  archived `2026-05-29` Kotlin-backtick bug as a dead lead, and the regex read
+  that citation as the entry's date.
+- **R-76 has two distinct lessons, not three.** Its row at L88 and its body at
+  L1997 are the same entry ("aggregate behaviour data is a screen, not a
+  verdict"); only the row at L91 ("extracting a decision creates a new seam") is
+  separate.
+
+Union of genuinely affected ids: **R-55, R-56, R-57, R-58, R-59, R-72, R-73,
+R-74, R-76** — **nine**, about 10% of the ledger.
+
+The method error is worth keeping next to the finding, because it is R-76's own
+law applied to this bug file: a date mismatch ranks *where to look*; reading the
+two texts decides *what is true*. Screening on a proxy and reporting the proxy's
+count as the finding is exactly the failure R-76 records.
 
 Worked example, R-57:
 
@@ -123,10 +141,13 @@ recurrence chains pass through affected ids: the search-scope chain
 The decision this needs is whether ids are stable identifiers or ordinals, and
 that is a call for the maintainer, not an implementation detail:
 
-1. **Disambiguate without renumbering.** Give each colliding instance a suffix
-   (`R-57a` / `R-57b`), leave every existing citation pointing at the base number,
-   and add a note naming the split. Preserves the 57 citations; costs a permanently
-   irregular numbering.
+1. **Disambiguate without renumbering.** For each colliding id, the EARLIER
+   instance keeps the bare number so existing citations continue to resolve to
+   what they most likely meant, and the later instance takes a `b` suffix
+   (`R-57` / `R-57b`), with a note on both naming the sibling and its line. This
+   is the option being applied: it preserves all 57 citations, loses nothing, and
+   makes the ambiguity visible to anyone following a reference. Cost is a
+   permanently irregular numbering.
 2. **Renumber the later instance** of each collision to the next free id
    (R-92+). Clean sequence afterwards; breaks any citation that meant the moved
    instance, and there is no record of which meant which.
