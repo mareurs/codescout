@@ -2188,16 +2188,28 @@ ownership marker.
 **Rule to apply next time.** In a repo where a second session may be live:
 
 1. Stage and commit in one call; never stage and then go do other work.
-2. Prefer `git commit <paths>` over `git add` then `git commit` — but only for
-   files git already tracks. **Corrected minutes after this entry was written,
-   by trying to follow it:** `git commit -- <new file>` fails with `pathspec ...
-   did not match any file(s) known to git`, because commit-by-path resolves
-   against the index and a new file is not in it. For new files the window
-   cannot be closed, only narrowed — chain `git add <paths> && git commit` in a
-   single shell invocation so no tool call separates them. (Worth noting how
-   this was caught: the rule was wrong in the direction of *sounding* right, and
-   only executing it surfaced that. An advice entry nobody has run is a
-   hypothesis.)
+2. **Use `git commit --only <paths>`.** This rule was wrong twice before it was
+   right, and both corrections came from executing it rather than re-reading it.
+
+   - *First draft:* "prefer `git commit <paths>`." Fails on new files —
+     `pathspec ... did not match any file(s) known to git`, because commit-by-path
+     resolves against the index and an untracked file is not in it.
+   - *Second draft:* "chain `git add <paths> && git commit`." This is worse than
+     useless: it narrows the staging window but `git commit` with no pathspec
+     commits **the entire index**, including whatever the other session staged.
+     Following it, this session committed a concurrent session's file rename into
+     `543086d1`, a commit about tracker policy — becoming the perpetrator of the
+     exact hazard this entry records. The hazard is symmetric, and "stage only my
+     paths" does not make the commit mine.
+   - *Correct form:* `git add <paths> && git commit --only <paths>` (or `-o`).
+     `--only` commits exactly the named paths and ignores the rest of the index,
+     which is the isolation the first two drafts were reaching for.
+
+   The general lesson is not about git. **An advice entry nobody has executed is
+   a hypothesis**, and this one read as obviously right through two wrong
+   versions. Both were caught within the hour only because the entry was being
+   used, not reviewed — which is the argument for harvesting `Promote-when`
+   criteria on a schedule rather than on inspiration.
 3. Read an empty `git status` after your own staging as evidence that *someone
    else committed*, not that your commit succeeded. `git log -1 --format=%s --
    <path>` names who took it.
