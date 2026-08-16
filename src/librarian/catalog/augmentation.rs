@@ -209,7 +209,7 @@ fn entry_count(cat: &Catalog, artifact_id: &str) -> Result<Option<usize>> {
 /// That is still allowed — a bulk rewrite is a legitimate operation — but it must
 /// not be silent: a caller sending one row to flip one row's status deletes every
 /// other row, and the catalog is not in git, so nothing else can notice.
-/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+/// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ParamsMergeOutcome {
     /// False when the artifact has no augmentation to merge into.
@@ -247,7 +247,7 @@ pub struct UpdateEntryOutcome {
 /// row through a field patch would strand every citation of it.
 ///
 /// Runs in a single `IMMEDIATE` transaction, like `append_entry`.
-/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+/// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 pub fn update_entry(
     cat: &mut Catalog,
     artifact_id: &str,
@@ -646,7 +646,7 @@ pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
 /// here deliberately did not change: [`update_entry`] gives a one-row edit its own
 /// path, and [`merge_params`] reports `entries_before`/`entries_after` so a
 /// wholesale replace is visible rather than silent.
-/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+/// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 ///
 /// Non-object patches are silent no-ops. Callers MUST reject them at their own
 /// input boundary rather than relying on the tool schema: the schema's
@@ -910,7 +910,7 @@ mod tests {
     /// row's status deletes the rest. That stays *allowed* — a bulk rewrite is
     /// legitimate — but it must never again be **silent**. This is the call
     /// that took a live tracker from 19 entries to 1.
-    /// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+    /// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
     #[test]
     fn merge_params_reports_entry_counts_across_a_wholesale_replace() {
         let cat = Catalog::open_in_memory().unwrap();

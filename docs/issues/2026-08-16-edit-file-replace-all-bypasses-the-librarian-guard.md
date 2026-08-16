@@ -5,7 +5,7 @@ closed:
 severity: high
 owner: marius
 related:
-  - docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+  - docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
   - docs/trackers/open-issue-work-queue.md
 tags:
   - librarian
@@ -151,7 +151,7 @@ grep librarian_guard --glob '*.rs'  ->
 ### The four protections that go missing
 
 Identical in shape to the params/body asymmetry filed in
-`docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md`:
+`docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md`:
 
 | | via `artifact(update)` | via `edit_file(replace_all)` |
 |---|---|---|
@@ -243,7 +243,7 @@ start recommending a call that now always fails.
 - `src/tools/edit_file/mod.rs:593` — the sole `guard_not_librarian_managed` call
 - `src/tools/edit_file/mod.rs:678` — `perform_edit`, the unguarded single path
 - `src/util/librarian_guard.rs` — the guard itself
-- `docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md` — the same
+- `docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md` — the same
   four-protection asymmetry on the params surface
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` — the twin-tool defect class
 - `docs/trackers/open-issue-work-queue.md` — BL-21

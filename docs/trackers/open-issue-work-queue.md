@@ -60,17 +60,17 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | open | `897fb0fbd6eb2546` |
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | open | `e557d0f2c9429b5d` |
-| BL-20 | 1 | params merge-patch wipes entry arrays wholesale — no guard, no report, no git backup | open | `29e65b54ee689dec` |
+| BL-20 | 1 | params merge-patch wipes entry arrays wholesale — gave entries an update path (`update_entry`) + always-on counts | **done, archived** | `36eda0c2634dbea9` |
 | BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | open | `3fb33d4da0791fe6` |
 | BL-22 | 1 | `move` broke the `id == hash(abs_path)` invariant, so the next reindex cascade-deleted the history | **done, archived** | `18a637f59289192c` |
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | open | `6149f4cfeaa6fab9` |
 | BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | open | `a68a76301714137f` |
 
-> **params lag the body on BL-1 and BL-22.** Both are `done` here and still `open`
-> in the live `tasks` array. Flipping one row's status needs the wholesale array
-> replace that already wiped this tracker once, and there is no entry-grain update
-> — that is BL-20. Two rows now carry the cost, which is the argument for BL-20's
-> fix 3. Reconcile once it lands; this snapshot is the git-backed truth until then.
+> **Params and body are reconciled** (2026-08-16). BL-1, BL-20 and BL-22 were
+> flipped with `artifact(action="update_entry", …)` — 24 rows before, 24 after,
+> three rows changed. The note that used to sit here said the flip was unsafe
+> because there was no entry-grain update; that was BL-20, and it is now fixed.
+> Its own row was the first thing the fix was used on.
 
 Next actions per row live in each bug's `## Resume`, and in the live params — not duplicated here,
 because a snapshot that carries instructions goes stale in the way that matters most.

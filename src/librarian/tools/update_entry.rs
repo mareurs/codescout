@@ -23,7 +23,7 @@ fn default_fields() -> Value {
 /// row was `artifact(update, patch={params:{…}})`, whose RFC 7396 array semantics
 /// replace the whole collection — so flipping one row's status meant re-sending
 /// every other row, and getting that wrong silently deleted them.
-/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+/// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
     if !a.fields.is_object() {

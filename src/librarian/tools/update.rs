@@ -484,7 +484,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Keep the entry-count report: a params patch replaces an array wholesale
     // (RFC 7396), so a caller re-sending a trimmed collection silently deletes the
     // rest — and the catalog is not in git, so nothing else can notice.
-    // docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+    // docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
     let params_merge = match &patch.params {
         Some(params_patch) => Some(crate::librarian::catalog::augmentation::merge_params(
             &cat,
