@@ -183,7 +183,34 @@ be treated as findings, not as a summary to re-derive.
    annexation). If it has, the ratified policy says promote — and R-90's
    promotion target is adopting per-session git worktrees as the default for
    concurrent sessions. That is a workflow change and needs a human call.
-3. **The A-chain and C-chain are candidates for promotion, not archiving.** A at
+3. **The promotion protocol is written but NOT DEPLOYED.** The reconnaissance
+   skill's Sync flow gained a third destination (the session-opening surface, for
+   laws with a measured base arm) and an audit-on-promote step —
+   `claude-plugins:c889e83`. That edit is in **source only**: all three CC
+   profiles load codescout-companion from
+   `~/<profile>/plugins/cache/sdd-misc-plugins/codescout-companion/1.16.4/`, and
+   none of those cached copies contains it (verified by grepping all three). It
+   needs a plugin version bump + reinstall across `.claude`, `.claude-sdd` and
+   `.claude-kat` per that repo's `docs/trackers/version-bump-checklist.md`. Until
+   then the protocol governs nothing — the same source-vs-running-artifact gap
+   R-89 is about, and the third instance of it in one day.
+
+4. **C is promoted in its weakest form, and that explains its recurrence.** The
+   skill carries *"Grep scope: workspace root, not the file being modified"*,
+   promoted 2026-05-23 from R-3. The chain then ran R-73b → R-77 → R-79 → R-87,
+   adding wrong-query-shape, negative-result-authorises-deletion, and
+   state-what-the-search-cannot-see — none of which the promoted sentence covers.
+   **Re-promoting C in its evolved form is the single highest-value promotion
+   available**, and it is a rewrite of an existing law, not a new one.
+
+5. **B may be outgrown too, by the unreachable mode rather than the wording one.**
+   The skill's substrate law already names *"a test suite importing an installed
+   wheel instead of the working tree"*, which is R-89's stale-build case exactly
+   — yet R-89 recurred ×4 citing a session-log entry as its parent, never the
+   promoted law. The text was general enough and was never fetched. Fix is
+   placement (destination 3), not a better sentence.
+
+6. **The A-chain and C-chain are candidates for promotion, not archiving.** A at
    35% and the five-deep C recurrence are the two laws this project demonstrably
    cannot hold in working memory; they belong in a surface that is delivered, not
    in a 228 KB file that must be opened. Note the constraint: seven of ten
