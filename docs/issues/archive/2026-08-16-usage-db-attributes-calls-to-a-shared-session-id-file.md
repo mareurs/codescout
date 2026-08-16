@@ -1,12 +1,17 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-16
+tags:
+- usage-db
+- telemetry
+- session-attribution
+- concurrency
+- analytics-integrity
 closed: 2026-08-16
-severity: high
+opened: 2026-08-16
 owner: marius
 related: []
-tags: [usage-db, telemetry, session-attribution, concurrency, analytics-integrity]
-kind: bug
+severity: high
 ---
 
 # BUG: `usage.db` attributes every call to a shared per-project file, so concurrent sessions collapse into one `cc_session_id`
@@ -172,22 +177,30 @@ what `cc_session_id` was introduced to provide.
 
 ## Resume
 
-Fix landed; two things remain.
+Nothing. The fix (`06498ed2`) is landed and verified; this file is archived.
 
-1. **Re-run the full gate** (`cargo clippy --all-targets -- -D warnings`, full
-   `cargo test`) once the concurrent `audit_doc_refs` refactor compiles, then
-   archive this file via `artifact(action="move", …)`.
-2. **Decide what to do about historical rows.** Everything recorded before
-   `06498ed2` under a concurrent-session window is mis-attributed and cannot be
-   repaired from the data — the correct id was never written. Options are a
-   documented cutoff date in whatever tracker consumes the column, or a
-   `session_attribution` marker. CAP-1's substrate check and any per-session
-   friction rate read this column, so the cutoff needs to be stated somewhere a
-   future analysis will see it.
+- **Gate** — `cargo clippy --all-targets --features dashboard -- -D warnings` clean and
+  `cargo test --features dashboard` green at `64082e8e` (3916 passed, 0 failed, 45
+  ignored); `cargo fmt --check` clean at the same SHA. HEAD was identical before and after
+  the run, so the verdict is pinned rather than taken mid-flight — an earlier attempt the
+  same day reported a failure that a concurrent commit (`ab94c33f`) had already fixed while
+  the suite was running.
+- **Regression test** — `record_content_uses_the_passed_cc_session_id_not_the_file`
+  (`src/usage/mod.rs`) writes a decoy id into the shared per-project file and asserts the
+  id passed by the server wins. It discriminates: it fails against the old file-reading
+  implementation.
+- **Historical rows** (was item 2) — **relocated to CAP-4** in
+  `docs/trackers/capability-proposals.md`, which is the surface that consumes the column.
+  Rows written before `06498ed2` under concurrent-session windows are mis-attributed and
+  cannot be repaired — the correct id was never written — so CAP-4 now states the cutoff
+  and warns that any window reaching back past that commit under-reports. Moving it was the
+  point: nothing re-reads `archive/`.
 
-Note for anyone measuring cross-session collisions (CAP-4): counts taken before
-this fix UNDER-report, because two sessions writing the same file appeared as one
-session writing it twice.
+**Promotion path is fast-forward**, so there is no second SHA to record here:
+`git rev-list --left-right --count master...experiments` = `0\t811` — zero on the left,
+meaning `master` moves onto these exact commits and `06498ed2` already *is* the master SHA.
+Do not add a pending-master-SHA line to this file; it would send a later session hunting
+for a commit that will never exist.
 ## References
 
 - `src/usage/mod.rs:100-104` — the file-only resolution

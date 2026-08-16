@@ -447,14 +447,26 @@ Run 2026-08-16 it returned **12 files written by two sessions the same day**, in
 `src/tools/core/types.rs` and `src/prompts/mod.rs`, both of which this session edited. So
 the signal is real and present.
 
-**Blocker — do not build on `cc_session_id` until it is fixed.**
-`docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md`:
-`src/usage/mod.rs:100-104` resolves the id from the shared per-project
-`.codescout/cc_session_id` file and never reads `CLAUDE_CODE_SESSION_ID`, while
-`src/server.rs:235-247` prefers the env var *because the file collides across concurrent
-windows*. Two sessions therefore write rows under one id — the exact case this capability
-exists to detect. The query above under-reports for that reason; the true collision count is
-higher than 12.
+**Blocker — CLEARED 2026-08-16 (`06498ed2`).** `src/usage/mod.rs` used to resolve the id
+from the shared per-project `.codescout/cc_session_id` file and never read
+`CLAUDE_CODE_SESSION_ID`, while `src/server.rs` preferred the env var *because the file
+collides across concurrent windows*. Two sessions therefore wrote rows under one id — the
+exact case this capability exists to detect. The server now resolves `cc_session_id` once
+and passes it to `UsageRecorder`, pinned by the regression test
+`record_content_uses_the_passed_cc_session_id_not_the_file` (`src/usage/mod.rs`), which
+writes a decoy id into the file and asserts the passed one wins. Full gate green at
+`64082e8e` (clippy `--all-targets --features dashboard -D warnings`, 3916 tests). Bug file
+archived to `docs/issues/archive/`.
+
+**The cutoff is permanent — state it in any analysis that reads this column.** Rows written
+before `06498ed2` under a concurrent-session window carry a collapsed id, and the correct
+value was *never written*, so it cannot be recovered from the data. The query above
+therefore **under-reports across any window reaching back past `06498ed2`** — the 12
+measured earlier is a floor, not a count. A base arm for this capability must either start
+after that commit or declare the cutoff explicitly; counting across it silently mixes two
+attribution regimes and reads as one. (Relocated here from the bug file's `## Resume` item
+2 before archiving — nothing re-reads `archive/`, and this is the surface that consumes the
+column.)
 
 **Shape.** Three decisions, none settled:
 
