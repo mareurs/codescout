@@ -52,13 +52,13 @@ Overall error rate by month — improving:
 |---|---|---|
 | TU-1 | The overflow hint's own recommended recovery needs `[*]`, which `json_path` rejects | **filed** — `docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` (`a7da09c6`) |
 | TU-2 | IL1's always-loaded text grants line-range reads without the overlap condition | **filed** — `docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md` (`32984694`, corrected `9746a5f0`) |
-| TU-3 | A write-scope denial does not name `approve_write` | **filed** — `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md` (`32984694`) |
-| TU-4 | Conditionally-required params are advertised as optional | **filed** — `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md` (`70d3ad76`) |
+| TU-3 | A write-scope denial does not name `approve_write` | **fixed** 2026-08-16 (`fe7732e2`) — `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`. Title was wrong: it *did* name `approve_write`, as `approve_write('<dir>')` — a placeholder, in a positional form the tool does not accept |
+| TU-4 | Conditionally-required params are advertised as optional | **fixed** 2026-08-16 (`1a54b5a6`, extended by `6ba720bc`) — `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`. Class A only; B and C deliberately deferred |
 | TU-5 | 31% of errors carry no `err_family` — the ranking's own blind spot | **fixed** — taxonomy extended + `BACKFILL_VERSION` bumped. **Headline corrected: 31% was a lifetime figure; live-DB rate was 19.8%, now 2.9%.** See § History |
 | TU-6 | `ast_extent_fail`'s hint blamed syntax errors on files that parse | **already fixed** `cafa4b37`, same day — near-miss, see § Method caveats |
 | TU-7 | Two high-volume guards are healthy and must not be "fixed" | **no action** — negative result, recorded so it is not re-litigated |
 | TU-8 | Routing is 45% of all errors — and is broadly working | **no action** — negative result, see § Tool sweep |
-| TU-9 | `artifact_event` carries TU-4's defect in a third tool | **open** — extends `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md` |
+| TU-9 | `artifact_event` carries TU-4's defect in a third tool | **fixed** 2026-08-16 (`6ba720bc`) — folded into TU-4's fix as this entry asked. Nine required fields across seven kinds, not the three that happened to fail |
 | TU-10 | Overflow pressure is concentrated, and compounds TU-1 | **open**, not filed |
 | TU-11 | Reading the arguments overturned conclusions in **both** directions | **method** — see § Trace pass; corrections folded into TU-1 and TU-2 |
 
@@ -251,6 +251,27 @@ TU-4 was filed against `edit_code.body` and `artifact.patch` and recommended swe
 vindicated **by a pass that did not look for it** — `artifact_event` never surfaced in the
 family-based analysis because these errors carry no `err_family`. Add it to TU-4's fix.
 
+
+**Resolved 2026-08-16 (`6ba720bc`), and the count was larger than measured.** The three
+fields above are the three that happened to fail; `validate_payload` enforces **nine
+required fields across seven kinds** (`note`→text; `status_change`→to; `field_patch`→field
++to; `superseded_by`→target_artifact_id; `external_signal`→source_id+summary;
+`intent`→hypothesis; `verdict`→outcome — `reviewed` requires none). The `payload` schema
+now renders that list from a table beside the validator.
+
+This entry's own framing is worth keeping as a method note: it called itself "the
+recommendation vindicated by a pass that did not look for it". That is exactly right, and
+the reason generalises — **these errors carry no `err_family`**, so the family-based
+analysis that found `edit_code.body` and `artifact.patch` was structurally incapable of
+seeing them. A ranking by error family cannot surface a defect whose errors are
+unclassified; it took a per-tool sweep. Kin to R-91 in
+`docs/trackers/reconnaissance-patterns.md` — a probe that cannot observe the thing the
+claim is about.
+
+`validate_payload` was deliberately left unrewritten rather than made table-driven:
+`field_patch.to` accepts any JSON value while the other eight require strings, and
+collapsing that distinction would have been a silent behaviour change. The table and the
+validator are held together by a test that *executes* the validator instead.
 ### TU-10 — overflow pressure is concentrated, and compounds TU-1
 
 | Tool | Overflow rate | Avg tokens | Max tokens |

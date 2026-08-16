@@ -1,7 +1,7 @@
 ---
 id: '365b599f3573b1c0'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: conditionally-required params are advertised as optional — 41% of live schema errors are a param the schema never said was required'
 owners:
 - marius
@@ -70,6 +70,8 @@ are not used.
 
 ## Root cause
 
+Confirmed at the bytes, and **wider than filed**.
+
 `required` in JSON Schema is a flat list. "Required when `action` is one of X" is expressible only
 via `if/then` or `oneOf`, which many MCP clients do not surface to the model. So the honest options
 are (a) mark it required always — wrong, it genuinely is optional for `rename`/`remove`; or (b) say
@@ -77,9 +79,22 @@ so in the description. Today neither happens: the description explains what the 
 each action, which reads as documentation of an optional convenience rather than a precondition.
 
 Measured 2026-08-15: 14 of 34 live schema errors are Class A; the two responsible parameters are
-`edit_code.body` (`src/tools/symbol/edit_code.rs:53`) and `artifact.patch`
-(`src/librarian/tools/artifact.rs:126`).
+`edit_code.body` (`src/tools/symbol/edit_code.rs`) and `artifact.patch`
+(`src/librarian/tools/artifact.rs`).
 
+**What the filing missed (found 2026-08-16 while fixing).** `edit_code.new_name` has the same
+defect and was not filed. Its description read `"rename only"` — and this same tool uses that
+*identical phrasing* for two params that are genuinely optional: `attributes` ("replace only: …
+Omit to keep the default") and `position` ("insert only, default 'after'").
+
+So the underlying defect is not "two descriptions are incomplete". It is that **the `"<action>
+only"` convention marks *scope*, never *obligation*** — the reader cannot tell a scoped-and-required
+param from a scoped-and-optional one. Where a `default` is stated they can infer it; where none is
+(`body`, `new_name`) they cannot. `body` is simply the highest-traffic instance.
+
+The runtime, by contrast, is unambiguous: `edit_code`'s `call()` refuses three (action, param)
+pairs — `rename`→`new_name`, `replace`→`body`, `insert`→`body`. The schema and the check were two
+hand-maintained statements of one rule, and only one of them was true.
 ## Proposed policy — lenient where unique and safe, confident everywhere else
 
 The request that prompted this bug was to be *"lenient but confident at the same time"*. Those are
@@ -154,23 +169,61 @@ across May / July / August.
 
 ## Fix
 
-Not implemented. In priority order:
+**Class A fixed on `experiments` in `1a54b5a6`.** Classes B and C deliberately not attempted — see
+below.
 
-1. **Class A, description fix** — append the requirement to `edit_code.body`
-   (`src/tools/symbol/edit_code.rs:53`) and `artifact.patch`
-   (`src/librarian/tools/artifact.rs:126`). Addresses 41% of live cases. No runtime change.
-2. **Class B, hint fix** — replace the generic *"Add the required 'X' parameter to the tool call"*
-   template with a shape-carrying example, following `references`'s existing wording.
-3. **Class C, leniency** — accept a one-sided line range; complete the missing bound. Lowest
-   urgency (nothing since May) and lowest risk.
+1. **Class A, description fix — DONE, and extended to a third param.** `edit_code.body`,
+   `edit_code.new_name` (added by the scout) and `artifact.patch` now open with an explicit
+   requirement clause. In `edit_code` the clause is rendered from two consts —
+   `BODY_REQUIRED_ACTIONS` and `NEW_NAME_REQUIRED_ACTIONS` — through one `required_for()` helper,
+   so every conditionally-required param states the obligation in the same words and a test can
+   assert on it without pattern-matching prose.
 
-Sweep for other conditionally-required params rather than fixing only the two measured: any
-`action`-dispatched tool is a candidate (`edit_markdown`, `librarian`, `memory`, `workspace`).
+   **Runtime messages were deliberately left byte-identical.** `usage::db::normalize_err_family`
+   classifies this family by the literal substring `requires '`; changing the wording would have
+   broken the very measurement that found the bug. The new test asserts that substring for exactly
+   this reason.
 
+2. **Class B, hint fix — not done.** Replacing the generic *"Add the required 'X' parameter"*
+   template with a shape-carrying example is a separate change to a shared error path.
+
+3. **Class C, leniency — not done.** Accepting a one-sided line range is a behaviour change, not a
+   description change; lowest urgency (nothing since May) and lowest risk, per the original
+   ranking.
+
+The sweep the filing asked for was run, and it found a **fourth tool**.
+
+**`artifact_event` — fixed in `6ba720bc`.** Its `payload` is the same defect nested one level
+deeper: required keys depend on `kind`, and the schema said only "create: event payload (a JSON
+object)". Nine required fields across seven kinds. This one was already on record as TU-9 in
+`docs/trackers/2026-08-15-tool-usage-investigation.md`, which asked for exactly this — *"Add it to
+TU-4's fix"* — and noted `artifact_event` ran a **50% error rate** in the 2026-07 window.
+
+Why the original measurement missed it is the reusable part: **those errors carry no
+`err_family`**, so the family-ranked analysis that surfaced `edit_code.body` and `artifact.patch`
+was structurally unable to see them. It took a per-tool sweep.
+
+Other `action`-dispatched tools do carry conditional requirements at runtime (`peer` needs
+`peer`/`tool`/`handle` per action; `artifact`'s `move`, `delete`, `graft` need their ids), but
+those surface as serde `missing field` errors rather than the Class A shape, which puts them in
+Class B — the same fix, deferred with it, rather than a different one.
 ## Tests added
 
-None — filed on discovery.
+`edit_code_advertises_every_conditionally_required_param` (`src/tools/symbol/tests.rs`) asserts
+both halves of the contract, separately, over all three (action, param) pairs.
 
+The first half **executes** the runtime rather than reading a constant — it calls `edit_code` with
+the action and no param and asserts the refusal. That is what stops the table drifting from
+`call()`: delete a check there and the test fails, rather than the table quietly describing a rule
+that no longer exists. The second half asserts the schema description carries `REQUIRED` and names
+the action.
+
+Mutation-verified: restoring `new_name`'s original `"rename only"` wording fails the test. A
+second, independent tripwire fires at the same time — `NEW_NAME_REQUIRED_ACTIONS` becomes unused
+and `-D warnings` rejects the build.
+
+Gate: `cargo fmt` + `cargo clippy --all-targets -D warnings` clean, `cargo test --lib` 3756 passed
+/ 0 failed / 7 ignored.
 ## Workarounds
 
 Pass `body` whenever `action` is `replace` or `insert`; pass `patch` whenever `artifact` action is
@@ -191,4 +244,3 @@ emitters, not a behaviour change.
 - `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md` — the precedent that a
   bare rejection is a defect when the tool holds what the caller needs
 - `docs/issues/archive/2026-07-10-artifact-filter-inversion-misleading-hint.md` — fixed; why the `eq` rows are excluded
-
