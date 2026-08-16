@@ -507,11 +507,35 @@ unchanged), `NoModules` for shell/CSS/HTML. Verified live on the rebuilt server:
 
 **What this leaves.** The code-comment surface is now worth sweeping rather than
 triaging — the remaining 116 Rust `unknown` are absolute and out-of-project paths,
-not classifier noise. Three items are still open and each needs a decision, not
-more measurement: the `//` marker defect
-(`docs/issues/2026-08-15-audit-doc-refs-classifies-comment-markers-as-paths.md`,
-narrow vs broad), four real stale citations the non-Rust scan found in
-`scripts/` and `tests/`, and the sweep itself. And one measurement discipline
-carries forward: repo-wide scans report `degraded: true` at 276+ files while
-scoped ones do not, so subset scans are not merely cheaper but strictly more
-trustworthy.
+not classifier noise. **Two** items are still open and each needs a decision, not
+more measurement: four real stale citations the non-Rust scan found in
+`scripts/` and `tests/`, and the sweep itself.
+
+The third — the `//` marker defect — is **fixed** (`148aabe6`, narrow candidate:
+count non-empty segments rather than slashes;
+`docs/issues/archive/2026-08-15-audit-doc-refs-classifies-comment-markers-as-paths.md`).
+The broad candidate was rejected because it risks Windows UNC paths.
+
+**The measurement discipline recorded here was wrong, and is retracted
+(2026-08-16).** It read: *"repo-wide scans report `degraded: true` at 276+ files
+while scoped ones do not, so subset scans are not merely cheaper but strictly
+more trustworthy."* Both halves fail.
+
+The threshold is not a threshold: a ~40-file scan degraded and a ~3-file scan
+did not, minutes apart, with no change in server state (HY-6 in
+`docs/trackers/tracker-hygiene-log.md`). Reading the source settled why — the
+flag is raised by three call sites in `note_degraded`, and **scan size is only a
+proxy for how many chances a run had to hit one of them**. A bigger scan meets a
+mid-index server more often; nothing about the server differs.
+
+And "strictly more trustworthy" inverts what the flag means. `degraded` says
+*coverage was incomplete* — a mid-index server silently costs 60-69 resolutions
+— not that the results reported are false. A scoped scan that returns
+`degraded: false` has fewer refs and no more per-ref reliability; preferring it
+for trust reasons trades away coverage for a cleaner-looking flag.
+
+The field itself was also lying: it was named `lsp_languages_offline` while one
+of its three causes fires on a branch where the server **answered**. Renamed to
+`lsp_languages_degraded` with a per-language `degraded_causes` map in
+`56fe1dd4` — a scan can now say `lsp_behind_index` (re-run resolves it) rather
+than implying the server is down.

@@ -1,7 +1,7 @@
 ---
 id: '772fff5739620581'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: audit_doc_refs classifies bare comment markers // /// //! as file paths — the second-segment guard counts an empty segment as a segment'
 tags:
 - audit_doc_refs
@@ -151,26 +151,44 @@ with more.
 
 ## Fix
 
-Not implemented. Two candidates, and the choice is not obvious:
+Fixed on `experiments` in `148aabe6` — the **narrow** candidate.
 
-- **Narrow:** require the second segment to be non-empty — compute
-  `single_root_segment` over non-empty segments rather than over raw slash
-  presence. Smallest change, fixes `//` and `///`, and `//!` falls out too since
-  its only non-empty segment is `!`. Watch the interaction with the
-  `s.ends_with('/')` acceptance in the unanchored branch, where a trailing empty
-  segment *is* meaningful (`docs/` means a directory).
-- **Broad:** reject any string whose characters are all `/` plus punctuation.
-  Catches more marker shapes but risks Windows UNC paths (`//server/share`),
-  which this repo does care about elsewhere.
+`looks_like_path` now counts non-empty segments rather than testing for a second slash:
 
-Either way the fix belongs beside a test naming the discriminating pair
-(`/mcp` rejected, `//` rejected, `/etc/hosts` accepted) — the current tests
-cannot fail on this, since none of them feed a bare marker in.
+```rust
+let segments = s.split('/').filter(|seg| !seg.is_empty()).count();
+let has_second_segment = segments >= 2 || (segments == 1 && s.ends_with('/'));
+let single_root_segment = s.starts_with('/') && !has_second_segment;
+```
 
+That is the guard the surrounding comment always claimed to implement — the code tested for a
+second *slash* where the comment said second *segment*, and `//` has the former without the
+latter.
+
+The `s.ends_with('/')` clause is carried deliberately: a trailing empty segment **is** meaningful
+(`docs/` means a directory), which is the interaction this section flagged as the thing to watch.
+
+The broad candidate — rejecting any all-punctuation-plus-slash string — was **not** taken: it
+risks Windows UNC paths (`//server/share`), which this repo cares about elsewhere.
+
+**Bookkeeping note.** This section read "Not implemented" until 2026-08-16, four commits after the
+fix landed: the code shipped and the bug file was never updated. Caught by a verify-open pass
+before a "what's open?" report, which is exactly the failure mode that cadence exists for.
 ## Tests added
 
-None yet. See Fix.
+Both in `src/librarian/tools/audit_doc_refs/parser.rs`, and the pair is the point — the filing
+noted the existing tests *could not fail* on this, since none fed a bare marker in.
 
+- `parser_rejects_bare_comment_markers` — `//`, `///` and `//!`, which appear in almost every Rust
+  snippet in the corpus.
+- `parser_keeps_anchored_paths_the_marker_fix_could_have_broken` — the discriminating set, each
+  entry accepted for a *different* reason so a regression is legible from which assert fails.
+
+Mutation-verified when the fix landed: reverting to the slash test reproduces
+`[("///", FilePath), ("//!", FilePath), ("//", FilePath)]`.
+
+Re-verified 2026-08-16 on the rebuilt server: `cargo test --lib parser_rejects_bare_comment_markers`
+passes, and the guard at `parser.rs:667` is the segment-counting form.
 ## Workarounds
 
 None needed — severity is low and the gate is unaffected: these land as
