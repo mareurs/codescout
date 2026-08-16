@@ -19,24 +19,23 @@ impl Tool for Librarian {
              reindex: re-scan and classify markdown artifacts. \
              tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \
              workspace_state_at: time-travel snapshot of all artifacts at a commit/timestamp. \
-             audit_doc_refs: scan markdown for stale code refs (file paths, symbols, \
-             line refs, link targets, module paths) against the current filesystem \
-             + LSP symbol index. Manual cadence — run before a doc-heavy PR merges \
-             or when drift is suspected. Output is an `audit_issues` tracker. \
-             legibility_scan: rank code-legibility refactor candidates from usage.db \
-             friction + the AST symbol index. Writes/updates the legibility-backlog \
-             tracker — open targets ranked by observed cost (tier 1 biting-now, tier 2 \
-             latent), auto-closing refactored ones with a before/after delta. \
-             write=false for a dry-run JSON. \
+             audit_doc_refs: scan markdown for stale code refs (paths, symbols, \
+             line refs, links) against the filesystem + LSP index. Manual — run \
+             before a doc-heavy merge. Emits an `audit_issues` tracker. \
+             legibility_scan: rank refactor candidates from usage.db friction + the \
+             AST symbol index; writes the legibility-backlog tracker, auto-closing \
+             refactored ones. write=false for a dry-run JSON. \
              link_scan: derive rel=\"cites\" edges from prose citations (entry \
              tokens, ids, md links); default reports, write=true \
              materializes/prunes cites edges. \
              doctor: catalog drift scanner (read-only by default): abs_path form, \
              ADS colons, '..' segments, missing files; commits.git_root form; \
-             worktree-scoped rows. JSON violation-count report. Opt-in repairs: \
+             worktree-scoped rows; frontmatter id vs catalog id. JSON \
+             violation-count report. Opt-in repairs: \
              fix=prune_missing + root=<dead root> prunes rows under it; \
              fix=reseat_worktree auto-reseats no-collision worktree rows (collisions \
-             need manual graft). \
+             need manual graft); fix=repair_frontmatter_id sweeps stale frontmatter \
+             ids (confirm=true to apply). \
              merge_worktree: fold a worktree's shadow rows onto their main twins \
              (delta-only, never duplicates base entries); reseats worktree-born \
              rows. root=<worktree_root>; dry_run=true previews only; abandon=true \
@@ -91,7 +90,7 @@ impl Tool for Librarian {
                 "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
                 "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap artifacts scanned (default 10000). doctor: size of the emitted abs_path_outside_managed_roots window (default 10) — raise it to reach the rows the report counts but elides; pair with offset to page." },
                 "offset": { "type": "integer", "description": "doctor: skip this many abs_path_outside_managed_roots rows before the window (default 0). Rows are ordered by abs_path, so pages are stable and disjoint across calls." },
-                "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree", "rehome"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual artifact(action=\"graft\"). rehome migrates a moved repo's catalog rows from old_root to new_root, preserving ids/history (requires old_root=<old path, gone> [alias: root=] + new_root=<new path, must exist>; dry-run by default, pass confirm=true to apply). Omit for a read-only scan." },
+                "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree", "rehome", "repair_frontmatter_id"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual artifact(action=\"graft\"). rehome migrates a moved repo's catalog rows from old_root to new_root, preserving ids/history (requires old_root=<old path, gone> [alias: root=] + new_root=<new path, must exist>; dry-run by default, pass confirm=true to apply). repair_frontmatter_id rewrites every frontmatter_id_mismatch file's `id:` to its catalog row's id — sweeps all, no root needed, dry-run by default, confirm=true to apply; a file with NO frontmatter id is left alone rather than stamped. Omit for a read-only scan." },
                 "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune (refused if the path still exists on disk). OMIT root to run BATCH mode: dry-run lists every dead root (whole-subtree-gone) with row counts; pass confirm=true to prune them all. fix=rehome: absolute path the repo used to live at (must no longer exist) — old_root is preferred; root is accepted as an alias for back-compat. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
                 "old_root": { "type": "string", "description": "For fix=rehome: absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface." },
                 "new_root": { "type": "string", "description": "For fix=rehome: absolute path the repo now lives at." },

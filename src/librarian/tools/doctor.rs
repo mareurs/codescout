@@ -530,6 +530,43 @@ async fn run_fix(
             }
         }
         "reseat_worktree" => reseat_worktree(ctx),
+        // Sweep-all, dry-run by default. Reuses `mv`'s repair so the invariant has
+        // exactly one implementation: a move writes the new id going forward, this
+        // rewrites the ones written before that shipped. BL-23.
+        "repair_frontmatter_id" => {
+            let stale = {
+                let cat = ctx.catalog.lock();
+                scan_frontmatter_id_mismatches(&cat.conn)?
+            };
+            if !confirm {
+                return Ok(json!({
+                    "fix": "repair_frontmatter_id", "mode": "dry_run",
+                    "files": stale.iter()
+                        .map(|v| json!({ "path": v.path, "detail": v.detail }))
+                        .collect::<Vec<_>>(),
+                    "totals": { "files": stale.len() },
+                    "hint": "re-run with confirm=true to rewrite these frontmatter ids",
+                }));
+            }
+            let mut repaired = Vec::new();
+            let mut failed = Vec::new();
+            for v in &stale {
+                // `artifact_id` is always Some for this check — it is built from the
+                // catalog row — but a default beats an unwrap in a repair loop.
+                let id = v.artifact_id.clone().unwrap_or_default();
+                match super::mv::repair_frontmatter_id(std::path::Path::new(&v.path), &id) {
+                    Ok(_) => repaired.push(json!({ "path": v.path, "id": id })),
+                    // One unwritable file must not abandon the rest of the sweep.
+                    Err(err) => failed.push(json!({ "path": v.path, "error": format!("{err:#}") })),
+                }
+            }
+            Ok(json!({
+                "fix": "repair_frontmatter_id", "mode": "applied",
+                "repaired": repaired,
+                "failed": failed,
+                "totals": { "files": repaired.len(), "failed": failed.len() },
+            }))
+        }
         "rehome" => {
             let cat = ctx.catalog.lock();
             let (old, new) = validate_rehome_request(root, new_root, &cat.conn)?;
@@ -560,7 +597,8 @@ async fn run_fix(
             }))
         }
         other => Err(RecoverableError::new(format!(
-            "unknown fix '{other}' — expected 'prune_missing', 'reseat_worktree', or 'rehome'"
+            "unknown fix '{other}' — expected 'prune_missing', 'reseat_worktree', \
+             'rehome', or 'repair_frontmatter_id'"
         ))),
     }
 }
@@ -805,6 +843,12 @@ fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result
             violations.push(v);
         }
         if let Some(v) = check_missing_file(id, abs_path) {
+            violations.push(v);
+        }
+        // Reads the file, so it runs after the cheap string checks. A missing or
+        // unreadable file yields None here — `check_missing_file` above already
+        // owns that finding.
+        if let Some(v) = check_frontmatter_id_matches_catalog(id, abs_path) {
             violations.push(v);
         }
         if is_absolute && !roots.is_empty() {
@@ -1110,6 +1154,56 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
     }
 }
 
+/// Every artifact file's frontmatter `id:` must name the row that owns it.
+///
+/// Catalog identity is `id == artifact_id_from_abs(abs_path)`, so a move re-keys
+/// the row — and before `ec9e63d0` the file kept asserting the id it was moved
+/// away from, which resolves to nothing. Measured 2026-08-16: **all 78** unique
+/// `^id:` values in `docs/issues/archive/` were stale, and none could be repaired
+/// through any write tool (each carries a 16-hex id, so `edit_markdown` and
+/// `edit_file` refuse it, and `artifact(update)`'s `extra` cannot write `id`).
+/// That is why the repair lives here.
+///
+/// Only a **present and wrong** id is a violation. The three abstentions are
+/// deliberate:
+/// - **No `id:` at all** is not a false assertion, and stamping one would newly
+///   subject the file to the librarian guard — `docs/trackers/skill-frictions.md`
+///   would stop accepting the `edit_markdown` workflow CLAUDE.md documents.
+/// - **A missing file** is [`check_missing_file`]'s finding. Reporting it here too
+///   would inflate the count on precisely the rows a repair cannot help.
+/// - **Unparseable frontmatter** is left alone rather than guessed at.
+fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Violation> {
+    let content = std::fs::read_to_string(abs_path).ok()?;
+    let (fm, _) = crate::librarian::frontmatter::parse(&content).ok()?;
+    let declared = fm?.id?;
+    if declared == id {
+        return None;
+    }
+    Some(Violation::new(
+        "frontmatter_id_mismatch",
+        Some(id.to_string()),
+        abs_path,
+        format!(
+            "frontmatter declares id '{declared}' but the catalog row is '{id}' — \
+             a move re-keys the row and this file kept the id it was moved away from"
+        ),
+    ))
+}
+
+/// The `frontmatter_id_mismatch` rows on their own, for `fix=repair_frontmatter_id`.
+/// Ordered by `abs_path` for the same reason [`scan_artifact_paths`] is — a stable
+/// order is what makes a reported sweep reproducible.
+fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows
+        .iter()
+        .filter_map(|(id, abs_path)| check_frontmatter_id_matches_catalog(id, abs_path))
+        .collect())
+}
+
 fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation> {
     // Schema declares `abs_path TEXT NOT NULL UNIQUE` but does not enforce
     // absoluteness. Pre-#66 code paths stored relative strings here in some
@@ -1286,6 +1380,175 @@ mod tests {
         assert!(check_abs_path_must_be_absolute("a1", "Cusers/foo.md").is_some());
         // Empty string is not absolute (no leading slash)
         assert!(check_abs_path_must_be_absolute("a1", "").is_some());
+    }
+
+    /// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
+    ///
+    /// `ec9e63d0` stopped `artifact(move)` creating this drift. The population it
+    /// left behind was total: all 78 unique `^id:` values in `docs/issues/archive/`
+    /// resolved to nothing.
+    ///
+    /// The three `None` rows are each load-bearing, not padding — they are the ways
+    /// a naive implementation over-reports:
+    /// a file with **no** `id:` asserts nothing false (and stamping one would newly
+    /// subject a prose tracker to the librarian guard); a file with no frontmatter
+    /// at all is not an artifact's business; and a **missing** file already has its
+    /// own finding in `check_missing_file`, so reporting it twice would inflate the
+    /// count on exactly the rows a repair cannot help.
+    #[test]
+    fn check_frontmatter_id_flags_only_an_id_that_is_present_and_wrong() {
+        let tmp = tempfile::tempdir().unwrap();
+        let write = |name: &str, body: &str| -> String {
+            let p = tmp.path().join(name);
+            std::fs::write(&p, body).unwrap();
+            crate::util::fs::RepoPath::from_path(&p).into_string()
+        };
+
+        let stale = write(
+            "stale.md",
+            "---\nid: aaaaaaaaaaaaaaaa\nkind: bug\n---\n# x\n",
+        );
+        let v = check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &stale)
+            .expect("a present-but-wrong id must be flagged");
+        assert_eq!(v.check, "frontmatter_id_mismatch");
+        assert!(
+            v.detail.contains("aaaaaaaaaaaaaaaa") && v.detail.contains("bbbbbbbbbbbbbbbb"),
+            "the detail must name both ids so the finding is actionable, got: {}",
+            v.detail
+        );
+
+        for (label, path) in [
+            (
+                "id already correct",
+                write("ok.md", "---\nid: bbbbbbbbbbbbbbbb\nkind: bug\n---\n# x\n"),
+            ),
+            (
+                "no id — asserts nothing false",
+                write("noid.md", "---\nkind: tracker\n---\n# x\n"),
+            ),
+            ("no frontmatter at all", write("plain.md", "# just a doc\n")),
+            (
+                "missing file — check_missing_file owns that finding",
+                crate::util::fs::RepoPath::from_path(&tmp.path().join("gone.md")).into_string(),
+            ),
+        ] {
+            assert!(
+                check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &path).is_none(),
+                "{label}: must not be flagged"
+            );
+        }
+    }
+
+    /// The sweep, end to end through `call`: default scan reports, dry-run previews
+    /// without touching disk, `confirm=true` repairs every stale file in one pass.
+    ///
+    /// The `c.md` and `d.md` rows are the ones that make this test able to fail for
+    /// the right reason — a sweep that rewrote every file would repair the two stale
+    /// ones and pass a weaker assertion while silently stamping an id onto `d.md`.
+    #[tokio::test]
+    async fn repair_frontmatter_id_sweeps_the_stale_and_leaves_everything_else() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = crate::util::fs::RepoPath::from_path(tmp.path()).into_string();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+
+        let seed_file = |name: &str, fm_id: Option<&str>| -> String {
+            let body = match fm_id {
+                Some(f) => format!("---\nid: {f}\nkind: bug\nstatus: fixed\n---\n\n# {name}\n"),
+                None => format!("---\nkind: tracker\nstatus: active\n---\n\n# {name}\n"),
+            };
+            std::fs::write(tmp.path().join("docs").join(name), body).unwrap();
+            format!("{root}/docs/{name}")
+        };
+        let read =
+            |name: &str| std::fs::read_to_string(tmp.path().join("docs").join(name)).unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(
+            &cat,
+            "1111111111111111",
+            &seed_file("a.md", Some("dead111111111111")),
+        );
+        seed_artifact(
+            &cat,
+            "2222222222222222",
+            &seed_file("b.md", Some("dead222222222222")),
+        );
+        seed_artifact(
+            &cat,
+            "3333333333333333",
+            &seed_file("c.md", Some("3333333333333333")),
+        );
+        seed_artifact(&cat, "4444444444444444", &seed_file("d.md", None));
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        // Default scan: reports, mutates nothing.
+        let scan = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            scan["summary"]["by_check"]["frontmatter_id_mismatch"], 2,
+            "the check must run in the DEFAULT scan, not only under fix=. Got: {}",
+            scan["summary"]["by_check"]
+        );
+
+        // Dry run: previews, still mutates nothing.
+        let dry = call(&ctx, json!({ "fix": "repair_frontmatter_id" }))
+            .await
+            .unwrap();
+        assert_eq!(dry["mode"], "dry_run");
+        assert_eq!(dry["totals"]["files"], 2);
+        assert!(
+            read("a.md").contains("dead111111111111"),
+            "a dry run must not write"
+        );
+
+        // Confirm: repairs both, in one sweep.
+        let applied = call(
+            &ctx,
+            json!({ "fix": "repair_frontmatter_id", "confirm": true }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(applied["mode"], "applied");
+        assert_eq!(applied["totals"]["files"], 2);
+
+        // Assert through the parser, not on a substring: `frontmatter::write`
+        // conservatively quotes any scalar YAML 1.1 could reinterpret, and these
+        // all-digit fixture ids come back as `id: '1111111111111111'`. A substring
+        // assertion would fail on correct output — as it did on the first run.
+        let declared = |name: &str| -> Option<String> {
+            let text = read(name);
+            crate::librarian::frontmatter::parse(&text)
+                .unwrap()
+                .0
+                .and_then(|fm| fm.id)
+        };
+        assert_eq!(declared("a.md").as_deref(), Some("1111111111111111"));
+        assert_eq!(declared("b.md").as_deref(), Some("2222222222222222"));
+        assert!(
+            read("a.md").contains("# a.md"),
+            "the body must survive the repair"
+        );
+        assert_eq!(
+            declared("c.md").as_deref(),
+            Some("3333333333333333"),
+            "an already-correct file must be left alone"
+        );
+
+        let d = read("d.md");
+        let (fm, _) = crate::librarian::frontmatter::parse(&d).unwrap();
+        assert!(
+            fm.expect("frontmatter preserved").id.is_none(),
+            "a file with no id must not gain one — stamping it would newly subject a \
+             prose tracker to the librarian guard. Got: {d:?}"
+        );
+
+        // Idempotent: a second sweep finds nothing left to do.
+        let again = call(
+            &ctx,
+            json!({ "fix": "repair_frontmatter_id", "confirm": true }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(again["totals"]["files"], 0);
     }
 
     /// The check exists because `containing_root` silently failed for every

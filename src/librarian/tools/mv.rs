@@ -172,7 +172,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// catalog still re-keys correctly, and the file is left exactly as it was.
 ///
 /// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
-fn repair_frontmatter_id(path: &std::path::Path, new_id: &str) -> anyhow::Result<String> {
+pub(super) fn repair_frontmatter_id(
+    path: &std::path::Path,
+    new_id: &str,
+) -> anyhow::Result<String> {
     let content = std::fs::read_to_string(path)?;
 
     let needs_repair = match crate::librarian::frontmatter::parse(&content) {
