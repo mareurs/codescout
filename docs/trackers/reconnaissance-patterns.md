@@ -157,6 +157,21 @@ of the convention you are about to hand-roll.
   cut 5.8%, not ~14%, because roughly a third of the corpus lives in
   self-contained index-table rows rather than bodies. Second measurement of the
   same effect that day (the D1 guide dedup realised 41% of its byte estimate).
+- **The disposition backlog is 25 entries, not "every entry without a `Status:`
+  field"** (measured 2026-08-16). 57 body entries, 18 now carry the field. But 43
+  carry a `Promote-when` criterion, and three of those — R-89, R-90, R-91 — were
+  already adjudicated **in prose** (`Promote-when: FIRED …`) with no field to grep;
+  a field-presence count misses them entirely. Those three are now normalized, which
+  leaves **25 entries with an unharvested `Promote-when`** as the actionable queue.
+  Note the shape: *field presence* and *adjudication presence* are different
+  questions, and only the second one matters.
+- **Twice in one sweep the instrument counted the document's discussion of a token
+  as a use of it.** `grep -c 'Status:'` matched the bullet above that describes the
+  field; a `/FIRED|fired/` adjudication probe matched R-45's "the tell that should
+  have fired", promoting an unfired entry into the adjudicated set. Field detection
+  needs a **structural** anchor — line-start, a key prefix — never a keyword. Prose
+  and field share a vocabulary by construction, so this is not a pattern-quality
+  problem that a better keyword fixes.
 
 ### Reproducing the per-entry assignment
 
@@ -2099,6 +2114,12 @@ can only succeed on the new build, and confirm the serving process postdates tha
 build.
 
 
+
+**Status:** promote-when **FIRED** 2026-08-16 — fourth instance, raised from another
+session (`28ea039a`, commit `5917e37e`: a committed claim about shipped guidance that
+rested on a stale build). Full adjudication is the **Promote-when** line above; this
+field only normalizes it. Added by the 2026-08-16 disposition sweep — the entry was
+already adjudicated in prose, which is exactly why a `^**Status:**` grep did not see it.
 ## R-90 — Miss ×2: two sessions, one working tree — `git add -A` silently annexes the other's staged work
 
 **Verdict:** miss, twice in one day. Both times the content survived and the
@@ -2196,6 +2217,13 @@ pathspec, a glob) with one habit instead of one habit per variant.
 
 **Kin:** R-95 (a rationale nobody re-audits) — this entry's own corrected rule
 was the un-audited claim the third instance walked past.
+
+**Status:** promote-when **FIRED** (3 instances) — **promotion not applied.** The target
+is adopting per-session git worktrees as the default for concurrent sessions; that is a
+workflow change and an explicit human decision, still untaken. The interim enforceable
+form is this entry's own corrected rule — a `git status --short` readback between `add`
+and `commit`, which catches every variant with one habit. Added by the 2026-08-16
+disposition sweep.
 ## R-91 — A probe that cannot observe the thing the claim is about (three instances, one session)
 
 **Verdict:** miss (×3) · **Observed:** 2026-08-16, benchmark + tracker-hygiene session
@@ -2267,6 +2295,12 @@ same condition that once printed `offline: ["rust"]` now prints `lsp_behind_inde
 rule stands unchanged: the field is still a claim, and the next one may not have been fixed.
 
 
+
+**Status:** promote-when **FIRED** 2026-08-16 — **promoted.** The criterion's second arm
+("one instance where the rule is applied prospectively and prevents a claim") was met
+while live-verifying `56fe1dd4`: an `audit_doc_refs` call returning `n_files_scanned: 0`
+was read as a possible silent no-op, and reading `mod.rs:341` first showed `paths` is a
+glob list, so no bug was filed. Added by the 2026-08-16 disposition sweep.
 ## R-92 — A filed root cause is a hypothesis, and confirming it usually widens the bug
 
 **Verdict:** hit (×2) · **Observed:** 2026-08-16, fixing the two tool-quirk bugs the
