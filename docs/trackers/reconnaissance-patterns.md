@@ -2149,6 +2149,67 @@ prospectively and prevents a claim. At that point promote the three concrete for
 `reconnaissance` memory topic — they are craft-shaped, not project-shaped, so the global
 SKILL.md is the eventual destination via the sync flow.
 
+
+## R-92 — A filed root cause is a hypothesis, and confirming it usually widens the bug
+
+**Verdict:** hit (×2) · **Observed:** 2026-08-16, fixing the two tool-quirk bugs the
+2026-08-16 hygiene sweep filed
+
+Both bugs were filed with their root cause explicitly marked unverified — `6c0952e8`:
+*"Inferred from the two error messages, not read from source"*; `49e562fc`: *"Unknown — not
+yet traced to a line."* Honest filings. Scouting each before writing code confirmed both
+inferences **and found both had understated the defect.**
+
+| bug | filed as | what the source said | scope change |
+|---|---|---|---|
+| `6c0952e8` | `artifact(update)`'s hint misroutes **`kind`** | shared validator `reject_reserved_extra_keys`, one hardcoded hint written for `create` | `update` has **no** top-level reserved-key parameters at all — its six settable ones live inside `patch`. The hint misrouted **7 keys**, not 1 |
+| `49e562fc` | mechanism unknown; suspected `degraded` over-fires | one writer, `note_degraded`, **three** call sites — only one is "offline", and the middle fires on a branch whose own comment says *the server ANSWERED* | `degraded` was never wrong; the coverage really was incomplete. Only the **word** was false. The fix moved from "stop over-firing" to "carry the cause" |
+
+The second row is the sharper one. The filing's suspected direction — that `degraded`
+itself over-fires — would have **undone a deliberate earlier fix** (`2026-08-06` added that
+branch precisely because a mid-index server silently costs 60-69 resolutions). Reading the
+code before acting is what kept a correct behaviour from being reverted as a bug.
+
+**Why widening is the norm rather than luck.** An inferred root cause is inferred from the
+one symptom the reporter hit. The reporter reached for `kind` because bug files carry
+`kind: bug`; nothing prompted them to try `status`. The filed scope is therefore a lower
+bound *by construction*, and the scout's question is not only "is this true?" but **"is
+this all of it?"**
+
+**Second finding — a fourth shape for Law D.** Neither bug had a test that could have
+caught it, and both had a test sitting over the exact function:
+
+- `create_rejects_an_extra_key_…` and `update_rejects_an_extra_key_…` both assert only
+  that the message **names the clashing key** — which the wrong hint also did.
+- `audit_doc_refs`'s suite asserted that `degraded` was *set*, never what the field was
+  *called*.
+
+Law D lists three ways a test silently is not coverage (never compiled, filtered out,
+callee-tested-not-dispatch). This is a fourth: **the test asserts the half of the output
+that was not broken.** It has a predictable trigger — when the defect is in *guidance* (a
+hint, an error message, a health field, a doc string), the existing test almost always pins
+the *detection*, because detection is what the original author was thinking about.
+
+**The rule, three steps, in order.**
+
+1. Treat `## Root cause` as a hypothesis and open the code it names. (A-chain, sixth
+   instance: R-49 → R-62 → R-78 → R-80 → R-84 → R-92.)
+2. When it survives, **re-derive its scope** — ask what else reaches the same line. Both
+   bugs here grew on this step, neither on step 1.
+3. Before writing the regression test, read what the existing test asserts. If it pins the
+   detection and your defect is in the guidance, it cannot catch you; the new test must
+   assert the guidance and then be **mutation-verified** against the old behaviour. Both
+   were: reverting each fix reproduces the filed symptom verbatim and fails the new test.
+
+**Substrate note.** R-91's instance 3 — `lsp_languages_offline` read as fact — *was* this
+same `49e562fc`. The field is now `lsp_languages_degraded` with a per-language
+`degraded_causes` map (`56fe1dd4`), so that particular self-report no longer lies. R-91's
+third concrete form stands unchanged as a rule; one of its exhibits has been repaired.
+
+**Promote-when:** a third instance of step 2 widening a filed bug. At that point step 2
+belongs in the `reconnaissance` memory topic as a one-line imperative — *"a filed root
+cause is a lower bound; re-derive its scope"* — since it is craft-shaped, not
+project-shaped.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
