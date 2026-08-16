@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: mitigated
+tags:
+- librarian
+- durability
+- silent-drift
+- trackers
+- git
+closed: null
 opened: 2026-08-16
-closed:
-severity: high
 owner: marius
 related: []
-tags: [librarian, durability, silent-drift, trackers, git]
-kind: bug
+severity: high
 ---
 
 # BUG: `append_entry` writes catalog-only state, so a tracker's committed snapshot silently drifts from its live rows
@@ -49,6 +54,42 @@ $ git status --short docs/trackers/open-issue-work-queue.md
 
 Four rows accepted, four rows absent from git, clean working tree.
 
+
+### Corpus-wide audit, 2026-08-16 — how much already drifted
+
+Every augmented tracker with an `entry_collection`, comparing params ids against
+the ids its body line-anchors. Buckets partition the corpus, so they reconcile:
+
+| bucket | n |
+|---|---|
+| no entries / unparseable params | 8 |
+| mixed id prefixes (not reasoned about) | 2 |
+| prose-only — body anchors nothing, by design | 5 |
+| keeps a snapshot, in sync | 10 |
+| **keeps a snapshot, DRIFTED** | **3** |
+| total | 28 |
+
+| missing | rows | tracker |
+|---|---|---|
+| **54** | 68 | `provenance-subsystem.md` — 79% of its rows exist only in the catalog |
+| 9 | 23 | `prompt-hamsa-audit-log.md` — A-15 … A-23 |
+| 3 | 6 | `innovaplan-export-tracker.md` |
+
+**The consequence worth naming.** `grep 'A-2[0-3]'` on `prompt-hamsa-audit-log.md`
+returns **zero matches** — not a heading, not a table row, not even prose. Yet:
+
+- the machine's `CLAUDE.md` cites **A-21** as the measurement behind the Conclude
+  Last iron rule (*"13.3% → 73.3% verify-before-assert under planted-belief
+  traps; ledger A-21"*), and
+- **A-22** is cited by R-90 in `docs/trackers/reconnaissance-patterns.md`.
+
+Both citations currently resolve only against
+`~/.local/share/librarian/catalog.db` — machine-local, git-ignored, and one of
+three profiles on this host. The evidence for a standing iron rule is in no repo.
+
+That is what inverted the sequencing: options 1 and 2 prevent only NEW drift, so
+the `doctor` check shipped first because it is the only one that surfaces what
+already happened.
 ## Reproduction
 
 1. `artifact(action="append_entry", …)` against any augmented tracker whose body
@@ -153,37 +194,91 @@ hand-synced and why (`e3dd375f`).
 
 ## Fix
 
-Options, in preference order:
+**Options 1 and 3 shipped 2026-08-16 in `99aaf83f`, in the reverse of the
+sequence this file proposed, and option 1 was implemented differently than it
+was specified.** Both changes came out of measuring the filed plan.
 
-1. **Make `append_entry` / `update_entry` report the drift.** When the artifact
-   declares a `render_template`, include a field in the response naming the body
-   as stale (e.g. `"snapshot_stale": true`) with the re-render call. Cheapest,
-   no behaviour change, and converts a silent divergence into a visible one.
-2. **Re-render on write.** Have entry mutations regenerate the templated section
-   in the body, so params and snapshot cannot diverge. Correct but larger, and
-   needs care to only touch the generated region.
-3. **A drift check in the doctor.** `librarian(action="doctor")` already scans
-   for catalog drift; "artifact declares a `render_template` and its body does
-   not contain every entry id" is exactly that shape, and catches historical
-   drift the other two options do not.
+### Option 1's gate was wrong — `render_template` is the opposite signal
 
-1 and 3 are complementary and cheap; 2 is the real fix.
+As filed: *"when the artifact declares a `render_template`, include a field in
+the response naming the body as stale."* Two measurements killed that:
 
-4. **Refuse, or auto-render, at `artifact(action="create")`.** Added after the third instance
-   above. When `augment` carries BOTH a `render_template` and a non-empty
-   `entry_collection`, and the supplied `body` contains no rendered rows, the artifact is born
-   with its entries invisible to git. Either render the template into the body at create time,
-   or return the same staleness flag option 1 proposes. This is cheaper than options 1-3 to
-   get right, because at create time there is no reconciliation to do — only a template to
-   apply — and it closes the sub-shape the § Workarounds text cannot reach.
+- `src/librarian/tools/render.rs:1-3` — `render_template` feeds
+  **`librarian_context`**, and its stated purpose is *"to project `params` into
+  a markdown table/snippet **so the artifact body can stay prose-only**"*. It is
+  a declaration that the body does NOT carry the rows.
+- **26 of 28** augmented trackers on this machine declare one. The flag would
+  have fired on nearly every append forever — the `removed_attributes` noise
+  failure.
 
+**The correct gate was already written**, inside `body_max_index`'s regex: *if a
+body line-anchors at least one `PREFIX-N`, that tracker demonstrably keeps a
+snapshot.* Self-configuring, no new field, and silent for the 5 of 28 trackers
+that are prose-only by design. Generalized to `body_claimed_indices` (set rather
+than max); `body_max_index` had no remaining callers and was removed, its four
+tests now asserting on the whole set.
+
+### `append_entry` already had half this check
+
+It was **already** reading the file from disk and computing `body_max_index`, to
+warn when the BODY runs ahead of params
+(`docs/issues/archive/2026-07-20-append-entry-id-drift-params-vs-body.md`). The
+mirror direction — params ahead of body, i.e. THIS bug — simply had no branch.
+Same read, same parse, **zero new I/O**. Response now carries
+`snapshot_missing` + `snapshot_hint`.
+
+The newly assigned id is included deliberately: at that moment the body does not
+carry it, and naming it is the reminder to write the row while the caller still
+has the context.
+
+### `update_entry` — why the third instance had nothing to notice it
+
+`abs_path` / `read_to_string` appeared **only** in `append_entry`; `update_entry`
+never read the body at all. And its sub-shape is the one no id comparison can
+catch — a patched row is usually *present* in the body, showing its previous
+values. It now does one read after commit (advisory; it must never fail the
+mutation) and distinguishes **stale** (row rendered, values behind) from
+**absent** (row in no repo), which need different remedies.
+
+### Option 4 (create-time) — still open
+
+Unchanged. An artifact born with `render_template` + `entry_collection` and a
+body with no rendered rows still starts with its entries invisible to git. The
+new gate deliberately stays silent there, because at that moment it cannot
+distinguish that case from a prose-only tracker.
+
+### Option 2 (re-render on write) — still open, and still the real fix
+
+Overlaps BL-30; scope them together.
 ## Tests added
 
-None yet. The test that matters for option 1: an `append_entry` against an
-artifact with a `render_template` must return the staleness flag. For option 3:
-a tracker whose params contain an id absent from its body must be reported by
-`doctor`.
+Eleven, in `99aaf83f`.
 
+`doctor` (4): reports rows that reached params but never the body; silent for a
+prose-only tracker; silent when the body carries every row; a **prose mention**
+is not accepted as a rendered row (or the check under-reports exactly the drift
+it exists to find).
+
+`append_entry` (2): names the missing rows — including one that was already
+adrift plus the id just assigned, and NOT the one the body renders; silent for a
+prose-only tracker.
+
+`update_entry` (3): a rendered row whose values changed says the committed table
+now disagrees; an unrendered row says it is absent entirely; a prose-only
+tracker says nothing.
+
+`body_claimed_indices` (4, converted from `body_max_index`'s): the full set from
+headings and index rows; prose mentions ignored; prefix boundaries respected;
+empty when the body claims nothing — the last is load-bearing, since empty is
+how a prose-only tracker is recognised.
+
+**Every `seed` helper sets `render_template: Some(..)` (doctor) or `None`
+(append/update) deliberately**, so no test can pass by accident if the gate were
+silently re-keyed to that field.
+
+**Mutation-verified**, both prose-only gates independently: disabling either
+makes every prose-only tracker report a false missing/absent row on every write
+— which is precisely the noise the `render_template` gate would have shipped.
 ## Workarounds
 
 After every `append_entry` / `update_entry` on a tracker with a rendered table,
@@ -194,14 +289,23 @@ bug, not evidence against it.
 
 ## Resume
 
-Implement option 1 first — locate the `append_entry` / `update_entry` response
-construction in `src/librarian/catalog/augmentation.rs` (`UpdateEntryOutcome` and
-its append twin) and add the flag when the augmentation row carries a non-null
-`render_template`. That is a small, self-contained change and it stops new drift
-while options 2 and 3 are decided. Then audit existing trackers for drift already
-present — `docs/trackers/open-issue-work-queue.md` was reconciled by hand in
-`bb11bba3`'s follow-up, but no other tracker has been checked.
+**Mitigated, not fixed.** New drift is now visible at the moment it is created,
+and pre-existing drift is discoverable via `librarian(action="doctor")` — but
+params and body still do not reconcile automatically, and the 3 drifted trackers
+above are still drifted.
 
+Remaining, in order:
+
+1. **Reconcile the 3 drifted trackers.** A judgement call, not mechanical: the
+   54 rows in `provenance-subsystem.md` are a large body rewrite, and whether
+   they belong in git at all is the maintainer's decision. `prompt-hamsa-audit-log.md`
+   is the urgent one — A-21 backs an iron rule in `CLAUDE.md`.
+2. **Option 4** — create-time, for artifacts born with entries invisible to git.
+3. **Option 2** — re-render on write. The real fix; overlaps BL-30, scope together.
+
+Do not re-derive the gate. `render_template` is **not** the signal (it means the
+opposite), and `append_entry` already reads the body — the machinery is present
+and `body_claimed_indices` is the shared entry point.
 ## References
 
 - `src/prompts/guides/librarian-runtime.md` § Where catalog state lives — the
