@@ -2144,10 +2144,32 @@ running build contains it. R-91 is its sibling and strictly wider: *evidence abo
 requires that the probe could have observed the alternative.* R-89 is the build-grain case;
 instance 1 is the corpus-grain case; instance 2 is the shell-operator case.
 
-**Promote-when:** a fourth instance, OR one instance where the rule is applied
-prospectively and prevents a claim. At that point promote the three concrete forms to the
-`reconnaissance` memory topic — they are craft-shaped, not project-shaped, so the global
-SKILL.md is the eventual destination via the sync flow.
+**Promote-when: FIRED 2026-08-16 — promoted.** The criterion's second arm ("one instance
+where the rule is applied prospectively and prevents a claim") was met while live-verifying
+the `56fe1dd4` fix. `librarian(audit_doc_refs, paths=["docs/issues"])` returned
+`n_files_scanned: 0` with `exit_code: 0` — indistinguishable from a silent no-op, and this
+repo's standing rule is to file on notice. Reading `mod.rs:341` first showed `paths` is a
+**glob** list, so a bare directory matching nothing is correct behaviour. **No bug was
+filed.** That is instance 1 of this entry — an existence check bound to the wrong question —
+caught before the claim instead of a day after it.
+
+A second prospective application in the same verification: three `audit_doc_refs` runs came
+back `degraded: false` and were nearly read as "the degraded path is verified clean". They
+were not evidence about it — one scanned 0 files, one had no `file_symbol` refs to reach the
+LSP branch at all, one had two that resolved. Only a 333-file scan against a cold
+rust-analyzer actually reached the branch, and it returned
+`degraded_causes: {"rust": ["lsp_behind_index"]}`.
+
+The three concrete forms are now in the `reconnaissance` memory topic (rule 7), with the
+zero-result corollary appended. Craft-shaped, so the global `SKILL.md` remains the eventual
+destination via the sync flow.
+
+**Substrate note.** Instance 3's exhibit is repaired. `lsp_languages_offline` is now
+`lsp_languages_degraded` with a per-language `degraded_causes` map (`56fe1dd4`,
+`docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`), so that
+particular self-report no longer lies — confirmed live on the rebuilt server, where the
+same condition that once printed `offline: ["rust"]` now prints `lsp_behind_index`. The
+rule stands unchanged: the field is still a claim, and the next one may not have been fixed.
 
 
 ## R-92 — A filed root cause is a hypothesis, and confirming it usually widens the bug

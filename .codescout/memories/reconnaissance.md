@@ -56,3 +56,22 @@ entry holds the full narrative; this file carries only the rule.
   command — that disagreement is the tell. (bug-fix work stream; the
   version-bump-checklist tracker calls a missing cache dir the #1 cause of
   "plugin appears installed but hook never fires")
+
+- **Before attaching a conclusion to a measurement, state in one sentence what
+  that measurement cannot see.** A real probe answering exactly what it was
+  asked, bound to the wrong question, has twice reached committed artifacts
+  here. Three forms: (1) when a tool reads a corpus it selects *itself* — a
+  pinned worktree, a baseline SHA, a configured collection — verify against
+  that corpus; the tree you are standing in is not evidence about it. (2) Never
+  probe for presence with `A || B` — short-circuit makes absence of B
+  unobservable whenever A succeeds, which is how one dual-GPU box got written up
+  as two machines. (3) A tool's self-reported health field is a claim, not a
+  probe of the thing it names; pick a call that *requires* the dependency
+  (`references()` needs the LSP, `symbols()` is tree-sitter-backed and cannot
+  tell up from down). When two hypotheses predict the same output from your
+  current probe, the fix is a different probe, not a longer stare. Corollary
+  that fired the promotion: an empty or zero result is a claim about your
+  *query* first — `paths=["docs/issues"]` scanning 0 files looked like a silent
+  no-op bug until the source showed `paths` takes globs. Reading it first
+  prevented a false bug filing; not reading it produced one the day before.
+  (R-91)
