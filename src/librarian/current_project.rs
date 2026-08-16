@@ -14,6 +14,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::librarian::workspace::{Umbrella, WorkspaceConfig};
+/// Worktree detection lives beside worktree enumeration in `util::path_security`
+/// so neither depends on the optional `librarian` feature — `tools::config` needs
+/// the same two facts to report a worktree activation.
+pub(crate) use crate::util::path_security::{is_linked_worktree, worktree_main_root};
 
 #[derive(Debug, Clone)]
 pub struct CurrentProject {
@@ -56,57 +60,6 @@ pub fn lookup_git_root(start: &Path) -> Option<PathBuf> {
         }
         cur = cur.parent()?;
     }
-}
-
-/// True iff `root` is a *linked* git worktree (created by `git worktree add`),
-/// as opposed to a main checkout, a submodule, or a non-git directory.
-///
-/// Filesystem-only (no `git` subprocess): a linked worktree's `.git` is a
-/// *file* containing `gitdir: <main>/.git/worktrees/<name>`. A submodule's
-/// `.git` file points into `.git/modules/<name>` instead, so we require a
-/// `worktrees` path component — skipping a submodule root would be wrong.
-pub(crate) fn is_linked_worktree(root: &Path) -> bool {
-    let dot_git = root.join(".git");
-    let Ok(meta) = std::fs::symlink_metadata(&dot_git) else {
-        return false;
-    };
-    if !meta.file_type().is_file() {
-        return false;
-    }
-    let Ok(pointer) = std::fs::read_to_string(&dot_git) else {
-        return false;
-    };
-    pointer
-        .lines()
-        .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))
-        .map(|gitdir| {
-            Path::new(gitdir)
-                .components()
-                .any(|c| c.as_os_str() == "worktrees")
-        })
-        .unwrap_or(false)
-}
-
-/// Given a linked-worktree root, derives its MAIN repo root from the
-/// `.git`-file `gitdir: <main>/.git/worktrees/<name>` pointer — the same file
-/// [`is_linked_worktree`] reads. Filesystem-only (no `git` subprocess).
-///
-/// Returns `None` if `root` has no readable `.git` file, or if the pointer's
-/// `gitdir:` path has no `.git` path component to split the main root on
-/// (i.e. `root` is not actually a linked worktree).
-pub(crate) fn worktree_main_root(root: &Path) -> Option<PathBuf> {
-    let pointer = std::fs::read_to_string(root.join(".git")).ok()?;
-    let gitdir = pointer
-        .lines()
-        .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))?;
-    let mut main = PathBuf::new();
-    for component in Path::new(gitdir).components() {
-        if component.as_os_str() == ".git" {
-            return Some(main);
-        }
-        main.push(component);
-    }
-    None
 }
 
 pub fn lookup_umbrella(abs_path: &Path, ws: &WorkspaceConfig) -> Option<String> {

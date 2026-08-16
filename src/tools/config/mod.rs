@@ -782,6 +782,51 @@ async fn build_activation_response(
         result["workspace"] = json!(ws);
     }
 
+    // Activating a linked worktree silently changes TWO things versus the main
+    // checkout, in opposite directions, and neither used to say so:
+    //
+    //   * `.codescout/memories/` IS git-tracked, so the worktree serves its own
+    //     commit's memory set — a memory written on main afterwards is simply
+    //     absent. Not corruption; git working as specified. But an agent reads
+    //     the short list and concludes the fact was never recorded.
+    //   * `.codescout/workspace.toml` is NOT tracked (.gitignore), so it is
+    //     absent here and sub-project discovery runs with defaults. Note the
+    //     precise mechanism: discovery is ALWAYS the manifest walk — there is no
+    //     second mode to "fall back" to. What the missing file removes is
+    //     `exclude_projects` and `discovery_max_depth`, so the walk stops
+    //     pruning. In this repo that alone takes the sub-project count from 2 to
+    //     9 (every `tests/fixtures/*`), because the only non-default setting is
+    //     `exclude_projects = ["fixtures"]`.
+    //
+    // Reporting the divergence is deliberately all this does. Whether a worktree
+    // SHOULD share main's memories and topology is a separate, still-open
+    // semantic question; saying so out loud does not foreclose either answer.
+    // docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+    if crate::util::path_security::is_linked_worktree(&project_root_path) {
+        let mut notice = json!({
+            "main_root": crate::util::path_security::worktree_main_root(&project_root_path)
+                .map(|p| to_forward_slash(&p)),
+            "memories_are_this_checkouts": format!(
+                "{} memory topics come from THIS worktree's commit. A memory written \
+                 on the main checkout after it was created does not exist here.",
+                memories.len()
+            ),
+        });
+        let ws_toml = crate::config::workspace::workspace_config_path(&project_root_path);
+        if !ws_toml.exists() {
+            notice["topology"] = json!("inferred");
+            notice["topology_hint"] = json!(
+                "No .codescout/workspace.toml here (it is gitignored, so it does not \
+                 travel into a worktree). Sub-project discovery ran with defaults — \
+                 no exclude_projects, depth 3 — so the project list is auto-detected, \
+                 not declared, and is likely wider than the main checkout's."
+            );
+        } else {
+            notice["topology"] = json!("configured");
+        }
+        result["worktree"] = notice;
+    }
+
     // Surface `security_profile` only when it departs from the sandboxed
     // `default` — `root` disables every path/command gate, which is worth
     // flagging on activation. `shell_enabled` is intentionally omitted: it has
@@ -829,6 +874,20 @@ fn format_activate_project(result: &Value) -> String {
 
     if let Some(ws) = result["workspace"].as_array() {
         parts.push(format!("{} workspace projects", ws.len()));
+    }
+
+    // A worktree activation is the one case where the memory count and the
+    // project count above describe a DIFFERENT tree than the caller may
+    // assume. Say so on the summary line, not only in the JSON — the
+    // compact form is what most callers actually read.
+    if let Some(wt) = result["worktree"].as_object() {
+        parts.push(match wt.get("topology").and_then(|v| v.as_str()) {
+            Some("inferred") => {
+                "linked worktree · memories + topology are this checkout's (topology inferred)"
+                    .to_string()
+            }
+            _ => "linked worktree · memories are this checkout's".to_string(),
+        });
     }
 
     if let Some(libs) = result["auto_registered_libs"].as_object() {

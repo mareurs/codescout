@@ -57,7 +57,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | blocked | `ce1447504150b25b` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | blocked | `30365fe50974fa6b` |
-| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology | blocked | `403e3fad0356f171` |
+| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | blocked | `403e3fad0356f171` |
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | open | `897fb0fbd6eb2546` |
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | open | `e557d0f2c9429b5d` |

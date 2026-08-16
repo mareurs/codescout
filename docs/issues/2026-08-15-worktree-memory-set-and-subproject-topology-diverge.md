@@ -1,7 +1,7 @@
 ---
 id: '403e3fad0356f171'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a worktree activation serves that commit''s memories and auto-detects sub-projects, so memory set and topology silently diverge from the main checkout'
 owners:
 - marius
@@ -35,24 +35,46 @@ Measured 2026-08-13.
 
 Two different mechanisms, one shared consequence.
 
-**Memories shrink because `.codescout/memories/` is git-tracked.** A worktree is
-checked out at some commit, so it serves *that commit's* memory set. A memory
-written after that commit does not exist there. This is not corruption — it is
-git working exactly as specified — but it means "read the project's memories"
-returns a different answer depending on which tree is active, with nothing saying
-so.
+**Memories shrink because `.codescout/memories/` is git-tracked.** Confirmed by
+`git ls-files .codescout/` — 39 tracked memory files. A worktree is checked out
+at some commit, so it serves *that commit's* memory set. A memory written after
+that commit does not exist there. This is not corruption — it is git working
+exactly as specified — but "read the project's memories" returns a different
+answer depending on which tree is active, with nothing saying so.
 
 **Sub-projects multiply because `.codescout/workspace.toml` is gitignored**
-(`.gitignore:28`). It is absent in the worktree, so sub-project discovery falls
-back to auto-detection, which finds every `tests/fixtures/*` and calls each one a
-sub-project.
+(`.gitignore:28`; confirmed absent from `git ls-files`). It does not travel into
+a worktree.
 
-The second is the more dangerous of the two, and CLAUDE.md already names the
-class: a mis-rooted `workspace.toml` *"silently redirects every per-project memory
-write into the wrong repo with no review able to catch it."* A worktree reaches
-the same failure by **absence** rather than by mis-rooting — the file is not
-wrong, it simply is not there, and the fallback is confident.
+**Correction, measured 2026-08-16 — the original wording of this section was
+wrong about the mechanism.** It said discovery *"falls back to auto-detection"*.
+There is no fallback, because there is no second mode: `Agent::load_project_resources`
+calls `discover_projects` — a manifest walk — **unconditionally**, on every
+`Agent::new` and every `activate`. `workspace.toml`'s `[[project]]` entries never
+replace that walk; they only annotate its results with `depends_on`.
 
+What the missing file actually removes is `load_discover_settings`'s two return
+values — `exclude_projects` and `discovery_max_depth` — which fall back to
+`(3, vec![])`. This repo's `workspace.toml` is:
+
+```toml
+exclude_projects = ["fixtures"]
+[workspace]
+discovery_max_depth = 3
+```
+
+`discovery_max_depth = 3` **is** the default, so the single operative difference
+is `exclude_projects = ["fixtures"]`. That one line is the entire 2 → 9 gap: the
+walk simply stops pruning `tests/fixtures/*`.
+
+The distinction matters for the fix. "Discovery falls back to a dumber mode"
+invites replacing the mode; "a prune list went missing" points at carrying the
+settings, which is a much smaller change and is what option 3 should mean.
+
+CLAUDE.md already names the class: a mis-rooted `workspace.toml` *"silently
+redirects every per-project memory write into the wrong repo with no review able
+to catch it."* A worktree reaches a neighbouring failure by **absence** rather
+than by mis-rooting.
 ## Symptom (Effect)
 
 - `memory(action="list")` in a worktree omits topics that exist on main, so an
@@ -65,37 +87,64 @@ wrong, it simply is not there, and the fallback is confident.
 
 ## Fix
 
-Not designed. The decision is what a worktree activation *should* mean, and it is
-genuinely open:
+**Option 2 implemented 2026-08-16 — report the divergence.** Options 1 and 3
+remain open; option 2 was always compatible with either.
+
+A linked-worktree activation now returns a `worktree` block:
+
+```json
+"worktree": {
+  "main_root": "/repo",
+  "memories_are_this_checkouts": "N memory topics come from THIS worktree's commit …",
+  "topology": "inferred",          // or "configured"
+  "topology_hint": "No .codescout/workspace.toml here …"
+}
+```
+
+and the compact summary line — which is what most callers actually read — gains
+`linked worktree · memories + topology are this checkout's (topology inferred)`.
+A plain checkout gets neither.
+
+Detection is filesystem-only and shared: `is_linked_worktree` /
+`worktree_main_root` moved from `librarian::current_project` to
+`util::path_security`, beside `list_git_worktrees`. `librarian` is an optional
+feature and `tools::config` needs the same two facts, so worktree *detection*
+and worktree *enumeration* now live in one place that no feature gates.
+`current_project` re-exports them; its tests are unchanged.
+
+### Still open — the semantic question
 
 1. **Follow the main checkout for both.** Resolve `.codescout/` against the main
-   worktree's root, so memories and topology are shared. Matches how the librarian
-   catalog already treats a worktree (overlay onto main, fork on first write) and
-   is the most consistent with the shipped model. Costs: a worktree can no longer
-   hold memories about its own in-flight work.
-2. **Keep per-worktree, but say so.** Leave the divergence and report it — the
-   memory list names the commit it came from, and sub-project discovery marks
-   itself `inferred` when no `workspace.toml` was found. Cheapest, and closes the
-   *silent* half without deciding the semantic question.
-3. **Copy `workspace.toml` into new worktrees.** Fixes topology only, leaves
-   memories diverging, and adds a file-sync obligation nothing else in the design
-   has.
+   worktree's root. Matches how the librarian catalog already treats a worktree
+   (overlay onto main, fork on first write). Costs: a worktree can no longer hold
+   memories about its own in-flight work.
+3. **Carry `workspace.toml` into new worktrees.** Now known to be narrower than
+   originally written: it is not "restore a discovery mode", it is "carry
+   `exclude_projects` + `discovery_max_depth`". Fixes topology only, leaves
+   memories diverging, and adds a file-sync obligation nothing else has.
 
-**Option 2 is the recommended first move regardless of where 1 vs 3 lands** — the
-divergence being invisible is the part that bites, and marking an inferred
-topology as inferred is useful even if the topology is later shared. Sequence it
-first; it does not foreclose either of the others.
-
-The librarian's worktree overlay (see `get_guide("librarian")` § Worktree overlay)
-is the precedent to read before deciding: it already answered this question for
-artifacts, and answered it as "overlay onto main, fork on first write".
-
+The librarian's worktree overlay (`get_guide("librarian")` § Worktree overlay)
+remains the precedent to read before deciding: it answered this question for
+artifacts as "overlay onto main, fork on first write".
 ## Tests added
 
-None. When implemented, the discriminating check is a worktree whose HEAD predates
-a memory write: the memory must either be visible (option 1) or its absence
-explained (option 2). Silently missing is the current behaviour and must fail.
+Five. The load-bearing one is the end-to-end activation — the three formatter
+tests would all pass even if the block were never emitted:
 
+- `activating_a_linked_worktree_reports_the_divergence_it_creates` — activates a
+  real linked-worktree root (`.git` as a file with a `worktrees` component) and
+  asserts `main_root`, `topology: "inferred"`, and the memory-provenance string.
+  **Mutation-verified**: short-circuiting the `is_linked_worktree` branch
+  reproduces exactly the pre-fix response, which carries no `worktree` key at all.
+- `activating_a_plain_checkout_adds_no_worktree_block` — the common case pays
+  nothing.
+- three `format_activate_project` tests pinning the compact line for
+  configured / inferred / plain.
+
+The discriminating check this file asked for — "a worktree whose HEAD predates a
+memory write: the memory must either be visible (option 1) or its absence
+explained (option 2)" — is satisfied by the explanation half. The visibility half
+belongs to option 1, if it is chosen.
 ## Workarounds
 
 Activate the main checkout for memory work. There is no workaround for the
@@ -104,11 +153,15 @@ the worktree by hand.
 
 ## Resume
 
-Open, and independent of the read-side guard gap filed alongside it. This one
-needs a **decision** before any code: options 1 and 3 are mutually exclusive, and
-option 2 is compatible with either.
+**Mitigated, not fixed.** The divergence is reported; whether it *should* exist
+is undecided, and that decision is the remaining work. Options 1 and 3 above are
+mutually exclusive; option 2 has shipped and forecloses neither.
 
-Do not treat the two halves as one bug. Memories diverge because a file IS tracked;
-topology diverges because a different file is NOT. They share a symptom and nothing
-else.
+Do not re-derive the mechanism — and in particular do not trust the original
+wording of § Root cause, which is corrected in place. The topology half is a
+missing `exclude_projects` list, not a missing discovery mode, and that makes
+option 3 substantially cheaper than this file first implied.
 
+Still true, and still the reason not to treat the two halves as one bug:
+memories diverge because a file IS tracked; topology diverges because a
+different file is NOT.

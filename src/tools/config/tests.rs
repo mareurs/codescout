@@ -759,6 +759,100 @@ depends_on = ["test"]
     assert_eq!(projects.len(), 2);
 }
 
+/// The load-bearing half of the worktree-divergence fix: the formatter tests
+/// below would pass even if the block were never emitted. This one activates a
+/// real linked-worktree root and asserts the response actually carries it.
+///
+/// docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+#[tokio::test]
+async fn activating_a_linked_worktree_reports_the_divergence_it_creates() {
+    let dir = tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+
+    // A linked worktree is identified by `.git` being a FILE whose `gitdir:`
+    // pointer contains a `worktrees` component — not by asking git.
+    let wt = base.join("main/.worktrees/feat");
+    std::fs::create_dir_all(wt.join(".codescout")).unwrap();
+    std::fs::write(wt.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+    std::fs::write(
+        wt.join(".git"),
+        format!("gitdir: {}/main/.git/worktrees/feat\n", base.display()),
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(wt.clone())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ActivateProject
+        .call(serde_json::json!({"path": wt.to_string_lossy()}), &ctx)
+        .await
+        .unwrap();
+
+    let wt_block = result
+        .get("worktree")
+        .unwrap_or_else(|| panic!("no worktree block on a linked-worktree activation: {result}"));
+    assert!(
+        wt_block["main_root"]
+            .as_str()
+            .is_some_and(|m| m.ends_with("main")),
+        "the notice must name the main checkout so the caller can compare, got: {wt_block}"
+    );
+    assert_eq!(
+        wt_block["topology"], "inferred",
+        "no .codescout/workspace.toml here — it is gitignored and does not travel \
+         into a worktree — so the sub-project list is auto-detected, got: {wt_block}"
+    );
+    assert!(
+        wt_block["memories_are_this_checkouts"].is_string(),
+        "the memory set is this commit's, and that has to be said: {wt_block}"
+    );
+}
+
+/// The other side: a plain checkout must not grow a worktree block, or the
+/// notice becomes noise in every ordinary session.
+#[tokio::test]
+async fn activating_a_plain_checkout_adds_no_worktree_block() {
+    let dir = tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    std::fs::write(root.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ActivateProject
+        .call(serde_json::json!({"path": root.to_string_lossy()}), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        result.get("worktree").is_none(),
+        "a plain checkout has no divergence to report, got: {result}"
+    );
+}
+
 #[tokio::test]
 async fn activate_project_switches_focus_by_id() {
     let dir = tempdir().unwrap();
@@ -871,6 +965,85 @@ async fn post_compact_flushes_lsp_clients_and_returns_flushed() {
     assert!(
         result["project_root"].is_string(),
         "normal call must include project_root"
+    );
+}
+
+/// docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+///
+/// A worktree activation serves that commit's memories and, because
+/// `workspace.toml` is gitignored and therefore absent, an unpruned sub-project
+/// walk. Both used to be silent. The compact line is what most callers read, so
+/// the divergence has to reach it — not just the JSON.
+#[test]
+fn a_worktree_activation_says_the_memory_count_is_this_checkouts() {
+    let result = json!({
+        "status": "ok",
+        "project": "codescout",
+        "project_root": "/repo/.worktrees/feat",
+        "read_only": false,
+        "memories": ["arch", "conventions"],
+        "index": {"status": "indexed"},
+        "worktree": {
+            "main_root": "/repo",
+            "topology": "configured",
+            "memories_are_this_checkouts": "2 memory topics come from THIS worktree's commit.",
+        },
+        "hint": "CWD: ..."
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        compact.contains("linked worktree"),
+        "a worktree activation must announce itself, got: {compact}"
+    );
+    assert!(
+        !compact.contains("topology inferred"),
+        "workspace.toml was present here, so the topology is declared: {compact}"
+    );
+}
+
+/// The sharper half: no `workspace.toml` means the sub-project walk ran with no
+/// `exclude_projects`, so the list is auto-detected and likely wider than main's.
+/// An agent that reads it as declared topology draws a wrong conclusion.
+#[test]
+fn a_worktree_without_workspace_toml_marks_its_topology_inferred() {
+    let result = json!({
+        "status": "ok",
+        "project": "codescout",
+        "project_root": "/repo/.worktrees/feat",
+        "read_only": false,
+        "memories": [],
+        "index": {"status": "indexed"},
+        "worktree": {
+            "main_root": "/repo",
+            "topology": "inferred",
+            "topology_hint": "No .codescout/workspace.toml here ...",
+        },
+        "hint": "CWD: ..."
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        compact.contains("topology inferred"),
+        "an inferred topology must say so, got: {compact}"
+    );
+}
+
+/// The common case pays nothing: a plain checkout gets no worktree block and no
+/// extra words on the summary line.
+#[test]
+fn a_plain_checkout_activation_says_nothing_about_worktrees() {
+    let result = json!({
+        "status": "ok",
+        "project": "codescout",
+        "project_root": "/repo",
+        "read_only": false,
+        "memories": [],
+        "index": {"status": "indexed"},
+        "hint": "CWD: /repo"
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        !compact.contains("worktree"),
+        "no worktree, nothing to say, got: {compact}"
     );
 }
 
