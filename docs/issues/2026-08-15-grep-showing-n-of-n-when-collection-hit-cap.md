@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- grep
+- progressive-disclosure
+- external-report
+closed: 2026-08-16
 opened: 2026-08-15
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [grep, progressive-disclosure, external-report]
-kind: bug
+severity: medium
 ---
 
 # BUG: `grep` prints a self-refuting "Showing N of N matches" when collection hit the cap
@@ -177,7 +180,9 @@ the fix touches both.
    total. The honest rendering is an explicit incompleteness marker.
 ## Fix
 
-Implemented 2026-08-16 on `experiments`. Three surfaces, because the misleading claim
+Implemented 2026-08-16 on `experiments` in `4b77dff5` (fast-forward promotion:
+`git rev-list --left-right --count master...experiments` = `0 789`, so this SHA is the
+master SHA — no second one to record). Three surfaces, because the misleading claim
 appears three times in one rendering:
 
 1. **`Grep::call` simple-mode hint** (`src/tools/grep.rs:~350`) — branches on `hit_cap`.
