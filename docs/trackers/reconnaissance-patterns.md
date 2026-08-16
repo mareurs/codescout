@@ -277,6 +277,7 @@ be treated as findings, not as a summary to re-derive.
 | R-94 | 2026-08-16 | hit ×1, miss ×2 (self-caught) | A wiring inventory is not a delivery inventory, and it is wrong in both directions | BL-25 (guide topics nothing triggers) |
 | R-95 | 2026-08-16 | hit ×5 → rule | A deferral rationale is a claim, and it is the least-audited kind | BL-11 / BL-12 / BL-16 worktree cluster |
 | R-97 | 2026-08-16 | miss (self-caught) → rule | **A classifier you just wrote has been calibrated on exactly one case: the one that made you write it.** Shipped `snapshot_drift` with the gate "body line-anchors ≥1 `PREFIX-N`", fitted to the tracker that motivated the bug; the SECOND real tracker was a false positive (params-canonical by design, 14 of 68 ids mentioned incidentally). The population was enumerable all along and is bimodal with no overlap — 100% contiguous-prefix (11 in sync) / 61% prefix (the real lag) / 21% scattered (the false positive) — so the discriminator was one script away. Same day, same shape, second instance: the audit itself reported "3 of 28 drifted" in a codescout conversation when the 28 spanned seven repos and one finding was another project's. Rule: run a new classifier over the whole enumerable corpus and read the distribution; the motivating case is the worst validation set, being the one it was fitted to. | BL-29; `0dbfd0ee`, `af2508b4`. Kin R-96 (same law, applied to tests rather than results), R-92, R-95, R-90 |
+| R-98 | 2026-08-16 | miss (self-caught) → rule | An id read from a scan is stale the moment a peer session writes — re-check at the point of allocation, and against the working tree, not `HEAD` | near-miss on collision #10; `a1ac0317` (sweep) vs `c60242ac` (peer's R-97). Kin R-90, R-94, R-97 |
 | R-96 | 2026-08-16 | miss (self-caught) → rule | Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason | GF-1 / GF-2, `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` |
 | R-1 | 2026-05-19 | hit → promoted | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
 | R-2 | 2026-05-19 | **archived** → R-4 + R-34 | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
@@ -2671,6 +2672,54 @@ check. At that point it belongs in the skill's Phase 1 as an explicit step —
 *enumerate the population and look at the distribution before trusting a gate*.
 
 ---
+## R-98 — An id read from a scan is stale the moment a peer session writes
+
+**Verdict:** miss (self-caught by a re-check) → rule · **Observed:** 2026-08-16, the
+R-N index-coverage sweep, with a second session live in the same checkout.
+
+**Seam:** allocating a monotonic id in a file another agent can write.
+
+**What happened.** The sweep opened with exactly the both-formats count this file's
+own id-suffix note prescribes — `grep -o '^## R-[0-9]*'` and `grep -o '^| R-[0-9]*'`,
+max across both. It returned **96**. Some minutes and thirteen index rows later, the
+same command, run immediately before writing, returned **97**: a concurrent session
+had written `## R-97` into the working tree. Allocating from the opening scan would
+have minted collision number ten in a ledger that had just spent an entire pass
+suffixing the first nine.
+
+**Why the prescribed check was not enough.** The note fixes the *pattern* — count both
+entry formats — and that part worked exactly as designed. What it does not fix is
+*when*. A max-id is a fact about a file at an instant, and every intervening tool call
+is time in which a peer can invalidate it. The check is not a preflight; it belongs in
+the same breath as the write.
+
+**And `git` would have been wrong in the other direction.** At the moment of the
+re-check, `git grep 'R-97' HEAD` returned nothing and `git log -S 'R-97'` named no
+commit — R-97 existed *only* in the working tree, uncommitted. A collision check run
+against committed state would have reported the id free while it was already taken.
+The working tree is the authority for allocation; `git` is the authority for
+provenance. Asking either one the other's question is the defect.
+
+**The rule.** Re-run the id scan in the same breath as the write — not at the start of
+the pass, and not against `HEAD`. If the two scans disagree, a peer is active in the
+file: allocate above the new max, and do not commit that file until their work is
+committed, or you annex it (R-90).
+
+**Status:** open — single datapoint, but fully evidenced. `a1ac0317` is this sweep;
+`c60242ac` is the peer's R-97, committed minutes after the working-tree write that the
+re-check caught. The sweep's own invariant (every body entry has an index row) then
+survived that peer write untouched — they added both formats for R-97 without ever
+seeing the commit, which is weak evidence that the convention is discoverable from the
+file alone.
+**Promote-when:** a second stale-max allocation in any ledger → promote to the
+reconnaissance SKILL.md *alongside* R-90, not separately: both are the
+concurrent-sessions-in-one-checkout family and share one remedy.
+
+**Kin:** R-90 (two sessions, one working tree — the annexation half of the same
+hazard), R-94 (a declaration inventory and a delivery inventory diverge), R-97 (a check
+validated only against the case that motivated it), and law B — here the instrument was
+right and its *timing* was wrong, which the law does not currently cover.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
