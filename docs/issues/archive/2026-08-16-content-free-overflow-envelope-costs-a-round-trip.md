@@ -1,12 +1,12 @@
 ---
 kind: bug
-status: mitigated
+status: fixed
 tags:
 - progressive-disclosure
 - buffer-handles
 - librarian
 - round-trip-cost
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -122,68 +122,95 @@ is often unnecessary, and make it work when it is.**
 
 ## Fix
 
-**Status: fix 1 done (`2099d4ce`), fixes 2 and 3 still open.** Marked `mitigated` rather
-than `fixed`, and deliberately NOT archived — the widest case is handled, the bug is not.
+**All three done.** Fix 1 shipped earlier (`2099d4ce`); fixes 2 and 3 landed 2026-08-16, and
+fix 3's shape was decided by measurement rather than by the plan written here.
 
-**1. Make the generic fallback shape-aware. — DONE (`2099d4ce`).** It now returns the
-top-level keys (so a `json_path` can be aimed without a second call), each array's length,
-and short scalars verbatim, since those are frequently the answer outright. Bounded: a wide
-object must not spend the whole summary budget listing keys, and a large value is *named,
-not inlined* — inlining it would undo the buffering that produced the envelope.
+**1. Shape-aware generic fallback — done (`2099d4ce`).** Unchanged. It lives in
+`src/tools/core/types.rs`, so every tool lacking a bespoke `format_compact` benefits, not
+just the librarian.
 
-One thing worth pinning, because it decided where the fix went: this is not librarian code.
-The fallback lives in `src/tools/core/types.rs`, so **every** tool lacking a bespoke
-`format_compact` was taking it; the librarian is just where it was loudest. Fixing
-`librarian/adapter.rs` instead would have left every other such tool untouched.
+**2. Per-action librarian summaries — done.** `matched_items_summary` lists what `find`
+matched: id, status and an ellipsized title per row, capped at 8. `section_headings_summary`
+renders `get`'s `preview.headings` with their level markers, so a heading can be passed
+straight back as `artifact(get, heading="…")`.
 
-**2. Give the librarian per-action summaries. — not done.** `get` naming the artifact's
-title, status and section headings; `find` listing the matched titles. Fix 1 now gets some
-of this incidentally — `title` and `status` are short scalars and so appear — but headings
-and matched-title lists are still absent, and those are the question the caller asked.
+The sequencing constraint this file recorded was honoured: the truncation warning is now an
+**additional line, not a precondition**, and it leads — `truncate_compact` cuts from the tail
+(BL-8), so a correctness signal placed after a long summary can be cut off.
 
-Note the sequencing constraint this section already recorded: *"Keep the existing
-truncation warning as an additional line, not a precondition."* That rework belongs to fix
-2 and was left alone here. The existing precondition guards a real silent-truncation bug
-that once cost duplicate sections
-(`docs/issues/archive/2026-07-09-artifact-get-full-true-body-silent-truncation.md`), so it
-is not to be relaxed casually.
+**The trap in fix 2, worth recording:** `format_compact` *replaces* the generic fallback
+(`unwrap_or_else` in `ToolContext::call_content`). Returning `Some` here would have silently
+dropped fix 1's top-level key list — the thing a `json_path` is aimed with — trading one gap
+for another. The summary therefore **composes**: librarian-specific lines first, generic
+shape appended.
 
-**3. Always emit a small preview alongside the handle. — not done.** Still the right idea
-and still the largest change of the three.
+**3. A preview alongside the handle — done, and re-scoped by a measurement.** Rather than
+assume fixes 1 and 2 had subsumed it, the question was put to a live call:
+
+```
+librarian(action="context", topic="frontmatter serialization and the librarian catalog")
+→ summary: "Result stored in @tool_… (15357 bytes)\n  4 keys: markdown, included_ids,
+            overflow, scope\n  arrays: included_ids[10]"
+```
+
+That answered it twice over.
+
+- **`markdown` *was* the entire answer** — named, never shown. `dominant_text_preview` now
+  names the largest string field and shows its first 240 chars. Bounded on both ends: below
+  200 bytes the generic describer already prints the value verbatim, and above the cap we
+  would be inlining the payload and undoing the buffering that produced the envelope.
+- **A correctness bug the plan had not anticipated.** That same response carried
+  `$.overflow.hint` saying *40 of 50 candidates omitted, discovery capped* — an
+  incompleteness signal — and the summary dropped it, because the whole function was gated
+  on `inner_name == "artifact"`. A partial answer that does not announce itself reads as a
+  complete one. `overflow_hint` now promotes it for **every** librarian tool, declining only
+  on the `artifact(get)` body cap, which is stated more loudly just above it.
+
+The artifact-shaped messages stay gated on the tool name, so another action carrying a
+similar-looking field is never described as an artifact body — the property
+`compact_summary_none_for_non_artifact_tools` was written to protect.
 ## Tests added
 
-Two in `src/tools/format.rs`, both against the real emitter.
+Two from fix 1 in `src/tools/format.rs` (unchanged). Five added in
+`src/librarian/adapter.rs`, all written before the implementation and watched fail:
 
-- `the_generic_fallback_describes_the_payload_instead_of_the_envelope` — built on the shape
-  of a real librarian `artifact(get)` response, the measured case. Asserts the key count,
-  that the big field is *named*, array sizes, short scalars verbatim — and, negatively,
-  that a 20 KB body is **not** inlined and the whole description stays under 600 bytes. The
-  negative assertions are the load-bearing ones: a describer that solves this bug by
-  pasting the payload back has reintroduced the problem buffering exists to solve.
-- `describe_payload_shape_handles_arrays_and_declines_scalars` — root arrays report element
-  keys (what a `[*]` projection needs to name a field), and bare scalars / empty objects
-  return `None` so the caller keeps its own wording rather than being handed a description
-  of a scalar.
+- `compact_summary_lists_what_find_matched` — ids (so the follow-up call needs no second
+  lookup), titles (the answer), and status (what a triage query filters on).
+- `compact_summary_lists_section_headings_for_get` — headings *with* their level markers.
+- `compact_summary_keeps_the_truncation_warning_first_and_adds_the_answer` — asserts on
+  **relative position**, not just presence: the correctness signal must precede the answer
+  because `truncate_compact` cuts from the tail.
+- `compact_summary_promotes_an_overflow_hint_from_any_librarian_tool` — built from the real
+  `librarian(context)` payload. Also asserts the body-cap case is announced **once**, since
+  the generic path could otherwise duplicate the specific one.
+- `compact_summary_previews_the_dominant_text_field_without_inlining_it` — the negative
+  assertions carry the weight: a tail marker beyond the preview window must be absent, and
+  the whole summary must stay under 1200 bytes. A preview that inlines the payload has
+  undone the buffering it exists to summarise.
 
-Gate: `cargo fmt` + `cargo clippy --all-targets -D warnings` clean, `cargo test --lib`
-3770 passed / 0 failed / 7 ignored.
+The two pre-existing `None` tests still pass unchanged, which is the check that the new
+paths did not swallow the generic fallback.
+
+Gate: **3973 tests**, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`.
 ## Workarounds
 
-- Follow the envelope's `hint` — since 2026-08-16 it names a real path derived from the payload's
-  largest array, so the second call usually lands.
-- For artifacts specifically, prefer a narrower first call: `artifact(get, id=…, heading="…")` or
-  `entry_filter=…` returns the slice you want without ever overflowing.
+Both obsolete, kept for the record.
 
+- ~~Follow the envelope's `hint`.~~ Still sound, and still improved by the jsonpath fix — but
+  the summary now usually answers without a second call.
+- ~~Prefer a narrower first call (`heading=`, `entry_filter=`).~~ Still the better habit when
+  you know which slice you want. The difference is that `get` now *tells you the headings*,
+  so the narrower call no longer requires already knowing them.
 ## Resume
 
-Start with fix 1, in the generic fallback that builds `"Result stored in <id> (N bytes)"` — find its
-emission site and replace the byte-count prose with a shape description (top-level keys, largest
-array name + length). Measure before and after on the same `artifact(get, full=true)` call used in
-§ Symptom.
+None — all three fixes are in.
 
-Then decide whether fix 2 is still needed once fix 1 lands: a good generic summary may cover the
-librarian's cases well enough that bespoke per-action summaries are not worth the surface.
-
+One thing worth carrying: this file's own Resume said *"decide whether fix 2 is still needed
+once fix 1 lands"*, and later *"fix 3 … still the right idea"*. Both questions were settled
+by **running the tool and reading the envelope**, not by reasoning about the code. The
+measurement changed the answer in both directions — it confirmed fix 2's gap (`find` reporting
+`items[50]` and nothing in it) and it re-scoped fix 3 from "emit a preview" into a preview
+*plus* a dropped incompleteness signal that no part of the plan had named.
 ## References
 
 - `docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md` — the hint half of

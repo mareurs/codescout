@@ -293,24 +293,68 @@ fn names_tracker_path(result: &Value) -> bool {
 
 /// Compact summary shown in place of a buffered librarian response.
 ///
-/// The load-bearing case is `artifact(get, full=true)`: `get` caps the returned
-/// `body` at `SOFT_CAP_LINES` and records the cut in a sibling `overflow` object
-/// (`shown_lines` / `total_lines` / `hint`). But any body large enough to trip
-/// that cap also exceeds the inline budget, so the whole response is buffered and
-/// the generic `"Result stored in …"` summary would drop the `overflow` warning
-/// entirely — leaving an agent to extract `$.body`, see ~500 lines, and never
-/// learn the body was truncated. That silent loss caused real downstream damage
-/// (duplicate sections written from a short-read line count); see
-/// `docs/issues/archive/2026-07-07-artifact-get-full-body-silent-truncation.md` and
-/// `docs/issues/archive/2026-07-09-artifact-get-full-true-body-silent-truncation.md`.
+/// Ordered deliberately, because `truncate_compact` cuts from the **tail**: anything
+/// below can be lost, so incompleteness signals lead.
 ///
-/// Promote the warning into the summary so it survives buffering. `output_id` and
-/// `hint` are set independently of the summary, so buffer navigation is unaffected.
+/// 1. **Incompleteness.** The `artifact(get)` body cap (`$.overflow.shown_lines`), then
+///    any other action's own `$.overflow.hint`. A body large enough to trip the cap also
+///    exceeds the inline budget, so without promotion the warning is buffered away and an
+///    agent extracts `$.body`, sees ~500 lines and never learns it was truncated — that
+///    silent loss caused duplicate sections written from a short-read line count
+///    (`docs/issues/archive/2026-07-09-artifact-get-full-true-body-silent-truncation.md`).
+///    The generic hint half was found by measurement: `librarian(context)` returned 10 of
+///    50 candidates with discovery capped, and the envelope said only "15357 bytes".
+///
+/// 2. **The answer the action was asked for** — matched titles for `find`, section
+///    headings for `get`, and a head-preview of whichever field actually holds the prose.
+///    Previously the body-cap warning was the *only* case, so every other response fell
+///    through to the generic envelope and the call returned no payload at all: 104
+///    `artifact` overflows in the live corpus, each a guaranteed wasted turn. BL-19.
+///
+/// 3. **The generic shape description**, appended rather than displaced. `format_compact`
+///    *replaces* the fallback in `ToolContext::call_content` (`unwrap_or_else`), so
+///    returning `Some` here would otherwise drop the top-level key list a `json_path` is
+///    aimed with — trading one gap for another.
+///
+/// Returns `None` when there is nothing to add, leaving the generic describer in place
+/// rather than replacing it with something worse.
 fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String> {
-    // Only the `artifact` tool emits an `overflow` object (from the `get` action).
-    if inner_name != "artifact" {
+    let is_artifact = inner_name == "artifact";
+    let mut lines: Vec<String> = Vec::new();
+
+    // Artifact-shaped messages stay gated on the tool, so another librarian action
+    // carrying a similar-looking field is never described as an artifact body.
+    if is_artifact {
+        if let Some(warning) = body_truncation_warning(result) {
+            lines.push(warning);
+        }
+    }
+    if let Some(hint) = overflow_hint(result) {
+        lines.push(hint);
+    }
+    if is_artifact {
+        if let Some(matched) = matched_items_summary(result) {
+            lines.push(matched);
+        } else if let Some(sections) = section_headings_summary(result) {
+            lines.push(sections);
+        }
+    }
+    if let Some(preview) = dominant_text_preview(result) {
+        lines.push(preview);
+    }
+
+    if lines.is_empty() {
         return None;
     }
+
+    if let Some(shape) = crate::tools::format::describe_payload_shape(result) {
+        lines.push(shape);
+    }
+    Some(lines.join("\n  "))
+}
+
+/// The `get` body-cap warning, promoted out of `$.overflow` so it survives buffering.
+fn body_truncation_warning(result: &Value) -> Option<String> {
     let overflow = result.get("overflow")?.as_object()?;
     let shown = overflow.get("shown_lines")?.as_u64()?;
     let total = overflow.get("total_lines")?.as_u64()?;
@@ -320,6 +364,139 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
          selector — artifact(get, id=…, heading=\"<section>\") or start_line=N, \
          end_line=M — or see $.overflow for total_lines and top-level headings."
     ))
+}
+
+/// Any *other* action's incompleteness signal, promoted out of `$.overflow.hint`.
+///
+/// Each librarian action carries its own: `context` reports omitted candidates and
+/// capped discovery, `find` reports more-in-scope. Buffered away, a partial answer reads
+/// as a complete one — measured 2026-08-16, a `context` call returned 10 of 50 candidates
+/// with discovery capped while its envelope said only `"15357 bytes … 4 keys"`.
+///
+/// Declines on the `artifact(get)` body cap, which [`body_truncation_warning`] states
+/// more loudly and more specifically just above.
+fn overflow_hint(result: &Value) -> Option<String> {
+    let overflow = result.get("overflow")?.as_object()?;
+    if overflow.contains_key("shown_lines") {
+        return None;
+    }
+    let hint = overflow.get("hint")?.as_str()?;
+    Some(format!("INCOMPLETE — {hint}"))
+}
+
+/// The largest string field, previewed by its head.
+///
+/// Shape alone is not an answer. `librarian(context)` described itself as
+/// `"4 keys: markdown, included_ids, overflow, scope"` while `markdown` *was* the whole
+/// answer — named, never shown. Naming the field and showing its opening is usually
+/// enough to decide whether the buffer needs reading at all.
+///
+/// Bounded hard on both ends: below `MIN_LEN` the generic describer already prints the
+/// value verbatim, so a preview would repeat it; above `PREVIEW_CHARS` we would be
+/// inlining the payload and undoing the buffering that produced this envelope.
+fn dominant_text_preview(result: &Value) -> Option<String> {
+    /// `describe_payload_shape` prints strings up to 60 bytes verbatim; well clear of it.
+    const MIN_LEN: usize = 200;
+    const PREVIEW_CHARS: usize = 240;
+
+    let (key, text) = result
+        .as_object()?
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k, s)))
+        .filter(|(_, s)| s.len() >= MIN_LEN)
+        .max_by_key(|(_, s)| s.len())?;
+
+    // Newlines would break the one-line-per-part layout the caller reads this as.
+    let head: String = text
+        .chars()
+        .take(PREVIEW_CHARS)
+        .collect::<String>()
+        .replace('\n', " ⏎ ");
+    Some(format!("$.{key} starts: {head}…"))
+}
+
+/// `find` (and any action answering with `items`) summarised by what it matched.
+///
+/// The generic describer can only report the array's *length* — `items[50]` — which is
+/// the one thing the caller did not ask. Titles are the answer; ids are what make the
+/// follow-up call possible without a second lookup; status is what a triage query is
+/// usually filtering on.
+fn matched_items_summary(result: &Value) -> Option<String> {
+    /// Eight rows is roughly 800 bytes — informative without crowding out the shape
+    /// description below it, and well inside `COMPACT_SUMMARY_MAX_BYTES`.
+    const MAX_ITEMS: usize = 8;
+    const MAX_TITLE: usize = 72;
+
+    let items = result.get("items")?.as_array()?;
+    if items.is_empty() {
+        return None;
+    }
+
+    let mut out = format!("{} matched:", items.len());
+    for item in items.iter().take(MAX_ITEMS) {
+        let id = item.get("id").and_then(Value::as_str).unwrap_or("?");
+        let status = item.get("status").and_then(Value::as_str).unwrap_or("-");
+        let title = item
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("<untitled>");
+        out.push_str(&format!(
+            "\n    {id} [{status}] {}",
+            ellipsize(title, MAX_TITLE)
+        ));
+    }
+    if items.len() > MAX_ITEMS {
+        out.push_str(&format!(
+            "\n    … +{} more — narrow the filter, or read them from the buffer",
+            items.len() - MAX_ITEMS
+        ));
+    }
+    Some(out)
+}
+
+/// `get` summarised by its section headings.
+///
+/// `title` and `status` already survive as short scalars in the generic description;
+/// headings do not, and they are what tells the caller which narrower
+/// `artifact(get, heading="…")` call to make instead of pulling the whole body out of
+/// the buffer. Rendered with their level markers so a heading can be passed straight
+/// back as that argument.
+fn section_headings_summary(result: &Value) -> Option<String> {
+    const MAX_HEADINGS: usize = 14;
+
+    let headings = result.get("preview")?.get("headings")?.as_array()?;
+    let rendered: Vec<String> = headings
+        .iter()
+        .take(MAX_HEADINGS)
+        .filter_map(|h| {
+            let text = h.get("text").and_then(Value::as_str)?;
+            let level = h
+                .get("level")
+                .and_then(Value::as_u64)
+                .unwrap_or(2)
+                .clamp(1, 6);
+            Some(format!("{} {text}", "#".repeat(level as usize)))
+        })
+        .collect();
+    if rendered.is_empty() {
+        return None;
+    }
+
+    let mut out = format!("sections: {}", rendered.join(" · "));
+    if headings.len() > rendered.len() {
+        out.push_str(&format!(" · … +{} more", headings.len() - rendered.len()));
+    }
+    Some(out)
+}
+
+/// Char-aware truncation — a byte slice would panic mid-codepoint, and artifact titles
+/// carry em-dashes and arrows routinely.
+fn ellipsize(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let kept: String = s.chars().take(max.saturating_sub(1)).collect();
+    format!("{kept}…")
 }
 
 /// Bridge a librarian-side `RecoverableError` into the host `RecoverableError`
@@ -379,6 +556,201 @@ mod tests {
         // must not be hijacked into an artifact-body message.
         let result = json!({ "overflow": { "shown_lines": 1, "total_lines": 2 } });
         assert!(librarian_compact_summary("librarian", &result).is_none());
+    }
+
+    /// BL-19 fix 2. `find` answering "which artifacts matched?" with `items[50]` is the
+    /// measured worst case: the envelope names the array's length and nothing in it, so
+    /// the call cost a turn and returned no answer. The titles ARE the answer, and the
+    /// ids are what makes the next call possible without a second lookup.
+    #[test]
+    fn compact_summary_lists_what_find_matched() {
+        let result = json!({
+            "count": 2,
+            "items": [
+                { "id": "0694a4a9946e10fe", "kind": "bug", "status": "mitigated",
+                  "title": "BUG: append_entry writes catalog-only state, so a tracker's committed snapshot silently drifts",
+                  "abs_path": "docs/issues/2026-08-16-append-entry.md", "updated_at": 1786902554589u64 },
+                { "id": "e04115d9477d280b", "kind": "bug", "status": "open",
+                  "title": "BUG: run_command passes the command to sh -c verbatim",
+                  "abs_path": "docs/issues/2026-08-16-run-command.md", "updated_at": 1786897911709u64 },
+            ],
+            "scope": { "applied": "repo" },
+            "hints": {},
+        });
+
+        let summary = librarian_compact_summary("artifact", &result)
+            .expect("a result carrying matched items must summarise them");
+
+        assert!(
+            summary.contains("0694a4a9946e10fe") && summary.contains("e04115d9477d280b"),
+            "ids make the follow-up call possible without a second lookup: {summary}"
+        );
+        assert!(
+            summary.contains("append_entry writes catalog-only state"),
+            "the titles are the answer the caller asked for: {summary}"
+        );
+        assert!(
+            summary.contains("mitigated") && summary.contains("open"),
+            "status is what a triage query is usually filtering on: {summary}"
+        );
+    }
+
+    /// The `get` half. `title` and `status` already survive via the generic shape
+    /// describer (they are short scalars), but the section headings do not — and
+    /// headings are what tell the caller which narrower `heading=` call to make
+    /// instead of pulling the whole body out of the buffer.
+    #[test]
+    fn compact_summary_lists_section_headings_for_get() {
+        let result = json!({
+            "id": "60b5323f5e11be66",
+            "kind": "bug",
+            "status": "open",
+            "title": "BUG: repairing a frontmatter id re-serializes the whole block",
+            "preview": {
+                "shape": "default",
+                "headings": [
+                    { "level": 1, "text": "BUG: repairing a frontmatter id", "line": 1 },
+                    { "level": 2, "text": "Summary", "line": 3 },
+                    { "level": 2, "text": "Root cause", "line": 68 },
+                    { "level": 3, "text": "The round-trip is the mechanism", "line": 99 },
+                ],
+                "line_count": 172,
+            },
+            "body": "…",
+        });
+
+        let summary = librarian_compact_summary("artifact", &result)
+            .expect("a result carrying section headings must summarise them");
+
+        assert!(
+            summary.contains("Summary") && summary.contains("Root cause"),
+            "headings name the narrower `heading=` call to make: {summary}"
+        );
+        assert!(
+            summary.contains("##"),
+            "carry the level markers so the heading can be passed back verbatim: {summary}"
+        );
+    }
+
+    /// The sequencing constraint the bug file recorded: keep the truncation warning as
+    /// an ADDITIONAL line, never a precondition. It guards a silent-truncation defect
+    /// that once cost duplicate sections, and `truncate_compact` cuts from the tail —
+    /// so it has to come first or a long summary can bury it.
+    #[test]
+    fn compact_summary_keeps_the_truncation_warning_first_and_adds_the_answer() {
+        let result = json!({
+            "id": "x",
+            "title": "Some Tracker",
+            "overflow": { "shown_lines": 500, "total_lines": 1841, "hint": "…" },
+            "preview": {
+                "headings": [
+                    { "level": 2, "text": "Findings index", "line": 49 },
+                    { "level": 2, "text": "History", "line": 378 },
+                ],
+            },
+            "body": "…capped…",
+        });
+
+        let summary = librarian_compact_summary("artifact", &result)
+            .expect("overflow plus headings must yield both");
+
+        let truncation = summary
+            .to_uppercase()
+            .find("TRUNCAT")
+            .expect("the truncation warning must survive: {summary}");
+        let headings = summary
+            .find("Findings index")
+            .expect("the headings must be added, not replace the warning");
+        assert!(
+            truncation < headings,
+            "truncate_compact cuts from the tail, so the correctness signal goes first: {summary}"
+        );
+    }
+
+    /// BL-19 fix 3, first half — and a correctness bug found by measuring rather than
+    /// reasoning. `librarian(context)` carries its OWN incompleteness signal in
+    /// `$.overflow.hint`, and the summary dropped it because the whole function was
+    /// gated on `inner_name == "artifact"`.
+    ///
+    /// Measured live 2026-08-16: a `context` call returned 10 of 50 candidates with
+    /// discovery capped, and the envelope said only `"15357 bytes … 4 keys"`. A partial
+    /// answer that does not announce itself reads as a complete one.
+    #[test]
+    fn compact_summary_promotes_an_overflow_hint_from_any_librarian_tool() {
+        let result = json!({
+            "markdown": "…bundle…",
+            "included_ids": ["a", "b"],
+            "overflow": {
+                "candidates": 50, "included": 10, "omitted": 40, "candidates_capped": true,
+                "hint": "40 candidate(s) omitted (token budget) — raise `max_tokens` or narrow `topic`.",
+            },
+            "scope": {},
+        });
+
+        let summary = librarian_compact_summary("librarian", &result)
+            .expect("an incompleteness signal must survive buffering, whatever the tool");
+        assert!(
+            summary.contains("40 candidate(s) omitted"),
+            "the hint is the signal; burying it makes a partial answer look whole: {summary}"
+        );
+
+        // The artifact body-cap message is louder and more specific; it must not be
+        // duplicated by this generic path.
+        let body_capped = json!({
+            "overflow": { "shown_lines": 500, "total_lines": 1841, "hint": "…" },
+        });
+        let summary =
+            librarian_compact_summary("artifact", &body_capped).expect("body cap still summarises");
+        assert_eq!(
+            summary.matches("500").count(),
+            1,
+            "the body-cap case must be announced once, not twice: {summary}"
+        );
+    }
+
+    /// BL-19 fix 3, second half. Shape alone is not an answer: `librarian(context)`
+    /// described itself as `"4 keys: markdown, included_ids, overflow, scope"` while
+    /// `markdown` *was* the entire answer. Name the field and show its head.
+    ///
+    /// The negative assertions are the load-bearing ones — a preview that inlines the
+    /// payload has undone the buffering that produced the envelope.
+    #[test]
+    fn compact_summary_previews_the_dominant_text_field_without_inlining_it() {
+        let body = format!(
+            "# Frontmatter and the catalog\n\nThe first paragraph is what a caller needs \
+             to decide whether to pull the rest.\n\n{}\n\nTAIL_MARKER_NOT_IN_PREVIEW",
+            "filler ".repeat(3000)
+        );
+        let result = json!({ "markdown": body, "included_ids": ["a"], "scope": {} });
+
+        let summary = librarian_compact_summary("librarian", &result)
+            .expect("a dominant text field must be previewed");
+
+        assert!(
+            summary.contains("markdown"),
+            "name the field so a json_path can be aimed at it: {summary}"
+        );
+        assert!(
+            summary.contains("The first paragraph is what a caller needs"),
+            "show the head — that is the part that answers the question: {summary}"
+        );
+        assert!(
+            !summary.contains("TAIL_MARKER_NOT_IN_PREVIEW"),
+            "the preview must not reach the tail: {summary}"
+        );
+        assert!(
+            summary.len() < 1_200,
+            "a preview that inlines the payload defeats buffering; got {} bytes",
+            summary.len()
+        );
+
+        // A short string is already printed verbatim by the generic describer, so a
+        // preview would only repeat it.
+        let short = json!({ "markdown": "tiny", "n": 1 });
+        assert!(
+            librarian_compact_summary("librarian", &short).is_none(),
+            "nothing worth previewing means the generic describer keeps the slot"
+        );
     }
 
     /// The guide the librarian delivers depends on what the call touched.
