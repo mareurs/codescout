@@ -1,7 +1,7 @@
 ---
 id: a2899c126f1e7771
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the librarian guard is keyed on YAML quoting, so 15 of 27 trackers are unprotected'
 tags:
 - librarian
@@ -9,7 +9,7 @@ tags:
 - edit_markdown
 - read_markdown
 - data-loss
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -91,6 +91,57 @@ Two independent failure modes follow from the same design:
 "f2ecdd76a6189efb"]}}, include_archived=true)` returns exactly one row, the latter.
 Guard body read via `symbols(name="is_librarian_artifact", include_body=true)`.*
 
+### Correction to the numbers above, and to half the diagnosis
+
+Two things in the original filing were wrong, and a first attempt at this section was
+wrong again in the other direction. Recording all three, because the sequence is the
+lesson.
+
+**The denominator.** `docs/trackers/` holds **41** markdown files, not 27. The 12/15
+split counts only files carrying a 16-hex `id:` at all; **14 more carry none**. Accurate
+statement: of 27 trackers with an id, 15 were unprotected by quoting. Repo-wide the
+quoting fix newly guards **86** files, not 15.
+
+**First correction, itself wrong.** I initially concluded the id-less files were not a
+defect — that the stamped `id:` was an intentional opt-in marker separating artifacts the
+librarian *wrote* from prose trackers it merely catalogues, and that a catalog-backed
+guard would break the documented `edit_markdown` workflow on
+`docs/trackers/skill-frictions.md`. That reasoning deferred to a convention instead of
+testing it. The convention is not the specification.
+
+**What the measurement actually shows.** Two queries settle it:
+
+```
+artifact(find, filter={rel_path contains "docs/RELEASE.md"|"CONTRIBUTING"|...})
+-> docs/RELEASE.md, CONTRIBUTING.md, docs/PROGRESSIVE_DISCOVERABILITY.md,
+   docs/TAXONOMY.md, docs/ROADMAP.md, src/prompts/README.md   — ALL catalog rows
+
+artifact(find, augmented=true, scope="repo")   -> count: 16
+```
+
+So **catalog membership is the wrong predicate** — 500+ rows, essentially all of `docs/`;
+a guard keyed on it would refuse `read_markdown("docs/RELEASE.md")`. But **augmentation is
+the right one**: exactly 16 artifacts repo-wide, all trackers, and precisely the set where
+state lives *outside* the file. It lands correctly on every case that mattered:
+
+| file | augmented | direct edit |
+|---|---|---|
+| `open-issue-work-queue.md`, `tool-usage-patterns.md` | yes | refused |
+| `skill-frictions.md`, `reconnaissance-patterns.md` | no | **allowed** — as CLAUDE.md documents |
+| `RELEASE.md`, `CONTRIBUTING.md`, archived bug files | no | allowed |
+
+The documented workflow survives — but now because it is *correct*, not because it is
+written down. And the id heuristic, even fixed for quoting, still misses one genuinely
+dangerous file: `docs/trackers/artifact-augmentation-followups.md` is augmented **and**
+carries no frontmatter id.
+
+**The plumbing objection was real but not decisive.** The core `ToolContext`
+(`src/tools/core/types.rs:58-80`) that `read_markdown`, `edit_markdown` and `edit_file`
+receive genuinely has no catalog handle — only the librarian's
+(`src/librarian/tools/mod.rs:84-103`) does — and adding a field to it means touching
+**124 construction sites across 21 files**. The way through is a narrow trait object
+installed once at server construction, which costs one line in `server.rs` and no
+churn anywhere else.
 ## Evidence
 
 ### More trackers are unprotected than protected
@@ -160,46 +211,90 @@ same question, and for 15 of 27 trackers the answer is still `false`.
 
 ## Fix
 
-Not implemented. The guard should answer "is this path a managed artifact?" by resolving
-the path against the catalog, not by pattern-matching frontmatter. That also fixes the
-false-positive half for free — a stale-but-well-shaped id stops mattering.
+Implemented 2026-08-16 on `experiments`. The guard now asks **two independent questions**,
+and refuses if either says yes. Neither implies the other: a stamped id says the librarian
+*wrote* this file; augmentation says the file is not where its state *lives*.
 
-If a text fast-path must stay (the guard runs on every markdown write, and a catalog hit
-is not free), strip surrounding `'` / `"` before the length test. That is a two-line change
-and closes the reported hole, but leaves the guard trusting a value the catalog may
-disagree with — so treat it as mitigation, not the fix.
+**1. Frontmatter id, quoting-insensitive.** `is_librarian_id` strips one layer of matching
+`'` or `"` before the 16-lowercase-hex test, and the key match loosened from
+`strip_prefix("id: ")` to `strip_prefix("id:")` + `trim()`. A mismatched or unterminated
+pair is left alone, so a malformed value fails the hex test rather than being coerced
+through it. Closes 86 files repo-wide.
 
-Do **not** fix by re-quoting the 15 files: that hides the defect behind a convention no
-writer enforces, and the next artifact created by a tool that quotes its YAML reopens it.
+**2. Augmentation, via the catalog.** New `AugmentedArtifactOracle` trait in
+`src/util/librarian_guard.rs`, implemented in `src/librarian/adapter.rs` as
+`CatalogAugmentationOracle` (`artifact_id_from_abs` → `augmentation::get`, a primary-key
+hit) and installed once at server construction. Left uninstalled — tests, or a build
+without the librarian — the guard degrades to question 1 rather than failing open.
 
+Design notes worth keeping:
+
+- **Why a process-global `OnceLock` rather than a `ToolContext` field.** There is one
+  catalog per process; adding a field to the core `ToolContext` means editing 124
+  construction sites. Precedent for process-global mutable state is `src/heartbeat.rs`.
+- **Why the decision function takes the oracle explicitly.** `guard_with_oracle` is the
+  testable core; the public wrapper reads the global. No test ever installs into the
+  `OnceLock`, so no test can poison another in the same binary.
+- **Why `lock()` and not `try_lock()`.** `parking_lot::Mutex` is not reentrant, but the
+  guard is only reachable from the three core markdown tools, none of which hold the
+  catalog lock — no librarian tool calls the guard. Noted in the impl so the invariant is
+  checkable rather than assumed.
+- The refusal message now names *which* reason fired; the augmented form adds "its params
+  live in the catalog, and this file is only a rendered snapshot of them". The substring
+  `usage/db.rs:282` classifies on is unchanged.
+
+Call sites now pass the resolved path: `read_markdown.rs:503`, `edit_markdown.rs:1213`,
+`edit_file/mod.rs` `read_edit_target`.
 ## Tests added
 
-None — not fixed. The regression test must be **table-driven over both quoting styles**,
-asserting the same verdict for `id: abc…` and `id: 'abc…'`. A test using only the unquoted
-form is green against the current code, which is exactly how this survived the
-`47abcb6d` hardening pass.
+All in `src/util/librarian_guard.rs` tests. Each was watched fail first.
 
+**Quoting half:**
+
+- `an_id_is_recognised_whatever_yaml_quoting_it_was_serialised_with` — table over bare,
+  single-quoted, double-quoted, extra-spaced and unspaced forms. The **bare row was green
+  before the fix**, which is exactly how this survived the `47abcb6d` hardening pass: a
+  test written with only the unquoted form cannot fail, however many write paths it covers.
+  Failed on `single-quoted` after passing `bare`, reproducing the asymmetry.
+- `stripping_quotes_does_not_loosen_the_id_rule` — too short, uppercase, non-hex,
+  mismatched quotes, unterminated, empty, quote-only. Green by construction; it pins that
+  the fix did not buy coverage with false positives.
+- `guard_fires_on_a_quoted_id_the_way_it_does_on_a_bare_one` — asserts at
+  `guard_not_librarian_managed`, the function all three call sites share.
+
+**Augmentation half:**
+
+- `an_augmented_artifact_is_guarded_even_with_no_frontmatter_id` — the case the text
+  predicate provably cannot see. Asserts the no-id precondition explicitly, so the test
+  cannot silently start passing for the wrong reason.
+- `a_catalogued_but_unaugmented_file_stays_directly_editable` — two rows,
+  `skill-frictions.md` and `RELEASE.md`. **Green before the oracle was wired**, on purpose:
+  it pins the behaviour the widening must not break, and it is the test that would have
+  caught the catalog-membership design had I implemented it.
+
+Gate: 3893 tests (full `cargo test`), clippy `-D warnings`, fmt.
 ## Workarounds
 
-Assume no guard. Use `artifact(action="get"/"update")` for anything under
-`docs/trackers/` regardless of whether a direct read or edit is refused — a refusal is
-informative, but permission is not evidence the file is unmanaged.
+No longer needed. For the record, the pre-fix habit was: assume no guard, and route
+everything under `docs/trackers/` through `artifact(get/update)` regardless of whether a
+direct call was refused.
 
+The general form of that habit survives and is worth keeping: **a refusal is informative,
+permission is not.** A gate that fires tells you something real about the file; a gate
+that stays quiet tells you only that its predicate returned false.
 ## Resume
 
-Decide catalog-lookup vs. quote-stripping fast-path (see *Fix*). Then check the other two
-guard entry points for the same text-heuristic assumption:
-`src/util/librarian_guard.rs` `guard_not_librarian_managed`, and whatever
-`read_markdown` calls — the refusal message differs between the read and write paths, so
-they may not share one predicate.
+N/A — fixed. Pending only: live MCP verification after `cargo rb` + `/mcp`, then archive
+with the SHA.
 
-Also worth pairing with BL-23 (`6149f4cfeaa6fab9`, "a moved artifact's frontmatter still
-asserts its pre-move id"): this bug is how a stale frontmatter id stays invisible, since
-the guard validates shape and never value.
-
+One residual, deliberately not closed: an artifact that is neither augmented nor carrying
+a stamped id stays directly editable — e.g. a bug file copied from
+`docs/issues/_TEMPLATE.md`. That is correct as it stands (nothing lives outside the file),
+and the class is shrinking on its own since `artifact(create)` stamps an id. Do not
+"fix" it by guarding catalog membership; see *Correction to the numbers above* for the
+measurement showing that would refuse `docs/RELEASE.md` and the whole documentation set.
 ## References
 
 - `src/util/librarian_guard.rs:31-45` — `is_librarian_artifact`
 - `docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md` — the coverage measurement this reframes
 - `docs/trackers/tool-usage-patterns.md` § T-22 — the session observation that surfaced it
-

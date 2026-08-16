@@ -227,6 +227,9 @@ impl CodeScoutServer {
             if let Some(lib_ctx) =
                 crate::librarian::try_build_runtime_with(lsp.clone(), &env.librarian).await
             {
+                // The markdown guard needs the catalog to recognise augmented
+                // artifacts whose frontmatter carries no id. BL-33.
+                crate::librarian::install_augmentation_guard_oracle(&lib_ctx);
                 tools.extend(crate::librarian::adapters_for(lib_ctx));
             }
         }

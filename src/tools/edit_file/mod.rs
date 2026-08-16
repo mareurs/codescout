@@ -689,7 +689,11 @@ fn read_edit_target(resolved: &std::path::Path, display_path: &str) -> anyhow::R
             anyhow::Error::new(e).context(format!("reading {} to edit it", resolved.display()))
         }
     })?;
-    crate::util::librarian_guard::guard_not_librarian_managed(display_path, &content)?;
+    crate::util::librarian_guard::guard_not_librarian_managed(
+        display_path,
+        &content,
+        Some(resolved),
+    )?;
     Ok(content)
 }
 

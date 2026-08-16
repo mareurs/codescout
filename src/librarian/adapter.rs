@@ -39,6 +39,43 @@ pub async fn try_build_runtime_with(
     }
 }
 
+/// Answers the markdown guard's question "is this file only a rendered snapshot?"
+/// by asking the catalog whether the path carries an augmentation.
+///
+/// Catalog identity is `id == artifact_id_from_abs(abs_path)` (stated in
+/// `src/librarian/tools/doctor.rs`), so the lookup is a primary-key hit, not a scan.
+struct CatalogAugmentationOracle {
+    catalog: Arc<parking_lot::Mutex<crate::librarian::catalog::Catalog>>,
+}
+
+impl crate::util::librarian_guard::AugmentedArtifactOracle for CatalogAugmentationOracle {
+    fn is_augmented(&self, abs_path: &std::path::Path) -> bool {
+        // Canonicalize: the catalog stores canonical absolute paths, and a caller's
+        // resolved path may still carry a symlinked prefix. A path that cannot be
+        // canonicalized (deleted mid-call) simply does not match.
+        let Ok(abs) = std::fs::canonicalize(abs_path) else {
+            return false;
+        };
+        let id = crate::librarian::ids::artifact_id_from_abs(&abs);
+        // Plain `lock()` is safe here despite `parking_lot::Mutex` being
+        // non-reentrant: the guard is only ever called from the core markdown
+        // tools (`read_markdown`, `edit_markdown`, `edit_file`), none of which
+        // hold the catalog lock — no librarian tool calls the guard.
+        let cat = self.catalog.lock();
+        matches!(
+            crate::librarian::catalog::augmentation::get(&cat, &id),
+            Ok(Some(_))
+        )
+    }
+}
+
+/// Wire the catalog into the markdown guard, once, at server construction.
+pub fn install_augmentation_guard_oracle(ctx: &LibToolContext) {
+    crate::util::librarian_guard::install_augmented_oracle(Arc::new(CatalogAugmentationOracle {
+        catalog: Arc::clone(&ctx.catalog),
+    }));
+}
+
 pub fn adapters_for(ctx: Arc<LibToolContext>) -> Vec<Arc<dyn crate::tools::Tool>> {
     lib_all_tools()
         .into_iter()

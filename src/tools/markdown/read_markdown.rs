@@ -500,7 +500,11 @@ impl Tool for ReadMarkdown {
         let (resolved, text) = resolve_markdown_source(path, ctx).await?;
 
         // Reject librarian-managed artifacts — use artifact(action="get") instead.
-        crate::util::librarian_guard::guard_not_librarian_managed(path, &text)?;
+        // The resolved path lets the guard also catch AUGMENTED artifacts whose
+        // frontmatter carries no id: for those the file is only a snapshot of
+        // params held in the catalog, so a direct read returns stale state with
+        // no signal that it is stale.
+        crate::util::librarian_guard::guard_not_librarian_managed(path, &text, Some(&resolved))?;
 
         // Extract params
         let heading = input["heading"].as_str();

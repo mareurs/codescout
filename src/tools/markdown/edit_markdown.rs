@@ -1210,7 +1210,13 @@ impl Tool for EditMarkdown {
         let file_content = std::fs::read_to_string(&resolved)?;
 
         // Reject librarian-managed artifacts — use artifact(action="update") instead.
-        crate::util::librarian_guard::guard_not_librarian_managed(path, &file_content)?;
+        // Passing the resolved path also catches augmented artifacts with no
+        // frontmatter id, where a direct write desynchronises file from params.
+        crate::util::librarian_guard::guard_not_librarian_managed(
+            path,
+            &file_content,
+            Some(&resolved),
+        )?;
 
         // Working buffer — frontmatter mutation (if requested) lands here first,
         // then body edits run on the result. One atomic_write at the end keeps
