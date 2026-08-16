@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::format::format_overflow;
+use super::format::{insert_below_header, overflow_head};
 use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 use crate::util::fs::to_forward_slash;
 
@@ -549,18 +549,18 @@ pub(super) fn format_grep(val: &Value) -> String {
         }
     }
 
-    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-        out.push('\n');
-        out.push_str(&format_overflow(overflow));
-    }
-    // Only reachable if a future change attaches the warning alongside results; rendering it in
-    // both branches is what keeps that change from silently losing it.
+    // Overflow and the completeness warning go immediately BELOW the count header, not at
+    // the tail. The compact summary is cut from the tail (`truncate_compact`), so a note
+    // appended after a long row list is dropped on exactly the results big enough to need
+    // it. The header keeps first place because it carries the `capped` marker a reader
+    // anchors on — see `format::insert_below_header`. Same lesson as the
+    // bound-before-the-early-return care taken for `warning` above, other end of the
+    // function.
+    let mut head_extra = overflow_head(val);
     if let Some(w) = warning {
-        out.push_str("\nwarning: ");
-        out.push_str(w);
-        out.push('\n');
+        head_extra.push_str(&format!("warning: {w}\n"));
     }
-    out
+    insert_below_header(out, &head_extra)
 }
 
 fn format_search_simple_mode(

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::format::format_overflow;
+use super::format::{insert_below_header, overflow_head};
 use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 use crate::util::text::extract_lines;
 
@@ -923,12 +923,7 @@ pub(super) fn format_read_file(val: &Value) -> String {
         .unwrap_or_else(|| content.lines().count() as u64);
 
     if content.is_empty() {
-        let mut out = "0 lines".to_string();
-        if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-            out.push('\n');
-            out.push_str(&format_overflow(overflow));
-        }
-        return out;
+        return insert_below_header("0 lines".to_string(), &overflow_head(val));
     }
 
     // Raw content, no per-line number prefixes (caller-supplied ranges make them
@@ -937,13 +932,11 @@ pub(super) fn format_read_file(val: &Value) -> String {
     let mut out = format!("{total_lines} {line_word}\n\n");
     out.push_str(content);
 
-    // Overflow
-    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-        out.push('\n');
-        out.push_str(&format_overflow(overflow));
-    }
-
-    out
+    // Below the header, not after the content. This is the sharpest instance of the tail
+    // cut on any surface: `content` is a whole file, so an overflow note appended here is
+    // dropped essentially always — the reader is told "1505 lines" and shown a prefix,
+    // with the sentence saying it is a prefix cut away. See `format::overflow_head`.
+    insert_below_header(out, &overflow_head(val))
 }
 
 fn format_read_file_summary(val: &Value, file_type: &str) -> String {

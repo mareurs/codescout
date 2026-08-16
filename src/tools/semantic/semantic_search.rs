@@ -1,6 +1,6 @@
 //! SemanticSearch tool — vector + BM25 hybrid search.
 
-use super::super::format::format_overflow;
+use super::super::format::overflow_head;
 use super::super::{optional_u64_param, parse_bool_param, Tool, ToolContext};
 use serde_json::{json, Value};
 
@@ -826,6 +826,12 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
 
     let result_word = if total == 1 { "result" } else { "results" };
     let mut out = format!("{total} {result_word}\n");
+    // The overflow note joins the state fields at the head for the same reason they are
+    // here: `truncate_compact` keeps only the prefix. Until 2026-08-16 this function
+    // protected `hint`/`drift_note`/`truncated_hint` from that cut while still appending
+    // `format_overflow` after the rows — so the reference implementation for head
+    // placement was itself only half-protected.
+    out.push_str(&overflow_head(val));
     out.push_str(&state_lines);
 
     // Build rows: (location, preview)
@@ -884,12 +890,6 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
                 "\n  {n} commits not yet indexed (results still valid — run index(action='build') to include new code)"
             ));
         }
-    }
-
-    // Overflow
-    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-        out.push('\n');
-        out.push_str(&format_overflow(overflow));
     }
 
     out

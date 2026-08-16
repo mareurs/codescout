@@ -7,7 +7,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::format::format_overflow;
+use super::format::{insert_below_header, overflow_head};
 use super::{
     optional_u64_param, parse_bool_param, OutputForm, RecoverableError, Tool, ToolContext,
 };
@@ -319,21 +319,21 @@ pub(crate) fn format_list_dir(val: &Value) -> String {
         }
     }
 
+    // Both cap signals go immediately BELOW the header rather than after the entries.
+    // The compact summary is cut from its tail (`truncate_compact`), so a note appended
+    // under a long listing is dropped on exactly the listings big enough to need it —
+    // see `format::overflow_head`. This surface is the one `get_guide("progressive-
+    // disclosure")` cites as the tool that *does* announce its cap, and tail placement
+    // made that reputation hold only below the compaction threshold.
+    let mut head_extra = String::new();
     if let Some(depth) = val.get("depth_capped").and_then(|v| v.as_u64()) {
-        out.push_str(&format!(
-            "\n[depth capped at {} — use max_depth=N or detail_level='full' for deeper]\n",
-            depth
+        head_extra.push_str(&format!(
+            "[depth capped at {depth} — use max_depth=N or detail_level='full' for deeper]\n"
         ));
     }
+    head_extra.push_str(&overflow_head(val));
 
-    if let Some(overflow) = val.get("overflow") {
-        if overflow.is_object() {
-            out.push('\n');
-            out.push_str(&format_overflow(overflow));
-        }
-    }
-
-    out
+    insert_below_header(out, &head_extra)
 }
 
 /// Renders entries with indentation based on path depth when the listing

@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use crate::tools::format::{format_line_range, format_overflow};
+use crate::tools::format::{format_line_range, insert_below_header, overflow_head};
 
 pub(super) fn format_goto_definition(val: &Value) -> String {
     let defs = match val["definitions"].as_array() {
@@ -220,19 +220,17 @@ pub fn format_search_symbols(val: &Value) -> String {
         row
     };
 
-    let mut out = render_grouped(&groups, total, files, noun, render_item);
+    let out = render_grouped(&groups, total, files, noun, render_item);
 
-    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-        out.push('\n');
-        out.push_str(&format_overflow(overflow));
-    }
-
+    // Below the header, above the rows: the compact summary is cut from its tail, so both
+    // of these were the first casualties on any result long enough to overflow — the
+    // exact results that need them. See `format::overflow_head`.
+    let mut head_extra = overflow_head(val);
     if let Some(w) = warning {
-        out.push_str("\n\nwarning: ");
-        out.push_str(w);
+        head_extra.push_str(&format!("warning: {w}\n"));
     }
 
-    out
+    insert_below_header(out, &head_extra)
 }
 
 pub(super) fn format_overview_symbols(val: &Value) -> String {
@@ -247,17 +245,17 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
         let mut out = format!("{file} — {count} {sym_word}\n");
         format_symbol_tree(&mut out, symbols, 2);
 
-        if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-            out.push('\n');
-            out.push_str(&format_overflow(overflow));
-        }
+        let mut head_extra = overflow_head(val);
+        // The warming marker matters most on the biggest files — the ones whose symbol
+        // tree overflows the summary budget — so tail placement hid it exactly when a
+        // reader most needed to know the detail was tree-sitter-grade, not LSP-grade.
         if val["lsp"].as_str() == Some("warming") {
             let hint = val["hint"]
                 .as_str()
                 .unwrap_or("served from tree-sitter — re-run shortly for LSP-grade detail");
-            out.push_str(&format!("\n[lsp warming] {hint}"));
+            head_extra.push_str(&format!("[lsp warming] {hint}\n"));
         }
-        return out;
+        return insert_below_header(out, &head_extra);
     }
 
     // class_overview / directory_map mode
@@ -283,16 +281,12 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
             }
         }
 
-        if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-            out.push('\n');
-            out.push_str(&format_overflow(overflow));
-        }
-
+        let mut head_extra = overflow_head(val);
         if let Some(hint) = val["hint"].as_str() {
-            out.push_str(&format!("\n\n{hint}"));
+            head_extra.push_str(&format!("{hint}\n"));
         }
 
-        return out;
+        return insert_below_header(out, &head_extra);
     }
 
     // Directory or pattern mode
@@ -330,12 +324,7 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
         format_symbol_tree(&mut out, symbols, 4);
     }
 
-    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-        out.push('\n');
-        out.push_str(&format_overflow(overflow));
-    }
-
-    out
+    insert_below_header(out, &overflow_head(val))
 }
 
 fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {

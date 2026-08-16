@@ -40,6 +40,55 @@ pub(crate) fn format_overflow(overflow: &Value) -> String {
     }
 }
 
+/// The overflow note rendered for placement at the **head** of a compact summary,
+/// above the variable-length rows.
+///
+/// Returns `""` when the result carries no overflow object, so a caller can push it
+/// unconditionally into its header block without a surrounding `if let`.
+///
+/// **Head placement is load-bearing, not cosmetic.** `call_content`'s overflow path shows
+/// the caller `truncate_compact(format_compact(val), soft, hard)` and nothing else, and
+/// `truncate_compact` (`src/tools/core/types.rs`) keeps only the PREFIX up to the last
+/// newline inside the hard cap. A note appended *after* the rows is therefore cut first,
+/// on exactly the results big enough to need it: the summary keeps "here are some rows"
+/// and drops the sentence saying how many were withheld, so an incomplete answer reads as
+/// a complete one.
+///
+/// Nine call sites across five surfaces tail-appended it. Note the cutter itself is
+/// correct and deliberately unchanged — a tail cut is right for prose; the defect was
+/// producer-side ordering.
+///
+/// See `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`.
+pub(crate) fn overflow_head(val: &Value) -> String {
+    match val.get("overflow").filter(|o| o.is_object()) {
+        Some(overflow) => format!("{}\n", format_overflow(overflow)),
+        None => String::new(),
+    }
+}
+
+/// Place `extra` immediately below `body`'s first line.
+///
+/// Two requirements meet here and neither yields. The overflow note must land inside the
+/// prefix `truncate_compact` keeps (see [`overflow_head`]) — but it must not displace the
+/// first line, which is the one a reader anchors on and which several surfaces make
+/// load-bearing: `grep`'s count header carries the `capped` marker that stops a
+/// collection-capped result from reading as a complete one
+/// (`grep_capped_collection_never_renders_as_a_complete_result`).
+///
+/// Slotting in second satisfies both: the header is still first, and the note is metres
+/// from the top of a budget measured in kilobytes.
+///
+/// `extra` should end with a newline. An empty `extra` returns `body` untouched.
+pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
+    if extra.is_empty() {
+        return body;
+    }
+    match body.find('\n') {
+        Some(i) => format!("{}\n{}{}", &body[..i], extra, &body[i + 1..]),
+        None => format!("{body}\n{extra}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +106,140 @@ mod tests {
     #[test]
     fn line_range_zero_end() {
         assert_eq!(format_line_range(10, 0), "L10");
+    }
+
+    #[test]
+    fn overflow_head_is_empty_without_an_overflow_object() {
+        // Callers push this unconditionally into their header block, so the no-overflow
+        // case must contribute nothing at all — not a stray newline.
+        assert_eq!(overflow_head(&serde_json::json!({})), "");
+        assert_eq!(overflow_head(&serde_json::json!({"overflow": null})), "");
+        // A non-object `overflow` is not a shape this can render; treat it as absent
+        // rather than printing "showing 0 of 0".
+        assert_eq!(overflow_head(&serde_json::json!({"overflow": 3})), "");
+    }
+
+    #[test]
+    fn insert_below_header_keeps_the_first_line_first() {
+        // The whole point: the note lands second, not first and not last.
+        let body = "12 matches\n  row a\n  row b".to_string();
+        let out = insert_below_header(body, "  … showing 2 of 12 — narrow it\n");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "12 matches", "header must stay first: {out}");
+        assert_eq!(lines[1], "  … showing 2 of 12 — narrow it");
+        assert_eq!(lines[2], "  row a", "rows must survive intact: {out}");
+        assert_eq!(lines[3], "  row b");
+    }
+
+    #[test]
+    fn insert_below_header_handles_a_single_line_body_and_an_empty_extra() {
+        assert_eq!(
+            insert_below_header("0 lines".to_string(), "note\n"),
+            "0 lines\nnote\n",
+            "a body with no newline still gets the note appended below it"
+        );
+        assert_eq!(
+            insert_below_header("12 matches\n  row".to_string(), ""),
+            "12 matches\n  row",
+            "an empty extra must not perturb the body"
+        );
+    }
+
+    /// Every compact surface must keep its overflow note inside the prefix that
+    /// `truncate_compact` preserves.
+    ///
+    /// This is the regression test for the defect itself, and it is written end-to-end on
+    /// purpose: it renders through each tool's real `format_compact`, then applies the
+    /// real caps `call_content` uses, and asserts the note is still there. A test that
+    /// only exercised [`overflow_head`] would pass while all nine call sites went on
+    /// appending it at the tail — which is exactly the state this replaced.
+    ///
+    /// See `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`.
+    #[test]
+    fn every_surface_keeps_its_overflow_note_above_the_truncation_cap() {
+        use crate::tools::core::types::truncate_compact;
+        use crate::tools::{Tool, COMPACT_SUMMARY_HARD_MAX_BYTES, COMPACT_SUMMARY_MAX_BYTES};
+
+        let overflow = serde_json::json!({
+            "shown": 50, "total": 4321, "hint": "NARROW-WITH-THIS"
+        });
+
+        // Each payload is deliberately far past the hard cap — that is the condition
+        // under which the note used to disappear.
+        let long_rows: Vec<serde_json::Value> = (0..300)
+            .map(|i| serde_json::json!({"file": format!("src/dir/file_{i}.rs"), "count": i}))
+            .collect();
+        let entries: Vec<String> = (0..300).map(|i| format!("src/dir/file_{i}.rs")).collect();
+        let results: Vec<serde_json::Value> = (0..120)
+            .map(|i| {
+                serde_json::json!({
+                    "file_path": format!("src/dir/file_{i}.rs"),
+                    "start_line": 1, "end_line": 2,
+                    "content": "x".repeat(120),
+                })
+            })
+            .collect();
+
+        let cases: Vec<(&str, String)> = vec![
+            (
+                "grep",
+                crate::tools::grep::Grep
+                    .format_compact(&serde_json::json!({
+                        "total": 4321, "files": long_rows, "files_count": 300,
+                        "overflow": overflow,
+                    }))
+                    .expect("grep has a compact form"),
+            ),
+            (
+                "tree",
+                crate::tools::tree::Tree
+                    .format_compact(&serde_json::json!({
+                        "entries": entries, "overflow": overflow,
+                    }))
+                    .expect("tree has a compact form"),
+            ),
+            (
+                "semantic_search",
+                crate::tools::semantic::SemanticSearch
+                    .format_compact(&serde_json::json!({
+                        "results": results, "total": 4321, "overflow": overflow,
+                    }))
+                    .expect("semantic_search has a compact form"),
+            ),
+            (
+                "read_file",
+                crate::tools::read_file::ReadFile
+                    .format_compact(&serde_json::json!({
+                        "content": "some line of content\n".repeat(400),
+                        "total_lines": 4321,
+                        "overflow": overflow,
+                    }))
+                    .expect("read_file has a compact form"),
+            ),
+        ];
+
+        for (surface, rendered) in cases {
+            assert!(
+                rendered.len() > COMPACT_SUMMARY_HARD_MAX_BYTES,
+                "{surface}: the fixture must exceed the hard cap or this test proves \
+                 nothing — got {} bytes",
+                rendered.len()
+            );
+            let cut = truncate_compact(
+                &rendered,
+                COMPACT_SUMMARY_MAX_BYTES,
+                COMPACT_SUMMARY_HARD_MAX_BYTES,
+            );
+            assert!(
+                cut.contains("NARROW-WITH-THIS"),
+                "{surface}: the overflow hint was cut away — it must sit above the rows, \
+                 not after them. Cut summary:\n{cut}"
+            );
+            assert!(
+                cut.contains("4321"),
+                "{surface}: the withheld-count must survive the cut too. Cut summary:\n{cut}"
+            );
+        }
     }
 
     #[test]
