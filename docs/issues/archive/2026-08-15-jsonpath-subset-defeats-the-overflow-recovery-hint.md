@@ -274,16 +274,36 @@ precisely for this and answers it in one `GROUP BY`.
 
 ### Not verified live: `336d3b04`
 
-The depth-bounded hint refinement is committed but has **never run** — the on-disk binary
-(10:56:45) predates it (11:04:36), and no resident process carries it. It is covered by four
-unit tests in `src/tools/core/types.rs` (`json_path_hint_tests`), all green, the load-bearing
-one being `nested_payload_beats_a_shallow_but_smaller_array`.
+**Now verified live too**, after the 2026-08-16 11:56 rebuild — running build `a9a397a9`,
+which carries `336d3b04` as an ancestor (confirmed by `codescout_sha` on this session's own
+`tool_calls` rows).
 
-The live check above does not discriminate the two versions: `$.items[*]` is a **top-level**
-array, which `7c91cdf7`'s top-level-only scan and `336d3b04`'s depth walk both name. Its
-specific claim — a nested array beating a shallower one — awaits the next `cargo rb`. This
-does not gate the archive: the bug's symptom is `[*]` being rejected, and that is closed.
+The discriminator is a payload whose largest array is *not* top-level. The identical call,
+before and after the rebuild:
 
+    artifact(get, id="f2ecdd76a6189efb", heading="## Prompt improvement candidates")
+
+    build 7c91cdf7  ->  hint: json_path="$.tags[*]"              (4 strings, top level)
+    build a9a397a9  ->  hint: json_path="$.preview.headings[*]"  (22 records, two levels down)
+
+And the hinted path resolves:
+
+    read_file("@tool_09ccb144", json_path="$.preview.headings[*].text")  -> 22 heading titles
+
+The depth walk names the larger nested array with its full path, exactly as
+`nested_payload_beats_a_shallow_but_smaller_array` asserts. Four unit tests in
+`src/tools/core/types.rs` (`json_path_hint_tests`) cover it; all green.
+
+Worth recording precisely: **the earlier live check could not have caught a regression here.**
+`$.items[*]` is a top-level array, which `7c91cdf7`'s top-level-only scan and `336d3b04`'s
+depth walk name identically. A verification both versions pass is not a verification of the
+difference between them — the discriminating payload had to be picked on purpose.
+
+Remaining caveat, and it is BL-19's territory rather than this bug's: *largest* array is a
+proxy for *most useful* array. Here it named `$.preview.headings[*]` for a call whose point
+was the section body. The hint is now shape-correct and always resolves; whether it points at
+what the caller actually wanted is a separate question, tracked in
+`docs/issues/2026-08-16-content-free-overflow-envelope-costs-a-round-trip.md`.
 ### Gate
 
     cargo test --lib json_path   15 passed, 0 failed
