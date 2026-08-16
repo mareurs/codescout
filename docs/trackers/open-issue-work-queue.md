@@ -74,6 +74,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | `5f6cfe1acdfda38d` |
 | BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
+| BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | open | `60b5323f5e11be66` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
