@@ -27,10 +27,15 @@ was cut."
 
 ## Reproduction
 
-Not yet reproduced end-to-end on this host. To reproduce: run `grep` with a pattern
-broad enough to hit the collection cap (`hit_cap`) while the display budget is large
-enough to show every collected match, i.e. `budget >= total`.
+Reproduced on this host 2026-08-16, in the RED phase of the fix. Three files with
+three matches each (9 total), `limit=4`:
 
+```
+{"shown":4,"total":4,
+ "hint":"Showing 4 of 4 matches across 2 files. Narrow with one of: ..."}
+```
+
+No special setup was needed — see *Root cause*, the shape is not conditional.
 ## Environment
 
 Reported on macOS against `experiments @ d7988aca`. Mechanism verified on Linux at
@@ -38,31 +43,35 @@ Reported on macOS against `experiments @ d7988aca`. Mechanism verified on Linux 
 
 ## Root cause
 
-Two independent notions of "truncated" are conflated.
+Two independent notions of "truncated" are conflated — and one of them is unreachable.
 
-`src/tools/grep.rs:324`:
+`max` is bound **once** (`src/tools/grep.rs:81`, `let max = optional_u64_param(&input,
+"limit").unwrap_or(50)`) and then serves as *both*:
+
+- the collection break threshold — `if matches.len() >= max || emitted_bytes >=
+  MAX_TOTAL_MATCH_BYTES { hit_cap = true; break 'outer; }`
+- `cap_grouped`'s display budget — `let max_matches = max; cap_grouped(matches,
+  max_matches)` (`:339`)
+
+So `matches.len() <= max` on exit, `cap_grouped` is always called with `budget >= total`,
+and its early return hands back the input unchanged. **`visible.len() == total`
+unconditionally**, which makes the second disjunct of
 
 ```rust
-let (visible, total, files) = cap_grouped(matches, budget);
 let truncated = hit_cap || total > visible.len();
 ```
 
-`hit_cap` (set at `src/tools/grep.rs:208`, `:254`, `:273`) means **collection** stopped
-early — `matches` is already a truncated view of reality. `total > visible.len()` means
-**display** was capped.
+**dead**. `truncated` *is* `hit_cap`, and the hint therefore renders `Showing {N} of {N}`
+**every time it fires** — this is not an edge case reachable when `budget >= total`, it is
+the only thing the simple-mode hint has ever printed.
 
-`cap_grouped` (`src/tools/file_group.rs:50-109`) computes `let total = items.len()` and
-returns `(items, total, files)` unchanged when `budget >= total`. So in the
-collection-capped case `total` *is* the cap, `visible.len() == total`, and the hint at
-`src/tools/grep.rs:342`/`:351` renders `Showing {total} of {total}`.
+The real total is not merely unreported — after `hit_cap` it is **unknown**, because the
+walk stopped.
 
-The real total is not merely unreported — after `hit_cap` it is **unknown**, because
-the walk stopped.
-
-*Verified 2026-08-15 by reading `src/tools/grep.rs:300-362` (via `read_file` with
-`force=true`) and `symbols(name="cap_grouped", include_body=true)`. Inferred from
-source — not measured at runtime on this host.*
-
+*Verified 2026-08-16 by reading `:81`, `:200-300`, `:330-410` (`read_file force=true`),
+`symbols(name="cap_grouped", include_body=true)`, and confirming `max` has no other
+binding or mutation (`grep` over `grep.rs` returns exactly `:81`, `:339`, `:340`,
+`:712`). Confirmed at runtime by the RED test output above.*
 ## Evidence
 
 ### `cap_grouped` returns the input length as `total`
@@ -125,51 +134,99 @@ clean finding.
 Correction recorded in
 `docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md`
 § *And a second one, which was wrong*.
+
+### The renderer already knew better, and the hint overrode it
+
+`format_overflow` (`src/tools/format.rs:32-41`) branches on `total > shown` and, when
+they are equal, prints the honest form:
+
+```rust
+if total > shown { format!("  … showing {shown} of {total} — {hint}") }
+else             { format!("  … showing first {shown} — {hint}") }
+```
+
+So the rendered text was a **three-way contradiction** in five lines:
+
+```
+12 matches in 11 files                       <- header, states 12 as fact
+...
+  … showing first 12 — Showing 12 of 12 matches across 11 files. Narrow with ...
+     ^ honest             ^ re-asserts completeness
+```
+
+The one honest clause sits between two that contradict it, and is the shortest of the
+three. The header is read first and anchors; the hint is read last and confirms. Fixing
+only the hint would have left the header still stating a floor as a count, which is why
+the fix touches both.
 ## Hypotheses tried
 
 1. **Hypothesis:** `total` is the true match count and `hit_cap` only affects display.
    **Test:** read `cap_grouped` and the `hit_cap` assignment sites.
-   **Verdict:** rejected — `hit_cap` is set during the walk (`:208`, `:254`, `:273`),
-   before `cap_grouped` ever sees the vector, so `total` is post-cap by construction.
+   **Verdict:** rejected — `hit_cap` is set during the walk, before `cap_grouped` ever
+   sees the vector, so `total` is post-cap by construction.
 
+2. **Hypothesis:** "N of N" is the `budget >= total` special case, so the display-capped
+   branch handles the normal case correctly.
+   **Test:** trace `max` from its single binding (`:81`) through both uses.
+   **Verdict:** rejected — the display-capped branch is unreachable in this call path.
+   The bug is unconditional, not a corner. This is what the original filing got wrong.
+
+3. **Hypothesis:** report a truthful denominator instead.
+   **Verdict:** rejected — not available. `cap_grouped` never counts past the cap, and the
+   walk has already stopped. Any number after "of" invites the reader to treat it as the
+   total. The honest rendering is an explicit incompleteness marker.
 ## Fix
 
-Not yet implemented. Distinguish the two cases in the hint:
+Implemented 2026-08-16 on `experiments`. Three surfaces, because the misleading claim
+appears three times in one rendering:
 
-- **Display-capped** (`total > visible.len()`): "Showing N of M matches" is correct.
-- **Collection-capped** (`hit_cap`): say so — e.g. "Showing N matches; the search
-  stopped at the collection cap, so the true total is unknown. Narrow the pattern."
+1. **`Grep::call` simple-mode hint** (`src/tools/grep.rs:~350`) — branches on `hit_cap`.
+   The collection-capped arm prints no denominator at all:
 
-Apply to both `src/tools/grep.rs:342`/`:351` and the `grep_in_buffer` twin at `:783`.
+   > `Collection stopped at limit=4, so the true total is unknown — 4 matches across 2
+   > files is a floor, not a count. To see more, raise limit, or narrow with one of: … `
 
+   The byte-capped variant says `raising limit will not help` instead, since it won't.
+   The display-capped arm is kept correct but marked unreachable in a comment.
+
+2. **`overflow.total_is_lower_bound: true`** — the machine-readable twin. `shown ==
+   total` cannot carry the distinction on its own, and a consumer reading JSON never sees
+   the prose hint.
+
+3. **The header line** (`format_search_simple_mode`) — takes a `total_is_floor` flag and
+   renders `4 matches (capped) in 2 files`. The qualifier travels with the number rather
+   than sitting two lines below it, because the header is what a reader anchors on.
+
+`grep_in_buffer` gets the same treatment plus the `byte_capped` flag it was missing, so
+`@cmd_*` / `@tool_*` searches report which cap fired.
 ## Tests added
 
-None yet. Needs a test constructing `hit_cap == true` with `budget >= total` and
-asserting the hint does not claim "N of N".
+- `grep_capped_collection_never_renders_as_a_complete_result` — table with **two rows**,
+  capped (`limit=4`) and complete (`limit=50`), over the same 9 matches. The complete row
+  **was green before the fix** and is the point: the defect is that the two renderings
+  were byte-identical, so a test asserting only on the capped string would have passed
+  against the buggy output. Asserts the capped hint carries no `of N matches`, that it
+  names the total as unknown, that `total_is_lower_bound` is set, and that the capped
+  *first line* differs from the complete one.
+- `grep_buffer_capped_collection_marks_the_total_as_a_floor` — the `grep_in_buffer` twin.
+  It carries its own copy of the collect-then-`cap_grouped` sequence, so a one-site fix
+  would have left it reporting `shown == total` with nothing marking the floor.
 
+Both were watched fail first; failure output is quoted under *Reproduction*.
 ## Workarounds
 
-When a `grep` result says "Showing N of N", treat N as a floor, not a total. Re-run with
-a narrower pattern or `mode="files"` for a per-file count summary.
-
+No longer needed on `experiments`. Before the fix: when a `grep` result said "Showing N of
+N", treat N as a floor, not a total, and re-run with a narrower pattern or `mode="files"`.
 ## Resume
 
-Edit the hint construction at `src/tools/grep.rs:332-360` to branch on `hit_cap` versus
-`total > visible.len()` rather than collapsing both into one string; mirror into
-`grep_in_buffer` at `src/tools/grep.rs:775-800`. Add a regression test.
+Gate green (3745 lib tests, clippy `-D warnings`, fmt). Pending: live MCP verification
+after `cargo rb` + `/mcp`, then archive with the commit SHA.
 
-**Design note added 2026-08-16 from the live instance above.** A truthful
-denominator is not enough on its own, because when collection stops at the cap the
-real total is *unknown* — `cap_grouped` never counted past it. So the honest
-rendering is not "12 of 847" but an explicit incompleteness marker: `Showing 12
-matches (collection stopped at the cap — more may exist; raise limit or narrow the
-pattern)`. Anything that prints a number after "of" invites the reader to treat it
-as the total.
-
-The regression test should assert on the **capped** case specifically, and assert
-the rendered string does *not* match the complete-result form — the defect is that
-the two are byte-identical, so a test that only checks the capped string in
-isolation would pass against the current buggy output too.
+**A second defect surfaced while fixing this one** and is filed separately: because
+collection stops at `max` in walk order, `cap_grouped`'s file-diversity round-robin never
+runs in the grep path, so the "Narrow with one of: …" file list is drawn from a
+walk-order-biased sample rather than the hottest files.
+→ `docs/issues/2026-08-16-grep-file-diversity-round-robin-never-runs.md`
 ## References
 
 - `docs/trackers/bistriceanu/index.md` § B-5

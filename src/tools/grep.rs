@@ -354,24 +354,49 @@ impl Tool for Grep {
                     .take(3)
                     .map(|g| format!("path=\"{}\" ({} matches)", g.file, g.items.len()))
                     .collect();
-                let hint = if top.is_empty() {
+                let narrow = if top.is_empty() {
+                    "narrow with a more specific pattern or add path=<file>".to_string()
+                } else {
+                    format!("narrow with one of: {}", top.join(", "))
+                };
+                // `max` is BOTH the walk's break threshold (`:81`) and cap_grouped's
+                // budget (`:339`), so a collection cap always lands on
+                // `visible.len() == total`. Printing "N of N" there emits the exact
+                // string a COMPLETE result prints: the reader cannot tell a capped
+                // sample from an exhaustive one, and a capped sample that happens to be
+                // homogeneous reads as a finding. Never print a denominator the walk
+                // never counted.
+                // BL-2 / docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md
+                let hint = if hit_cap {
+                    let (stopped_at, more) = if byte_capped {
+                        (
+                            "the output byte budget".to_string(),
+                            "raising limit will not help — shorten the matched lines or",
+                        )
+                    } else {
+                        (format!("limit={max}"), "raise limit, or")
+                    };
+                    format!(
+                        "Collection stopped at {stopped_at}, so the true total is unknown — \
+                         {} matches across {} files is a floor, not a count. \
+                         To see more, {more} {narrow}. \
+                         Or mode=\"files\" for a per-file count summary.",
+                        visible.len(),
+                        files
+                    )
+                } else {
+                    // Currently unreachable: `truncated` is `hit_cap || total >
+                    // visible.len()`, and the second disjunct cannot fire while
+                    // `max` serves as both thresholds. Kept correct rather than
+                    // deleted, so decoupling the display budget from the collection
+                    // cap stays a one-line change.
                     format!(
                         "Showing {} of {} matches across {} files. \
-                         Narrow with a more specific pattern or add path=<file>. \
+                         To trim, {narrow}. \
                          Or mode=\"files\" for a per-file count summary.",
                         visible.len(),
                         total,
                         files
-                    )
-                } else {
-                    format!(
-                        "Showing {} of {} matches across {} files. \
-                         Narrow with one of: {} — or use a more specific pattern. \
-                         Or mode=\"files\" for a per-file count summary.",
-                        visible.len(),
-                        total,
-                        files,
-                        top.join(", ")
                     )
                 };
                 let mut overflow = json!({
@@ -379,6 +404,12 @@ impl Tool for Grep {
                     "total": total,
                     "hint": hint,
                 });
+                if hit_cap {
+                    // `total` is what the walk collected before stopping, not what
+                    // exists. Machine readers need that distinction as much as prose
+                    // readers do — `shown == total` alone cannot carry it.
+                    overflow["total_is_lower_bound"] = json!(true);
+                }
                 if byte_capped {
                     // Say WHICH cap fired: "40 of 900 matches" and "stopped at 60KB"
                     // call for different next moves.
@@ -490,7 +521,13 @@ pub(super) fn format_grep(val: &Value) -> String {
     //           files[]      → files mode (per-file ranked counts).
     if let Some(groups) = val["file_groups"].as_array() {
         let files = val["files"].as_u64().unwrap_or(0) as usize;
-        format_search_simple_mode(&mut out, groups, total, files);
+        // Set only when the walk stopped early, so `total` is a lower bound.
+        let total_is_floor = val
+            .get("overflow")
+            .and_then(|o| o.get("total_is_lower_bound"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        format_search_simple_mode(&mut out, groups, total, files, total_is_floor);
     } else if let Some(flat) = val["matches"].as_array() {
         let match_word = if total == 1 { "match" } else { "matches" };
         out.push_str(&format!("{total} {match_word}\n"));
@@ -526,11 +563,25 @@ pub(super) fn format_grep(val: &Value) -> String {
     out
 }
 
-fn format_search_simple_mode(out: &mut String, file_groups: &[Value], total: usize, files: usize) {
+fn format_search_simple_mode(
+    out: &mut String,
+    file_groups: &[Value],
+    total: usize,
+    files: usize,
+    total_is_floor: bool,
+) {
     use crate::tools::file_group::{groups_from_json, render_grouped};
 
     let groups = groups_from_json(file_groups);
-    let noun = if total == 1 { "match" } else { "matches" };
+    // The header is the line a reader anchors on, and it is read before the overflow
+    // hint two lines below. When collection stopped early `total` is a floor, so a
+    // bare "N matches in M files" states as fact something the walk never
+    // established — the qualifier has to travel with the number.
+    let noun = match (total, total_is_floor) {
+        (_, true) => "matches (capped)",
+        (1, false) => "match",
+        (_, false) => "matches",
+    };
 
     let render_item = |item: &Value| -> String {
         let line = item["line"].as_u64().unwrap_or(0);
@@ -759,6 +810,9 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     // the filesystem path above and needs the same clamp — a buffered command's
     // output can be one enormous line just as easily as a minified file can.
     let mut emitted_bytes = 0usize;
+    // Mirrors the filesystem path: which cap fired decides whether raising `limit`
+    // is even the right advice.
+    let mut byte_capped = false;
 
     if context_lines == 0 {
         for (i, line) in text.lines().enumerate() {
@@ -773,6 +827,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
                 }));
                 if matches.len() >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                     hit_cap = true;
+                    byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                     break;
                 }
             }
@@ -815,6 +870,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
 
             if total_match_count >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                 hit_cap = true;
+                byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                 break;
             }
         }
@@ -853,11 +909,34 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
             "files": files,
         });
         if truncated {
-            r["overflow"] = json!({
+            // Same rule as the filesystem path: after a collection cap, `total` is
+            // what we managed to collect, not what exists. Publishing it beside an
+            // equal `shown` with nothing marking it a floor reads as complete.
+            // BL-2 / docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md
+            let mut overflow = json!({
                 "shown": visible.len(),
                 "total": total,
-                "hint": "Many matches. Narrow the pattern.",
             });
+            if hit_cap {
+                let stopped_at = if byte_capped {
+                    "the output byte budget".to_string()
+                } else {
+                    format!("limit={max}")
+                };
+                overflow["hint"] = json!(format!(
+                    "Collection stopped at {stopped_at}, so the true total is unknown — \
+                     {} matches is a floor, not a count. Raise limit or narrow the pattern.",
+                    visible.len()
+                ));
+                overflow["total_is_lower_bound"] = json!(true);
+                if byte_capped {
+                    overflow["reason"] = json!("byte budget");
+                    overflow["truncated_bytes"] = json!(true);
+                }
+            } else {
+                overflow["hint"] = json!("Many matches. Narrow the pattern.");
+            }
+            r["overflow"] = overflow;
         }
         r
     } else {
@@ -1292,6 +1371,141 @@ mod tests {
         assert!(
             hint.contains("matches"),
             "hint must include match counts so the model can pick, got: {hint}"
+        );
+    }
+
+    /// BL-2 / `docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md`.
+    ///
+    /// `max` is BOTH the collection break threshold and `cap_grouped`'s budget
+    /// (bound once at `:81`, reused at `:339`), so whenever the walk stops early
+    /// `visible.len() == total` and the overflow hint rendered "Showing N of N
+    /// matches" — byte-identical to what a genuinely complete result prints.
+    ///
+    /// The defect IS that identity, so a test inspecting only the capped string
+    /// would have passed against the buggy output. Both rows are therefore
+    /// load-bearing: the `complete` row pins what "nothing was hidden" looks like,
+    /// and was green before the fix.
+    ///
+    /// Mutation caught: restoring `Showing {n} of {total}` makes the capped render
+    /// indistinguishable from the complete one again.
+    #[tokio::test]
+    async fn grep_capped_collection_never_renders_as_a_complete_result() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        // 3 files x 3 matches = 9. limit=4 stops the walk inside the second file,
+        // so `files == 2` whatever order the walker visits them in.
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(
+                dir.path().join(name),
+                "fn target_1() {}\nfn target_2() {}\nfn target_3() {}\n",
+            )
+            .unwrap();
+        }
+
+        let ctx = test_ctx().await;
+        let tool = Grep;
+        let path = dir.path().to_str().unwrap();
+
+        let capped = tool
+            .call(
+                json!({ "pattern": "target", "path": path, "limit": 4 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let complete = tool
+            .call(
+                json!({ "pattern": "target", "path": path, "limit": 50 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // --- control row: a complete result hides nothing and says so by omission.
+        assert!(
+            complete.get("overflow").is_none(),
+            "limit=50 over 9 matches must not overflow, got: {complete}"
+        );
+        assert_eq!(complete["total"].as_u64(), Some(9));
+
+        // --- the row under test.
+        let overflow = capped
+            .get("overflow")
+            .expect("limit=4 over 9 matches must overflow");
+        assert_eq!(
+            overflow
+                .get("total_is_lower_bound")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "a collection-capped result must mark its total as a floor, got: {overflow}"
+        );
+
+        let hint = overflow["hint"]
+            .as_str()
+            .expect("overflow.hint is a string");
+        assert!(
+            !hint.contains("of 4 matches"),
+            "the hint must not print a denominator it never counted — that is the \
+             exact string a complete result prints. Got: {hint}"
+        );
+        assert!(
+            hint.contains("true total is unknown"),
+            "the hint must say the total is unknown, got: {hint}"
+        );
+
+        // --- the cross-row assertion: the two renderings must not be confusable,
+        // on the header line a reader anchors on before reaching the hint.
+        let capped_text = tool.format_compact(&capped).unwrap();
+        let complete_text = tool.format_compact(&complete).unwrap();
+        assert!(
+            !complete_text.contains("capped"),
+            "a complete result must carry no incompleteness marker, got:\n{complete_text}"
+        );
+        let header = capped_text.lines().next().unwrap_or_default();
+        assert!(
+            header.contains("capped"),
+            "the capped result's FIRST line must not read as a plain count — that is \
+             the line a reader anchors on. Got: {header}"
+        );
+    }
+
+    /// The buffer twin. `grep_in_buffer` carries its own copy of the
+    /// collect-then-`cap_grouped` sequence (`:846`), so a fix applied only to the
+    /// filesystem path leaves `@cmd_*` / `@tool_*` searches still publishing a
+    /// `total` equal to `shown` with nothing marking it as a floor.
+    #[tokio::test]
+    async fn grep_buffer_capped_collection_marks_the_total_as_a_floor() {
+        use serde_json::json;
+        let ctx = test_ctx().await;
+        let body: String = (0..20).map(|i| format!("target_{i}\n")).collect();
+        let raw = json!({ "id": "abc", "body": body }).to_string();
+        let buf_id = ctx.output_buffer.store_tool("artifact", raw);
+
+        let tool = Grep;
+        let result = tool
+            .call(
+                json!({ "pattern": "target_", "path": buf_id, "limit": 5 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let overflow = result
+            .get("overflow")
+            .expect("limit=5 over 20 buffer matches must overflow");
+        assert_eq!(
+            overflow
+                .get("total_is_lower_bound")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "the buffer path must mark a collection-capped total as a floor, got: {overflow}"
+        );
+        let hint = overflow["hint"]
+            .as_str()
+            .expect("overflow.hint is a string");
+        assert!(
+            hint.contains("true total is unknown"),
+            "the buffer hint must say the total is unknown, got: {hint}"
         );
     }
 
