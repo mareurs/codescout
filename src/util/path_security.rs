@@ -310,8 +310,14 @@ pub fn classify_write_path(
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
+        // Says what will NOT work, deliberately. This message shares the
+        // `write_scope_denied` family with the approvable case above, so a reader who has
+        // learned "write denied → call approve_write" would otherwise spend a call
+        // discovering that the hard denials cannot be approved.
         return WritePathDecision::Denied(format!(
-            "write denied: '{}' contains '..' that could not be resolved",
+            "write denied: '{}' contains '..' that could not be resolved. \
+             approve_write cannot grant this — the path itself is rejected, not its \
+             location; pass a path with no unresolved '..' segments.",
             raw
         ));
     }
@@ -323,7 +329,9 @@ pub fn classify_write_path(
     let denied = denied_read_paths(config);
     if is_denied(&resolved, &denied) {
         return WritePathDecision::Denied(format!(
-            "write denied: '{}' is in a protected location",
+            "write denied: '{}' is in a protected location. approve_write cannot grant \
+             this — the deny-list is checked first and holds even inside an approved \
+             directory.",
             raw
         ));
     }
@@ -378,11 +386,29 @@ pub fn validate_write_path(
 ) -> Result<PathBuf> {
     match classify_write_path(raw, project_root, config, session_roots) {
         WritePathDecision::Allowed(p) => Ok(p),
-        WritePathDecision::OutsideRoot { .. } => bail!(
-            "write denied: '{}' is outside the project root. \
-             Call approve_write('<dir>') first to grant write access for this session.",
-            raw
-        ),
+        // The directory to approve is derivable right here — `OutsideRoot` carries
+        // `resolved` — and this arm used to match `{ .. }` and throw it away, printing a
+        // literal `'<dir>'` placeholder. Worse, `approve_write('<dir>')` is not a callable
+        // shape at all: the tool takes a NAMED `path` parameter, so an agent following the
+        // message verbatim earned a second error. `write_ack.rs` derives the same
+        // directory the same way when minting an ack handle.
+        //
+        // Measured 2026-08-15: 26% of write denials are followed by retrying the same
+        // denied write — the highest immediate-repeat rate in the corpus. The comparison
+        // that makes the mechanism legible is `il3_pipe_to_trimmer`, whose message carries
+        // a concrete corrective action and repeats at 3%.
+        //
+        // See `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
+        WritePathDecision::OutsideRoot { resolved } => {
+            let dir = resolved.parent().unwrap_or(resolved.as_path());
+            bail!(
+                "write denied: '{}' is outside the project root. \
+                 Call approve_write(path=\"{}\") first to grant write access for this \
+                 session.",
+                raw,
+                dir.display()
+            )
+        }
         WritePathDecision::Denied(msg) => bail!("{msg}"),
     }
 }
@@ -2841,6 +2867,72 @@ EOF"#;
         assert!(
             matches!(decision, WritePathDecision::OutsideRoot { .. }),
             "got: {decision:?}"
+        );
+    }
+
+    /// A write denial must hand back a corrective action the reader can *execute*, not
+    /// merely the name of a tool.
+    ///
+    /// The message used to read `Call approve_write('<dir>')`, which fails twice over: the
+    /// directory is a literal placeholder, and `approve_write` has no positional form — it
+    /// takes a named `path`. An agent following it verbatim earned a second error, which
+    /// is the mechanism behind the measured behaviour: 26% of write denials are followed
+    /// by retrying the same denied write, the highest immediate-repeat rate in the corpus,
+    /// against 3% for `il3_pipe_to_trimmer` whose message carries a concrete action.
+    ///
+    /// See `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
+    #[test]
+    fn write_denial_names_an_approve_write_call_that_can_be_run_verbatim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = PathSecurityConfig::default();
+        let err = validate_write_path("/var/ce_denial_msg/x.rs", tmp.path(), &cfg, &[])
+            .expect_err("a path outside the project root must be denied");
+        let msg = err.to_string();
+
+        // Keeps `usage::db::normalize_err_family` classifying this as write_scope_denied —
+        // the family the 26% was measured over.
+        assert!(msg.contains("write denied"), "{msg}");
+
+        // The actual directory, not a placeholder. This is the whole fix.
+        assert!(
+            msg.contains("/var/ce_denial_msg"),
+            "the denial must name the directory to approve, which OutsideRoot already \
+             carries: {msg}"
+        );
+        assert!(
+            !msg.contains("<dir>"),
+            "a placeholder is not a corrective action: {msg}"
+        );
+
+        // The named-parameter form, because the positional one does not exist.
+        assert!(
+            msg.contains("approve_write(path="),
+            "approve_write takes a named `path`; a positional call shape sends the reader \
+             into a second error: {msg}"
+        );
+    }
+
+    /// The hard denials share the `write_scope_denied` family with the approvable case, so
+    /// they must say that approving will not help — otherwise a reader who has learned
+    /// "write denied → approve_write" spends a call finding out.
+    #[test]
+    fn hard_denials_say_that_approve_write_will_not_help() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = PathSecurityConfig::default();
+
+        // `..` only survives canonicalization when an intermediate directory does not
+        // exist — the branch's own comment says so, and `/var/..` resolves cleanly, so a
+        // path built from real directories takes the OutsideRoot arm instead.
+        let WritePathDecision::Denied(msg) =
+            classify_write_path("no-such-dir-xyz/../escape.rs", tmp.path(), &cfg, &[])
+        else {
+            // If this ever classifies differently the message contract still needs a home;
+            // fail loudly rather than skipping the assertion.
+            panic!("an unresolved '..' must be a hard Denied, not approvable");
+        };
+        assert!(
+            msg.contains("approve_write cannot grant this"),
+            "an unapprovable denial must say so: {msg}"
         );
     }
 
