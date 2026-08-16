@@ -1203,6 +1203,24 @@ mod redesign_invariants {
             MAX_INSTRUCTIONS_CHARS,
         );
     }
+    /// B-9 regression
+    /// (docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md):
+    /// the guide once claimed `cat src/foo.rs` was "allowed on bounded files".
+    /// The gate is a *path* predicate (`check_source_file_access`, called from
+    /// `src/tools/run_command/inner.rs` Step 2.5) with no per-command carve-out —
+    /// measured 0/10 unaided survival against the false sentence
+    /// (prompt-engineering scenarios/conclude-last, trap t2). The guide must state
+    /// the block and the real override, and never re-grow the phantom carve-out.
+    #[test]
+    fn iron_laws_detail_gate_claim_matches_path_predicate() {
+        let body = crate::prompts::topic_body("iron-laws-detail").expect("guide registered");
+        assert!(
+            !body.contains("allowed on bounded files"),
+            "B-9 false claim resurfaced: the shell gate has no bounded-file carve-out"
+        );
+        assert!(body.contains("by path, not by command"));
+        assert!(body.contains("acknowledge_risk: true"));
+    }
 
     #[test]
     fn every_iron_law_has_do_instead() {

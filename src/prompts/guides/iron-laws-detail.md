@@ -96,9 +96,13 @@ Windows `find` is ambiguous — cmd.exe ships its own `find` (a
 string filter) that shadows the Unix `find`, and `find "x"` with
 no file argument reads stdin and hangs the command.
 
-**Read-mode for source code is blocked.** `cat src/foo.rs` is
-allowed on bounded files but the broader "shell on source" pattern
-is intercepted with a hint to route through `symbols`.
+**Read-mode for source code is blocked — by path, not by command.**
+`cat`, `wc`, `sed`, `ls` on `src/foo.rs` all refuse with `shell access
+to source files is blocked`, regardless of how bounded or read-only
+the command is: the gate's predicate is the source *path* in the
+resolved command, and there is no per-command carve-out. Route
+through `symbols` / `read_file` / `grep`, or pass
+`acknowledge_risk: true` for genuine raw shell access.
 
 **Why this matters:** every `@cmd_*` buffer is queryable for the
 rest of the session via `grep PATTERN @cmd_xxx`, `tail -N @cmd_xxx`,
