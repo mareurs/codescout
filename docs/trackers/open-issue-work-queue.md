@@ -218,3 +218,66 @@ That near-miss is the argument for the snapshot, independent of git: **params ha
 no `force` gate, no report of what a write destroyed, and no version control** — all four of which
 the body surface has. The less-protected surface is the one with no backup. Keep a rendered table in
 the body of every entry-bearing tracker.
+
+
+### 2026-08-16 — six fixed and archived; the queue's own tooling was most of the work
+
+**Shipped, all on `experiments`, all fast-forward (so each SHA *is* the master SHA):**
+
+| BL | what | SHA |
+|---|---|---|
+| BL-1 | `[*]` projection + payload-derived hint (+ depth walk) | `7c91cdf7`, `336d3b04` |
+| BL-20 | `update_entry` — entry-grain patching; always-on entry counts | `02a87a83` |
+| BL-21 | librarian guard hoisted into `read_edit_target` (all 3 write paths) | `47abcb6d` |
+| BL-22 | `move` grafts history onto the new id instead of stranding it | `2d8c7f39` |
+| BL-26 | `librarian-runtime` guide corrected + guard test over every guide | `6018b7ad` |
+| BL-27 | `entry`-param guard fires whenever `entry` is present | `6018b7ad` |
+
+Plus `61ab520a`: **14 `fixed`-but-unarchived bug files archived**, and three deliberately
+left open because their Resumes describe real undone work —
+`audit-doc-refs-gate-hides-its-own-cause`, `edit-code-remove-ast-repair-over-deletes`,
+`workspace-toml-mis-rooted`. Those three were indistinguishable from the other fourteen by
+status, path or age; only reading the Resumes separated them.
+
+**BL-22 is the one to understand before touching the catalog.** `move` used to preserve an
+artifact's id while changing its path, which breaks the invariant `doctor.rs` states twice
+(`id == artifact_id_from_abs(abs_path)`). The next `reindex` then re-keyed the row and
+`upsert`'s abs_path pre-clean cascade-deleted its events. Measured: one reindex took the
+catalog from **1845 to 1834 events while reporting `removed: 0`**, and archived bug files
+carried 0.02 events/row against 0.65 for live ones. Fixing it is what made the 14-file
+sweep above safe to run at all.
+
+**Two guards were written to the reproduction rather than the condition**, hours apart:
+`edit_file`'s covered 1 write path of 3, and `update_entry`'s read
+`entry.is_some() && fields.is_none()` so sending both dropped `entry` again. Both were
+caught by the other session. The test shape that catches this class is a table containing a
+row that was **green before the fix** — it proves the table discriminates rather than
+refusing everything.
+
+### Resume — state at compaction, 2026-08-16
+
+**18 of 30 rows open.** Phase 1 remaining: BL-2, BL-3, BL-4, BL-6, BL-7, BL-19, BL-25.
+BL-29/BL-30 are the other session's.
+
+**BL-2 has fresh evidence and is the natural next.** It fired live this session and produced
+a **false claim in a committed artifact**: `grep(…, limit=12)` answered *"Showing 12 of 12
+matches"*, which is byte-identical to what a complete result prints, and the homogeneous
+capped sample was written up as a finding. Corrected in
+`docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md`
+§ *And a second one, which was wrong*; the evidence and a design note are in BL-2's own
+file (`4059035cf39e6aab`). Note the design constraint recorded there: a truthful denominator
+is **not** available — `cap_grouped` never counts past the cap — so the fix is an explicit
+incompleteness marker, not "12 of 847".
+
+**Working practices this session settled, worth keeping:**
+
+- **Verify a fix is live by invoking it**, never by inspecting the binary or `codescout_sha`.
+  Three signals disagreed within one minute; only the tool call interrogates the process
+  serving the call. (T-20; the dirty-build half is BL-24.)
+- **Archive with `artifact(action="move")` and read `id_changed`** — the id changes, so
+  re-point prose citing the old one in the same commit, ids as well as paths.
+- **Patch tracker rows with `update_entry`**, never `patch={params:…}` — the latter replaces
+  the collection.
+- **A concurrent session shares this working tree and index.** Commit by pathspec; check
+  `git status` before staging. Their surfaces right now: `reconnaissance-patterns.md`
+  (R-N — leave alone), `archive-cadence-policy.md`, the benchmark trackers.

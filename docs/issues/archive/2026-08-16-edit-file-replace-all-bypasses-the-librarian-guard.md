@@ -236,15 +236,59 @@ path that could mutate.
 
 This file originally asserted that "`edit_markdown` correctly refuses a managed
 artifact" — taken from `get_guide("librarian")`, never observed. Checked properly
-before fixing: `read_markdown` on the same tracker does refuse, and the file
-carries `id: abc513d3ee0f0b50` **unquoted**, which is what `is_librarian_artifact`
-keys on. The premise held; the way it had been arrived at did not.
+before fixing: `read_markdown` on `docs/trackers/tool-usage-patterns.md` does
+refuse, and the file carries `id: abc513d3ee0f0b50` **unquoted**, which is what
+`is_librarian_artifact` keys on. The premise held; the way it had been arrived at
+did not.
 
-Worth recording alongside it: every `id:` in `docs/issues/` and `docs/adrs/` is
-**quoted** (`id: '74c1aa5018287728'`) or `null`, and the heuristic requires 16
-unquoted hex chars. So the guard effectively covers `docs/trackers/` and little
-else. Not touched here — it is a separate question from this bug, and closing the
-write-path gap does not depend on it.
+### And a second one, which was wrong — corrected 2026-08-16
+
+Alongside it this file claimed:
+
+> every `id:` in `docs/issues/` and `docs/adrs/` is **quoted** or `null` … So the
+> guard effectively covers `docs/trackers/` and little else.
+
+**That is false.** Counted properly:
+
+```
+unquoted 16-hex `id:` (what the guard matches), by directory:
+    27  docs/issues/archive        <- the largest group, not docs/trackers
+    12  docs/trackers
+     3  docs/issues
+     2  docs/trackers/archive
+     2  docs/plans
+     1  each: docs/trackers/bistriceanu, docs/superpowers/specs,
+            docs/superpowers/plans, docs/research
+
+191 files carry any `^id:` line; 141 are quoted or null.
+```
+
+So the guard covers **50** files, and `docs/issues/archive/` — not `docs/trackers/`
+— is where most of them are. The true statement is narrower and less interesting:
+*most* frontmatter ids are quoted, so most files are unguarded; the guarded set is
+not confined to trackers.
+
+**How the wrong version got written, because that is the reusable part.** The
+supporting grep was `grep(pattern="^id: ", glob="docs/**/*.md", limit=12)`. It
+returned:
+
+```
+12 matches in 11 files … Showing 12 of 12 matches across 11 files.
+```
+
+"12 of 12" reads as *complete*. It is not — collection stopped at the `limit`, and
+the denominator is the capped count, not the total. Every one of the 12 happened
+to be quoted or `null`, so the conclusion looked clean and was drawn from a
+truncated sample that never reached `docs/trackers/`.
+
+That is precisely the defect filed as **BL-2** (`4059035cf39e6aab`, *"grep prints a
+self-refuting 'Showing N of N' when collection hit the cap"*), observed here
+producing a **false claim in a committed artifact** rather than merely a confusing
+response. The glob was never the problem — re-running the same glob with a
+specific pattern found the tracker immediately.
+
+The adjacent question this raised is left open on its own terms: whether the
+quoted-id majority being unguarded is intended or an oversight.
 ## Tests added
 
 `librarian_guard_fires_on_every_edit_file_write_path`

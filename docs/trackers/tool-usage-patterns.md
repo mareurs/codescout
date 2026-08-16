@@ -365,6 +365,66 @@ That is the guard working as designed — and the "same-tool recovery" metric sc
 because the correct answer is a *different* tool. One guard, two populations: healthy for
 symbol-body reads, structurally wrong for non-definition text.
 
+### T-19 — A `limit` turned "none of these" into "none exist"
+
+`grep(pattern="^id: ", glob="docs/**/*.md", limit=12)` → *"Showing 12 of 12 matches
+across 11 files."* All 12 quoted or `null`, so the claim written — and committed — was
+that codescout's librarian guard "covers `docs/trackers/` and little else".
+
+Counted without a limit: **50** files carry an unquoted 16-hex `id:`, the largest group
+being `docs/issues/archive` (27), ahead of `docs/trackers` (12).
+
+The glob was never at fault — the same glob with a narrower pattern found the tracker
+on the first try. The denominator was. This is **BL-2** seen producing a false claim in
+shipped prose, which is a different severity argument from the one it was filed on:
+`Showing N of N` is byte-identical to the string a complete result prints, so a capped
+sample is indistinguishable from an exhaustive one and there is nothing to notice.
+
+**Caller-side habit, independent of the fix:** any grep whose result will support a
+claim about *absence* must run without a limit. A limit converts "none of these" into
+"none exist".
+
+### T-20 — Three proxies for "what code is running", none of them the process
+
+Asking whether a just-committed fix was live, `strings target/release/codescout` found
+the new response fields, and that was taken as confirmation. The conclusion was right;
+the evidence was not — `strings` reads the **on-disk binary**, which is not the image a
+long-lived server process is running. That is the same reason `codescout_sha` is the
+recommended discriminator, so the check reached for exactly the artifact the
+recommendation exists to replace.
+
+Measured in one minute, all disagreeing:
+
+| signal | said |
+|---|---|
+| `codescout version` (on-disk) | `8ad83c42`, `git_dirty: true` |
+| running server's `usage.db` rows | `536b9581` |
+| code actually executing | neither — contained `2d8c7f39` |
+
+What settled it was **calling the changed behaviour** and reading the response. Only a
+tool call interrogates the process serving the call; every other signal is a correlate.
+(The dirty-build half is filed as BL-24.)
+
+### T-21 — The docs demonstrated the dangerous path for the narrow task
+
+Flipping one row's status on a 24-row tracker required re-sending all 24 rows through
+`patch={params:…}`, whose RFC 7396 array semantics **replace** the collection. That call
+had already taken this queue from 19 rows to 1 earlier in the same session.
+
+`artifact(action="update_entry", entry_id=…, fields=…)` now patches one row in place —
+three rows flipped, `entries_total` 24 before and 24 after — and `artifact(update)`
+reports `entries_before`/`entries_after` on *every* params write, so a mistaken replace
+is visible in the response that performed it.
+
+The prompt-side half is the sharper finding: **CLAUDE.md's own worked example for this
+tracker was the read-then-write that causes the loss** (`params={observations:
+[...existing..., new]}`), and its step 2 used `edit_markdown` on a managed file, which is
+refused. Both corrected, with two librarian-guide sections that recommended
+`artifact_augment(merge=true)` for adding rows.
+
+General shape worth carrying: when a tool has a safe narrow path and a dangerous general
+one, the docs must not demonstrate the general one for a narrow task.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
