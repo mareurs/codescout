@@ -102,6 +102,48 @@ minutes earlier — "without it the rows would have been gone with no copy
 anywhere." So the snapshot is not cosmetic; it is the only backup of catalog
 state. A stale snapshot is a stale backup.
 
+
+### Third instance, same day — `update_entry`, and a worse sub-shape
+
+2026-08-16, ~5h after this file was opened, on `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`
+(`ac8fbe339e66ade3`). Two `update_entry` calls flipped GF-5 and GF-8:
+
+```
+artifact(update_entry, entry_id="GF-8", fields={...})
+-> {"changed_fields":["title","status","target"], "entries_total":8}   # success
+git commit --only <tracker>
+-> "no changes added to commit"
+```
+
+Three things this adds to the record:
+
+**1. It is not only `append_entry`.** `update_entry` has the identical shape — a success
+envelope naming the fields it changed, and no write to the file. The Fix and Resume sections
+below already name `UpdateEntryOutcome`; this is the field instance confirming it.
+
+**2. A worse sub-shape: the snapshot that never existed.** This bug is written about a
+snapshot going *stale*. Here the tracker was created with `augment={render_template,
+entry_collection, params:{findings:[8 rows]}}` and a hand-written body that contained **no
+rendered table at all**. `artifact(action="create")` accepted it and reported success. So the
+failure was not drift — it was **absence**: eight findings existed in the catalog and zero in
+git, and every reader on another machine would have seen a tracker with no findings. The
+tracker was born broken, and nothing at create time said so.
+
+**3. The documented workaround has a hole, and it is exactly this case.** § Workarounds says
+*"after every `append_entry` / `update_entry` on a tracker **with a rendered table**, edit the
+table in the same turn."* When there is no rendered table, the precondition is false, the
+workaround silently does not apply — and the outcome is worse than the case it guards. A
+workaround that is conditional on the artifact already being half-correct cannot catch the
+artifact that was never correct.
+
+**Detection differed too, and was slower.** The first two instances were caught by
+`grep <new-id> <file>` returning 0. This one surfaced as `git commit` reporting *"no changes
+added to commit"* — which reads as *"my edit did not apply"*, not as *"my edit went to a
+database outside version control"*. The later and more misleading signal is the one an author
+hits when they were not already suspicious.
+
+**Repaired by** giving the body a real `## Findings index` table plus a note stating it is
+hand-synced and why (`e3dd375f`).
 ## Hypotheses tried
 
 1. **Hypothesis** — `reindex` reconciles the body from params. **Test** — ran
@@ -126,6 +168,14 @@ Options, in preference order:
    drift the other two options do not.
 
 1 and 3 are complementary and cheap; 2 is the real fix.
+
+4. **Refuse, or auto-render, at `artifact(action="create")`.** Added after the third instance
+   above. When `augment` carries BOTH a `render_template` and a non-empty
+   `entry_collection`, and the supplied `body` contains no rendered rows, the artifact is born
+   with its entries invisible to git. Either render the template into the body at create time,
+   or return the same staleness flag option 1 proposes. This is cheaper than options 1-3 to
+   get right, because at create time there is no reconciliation to do — only a template to
+   apply — and it closes the sub-shape the § Workarounds text cannot reach.
 
 ## Tests added
 
