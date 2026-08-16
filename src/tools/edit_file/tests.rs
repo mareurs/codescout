@@ -1982,6 +1982,79 @@ async fn edit_file_batch_all_replace_all_on_markdown_passes_through() {
     assert_eq!(body, "A A B B\n");
 }
 
+/// The librarian guard must fire on EVERY `edit_file` write path, not just the
+/// one that happened to get it.
+///
+/// `edit_file` has three ways to reach a file — batch `edits[]`, `insert`
+/// prepend/append, and a single `old_string`/`new_string` — and
+/// `guard_not_librarian_managed` was called from exactly one of them. Worse, the
+/// markdown gate admits three escapes and its refusal hint names all three, but
+/// only `insert` landed on the guarded path. So the sequence a caller actually
+/// walks — `edit_markdown` refuses (managed) -> `edit_file` refuses (markdown) ->
+/// hint says `replace_all=true` -> unguarded write — is not an unlikely path
+/// through the code. It is what the error messages compose into.
+///
+/// The `insert` rows already passed before this test existed. That is the point:
+/// they prove the table discriminates, so a green run on the other four means
+/// something. A test that only asked "does edit_file guard managed artifacts?"
+/// had one answer for three code paths, which is how this survived.
+/// docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
+#[tokio::test]
+async fn librarian_guard_fires_on_every_edit_file_write_path() {
+    // Identical apart from the `id:` line the guard keys on.
+    const MANAGED: &str = "---\nid: abc513d3ee0f0b50\nkind: tracker\n---\n\n# T\n\nalpha alpha\n";
+    const PLAIN: &str = "---\nkind: notes\n---\n\n# T\n\nalpha alpha\n";
+
+    // Every shape the .md gate admits (src/tools/edit_file/mod.rs, `allowed`).
+    let paths: Vec<(&str, serde_json::Value)> = vec![
+        (
+            "single + replace_all",
+            json!({"old_string": "alpha", "new_string": "beta", "replace_all": true}),
+        ),
+        (
+            "batch + all replace_all",
+            json!({"edits": [{"old_string": "alpha", "new_string": "beta", "replace_all": true}]}),
+        ),
+        (
+            "insert append",
+            json!({"insert": "append", "new_string": "tail\n"}),
+        ),
+    ];
+
+    for (label, extra) in paths {
+        for (kind, body, must_refuse) in [("managed", MANAGED, true), ("plain", PLAIN, false)] {
+            let (dir, ctx) = project_ctx().await;
+            let md_file = dir.path().join("doc.md");
+            std::fs::write(&md_file, body).unwrap();
+
+            let mut args = extra.clone();
+            args["path"] = json!(md_file.to_str().unwrap());
+            let result = EditFile.call(args, &ctx).await;
+
+            if must_refuse {
+                let err = result.expect_err(&format!(
+                    "{label} on a {kind} artifact must be refused — it writes past the catalog, \
+                     so no field_patch event, no shrink guard, and a stale updated_at"
+                ));
+                assert!(
+                    err.to_string().contains("librarian-managed artifact"),
+                    "{label}/{kind}: wrong error, got: {err}"
+                );
+                assert_eq!(
+                    std::fs::read_to_string(&md_file).unwrap(),
+                    body,
+                    "{label}/{kind}: a refused write must leave the file untouched"
+                );
+            } else {
+                assert!(
+                    result.is_ok(),
+                    "{label} on a {kind} file must still work: {result:?}"
+                );
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn edit_file_batch_mixed_replace_all_on_markdown_still_gated() {
     // Batch mode: gate must reject when any entry omits replace_all=true.
@@ -5608,7 +5681,8 @@ fn a_missing_edit_target_names_the_path_and_absolves_the_ack_handle() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("nested").join("absent.toml");
 
-    let err = super::read_edit_target(&missing).expect_err("a missing file must error");
+    let err =
+        super::read_edit_target(&missing, "missing.txt").expect_err("a missing file must error");
     let msg = err.to_string();
 
     assert!(
@@ -5633,7 +5707,8 @@ fn a_missing_edit_target_names_the_path_and_absolves_the_ack_handle() {
 fn a_non_enoent_read_failure_is_not_reported_as_a_missing_file() {
     let dir = tempfile::tempdir().unwrap();
     // A directory is not a file: read_to_string fails with IsADirectory, not NotFound.
-    let err = super::read_edit_target(dir.path()).expect_err("reading a dir must error");
+    let err =
+        super::read_edit_target(dir.path(), "some-dir").expect_err("reading a dir must error");
     let msg = err.to_string();
 
     assert!(

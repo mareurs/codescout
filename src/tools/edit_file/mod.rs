@@ -439,7 +439,7 @@ impl Tool for EditFile {
             if !allowed {
                 return Err(super::RecoverableError::with_hint(
                     "Use edit_markdown for markdown files",
-                    "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace).",
+                    "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace) — but NOT on a librarian-managed artifact (docs/trackers, bug files with an `id:` in frontmatter), which every edit_file path refuses: use artifact(action=\"update\", id=..., patch={body_edits: [...]}) for those.",
                 ).into());
             }
         }
@@ -469,7 +469,7 @@ impl Tool for EditFile {
                     super::WriteOutcome::Write(p) => p,
                     super::WriteOutcome::Pending(env) => return Ok(env),
                 };
-            let mut content = read_edit_target(&resolved)?;
+            let mut content = read_edit_target(&resolved, path)?;
 
             // Pre-pass: identify structural edits before applying any. When the
             // batch mixes safe edits with structural ones, the caller benefits
@@ -588,9 +588,9 @@ impl Tool for EditFile {
                     super::WriteOutcome::Write(p) => p,
                     super::WriteOutcome::Pending(env) => return Ok(env),
                 };
-            let content = read_edit_target(&resolved)?;
-            // Reject librarian-managed artifacts — use artifact(action="update") instead.
-            crate::util::librarian_guard::guard_not_librarian_managed(path, &content)?;
+            // The librarian guard now lives inside read_edit_target, so every write
+            // path gets it — including this one.
+            let content = read_edit_target(&resolved, path)?;
             let new_content = match insert {
                 "prepend" => format!("{}{}", new_string, content),
                 "append" => format!("{}{}", content, new_string),
@@ -645,7 +645,20 @@ impl Tool for EditFile {
     }
 }
 
-/// Read the file an edit targets, naming it in any failure.
+/// Read the file an edit targets, naming it in any failure, and refuse it if it
+/// is a librarian-managed artifact.
+///
+/// **The guard lives here because this is the one thing all three write paths do.**
+/// `edit_file` can reach a file three ways — batch `edits[]`, `insert`
+/// prepend/append, and a single `old_string`/`new_string` — and
+/// `guard_not_librarian_managed` used to be called from exactly one of them, the
+/// `insert` branch. The markdown gate meanwhile admits all three and its refusal
+/// hint names all three, so the sequence `edit_markdown` refuses (managed) ->
+/// `edit_file` refuses (markdown) -> hint says `replace_all=true` -> unguarded
+/// write was the path the error messages composed into. Guarding at the shared
+/// read makes it structurally unbypassable, including by a fourth write path
+/// somebody adds later.
+/// docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
 ///
 /// A bare `std::fs::read_to_string(&resolved)?` propagates
 /// `No such file or directory (os error 2)` with no path and no indication of which
@@ -659,8 +672,11 @@ impl Tool for EditFile {
 /// the mechanism works in both call shapes; the ENOENT was the *target file*. The
 /// report cost two extra round-trips and a bug file, and the only thing that made the
 /// wrong conclusion attractive was an error message that mentioned no path.
-fn read_edit_target(resolved: &std::path::Path) -> anyhow::Result<String> {
-    std::fs::read_to_string(resolved).map_err(|e| {
+///
+/// `display_path` is the caller's own path string, used for both messages so they
+/// name what was passed rather than the resolved absolute form.
+fn read_edit_target(resolved: &std::path::Path, display_path: &str) -> anyhow::Result<String> {
+    let content = std::fs::read_to_string(resolved).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             crate::tools::RecoverableError::with_hint(
                 format!("no file to edit at {}", resolved.display()),
@@ -672,7 +688,9 @@ fn read_edit_target(resolved: &std::path::Path) -> anyhow::Result<String> {
         } else {
             anyhow::Error::new(e).context(format!("reading {} to edit it", resolved.display()))
         }
-    })
+    })?;
+    crate::util::librarian_guard::guard_not_librarian_managed(display_path, &content)?;
+    Ok(content)
 }
 
 async fn perform_edit(
@@ -689,7 +707,7 @@ async fn perform_edit(
             crate::tools::WriteOutcome::Pending(env) => return Ok(env),
         };
 
-    let content = read_edit_target(&resolved)?;
+    let content = read_edit_target(&resolved, path)?;
 
     let match_count = content.matches(old_string).count();
 

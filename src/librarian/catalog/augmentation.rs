@@ -260,6 +260,22 @@ pub fn update_entry(
             "update_entry: `fields` must be a JSON object",
         ));
     };
+    // An empty patch passes every guard below and completes having touched
+    // nothing, reporting success with `changed_fields: []` — which reads as "this
+    // changed nothing" rather than "your patch never arrived". That is how a
+    // typo'd param name became a silent no-op: an undeclared key is dropped before
+    // it reaches here, so `fields` arrives as `{}`. This action exists because the
+    // path it replaced was silent; it must not be silent in a narrower way.
+    // docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    if patch.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "update_entry: `fields` is empty — there is nothing to patch".to_string(),
+            "Pass at least one field, e.g. fields={\"status\": \"done\"}; a null value deletes a \
+             key. If you passed the patch under a different parameter name, note that `entry` \
+             belongs to append_entry — this action takes `fields`."
+                .to_string(),
+        ));
+    }
     if patch.contains_key("id") {
         return Err(RecoverableError::with_hint(
             "update_entry: `id` cannot be changed through a field patch".to_string(),
@@ -1006,6 +1022,27 @@ mod tests {
         let row = get(&cat, "art1").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert_eq!(params["tasks"].as_array().unwrap().len(), 3);
+    }
+
+    /// An empty patch passes every other guard and completes having touched
+    /// nothing, reporting success. That is how a typo'd param name became a
+    /// silent no-op: the MCP layer drops an undeclared key, `fields` defaults
+    /// to `{}`, and `changed_fields: []` reads as "this changed nothing"
+    /// rather than "your patch never arrived".
+    ///
+    /// This action exists because the path it replaced was silent. It must not
+    /// be silent in a narrower way.
+    /// docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    #[test]
+    fn update_entry_rejects_an_empty_patch() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        let err = update_entry(&mut cat, "art1", "tasks", "T-1", json!({})).unwrap_err();
+        assert!(
+            err.to_string().contains("empty"),
+            "the error must say the patch was empty, not report success: {err}"
+        );
     }
 
     /// Entry ids are a citation surface — `entry_cite` rows key on

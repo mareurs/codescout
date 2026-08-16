@@ -180,7 +180,7 @@ impl Tool for Artifact {
                 },
                 "fields": {
                     "type": "object",
-                    "description": "update_entry: fields to set on that one entry, merged shallowly; a null value deletes the key. Every other entry, and every field this patch does not name, is left untouched. `id` is rejected — entry ids key entry_cite rows, so re-keying one would strand its citations."
+                    "description": "update_entry: fields to set on that one entry, merged shallowly; a null value deletes the key. Every other entry, and every field this patch does not name, is left untouched. NOTE the asymmetry with append_entry, which takes `entry` (a whole new row) — this action takes `fields` (the subset to change); passing `entry` here is refused rather than silently ignored. An empty patch is refused too. `id` is rejected — entry ids key entry_cite rows, so re-keying one would strand its citations."
                 },
                 "id_prefix": {
                     "type": "string",

@@ -25,6 +25,22 @@ fn default_fields() -> Value {
 /// every other row, and getting that wrong silently deleted them.
 /// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    // `append_entry` names its payload `entry`; this action names its patch
+    // `fields`. Nothing in the action name says which noun applies, so `entry` is
+    // a natural guess — and an undeclared key is dropped before it reaches the
+    // handler, which turned that guess into an empty patch and a success envelope.
+    // Catch it by name so the error can say which parameter to use, instead of the
+    // generic "nothing to patch" the catalog layer would give.
+    // docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    if args.get("entry").is_some() && args.get("fields").is_none() {
+        return Err(RecoverableError::with_hint(
+            "update_entry: `entry` is append_entry's parameter — this action takes `fields`"
+                .to_string(),
+            "Re-send the patch as fields={...}. `entry` is the whole row for a NEW entry; \
+             `fields` is the subset to change on an existing one."
+                .to_string(),
+        ));
+    }
     let a: Args = serde_json::from_value(args)?;
     if !a.fields.is_object() {
         return Err(RecoverableError::new(
@@ -138,6 +154,65 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("fields"), "got: {err}");
+    }
+
+    /// `append_entry` names its payload `entry`; this action names its patch
+    /// `fields`. Nothing in the action name says which noun applies, so `entry` is
+    /// a natural guess — and an undeclared key is dropped before it reaches the
+    /// handler, so the guess used to become an empty patch and a success envelope
+    /// with `changed_fields: []`.
+    ///
+    /// Reported from a real session: ~1.4 KB of text sent as `entry=`, exit
+    /// success, row unchanged.
+    /// docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    #[tokio::test]
+    async fn call_rejects_the_entry_param_and_names_fields() {
+        let ctx = mk_ctx();
+        seed(&ctx, "art1");
+
+        let err = call(
+            &ctx,
+            json!({
+                "action": "update_entry",
+                "id": "art1",
+                "entry_collection": "tasks",
+                "entry_id": "T-1",
+                "entry": {"status": "done"}
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("fields"),
+            "the error must name the parameter that IS accepted: {msg}"
+        );
+
+        // And it must not have written anything on the way to that error.
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["tasks"][0]["status"], "open");
+    }
+
+    #[tokio::test]
+    async fn call_rejects_an_empty_fields_patch() {
+        let ctx = mk_ctx();
+        seed(&ctx, "art1");
+
+        let err = call(
+            &ctx,
+            json!({
+                "id": "art1",
+                "entry_collection": "tasks",
+                "entry_id": "T-1",
+                "fields": {}
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("empty"), "got: {err}");
     }
 
     #[tokio::test]

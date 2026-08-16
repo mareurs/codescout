@@ -141,6 +141,14 @@ content edit. Same gate as Iron Law 4.
   heading addressing needed)
 - `replace_all: true` (file-wide text substitution)
 
+**Neither exception applies to a librarian-managed artifact** — anything
+under `docs/trackers/`, or any file whose frontmatter carries an `id:`.
+*Every* `edit_file` write path refuses those, not only the ones this gate
+blocks: a direct write bypasses the catalog, so no `field_patch` event is
+recorded, the body-shrink guard never runs, and `updated_at` goes stale.
+Use `artifact(action="update", id=…, patch={body_edits: […]})` — its
+entries mirror `edit_markdown`'s batch shape.
+
 **Batch mode:** `edit_markdown` supports a top-level `edits: [...]`
 array applied atomically. Use for multi-section edits in one call.
 
