@@ -198,6 +198,35 @@ Everything a change to `is_unbounded_lhs` needs:
   what `symbols` cannot serve.
 - **Regression guard:** the 0%-repeat control below must stay at 0%.
 
+## Prior art — this is an incomplete fix, not a new defect
+
+Found after this audit was first written, and it reframes GF-1.
+
+**`docs/issues/archive/2026-05-18-il3-overtriggers-bounded-lhs.md`** (opened and closed the
+same day, status `fixed`) reported: *"IL3 over-triggers on bounded LHS commands, forcing
+buffer-dance overhead."* Its root cause was that the `IL3_LHS` regex *"treats every LHS as
+unbounded"*, and its fix was **"split LHS into bounded/unbounded"** — which is precisely the
+`UNBOUNDED_PREFIXES` list this audit is now measuring.
+
+So GF-1 is not a regression and not a new discovery. It is the **same failure class at finer
+grain**: the May fix moved from *"everything is unbounded"* to *"these thirteen binaries are
+unbounded"*, and `git` — whose real-world use is 64% self-bounded — landed on the wrong side
+of the new line. The remedy is the same shape a third time: move from *binary* to
+*binary + flags*, which the same function already does for `grep` and `find`.
+
+Independent corroboration from a live tracker: `docs/trackers/codescout-usage-frictions.md`
+keeps a running tally of IL-3 false positives and had already reached **"13 of 15 pure 'show
+me less'"**, concluding that *"the gate has a real false-positive rate of its own, which the
+narrower rule would reduce rather than add to."* That entry reached this audit's conclusion
+by a different route — reading refused commands one at a time rather than aggregating them.
+
+**Sibling defect filed this session:**
+`docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md` — `run_command`
+hands its string to `sh -c` unexamined, so backticks in a `git commit -m` message are
+substituted, and the failure reports `Argument list too long`, which is the wrong cause. Same
+function family, same theme as GF-4: the shell-shape knowledge lives in one place and never
+reaches the caller.
+
 ## Baselines — for re-measurement
 
 Re-run on codescout only, same window length.
@@ -254,4 +283,3 @@ The base-arm query — *"does the same session re-violate the same law after a r
 run as a pre-registered no-ship test and came back 38–71% for four families, refuting no-ship.
 TU-7 was then read and reframed the result: recovery was already known-good, so the finding
 moved to firing-correctness and to the learning-vs-fixing distinction.
-
