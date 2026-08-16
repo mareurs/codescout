@@ -5,11 +5,11 @@ set -euo pipefail
 BINARY="${1:-./target/release/codescout}"
 # The corpus defaults to THIS repo, not a path on the author's machine:
 # run-tc-benchmark.py's expected-file lists name codescout's own tree
-# (src/lsp/client.rs, src/lsp/manager.rs, src/tools/output.rs, ...), so scores are
-# only meaningful against this checkout. NOTE: five paths in those expected
-# lists no longer exist, so some TCs cannot score at any boost value — see
-# docs/issues/2026-08-16-tc-benchmark-ground-truth-cites-deleted-files.md before
-# reading a sweep result as a retrieval measurement.
+# (src/lsp/client.rs, src/embed/index.rs, docs/FEATURES.md, ...), so scores are
+# only meaningful against this checkout. NOTE: those paths are relative to the
+# PINNED bench corpus (.worktrees/bench, detached at baseline_sha ede25e69), not
+# to current HEAD — several of them have since been deleted or merged on
+# experiments. Checking them against HEAD tells you nothing about this harness.
 # The previous default pointed at
 # ".../code-explorer" -- codescout's pre-rename name -- and had resolved to
 # nothing since the rename.
