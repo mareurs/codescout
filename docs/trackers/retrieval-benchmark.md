@@ -28,6 +28,9 @@ This tracker is the canonical log going forward. Every run is anchored to:
 - A **dedicated qdrant collection** (`bench_<model>_code_chunks`) so models coexist
 - A **config block** in the JSON output (model, boost, sparse on/off, project_sha)
 - The **25-TC suite** (20 legacy tiers + 5 T5 real-usage-shape from external `usage.db`)
+- The **host** — machine, GPU, VRAM, and container set. Added 2026-08-16, after the table
+  turned out to already span at least three machines without ever recording which. See the
+  2026-08-16 history entry.
 
 If the table above ever needs a new `baseline_sha`, treat all prior rows as compromised
 and start a new section here.
@@ -42,9 +45,18 @@ docker ps --format '{{.Names}}' | grep -E "qdrant|embedder|reranker"
 # Expect: codescout-qdrant (:6334), codescout-embedder-gpu (:48081),
 #         codescout-embedder-sparse-gpu (:48084), codescout-reranker-gpu (:48083)
 
+# NOTE (2026-08-16): the container NAMES above are host-specific. They are the
+# `-gpu` set from an NVIDIA host. On the Threadripper/RX 7800 XT desktop the same
+# ports are served by codescout-dense-amd (:48081, CodeRankEmbed-Q4_K_M),
+# codescout-reranker-amd (:48083, bge-reranker-v2-m3-Q4_K_M) and
+# codescout-sparse-amd (:48084, Splade_PP_en_v1) — all llama.cpp/TEI in Docker,
+# so no separate llama-server on :43300 is needed there. Check what you have
+# before following the Run sections verbatim.
+
 # 2. Pinned bench worktree must exist at the baseline commit
 git worktree list | grep .worktrees/bench
-# If missing: git worktree add --detach .worktrees/bench <baseline_sha>
+# It will be missing on a fresh host — it is NOT in git and was deleted 2026-08-16.
+# Recreate it: git worktree add --detach .worktrees/bench <baseline_sha>
 
 # 3. Build release binary
 cargo build --release
@@ -173,6 +185,84 @@ relative — known gap.
   comparing tails matters.
 
 ## History
+
+### 2026-08-16 — the pinned table spans at least three machines, and never said so; bench worktree was a foreign-host leftover and is now deleted
+
+Started as "let's run the benchmark" and ended without a run, because the preconditions did
+not hold and one of them invalidates comparison itself.
+
+**1. Host is a comparability axis this tracker never anchored.** The section above pins every
+run to a worktree, a collection, and a config block. It does not pin the machine. Reading
+back through the log, at least three are involved:
+
+| entry | hardware, as its own text records it |
+|---|---|
+| 2026-05-12 nomic-embed-code | *"llama-server (CUDA, **RTX A5000 24GB**)"* — NVIDIA |
+| 2026-07-28 reranker swap | *"this **6 GiB** card"*; TEI at float16 could not warm up |
+| 2026-08-16 (this entry) | Threadripper PRO 3975WX + **Radeon RX 7800 XT, 16 GiB**, `-amd` containers |
+
+This is not cosmetic. Every p50/p95 in the table is a property of its host. Worse, VRAM
+pressure changed **scores** too: the 6 GiB box is why `.env.amd` carried
+`CODESCOUT_DISABLE_SPARSE=1`, which fed every profile through config layer 2 and made that
+session's entire reranker A/B dense-only — the axis its author called *"the one I was least
+aware of while measuring"*. `host` is now in the anchored list above.
+
+**Consequence:** the champion row (**37/75**, CodeRank Q4 no-prefix boost=5.0, dense+sparse+rerank)
+was not measured on this desktop. Re-running that config here would conflate ~3 months of code
+changes with a machine change — the same multi-dimension confound the 2026-07-28 entry
+correctly refused to draw a conclusion from. **On this host the suite starts a NEW baseline
+section; it does not continue the table above.**
+
+**2. `.worktrees/bench` was a foreign-host leftover — deleted.** Its `.git` file read
+`gitdir: /home/marius/work/claude/code-explorer/.git/worktrees/bench`, a repo path that does
+not exist on this machine, so the worktree was orphaned from git entirely: `git -C` failed and
+`git worktree list` omitted it. `git worktree repair` cannot fix that (the referenced repo is
+gone), so the admin dir was reconstructed by hand purely to inspect the contents before
+deciding its fate. Findings:
+
+- Created **2026-05-12** — the date of every pinned run.
+- Corpus **complete and correct**: all **851** files of the `ede25e69` tree present, zero missing.
+- Diverged from the baseline in exactly **two** files — `crates/codescout-embed/src/remote.rs`
+  (adds `nomic-embed-code` to `query_prefix_for`) and `src/retrieval/embedder.rs` (an
+  `CODESCOUT_EMBEDDER_QUERY_PREFIX` prototype).
+- **Both are dead.** The nomic-embed-code entry below already records them as *"redundant
+  patches … because main already had `CODESCOUT_QUERY_PREFIX` support"*, and that experiment's
+  own verdict was **"drop nomic-embed-code-7B from consideration"**. Verified independently:
+  main's `query_prefix_for` (`crates/codescout-embed/src/remote.rs:105`) matches `coderank`
+  only, and main's `EmbedderHttp` reads `CODESCOUT_QUERY_PREFIX` (`src/retrieval/embedder.rs:292`)
+  — a different, more complete implementation than the prototype's.
+
+Nothing was worth merging, and the stale copy actively caused a false bug report earlier the
+same day (see below), so it was removed with `git worktree remove --force`. 174 MB, of which
+163 MB was regenerable `.codescout` index state. **Recreating it is one command** —
+`git worktree add --detach .worktrees/bench ede25e694b63219e1382f359d7ba242f66a516a5` — and a
+fresh checkout is strictly better than the diverged one.
+
+**3. A false bug, and the reason it was false.** Earlier the same day a bug was filed claiming
+`run-tc-benchmark.py`'s `expected` lists cite five deleted files, making several TCs unpassable.
+Wrong: the harness scores against the **pinned corpus**, never against current HEAD, and all
+five resolve at `ede25e69` (`git cat-file -e`, plus the 851-file walk above). The check had been
+run against the working tree the session happened to be standing in. Retracted in
+`docs/issues/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md`, whose
+Hypotheses-tried keeps the mistake on purpose. The rule it earns: **check the corpus the
+instrument actually reads, not the one you are standing in.**
+
+**4. Bench collections are gone.** Qdrant on this host holds only `memories`, `code_chunks`
+(579,834 points, dense 768 + sparse w/ IDF), and `artifacts`. Both `bench_coderank_code_chunks`
+and `bench_jinav2_code_chunks` are absent, so any run here starts with a full re-index of the
+pinned corpus (~20-30 min at the rates recorded below).
+
+**5. Config drift flagged on 2026-07-28 is already fixed.** `~/.config/codescout/.env` →
+`.env.amd` now has **both** `CODESCOUT_DISABLE_SPARSE=1` and `CODESCOUT_QUERY_PREFIX` commented
+out. Sparse is on; no query prefix. That matches what the log says it should be.
+
+**What a run here still needs, for whoever picks this up.** Recreate the worktree; re-index into
+a `bench_*` collection; then run the A/B the 2026-07-28 entry asked for — boost=5.0, mode=code,
+sparse ON, with reranker arms that differ **only** in server. Note the one blocker for that last
+part: isolating server from model needs the *same* model on TEI, and this host's `tei-rerank`
+(:30083) serves `cross-encoder/ms-marco-MiniLM-L-6-v2`, not `bge-reranker-v2-m3`. A TEI arm on
+it would change model and server together, which is exactly the confound the arm exists to
+remove. Stand up a TEI with bge-reranker-v2-m3 first, or drop that arm and say so.
 
 ### 2026-07-28 — TEI→llama-server reranker swap costs ~13× p50; prefix rediscovered; scores are load-dependent
 

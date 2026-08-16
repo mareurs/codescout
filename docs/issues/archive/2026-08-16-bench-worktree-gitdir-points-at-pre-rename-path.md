@@ -1,13 +1,14 @@
 ---
 id: '5043d3c2e3e4bbfd'
 kind: bug
-status: open
+status: fixed
 title: Bench worktree's gitdir still points at the pre-rename repo path, orphaning it from git
 tags:
 - retrieval
 - benchmark
 - measurement-validity
 - stale-ground-truth
+closed: 2026-08-16
 ---
 
 ## Summary
@@ -89,44 +90,45 @@ $ git cat-file -e ede25e694b63219e1382f359d7ba242f66a516a5:docs/FEATURES.md   # 
 
 ## Fix
 
-Not implemented. Re-register the worktree so `git -C` works again and the baseline is
-verifiable from inside it:
+**Resolved by deletion, 2026-08-16.** The worktree was not repairable in place —
+`git worktree repair` requires the referenced repository to exist, and
+`/home/marius/work/claude/code-explorer` does not exist on this machine. The admin dir
+(`.git/worktrees/bench/{commondir,gitdir,HEAD}` + `read-tree`) was reconstructed by hand
+**only to inspect the contents** before deciding, then the whole worktree was removed with
+`git worktree remove --force .worktrees/bench`.
 
-```
-git worktree repair .worktrees/bench      # rewrites the gitdir pointer + admin dir
-git -C .worktrees/bench rev-parse HEAD    # must print ede25e694b63219e1382f359d7ba242f66a516a5
-```
+Removal was the right call rather than repair because the copy had nothing worth keeping and
+was actively misleading:
 
-`git worktree repair` is the purpose-built path for exactly this (moved/renamed main repo).
-If it cannot reconstruct the admin dir, the fallback is to re-add the worktree detached at
-the baseline SHA — but confirm the existing tree is unmodified first, since a re-add
-discards local state, and this corpus is what every pinned run in
-`docs/trackers/retrieval-benchmark.md` was scored against.
+- Corpus was complete (851/851 baseline files) but diverged from `ede25e69` in two files, both
+  documented in `docs/trackers/retrieval-benchmark.md` as *"redundant patches … because main
+  already had `CODESCOUT_QUERY_PREFIX` support"*, from an experiment whose verdict was
+  *"drop nomic-embed-code-7B from consideration"*.
+- It was a leftover from a different machine, which is why its gitdir named a path that is not
+  here — and that foreignness is what produced the retracted claim in Hypotheses-tried.
+- It is reproducible in one command:
+  `git worktree add --detach .worktrees/bench ede25e694b63219e1382f359d7ba242f66a516a5`.
 
-Until then the benchmark may still run — the harness takes a `--project-path` and indexes
-files — but codescout's own git detection inside that path will fail, so any
-provenance/`project_sha` the run records is unreliable.
-
+174 MB reclaimed, 163 MB of it regenerable `.codescout` index state.
 ## Tests added
 
-None. A prerequisite check in the harness ("is `--project-path` a valid git checkout, and
-does its HEAD match the expected baseline?") would have surfaced this before a run rather
-than after.
-
+None, and none applies — the resolution is the deletion of an untracked local directory, not a
+code change. The durable guard is documentation instead: `docs/trackers/retrieval-benchmark.md`
+§ Prerequisites now states that the worktree is absent on a fresh host and gives the recreate
+command, and `host` was added to that tracker's anchored-dimensions list so the next session
+does not treat a foreign-host artifact as canonical.
 ## Workarounds
 
 Read the baseline from the tracker (`params.baseline_sha`) rather than from the worktree.
 
 ## Resume
 
-Run `git worktree repair .worktrees/bench`, then assert
-`git -C .worktrees/bench rev-parse HEAD` equals `ede25e69...`. If it does not, the corpus
-has drifted from the pinned baseline and every row in `docs/trackers/retrieval-benchmark.md`
-is compromised — the tracker's own rule says to start a new section in that case.
-
+N/A — closed. If a bench run is wanted on this host, recreate the worktree with the command
+above and read the 2026-08-16 entry in `docs/trackers/retrieval-benchmark.md` first: the pinned
+table was measured on other machines, so results here start a new baseline rather than
+continuing it.
 ## References
 
 - `docs/trackers/retrieval-benchmark.md` — the pinned 25-TC log; `params.baseline_sha`
 - `scripts/run-tc-benchmark.py` — the harness
 - `scripts/sweep-bm25-boost.sh:6-15` — the comment describing the same rename fallout
-
