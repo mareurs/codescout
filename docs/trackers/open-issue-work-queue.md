@@ -60,6 +60,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | open | `897fb0fbd6eb2546` |
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | open | `e557d0f2c9429b5d` |
+| BL-20 | 1 | params merge-patch wipes entry arrays wholesale — no guard, no report, no git backup | open | `29e65b54ee689dec` |
 
 Next actions per row live in each bug's `## Resume`, and in the live params — not duplicated here,
 because a snapshot that carries instructions goes stale in the way that matters most.
@@ -191,3 +192,13 @@ prose only — so the queue existed on this machine and nowhere else, which is t
 tracker was chosen over Claude Code's per-profile memory in the first place. The rendered snapshot
 above fixes that. Worth knowing when creating any augmented tracker: writing a good body does not
 make its live state durable, and the file will not look wrong.
+
+**BL-20** — filed from an own goal committed while writing the line above. Flipping BL-1 to `done`
+via `patch={params:{tasks:[one row]}}` deleted BL-2..BL-19: merge-patch replaces arrays wholesale,
+and the call answered `updated: true`. The rows survived only because the snapshot had been written
+minutes earlier, for an unrelated reason.
+
+That near-miss is the argument for the snapshot, independent of git: **params have no shrink guard,
+no `force` gate, no report of what a write destroyed, and no version control** — all four of which
+the body surface has. The less-protected surface is the one with no backup. Keep a rendered table in
+the body of every entry-bearing tracker.
