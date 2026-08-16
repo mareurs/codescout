@@ -880,7 +880,10 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
             .iter()
             .map(|c| (c.raw_ref.as_str(), c.ref_kind))
             .collect();
-        assert!(kinds.is_empty(), "expected no path candidates, got {kinds:?}");
+        assert!(
+            kinds.is_empty(),
+            "expected no path candidates, got {kinds:?}"
+        );
     }
 
     #[test]

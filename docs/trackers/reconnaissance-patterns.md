@@ -2212,6 +2212,54 @@ rationale the second sweep displaced.
 mis-attributed but semantically wrong in its host commit — a revert that also
 reverts the annexed work, say. At that point the worktree split stops being
 optional and becomes the default for concurrent sessions.
+## R-91 — A probe that cannot observe the thing the claim is about (three instances, one session)
+
+**Verdict:** miss (×3) · **Observed:** 2026-08-16, benchmark + tracker-hygiene session
+
+Three separate wrong claims in one session, all the same shape: a **real measurement**
+attached to a conclusion the measurement was **structurally incapable of observing**. None
+was a careless reading; each probe returned exactly what it was asked, and each question was
+the wrong one.
+
+| # | probe run | claim attached | why the probe could not see it |
+|---|---|---|---|
+| 1 | `ls` / existence check over the **working tree** | "`run-tc-benchmark.py` cites 5 deleted files, so TCs are unpassable" — **filed as a bug** | the harness scores against a corpus **pinned at `ede25e69`**, never against HEAD. All 5 exist there; 851/851 baseline files present |
+| 2 | `rocm-smi ... \|\| nvidia-smi ...` | "the log spans **three** machines; the A5000 is a separate NVIDIA host" — **written into a commit** | `\|\|` short-circuits. ROCm answered, so the NVIDIA branch **never ran**. Both cards are in the same box; there are two machines |
+| 3 | read `scan_meta.lsp_languages_offline: ["rust"]` | "rust-analyzer is offline, discard this audit" | the field is a **claim about a dependency**, not a probe of it. `references()` answered from that same LSP seconds later |
+
+Cost: one bug filed and retracted the same day, one committed tracker entry corrected the
+same day, and one valid 40-file audit nearly discarded. Instances 1 and 2 both reached
+**committed artifacts** before being caught — this class does not stop at the draft.
+
+**The rule.** Before attaching a conclusion to a measurement, say in one sentence what the
+measurement can and cannot see. Three concrete forms:
+
+- **Pinned/configured corpora:** when a tool reads a corpus it selects itself (a pinned
+  worktree, a configured collection, a baseline SHA), verify against *that* corpus. The tree
+  you are standing in is not evidence about it.
+- **Never probe for presence with `A || B`.** Short-circuit makes absence of B
+  unobservable whenever A succeeds. Run both, unconditionally, when the question is "which
+  of these exist".
+- **A tool's self-reported health field is a claim, not a measurement.** Probe the
+  dependency directly before believing it.
+
+**Discriminating-probe technique, worth reusing.** Instance 3 was settled by picking a call
+that *requires* the dependency: `symbols()` is tree-sitter-backed and succeeds whether or not
+the LSP is up, so it cannot distinguish the states; `references()` needs the LSP and can.
+One round-trip. When two hypotheses predict the same output from your current probe, the
+fix is a different probe, not a longer stare — the operational form of the Iron Law's
+"evaluation means new information".
+
+**Relation to R-89.** R-89 says a tool's output is evidence about the code only if the
+running build contains it. R-91 is its sibling and strictly wider: *evidence about anything
+requires that the probe could have observed the alternative.* R-89 is the build-grain case;
+instance 1 is the corpus-grain case; instance 2 is the shell-operator case.
+
+**Promote-when:** a fourth instance, OR one instance where the rule is applied
+prospectively and prevents a claim. At that point promote the three concrete forms to the
+`reconnaissance` memory topic — they are craft-shaped, not project-shaped, so the global
+SKILL.md is the eventual destination via the sync flow.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

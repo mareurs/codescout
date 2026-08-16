@@ -206,6 +206,79 @@ relative — known gap.
 
 ## History
 
+### 2026-08-16 (later) — first run attempt on `desktop-threadripper`: corpus indexed, harness scores 0/75, NOT root-caused
+
+**No row was appended to `params.runs`.** There is no valid score to log; a 0/75 from a
+wiring fault is not a measurement, and writing it into the table would poison exactly the
+comparability this tracker exists to protect.
+
+**Setup actually used** (differs from § Prerequisites, which is `laptop`-shaped):
+
+| | value |
+|---|---|
+| host / accelerator | `desktop-threadripper`, stack on the **RX 7800 XT**; A5000 idle |
+| dense | `codescout-dense-amd` :48081 — CodeRankEmbed-Q4_K_M via llama.cpp (**no separate `llama-server` on :43300 needed here**) |
+| sparse | `codescout-sparse-amd` :48084 — Splade_PP_en_v1 |
+| rerank | `codescout-reranker-amd` :48083 — bge-reranker-v2-m3-Q4_K_M |
+| corpus | `.worktrees/bench` recreated pristine at `ede25e69`, 851/851 files |
+| collection | `bench_coderank_code_chunks`, dim 768 + sparse w/ IDF — byte-identical config to production `code_chunks` |
+| project id | `bench` (basename default; no `project.toml` on either side) |
+
+**Indexing succeeded and was fast:** `+19216 -0 ~0 chunks in 323862 ms` — 5.4 min, against
+1239 s for a comparable index on `laptop`. Roughly 4×, which is the clearest
+host-difference datapoint the log now has.
+
+**But the corpus is 11% smaller than the chunk count says.** Qdrant holds **17,108**
+points against 19,216 chunks reported added. `chunk_id` is `{project}:{path}:{content_hash}`
+with no ordinal (`src/retrieval/sync.rs:77`) and the point id derives from it, so two
+identical chunks in one file are the same point and the second overwrites the first. Both
+ends report success — the writer says `+19216`, and a no-op re-sync says `+0 -0 ~0`. Filed
+as `docs/issues/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md`. The 64-bit
+truncation in `chunk_id_to_point_id` (`src/retrieval/qdrant.rs:28`) is NOT the cause — at
+19k items its expected collision count is ~1e-11 — and ruling that out is what located the
+real one. **Any future score on this collection has an unknown recall ceiling below 100%.**
+
+**The blocker: every TC returns `top10_files: []`.** Zero hits, no exception, no `[WARN]`
+line — `semantic_search` returns successfully and empty. Ruled out by measurement:
+
+| candidate | how it was excluded |
+|---|---|
+| `mode` | `code` and `full` both 0/75 |
+| reranking | on and off both 0/75 |
+| project-id mismatch (the 2026-05-12 failure) | payloads carry `project_id: "bench"`; activation resolves `bench`; no `project.toml` on either side |
+| collection shape | dense 768 + sparse/IDF, identical to production |
+| response parsing | `semantic_search` returns clean JSON with a `results` array, and the same query against the production project returns hits |
+
+**Lead for the next session — sub-project topology.** Activating the bench corpus resolves
+**8** workspace projects (`bench`, `codescout-embed`, `librarian-mcp`, and 5
+`tests/fixtures/*` libraries); today's tree resolves **2**. `sync_project` wrote every chunk
+under the single id `bench`. If the query path scopes by sub-project, everything under
+`crates/**` and `tests/fixtures/**` is unreachable under that id — and TC-01's expected
+`src/tools/core/types.rs` is not, so this hypothesis does not explain the *whole* zero on
+its own. Test it before building on it.
+
+**Harness gaps that made this expensive, worth fixing before the next attempt:**
+
+- `run-tc-benchmark.py` spawns the server with `stderr=subprocess.DEVNULL`, so every
+  server-side error is discarded. Capturing it would very likely have answered this in one
+  run instead of a dozen probes.
+- A prerequisite assertion is missing: the harness should refuse to run when the collection
+  is empty, when `points_count` disagrees with the index state, or when a first smoke query
+  returns nothing — rather than dutifully scoring 25 zeros.
+
+**Two config facts the old rows do not pin, now recorded:**
+
+- **`CODESCOUT_RERANK` is opt-in and defaults OFF** (`src/retrieval/config.rs:4`,
+  `src/retrieval/search.rs:10`). Reranking does not happen unless explicitly set, so any
+  historical row that does not state the flag is ambiguous about whether it reranked.
+- `.env.amd` (symlinked as the global `.env`) now has **both** `CODESCOUT_DISABLE_SPARSE`
+  and `CODESCOUT_QUERY_PREFIX` commented out — the 2026-07-28 drift is fixed.
+
+**Un-filed minor quirk:** `sync_project` has no argument parsing — `./target/release/sync_project --help`
+treats `--help` as the project path and syncs a project named `--help`, creating a `./--help/`
+directory. Harmless (removed), but it is a silent do-the-wrong-thing on the most natural
+discovery command. Not filed as a bug; noted here.
+
 ### 2026-08-16 — the pinned table spans two machines, and never said so; bench worktree was a foreign-host leftover and is now deleted
 
 Started as "let's run the benchmark" and ended without a run, because the preconditions did
