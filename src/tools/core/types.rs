@@ -396,19 +396,46 @@ impl Availability {
 /// shelling out. A hint that cannot work for the result it is attached to is
 /// worse than no hint: it converts a lookup into a failed call.
 ///
-/// Now: an array payload gets `$[*]`, an object gets its largest array field
-/// projected, and only a genuinely scalar-shaped payload gets `$.field`.
+/// Picks the **largest array anywhere within a bounded depth**, not merely a
+/// top-level one. Envelopes routinely carry a short array at the top and the
+/// payload worth projecting further down — measured live 2026-08-16, an
+/// `artifact(get)` result advertised `$.tags[*]` (4 strings) for a buffer whose
+/// point was `$.augmentation.params.tasks[*]` (18 records).
 /// docs/issues/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
 pub(crate) fn default_json_path_hint(val: &Value) -> String {
-    match val {
-        Value::Array(_) => "$[*]".to_string(),
-        Value::Object(map) => map
-            .iter()
-            .filter_map(|(k, v)| v.as_array().map(|a| (k, a.len())))
-            .max_by_key(|(_, n)| *n)
-            .map(|(k, _)| format!("$.{k}[*]"))
-            .unwrap_or_else(|| "$.field".to_string()),
-        _ => "$.field".to_string(),
+    if val.is_array() {
+        return "$[*]".to_string();
+    }
+    let mut best: Option<(String, usize)> = None;
+    find_largest_array(val, "$", 0, &mut best);
+    best.map(|(path, _)| format!("{path}[*]"))
+        .unwrap_or_else(|| "$.field".to_string())
+}
+
+/// Record the largest array reachable through object keys, with its full path.
+///
+/// Descends through objects only, never into arrays: an array's *elements* are
+/// what a projection returns, so recursing into them would suggest addressing one
+/// row rather than the set. Depth-bounded so a deeply nested payload costs a fixed
+/// walk rather than a full traversal.
+fn find_largest_array(v: &Value, path: &str, depth: usize, best: &mut Option<(String, usize)>) {
+    const MAX_DEPTH: usize = 4;
+    let Some(map) = v.as_object() else {
+        return;
+    };
+    for (key, child) in map {
+        let child_path = format!("{path}.{key}");
+        match child {
+            Value::Array(items) => {
+                if best.as_ref().is_none_or(|(_, n)| items.len() > *n) {
+                    *best = Some((child_path, items.len()));
+                }
+            }
+            Value::Object(_) if depth < MAX_DEPTH => {
+                find_largest_array(child, &child_path, depth + 1, best);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -735,5 +762,45 @@ pub trait Tool: Send + Sync {
     /// don't need the hint.
     fn relevant_guide_topic(&self) -> Option<&str> {
         None
+    }
+}
+
+#[cfg(test)]
+mod json_path_hint_tests {
+    use super::default_json_path_hint;
+    use serde_json::json;
+
+    #[test]
+    fn array_payload_projects_the_root() {
+        assert_eq!(default_json_path_hint(&json!([{"a": 1}])), "$[*]");
+    }
+
+    #[test]
+    fn object_payload_names_its_largest_array() {
+        let v = json!({ "meta": "x", "rows": [1, 2, 3], "tags": ["a"] });
+        assert_eq!(default_json_path_hint(&v), "$.rows[*]");
+    }
+
+    /// The shape that matters most in practice. An `artifact(get)` envelope keeps
+    /// its useful payload three levels down while carrying a short `tags` array at
+    /// the top; a top-level-only scan names `tags` — real, but not what the caller
+    /// wants projected. Measured live 2026-08-16: the hint said `$.tags[*]` (4
+    /// strings) for a buffer whose point was `$.augmentation.params.tasks[*]` (18
+    /// records).
+    #[test]
+    fn nested_payload_beats_a_shallow_but_smaller_array() {
+        let v = json!({
+            "tags": ["a", "b", "c", "d"],
+            "augmentation": { "params": { "tasks": [1, 2, 3, 4, 5, 6, 7, 8] } }
+        });
+        assert_eq!(default_json_path_hint(&v), "$.augmentation.params.tasks[*]");
+    }
+
+    #[test]
+    fn scalar_shaped_payload_keeps_the_generic_placeholder() {
+        assert_eq!(
+            default_json_path_hint(&json!({ "content": "text", "lines": 4 })),
+            "$.field"
+        );
     }
 }
