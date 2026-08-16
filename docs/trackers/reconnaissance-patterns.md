@@ -2499,6 +2499,50 @@ contact. At that point this belongs in the skill's Phase 1 as an explicit step �
 read-the-`## Fix`-as-a-plan rule (R-62).
 
 ---
+
+## R-96 — Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason
+
+**Verdict:** miss (self-caught by the suite) → rule · **Observed:** 2026-08-16, the IL-3
+refactor (GF-1/GF-2 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`).
+
+**What happened.** Making `git` flag-conditional in `is_unbounded_lhs` turned one
+pre-existing test red: `il3_still_blocks_when_a_quoted_separator_precedes_a_real_pipe`,
+whose fixture was `git log --oneline -50 --grep='a;b' | head -3`.
+
+That test's subject is **quote-aware segmentation** — its own doc says so, and its two
+sibling assertions use `cargo test`. The `-50` was incidental realism. But `-50` is a real
+commit-count limit, so under the new classifier the command became legitimately allowed and
+the fixture **stopped reaching the gate the test exists to exercise**.
+
+**Why it earns a rule rather than a shrug.** The failure was visible only because the
+widening happened to make the test RED. Had the fixture been `cargo test … | head`, the same
+widening would have left it GREEN — passing for the same reason as before — and there would
+have been no signal at all. The dangerous version is the inverse of what happened here: a
+widening that leaves a scaffolding-fixture passing *for a new reason*, with nothing to notice.
+
+**The tell.** A test goes red on a change that has nothing to do with its stated subject. The
+question is then not *"did I break the subject?"* but **"is this red because I broke the
+subject, or because I moved the scaffolding?"** — and the answer has to be proven, not argued.
+
+**Do.** When widening a gate, classifier, or predicate:
+
+1. For each newly-failing test, read its **doc** and its sibling assertions to find the stated
+   subject. If the changed predicate is not that subject, the fixture is scaffolding.
+2. Amend the **fixture** to restore its reach — never the rule, and never by deleting the case.
+3. **Mutation-verify the amendment**: revert the widening and confirm the amended test still
+   passes. If it goes red, the fixture change weakened it and the amendment is wrong.
+
+Here, reverting `git` to `UNBOUNDED_PREFIXES` left the amended case green while turning all
+five new positive cases red — so the fixture still blocks for the reason it always did, and
+the new cases discriminate on the new behaviour and nothing else.
+
+**Relation to law D** (*a test that cannot fail is not coverage*). D is the STATIC form: the
+test never could fail. This is the DYNAMIC form — it could fail yesterday and cannot today, as
+a side effect of a change elsewhere in the tree. Same consequence, but there is no authoring
+defect to find, and review cannot see it because **the test file did not change**.
+
+**Kin:** R-70 → R-73 → R-76 (the D chain), R-3/R-73b/R-77/R-79 (law C, whose false zeros ran
+three times in the same session).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
