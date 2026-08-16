@@ -203,8 +203,9 @@ added; its catalog title was literally "Session Log — Template", an unrenamed 
 status vocabulary — TAXONOMY lists it for U-N/BUG entries only).
 
 **`kind:` could not be written on any of them** — see HY-4 and bug
-`docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`. The catalog holds
-`kind: tracker`; the files still do not declare it.
+`docs/issues/archive/2026-08-16-artifact-update-kind-hint-misroutes.md`. The catalog holds
+`kind: tracker`; the files still do not declare it. Still true after that bug's fix
+(`99fa967f`): the fix corrected the misleading hint, not the missing capability.
 
 **D5 (2 approved, 1 resolved by D10).** goal-tracker cluster (4 files, one topic, all ~90d)
 and headroom cluster (2 files) archived wholesale. The tracker-redesign cluster resolved
@@ -270,7 +271,8 @@ in 7 live surfaces**; `link_scan` heals catalog edges but not prose. Repointed a
 paths were deliberately left alone — they are records of what was true then.
 
 **Bugs filed this sweep:** `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`,
-`docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`.
+`docs/issues/archive/2026-08-16-artifact-update-kind-hint-misroutes.md` (paths as they
+resolve now — the second was fixed in `99fa967f` and archived the same day).
 
 **Fixes applied:** this commit.
 
@@ -307,7 +309,8 @@ A tracker edited today is not stale whatever its refresh counter says.
 
 ## HY-4 — D4's "no `kind:`" sub-class cannot be fixed through the librarian at all
 
-**Kind:** miss · **Sweep:** 2026-08-16 · **Status:** open (bug filed)
+**Kind:** miss · **Sweep:** 2026-08-16 · **Status:** open — the misleading half is fixed,
+the gap is not
 
 D4's proposed fix is "reconcile via `artifact(update)`". For the `status`/`title` half that
 works — updating a frontmatter-less file synthesizes a block. For `kind:` it does not:
@@ -319,9 +322,21 @@ So nine files this sweep end with a catalog row saying `kind: tracker` and a fil
 not declare it. Any consumer reading the file rather than the catalog — a fresh clone's
 reindex, a non-librarian reader — sees an unclassified document.
 
-Filed as `docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`. **Until it is
-fixed, D4's proposed-fix column is wrong for this sub-class** and the skill should say so
-rather than have each sweep rediscover it.
+Filed as `docs/issues/archive/2026-08-16-artifact-update-kind-hint-misroutes.md`, fixed on
+`experiments` in `99fa967f` — but only the *misleading* half. The hint now names remedies
+that exist on the surface that refused: on `update` it says `kind` is fixed once the
+artifact exists and `patch` does not accept it, instead of pointing at a parameter that
+is not there. Scouting the fix widened the finding — `update` has no top-level
+reserved-key parameters at all, so the old hint misrouted `status`, `title`, `owners`,
+`tags`, `topic` and `time_scope` too, not only `kind`.
+
+**The gap itself stands: there is still no way to write `kind:` into a file's frontmatter
+through the librarian**, so D4's proposed-fix column remains wrong for this sub-class and
+the skill should still say so rather than have each sweep rediscover it. What changed is
+that a sweep now learns that from the error instead of from a wasted round-trip. Closing
+the gap for real is the filed option 2 — accept `kind` in `patch`, re-classifying the
+catalog row atomically — deliberately not taken, because reclassification side effects
+need thought and are not required to stop the misrouting.
 
 
 ## HY-5 — Archiving N files creates doc-ref drift that Phase 5 does not repair, and no index exists to drift against
