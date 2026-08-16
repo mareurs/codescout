@@ -276,6 +276,7 @@ be treated as findings, not as a summary to re-derive.
 | R-93 | 2026-08-16 | hit | First audit-on-promote: C re-promoted, and the audit's own precedent text failed the audit | `claude-plugins:c889e83` (1.16.4 → 1.16.5) |
 | R-94 | 2026-08-16 | hit ×1, miss ×2 (self-caught) | A wiring inventory is not a delivery inventory, and it is wrong in both directions | BL-25 (guide topics nothing triggers) |
 | R-95 | 2026-08-16 | hit ×5 → rule | A deferral rationale is a claim, and it is the least-audited kind | BL-11 / BL-12 / BL-16 worktree cluster |
+| R-97 | 2026-08-16 | miss (self-caught) → rule | **A classifier you just wrote has been calibrated on exactly one case: the one that made you write it.** Shipped `snapshot_drift` with the gate "body line-anchors ≥1 `PREFIX-N`", fitted to the tracker that motivated the bug; the SECOND real tracker was a false positive (params-canonical by design, 14 of 68 ids mentioned incidentally). The population was enumerable all along and is bimodal with no overlap — 100% contiguous-prefix (11 in sync) / 61% prefix (the real lag) / 21% scattered (the false positive) — so the discriminator was one script away. Same day, same shape, second instance: the audit itself reported "3 of 28 drifted" in a codescout conversation when the 28 spanned seven repos and one finding was another project's. Rule: run a new classifier over the whole enumerable corpus and read the distribution; the motivating case is the worst validation set, being the one it was fitted to. | BL-29; `0dbfd0ee`, `af2508b4`. Kin R-96 (same law, applied to tests rather than results), R-92, R-95, R-90 |
 | R-96 | 2026-08-16 | miss (self-caught) → rule | Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason | GF-1 / GF-2, `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` |
 | R-1 | 2026-05-19 | hit → promoted | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
 | R-2 | 2026-05-19 | **archived** → R-4 + R-34 | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
@@ -2569,6 +2570,107 @@ defect to find, and review cannot see it because **the test file did not change*
 
 **Kin:** R-70 → R-73 → R-76 (the D chain), R-3/R-73b/R-77/R-79 (law C, whose false zeros ran
 three times in the same session).
+
+### Addendum 2026-08-16 — the NARROWING direction, and why minimal fixtures cluster on thresholds
+
+Second instance the same day, from the other side. Adding a majority-coverage
+requirement to `snapshot_drift`'s gate (`0dbfd0ee`) turned **four** pre-existing
+tests red at once — not one.
+
+Every one had a fixture sitting **exactly at or below the new boundary**: bodies
+carrying 2 of 4 rows, or 1 of 2. Each had been written to express *"a maintained
+snapshot that fell behind"*, and each had silently been expressing the ambiguous
+50/50 case instead, because that was the smallest fixture that produced the old
+behaviour.
+
+**The sharpening this adds to the entry above.** A fixture chosen for
+**minimality** lands on the smallest input that exercises the current rule — and
+the smallest input is disproportionately likely to be a boundary value for a
+threshold nobody has introduced yet. So scaffolding-fixture breakage is not
+randomly distributed across a narrowing: it **concentrates at the new threshold**,
+and a narrowing that touches a ratio should be expected to redden every fixture
+that was minimal in that ratio.
+
+**Direction matters, and this one is the safe direction.** Narrowing pushes
+boundary fixtures RED, so the suite reports them — four at once, unmissable. The
+dangerous case remains the one this entry already names: widening leaves them
+GREEN for a new reason, with nothing to notice. The remedy is unchanged — amend
+the fixture to restore its reach (here: enlarge until the ratio is unambiguous,
+and make it explicit in the helper's signature rather than hardcoded), never the
+rule — plus mutation-verify, which held: reverting the majority test reproduced
+the original false positive and failed only the test written for it.
+
+**Do, additionally:** when a change introduces a *ratio* or *threshold* where
+there was a boolean, expect the minimal fixtures to be the ones that break, and
+state the ratio explicitly in the fixture rather than leaving it implicit in a
+hardcoded seed. A fixture that leaves the ratio implicit lands on the wrong side
+of a future gate without saying so.
+
+## R-97 — A classifier you just wrote has been calibrated on exactly one case: the one that made you write it
+
+**Verdict:** miss (self-caught on the second real input) → rule
+
+**Observed:** 2026-08-16, BL-29's snapshot-drift work (`99aaf83f` → `0dbfd0ee`).
+
+**What happened.** Shipped a `doctor` check whose gate was *"if the body
+line-anchors at least one `PREFIX-N`, this tracker keeps a snapshot"*. It was
+derived from, and verified against, `prompt-hamsa-audit-log.md` — the tracker
+that motivated the bug. Pointed at the **second** real tracker,
+`provenance-subsystem.md`, it was a false positive: that tracker is
+params-canonical by design (its own § *PV-N entries* says *"the canonical PV-N
+rows live in the augmentation params, not in this file"*) and merely mentions 14
+of 68 ids incidentally, in the first cells of unrelated tables and four `### PV-N`
+write-ups. The gate read that as a snapshot 79% behind, and acting on it would
+have duplicated into the file exactly what its author deliberately kept out.
+
+**The cheap part was available all along: the population was enumerable.** One
+query over all 28 augmented trackers, and the answer is not a judgement call — it
+is bimodal with no overlap:
+
+| coverage | shape | what it was |
+|---|---|---|
+| 100% | contiguous prefix | 11 maintained snapshots, in sync |
+| 61% | contiguous prefix `1..14` | the real lag — correctly caught |
+| 21% | scattered, holes throughout | the false positive |
+
+A snapshot is appended to, so it lags at the **tail** and still carries most of
+its rows; a document that mentions ids carries a scattered minority. That rule
+was *measured*, not reasoned out, and it took one script.
+
+**Rule.** Before shipping a classifier over a corpus you can enumerate, **run it
+across the whole corpus and look at the distribution** — not only at the case
+that motivated it. Bimodal with a gap means you have a threshold. Overlapping
+means you do not have a classifier yet and should say so rather than pick a
+number. The motivating case is the *worst* possible validation set: it is the one
+the rule was fitted to.
+
+**Second instance, same day, same shape.** The drift audit itself. It read the
+catalog directly via sqlite and reported *"3 of 28 augmented trackers have
+drifted"* inside a codescout conversation. The catalog is machine-wide: the 28
+span **seven repos**, only 11 are codescout's, and one of the three drifted
+trackers belonged to `mirela/backend-kotlin`. The count was arithmetically
+correct and the population it described was never checked — an instrument
+validated on its output instead of on its input set.
+`get_guide("tracker-conventions")` and the tracker-hygiene skill both warn about
+exactly this for `librarian(action="doctor")`; the warning was on record and
+unread (law G).
+
+**Cost avoided.** Believing the first gate would have meant rewriting 54 rows
+into a tracker whose author had documented, twice, that the rows do not belong
+there — and then nagging every params-canonical tracker on every write forever.
+
+**Kin:** R-96 (its sibling from the other end — that entry is what changing a
+threshold does to *tests*; this is what an unvalidated threshold does to
+*results*), R-92 (a filed root cause is a hypothesis — so is a gate you just
+wrote), R-95 (a deferral rationale is a claim), R-90 (read what you actually
+selected, not what you meant to select), law B (the instrument decides the
+answer), law G (the answer may already be on record).
+
+**Promote-when:** one more classifier shipped without a corpus-wide distribution
+check. At that point it belongs in the skill's Phase 1 as an explicit step —
+*enumerate the population and look at the distribution before trusting a gate*.
+
+---
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
