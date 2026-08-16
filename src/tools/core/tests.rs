@@ -301,6 +301,53 @@ async fn one_param_name_meaning_three_things_gets_three_hints() {
     assert_ne!(approve, register, "these want different things too");
 }
 
+/// Caught by live verification, not by the unit test above — which is the point.
+///
+/// `a_missing_required_param_teaches_the_call_…` exercises `require_str_param`, the
+/// shared helper. `memory` does not always reach it: `topic` goes through a private
+/// `require_topic_param` with its own hardcoded hint, so the table entry was bypassed
+/// and the live server still answered:
+///
+/// ```text
+/// missing 'topic' parameter — Add the required 'topic' parameter to the tool call.
+/// ```
+///
+/// while `query` on the same tool already showed the new hint. A test written to the
+/// mechanism cannot see a call site that skips the mechanism. This one drives the
+/// real tool, so it can.
+#[tokio::test]
+async fn memorys_runtime_required_params_teach_the_call_through_the_real_tool() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = rooted_ctx(dir.path()).await;
+
+    // (action, the param omitted). All are required at runtime but absent from the
+    // schema's `required` array — exactly the shape BL-3 is about, and the only one
+    // reachable through a schema-validating client.
+    for (action, param) in [("read", "topic"), ("recall", "query")] {
+        let err = crate::tools::memory::Memory
+            .call(json!({ "action": action }), &ctx)
+            .await
+            .expect_err("a runtime-required param must be refused when absent")
+            .to_string();
+
+        assert!(
+            err.contains(&format!("missing '{param}'")),
+            "action={action}: expected the missing-`{param}` refusal, got something \
+             else entirely: {err}"
+        );
+        assert!(
+            !err.contains("Add the required"),
+            "action={action}: `{param}` still emits the generic template — a call site \
+             that bypasses require_str_param bypasses the hint table with it: {err}"
+        );
+        assert!(
+            err.contains(&format!("{param}=")),
+            "action={action}: the hint must show a concrete call shape: {err}"
+        );
+    }
+}
+
 #[test]
 fn require_path_param_accepts_unified_aliases() {
     use serde_json::json;

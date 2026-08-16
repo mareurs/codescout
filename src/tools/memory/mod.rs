@@ -273,17 +273,12 @@ fn now_epoch_string() -> String {
 /// references the canonical `topic` so the schema stays the source of
 /// truth.
 fn require_topic_param(input: &Value) -> anyhow::Result<&str> {
-    for key in ["topic", "name", "key"] {
-        if let Some(v) = input.get(key).and_then(|v| v.as_str()) {
-            return Ok(v);
-        }
-    }
-    Err(RecoverableError::with_hint(
-        "missing 'topic' parameter",
-        "Add the required 'topic' parameter to the tool call. \
-         (Aliases 'name' and 'key' are also accepted.)",
-    )
-    .into())
+    // Delegates rather than carrying its own message: this used to hold a private
+    // copy of the generic "Add the required 'topic' parameter" text, which meant the
+    // shared hint table was silently bypassed on the tool's most-used path. Live
+    // verification caught it after the table shipped — `query` taught the call and
+    // `topic`, on the same tool, did not. BL-3 Class B.
+    crate::tools::require_str_param_or(input, "topic", &["name", "key"])
 }
 
 /// Rank `available` topics by shared kebab/slash/underscore token overlap with

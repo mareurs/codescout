@@ -46,10 +46,13 @@ fn param_hint(name: &str) -> Option<&'static str> {
             "Pass the text to write as a string, e.g. content=\"# Title\\n\\nBody\". The value \
              is written verbatim."
         }
+        // `topic` exists only in `memory`, so its aliases belong in the shared entry
+        // rather than at the call site — that is what lets `require_topic_param`
+        // delegate here instead of carrying a second, drifting copy of the text.
         "topic" => {
             "Pass the memory topic key, e.g. topic=\"architecture\". Path-like keys such as \
              topic=\"conventions/testing\" are valid, and memory(action=\"list\") shows what \
-             exists."
+             exists. Aliases 'name' and 'key' are also accepted."
         }
         _ => return None,
     })
