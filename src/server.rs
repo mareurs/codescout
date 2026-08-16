@@ -96,7 +96,18 @@ pub struct CodeScoutServer {
     /// Session-scoped set of guide topics already hinted to the model.
     /// Reset on workspace(action="activate").
     guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
+    /// This MCP server process's own id — a fresh uuid per construction.
     session_id: String,
+    /// The Claude Code session's id, resolved ONCE here (env var, then the
+    /// shared file, then a uuid) and handed to every consumer.
+    ///
+    /// Resolved once on purpose. `src/usage/mod.rs` used to re-derive this by
+    /// reading `.codescout/cc_session_id` directly, which is per-PROJECT: with
+    /// two Claude Code sessions open on one repo, both attributed their calls to
+    /// whichever id the file held last, so telemetry could not tell them apart
+    /// — exactly the case the env var exists to disambiguate.
+    /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
+    cc_session_id: String,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
@@ -273,6 +284,7 @@ impl CodeScoutServer {
             section_coverage,
             guide_hints_emitted,
             session_id: uuid::Uuid::new_v4().to_string(),
+            cc_session_id,
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
@@ -741,7 +753,12 @@ impl CodeScoutServer {
                 .ok()
         };
 
-        let recorder = UsageRecorder::new(self.agent.clone(), self.debug, self.session_id.clone());
+        let recorder = UsageRecorder::new(
+            self.agent.clone(),
+            self.debug,
+            self.session_id.clone(),
+            self.cc_session_id.clone(),
+        );
         let input_for_record = input.clone();
 
         // Acquire the write guard if this is a mutating call. Read calls skip

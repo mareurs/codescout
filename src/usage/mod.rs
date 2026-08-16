@@ -9,15 +9,27 @@ use std::time::Instant;
 pub struct UsageRecorder {
     agent: Agent,
     debug: bool,
+    /// This MCP server process's own id.
     session_id: String,
+    /// The Claude Code session id, resolved by the server and passed in.
+    ///
+    /// This used to be read here from `.codescout/cc_session_id` on every write.
+    /// That file is per-PROJECT, so two concurrent Claude Code sessions both
+    /// recorded under whichever id was written last, and every per-session
+    /// figure silently merged them. The server already resolves this correctly
+    /// (`CLAUDE_CODE_SESSION_ID` first, which is per-process); taking it from
+    /// there gives the value one resolution site instead of two that drifted.
+    /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
+    cc_session_id: String,
 }
 
 impl UsageRecorder {
-    pub fn new(agent: Agent, debug: bool, session_id: String) -> Self {
+    pub fn new(agent: Agent, debug: bool, session_id: String, cc_session_id: String) -> Self {
         Self {
             agent,
             debug,
             session_id,
+            cc_session_id,
         }
     }
 
@@ -97,11 +109,8 @@ impl UsageRecorder {
             None
         };
 
-        let cc_session_id =
-            std::fs::read_to_string(project_root.join(".codescout").join("cc_session_id"))
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
+        // Resolved once by the server, not re-derived here — see the field doc.
+        let cc_session_id = Some(self.cc_session_id.as_str()).filter(|s| !s.is_empty());
 
         db::write_record(
             &conn,
@@ -115,7 +124,7 @@ impl UsageRecorder {
             &self.session_id,
             input_json.as_deref(),
             output_json.as_deref(),
-            cc_session_id.as_deref(),
+            cc_session_id,
             friction_target.as_deref(),
             overflow_tokens,
             err_family,
@@ -275,6 +284,57 @@ mod content_tests {
         assert_eq!(extract_friction_target(&json!({"unrelated": 1})), None);
     }
 
+    /// Regression for
+    /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md:
+    /// the recorder used to read `.codescout/cc_session_id` itself. That file is
+    /// per-PROJECT, so with two Claude Code sessions open on one repo both wrote
+    /// rows under whichever id the file held last and per-session figures merged
+    /// them silently. The id the server resolved must win over the file.
+    #[tokio::test]
+    async fn record_content_uses_the_passed_cc_session_id_not_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        // A file holding a DIFFERENT session's id — the concurrent-session case.
+        std::fs::write(
+            dir.path().join(".codescout").join("cc_session_id"),
+            "other-session-from-the-file",
+        )
+        .unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "mcp-session".to_string(),
+            "my-cc-session".to_string(),
+        );
+
+        let _ = recorder
+            .record_content(
+                "symbols",
+                &serde_json::json!({"query": "x"}),
+                None,
+                || async { Ok(vec![Content::text("ok")]) },
+            )
+            .await;
+
+        let db = dir.path().join(".codescout").join("usage.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        let got: String = conn
+            .query_row(
+                "SELECT cc_session_id FROM tool_calls ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            got, "my-cc-session",
+            "the server-resolved id must win; reading the shared per-project file \
+             is what merged concurrent sessions into one"
+        );
+    }
+
     #[tokio::test]
     async fn record_content_stores_input_in_debug_mode() {
         use serde_json::json;
@@ -284,7 +344,12 @@ mod content_tests {
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
             .await
             .unwrap();
-        let recorder = UsageRecorder::new(agent.clone(), true, "test-session".to_string());
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            true,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+        );
         let input = json!({"query": "test_symbol", "path": "src/lib.rs"});
 
         let _ = recorder
@@ -336,7 +401,12 @@ mod content_tests {
         let agent = crate::agent::Agent::new(Some(dir_b.path().to_path_buf()))
             .await
             .unwrap();
-        let recorder = UsageRecorder::new(agent, false, "pin-session".to_string());
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "pin-session".to_string(),
+            "cc-pin".to_string(),
+        );
         let input = json!({"query": "x"});
 
         let _ = recorder
@@ -371,7 +441,12 @@ mod content_tests {
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
             .await
             .unwrap();
-        let recorder = UsageRecorder::new(agent.clone(), true, "test-session".to_string());
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            true,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+        );
         let input = json!({"path": "/bad/path"});
 
         let _ = recorder
@@ -401,7 +476,12 @@ mod content_tests {
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
             .await
             .unwrap();
-        let recorder = UsageRecorder::new(agent.clone(), false, "test-session".to_string());
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+        );
         let input = json!({"query": "test_symbol"});
 
         let _ = recorder
@@ -432,7 +512,12 @@ mod content_tests {
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
             .await
             .unwrap();
-        let recorder = UsageRecorder::new(agent.clone(), false, "test-session".to_string());
+        let recorder = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+        );
         let input = json!({"name_path": "LspManager/get_or_start", "path": "src/lsp/manager.rs"});
 
         let _ = recorder
