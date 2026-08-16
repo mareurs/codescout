@@ -7077,6 +7077,71 @@ fn test_ctx_with_agent(agent: Agent) -> ToolContext {
     }
 }
 
+/// Every `(action, param)` pair `edit_code` refuses at runtime must be advertised as
+/// required in the schema — and every pair listed here must really still be refused.
+///
+/// Both halves are asserted, separately and in that order. The first loop **executes**
+/// the runtime rather than reading a constant, so this table cannot quietly drift from
+/// `call()`: delete a check there and the assertion fails rather than the table silently
+/// describing a rule that no longer exists.
+///
+/// The second half is the one that was wrong. `body` was described only by what it
+/// *means* per action ("replace: new body; insert: code to inject"), which reads as an
+/// optional convenience; `new_name` said `"rename only"` — a phrase this same tool uses
+/// for `attributes` and `position`, both genuinely optional. The phrase marks scope, not
+/// obligation, so it could not tell a reader which kind they had.
+///
+/// Measured 2026-08-15 over the live call log: params that are required but advertised
+/// optional are **41% of all schema errors**, the largest single class.
+/// See `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md`.
+///
+/// Incidental guarantee worth keeping: the `requires '<param>'` substring asserted below
+/// is what `usage::db::normalize_err_family` keys on to classify this family, so the
+/// measurement that found the bug keeps working.
+#[tokio::test]
+async fn edit_code_advertises_every_conditionally_required_param() {
+    const PAIRS: &[(&str, &str)] = &[
+        ("rename", "new_name"),
+        ("replace", "body"),
+        ("insert", "body"),
+    ];
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+    let schema = EditCode.input_schema();
+
+    for (action, param) in PAIRS {
+        let err = EditCode
+            .call(
+                json!({"symbol": "f", "path": "src/lib.rs", "action": action}),
+                &ctx,
+            )
+            .await
+            .expect_err("omitting a conditionally-required param must be refused");
+        assert!(
+            err.to_string().contains(&format!("requires '{param}'")),
+            "runtime must still refuse action='{action}' without `{param}`; got: {err}"
+        );
+
+        let desc = schema["properties"][param]["description"]
+            .as_str()
+            .unwrap_or_else(|| panic!("`{param}` has no description to check"));
+        assert!(
+            desc.contains("REQUIRED"),
+            "`{param}` is a precondition and the schema must say so, not merely describe \
+             what it means: {desc}"
+        );
+        assert!(
+            desc.contains(action),
+            "`{param}`'s description must name action '{action}' as one that requires it: \
+             {desc}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn symbols_overview_scope_libraries_includes_library_files() {
     let project_dir = tempdir().unwrap();

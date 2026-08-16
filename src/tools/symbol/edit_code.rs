@@ -22,6 +22,43 @@ use crate::symbol::query::{
     count_symbols_by_name_path, fetch_validated_symbol, find_unique_symbol_by_name_path,
 };
 
+/// Actions for which `body` is a precondition rather than a convenience.
+///
+/// `required` in JSON Schema is a flat list, so "required when `action` is one of X" is
+/// expressible only via `if`/`then` or `oneOf` — which many MCP clients never surface to
+/// the model. The remaining honest option is to say it in the description, and until
+/// 2026-08-16 nothing did: `body` was described purely by what it *means* per action
+/// ("replace: new body; insert: code to inject"), which reads as documentation of an
+/// optional convenience. Measured 2026-08-15 over the live call log, that omission is
+/// **41% of all schema errors** — the single largest class.
+///
+/// See `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md`.
+const BODY_REQUIRED_ACTIONS: &[&str] = &["replace", "insert"];
+
+/// Actions for which `new_name` is a precondition. Same contract as
+/// [`BODY_REQUIRED_ACTIONS`].
+///
+/// The filed bug named only `body`; `new_name` carries the same defect. Its description
+/// was `"rename only"`, and this tool uses that identical phrasing for params that are
+/// genuinely optional — `attributes` ("replace only: … Omit to keep the default") and
+/// `position` ("insert only, default 'after'"). The phrase marks *scope*, not
+/// *obligation*, so it cannot tell a reader which kind they are looking at.
+const NEW_NAME_REQUIRED_ACTIONS: &[&str] = &["rename"];
+
+/// Render the requirement clause that opens a conditionally-required param's description.
+///
+/// Kept as one function so every such param states the obligation in the same words, which
+/// is what lets `edit_code_advertises_every_conditionally_required_param` assert on it
+/// without pattern-matching prose.
+fn required_for(actions: &[&str]) -> String {
+    let list = actions
+        .iter()
+        .map(|a| format!("'{a}'"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    format!("REQUIRED for action={list}.")
+}
+
 pub struct EditCode;
 
 #[async_trait::async_trait]
@@ -49,8 +86,21 @@ impl Tool for EditCode {
                 "symbol":   { "type": "string" },
                 "path":     { "type": "string" },
                 "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"] },
-                "new_name": { "type": "string", "description": "rename only" },
-                "body":     { "type": "string", "description": "replace: new body; insert: code to inject" },
+                "new_name": {
+                    "type": "string",
+                    "description": format!(
+                        "{} The symbol's new name — applied across the codebase via LSP.",
+                        required_for(NEW_NAME_REQUIRED_ACTIONS)
+                    )
+                },
+                "body": {
+                    "type": "string",
+                    "description": format!(
+                        "{} 'replace': the new symbol body. 'insert': the code to inject. \
+                         Not read by 'rename' or 'remove'.",
+                        required_for(BODY_REQUIRED_ACTIONS)
+                    )
+                },
                 "attributes": {
                     "type": "array",
                     "items": { "type": "string" },
