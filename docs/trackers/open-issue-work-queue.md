@@ -75,7 +75,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | `5f6cfe1acdfda38d` |
 | BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
-| BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | open | `60b5323f5e11be66` |
+| BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | done | `529a6c05895cc686` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -371,24 +371,68 @@ augmented-with-no-id refused, augmented-with-quoted-id refused, prose tracker re
 T-22 caught me making — the observation and the fix landed in the same session, and
 `artifact(get, entry_filter=…)` is now the only way in.
 
+### 2026-08-16 — BL-34 fixed, and the corpus proved something the unit tests could not
+
+`858f22ec` — `frontmatter::replace_id_line` splices the `^id:` line instead of round-tripping
+the block through `parse` → `write`. `mv::repair_frontmatter_id` now reads through the parser
+(authoritative about *whether* a repair is needed) and writes through the splice (authoritative
+about *which bytes move*). When they disagree — a folded or flow-mapped `id:` the line scan
+cannot see — it warns and leaves the file alone. Declining beats reformatting: a stale id is a
+broken citation, a reformat is data loss.
+
+**Verified live against the named regression corpus**, `/home/marius/work/mirela/eduplanner-ui`
+(reverted on purpose 2026-08-16 precisely so it could serve as one):
+
+| | before | after |
+|---|---|---|
+| files | 26 | 26 |
+| diff | 402+ / 370− | **26+ / 26−** |
+| lines/file | 30 | **1** |
+
+Every hunk in `git diff -U0` is `@@ -2 +2 @@`, and every `−`/`+` line begins with `id:`. Both
+ADR/FDR templates are byte-identical outside that line — `created: {YYYY-MM-DD}` intact.
+
+**Three things worth carrying forward.**
+
+1. **The corpus caught a class the unit tests structurally could not.** `title: "{Title}"` and
+   `category: a | b | c` are shapes a *round-trip* mangles and a *splice* never sees. The fix
+   is not "handle more YAML shapes correctly" — it is "stop reading shapes you have no business
+   rewriting." A narrower contract needs fewer cases.
+
+2. **Fourth instance this session of a test that exercises the mechanism but not the call
+   site.** `move_rewrites_the_frontmatter_id_it_just_invalidated` was green through this entire
+   defect, because it only ever asserted *that the id changed*. When a fix lands in a shared
+   helper, drive at least one real call site — and mutation-verify that one, since it is the
+   only test that can fail for the right reason.
+
+3. **A read-only precondition check is cheap and buys the apply.** Before writing into a
+   foreign repo, `grep -c '^id:'` over the 26 flagged files confirmed every one would take the
+   splice path rather than the decline path. The four files the doctor did *not* flag
+   (ADR-0023, ADR-0024, two READMEs) have no `id:` at all — the abstention branch, visible for
+   free in the same result.
+
+The 26-line repair is left **uncommitted** in `eduplanner-ui`'s working tree. It is the correct
+repair now, but committing into another repo is not this session's call.
 ### Resume — state at compaction, 2026-08-16
 
-**17 of 31 rows open.** Phase 1 remaining: **BL-3, BL-4, BL-6, BL-7, BL-19, BL-25**.
-BL-29/BL-30 are the other session's. BL-31 is new (phase 2).
+**15 of 35 rows open.** Phase 1 remaining: **BL-4, BL-19** (BL-29 is phase 1 but the other
+session's). Phase 2: BL-9, BL-24, BL-30, BL-31, BL-35. Phase 3: BL-13, BL-14, BL-15, BL-16,
+BL-28, BL-32. Phase 4: BL-17.
 
-**BL-3 is the natural next** — "Tool schemas: stop advertising conditionally-required
-params as optional" (`02d2d9d8a7eeec2e`) — **since closed**; see the BL-3 History entry.
-BL-6 and BL-19 are both progressive-disclosure siblings of the BL-2 fix (incompleteness
-signals on buffered output) and would batch well together if you prefer momentum over
-order.
+BL-29/BL-30/BL-35 belong to the concurrent session. **BL-4 and BL-19 are the natural next** —
+BL-19 is a progressive-disclosure sibling of the BL-2 fix (incompleteness signals on buffered
+output).
 
 **Working practices, carried forward:**
 
 - **Read the filing as a hypothesis, not a spec.** BL-2's filed root cause was narrower
   than the defect; the fix would have been written to a branch that cannot execute.
   Trace the variable from its binding before implementing the fix a bug file prescribes.
-- **The catching test contains a row that was green before the fix.** Three for three
-  this session on guard/message defects.
+- **The catching test contains a row that was green before the fix.** Four for four
+  this session on guard/message defects — BL-34 made it a helper-vs-call-site variant.
+- **When the fix lands in a shared helper, drive at least one real call site**, and
+  mutation-verify that test specifically. The helper's own tests cannot prove the caller
+  reaches for it.
 - **Verify a fix is live by invoking it**, never by inspecting the binary or
   `codescout_sha` (T-20).
 - **Archive with `artifact(action="move")` and re-point ids in the same commit** — read
@@ -397,3 +441,6 @@ order.
   had drifted here, all from catalog-only writes.
 - **A concurrent session shares this working tree, index, and formatter.** Commit by
   pathspec; prefer `cargo fmt -- <file>`.
+- **Before writing into a foreign repo, run the read-only precondition check first.** The
+  dry-run says *which* files; a `grep` on the shape says *which code path* they will take.
+  Both are free, and together they make the apply reviewable in advance (BL-34).

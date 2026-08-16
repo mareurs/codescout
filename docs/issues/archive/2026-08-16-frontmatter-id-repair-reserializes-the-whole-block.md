@@ -1,7 +1,7 @@
 ---
-id: '60b5323f5e11be66'
+id: 529a6c05895cc686
 kind: bug
-status: open
+status: fixed
 title: 'BUG: repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML and expanding template placeholders'
 tags:
 - librarian
@@ -9,7 +9,7 @@ tags:
 - move
 - doctor
 - blast-radius
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -147,26 +147,47 @@ shape*, not its content.
 
 ## Fix
 
-Not implemented. Replace the round-trip with a surgical single-line edit: locate the `^id:`
-line inside the frontmatter delimiters and swap only that line, leaving every other byte
-untouched. The value to write is already known, the region is already delimited by the same
-`---` scan `parse` performs, and it makes the repair's diff exactly one line by construction —
-which is also what makes it reviewable in a foreign repo.
+Fixed in `858f22ec` (`experiments`). `frontmatter::replace_id_line` performs a surgical byte
+splice: it walks the frontmatter with the **same delimiter scan `parse` uses**, so the two can
+never disagree about where the block ends, finds the top-level `^id:` line, and rewrites only
+that line's bytes. Quoting still routes through `scalar_can_be_bare`, so an all-digit id stays
+quoted — the one property a naive splice would lose relative to `write`.
 
-Keep `update_in_place` for callers that *want* normalization (`artifact(update)` writing
-frontmatter fields); it is the right primitive there.
+`mv::repair_frontmatter_id` now **reads through the parser and writes through the splice**. The
+parser stays authoritative about whether a repair is needed (it is what YAML actually sees);
+the splice decides what bytes move. When the two disagree — the parser finds an id the line
+scan cannot, i.e. a folded or flow-mapped `id:` — it logs a warning and leaves the file
+untouched rather than falling back to a whole-block rewrite. Declining is correct here: an
+unrepaired id is a stale citation, a reformat is data loss.
 
-Two smaller alternatives, both inferior:
-- Report the extra churn in the response (`reformatted: true`) — honest, still reformats.
-- Refuse when the round-trip would change more than the id line — a guard where a fix belongs.
+`replace_id_line` returns `None` on four shapes: no frontmatter, no top-level id, an *indented*
+`id:` (a nested mapping's key), and an `id:` below the closing delimiter (body text).
 
+`update_in_place` is unchanged and still used by `artifact(update)`, where canonicalization is
+the desired behaviour.
 ## Tests added
 
-None — not fixed. The regression test should assert **byte equality outside the `id:` line**
-for a deliberately non-canonical fixture: flow-style `tags: [a, b]`, a double-quoted title, a
-`{Placeholder}` value, a null key. Asserting only that the id changed is what let this
-through; the fixture must be hostile to normalization or it proves nothing.
+Four in `src/librarian/frontmatter.rs`, all watched fail against a stub returning `None`:
 
+- `replace_id_line_touches_only_the_id_line` — the hostile fixture the bug called for: flow
+  sequence, double-quoted title, `{YYYY-MM-DD}` placeholder, null keys, and an `id:`-like token
+  in the body. Asserts **byte equality** against the doc with only that line substituted.
+- `replace_id_line_quotes_an_id_yaml_would_misread`
+- `replace_id_line_declines_when_there_is_nothing_to_replace` — 4 shapes
+- `replace_id_line_preserves_crlf_line_endings`
+
+One caller test in `src/librarian/tools/mv.rs`:
+`move_preserves_hand_authored_frontmatter_outside_the_id_line`. **Mutation-verified** by
+temporarily restoring the `update_in_place` round-trip, which reproduced BL-34 exactly
+(`tags` exploded to block style, `created: {YYYY-MM-DD}` → `created:\n  YYYY-MM-DD: null`),
+then restoring the real implementation.
+
+That caller test is the load-bearing one. `replace_id_line`'s own tests cannot prove `move`
+reaches for it — and the pre-existing `move_rewrites_the_frontmatter_id_it_just_invalidated`
+was green through this entire defect, because it only ever asserted *that the id changed*.
+Fourth instance this session of a test that exercises the mechanism but not the call site.
+
+Gate at commit: 3932 tests, `cargo clippy -- -D warnings`, `cargo fmt`.
 ## Workarounds
 
 Before pointing `fix=repair_frontmatter_id` at a repo of hand-authored docs, run the dry-run,
@@ -176,16 +197,31 @@ approaching 30 means the frontmatter is being rewritten and the repair is not wo
 
 ## Resume
 
-Implement the surgical `id:` line swap in `src/librarian/tools/mv.rs`
-(`repair_frontmatter_id`), then re-run the sweep against
-`/home/marius/work/mirela/eduplanner-ui` — the repo reverted on 2026-08-16 — and confirm the
-diff is one line per file. That repo is the regression corpus: it is the one that exposed
-this, and its two templates (`docs/adr/templates/adr-template.md`, `fdr-template.md`) carry
-the `{Placeholder}` shape that must survive.
+None — verified end to end.
 
+**Live verification, 2026-08-16** against the named regression corpus
+(`/home/marius/work/mirela/eduplanner-ui`, clean tree at `34799b14`):
+
+```
+librarian(doctor, fix="repair_frontmatter_id", root=".../eduplanner-ui")  -> 26 files
+  … confirm=true                                                          -> 26 repaired, 0 failed
+git diff --shortstat  ->  26 files changed, 26 insertions(+), 26 deletions(-)
+```
+
+**30 lines/file → 1 line/file.** Every hunk in `git diff -U0` is `@@ -2 +2 @@`; every `-` and
+every `+` line begins with `id:`. No body line and no other frontmatter key moved in any of the
+26 files.
+
+Both templates survive byte-identical outside the id line — `title: "{Title}"` still
+double-quoted, `category: architecture | calendar | …` still a bare scalar, `tags:` still a
+block sequence, and **`created: {YYYY-MM-DD}` still a placeholder**.
+
+Pre-check worth keeping: all 26 flagged files carry exactly one top-level `^id:` line, so every
+one took the splice path rather than the decline path. The four ADR-directory files the doctor
+did *not* flag (ADR-0023, ADR-0024, and the READMEs) have no `id:` at all — the abstention
+branch, behaving as designed.
 ## References
 
 - `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md` — BL-23, the repair this is a defect in
 - `src/librarian/frontmatter.rs:180-185` — `update_in_place`
 - `src/librarian/tools/mv.rs` — `repair_frontmatter_id`, the shared helper both callers use
-
