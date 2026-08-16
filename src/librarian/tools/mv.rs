@@ -75,18 +75,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     std::fs::rename(&old_full, &new_full)?;
 
     let now = chrono::Utc::now().timestamp_millis();
-    let file_mtime = std::fs::metadata(&new_full)
-        .ok()
-        .and_then(|m| {
-            m.modified().ok().and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| d.as_millis() as i64)
-            })
-        })
-        .unwrap_or(now);
-    let content = std::fs::read_to_string(&new_full)?;
-    let file_sha256 = crate::librarian::util::sha_of_bytes(content.as_bytes());
 
     // Catalog identity is `id == artifact_id_from_abs(abs_path)` — stated in
     // `doctor.rs` and relied on by `migrate_v6`'s implicit id migration. Keeping
@@ -102,6 +90,30 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // twin that moved.
     // docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
     let new_id = crate::librarian::ids::artifact_id_from_abs(&new_full);
+
+    // The file's own `id:` now asserts an identity this move just invalidated.
+    // Repair it here, in the same call, because nothing downstream can: every
+    // write path into a managed artifact refuses one (`edit_markdown` and
+    // `edit_file` both guard on the frontmatter id; `artifact(update)`'s `extra`
+    // writes custom keys but never `id`), so a later repair pass has no route to
+    // the file. BL-23.
+    let content = repair_frontmatter_id(&new_full, &new_id)?;
+
+    // Both derived AFTER the repair. A digest taken before it describes a file
+    // that no longer exists on disk, which leaves the row looking dirty on every
+    // subsequent walk.
+    let file_mtime = std::fs::metadata(&new_full)
+        .ok()
+        .and_then(|m| {
+            m.modified().ok().and_then(|t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_millis() as i64)
+            })
+        })
+        .unwrap_or(now);
+    let file_sha256 = crate::librarian::util::sha_of_bytes(content.as_bytes());
+
     let updated_row = crate::librarian::catalog::artifact::ArtifactRow {
         id: new_id.clone(),
         abs_path: new_full.clone(),
@@ -142,6 +154,57 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "new_abs_path": to_forward_slash(&new_full),
         "moved": true
     }))
+}
+
+/// Rewrite a moved file's frontmatter `id:` to the id the move just minted, and
+/// return the file's post-repair content.
+///
+/// **Only an id already present is rewritten.** A file carrying none is not
+/// asserting anything false, and `frontmatter::update_in_place` would *insert* a
+/// block rather than skip — stamping an `id:` is exactly what subjects a file to
+/// the librarian guard, so archiving a prose tracker like
+/// `docs/trackers/skill-frictions.md` would quietly make `edit_markdown` refuse
+/// the workflow CLAUDE.md documents for it.
+///
+/// **Best-effort by design.** The rename has already happened by the time this
+/// runs, so unparseable frontmatter must not abort the move and strand the
+/// catalog mid-update. A failure is logged and the original content returned; the
+/// catalog still re-keys correctly, and the file is left exactly as it was.
+///
+/// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
+fn repair_frontmatter_id(path: &std::path::Path, new_id: &str) -> anyhow::Result<String> {
+    let content = std::fs::read_to_string(path)?;
+
+    let needs_repair = match crate::librarian::frontmatter::parse(&content) {
+        Ok((Some(fm), _)) => fm.id.as_deref().is_some_and(|id| id != new_id),
+        Ok((None, _)) => false,
+        Err(err) => {
+            tracing::warn!(
+                "move: frontmatter unparseable at {}, leaving its id alone: {err:#}",
+                path.display()
+            );
+            false
+        }
+    };
+    if !needs_repair {
+        return Ok(content);
+    }
+
+    match crate::librarian::frontmatter::update_in_place(&content, |fm| {
+        fm.id = Some(new_id.to_string());
+    }) {
+        Ok(rewritten) => {
+            std::fs::write(path, &rewritten)?;
+            Ok(rewritten)
+        }
+        Err(err) => {
+            tracing::warn!(
+                "move: could not rewrite frontmatter id at {}: {err:#}",
+                path.display()
+            );
+            Ok(content)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -234,6 +297,125 @@ mod tests {
         assert!(
             artifact::get(&cat, "aabbccdd11223344").unwrap().is_none(),
             "the old id must not linger as a second row"
+        );
+    }
+
+    /// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
+    ///
+    /// A move mints a new id, and the file's own `id:` keeps asserting the old one —
+    /// which resolves to nothing. This has to be repaired **here**, in the same call
+    /// as the graft, because by the time anyone notices, no write path can reach the
+    /// file: `edit_markdown` and `edit_file` both refuse a librarian-managed artifact,
+    /// and `artifact(update)`'s `extra` writes custom keys but never `id`.
+    ///
+    /// The `file_sha256` assertion is the load-bearing one. It fails if the rewrite
+    /// happens after the hash is taken — the catalog would then record a digest of a
+    /// file that no longer exists on disk, and the next reindex would see the row as
+    /// dirty on every walk.
+    #[tokio::test]
+    async fn move_rewrites_the_frontmatter_id_it_just_invalidated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id_changed"], true);
+        let new_id = result["id"].as_str().unwrap().to_string();
+
+        let moved = tmp.path().join("docs/archive/foo.md");
+        let text = std::fs::read_to_string(&moved).unwrap();
+        let (fm, body) = crate::librarian::frontmatter::parse(&text).unwrap();
+        let fm = fm.expect("frontmatter must survive the move");
+
+        assert_eq!(
+            fm.id.as_deref(),
+            Some(new_id.as_str()),
+            "the file must assert the id it now has, not the one it was moved away from"
+        );
+        assert_eq!(
+            fm.kind.as_deref(),
+            Some("tracker"),
+            "rewriting `id` must not disturb the other frontmatter fields"
+        );
+        assert!(
+            body.contains("# Foo"),
+            "the body must be byte-untouched, got: {body:?}"
+        );
+
+        let cat = ctx.catalog.lock();
+        let row = artifact::get(&cat, &new_id).unwrap().unwrap();
+        assert_eq!(
+            row.file_sha256,
+            crate::librarian::util::sha_of_bytes(text.as_bytes()),
+            "the recorded sha must describe the file AFTER the frontmatter rewrite — \
+             hashing before it leaves the row permanently dirty"
+        );
+    }
+
+    /// The other half, and the reason this is not simply `update_in_place`.
+    ///
+    /// `frontmatter::update_in_place` inserts a frontmatter block when none exists,
+    /// so applying it unconditionally would stamp an `id:` onto files that never had
+    /// one — and a stamped id is exactly what subjects a file to the librarian guard
+    /// (BL-33). Archiving `docs/trackers/skill-frictions.md` would silently make it
+    /// unreachable by `edit_markdown`, the workflow CLAUDE.md documents for it.
+    ///
+    /// A file with no `id:` is not asserting anything false. Only a wrong id is repaired.
+    #[tokio::test]
+    async fn move_does_not_stamp_an_id_onto_a_file_that_never_had_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+
+        let prose = tmp.path().join("docs/trackers/prose.md");
+        std::fs::write(&prose, "---\nkind: tracker\nstatus: active\n---\n# Prose\n").unwrap();
+        {
+            let cat = ctx.catalog.lock();
+            let row = ArtifactRow {
+                id: "1111222233334444".into(),
+                abs_path: prose.clone(),
+                kind: "tracker".into(),
+                status: "active".into(),
+                title: Some("Prose Tracker".into()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: 0,
+                updated_at: 0,
+                file_mtime: 0,
+                file_sha256: String::new(),
+                confidence: 1.0,
+            };
+            artifact::upsert(&cat, &row).unwrap();
+        }
+
+        mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "1111222233334444",
+                "new_rel_path": "docs/archive/prose.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let text = std::fs::read_to_string(tmp.path().join("docs/archive/prose.md")).unwrap();
+        let (fm, _) = crate::librarian::frontmatter::parse(&text).unwrap();
+        assert!(
+            fm.expect("frontmatter block preserved").id.is_none(),
+            "a file with no id must not gain one — stamping it would newly subject a \
+             prose tracker to the librarian guard. Got: {text:?}"
         );
     }
 

@@ -133,23 +133,39 @@ wrote through the old hole — here, nothing did yet, which is precisely why it 
 
 ## Fix
 
-Two candidates, cheapest first:
+**Half fixed 2026-08-16 on `experiments`.** New moves no longer create the defect; the
+existing population is untouched and still needs a repair path (see *Resume*).
 
-1. **Have `move` rewrite the `id:` line** as part of the same call, before the
-   sha256 of the content is recorded (order matters — `mv` computes `file_sha256`
-   from the file it just renamed, so a rewrite has to land before that read or the
-   row's hash goes stale immediately).
-2. **Stop writing `id:` into frontmatter at all.** It is redundant with the
-   catalog, derivable from the path, and this bug is the second time it has drifted.
-   The cost is that a file read outside the catalog loses its identity hint.
+`artifact(action="move")` now rewrites the frontmatter `id:` to the id it just minted, in
+the same call as the graft — `repair_frontmatter_id` in `src/librarian/tools/mv.rs`. Three
+decisions worth keeping:
 
-Prefer 1 if the `id:` line is load-bearing for any human workflow; prefer 2 if it
-is not. Worth checking which before implementing.
-
+1. **Only an id already present is rewritten.** `frontmatter::update_in_place` *inserts* a
+   block when none exists, so applying it unconditionally would stamp an `id:` onto files
+   that never had one — and a stamped id is precisely what subjects a file to the librarian
+   guard. Archiving `docs/trackers/skill-frictions.md` would have silently made
+   `edit_markdown` refuse it, breaking the workflow CLAUDE.md documents. A file with no
+   `id:` is not asserting anything false.
+2. **`file_mtime` and `file_sha256` are taken AFTER the rewrite.** They were computed before
+   `new_id` even existed; hashing pre-repair content would record a digest of a file that no
+   longer exists on disk, leaving the row looking dirty on every subsequent walk.
+3. **Best-effort, never fatal.** The rename has already happened when this runs, so
+   unparseable frontmatter must not abort the move and strand the catalog mid-update. It
+   logs and returns the original content; the re-key and graft still complete.
 ## Tests added
 
-None yet — bug is `open`.
+Both in `src/librarian/tools/mv.rs`, both watched fail first.
 
+- `move_rewrites_the_frontmatter_id_it_just_invalidated` — reproduced the bug exactly on the
+  red run: file `aabbccdd11223344`, catalog `e59346e2f3e5c221`. Asserts the body is
+  byte-untouched and sibling frontmatter fields survive. **The `file_sha256` assertion is
+  the load-bearing one** — it is what fails if the rewrite lands after the hash is taken,
+  a bug the id assertion alone would not see.
+- `move_does_not_stamp_an_id_onto_a_file_that_never_had_one` — the half a naive
+  `update_in_place` would break. Green before the fix by construction; it exists to pin the
+  behaviour the fix must not change.
+
+Gate: 3908 tests (full `cargo test`), clippy `-D warnings`, fmt.
 ## Workarounds
 
 Resolve archived artifacts by path, not by the id printed in their frontmatter:
@@ -160,15 +176,40 @@ artifact(action="find", filter={"rel_path": {"contains": "<slug>"}}, include_arc
 
 ## Resume
 
-Decide between the two Fix options first, and check whether anything actually
-consumes the frontmatter `id:` line before choosing — `grep` for `id:` readers in
-`src/librarian/` and in the companion plugin. If nothing does, option 2 removes the
-class instead of patching it.
+**The existing population is 100% affected, and the fix above does not touch it.**
 
-If option 1: `src/librarian/tools/mv.rs` computes `file_sha256` from the renamed
-file; a frontmatter rewrite must happen before that, or the catalog row records the
-hash of content the move is about to change.
+Measured 2026-08-16 — every `^id:` in `docs/issues/archive/*.md` (78 unique), queried
+against the catalog in two batches:
 
+```
+artifact(find, filter={id: {in: […78 ids…]}}, include_archived=true)
+-> count: 0        (both batches)
+```
+
+Positive control, because a bare zero is evidence about the query and not the world — the
+same call with two ids known current returns exactly those two:
+
+```
+filter={id:{in:[e7353641aafe0098, 8e665c2d041ebb04,   <- current
+                365b599f3573b1c0, a2899c126f1e7771,   <- known stale
+                875e5d03d980ceac, 0a15c81150c4cce7]}}
+-> count: 2, the two current ones
+```
+
+So **78 of 78 archived bug files assert an id that resolves to nothing**, and none can be
+repaired in place: each carries a 16-hex id, so `edit_markdown` and `edit_file` both refuse
+it, and `artifact(update)`'s `extra` cannot write `id`. `move` can now write frontmatter,
+but moving a file onto its own path is blocked by the destination-exists check.
+
+**Proposed repair path — not yet built, needs a decision.** Add a `librarian(action="doctor")`
+check (`frontmatter_id_matches_catalog`) plus a `fix=repair_frontmatter_id` mode reusing
+`mv::repair_frontmatter_id`. Doctor is the right home: it already is the read-only
+catalog-vs-disk drift scanner with fix modes (`reseat_worktree` is the precedent), and this
+is exactly that class of drift. Open questions before building: should the check be part of
+the default scan or opt-in; and should `fix` be per-artifact or sweep-all.
+
+Note this population grows on every archive that predates the `move` fix reaching `master`,
+and — per the section above — grew ~7× in one commit when `29f0c015` widened the guard.
 ## References
 
 - `src/librarian/tools/mv.rs` — the move, which rewrites the row but not the file
