@@ -149,16 +149,26 @@ variant.
 
 ## Resume
 
-**Closed 2026-08-16.** Fast-forward promotion, so the `experiments` SHA is the
-master SHA — no second SHA to record.
+**Closed and verified 2026-08-16.** Fast-forward promotion, so the `experiments`
+SHA is the master SHA — no second SHA to record.
 
-Verify live after the next `cargo rb` + `/mcp` by re-running the call in
-§ Symptom: it must now return the `\`entry\` is append_entry's parameter` error
-rather than a success envelope.
+Verified live after `cargo rb` + `/mcp` with the byte-identical call from
+§ Symptom — same artifact, same entry, same divergent payloads:
 
-**Housekeeping from the measurement:** the probe left BL-27's `status` explicitly
-set to `open` (its prior value), so no cleanup is owed — but note that the queue
-row will need flipping to `done` once this is verified.
+```
+artifact(update_entry, id="9a892c2a5976e296", entry_collection="tasks",
+         entry_id="BL-27",
+         entry={"status":"done", "task":"SENTINEL-entry-was-applied"},
+         fields={"status":"open"})
+->
+update_entry: `entry` is append_entry's parameter — this action takes `fields`
+hint: Re-send the patch as fields={...}. `entry` is the whole row for a NEW
+      entry; `fields` is the subset to change on an existing one.
+```
+
+That call previously returned `{"changed_fields":["status"], "entries_total":30}`
+with `entry`'s payload silently discarded. Refused now, and the sentinel still
+never reached the row.
 ## References
 
 - `src/librarian/tools/update_entry.rs` — the guard

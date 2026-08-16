@@ -12,6 +12,50 @@ tags:
 
 # Tracker — Archive cadence policy
 
+## Ratified — 2026-08-16
+
+**The leans below are now decisions.** This document sat three months past its
+own `wontfix` deadline (§ Decision criteria) while the cost it predicted
+compounded. Settling it rather than re-deriving it.
+
+| Surface | Ratified | vs. draft |
+|---|---|---|
+| 1. Status vocabulary | **A** — cite the master-side SHA; lifecycle stays informal | unchanged |
+| 2. Archive trigger | **ii + iv** — quarterly manual pass, accelerated by release cuts, **plus promote-or-die** | **overturned** |
+| 3. Archive destination | **a** — `docs/trackers/archive/`, one file per source tracker | unchanged |
+| 4. Recovery | the librarian's archived-but-indexed model; no new infra | unchanged |
+
+**Why surface 2 was overturned.** The draft rejected (iv) promote-or-die as *"too
+aggressive — promote-when criteria are often legitimately deferred for good
+reasons."* That judgement was made when `reconnaissance-patterns.md` held **5**
+R-N entries; it now holds **90** (2,221 lines, 242 KB), and the deferral turns
+out not to be deliberate. On 2026-08-16, R-89's promote-when criterion — *"one
+more instance where a stale-build assumption reaches a committed claim"* — had
+already **fired**, and nothing had noticed; it was found by a session reading the
+entry for an unrelated reason, which then supplied the fourth instance itself.
+
+A criterion nobody harvests is not a deferred decision, it is an unread one. The
+quarterly pass alone gave it three months of silence. Promote-or-die gives it a
+deadline, and the draft's stated objection does not survive the evidence that
+accumulated after it was written.
+
+**Operative form.** An entry is archive-eligible when any holds:
+
+- its declared `promote-when` criterion has fired — promote it to its permanent
+  surface (CLAUDE.md, an ADR, a skill), or flip it `wontfix`;
+- it is 90 days past its date with the criterion unmet and no action taken;
+- it carries no `promote-when` at all and is older than 90 days — an entry with
+  no exit condition cannot be triaged, and writing one retroactively is the
+  triage.
+
+Archiving is not deletion: entries move to `docs/trackers/archive/`, stay indexed
+by the librarian, and remain citable by artifact id (surface 4).
+
+**Scope note.** The draft's § Pointers lists the trackers this covers, with
+line counts from 2026-05-24. Those counts are the argument now, not the
+inventory: `reconnaissance-patterns.md` went 5 → 90 entries under a policy that
+named it and was never applied.
+
 ## Why
 
 Trackers (U-N, F-N, H-N, R-N, T-N) accumulate without a rhythm. `codescout-usage-frictions.md` reached **18 entries / 528 lines** by 2026-05-23; **13 of 18 are closed** but none have been archived. The pattern is the same across the other trackers. Two problems compound:
@@ -131,6 +175,22 @@ Promote to **active** (and start implementation) when:
 - A first quarterly archive pass is scheduled or executed (proving the policy is operable, not just paper).
 
 Mark **wontfix** if neither happens within a month. The trackers can keep growing in the meantime — the cost is real but not blocking — and the policy isn't worth designing in a vacuum.
+
+---
+
+**Gate outcome, recorded 2026-08-16.** Neither condition was met within the
+month, so by the letter of this section the document should have flipped to
+`wontfix` around 2026-06-24. It did not — it stayed `status: active`, which reads
+as *"this policy is in force"* when it meant *"this design is unresolved."* That
+mislabel is why three months passed without anyone re-opening it.
+
+Resolved by ratifying rather than by expiring (see § Ratified — 2026-08-16): the
+cost the draft called "real but not blocking" grew 18× on a single tracker while
+the deadline sat unenforced, which is itself the argument the draft was waiting
+for. Worth keeping as a pattern: **a self-expiring decision gate needs something
+that actually reads the expiry.** This one had a deadline and no reader, which is
+the same defect as a `promote-when` nobody harvests — the failure the ratified
+trigger (iv) now exists to catch.
 
 ## Pointers
 
