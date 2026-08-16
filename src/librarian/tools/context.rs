@@ -70,6 +70,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         )?
     };
 
+    // Worktree overlay. `apply_scope` deliberately over-selects for a worktree
+    // session (main prefix OR worktree prefix) and hands the caller the job of
+    // dropping the duplicate; separately, an in-repo worktree layout puts OTHER
+    // sessions' shadow rows under this session's own prefix. `find` does both;
+    // this handler used to do neither.
+    // docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md
+    let (shadowed_mains, worktree_exclusions) = {
+        let cat = ctx.catalog.lock();
+        (
+            crate::librarian::tools::worktree::shadowed_main_ids(&cat, current)?,
+            crate::librarian::tools::worktree::overlay_exclusions(&cat, current)?,
+        )
+    };
+
     let topic_vec: Option<Vec<f32>> =
         if let (Some(ref topic), Some(ref svc)) = (&a.topic, &ctx.embedding) {
             Some(svc.embedder.embed_query(topic).await?)
@@ -102,7 +116,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 effective_scope,
                 &ctx.workspace,
                 current,
-                &[],
+                &worktree_exclusions,
             )?;
             let project_id = if effective_scope == Scope::Project {
                 current.and_then(|cp| {
@@ -169,7 +183,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 effective_scope,
                 &ctx.workspace,
                 current,
-                &[],
+                &worktree_exclusions,
             )?;
 
             // topic_vec was None here (the semantic path is hoisted above) —
@@ -239,7 +253,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 effective_scope,
                 &ctx.workspace,
                 current,
-                &[],
+                &worktree_exclusions,
             )?;
             let mut rows = find(
                 &cat,
@@ -278,6 +292,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             rows.into_iter().map(|r| (r.id.clone(), r)).collect()
         }
     };
+
+    // The anchor-graph path walks `worktree_of` edges and the semantic path
+    // queries the vector store, so neither is covered by the scope clause the
+    // exclusions were folded into. Drop shadowed main twins and foreign shadow
+    // rows here, at the one point every candidate path converges on, before any
+    // of them can consume the token budget.
+    let rows_map: HashMap<String, artifact::ArtifactRow> = rows_map
+        .into_iter()
+        .filter(|(id, r)| {
+            !shadowed_mains.contains(id.as_str())
+                && !crate::librarian::tools::worktree::is_under_any(
+                    &r.abs_path,
+                    &worktree_exclusions,
+                )
+        })
+        .collect();
+    let candidate_ids: Vec<String> = candidate_ids
+        .into_iter()
+        .filter(|id| rows_map.contains_key(id.as_str()))
+        .collect();
 
     let aug_map: std::collections::HashMap<String, augmentation::AugmentationRow> = {
         let cat = ctx.catalog.lock();
@@ -764,6 +798,145 @@ mod tests {
             ids.len(),
             4,
             "expected anchor + all 3 neighbors, got {ids:?}"
+        );
+    }
+
+    /// C1 of docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md.
+    ///
+    /// `apply_scope` ORs the worktree prefix with the main prefix for a worktree
+    /// session, so both twins are in the candidate pool by construction. `find`
+    /// drops the main twin; `context` used to render both — two `## <title>`
+    /// sections for one document, each charged against the same token budget.
+    #[tokio::test]
+    async fn a_worktree_session_drops_the_main_twin_its_shadow_supersedes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let main_dir = root.join("codescout");
+        let wt_dir = main_dir.join(".worktrees/feat");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        std::fs::create_dir_all(&wt_dir).unwrap();
+        std::fs::write(main_dir.join("auth.md"), "# auth\nmain body").unwrap();
+        std::fs::write(wt_dir.join("auth.md"), "# auth\nshadow body").unwrap();
+
+        let mut main_row = sample_row("main", "x", "auth.md", "auth notes", Some("auth"));
+        main_row.abs_path = main_dir.join("auth.md");
+        let mut shadow_row = sample_row("shadow", "x", "auth.md", "auth notes", Some("auth"));
+        shadow_row.abs_path = wt_dir.join("auth.md");
+        artifact::upsert(&cat, &main_row).unwrap();
+        artifact::upsert(&cat, &shadow_row).unwrap();
+
+        // The lineage edge is what pairs them; without it there is no way to
+        // know the two rows are one document.
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: "shadow".into(),
+                dst_id: "main".into(),
+                rel: crate::librarian::tools::worktree::LINEAGE_REL.into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "x".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: wt_dir.clone(),
+                    git_root: wt_dir.clone(),
+                    main_root: Some(main_dir.clone()),
+                    umbrella: None,
+                },
+            ))
+            .build();
+
+        let v = call(&ctx, json!({"topic": "auth"})).await.unwrap();
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(
+            ids,
+            vec!["shadow".to_string()],
+            "the shadow supersedes its main twin; rendering both packs one \
+             document into the bundle twice, unlabelled, got {ids:?}"
+        );
+    }
+
+    /// C2 of the same bug — the half its report never reached.
+    ///
+    /// `exclude_worktrees` is computed for EVERY session, not only worktree
+    /// ones: an in-repo layout (`<main>/.worktrees/<n>`) puts a foreign
+    /// session's shadow rows underneath the main checkout's own path prefix,
+    /// so a plain main-checkout query matches them unless they are excluded.
+    /// This needs no worktree session at all, which is why it is the more
+    /// reachable of the two.
+    #[tokio::test]
+    async fn a_main_checkout_never_pulls_in_another_worktrees_shadow() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let main_dir = root.join("codescout");
+        let wt_dir = main_dir.join(".worktrees/feat");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        std::fs::create_dir_all(&wt_dir).unwrap();
+        std::fs::write(main_dir.join("auth.md"), "# auth\nmain body").unwrap();
+        std::fs::write(wt_dir.join("other.md"), "# auth\nforeign shadow").unwrap();
+
+        let mut mine = sample_row("mine", "x", "auth.md", "auth notes", Some("auth"));
+        mine.abs_path = main_dir.join("auth.md");
+        let mut foreign = sample_row("foreign", "x", "other.md", "auth elsewhere", Some("auth"));
+        foreign.abs_path = wt_dir.join("other.md");
+        artifact::upsert(&cat, &mine).unwrap();
+        artifact::upsert(&cat, &foreign).unwrap();
+
+        crate::librarian::catalog::worktree::upsert_active(
+            &cat,
+            &crate::util::fs::RepoPath::from(wt_dir.as_path()).into_string(),
+            &crate::util::fs::RepoPath::from(main_dir.as_path()).into_string(),
+            None,
+            1,
+        )
+        .unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "x".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: main_dir.clone(),
+                    git_root: main_dir.clone(),
+                    // Not a worktree session — this is the plain main checkout.
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .build();
+
+        let v = call(&ctx, json!({"topic": "auth"})).await.unwrap();
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(
+            ids,
+            vec!["mine".to_string()],
+            "a registered worktree's rows belong to that session's overlay; the \
+             main checkout must not see them, got {ids:?}"
         );
     }
 

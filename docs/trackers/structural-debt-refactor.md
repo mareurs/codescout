@@ -420,7 +420,7 @@ call to it and no occurrence of the string `worktree` at all;
 documents an obligation that two of its callers never discharge, and one
 artifact can be rendered twice into a budgeted bundle with nothing marking the
 pair. That is orthogonal to scope width and outlived the decision unchanged:
-`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
+`docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
 Inferred from the code, **not** measured — the bug file says so and carries the
 reproduction that would settle it.
 
@@ -471,7 +471,7 @@ changed behaviour. `cargo fmt --all` and
 Still open and deliberately untouched: neither `src/librarian/tools/context.rs`
 nor `src/librarian/tools/workspace_state_at.rs` dedups the worktree overlay that
 `apply_scope` documents as the caller's job —
-`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
+`docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
 
 ### 2026-08-16 — the surface SD-1b built ran for the first time, and needed tuning
 

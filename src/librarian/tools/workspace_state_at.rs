@@ -102,8 +102,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let base_filter = build_base_filter(a.kinds.as_deref(), a.include_archived);
     let current = ctx.current_project.as_deref();
-    let (scoped_filter, applied) =
-        apply_scope(base_filter, effective_scope, &ctx.workspace, current, &[])?;
+    // Worktree overlay, same contract `find` honours: exclude other sessions'
+    // shadow rows, and drop main twins this session's worktree supersedes.
+    //
+    // Dedup rather than show-both, even though this is a forensic tool: a
+    // shadow IS the artifact's state for this session, so replaying its stale
+    // main twin beside it reports two states for one document. Showing both
+    // would be defensible only if the pair were labelled as a lineage pair,
+    // and an unlabelled duplicate is worse than either choice.
+    // docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md
+    let (shadowed_mains, worktree_exclusions) = {
+        let cat = ctx.catalog.lock();
+        (
+            crate::librarian::tools::worktree::shadowed_main_ids(&cat, current)?,
+            crate::librarian::tools::worktree::overlay_exclusions(&cat, current)?,
+        )
+    };
+    let (scoped_filter, applied) = apply_scope(
+        base_filter,
+        effective_scope,
+        &ctx.workspace,
+        current,
+        &worktree_exclusions,
+    )?;
 
     let (total_in_scope, all_rows) = {
         let cat = ctx.catalog.lock();
@@ -131,6 +152,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         (total, rows)
     };
 
+    let all_rows: Vec<_> = all_rows
+        .into_iter()
+        .filter(|r| !shadowed_mains.contains(r.id.as_str()))
+        .collect();
     let more_in_scope = total_in_scope.saturating_sub(MAX_ROWS);
     let rows_to_process = &all_rows[..];
 

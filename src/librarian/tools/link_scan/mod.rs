@@ -66,12 +66,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let effective_scope = args.scope.unwrap_or(Scope::Project);
     let current = ctx.current_project.as_ref();
+    // Worktree overlay: never scan another session's shadow rows (an in-repo
+    // worktree sits under the main checkout's own prefix), and never scan a
+    // main twin this session's worktree supersedes. link_scan WRITES edges, so
+    // an undeduped pair does not merely read twice — it materializes `cites`
+    // edges out of both copies.
+    // docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md
+    let (shadowed_mains, worktree_exclusions) = {
+        let cat = ctx.catalog.lock();
+        (
+            crate::librarian::tools::worktree::shadowed_main_ids(&cat, current.map(|v| &**v))?,
+            crate::librarian::tools::worktree::overlay_exclusions(&cat, current.map(|v| &**v))?,
+        )
+    };
     let (scoped_filter, applied) = apply_scope(
         None,
         effective_scope,
         &ctx.workspace,
         current.map(|v| &**v),
-        &[],
+        &worktree_exclusions,
     )?;
 
     let git_root = current.map(|c| c.git_root.clone());
@@ -93,6 +106,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         },
         cutoff_ms,
     )?;
+    rows.retain(|r| !shadowed_mains.contains(r.id.as_str()));
     let scan_truncated = rows.len() > limit;
     rows.truncate(limit);
 

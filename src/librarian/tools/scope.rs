@@ -137,7 +137,11 @@ pub fn apply_scope(
             let cp = require(current, "project")?;
             Some(match &cp.main_root {
                 // Overlay: a worktree session sees its own rows AND the main
-                // checkout's rows; shadow-vs-main dedup happens post-query in find.
+                // checkout's rows. This clause deliberately over-selects; the
+                // CALLER owes the shadow-vs-main dedup, via
+                // `worktree::shadowed_main_ids`. No caller may opt out
+                // silently — an unlabelled duplicate is worse than either
+                // dropping or labelling it.
                 Some(main) => FilterNode::Or {
                     or: vec![path_prefix_clause(&cp.abs_path), path_prefix_clause(main)],
                 },
@@ -147,8 +151,8 @@ pub fn apply_scope(
         Scope::Repo => {
             let cp = require(current, "repo")?;
             Some(match &cp.main_root {
-                // Overlay: a worktree session sees its own rows AND the main
-                // checkout's rows; shadow-vs-main dedup happens post-query in find.
+                // Same over-selection as Scope::Project above, same caller
+                // obligation: dedup via `worktree::shadowed_main_ids`.
                 Some(main) => FilterNode::Or {
                     or: vec![path_prefix_clause(&cp.git_root), path_prefix_clause(main)],
                 },

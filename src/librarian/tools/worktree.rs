@@ -184,6 +184,59 @@ pub(crate) fn shadow_main_pairs(
     Ok(pairs)
 }
 
+/// Worktree roots whose shadow rows this session must NOT see, ready to hand
+/// to [`apply_scope`](super::scope::apply_scope)'s `exclude_worktrees`.
+///
+/// Every ACTIVE registration except the caller's own: a session sees its own
+/// overlay and nobody else's. This matters for **every** session, not only
+/// worktree ones — an in-repo layout (`<main>/.worktrees/<n>`) puts foreign
+/// shadow rows underneath the main checkout's own path prefix, so a plain
+/// main-checkout query pulls them in unless they are excluded here.
+pub(crate) fn overlay_exclusions(
+    cat: &Catalog,
+    current: Option<&CurrentProject>,
+) -> Result<Vec<String>> {
+    let own = current
+        .filter(|c| c.main_root.is_some())
+        .map(|c| RepoPath::from(c.git_root.as_path()).into_string());
+    Ok(reg::active_roots(cat)?
+        .into_iter()
+        .filter(|r| own.as_deref() != Some(r.as_str()))
+        .collect())
+}
+
+/// True iff `abs_path` sits inside any of `roots` (as produced by
+/// [`overlay_exclusions`]). For candidate paths that never went through a
+/// scope clause — the anchor-graph and semantic paths in `context` — this is
+/// the only thing standing between a foreign worktree's shadow row and the
+/// caller's result set.
+pub(crate) fn is_under_any(abs_path: &std::path::Path, roots: &[String]) -> bool {
+    if roots.is_empty() {
+        return false;
+    }
+    let p = RepoPath::from(abs_path).into_string();
+    roots.iter().any(|r| under(&p, r))
+}
+
+/// Main-checkout ids that THIS session's worktree already shadows — drop them
+/// from any result set, or the same artifact is returned twice (once as the
+/// main row, once as the shadow that supersedes it).
+///
+/// Empty for a non-worktree session, which has no shadows of its own.
+pub(crate) fn shadowed_main_ids(
+    cat: &Catalog,
+    current: Option<&CurrentProject>,
+) -> Result<std::collections::HashSet<String>> {
+    let Some(cp) = current.filter(|c| c.main_root.is_some()) else {
+        return Ok(Default::default());
+    };
+    let wt = RepoPath::from(cp.git_root.as_path()).into_string();
+    Ok(shadow_main_pairs(cat, &wt)?
+        .into_iter()
+        .map(|(main_id, _)| main_id)
+        .collect())
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};

@@ -14,7 +14,7 @@ closed: 2026-08-15
 opened: 2026-08-15
 owner: marius
 related:
-- b5080e6c7a73ab44
+- d31233700ca979c2
 severity: high
 ---
 
@@ -35,7 +35,7 @@ What this investigation leaves behind is not this behaviour but two things it
 uncovered on the way: the `find` / `workspace_state_at` prologue duplication
 (SD-10 in `docs/trackers/structural-debt-refactor.md`) and an un-deduplicated
 worktree overlay, which has its own file —
-`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
+`docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`.
 
 The original report is kept below unedited. It was right about the mechanism and
 wrong about what the mechanism means, which is worth being able to read back.
@@ -205,7 +205,7 @@ N/A — nothing to work around. A caller who wants the narrower pool can pass
 N/A — closed. Follow-up lives in two places: SD-10 in
 `docs/trackers/structural-debt-refactor.md` (extract the prologue with an
 explicit umbrella policy; add the `context`-literal-`all` test), and
-`docs/issues/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`
+`docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md`
 for the one finding this decision does not settle.
 ## References
 
