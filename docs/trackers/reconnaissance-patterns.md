@@ -2152,6 +2152,58 @@ failure recurs. The Phase-1 step should name both freshness axes: run a probe th
 can only succeed on the new build, and confirm the serving process postdates that
 build.
 
+
+## R-90 — Miss ×2: two sessions, one working tree — `git add -A` silently annexes the other's staged work
+
+**Verdict:** miss, twice in one day. Both times the content survived and the
+*reason* did not.
+
+**Seam:** any `git add` / `git commit` in a repo where another agent session is
+live. The index is process-shared state, and nothing in `git status` says who
+staged a line.
+
+**What it cost.** On 2026-08-16 a concurrent session's `git add -A` swept this
+session's staged, unrelated work into its own commit, twice:
+
+- a filed bug file (`librarian-runtime` doc-vs-code) landed in `618acd57`,
+  *"retract the benchmark ground-truth claim"*;
+- a guide dedup cut (D1) landed in `148aabe6`, *"count non-empty segments, so
+  bare // /// //! stop being paths"*.
+
+Each commit is correct about its own content and silent about the annexed
+change. Nothing is lost in the working-tree sense — the files are in HEAD. What
+is lost is the **commit message**: D1's containment proof and its byte-realisation
+measurement were written and never committed, and had to be re-recorded in a
+tracker row (`docs/trackers/prompt-hamsa-audit-log.md`, A-22) afterwards. The
+durable damage is attribution: `git log -- <path>` now points a later reader at
+an `audit_doc_refs` commit to explain why a guide section was deleted.
+
+**Why this is a recon miss and not bad luck.** The state was checkable before
+acting, both times, and was checked in the wrong window. `git status` *was* run
+and *did* show the files staged — but staged-ness was read as "mine, awaiting my
+commit" rather than "in a shared index that another process may commit at any
+moment." The seam is not the file. It is the index, and the index carries no
+ownership marker.
+
+**Rule to apply next time.** In a repo where a second session may be live:
+
+1. Stage and commit in one call; never stage and then go do other work.
+2. Prefer `git commit <paths>` over `git add` then `git commit` — it closes the
+   window entirely rather than narrowing it.
+3. Read an empty `git status` after your own staging as evidence that *someone
+   else committed*, not that your commit succeeded. `git log -1 --format=%s --
+   <path>` names who took it.
+4. The structural fix is a per-session worktree. The repo already supports it
+   (`.worktrees/`) and the librarian has overlay + `merge_worktree` semantics
+   built for exactly this.
+
+**Evidence:** commits `618acd57`, `148aabe6`; A-22's outcome field carries the
+rationale the second sweep displaced.
+
+**Promote-when:** a third instance, or one where the annexed change is not merely
+mis-attributed but semantically wrong in its host commit — a revert that also
+reverts the annexed work, say. At that point the worktree split stops being
+optional and becomes the default for concurrent sessions.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
