@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- prompt-surfaces
+- get_guide
+- discoverability
+- byte-cap
+- guide-delivery
+closed: null
 opened: 2026-08-16
-closed:
-severity: high
 owner: marius
 related: []
-tags: [prompt-surfaces, get_guide, discoverability, byte-cap, guide-delivery]
-kind: bug
+severity: high
 ---
 
 # BUG: the 2200-byte cap evicts rules into `get_guide` topics that nothing ever triggers
@@ -119,29 +124,69 @@ match arm). A session whose calls all return small results never receives it.
 
 ## Fix
 
-Plan — three parts, in increasing cost:
+Fixed on `experiments` — all three parts, `72f39849` (1 and 3) and `73ccb495` (2).
 
-1. **Gate the eviction.** A test asserting every registered `get_guide` topic
-   either has a `relevant_guide_topic()` trigger or is explicitly listed as
-   pull-only with a reason. That converts a silent omission into a build
-   failure, and is the piece that stops recurrence.
-2. **Wire the obvious triggers.** `workspace-state` → the `workspace` tool
-   (alongside the session opener); `tracker-conventions` → `artifact`/`librarian`
-   when the target is under `docs/issues/` or `docs/trackers/`;
-   `error-handling` → nothing obvious, likely genuinely pull-only.
-3. **Amend `src/prompts/README.md` rule 8** so the documented cap remedy is
-   "author the topic AND give it a trigger, or record why it is pull-only" —
-   the instruction currently ends one step early, which is what allowed this.
+**1. Gate the eviction. — DONE.** `server::tests::every_guide_topic_is_triggered_or_declared_pull_only`
+fails the build for any registered topic that is neither triggered nor listed in
+`prompts::PULL_ONLY_GUIDE_TOPICS` with a reason. Both directions are checked — a stale entry
+fails too, whether it names a topic that has since gained a trigger or one that no longer
+exists — and a placeholder reason is rejected, since a one-word excuse restores the silent
+default it replaced.
 
-Note the tension with byte cost: `librarian` alone is 18 KB and already fires on
-a routine call. Wiring more triggers without first cutting the corpus trades one
-problem for another — sequence this behind the dedup stream (audit-log A-22, P3).
+**2. Wire the obvious triggers. — DONE**, all three the operator chose, and the mechanism
+changed to allow it. `relevant_guide_topic()` now receives the call's **result**. `input`
+was the obvious parameter and is the wrong one: `call_content` moves it into `call()`
+before the hint is computed, so passing it means cloning every tool's input on every call.
+The result is already in scope, already borrowed, and already carries `abs_path`.
 
+- `workspace-state` ← the `workspace` tool. The arm previously returned
+  `SESSION_OPENING_GUIDE`, which was already redundant: `activate` clears the ledger inside
+  `call()`, and the empty-ledger branch fires the opener regardless.
+- `tracker-conventions` ← `artifact`/`librarian` when the result names a `docs/issues/` or
+  `docs/trackers/` path.
+- `symbol-navigation` ← `symbols`/`references`/`call_graph` on a result that *fits*. Those
+  tools returned `progressive-disclosure` unconditionally, but `call_content` gates that
+  topic on overflow having actually happened — so on a small result the slot delivered
+  **nothing at all**. It now costs nothing to spend.
+
+**3. Amend README rule 8. — DONE.** Both places that gave the incomplete remedy — rule 8 and
+the byte-cap section under *Verify the slice* — now name the second step and say why.
+
+**Result: 47,343 → 26,488 undelivered bytes; 63% of the corpus firing for nobody → 35%.**
+Four topics remain pull-only *by decision*, each with its reason recorded.
+
+The byte tension this section flagged is unresolved and deliberately so: a session doing
+tracker work can now receive `tracker-conventions` (10.4 KB) *and* `librarian` (19.9 KB)
+over its lifetime. Cutting the corpus is the answer to that, not withholding the guide —
+still sequenced behind the dedup stream.
 ## Tests added
 
-None yet. Part 1 of the fix IS the test, and is the load-bearing piece: without
-it the next cap overflow evicts the next rule the same way.
+- `every_guide_topic_is_triggered_or_declared_pull_only` (`src/server.rs`) — the gate.
+  Mutation-verified by deleting an allowlist entry.
+- `tracker_paths_route_to_the_tracker_guide_and_nothing_else_does`
+  (`src/librarian/adapter.rs`) — the discriminator, including the `find`-shaped `items[]`
+  case a top-level-only check would miss, and a near-miss (`title` mentioning
+  `docs/trackers/`) that must **not** route.
+- `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide` (`src/server.rs`) —
+  end-to-end through `call_content`.
 
+**The gate caught a blind spot in itself, which is the part worth keeping.** Moving
+`workspace` off `SESSION_OPENING_GUIDE` left `project-activation-bootstrap` with no *tool*
+trigger, and the test failed it — but that guide is delivered by `call_content`'s
+empty-ledger branch, a second path a scan of tool impls cannot see. The gate would have had
+me re-add a redundant trigger to fix a non-problem. It now knows about both paths.
+
+Also surfaced rather than left as a trap: `first_artifact_call_emits_librarian_hint` runs
+`find kind=tracker` and still expects `librarian`, which holds **only** because its catalog
+is empty and `items: []` names no path. The new test states that dependency.
+
+**Verified live** on the rebuilt server: all three fired on their first eligible call. The
+`workspace-state` payload delivered is the closing argument — it contains the per-call
+workspace-pinning rule that `a926fdf5` evicted from the always-loaded slice, a
+concurrency-correctness rule that has been unreachable ever since.
+
+Gate: `cargo fmt` + `cargo clippy --all-targets -D warnings` clean, `cargo test --lib`
+3777 passed / 0 failed / 7 ignored.
 ## Workarounds
 
 When a prompt-surface edit moves content out of `source.md` under cap pressure,
