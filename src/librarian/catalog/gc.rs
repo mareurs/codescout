@@ -375,7 +375,7 @@ pub fn plan_rehome(conn: &Connection, old_root: &Path, new_root: &Path) -> Resul
 /// mis-rewritten — only an exact-prefix match under `old_root` qualifies.
 /// Also reuses `crate::librarian::util::escape_like_pattern` rather than
 /// re-inlining the LIKE-escape idiom (`like_escape_idiom_is_not_inlined_outside_helper`
-/// in `librarian/util.rs` pins this).
+/// in `src/librarian/util.rs` pins this).
 ///
 /// Returns the number of `commits` rows rewritten.
 pub fn rehome_commits(conn: &Connection, old_root: &Path, new_root: &Path) -> Result<usize> {

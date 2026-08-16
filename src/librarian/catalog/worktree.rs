@@ -66,7 +66,7 @@ pub fn covering(cat: &Catalog, abs_path: &str) -> Result<Option<RegistrationRow>
 }
 
 /// Connection-level core of [`covering`], for call sites that only hold a
-/// bare `&rusqlite::Connection` (e.g. `doctor.rs`, which doesn't otherwise
+/// bare `&rusqlite::Connection` (e.g. `src/librarian/tools/doctor.rs`, which doesn't otherwise
 /// need a full `&Catalog`).
 pub(crate) fn covering_conn(
     conn: &rusqlite::Connection,
