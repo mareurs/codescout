@@ -2138,10 +2138,36 @@ ownership marker.
 **Evidence:** commits `618acd57`, `148aabe6`; A-22's outcome field carries the
 rationale the second sweep displaced.
 
-**Promote-when:** a third instance, or one where the annexed change is not merely
-mis-attributed but semantically wrong in its host commit — a revert that also
-reverts the annexed work, say. At that point the worktree split stops being
-optional and becomes the default for concurrent sessions.
+**Third instance — 2026-08-16, Promote-when FIRED.** During the worktree-cluster
+fixes, `git add -A` swept the concurrent session's newly-created bug file
+(`2026-08-16-run-command-backticks-substituted-in-quoted-message.md`,
+`e04115d9477d280b`) into `8b27b1ea`, a commit about the read-side worktree
+notice. Content intact, attribution wrong, commit message silent — the same
+shape as the first two, in the same direction as the second (this session as
+perpetrator, not victim).
+
+What makes it worth recording rather than embarrassing: **the corrected rule was
+already written in this entry and was still not followed.** Step 2 says
+`git add <paths> && git commit --only <paths>`. The reflex reached for `-A`
+anyway, at the end of a long working stretch, on the third of three bug fixes.
+An entry being *correct* does not make it *reached for*; a rule that only fires
+when you remember to consult it is not yet a rule.
+
+It recurred once more within the same hour, in the weaker form: `git add src/`
+staged two files the other session was mid-edit on (`frontmatter.rs`, `mv.rs`).
+That one was caught by reading `git status --short` before committing and undone
+with `git restore --staged` — which is the actual working defence, and cheaper
+than remembering the right flag: **read what you staged, not what you meant to
+stage.** A directory pathspec is `-A` scoped to a subtree; it is not a fix.
+
+**Promote-when: FIRED (3 instances).** The worktree split stops being optional
+and becomes the default for concurrent sessions. Until it is, the enforceable
+form is the readback, not the flag — `git status --short` between `add` and
+`commit`, every time, because it catches every variant (`-A`, a directory
+pathspec, a glob) with one habit instead of one habit per variant.
+
+**Kin:** R-95 (a rationale nobody re-audits) — this entry's own corrected rule
+was the un-audited claim the third instance walked past.
 ## R-91 — A probe that cannot observe the thing the claim is about (three instances, one session)
 
 **Verdict:** miss (×3) · **Observed:** 2026-08-16, benchmark + tracker-hygiene session
@@ -2400,6 +2426,79 @@ silently depended on.
 **Promote-when:** a second instance where reading the consumer overturns a registry-derived
 conclusion. At that point rule 1 ("can it arrive by a path not in the registry?") is the
 craft-shaped half and belongs in the `reconnaissance` memory topic.
+
+## R-95 — A deferral rationale is a claim, and it is the least-audited kind
+
+**Verdict:** hit ×5 in one cluster → rule
+
+**Observed:** 2026-08-16, the three-bug worktree cluster (BL-11 / BL-12 / BL-16).
+
+**The seam.** A bug file's `## Fix` section routinely records *why the work was
+not done*: a cost estimate, a blocking dilemma, a "cannot reproduce". Those
+sentences are claims about the substrate exactly like a root cause is — but they
+are read as **settled analysis** rather than as hypotheses, because they are
+phrased as decisions. R-92 established that a filed root cause is a hypothesis
+that usually widens on contact. This is its sibling and it is worse, because a
+wrong root cause gets corrected the moment you fix the bug, while a wrong
+deferral rationale is never revisited at all — its whole function is to stop
+anyone looking.
+
+**Every deferral reason in this cluster was wrong, and all five were wrong in the
+direction that made the work look bigger or impossible.**
+
+| Filed rationale | Measured |
+|---|---|
+| "a 38-site mechanical change to `ToolContext`" | **133** construction sites (`guide_hints_emitted:` → 134 matches, one the declaration) |
+| "pick one deliberately; do not add a second one-shot mechanism" — a binary between a `ToolContext` field and a ledger sentinel | A **third** option existed: a separate `notices` set on `GuideLedger`. One construction site, no namespace collision |
+| the sentinel is "a semantic compromise" | It is a **live regression**: `types.rs:626` reads `if emitted.is_empty()`, which IS the session-opening guide's trigger |
+| "the guard proves the condition is detectable, and then only spends the detection on half the surface" | It spends it on **neither**. `guard_worktree_write` returns `Ok` on line 1 in every real session |
+| "Not yet reproduced — no worktree session with shadow rows was active" | A unit fixture reproduced **both** halves in milliseconds; the second half needed no worktree session at all |
+
+**The tell they share.** Each rationale was *locally plausible and never executed*.
+The 38 was never counted — and R-4 had already recorded a 13-vs-30 undercount for
+**this same struct** three months earlier, so the ledger predicted the error and
+nobody read the ledger. The sentinel's real cost was one `is_empty()` call away.
+The guard's premise needed one probe. The "cannot reproduce" was true only of the
+recipe the file had written for itself.
+
+**Why the direction is not a coincidence.** A rationale is written at the moment
+someone decides to stop. Nobody drafts an estimate that makes the work sound
+easier than it is, because that estimate would not justify stopping. So the bias
+is structural: deferral rationales inflate, and the inflated ones are the ones
+that survive, because nothing ever re-costs them.
+
+**Rule.** When picking up a bug that was deferred, **re-cost it before believing
+it is expensive** — the estimate is the first thing to verify, not the last:
+
+1. Any *number* in a `## Fix` (site counts, file counts, "N places") — re-run the
+   count. Field-specific grep, or `cargo check` as the enumerator (R-4/R-5).
+2. Any *binary* framing ("option A or option B, both bad") — the third option is
+   usually inside a type one of them already touches. Read the consumer.
+3. Any *premise* about existing machinery ("the guard proves X is detectable") —
+   run it once. A shipped guard with tests can still be unreachable.
+4. Any "cannot reproduce" — ask whether the *recipe* is what is expensive. A
+   runtime recipe demanding rare setup often has a unit-fixture twin, and the
+   easier half of the bug may not be the half the recipe describes.
+
+**Cost avoided here.** Believing the file would have left BL-12 blocked on a
+133-site refactor it never needed, shipped a sentinel that silently disabled the
+session-opening guide fixed hours earlier, and left BL-11 closed as
+`wontfix-false-alarm` — its own § Resume instructed exactly that if the
+reproduction did not show two sections, and the reproduction as written could
+not have been run.
+
+**Kin:** R-92 (a filed root cause is a hypothesis — this is the same law applied
+to the reasons for *not* acting), R-4 (grep undercounts construction sites, same
+struct, predicted this), R-59 (an unreachable hypothesis is cheaper to eliminate
+than to measure), R-90 (its own corrected rule was an un-audited claim that got
+walked past a third time).
+
+**Promote-when:** one more cluster where a deferral rationale is falsified on
+contact. At that point this belongs in the skill's Phase 1 as an explicit step —
+*re-cost the deferral before you accept it* — beside the existing
+read-the-`## Fix`-as-a-plan rule (R-62).
+
+---
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
