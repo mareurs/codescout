@@ -141,7 +141,13 @@ of the convention you are about to hand-roll.
   three months; the clusters existed and had no name until now.
 - **Six entries are labelled recurrences outright**, and the C-chain contains a
   self-declared *fifth*. The ledger records its own failures to prevent.
-- **Only 16 of 63 body entries carry a `Status:` line**, and only two record a
+- **Only 14 of 55 body entries carry a `Status:` line** — corrected 2026-08-16 from
+  "16 of 63". That figure came from `grep -c 'Status:'`, which counts this bullet's
+  own two prose mentions of the word alongside the field's actual uses; anchoring
+  the pattern to line-start gives 14, then and now. The denominator moved too: 63
+  predates the archive pass, and 55 body entries survive it. So **41 entries carry
+  no disposition at all**. (Law B on this ledger's own instrument — a count of a
+  word also counts the document's discussion of it.) Only two record a
   discharge — R-1 and R-3, both promoted to SKILL.md in May and still sitting in
   the active file. There is no disposition field, which is why `Promote-when`
   criteria go unharvested and why the archive policy had nothing to enforce
@@ -248,9 +254,29 @@ be treated as findings, not as a summary to re-derive.
 > `grep -o '^## R-[0-9]*' <file>` **and** `grep -o '^| R-[0-9]*' <file>`. The
 > heading-only grep is what caused this.
 > (`docs/issues/2026-08-16-reconnaissance-ledger-reuses-ten-ids-for-different-lessons.md`)
+>
+> **Seven of the nine survive in-file (checked 2026-08-16).** R-56b and R-59b were
+> split by `52fca682` and then archived by `b6bb6377`, the first R-N archive pass —
+> so a both-formats count returns seven, not nine. The list above is the *record of
+> the split*, not an inventory of what the file now holds; read it as history. This
+> is R-94's law applied to this note — a declaration inventory and a delivery
+> inventory diverge, and no gate connects prose counts to the entries they count.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-55b | 2026-08-08 | miss | A host-specific symptom accepted as the norm without sweeping the other hosts | 9 of 15 declared roots swept; all nine had zero untracked entries |
+| R-57b | 2026-08-08 | miss | An identifier's shape says nothing about whether the thing exists — check its declared root | caught by an unrelated tool response an hour after the claim was published |
+| R-58b | 2026-08-08 | hit | Before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure | `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` |
+| R-87 | 2026-08-15 | hit | Before designing an abstraction, scout for the dispatch point that already exists | SD-1b |
+| R-88 | 2026-08-15 | hit | The instrument that nominates a refactor group also fixes its axis, and that axis can be orthogonal to the real duplication | SD-3 + SD-10; `legibility_scan` tier-1 group, premise falsified by live A/B |
+| R-89 | 2026-08-16 | miss ×3 | A tool's output is evidence about the code only if the running build contains it | SD-1b; `5917e37e`, `7c91cdf7` |
+| R-90 | 2026-08-16 | miss ×2 | Two sessions, one working tree — `git add -A` silently annexes the other's staged work | `543086d1`, `8b27b1ea`; promote-when has fired (per-session worktrees — human call) |
+| R-91 | 2026-08-16 | miss ×3 | A probe that cannot observe the thing the claim is about | benchmark + tracker-hygiene session |
+| R-92 | 2026-08-16 | hit ×2 | A filed root cause is a hypothesis, and confirming it usually widens the bug | the two tool-quirk bugs filed by the 2026-08-16 hygiene sweep |
+| R-93 | 2026-08-16 | hit | First audit-on-promote: C re-promoted, and the audit's own precedent text failed the audit | `claude-plugins:c889e83` (1.16.4 → 1.16.5) |
+| R-94 | 2026-08-16 | hit ×1, miss ×2 (self-caught) | A wiring inventory is not a delivery inventory, and it is wrong in both directions | BL-25 (guide topics nothing triggers) |
+| R-95 | 2026-08-16 | hit ×5 → rule | A deferral rationale is a claim, and it is the least-audited kind | BL-11 / BL-12 / BL-16 worktree cluster |
+| R-96 | 2026-08-16 | miss (self-caught) → rule | Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason | GF-1 / GF-2, `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` |
 | R-1 | 2026-05-19 | hit → promoted | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
 | R-2 | 2026-05-19 | **archived** → R-4 + R-34 | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
 | R-3 | 2026-05-19 | miss → promoted | Scout limited grep to one file/crate; cross-file asserts slipped | mcp-prompt-redesign F-2 |
