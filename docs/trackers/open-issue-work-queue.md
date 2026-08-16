@@ -71,6 +71,8 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | open | `ffa936075f1f03fd` |
 | BL-29 | 1 | `append_entry` writes catalog-only state, so this very snapshot drifts silently — tool says success, git says clean | open | `0694a4a9946e10fe` |
 | BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | open | `63d36f5da3b200a7` |
+| BL-31 | — | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | — |
+| BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
 
 > **Params and body are reconciled** (2026-08-16). BL-1, BL-20 and BL-22 were
 > flipped with `artifact(action="update_entry", …)` — 24 rows before, 24 after,
@@ -265,7 +267,7 @@ matches"*, which is byte-identical to what a complete result prints, and the hom
 capped sample was written up as a finding. Corrected in
 `docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md`
 § *And a second one, which was wrong*; the evidence and a design note are in BL-2's own
-file (`4059035cf39e6aab`). Note the design constraint recorded there: a truthful denominator
+file (`8e665c2d041ebb04`, now archived). Note the design constraint recorded there: a truthful denominator
 is **not** available — `cap_grouped` never counts past the cap — so the fix is an explicit
 incompleteness marker, not "12 of 847".
 

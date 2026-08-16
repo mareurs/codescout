@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-16
-closed:
+closed: 2026-08-16
 severity: high
 owner: marius
 related: []
@@ -126,8 +126,12 @@ substrate check both lean on this column.
 
 ## Fix
 
-Resolve `cc_session_id` once and share it, rather than resolving it twice with
-different rules:
+**FIXED 2026-08-16 in `06498ed2` (experiments), via option 2.** The server keeps
+the id it already resolved and passes it to `UsageRecorder::new`; the file read in
+`usage/mod.rs` is gone, so there is one resolution site instead of two. Not yet
+archived — see *Tests added* for the gate caveat.
+
+Options as written before the fix:
 
 1. **Minimal:** make `usage/mod.rs` use the same precedence as `server.rs` — env
    var, then file, then None. Two lines, and it makes concurrent attribution
@@ -141,10 +145,23 @@ different rules:
 
 ## Tests added
 
-None yet. The regression test: with `CLAUDE_CODE_SESSION_ID` set and a
-`.codescout/cc_session_id` file holding a *different* value, a recorded call must
-carry the env value.
+`usage::content_tests::record_content_uses_the_passed_cc_session_id_not_the_file`
+(`src/usage/mod.rs`). The fixture writes a **different** id
+(`other-session-from-the-file`) into `.codescout/cc_session_id` and asserts the
+passed id wins — so under the old implementation it would have returned the file's
+value and failed. The test discriminates rather than merely passing.
 
+**Gate is partial, and this file stays out of `archive/` until it is not.**
+`cargo test --lib -- usage` — 56 passed, 0 failed, on exactly this code; that
+target compiles the whole lib test binary, so every `UsageRecorder::new` call site
+is verified to compile. `cargo fmt` clean. The full suite and
+`clippy --all-targets` could NOT be run: a concurrent session was mid-refactor in
+`src/librarian/tools/audit_doc_refs`, leaving 17 compile errors in files this fix
+does not touch (verified theirs by `git diff` before concluding, and the errors
+changed between runs, which is what in-flight work looks like).
+
+Archive trigger for this file: re-run `cargo clippy --all-targets -- -D warnings`
+and the full `cargo test` once that tree is green, then move it.
 ## Workarounds
 
 For any per-session analysis over a multi-session window, group by `session_id`
@@ -155,12 +172,22 @@ what `cc_session_id` was introduced to provide.
 
 ## Resume
 
-Apply fix 1 in `src/usage/mod.rs:100-104`, add the regression test described
-above, then decide fix 2 (single resolution site) with the user — it is the one
-that prevents recurrence. Before building anything on `cc_session_id` (CAP-1's
-touch ledger, CAP-4's cross-session collision hint), this must land, because both
-depend on the column distinguishing sessions and today it does not.
+Fix landed; two things remain.
 
+1. **Re-run the full gate** (`cargo clippy --all-targets -- -D warnings`, full
+   `cargo test`) once the concurrent `audit_doc_refs` refactor compiles, then
+   archive this file via `artifact(action="move", …)`.
+2. **Decide what to do about historical rows.** Everything recorded before
+   `06498ed2` under a concurrent-session window is mis-attributed and cannot be
+   repaired from the data — the correct id was never written. Options are a
+   documented cutoff date in whatever tracker consumes the column, or a
+   `session_attribution` marker. CAP-1's substrate check and any per-session
+   friction rate read this column, so the cutoff needs to be stated somewhere a
+   future analysis will see it.
+
+Note for anyone measuring cross-session collisions (CAP-4): counts taken before
+this fix UNDER-report, because two sessions writing the same file appeared as one
+session writing it twice.
 ## References
 
 - `src/usage/mod.rs:100-104` — the file-only resolution
