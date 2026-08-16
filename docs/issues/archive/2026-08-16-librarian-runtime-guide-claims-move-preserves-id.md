@@ -113,8 +113,9 @@ anywhere in its context**. See R-89 in `docs/trackers/reconnaissance-patterns.md
 
 ### Adjacent but distinct
 
-`docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
-(`6149f4cfeaa6fab9`) covers frontmatter-vs-catalog id skew after a move. That is a
+`docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
+(`61e2360408cb206b` — fixed and archived 2026-08-16) covers frontmatter-vs-catalog id skew
+after a move. That is a
 different defect: this one is a doc error in a prompt surface, not a state skew.
 
 ## Hypotheses tried

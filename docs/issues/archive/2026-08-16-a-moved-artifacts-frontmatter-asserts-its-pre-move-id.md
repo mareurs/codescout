@@ -1,18 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- catalog-drift
+- archive-flow
+- frontmatter
+closed: 2026-08-16
 opened: 2026-08-16
-closed:
-severity: low
 owner: marius
 related:
-  - docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
-  - docs/trackers/open-issue-work-queue.md
-tags:
-  - librarian
-  - catalog-drift
-  - archive-flow
-  - frontmatter
-kind: bug
+- docs/issues/archive/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+- docs/trackers/open-issue-work-queue.md
+severity: low
 ---
 
 # BUG: a moved artifact's frontmatter still asserts its pre-move id
@@ -194,40 +194,38 @@ artifact(action="find", filter={"rel_path": {"contains": "<slug>"}}, include_arc
 
 ## Resume
 
-**The existing population is 100% affected, and the fix above does not touch it.**
+N/A — mechanism fixed, population repaired, and a tool exists for the next one.
 
-Measured 2026-08-16 — every `^id:` in `docs/issues/archive/*.md` (78 unique), queried
-against the catalog in two batches:
+| step | commit |
+|---|---|
+| `move` rewrites the id it mints | `ec9e63d0` |
+| `doctor` check + sweep fix | `05cf7ed5` |
+| sweep scoped to one root before it writes | `3db48ebf` |
+| the 91-file repair itself | `79c6beb8` |
 
-```
-artifact(find, filter={id: {in: […78 ids…]}}, include_archived=true)
--> count: 0        (both batches)
-```
+**The sweep, run live:** 91 repaired, 0 failed, and a second dry-run reports 0 — idempotent.
+78 archived bugs, 8 archived trackers, 5 **active** trackers, 1 README.
 
-Positive control, because a bare zero is evidence about the query and not the world — the
-same call with two ids known current returns exactly those two:
+**`move` was not the main cause**, which the population made obvious once it was listed:
+five of the 91 are active trackers that were never moved. `src/librarian/catalog/migrate_v6.rs`'s
+module doc had already written down why — Round 5 of the Windows CI rehab changed
+`ids::artifact_id_from_abs` to hash the forward-slash-normalized path form, *"same `abs_path`
+produces a new `id`"*, and *"external citations to the old IDs go stale — that's the documented
+user-visible cost."* A file's own frontmatter id is exactly such a citation. This bug's title
+names the minority cause; the dominant one is a hash-form change that re-keyed rows in place.
+What shipped converts that accepted cost into a repaired one.
 
-```
-filter={id:{in:[e7353641aafe0098, 8e665c2d041ebb04,   <- current
-                365b599f3573b1c0, a2899c126f1e7771,   <- known stale
-                875e5d03d980ceac, 0a15c81150c4cce7]}}
--> count: 2, the two current ones
-```
+**On the diff being bigger than predicted.** I said "the `id:` line only" from two sampled
+files and was wrong: `frontmatter::write` re-serializes, dropping `topic: null` (27),
+`time_scope: null` (29), `owners: []` (17), `tags: []` (4) and unquoting `opened:`/`closed:`
+dates. All value-preserving — established by classifying **every** added and removed line,
+which accounted for 100% of them and left no body line touched. The empty-`tags` case was
+the one that mattered to check; all four were `[]`, no values lost. A bigger sample would not
+have settled it — classifying the whole diff did.
 
-So **78 of 78 archived bug files assert an id that resolves to nothing**, and none can be
-repaired in place: each carries a 16-hex id, so `edit_markdown` and `edit_file` both refuse
-it, and `artifact(update)`'s `extra` cannot write `id`. `move` can now write frontmatter,
-but moving a file onto its own path is blocked by the destination-exists check.
-
-**Proposed repair path — not yet built, needs a decision.** Add a `librarian(action="doctor")`
-check (`frontmatter_id_matches_catalog`) plus a `fix=repair_frontmatter_id` mode reusing
-`mv::repair_frontmatter_id`. Doctor is the right home: it already is the read-only
-catalog-vs-disk drift scanner with fix modes (`reseat_worktree` is the precedent), and this
-is exactly that class of drift. Open questions before building: should the check be part of
-the default scan or opt-in; and should `fix` be per-artifact or sweep-all.
-
-Note this population grows on every archive that predates the `move` fix reaching `master`,
-and — per the section above — grew ~7× in one commit when `29f0c015` widened the guard.
+**Residual:** other repos on this machine carry the same drift (a pre-scope dry-run counted
+207 files across five). Repairing them is one call each with `root=<repo>`, deliberately not
+done from here.
 ## References
 
 - `src/librarian/tools/mv.rs` — the move, which rewrites the row but not the file
