@@ -968,8 +968,8 @@ fn is_unbounded_lhs(lhs: &str) -> bool {
     // Always-unbounded executables: project-scale tools, package managers,
     // language runtimes, fast recursive searchers (rg/fd default-recurse).
     const UNBOUNDED_PREFIXES: &[&str] = &[
-        "cargo", "npm", "pnpm", "yarn", "python", "python3", "pytest", "go", "mvn", "gradle",
-        "git", "rg", "fd",
+        "cargo", "npm", "pnpm", "yarn", "python", "python3", "pytest", "go", "mvn", "gradle", "rg",
+        "fd",
     ];
     if UNBOUNDED_PREFIXES.contains(&head) {
         return true;
@@ -987,6 +987,14 @@ fn is_unbounded_lhs(lhs: &str) -> bool {
             .any(|tok| tok == "-maxdepth" || tok.starts_with("-maxdepth="));
     }
 
+    // git defaults to unbounded — `log`, `diff` and `show` can each emit an
+    // entire history — but half of its real piped uses name an explicit limit.
+    // See [`git_output_is_bounded`] for the token set and why `--oneline` is
+    // not in it.
+    if head == "git" {
+        return !git_output_is_bounded(&tokens);
+    }
+
     false
 }
 
@@ -1001,6 +1009,54 @@ fn has_recursive_flag(cmd: &str) -> bool {
     shell_tokens(cmd)
         .iter()
         .any(|tok| tok == "-r" || tok == "-R" || tok == "--recursive")
+}
+
+/// True if a `git` command line carries an explicit output limiter, making its
+/// output bounded for IL3 purposes.
+///
+/// `git` sat on `UNBOUNDED_PREFIXES` unconditionally until 2026-08-16. That is
+/// right for `git log` and wrong for how agents actually call git: measured over
+/// 94 `git` IL3 refusals in one project's `usage.db`, **47 carried one of the
+/// tokens below** — half the family, refused against this module's own stated
+/// bias that when shape parsing is ambiguous we treat as bounded.
+///
+/// The cost asymmetry is what licenses being generous here. A false negative
+/// (allowing the pipe) cannot flood the transcript, because the trimmer on the
+/// right-hand side is what bounds the output — it costs only the queryable
+/// `@cmd_*` buffer. A false positive costs a refusal on a command that was fine.
+///
+/// **Deliberately NOT a limiter: `--oneline`.** It bounds line *width*, not line
+/// *count* — `git log --oneline` still emits one line per commit for every
+/// commit. It appeared in 25 of those 94 refusals and is the most tempting false
+/// entry; `il3_blocks_git_pipe_head_still` (the U-16 case) already pinned that
+/// judgement before this function existed.
+///
+/// Mirrors the `grep` and `find` branches in [`is_unbounded_lhs`]: a head-token
+/// match refined by a flag check, rather than a bare name match.
+///
+/// (GF-1 / GF-2 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`,
+/// which also records that this is the *incomplete* half of the fix in
+/// `docs/issues/archive/2026-05-18-il3-overtriggers-bounded-lhs.md` — that one
+/// split LHS into bounded/unbounded and put `git` wholesale on the wrong side.)
+fn git_output_is_bounded(tokens: &[String]) -> bool {
+    // skip(1): the head is `git` itself; a limiter is always an argument.
+    tokens.iter().skip(1).any(|tok| {
+        matches!(
+            tok.as_str(),
+            // an explicit commit/line count
+            "-n" | "--max-count"
+                // a single value by construction
+                | "--show-current"
+                // porcelain status — bounded by the working tree, not by history
+                | "--porcelain" | "--short" | "-s"
+                // a name/stat listing rather than a diff body
+                | "--stat" | "--name-only" | "--name-status"
+        ) || tok.starts_with("--max-count=")
+            // git's count shorthand: `-3`, `-20`
+            || (tok.len() >= 2
+                && tok.starts_with('-')
+                && tok[1..].chars().all(|c| c.is_ascii_digit()))
+    })
 }
 
 /// Source file extensions that should be accessed via codescout tools,
@@ -2629,6 +2685,75 @@ mod tests {
         assert!(detect_il3_violation("grep -oE 'pat' src/lib.rs | sort -u").is_none());
     }
 
+    // -----------------------------------------------------------------
+    // git: bounded when the command carries an explicit output limiter.
+    // GF-1/GF-2 in docs/trackers/2026-08-16-iron-law-gate-firing-audit.md —
+    // `git` sat on UNBOUNDED_PREFIXES unconditionally, and 47 of 94 measured
+    // `git` IL3 refusals carried one of these tokens.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn il3_allows_git_log_with_explicit_count() {
+        // `-3` bounds the commit count. The single most common refused shape.
+        assert!(detect_il3_violation("git log --oneline -3 | head -20").is_none());
+    }
+
+    #[test]
+    fn il3_allows_git_log_with_dash_n_count() {
+        assert!(detect_il3_violation("git log -n 5 | tail -20").is_none());
+    }
+
+    #[test]
+    fn il3_allows_git_branch_show_current() {
+        // One value by construction.
+        assert!(detect_il3_violation("git branch --show-current | head -1").is_none());
+    }
+
+    #[test]
+    fn il3_allows_git_status_porcelain() {
+        // Bounded by the working tree, not by history.
+        assert!(detect_il3_violation("git status --short | head -30").is_none());
+        assert!(detect_il3_violation("git status --porcelain | grep foo").is_none());
+    }
+
+    #[test]
+    fn il3_allows_git_show_stat() {
+        // A diffstat for one commit, not a diff body.
+        assert!(detect_il3_violation("git show --stat --oneline abc1234 | head -20").is_none());
+    }
+
+    #[test]
+    fn il3_blocks_bare_git_log() {
+        // No limiter: `git log` emits the entire history.
+        let hint = detect_il3_violation("git log | head -40").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+    }
+
+    #[test]
+    fn il3_blocks_git_oneline_without_a_count() {
+        // `--oneline` bounds line WIDTH, not line COUNT — `git log --oneline`
+        // still emits one line per commit for every commit. It is the most
+        // tempting false entry on the bounding list (25 of the 94 measured
+        // refusals carried it), and admitting it would make the gate wrong.
+        let hint = detect_il3_violation("git log --oneline | head -40").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+    }
+
+    #[test]
+    fn il3_blocks_git_diff_without_a_limiter() {
+        // A single-file diff is still an arbitrarily large diff body.
+        assert!(detect_il3_violation("git diff -- src/lib.rs | tail -50").is_some());
+    }
+
+    #[test]
+    fn il3_does_not_read_the_limiter_from_the_trimmer() {
+        // The limiter must be found on the LHS. `head -20` on the RHS is the
+        // trimmer's own count and must not bound the producer — the exact
+        // contamination that inflated the first measurement of this defect.
+        let hint = detect_il3_violation("git log --oneline | head -20").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+    }
+
     #[test]
     fn il3_blocks_grep_recursive() {
         let hint = detect_il3_violation("grep -r FAILED src/ | head").expect("should block");
@@ -2794,10 +2919,24 @@ EOF"#;
     /// not an unbounded command, so the check passed.
     ///
     /// A false positive costs a retry. This cost the guarantee.
+    ///
+    /// **Fixture amended 2026-08-16, deliberately.** The original carried `-50`,
+    /// which [`git_output_is_bounded`] now reads as a real commit-count limit — so
+    /// the command became legitimately allowed and the case stopped exercising the
+    /// property it exists to test. The `-50` was incidental realism; the subject is
+    /// quote-aware segmentation, and dropping it keeps the producer unbounded and the
+    /// quoted `;` in place.
+    ///
+    /// Mutation-verified: putting `git` back on `UNBOUNDED_PREFIXES` (which makes the
+    /// new branch dead) turns all five `il3_allows_git_*` cases red while THIS one
+    /// stays green — so the amended fixture still blocks for the reason it always did,
+    /// and the new cases discriminate. The other direction is not re-run here; the
+    /// pre-fix measurement above is the record for it, and the `-50` played no part in
+    /// that mechanism (a quote-blind split leaves the lead `b'` either way).
     #[test]
     fn il3_still_blocks_when_a_quoted_separator_precedes_a_real_pipe() {
         assert!(
-            detect_il3_violation("git log --oneline -50 --grep='a;b' | head -3").is_some(),
+            detect_il3_violation("git log --oneline --grep='a;b' | head -3").is_some(),
             "a quoted `;` must not hide a real pipe from the check"
         );
         assert!(
