@@ -100,7 +100,65 @@ fn write_locks() -> &'static WriteLockRegistry {
     WRITE_LOCKS.get_or_init(WriteLockRegistry::default)
 }
 
-fn validate_payload(kind: &str, p: &Value) -> Result<()> {
+/// Payload fields each event `kind` requires, as [`validate_payload`] enforces them.
+///
+/// Exists so `artifact_event`'s `payload` schema can *say* what it requires. That
+/// description read only "create: event payload (a JSON object)" and named none of the
+/// nine fields below, which is the same defect as `edit_code.body` and `artifact.patch`
+/// — a param required only for certain values of another param, advertised as though it
+/// were free-form. Here it is nested one level deeper: the requirement is on
+/// `payload.<field>` conditional on `kind`, which flat JSON Schema `required` cannot
+/// express at all.
+///
+/// Measured: `artifact_event` ran a 50% error rate over the 2026-07 window, and every
+/// failure was a missing per-kind payload field. Those errors carry no `err_family`, so
+/// the family-based sweep that found the sibling instances could not see them — TU-9 in
+/// `docs/trackers/2026-08-15-tool-usage-investigation.md` found them by a different route
+/// and asked for exactly this.
+///
+/// `validate_payload` is deliberately NOT rewritten to read this table: `field_patch.to`
+/// accepts any JSON value while every other field must be a string, and collapsing that
+/// distinction would be a silent behaviour change. Agreement between the two is proved by
+/// `every_required_payload_field_is_enforced_and_advertised`, which executes the validator
+/// rather than trusting the table.
+///
+/// See `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`.
+pub const REQUIRED_PAYLOAD_FIELDS: &[(&str, &[&str])] = &[
+    ("note", &["text"]),
+    ("reviewed", &[]),
+    ("status_change", &["to"]),
+    ("field_patch", &["field", "to"]),
+    ("superseded_by", &["target_artifact_id"]),
+    ("external_signal", &["source_id", "summary"]),
+    ("intent", &["hypothesis"]),
+    ("verdict", &["outcome"]),
+];
+
+/// Render [`REQUIRED_PAYLOAD_FIELDS`] as the requirement clause for the `payload` schema.
+///
+/// Generated rather than hand-written so a new event kind cannot be added to the validator
+/// and silently left out of what the tool advertises.
+pub fn payload_requirements_sentence() -> String {
+    let with_required = REQUIRED_PAYLOAD_FIELDS
+        .iter()
+        .filter(|(_, fields)| !fields.is_empty())
+        .map(|(kind, fields)| format!("{kind}→{}", fields.join("+")))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let no_required = REQUIRED_PAYLOAD_FIELDS
+        .iter()
+        .filter(|(_, fields)| fields.is_empty())
+        .map(|(kind, _)| *kind)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "REQUIRED keys depend on `kind`: {with_required}. \
+         No required keys: {no_required}. \
+         Omitting one is refused with `<kind>.<field> required`."
+    )
+}
+
+pub(crate) fn validate_payload(kind: &str, p: &Value) -> Result<()> {
     let obj = p
         .as_object()
         .ok_or_else(|| RecoverableError::new("payload must be object"))?;

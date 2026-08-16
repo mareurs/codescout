@@ -33,7 +33,13 @@ impl Tool for ArtifactEvent {
                     "type": "string",
                     "description": "create: event kind (note, reviewed, status_change, field_patch, superseded_by, external_signal, intent, verdict)"
                 },
-                "payload": { "type": "object", "description": "create: event payload (a JSON object)" },
+                "payload": {
+                    "type": "object",
+                    "description": format!(
+                        "create: event payload (a JSON object). {}",
+                        super::event_create::payload_requirements_sentence()
+                    )
+                },
                 "anchor_commit": { "type": "string", "description": "create: git commit to anchor event to" },
                 "head_commit": { "type": "string", "description": "create: HEAD commit at write time" },
                 "parent_event_id": { "type": "string", "description": "create: parent event id for threading" },
@@ -127,5 +133,71 @@ mod tests {
             schema["properties"]["payload"]["type"], "object",
             "payload must declare type=object so clients send an object, not a JSON string"
         );
+    }
+
+    /// Every per-kind payload requirement must be both **enforced** and **advertised**.
+    ///
+    /// `artifact_event` ran a 50% error rate over the 2026-07 window and every failure was
+    /// a missing per-kind payload field, while the schema said only "event payload (a JSON
+    /// object)". Those errors carry no `err_family`, so the family-based sweep that caught
+    /// the sibling instances (`edit_code.body`, `artifact.patch`) was blind to them; TU-9
+    /// in `docs/trackers/2026-08-15-tool-usage-investigation.md` found them by a different
+    /// route and asked for this.
+    ///
+    /// The first half executes `validate_payload` rather than reading
+    /// `REQUIRED_PAYLOAD_FIELDS`, so the table cannot drift from the validator: drop a
+    /// check there and this fails instead of the schema confidently describing a rule that
+    /// is no longer enforced.
+    ///
+    /// See `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`.
+    #[test]
+    fn every_required_payload_field_is_enforced_and_advertised() {
+        use crate::librarian::tools::event_create::REQUIRED_PAYLOAD_FIELDS;
+
+        let desc = ArtifactEvent.input_schema()["properties"]["payload"]["description"]
+            .as_str()
+            .expect("payload must carry a description")
+            .to_string();
+
+        for (kind, fields) in REQUIRED_PAYLOAD_FIELDS {
+            if fields.is_empty() {
+                assert!(
+                    desc.contains(kind),
+                    "`{kind}` has no required keys and the description must say so: {desc}"
+                );
+                continue;
+            }
+            assert!(
+                desc.contains(kind),
+                "the description must name kind `{kind}`: {desc}"
+            );
+
+            for omitted in *fields {
+                // Every OTHER required field present, so the failure is unambiguously the
+                // omitted one and not simply the first check in the arm.
+                let mut payload = serde_json::Map::new();
+                for f in *fields {
+                    if f != omitted {
+                        payload.insert((*f).to_string(), serde_json::json!("x"));
+                    }
+                }
+                let err = crate::librarian::tools::event_create::validate_payload(
+                    kind,
+                    &serde_json::Value::Object(payload),
+                )
+                .expect_err("a missing required payload field must be refused");
+
+                assert_eq!(
+                    err.to_string(),
+                    format!("{kind}.{omitted} required"),
+                    "the refusal must name kind and field, which is the shape \
+                     usage::db::normalize_err_family classifies on"
+                );
+                assert!(
+                    desc.contains(omitted),
+                    "`{kind}.{omitted}` is enforced but never advertised: {desc}"
+                );
+            }
+        }
     }
 }
