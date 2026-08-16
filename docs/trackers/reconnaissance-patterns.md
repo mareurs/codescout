@@ -200,13 +200,22 @@ be treated as findings, not as a summary to re-derive.
    evidence about the pattern. **When verifying that a deployment landed, compare
    the artifact, do not search it.**
 
-4. **C is promoted in its weakest form, and that explains its recurrence.** The
-   skill carries *"Grep scope: workspace root, not the file being modified"*,
-   promoted 2026-05-23 from R-3. The chain then ran R-73b → R-77 → R-79 → R-87,
-   adding wrong-query-shape, negative-result-authorises-deletion, and
-   state-what-the-search-cannot-see — none of which the promoted sentence covers.
-   **Re-promoting C in its evolved form is the single highest-value promotion
-   available**, and it is a rewrite of an existing law, not a new one.
+4. ~~**C is promoted in its weakest form, and that explains its recurrence.**~~
+   **RE-PROMOTED 2026-08-16.** Phase 1 now carries all four mechanisms — scope
+   (R-3), shape (R-77), encoding (this session), and R-79's hard rule that a
+   negative search result must never authorise a deletion. The audit that
+   produced it also found the protocol's own `Outgrown` precedent text **false**:
+   it claimed a *fifth* self-labelled recurrence, where the entries self-label
+   **four**, and R-87 is the law's *hit* rather than a failure. Corrected in the
+   same pass. Full record: **R-93**.
+
+   *Note for the next pass.* The `## Index` table's rows stop at **R-86**;
+   R-87..R-93 exist as sections only. Entry identity is therefore the section
+   headings, not the index — which is exactly what made `grep "^## R-(77|79) "`
+   return a false zero during this audit, since R-77 and R-79 are index rows with
+   no section. Either backfill the rows or state the convention change at the
+   table's head: a half-maintained index is worse than none, because it reads as
+   complete.
 
 5. **B may be outgrown too, by the unreachable mode rather than the wording one.**
    The skill's substrate law already names *"a test suite importing an installed
@@ -2264,6 +2273,71 @@ third concrete form stands unchanged as a rule; one of its exhibits has been rep
 belongs in the `reconnaissance` memory topic as a one-line imperative — *"a filed root
 cause is a lower bound; re-derive its scope"* — since it is craft-shaped, not
 project-shaped.
+
+## R-93 — First audit-on-promote: C re-promoted, and the audit's own precedent text failed the audit
+
+**Observed:** 2026-08-16, first exercise of the audit-on-promote protocol that
+shipped the same day (`claude-plugins:c889e83`, 1.16.4 → 1.16.5).
+
+**The promotion.** Law C was carried in the skill as a single mechanism —
+*"Grep scope: workspace root, not the file being modified"* (promoted 2026-05-23
+from R-3) — while its chain had since added three more. Phase 1 now carries all
+four: **scope** (R-3), **shape** (R-77 — a query that answers *"what is in this
+directory?"* never answers *"does this thing have a test?"*), **encoding** (this
+session, below), and the hard rule from R-79 that **a negative search result must
+never authorise a deletion**.
+
+**The audit found its own precedent false.** The `Outgrown` mode's worked example
+— written the previous day, by the same hand — claimed *"a **fifth** self-labelled
+recurrence"* over the chain `R-73b → R-77 → R-79 → R-87`. What the entries
+actually self-label: R-77 says *"third instance"*, R-79 says *"fourth recurrence
+of R-77"*, and the first two are folded inside R-73b. That is **four**. And
+**R-87 is the law's *hit*** — the scout ran and found the abstraction already
+there — not a fifth failure. Corrected in the same commit. Mode 1 (**False**)
+firing against one-day-old text, inside the section that defines mode 1.
+
+**Two fresh C instances, both in this session, both while auditing C.**
+
+1. `grep "three destinations"` → 0, because the source reads `**three**
+   destinations` and the markdown emphasis breaks the literal. A deployment check
+   that nearly reported the opposite of the truth. Settled by `diff -q` against
+   source.
+2. `grep "^## R-(77|79) "` → 0, concluding those entries did not exist. They exist
+   as **Index-table rows**, not `## R-N` sections. The file keeps entries under two
+   conventions and I searched one — R-77's own mechanism, applied to R-77.
+
+Both are the encoding/shape half of the law, and the promoted wording as it stood
+covered neither. That is the datapoint justifying the rewrite: the narrow form was
+live, loaded, and did not fire.
+
+**The audit of the rest of the set.** Recorded so the next promotion inherits the
+check rather than repeating it:
+
+| Law | Mode checked | Verdict |
+|---|---|---|
+| C — search / absence | Outgrown | **Confirmed, fixed** — re-promoted with all four mechanisms |
+| B — substrate / instrument (R-89) | Unreachable | **Confirmed, open** — the text is general enough and is never fetched. Fix is placement (destination 3), not wording. Still-open item 5. |
+| `iron-laws-detail` guide's `cat`-is-permitted sentence | False | **Confirmed, fixed earlier** — 0/10 unaided survival; now pinned by test |
+| Remaining Phase 1 laws | all four | **No recurrence on record** — no ledger entry cites any of them as a repeat, so no action. This row exists so the next audit does not re-derive it. |
+| Whole set | Obsolete | **None** — no promoted law guards a failure that a structural gate now prevents |
+
+**Verdict: rule.** Two process rules earned:
+
+1. **When verifying that a deployment landed, compare the artifact, do not search
+   it.** A grep is evidence about the pattern; a whole-file `diff` or checksum
+   cannot be defeated by pattern shape. Now shipped as C's **encoding** clause.
+2. **Audit the precedent text, not only the promoted rule.** The worked examples
+   inside a protocol are load-bearing — they are what a reader pattern-matches on
+   — and they go stale exactly like the rules they illustrate.
+
+**Counterfactual.** Without the audit step, the re-promotion would have shipped
+carrying a precedent that miscounts its own evidence and miscasts a hit as a
+failure — in the one paragraph a future agent reads to decide whether *their*
+promoted law is outgrown. The wrong lesson would have been: recurrences are
+inevitable, five of them are normal.
+
+**Kin:** R-3, R-73b, R-77, R-79 (the chain), R-50 (the view is not the set), R-87
+(the hit), R-89 (the unreachable case audited alongside).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
