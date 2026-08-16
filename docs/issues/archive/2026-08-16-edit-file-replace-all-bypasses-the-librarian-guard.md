@@ -281,10 +281,12 @@ the denominator is the capped count, not the total. Every one of the 12 happened
 to be quoted or `null`, so the conclusion looked clean and was drawn from a
 truncated sample that never reached `docs/trackers/`.
 
-That is precisely the defect filed as **BL-2** (`4059035cf39e6aab`, *"grep prints a
+That is precisely the defect filed as **BL-2** (`8e665c2d041ebb04`, *"grep prints a
 self-refuting 'Showing N of N' when collection hit the cap"*), observed here
 producing a **false claim in a committed artifact** rather than merely a confusing
-response. The glob was never the problem — re-running the same glob with a
+response. **Fixed 2026-08-16 in `4b77dff5`** — the same call now renders
+`12 matches (capped) in 11 files` and a hint that names the total as unknown, so the
+output quoted above no longer reproduces. The glob was never the problem — re-running the same glob with a
 specific pattern found the tracker immediately.
 
 The adjacent question this raised is left open on its own terms: whether the

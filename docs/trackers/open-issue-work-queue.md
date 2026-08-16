@@ -42,7 +42,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | ID | Ph | Task | Status | Bug |
 |----|---:|------|--------|-----|
 | BL-1 | 1 | json_path: add a `Segment::Wildcard` arm so the overflow hint's own recovery works | **done** | `875e5d03d980ceac` |
-| BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | open | `4059035cf39e6aab` |
+| BL-2 | 1 | grep: stop printing a self-refuting "Showing N of N" when collection hit the cap | **done, archived** | `8e665c2d041ebb04` |
 | BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | open | `365b599f3573b1c0` |
 | BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | open | `dbebda84901961c0` |
 | BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | **done** | `3f88d49c38ced0c1` |
@@ -66,18 +66,37 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | open | `6149f4cfeaa6fab9` |
 | BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | open | `a68a76301714137f` |
 | BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | open | `cfcbee6f7d047a55` |
-| BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | open | `db02045fdbaaf860` |
-| BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | open | `ea21099f9d39f734` |
+| BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | **done, archived** | `5d8584d109d876ea` |
+| BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | **done, archived** | `d082f963f57bd76b` |
 | BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | open | `ffa936075f1f03fd` |
 | BL-29 | 1 | `append_entry` writes catalog-only state, so this very snapshot drifts silently — tool says success, git says clean | open | `0694a4a9946e10fe` |
 | BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | open | `63d36f5da3b200a7` |
-| BL-31 | — | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | — |
+| BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | `5f6cfe1acdfda38d` |
 | BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
+| BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | open | `a2899c126f1e7771` |
 
-> **Params and body are reconciled** (2026-08-16). BL-1, BL-20 and BL-22 were
-> flipped with `artifact(action="update_entry", …)` — 24 rows before, 24 after,
-> three rows changed. The note that used to sit here said the flip was unsafe
-> because there was no entry-grain update; that was BL-20, and it is now fixed.
+> **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
+> previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
+> archived, and `artifact(action="move")` re-keys, so params carried the new ids while
+> this snapshot still cited `db02045fdbaaf860` / `ea21099f9d39f734` — neither of which
+> resolves any more. Three rows had drifted (BL-2, BL-26, BL-27) and BL-31 was missing
+> entirely.
+>
+> A **duplicate BL-31 row** also had to be removed here: two sessions hand-rendered the
+> same new params entry into this table within minutes of each other, one of them with
+> `—` placeholders for the fields it could not see. `append_entry` prevented the *id*
+> collision server-side (the concurrent session's entry took BL-32, mine BL-33, with no
+> coordination) — but nothing protects the hand-maintained snapshot from the same race.
+> That gap between the two is BL-30's cost stated precisely.
+>
+> That is **BL-29** demonstrated, not a lapse: `update_entry` and `move` both write
+> catalog-only state, so every entry-grain write silently ages this table. The check that
+> catches it is `artifact(get, entry_filter=…)` against the live params before trusting
+> any row here — an id that returns `count: 0` is archived, not deleted.
+>
+> Earlier note, still true: BL-1, BL-20 and BL-22 were flipped with
+> `artifact(action="update_entry", …)`. The note that used to sit here said the flip was
+> unsafe because there was no entry-grain update; that was BL-20, and it is now fixed.
 > Its own row was the first thing the fix was used on.
 
 Next actions per row live in each bug's `## Resume`, and in the live params — not duplicated here,
@@ -256,30 +275,79 @@ caught by the other session. The test shape that catches this class is a table c
 row that was **green before the fix** — it proves the table discriminates rather than
 refusing everything.
 
+### 2026-08-16 — BL-2 fixed; the filed root cause was understating it
+
+| BL | What shipped | SHA |
+|----|--------------|-----|
+| BL-2 | grep stops printing a denominator the walk never counted | `4b77dff5` + `358f1ced` |
+| BL-31 | filed — found while fixing BL-2 | (open) |
+
+**The filing was wrong about scope, and the reconnaissance is what caught it.** BL-2 was
+filed as a corner case: "N of N" appears *when* `budget >= total`. Tracing `max` from its
+single binding showed it serves as **both** the collection break threshold and
+`cap_grouped`'s display budget, so `visible.len() == total` unconditionally and the second
+disjunct of `truncated = hit_cap || total > visible.len()` is **dead code**. The hint had
+never printed anything else. Had the fix been written to the filing, it would have
+branched on a condition that cannot occur.
+
+**Three surfaces, not one.** `format_overflow` already rendered the honest `… showing
+first N` when `shown == total`; grep's own hint then re-asserted `Showing N of N` right
+after it, under a header stating the count as fact. The one true clause was the shortest
+and sat between the two that overrode it. Fixing only the hint would have left the header
+— the line a reader anchors on — still wrong.
+
+**The test shape, third instance this session.** Two rows over one corpus, capped and
+complete; the complete row was **green before the fix**. That is the only shape that can
+catch a defect whose symptom is that two renderings are byte-identical — asserting on the
+capped string alone passes against the bug. Same shape as the `edit_file` guard (1 write
+path of 3) and the `update_entry` guard (1 input shape of 2).
+
+**Verified by invoking, not by inspecting** (T-20). `cargo test` proved `Grep::call` →
+`format_compact`; only the live MCP call proved the running server serves it:
+
+```
+grep(pattern="^use serde_json::json;", glob="src/**/*.rs", limit=5)
+5 matches (capped) in 5 files
+  … showing first 5 — Collection stopped at limit=5, so the true total is unknown …
+```
+
+**BL-31 fell out of the same reading.** Because collection stops at `max` in walk order,
+`cap_grouped`'s round-robin never runs from grep. Live proof, same session: a capped
+search offered three files holding **one match each** as ways to narrow a result already
+capped at five — advice that is not merely unranked but inert. Two capped searches before
+it returned `across 1 files`, so the common capped result is one file's worth, which is
+also why BL-2's new `(capped)` header marker is invisible in the common case. The two
+defects interact; fixing BL-31 restores the marker.
+
+**Shared-tree hazard #2.** `cargo fmt` formats the whole crate, and it was run while the
+concurrent session had uncommitted edits under `src/librarian/tools/audit_doc_refs/`. Any
+reformatting of their in-progress files landed in *their* diff. Pathspec-scoped commits
+protect the index; they do not protect against a whole-crate formatter. Prefer
+`cargo fmt -- <file>` on a shared tree.
+
 ### Resume — state at compaction, 2026-08-16
 
-**18 of 30 rows open.** Phase 1 remaining: BL-2, BL-3, BL-4, BL-6, BL-7, BL-19, BL-25.
-BL-29/BL-30 are the other session's.
+**17 of 31 rows open.** Phase 1 remaining: **BL-3, BL-4, BL-6, BL-7, BL-19, BL-25**.
+BL-29/BL-30 are the other session's. BL-31 is new (phase 2).
 
-**BL-2 has fresh evidence and is the natural next.** It fired live this session and produced
-a **false claim in a committed artifact**: `grep(…, limit=12)` answered *"Showing 12 of 12
-matches"*, which is byte-identical to what a complete result prints, and the homogeneous
-capped sample was written up as a finding. Corrected in
-`docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md`
-§ *And a second one, which was wrong*; the evidence and a design note are in BL-2's own
-file (`8e665c2d041ebb04`, now archived). Note the design constraint recorded there: a truthful denominator
-is **not** available — `cap_grouped` never counts past the cap — so the fix is an explicit
-incompleteness marker, not "12 of 847".
+**BL-3 is the natural next** — "Tool schemas: stop advertising conditionally-required
+params as optional" (`365b599f3573b1c0`), the last Phase 1 row with no open questions.
+BL-6 and BL-19 are both progressive-disclosure siblings of the BL-2 fix (incompleteness
+signals on buffered output) and would batch well together if you prefer momentum over
+order.
 
-**Working practices this session settled, worth keeping:**
+**Working practices, carried forward:**
 
-- **Verify a fix is live by invoking it**, never by inspecting the binary or `codescout_sha`.
-  Three signals disagreed within one minute; only the tool call interrogates the process
-  serving the call. (T-20; the dirty-build half is BL-24.)
-- **Archive with `artifact(action="move")` and read `id_changed`** — the id changes, so
-  re-point prose citing the old one in the same commit, ids as well as paths.
-- **Patch tracker rows with `update_entry`**, never `patch={params:…}` — the latter replaces
-  the collection.
-- **A concurrent session shares this working tree and index.** Commit by pathspec; check
-  `git status` before staging. Their surfaces right now: `reconnaissance-patterns.md`
-  (R-N — leave alone), `archive-cadence-policy.md`, the benchmark trackers.
+- **Read the filing as a hypothesis, not a spec.** BL-2's filed root cause was narrower
+  than the defect; the fix would have been written to a branch that cannot execute.
+  Trace the variable from its binding before implementing the fix a bug file prescribes.
+- **The catching test contains a row that was green before the fix.** Three for three
+  this session on guard/message defects.
+- **Verify a fix is live by invoking it**, never by inspecting the binary or
+  `codescout_sha` (T-20).
+- **Archive with `artifact(action="move")` and re-point ids in the same commit** — read
+  `id_changed`. An id that returns `count: 0` from `find` is archived, not deleted.
+- **Check the snapshot against live params before trusting a row** (BL-29). Three rows
+  had drifted here, all from catalog-only writes.
+- **A concurrent session shares this working tree, index, and formatter.** Commit by
+  pathspec; prefer `cargo fmt -- <file>`.

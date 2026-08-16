@@ -224,14 +224,31 @@ No longer needed on `experiments`. Before the fix: when a `grep` result said "Sh
 N", treat N as a floor, not a total, and re-run with a narrower pattern or `mode="files"`.
 ## Resume
 
-Gate green (3745 lib tests, clippy `-D warnings`, fmt). Pending: live MCP verification
-after `cargo rb` + `/mcp`, then archive with the commit SHA.
+N/A — fixed in `4b77dff5`, gate green, verified live against the running MCP server on
+2026-08-16:
 
-**A second defect surfaced while fixing this one** and is filed separately: because
-collection stops at `max` in walk order, `cap_grouped`'s file-diversity round-robin never
-runs in the grep path, so the "Narrow with one of: …" file list is drawn from a
-walk-order-biased sample rather than the hottest files.
-→ `docs/issues/2026-08-16-grep-file-diversity-round-robin-never-runs.md`
+```
+grep(pattern="^use serde_json::json;", glob="src/**/*.rs", limit=5)
+
+5 matches (capped) in 5 files
+  … showing first 5 — Collection stopped at limit=5, so the true total is unknown —
+    5 matches across 5 files is a floor, not a count. To see more, raise limit, or …
+```
+
+The three claims that used to contradict each other now agree. The same call on the old
+build rendered `5 matches in 5 files` / `Showing 5 of 5 matches across 5 files.`
+
+**Follow-ups, both filed, neither blocking:**
+
+- `docs/issues/2026-08-16-grep-file-diversity-round-robin-never-runs.md` (BL-31) — the
+  same single-`max` binding makes `cap_grouped`'s round-robin unreachable. Note the
+  interaction: a capped grep usually spans **one** file, and `render_grouped` suppresses
+  its header when `files <= 1`, so the `(capped)` marker added here is invisible in the
+  common case. The overflow line still carries it. Fixing BL-31 restores the header
+  marker to that path.
+- Cosmetic, unfiled: the hint pluralizes unconditionally (`across 1 files`,
+  `(1 matches)`). Pre-existing — the old format strings had the same `{} files` — so not
+  a regression, but the rewritten hint makes it more visible.
 ## References
 
 - `docs/trackers/bistriceanu/index.md` § B-5

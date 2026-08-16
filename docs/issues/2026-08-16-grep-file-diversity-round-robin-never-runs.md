@@ -109,6 +109,37 @@ hotter files") would have produced 2/1/1 across 3 files.
 reaches it. This is why the defect is invisible to the suite: the unit is green and the
 integration is never asserted.
 
+
+### Live, on the real codebase: the hint offers files that cannot help
+
+Observed 2026-08-16 against the running MCP server at `4b77dff5`:
+
+```
+grep(pattern="^use serde_json::json;", glob="src/**/*.rs", limit=5)
+
+5 matches (capped) in 5 files
+  … Collection stopped at limit=5 … narrow with one of:
+     path=".../librarian/tools/worktree.rs" (1 matches),
+     path=".../tools/edit_file/tests.rs"    (1 matches),
+     path=".../tools/markdown/tests.rs"     (1 matches).
+```
+
+Every suggested file holds **one** match. Narrowing to any of them cannot reduce a
+result that is already capped at 5 — the advice is not merely unranked, it is inert.
+The list is the first three files the walker happened to reach, and because collection
+stops at `max` in walk order it can only ever be that.
+
+Two companion observations from the same session, both consequences of the same
+collect-at-`max` shape:
+
+- **A capped grep usually spans one file.** `grep(pattern="hit_cap", limit=3)` and
+  `grep(pattern="total_is_lower_bound", limit=4)` both returned `across 1 files` — the
+  first file walked held enough matches to exhaust the budget on its own. So the common
+  capped result is not a broad sample at all, it is one file's worth.
+- Because `render_grouped` suppresses its header when `files <= 1`, that also means the
+  `(capped)` header marker added for BL-2 is invisible in exactly the single-file case.
+  The overflow line still carries it, so nothing is unmarked — but the two defects
+  interact, and fixing this one restores the header marker to the common path.
 ## Hypotheses tried
 
 1. **Hypothesis:** collection-at-`max` is deliberate and diversity is meant to apply only
@@ -159,4 +190,3 @@ collect-at-budget-then-cap-at-budget shape — if they do, the fix belongs close
 
 - `docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md` — found while fixing it
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — overflow-hint contract (Pattern 1: concrete + copy-paste-ready)
-

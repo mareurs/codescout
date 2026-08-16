@@ -425,6 +425,47 @@ refused. Both corrected, with two librarian-guide sections that recommended
 General shape worth carrying: when a tool has a safe narrow path and a dangerous general
 one, the docs must not demonstrate the general one for a narrow task.
 
+
+### T-22 — A gate that approves the tool name is not a gate on the operation
+
+I needed one row out of the queue tracker. `read_file` on it was refused by the IL4 gate,
+which named `read_markdown` as the fix; `read_markdown` then **succeeded**. Both are wrong
+for a librarian-managed tracker — the rule is `artifact(get, entry_filter=…)` — but the
+successful call felt like compliance, because a gate had just approved the tool name one
+step earlier.
+
+The cost was immediate and concrete: the snapshot I read was stale on three rows, two of
+them citing artifact ids that no longer resolve (archiving re-keys). Entering through the
+catalog returns live params on the first call; entering through the file returns a
+git-visible cache of them with no staleness signal.
+
+**Then the interesting part.** The first draft of this entry asserted that no guard exists
+for `read_markdown` on trackers, and proposed adding one. Checking before writing it up:
+
+```
+read_markdown("docs/trackers/tool-usage-patterns.md")   -> REFUSED (librarian-managed)
+read_markdown("docs/trackers/open-issue-work-queue.md") -> 285 lines
+```
+
+The guard exists. It did not fire for the queue, and the reason is the finding:
+`is_librarian_artifact` (`src/util/librarian_guard.rs:31-45`) tests the frontmatter TEXT
+for an `id:` value of exactly 16 lowercase-hex chars. `id: '9a892c2a5976e296'` is 18 chars
+with its quotes, so the file reads as unmanaged. In `docs/trackers/` alone: **12 protected,
+15 unprotected** — more trackers are unguarded than guarded, split by a serialisation
+choice no author made deliberately, and the unguarded set includes the queue this session
+maintained all day.
+
+The same shape-not-value check has a mirror-image failure: `tool-usage-patterns.md` is
+protected while asserting `abc513d3ee0f0b50`, an id that resolves to nothing (live:
+`f2ecdd76a6189efb`). Protected by accident, on a value that is wrong.
+
+Filed as `docs/issues/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
+
+**The transferable rule:** a refusal is informative; permission is not. A gate that fires
+tells you something real about the file. A gate that stays quiet tells you only that its
+predicate returned false — which may mean "not managed" or may mean the predicate cannot
+see what it is looking at. Do not read silence as clearance, and when about to write up
+"no guard exists here", run the call that would prove it.
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
