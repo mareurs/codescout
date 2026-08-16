@@ -92,7 +92,9 @@ async fn test_ctx() -> crate::tools::ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
-        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+            crate::tools::guide_ledger::GuideLedger::mid_session(),
+        )),
         workspace_override: None,
     }
 }
@@ -111,7 +113,9 @@ async fn project_ctx() -> (tempfile::TempDir, crate::tools::ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
-            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                crate::tools::guide_ledger::GuideLedger::mid_session(),
+            )),
             workspace_override: None,
         },
     )

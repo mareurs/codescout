@@ -46,6 +46,32 @@ impl GuideLedger {
         self.emitted.contains(topic)
     }
 
+    /// Has nothing been surfaced yet this session?
+    ///
+    /// True at session start and again after [`clear`](Self::clear) (workspace
+    /// activate / post-compact re-arm). This is the condition that fires the
+    /// session-opening guide from any tool — see
+    /// `prompts::SESSION_OPENING_GUIDE`.
+    pub fn is_empty(&self) -> bool {
+        self.emitted.is_empty()
+    }
+
+    /// A ledger that behaves as if the session has already opened.
+    ///
+    /// Test-only. The session opener (`prompts::SESSION_OPENING_GUIDE`) fires on
+    /// the first guide-eligible call of any session and appends a second content
+    /// block, so a test asserting on *primary-block shape* must start
+    /// mid-session or it measures the opener instead. Guide delivery itself is
+    /// covered by `server::guide_hint_tests`.
+    #[cfg(test)]
+    pub fn mid_session() -> Self {
+        let mut ledger = Self::default();
+        ledger
+            .emitted
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+        ledger
+    }
+
     /// Record a topic. Returns `true` if newly added (matching
     /// `HashSet::insert`); persists only on a genuine insertion.
     pub fn insert(&mut self, topic: String) -> bool {

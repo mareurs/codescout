@@ -1029,7 +1029,9 @@ mod tests {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
-            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                crate::tools::guide_ledger::GuideLedger::mid_session(),
+            )),
             workspace_override: None,
         }
     }
@@ -1044,7 +1046,9 @@ mod tests {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
-            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                crate::tools::guide_ledger::GuideLedger::mid_session(),
+            )),
             workspace_override: None,
         }
     }

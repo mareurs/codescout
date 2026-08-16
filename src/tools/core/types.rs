@@ -621,36 +621,59 @@ pub trait Tool: Send + Sync {
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
         // Compute potential hint topic + whether it should fire on this call.
-        let hint_topic: Option<String> = if let Some(topic) = self.relevant_guide_topic() {
+        let hint_topic: Option<String> = {
             let mut emitted = ctx.guide_hints_emitted.lock();
-            if emitted.contains(topic) {
-                None
-            } else {
-                let should = match topic {
-                    "progressive-disclosure" => {
-                        // Either the default-path buffering kicked in (large JSON),
-                        // or the tool itself pre-buffered (e.g. run_command storing
-                        // a `@cmd_*` ref and returning a small envelope with
-                        // `output_id`). Both signal the agent should learn the
-                        // progressive-disclosure pattern.
-                        exceeds_inline_limit(&json)
-                            || val
-                                .as_object()
-                                .and_then(|o| o.get("output_id"))
-                                .and_then(|v| v.as_str())
-                                .is_some()
-                    }
-                    _ => true,
-                };
-                if should {
-                    emitted.insert(topic.to_string());
-                    Some(topic.to_string())
-                } else {
+            if emitted.is_empty() {
+                // Session opener. An empty ledger means this is the session's
+                // first guide-eligible call — or the first since an `activate`
+                // or post-compact re-arm cleared it — so the orientation guide
+                // goes out now, whatever tool was called.
+                //
+                // Before 2026-08-16 this fired only for `workspace`, so a
+                // session opening with symbols/grep/read_file never received
+                // it. `progressive-disclosure` does not cover the gap: it is
+                // conditional on actual overflow, so a session with small
+                // results got no guide at all.
+                //
+                // The calling tool's own topic is deliberately NOT marked
+                // emitted here, so it still fires on a later call. The cost is
+                // a one-response delay, and a tool called exactly once in a
+                // session forfeits its guide — an acceptable trade against
+                // 18 KB of librarian guide landing on a one-shot `artifact`
+                // call. See `prompts::SESSION_OPENING_GUIDE`.
+                let topic = crate::prompts::SESSION_OPENING_GUIDE;
+                emitted.insert(topic.to_string());
+                Some(topic.to_string())
+            } else if let Some(topic) = self.relevant_guide_topic() {
+                if emitted.contains(topic) {
                     None
+                } else {
+                    let should = match topic {
+                        "progressive-disclosure" => {
+                            // Either the default-path buffering kicked in (large JSON),
+                            // or the tool itself pre-buffered (e.g. run_command storing
+                            // a `@cmd_*` ref and returning a small envelope with
+                            // `output_id`). Both signal the agent should learn the
+                            // progressive-disclosure pattern.
+                            exceeds_inline_limit(&json)
+                                || val
+                                    .as_object()
+                                    .and_then(|o| o.get("output_id"))
+                                    .and_then(|v| v.as_str())
+                                    .is_some()
+                        }
+                        _ => true,
+                    };
+                    if should {
+                        emitted.insert(topic.to_string());
+                        Some(topic.to_string())
+                    } else {
+                        None
+                    }
                 }
+            } else {
+                None
             }
-        } else {
-            None
         };
 
         fn inject_hint(val: &mut Value, topic: &str) {

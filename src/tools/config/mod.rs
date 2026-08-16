@@ -94,7 +94,12 @@ impl Tool for Workspace {
         // guide ledger in `call()` before `call_content` re-checks it, so the
         // guide re-injects on every activate. A pre-activate status/list call
         // fires it once (harmless); post-activate calls are ledger-suppressed.
-        Some("project-activation-bootstrap")
+        //
+        // Since 2026-08-16 this is a backstop rather than the sole trigger: an
+        // empty ledger fires the same guide from any tool (`call_content` in
+        // src/tools/core/types.rs). This arm still matters because `activate`
+        // clears the ledger mid-session, re-arming the guide for the new project.
+        Some(crate::prompts::SESSION_OPENING_GUIDE)
     }
 }
 

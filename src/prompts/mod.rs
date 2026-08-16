@@ -138,6 +138,21 @@ pub const GUIDE_TOPICS: &[&str] = &[
     "project-activation-bootstrap",
 ];
 
+/// The guide that opens a session.
+///
+/// Delivered on the first guide-eligible tool call of a session, whatever that
+/// call is — see `Tool::call_content` in `src/tools/core/types.rs`.
+///
+/// Before 2026-08-16 its only trigger was the `workspace` tool, so a session
+/// that opened with `symbols`/`grep`/`read_file` — the common case — never
+/// received it. That is a *discoverability* failure, not an adherence one: the
+/// wording itself measured 100% plausibility-verified as eval arm `s1`
+/// (prompt-engineering `scenarios/conclude-last`), and audit-log A-10 found that
+/// on-demand guidance is obeyed as reliably as always-visible guidance once
+/// fetched — its failure mode is "never fetched", not "fetched then forgotten".
+/// So the fix is the trigger, not the text.
+pub const SESSION_OPENING_GUIDE: &str = "project-activation-bootstrap";
+
 /// Return the compiled-in markdown body for a `get_guide(topic)` topic.
 /// `None` for unknown topics — callers that need a hard-fail should match
 /// `None` themselves; `GetGuide::call` wraps `None` into a

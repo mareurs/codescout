@@ -3724,10 +3724,24 @@ mod guide_hint_tests {
             .map(String::from)
     }
 
+    /// Consume the session-opening guide slot.
+    ///
+    /// The opener fires on the first guide-eligible call of ANY session
+    /// (`prompts::SESSION_OPENING_GUIDE`, dispatched from `Tool::call_content`).
+    /// Tests that measure a *domain* guide's own trigger must warm the ledger
+    /// first, or they measure the opener instead — which is exactly what made
+    /// seven of these tests fail when the opener was widened on 2026-08-16.
+    fn warm_ledger(ctx: &crate::tools::ToolContext) {
+        ctx.guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+    }
+
     #[tokio::test]
     async fn first_artifact_call_emits_librarian_hint() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let tool = tool_by_name(&server, "artifact");
         let result = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
@@ -3740,6 +3754,98 @@ mod guide_hint_tests {
             "expected _guide_hint mentioning 'librarian' on first artifact call"
         );
     }
+
+    /// The session opener must reach a session that never calls `workspace`.
+    ///
+    /// Before 2026-08-16 `project-activation-bootstrap` was triggered ONLY by
+    /// the `workspace` tool, and `progressive-disclosure` is conditional on
+    /// actual overflow — so a session opening with a small `run_command`
+    /// received no guide at all. This pins that gap closed: the very call that
+    /// `run_command_without_overflow_no_progressive_hint` asserts emits no
+    /// *progressive-disclosure* hint must still open the session.
+    #[tokio::test]
+    async fn session_opens_with_bootstrap_from_a_non_workspace_tool() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let result = tool
+            .call_content(json!({"command": "echo small"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result)
+                .unwrap_or_default()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "a session's first call must open with the orientation guide, whatever the tool"
+        );
+        assert_eq!(
+            result.len(),
+            2,
+            "opener rides a second content block (primary + guide), got {}",
+            result.len()
+        );
+        let second = result[1].as_text().expect("second block must be text");
+        assert!(
+            second.text.contains("ALWAYS VERIFY"),
+            "the opener must carry the verification imperative that measured 100% \
+             plausibility-verified as eval arm s1 — delivering the guide without it \
+             would ship the trigger fix and drop the payload it exists for"
+        );
+    }
+
+    /// Once per session, not once per call — the opener is subject to the same
+    /// ledger dedup as every other topic.
+    #[tokio::test]
+    async fn session_opener_fires_once_not_on_every_call() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let _ = tool
+            .call_content(json!({"command": "echo one"}), &ctx)
+            .await
+            .unwrap();
+        let second = tool
+            .call_content(json!({"command": "echo two"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            !extract_hint(&second)
+                .unwrap_or_default()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "the opener must not re-fire on later calls"
+        );
+    }
+
+    /// The opener defers the calling tool's own topic by one call — it must not
+    /// consume it. Without this, a session opening with `artifact` would never
+    /// receive the librarian guide at all.
+    #[tokio::test]
+    async fn session_opener_defers_but_does_not_consume_the_tools_topic() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let first = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&first)
+                .unwrap_or_default()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "first call opens the session"
+        );
+        let second = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&second)
+                .unwrap_or_default()
+                .contains("librarian"),
+            "the tool's own guide must still arrive, one call later"
+        );
+    }
+
     /// Regression for docs/issues/archive/2026-06-01-librarian-adapter-stale-is-write.md:
     /// LibrarianAdapter::is_write matched dead tool names, so every librarian tool
     /// classified as a read and the main server's write-guard never engaged for
@@ -3794,6 +3900,7 @@ mod guide_hint_tests {
     async fn second_artifact_call_no_hint() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let tool = tool_by_name(&server, "artifact");
         let _ = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
@@ -3816,6 +3923,7 @@ mod guide_hint_tests {
         // the full guide body wrapped in `<!-- auto-injected ... -->` markers.
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let tool = tool_by_name(&server, "artifact");
         let result = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
@@ -3853,6 +3961,7 @@ mod guide_hint_tests {
         // re-append the guide body block. Only the primary response block.
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let tool = tool_by_name(&server, "artifact");
         let _ = tool
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
@@ -3874,6 +3983,7 @@ mod guide_hint_tests {
     async fn artifact_event_after_artifact_no_hint() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let artifact = tool_by_name(&server, "artifact");
         let event = tool_by_name(&server, "artifact_event");
         let _ = artifact
@@ -4025,6 +4135,7 @@ mod guide_hint_tests {
     async fn run_command_without_overflow_no_progressive_hint() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let tool = tool_by_name(&server, "run_command");
         let result = tool
             .call_content(json!({"command": "echo small"}), &ctx)
@@ -4046,6 +4157,7 @@ mod guide_hint_tests {
     async fn run_command_with_overflow_emits_progressive_hint_once() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
         let tool = tool_by_name(&server, "run_command");
         let big = tool
             .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
