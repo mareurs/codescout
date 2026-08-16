@@ -180,19 +180,37 @@ written.
 
 ## Resume
 
-**Fixed on `experiments`.** Verify live after the next `cargo rb` + `/mcp`: issue
-the reported call shape (`entry=` on `update_entry`) and confirm it now returns a
-`RecoverableError` naming `fields` rather than a success envelope; then confirm
-`fields=` still writes.
+**Closed 2026-08-16.** Fix SHA on **`experiments`**: `47abcb6d`. Fast-forward
+promotion (0 on the left of `rev-list --left-right master...experiments`), so this
+is the master SHA — no second SHA to record.
 
-The A-22 row in `docs/trackers/prompt-hamsa-audit-log.md` that surfaced this may
-still have an empty `outcome` — worth re-checking and filling, since the original
-write never landed.
+**Verified live** after `cargo rb` + `/mcp`, with the reported call shape:
 
-One thing deliberately left: renaming `fields` to something that cannot be
-confused with `append_entry`'s `entry`. That removes the trap rather than
-reporting it, but it is a breaking change to a param that shipped the same day —
-reopen as its own change if the guard proves insufficient.
+```
+artifact(update_entry, id=…, entry_collection="tasks", entry_id="BL-21",
+         entry={"status": "done"})
+-> update_entry: `entry` is append_entry's parameter — this action takes `fields`
+   hint: Re-send the patch as fields={...}. `entry` is the whole row for a NEW
+         entry; `fields` is the subset to change on an existing one.
+
+artifact(update_entry, …, fields={})
+-> update_entry: `fields` is empty — there is nothing to patch
+
+artifact(update_entry, …, fields={"status":"done", "next":"…"})
+-> {"changed_fields": ["status","next"], "entries_total": 28}
+```
+
+The first call is the exact shape that previously returned a success envelope with
+`changed_fields: []`. Both guards fire, and the working path still writes.
+
+**One loose end from § Symptom, not ours to close here:** the `outcome` on row A-22
+of `docs/trackers/prompt-hamsa-audit-log.md` was never written by the call that
+surfaced this — it is presumably still empty and worth re-filling.
+
+**Deliberately not done:** renaming `fields` so it cannot be confused with
+`append_entry`'s `entry`. That removes the trap rather than reporting it, but it is
+a breaking change to a parameter that shipped the same day. Reopen as its own
+change if the guard proves insufficient.
 ## References
 
 - `src/librarian/catalog/augmentation.rs:226-333`

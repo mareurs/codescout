@@ -31,7 +31,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // handler, which turned that guess into an empty patch and a success envelope.
     // Catch it by name so the error can say which parameter to use, instead of the
     // generic "nothing to patch" the catalog layer would give.
-    // docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    // docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
     if args.get("entry").is_some() && args.get("fields").is_none() {
         return Err(RecoverableError::with_hint(
             "update_entry: `entry` is append_entry's parameter — this action takes `fields`"
@@ -164,7 +164,7 @@ mod tests {
     ///
     /// Reported from a real session: ~1.4 KB of text sent as `entry=`, exit
     /// success, row unchanged.
-    /// docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    /// docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
     #[tokio::test]
     async fn call_rejects_the_entry_param_and_names_fields() {
         let ctx = mk_ctx();

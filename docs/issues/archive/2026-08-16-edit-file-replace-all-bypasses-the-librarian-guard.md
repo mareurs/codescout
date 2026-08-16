@@ -1,19 +1,19 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- guard-gap
+- edit_file
+- twin-tool-defect
+- catalog-drift
+closed: 2026-08-16
 opened: 2026-08-16
-closed:
-severity: high
 owner: marius
 related:
-  - docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
-  - docs/trackers/open-issue-work-queue.md
-tags:
-  - librarian
-  - guard-gap
-  - edit_file
-  - twin-tool-defect
-  - catalog-drift
-kind: bug
+- docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+- docs/trackers/open-issue-work-queue.md
+severity: high
 ---
 
 # BUG: edit_file's replace_all path writes librarian-managed artifacts with no guard — and the markdown refusal hint is what sends you there
@@ -184,34 +184,86 @@ is the only reason this is high and not critical.
 
 ## Fix
 
-Not yet implemented. Proposed, cheapest first:
+**Implemented 2026-08-16 on `experiments`, `47abcb6d`.** Proposals 1 and 2 shipped;
+3 shipped in a stronger form than proposed.
 
-1. **Hoist the guard above the branch.** All three paths already resolve the
-   target and read its content; move `guard_not_librarian_managed` to fire once
-   after `read_edit_target` in each, or better, into a small wrapper both
-   `perform_edit` and the batch path call. One call site becoming three (or one
-   shared) closes the whole class here rather than patching the branch that got
-   noticed.
+**The guard moved into `read_edit_target`** rather than being added at the two
+missing call sites. That function is the one thing all three write paths do, so
+guarding there makes it structurally unbypassable — including by a fourth write
+path somebody adds later. Adding two more calls would have fixed the three paths
+that exist and left the next sibling to rediscover this.
 
-2. **Stop advertising an escape that does not hold.** The hint at
-   `src/tools/edit_file/mod.rs:441-442` should not name `replace_all=true` as a
-   markdown route without saying it is still refused on managed artifacts —
-   otherwise fixing (1) turns a helpful hint into a hint that reliably produces
-   an error, which is the same defect the json_path hint bug was about
-   (`docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`).
+`read_edit_target` gained a `display_path` parameter so both its messages keep
+naming what the caller passed rather than the resolved absolute form.
 
-3. **Consider a regression test per write path, not per tool.** The reason this
-   survived is that "does edit_file guard managed artifacts?" has three answers
-   and the suite only ever asked once. A table-driven test over
-   {batch, insert, single} × {managed, unmanaged} would have caught it and will
-   catch the next sibling added.
+**The hint no longer advertises an escape that is about to fail.** It now states
+that `replace_all` is still refused on a librarian-managed artifact and points at
+`artifact(action="update", patch={body_edits: […]})`. Fixing the guard without
+fixing the hint would have turned a helpful message into one that reliably
+produces an error — the same defect class as the json_path recovery hint
+(`docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`).
 
+**Guides corrected**, since both described the old contract:
+
+- `src/prompts/guides/iron-laws-detail.md` § Iron Law 5 — the `.md` exceptions now
+  carry "neither applies to a librarian-managed artifact", with the reason (no
+  `field_patch`, no shrink guard, stale `updated_at`).
+- `src/prompts/guides/librarian.md` § Body Editing Surfaces — new `edit_file` row
+  stating it is refused **on every write path**, so the `replace_all` escape is
+  not read as a way around the `edit_markdown` refusal above it.
+
+## Verified live
+
+2026-08-16, after `cargo rb` + `/mcp`. Probed with an `old_string` that cannot
+match, so a failure to guard could still not write:
+
+```
+edit_file("docs/trackers/tool-usage-patterns.md",
+          old_string="ZZZ_…CANNOT_EXIST…", replace_all=true)
+-> 'docs/trackers/tool-usage-patterns.md' is a librarian-managed artifact
+
+edit_file("docs/trackers/tool-usage-patterns.md",
+          edits=[{old_string:"ZZZ_…BATCH…", replace_all:true}])
+-> 'docs/trackers/tool-usage-patterns.md' is a librarian-managed artifact
+```
+
+Both are paths that returned `"ok"` before. Note the error is the `librarian_guard`
+message and **not** the "0 matches" error the probe string would otherwise have
+triggered — which confirms the guard runs before match counting, i.e. before any
+path that could mutate.
+
+### One premise corrected
+
+This file originally asserted that "`edit_markdown` correctly refuses a managed
+artifact" — taken from `get_guide("librarian")`, never observed. Checked properly
+before fixing: `read_markdown` on the same tracker does refuse, and the file
+carries `id: abc513d3ee0f0b50` **unquoted**, which is what `is_librarian_artifact`
+keys on. The premise held; the way it had been arrived at did not.
+
+Worth recording alongside it: every `id:` in `docs/issues/` and `docs/adrs/` is
+**quoted** (`id: '74c1aa5018287728'`) or `null`, and the heuristic requires 16
+unquoted hex chars. So the guard effectively covers `docs/trackers/` and little
+else. Not touched here — it is a separate question from this bug, and closing the
+write-path gap does not depend on it.
 ## Tests added
 
-None yet — bug is `open`. The regression test must assert refusal on **all three**
-write paths; a test that only covers `insert` reproduces the blind spot that
-caused this.
+`librarian_guard_fires_on_every_edit_file_write_path`
+(`src/tools/edit_file/tests.rs`) — table-driven over
+`{single + replace_all, batch + all replace_all, insert append}` ×
+`{managed, plain}`. Fixtures are byte-identical apart from the `id:` line. The
+refused cases also assert the file is **unchanged**, so a guard that errored after
+writing would still fail.
 
+Written first and watched fail on `single + replace_all → String("ok")`.
+
+**The `insert` rows already passed before this test existed.** That is the point:
+they prove the table discriminates, so a green run on the other four means
+something. The reason this bug survived is that "does `edit_file` guard managed
+artifacts?" had one answer and three code paths — a per-tool test could not catch
+it, only a per-path one.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test` 3879 passed / 0 failed / 45 ignored (baseline 3875).
 ## Workarounds
 
 Use `artifact(action="update", id=…, patch={body_edits: [...]})` for any file
@@ -226,17 +278,16 @@ it. The `field_patch` event is not recoverable.
 
 ## Resume
 
-Start at `src/tools/edit_file/mod.rs:436-444` (the markdown gate) and
-`mod.rs:593` (the sole guard call). Decide between hoisting the guard into a
-shared helper vs. three call sites — the batch path at `mod.rs:472` and
-`perform_edit` at `mod.rs:678` are the two that need it. Write the table-driven
-test first: `{batch, insert, single} × {managed, unmanaged}`, asserting a
-`librarian_guard` error for all three managed cases. `insert` should already
-pass, which is the point — it proves the test discriminates.
+**Closed 2026-08-16.** Fix SHA on **`experiments`**: `47abcb6d`.
+`git rev-list --left-right --count master...experiments` has 0 on the left, so
+promotion is a fast-forward and this SHA is the master SHA — no second SHA to
+record.
 
-Then fix the hint at `mod.rs:441-442` in the same commit, or it will
-start recommending a call that now always fails.
-
+One adjacent question deliberately left open, and it is not a gap in this fix:
+`is_librarian_artifact` matches only an **unquoted** 16-hex `id:`, while every
+`id:` outside `docs/trackers/` in this repo is quoted or `null`. Whether that is
+intended (only trackers are meant to be guarded) or an oversight is worth deciding
+on its own evidence rather than being folded in here.
 ## References
 
 - `src/tools/edit_file/mod.rs:436-444` — the markdown gate and its hint

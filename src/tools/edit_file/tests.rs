@@ -1998,7 +1998,7 @@ async fn edit_file_batch_all_replace_all_on_markdown_passes_through() {
 /// they prove the table discriminates, so a green run on the other four means
 /// something. A test that only asked "does edit_file guard managed artifacts?"
 /// had one answer for three code paths, which is how this survived.
-/// docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
+/// docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
 #[tokio::test]
 async fn librarian_guard_fires_on_every_edit_file_write_path() {
     // Identical apart from the `id:` line the guard keys on.

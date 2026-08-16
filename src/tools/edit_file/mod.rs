@@ -658,7 +658,7 @@ impl Tool for EditFile {
 /// write was the path the error messages composed into. Guarding at the shared
 /// read makes it structurally unbypassable, including by a fourth write path
 /// somebody adds later.
-/// docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
+/// docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
 ///
 /// A bare `std::fs::read_to_string(&resolved)?` propagates
 /// `No such file or directory (os error 2)` with no path and no indication of which

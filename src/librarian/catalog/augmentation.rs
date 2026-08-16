@@ -266,7 +266,7 @@ pub fn update_entry(
     // typo'd param name became a silent no-op: an undeclared key is dropped before
     // it reaches here, so `fields` arrives as `{}`. This action exists because the
     // path it replaced was silent; it must not be silent in a narrower way.
-    // docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    // docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
     if patch.is_empty() {
         return Err(RecoverableError::with_hint(
             "update_entry: `fields` is empty — there is nothing to patch".to_string(),
@@ -1032,7 +1032,7 @@ mod tests {
     ///
     /// This action exists because the path it replaced was silent. It must not
     /// be silent in a narrower way.
-    /// docs/issues/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
+    /// docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md
     #[test]
     fn update_entry_rejects_an_empty_patch() {
         let mut cat = Catalog::open_in_memory().unwrap();
