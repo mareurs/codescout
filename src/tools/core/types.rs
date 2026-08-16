@@ -712,9 +712,18 @@ pub trait Tool: Send + Sync {
         let primary = if exceeds_inline_limit(&json) && !self.force_inline() {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
-            let raw_summary = self
-                .format_compact(&val)
-                .unwrap_or_else(|| format!("Result stored in {} ({} bytes)", ref_id, json_len));
+            // The fallback describes the payload rather than restating the envelope. A
+            // bare "Result stored in @tool_x (N bytes)" repeats `output_id` — which the
+            // caller already has — and spends the only informative slot on nothing, so
+            // the call answers no question and a second round-trip is needed to learn
+            // what is in there. See `format::describe_payload_shape`.
+            let raw_summary = self.format_compact(&val).unwrap_or_else(|| {
+                let head = format!("Result stored in {ref_id} ({json_len} bytes)");
+                match crate::tools::format::describe_payload_shape(&val) {
+                    Some(shape) => format!("{head}\n  {shape}"),
+                    None => head,
+                }
+            });
             let summary = truncate_compact(
                 &raw_summary,
                 COMPACT_SUMMARY_MAX_BYTES,

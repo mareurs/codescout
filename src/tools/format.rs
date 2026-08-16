@@ -89,6 +89,78 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
     }
 }
 
+/// Describe a buffered payload's shape, for tools with no bespoke `format_compact`.
+///
+/// The fallback this feeds used to read `"Result stored in @tool_abc (18618 bytes)"` and
+/// nothing else — which **restates the envelope's own `output_id`** and adds a byte count
+/// the caller can already see. The one slot that could say something about the result said
+/// nothing, so the call returned no answer and cost a second round-trip to find out what
+/// was in there. Measured 2026-08-16: every librarian `find` / `graph` / `state_at`, and
+/// every `get` whose body fits under the soft cap, took that path.
+///
+/// What comes back instead is a map — the top-level keys, so a `json_path` can be aimed;
+/// each array's length; and short scalars verbatim, since those are frequently the answer
+/// outright (`status`, `title`, a count).
+///
+/// Bounded on purpose: a wide object must not spend the whole summary budget listing keys.
+/// Returns `None` for a payload with no describable shape (a bare scalar), leaving the
+/// caller its own wording.
+///
+/// See `docs/issues/2026-08-16-content-free-overflow-envelope-costs-a-round-trip.md`.
+pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
+    /// Wide objects exist (`artifact(get)` alone carries ~15); listing every key would
+    /// crowd out the arrays and scalars below, which carry more per byte.
+    const MAX_KEYS: usize = 24;
+    /// Long enough for a title or a status, short enough that a stray blob cannot
+    /// monopolise the line.
+    const MAX_SCALAR_LEN: usize = 60;
+    const MAX_SCALARS: usize = 8;
+
+    match val {
+        Value::Object(map) if !map.is_empty() => {
+            let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+            let shown = keys.len().min(MAX_KEYS);
+            let mut out = format!("{} keys: {}", keys.len(), keys[..shown].join(", "));
+            if keys.len() > shown {
+                out.push_str(&format!(", … +{} more", keys.len() - shown));
+            }
+
+            let arrays: Vec<String> = map
+                .iter()
+                .filter_map(|(k, v)| v.as_array().map(|a| format!("{k}[{}]", a.len())))
+                .collect();
+            if !arrays.is_empty() {
+                out.push_str(&format!("\n  arrays: {}", arrays.join(", ")));
+            }
+
+            let scalars: Vec<String> = map
+                .iter()
+                .filter_map(|(k, v)| match v {
+                    Value::String(s) if s.len() <= MAX_SCALAR_LEN => Some(format!("{k}={s:?}")),
+                    Value::Number(n) => Some(format!("{k}={n}")),
+                    Value::Bool(b) => Some(format!("{k}={b}")),
+                    _ => None,
+                })
+                .take(MAX_SCALARS)
+                .collect();
+            if !scalars.is_empty() {
+                out.push_str(&format!("\n  {}", scalars.join(", ")));
+            }
+            Some(out)
+        }
+        Value::Array(items) => {
+            let mut out = format!("array of {} items", items.len());
+            // The element keys are what a `[*]` projection needs to name a field.
+            if let Some(Value::Object(first)) = items.first() {
+                let keys: Vec<&str> = first.keys().map(String::as_str).take(MAX_KEYS).collect();
+                out.push_str(&format!("\n  item keys: {}", keys.join(", ")));
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +312,71 @@ mod tests {
                 "{surface}: the withheld-count must survive the cut too. Cut summary:\n{cut}"
             );
         }
+    }
+
+    /// The generic fallback must describe the payload, not restate the envelope.
+    ///
+    /// `"Result stored in @tool_abc (18618 bytes)"` repeats `output_id` — a field the
+    /// caller already holds — and adds a byte count. It answers nothing, so the call is
+    /// spent and a second round-trip is needed to learn what is in the buffer. This
+    /// asserts the replacement carries something the envelope does not.
+    ///
+    /// See `docs/issues/2026-08-16-content-free-overflow-envelope-costs-a-round-trip.md`.
+    #[test]
+    fn the_generic_fallback_describes_the_payload_instead_of_the_envelope() {
+        // Shaped like a real librarian `artifact(get)` response — the measured case.
+        let val = serde_json::json!({
+            "id": "9a892c2a5976e296",
+            "kind": "tracker",
+            "status": "active",
+            "title": "Open-Issue Work Queue (BL-N)",
+            "tags": ["backlog", "triage"],
+            "body": "x".repeat(20_000),
+        });
+        let shape = describe_payload_shape(&val).expect("an object has a describable shape");
+
+        // The keys are what lets a caller aim a json_path without a second call.
+        assert!(shape.contains("body"), "must name the big field: {shape}");
+        assert!(shape.contains("6 keys"), "must count the keys: {shape}");
+        // Array lengths, so `tags[*]` is known to be worth projecting.
+        assert!(shape.contains("tags[2]"), "must size the arrays: {shape}");
+        // Short scalars are frequently the answer outright.
+        assert!(
+            shape.contains("Open-Issue Work Queue (BL-N)"),
+            "a short scalar is often the answer and must appear verbatim: {shape}"
+        );
+        assert!(
+            shape.contains(r#"status="active""#),
+            "must carry short scalars: {shape}"
+        );
+        // The 20 KB body must be named but never inlined — that is the whole point of
+        // buffering it in the first place.
+        assert!(
+            !shape.contains("xxxxxxxxxx"),
+            "a large value must be named, not inlined: {shape}"
+        );
+        assert!(
+            shape.len() < 600,
+            "the description must stay a summary, got {} bytes: {shape}",
+            shape.len()
+        );
+    }
+
+    #[test]
+    fn describe_payload_shape_handles_arrays_and_declines_scalars() {
+        let arr = serde_json::json!([{"id": "T-1", "verdict": "ok"}, {"id": "T-2"}]);
+        let shape = describe_payload_shape(&arr).expect("an array has a shape");
+        assert!(shape.contains("array of 2 items"), "{shape}");
+        assert!(
+            shape.contains("item keys: id, verdict"),
+            "element keys are what a [*] projection needs to name a field: {shape}"
+        );
+
+        // Nothing useful to say about these — the caller keeps its own wording rather
+        // than being handed a description of a scalar.
+        assert!(describe_payload_shape(&serde_json::json!("hi")).is_none());
+        assert!(describe_payload_shape(&serde_json::json!(7)).is_none());
+        assert!(describe_payload_shape(&serde_json::json!({})).is_none());
     }
 
     #[test]
