@@ -123,8 +123,11 @@ mechanics that apply to all kinds.
 A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
 **augmented artifact**: attach a `params` array + `render_template` (+ optional
 `entry_collection`) once via `artifact_augment`, then add rows with
-`artifact_augment(merge=true)` and filter them with
-`artifact(action="get", entry_filter={…})`. Merge semantics + the full-array rule
+`artifact(action="append_entry")`, change one with
+`artifact(action="update_entry")`, and filter them with
+`artifact(action="get", entry_filter={…})`. Reach for a raw
+`artifact_augment(merge=true)` params patch only for a deliberate bulk rewrite —
+it replaces the collection rather than merging into it. Merge semantics + the full-array rule
 are in *Augmentation Lifecycle* below.
 ## Augmentation Lifecycle
 
@@ -152,8 +155,32 @@ buffer caps inline reads, so it can't round-trip. Two server-side paths read it 
   file server-side; mutually exclusive with `params`.
 - CLI: `codescout artifact-augment <id> --params @<file> [--merge]` (also `--params -` for
   stdin) — same catalog, same validation.
-`apply_merge_patch` replaces arrays wholesale (no entry-grain write), so the file must hold
-the full array under its key — a bare-array patch under `merge` is a silent no-op.
+`apply_merge_patch` replaces arrays wholesale, so the file must hold the full array under
+its key — a bare-array patch under `merge` is a silent no-op.
+
+### Changing ONE entry — don't hand-build the array
+
+**A params patch replaces an entry collection; it does not merge into it.** Sending
+`{tasks: [one row]}` to flip one row's status deletes every other row, and the catalog is
+not in git, so nothing recovers it. Two purpose-built paths exist so you never have to:
+
+```
+artifact(action="append_entry", id=…, entry_collection="tasks",
+         id_prefix="T", entry={...})                        # add a row
+artifact(action="update_entry", id=…, entry_collection="tasks",
+         entry_id="T-7", fields={"status": "done"})         # change a row
+```
+
+`update_entry` merges `fields` shallowly onto that one entry — a `null` value deletes the
+key, every other entry and every unnamed field is untouched — and returns
+`changed_fields` plus `entries_total`. An unknown `entry_id` is refused **with the list of
+ids that do exist**, never a silent no-op. `id` is rejected as a field: entry ids key
+`entry_cite` rows, so re-keying one would strand its citations.
+
+The wholesale replace is still available for a genuine bulk rewrite. It now reports
+`entries_before` / `entries_after` on every params write, and adds `entries_removed` plus a
+`warning` when the collection shrank — so a mistaken replace is visible in the response
+that performed it.
 
 **Refresh cycle** (run by the agent, not automatic):
 1. `artifact_refresh(action="gather", id="...")` — collects context; does NOT write

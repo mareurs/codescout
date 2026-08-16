@@ -13,14 +13,16 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Artifact CRUD and query. action: find | get | create | update | move | delete | graft | link | graph | state_at | append_entry. \
+        "Artifact CRUD and query. action: find | get | create | update | move | delete | graft | link | graph | state_at | append_entry | update_entry. \
          Defaults: scope=project (active project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
          and combine with filter via AND. \
          Trackers are artifacts with kind=tracker — augmented documents that auto-refresh their \
          body via a persistent prompt; call librarian(tracker_design) before creating one. \
          append_entry atomically assigns the next id and appends to a tracker's entry_collection — \
-         use it instead of a manual read-then-write for any monotonic-ID tracker (F-N, W-N, T-N, ...)."
+         use it instead of a manual read-then-write for any monotonic-ID tracker (F-N, W-N, T-N, ...). \
+         update_entry patches ONE existing entry in place; use it to change a row (e.g. flip a status) \
+         instead of patch={params:...}, whose RFC 7396 array semantics replace the whole collection."
     }
 
     fn input_schema(&self) -> Value {
@@ -30,7 +32,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -170,7 +172,15 @@ impl Tool for Artifact {
                 },
                 "entry_collection": {
                     "type": "string",
-                    "description": "append_entry: the augmentation's entry_collection array to append into (must match the artifact's declared entry_collection)"
+                    "description": "append_entry/update_entry: the augmentation's entry_collection array to write into (must match the artifact's declared entry_collection)"
+                },
+                "entry_id": {
+                    "type": "string",
+                    "description": "update_entry: the id of the entry to patch (e.g. 'T-7'). Unknown ids are refused with the list of ids that do exist — never a silent no-op."
+                },
+                "fields": {
+                    "type": "object",
+                    "description": "update_entry: fields to set on that one entry, merged shallowly; a null value deletes the key. Every other entry, and every field this patch does not name, is left untouched. `id` is rejected — entry ids key entry_cite rows, so re-keying one would strand its citations."
                 },
                 "id_prefix": {
                     "type": "string",
@@ -192,7 +202,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry",
+                "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry",
             )
         })?;
         match action {
@@ -207,8 +217,9 @@ impl Tool for Artifact {
             "graph"    => super::graph::call(ctx, args).await,
             "state_at" => super::state_at::call(ctx, args).await,
             "append_entry" => super::append_entry::call(ctx, args).await,
+            "update_entry" => super::update_entry::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry"
             ))),
         }
     }

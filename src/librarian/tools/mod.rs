@@ -284,6 +284,7 @@ pub mod append_entry;
 pub mod delete;
 pub mod graft;
 pub mod mv;
+pub mod update_entry;
 
 pub mod event_create;
 pub mod state_at;

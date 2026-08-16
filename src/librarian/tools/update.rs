@@ -481,9 +481,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
     artifact::upsert(&cat, &updated_row)?;
 
-    if let Some(params_patch) = &patch.params {
-        crate::librarian::catalog::augmentation::merge_params(&cat, &a.id, params_patch)?;
-    }
+    // Keep the entry-count report: a params patch replaces an array wholesale
+    // (RFC 7396), so a caller re-sending a trimmed collection silently deletes the
+    // rest — and the catalog is not in git, so nothing else can notice.
+    // docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+    let params_merge = match &patch.params {
+        Some(params_patch) => Some(crate::librarian::catalog::augmentation::merge_params(
+            &cat,
+            &a.id,
+            params_patch,
+        )?),
+        None => None,
+    };
 
     if body_changing {
         let _ = crate::librarian::catalog::events::insert(
@@ -537,6 +546,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut out = json!({"id": a.id, "updated": true});
     if let Some(c) = committed {
         out["committed"] = json!(c);
+    }
+    // Report what the params write did to the entry collection, always — not only
+    // when it shrank. A count that appears solely on loss is a count nobody learns
+    // to read.
+    if let Some(m) = &params_merge {
+        if let (Some(before), Some(after)) = (m.entries_before, m.entries_after) {
+            out["entries_before"] = json!(before);
+            out["entries_after"] = json!(after);
+            if after < before {
+                out["entries_removed"] = json!(before - after);
+                out["warning"] = json!(format!(
+                    "params patch replaced the entry collection wholesale: {before} entries -> \
+                     {after} ({} removed). RFC 7396 replaces arrays, it does not merge them. To \
+                     change one row use artifact(action=\"update_entry\", entry_id=…, fields=…); \
+                     to add one use append_entry.",
+                    before - after
+                ));
+            }
+        }
     }
     if !corrections.is_empty() {
         out["corrections"] = json!(corrections);

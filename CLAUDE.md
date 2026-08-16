@@ -108,15 +108,27 @@ foot-gun, why managed files refuse direct `read_markdown`), see
 
 **How to append (Claude):**
 ```
-# 1. Add structured entry to params
-artifact_augment(id="f2ecdd76a6189efb", merge=true,
-  params={observations: [...existing..., {id:"T-NNN", tool:"...", verdict:"...", ...}]})
+# 1. Add the structured entry — the server assigns the next T-N id
+artifact(action="append_entry", id="f2ecdd76a6189efb",
+  entry_collection="observations", id_prefix="T",
+  entry={tool:"...", verdict:"...", ...})
 
-# 2. Add analysis prose to body
-edit_markdown("docs/trackers/tool-usage-patterns.md",
-  action="insert_before", heading="## Prompt improvement candidates",
-  content="### T-NNN — <title>\n...")
+# 2. Add analysis prose to the body (managed file — edit_markdown is refused)
+artifact(action="update", id="f2ecdd76a6189efb", patch={body_edits: [{
+  heading: "## Prompt improvement candidates", action: "insert_before",
+  content: "### T-NNN — <title>\n..."}]})
 ```
+
+**To change an existing row** (fix a verdict, flip a status):
+```
+artifact(action="update_entry", id="f2ecdd76a6189efb",
+  entry_collection="observations", entry_id="T-17", fields={verdict:"wrong-tool"})
+```
+
+> ⚠️ Never hand-build the array — `artifact_augment(merge=true, params={observations:
+> [...everything...]})` **replaces** the collection rather than merging into it, and the
+> catalog is not in git. That call took this queue from 19 entries to 1 on 2026-08-16.
+> `append_entry` / `update_entry` exist so it is never needed.
 
 **User — browse:** open `docs/trackers/tool-usage-patterns.md`; the live params table is
 rendered at the top by the librarian. Prompt improvement candidates are at the bottom —

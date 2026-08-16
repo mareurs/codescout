@@ -416,7 +416,7 @@ impl Tool for ArtifactAugment {
                     }
                 }
                 if !patched_siblings {
-                    let found = augmentation::merge_params(&cat, &a.id, &patch)?;
+                    let found = augmentation::merge_params(&cat, &a.id, &patch)?.found;
                     if !found {
                         return Err(RecoverableError::new(format!(
                             "no augmentation for artifact '{}' — call artifact_augment first",

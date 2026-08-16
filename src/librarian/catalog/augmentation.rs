@@ -159,9 +159,13 @@ pub fn validate_params_patch(cat: &Catalog, artifact_id: &str, patch: &Value) ->
     merge_params_dry(cat, artifact_id, patch).map(|_| ())
 }
 
-pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<bool> {
+pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<ParamsMergeOutcome> {
+    // Sample the entry collection BEFORE the write. RFC 7396 replaces arrays
+    // wholesale, and the catalog is not in git, so this count is the only signal
+    // a wipe will ever produce.
+    let entries_before = entry_count(cat, artifact_id)?;
     let Some(new_params) = merge_params_dry(cat, artifact_id, patch)? else {
-        return Ok(false);
+        return Ok(ParamsMergeOutcome::default());
     };
     cat.conn.execute(
         "UPDATE artifact_augmentation SET params = ?1,
@@ -169,7 +173,207 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
          WHERE artifact_id = ?2",
         rusqlite::params![new_params, artifact_id],
     )?;
-    Ok(true)
+    let entries_after = entry_count(cat, artifact_id)?;
+    Ok(ParamsMergeOutcome {
+        found: true,
+        entries_before,
+        entries_after,
+    })
+}
+
+/// Rows in the artifact's declared `entry_collection`.
+///
+/// `None` means the artifact declares no entry collection — there is nothing to
+/// count, and reporting `0` would read as "the collection was emptied". A
+/// declared-but-absent key counts as `0`: the collection exists conceptually and
+/// holds no rows.
+fn entry_count(cat: &Catalog, artifact_id: &str) -> Result<Option<usize>> {
+    let Some(existing) = get(cat, artifact_id)? else {
+        return Ok(None);
+    };
+    let Some(collection) = existing.entry_collection.as_deref() else {
+        return Ok(None);
+    };
+    let params: Value = serde_json::from_str(&existing.params).unwrap_or_else(|_| json!({}));
+    Ok(Some(
+        params
+            .get(collection)
+            .and_then(|v| v.as_array())
+            .map_or(0, |a| a.len()),
+    ))
+}
+
+/// What a params merge did to the artifact's declared entry collection.
+///
+/// `merge_params` applies RFC 7396 semantics, which replace an array **wholesale**.
+/// That is still allowed — a bulk rewrite is a legitimate operation — but it must
+/// not be silent: a caller sending one row to flip one row's status deletes every
+/// other row, and the catalog is not in git, so nothing else can notice.
+/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ParamsMergeOutcome {
+    /// False when the artifact has no augmentation to merge into.
+    pub found: bool,
+    /// Length of the declared `entry_collection` array before/after the merge.
+    /// `None` when the artifact declares no entry collection — there is no array
+    /// to count, and inventing one would be worse than saying nothing.
+    pub entries_before: Option<usize>,
+    pub entries_after: Option<usize>,
+}
+
+/// What an entry-grain update changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateEntryOutcome {
+    pub entry_id: String,
+    /// Keys the patch actually touched, in patch order.
+    pub changed_fields: Vec<String>,
+    /// Row count after the write. An entry update never changes it — reported so
+    /// a caller can assert that cheaply.
+    pub entries_total: usize,
+}
+
+/// Patch the fields of ONE entry in `params.<entry_collection>`, leaving every
+/// other row untouched.
+///
+/// The counterpart `append_entry` never had. Without it, flipping one row's
+/// status — the most common maintenance action on a task tracker — had no choice
+/// but to go through `merge_params`, whose RFC 7396 array semantics replace the
+/// whole collection. `append_entry` exists precisely so nobody hand-rolls that
+/// read-then-write; this closes the other half.
+///
+/// `fields` is merged shallowly onto the matched row: a `null` value deletes the
+/// key, matching the params merge-patch semantics callers already know. `id` is
+/// rejected — entry ids key `entry_cite` rows (`<slug>:<local>`), so re-keying a
+/// row through a field patch would strand every citation of it.
+///
+/// Runs in a single `IMMEDIATE` transaction, like `append_entry`.
+/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+pub fn update_entry(
+    cat: &mut Catalog,
+    artifact_id: &str,
+    entry_collection: &str,
+    entry_id: &str,
+    fields: Value,
+) -> Result<UpdateEntryOutcome> {
+    let Some(patch) = fields.as_object() else {
+        return Err(RecoverableError::new(
+            "update_entry: `fields` must be a JSON object",
+        ));
+    };
+    if patch.contains_key("id") {
+        return Err(RecoverableError::with_hint(
+            "update_entry: `id` cannot be changed through a field patch".to_string(),
+            "Entry ids key entry_cite rows (`<slug>:<local>`), so re-keying one would strand \
+             every citation of it with nothing to repair them. Append a new entry and mark this \
+             one superseded instead."
+                .to_string(),
+        ));
+    }
+
+    let tx = cat
+        .conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+    let row: Option<(String, Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT params, params_schema, entry_collection
+             FROM artifact_augmentation WHERE artifact_id = ?1",
+            [artifact_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+
+    let Some((params_text, params_schema, declared_collection)) = row else {
+        return Err(RecoverableError::new(format!(
+            "update_entry: artifact `{artifact_id}` has no augmentation — augment it with an entry_collection first"
+        )));
+    };
+
+    if declared_collection.as_deref() != Some(entry_collection) {
+        return Err(RecoverableError::with_hint(
+            format!("update_entry: `{entry_collection}` is not this artifact's entry_collection"),
+            match declared_collection {
+                Some(c) => format!("This artifact's entry_collection is `{c}` — pass that instead."),
+                None => "This artifact has no entry_collection declared — set one via artifact_augment first.".to_string(),
+            },
+        ));
+    }
+
+    let mut params: Value = serde_json::from_str(&params_text).unwrap_or_else(|_| json!({}));
+
+    // Locate the row before mutating, so the immutable borrow ends before the
+    // schema re-validation needs `params` whole again.
+    let Some(arr) = params.get(entry_collection).and_then(|v| v.as_array()) else {
+        return Err(RecoverableError::new(format!(
+            "update_entry: `{entry_collection}` holds no entry array on artifact `{artifact_id}`"
+        )));
+    };
+    let entries_total = arr.len();
+    let position = arr
+        .iter()
+        .position(|e| e.get("id").and_then(|v| v.as_str()) == Some(entry_id));
+
+    let Some(position) = position else {
+        // Name what IS there. A bare "not found" makes the caller re-read the
+        // whole collection just to discover it typed the id — which is the
+        // read-then-write this path exists to remove.
+        const KNOWN_IDS_SHOWN: usize = 12;
+        let known: Vec<&str> = arr
+            .iter()
+            .filter_map(|e| e.get("id").and_then(|v| v.as_str()))
+            .take(KNOWN_IDS_SHOWN)
+            .collect();
+        let elided = entries_total.saturating_sub(known.len());
+        let suffix = if elided > 0 {
+            format!(" (+{elided} more)")
+        } else {
+            String::new()
+        };
+        return Err(RecoverableError::with_hint(
+            format!("update_entry: no entry `{entry_id}` in `{entry_collection}`"),
+            format!("Known ids: {}{}", known.join(", "), suffix),
+        ));
+    };
+
+    let Some(obj) = params[entry_collection][position].as_object_mut() else {
+        return Err(RecoverableError::new(format!(
+            "update_entry: entry `{entry_id}` is not a JSON object"
+        )));
+    };
+
+    let mut changed_fields = Vec::with_capacity(patch.len());
+    for (k, v) in patch {
+        changed_fields.push(k.clone());
+        if v.is_null() {
+            obj.remove(k);
+        } else {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+
+    if let Some(schema_text) = params_schema.as_deref() {
+        schema_validate::validate_against_stored(schema_text, &params).map_err(|e| {
+            RecoverableError::new(format!(
+                "update_entry: patched entry violates params_schema: {e}"
+            ))
+        })?;
+    }
+    validate_rule_globs(entry_collection, &params)?;
+
+    let new_params_text = serde_json::to_string(&params)?;
+    tx.execute(
+        "UPDATE artifact_augmentation SET params = ?1,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE artifact_id = ?2",
+        rusqlite::params![new_params_text, artifact_id],
+    )?;
+    tx.commit()?;
+
+    Ok(UpdateEntryOutcome {
+        entry_id: entry_id.to_string(),
+        changed_fields,
+        entries_total,
+    })
 }
 
 /// Result of a successful [`append_entry`].
@@ -428,8 +632,21 @@ pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
 
 /// Shallow RFC 7396 merge-patch applied in place to `target`. `null` keys in the
 /// patch delete; non-null values overwrite the corresponding target key entirely.
-/// Nested objects are overwritten in full (not recursively merged). This is intentional —
-/// artifact params are expected to be flat key-value objects.
+/// Nested objects are overwritten in full (not recursively merged).
+///
+/// **Arrays are replaced wholesale, and params are no longer flat.** This comment
+/// used to justify the shallow merge with "artifact params are expected to be flat
+/// key-value objects". That was true when it was written and is not any more:
+/// `entry_collection` makes params the home for arrays of entry rows, and two of
+/// the archetypes `tracker_design` recommends are built on exactly that shape. So
+/// a patch carrying one row of a collection deletes every other row — legitimate
+/// for a bulk rewrite, catastrophic for the one-row edit it looks like.
+///
+/// Two things now stand between a caller and that outcome, because the semantics
+/// here deliberately did not change: [`update_entry`] gives a one-row edit its own
+/// path, and [`merge_params`] reports `entries_before`/`entries_after` so a
+/// wholesale replace is visible rather than silent.
+/// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 ///
 /// Non-object patches are silent no-ops. Callers MUST reject them at their own
 /// input boundary rather than relying on the tool schema: the schema's
@@ -654,7 +871,7 @@ mod tests {
         art_upsert(&cat, &sample_art("art1")).unwrap();
         upsert(&cat, &aug("art1")).unwrap();
         let patch = json!({"format": "table"});
-        let found = merge_params(&cat, "art1", &patch).unwrap();
+        let found = merge_params(&cat, "art1", &patch).unwrap().found;
         assert!(found);
         let row = get(&cat, "art1").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
@@ -675,10 +892,162 @@ mod tests {
         assert!(params.get("format").is_none());
     }
 
+    /// Seeds an artifact whose params hold a three-row `tasks` entry collection.
+    fn seed_task_list(cat: &Catalog, id: &str) {
+        art_upsert(cat, &sample_art(id)).unwrap();
+        let mut a = aug(id);
+        a.entry_collection = Some("tasks".into());
+        a.params = r#"{"tasks":[
+                {"id":"T-1","status":"open","note":"first"},
+                {"id":"T-2","status":"open"},
+                {"id":"T-3","status":"open"}
+            ]}"#
+        .to_string();
+        upsert(cat, &a).unwrap();
+    }
+
+    /// RFC 7396 replaces an array wholesale, so sending one row to flip one
+    /// row's status deletes the rest. That stays *allowed* — a bulk rewrite is
+    /// legitimate — but it must never again be **silent**. This is the call
+    /// that took a live tracker from 19 entries to 1.
+    /// docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+    #[test]
+    fn merge_params_reports_entry_counts_across_a_wholesale_replace() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        let out = merge_params(&cat, "art1", &json!({"tasks":[{"id":"T-1"}]})).unwrap();
+
+        assert!(out.found);
+        assert_eq!(out.entries_before, Some(3));
+        assert_eq!(
+            out.entries_after,
+            Some(1),
+            "the caller must be told the collection shrank, even though the write is permitted"
+        );
+    }
+
+    /// An artifact with no declared entry_collection has no array to count, and
+    /// must not invent one.
+    #[test]
+    fn merge_params_reports_no_entry_counts_without_an_entry_collection() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        upsert(&cat, &aug("art1")).unwrap();
+
+        let out = merge_params(&cat, "art1", &json!({"format": "table"})).unwrap();
+
+        assert!(out.found);
+        assert_eq!(out.entries_before, None);
+        assert_eq!(out.entries_after, None);
+    }
+
+    /// The real fix: flipping one row's status is the most common maintenance
+    /// action on a task tracker, and until now it had to go through the
+    /// wholesale replace because `append_entry` only appends.
+    #[test]
+    fn update_entry_patches_one_row_and_leaves_the_others() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        let out = update_entry(&mut cat, "art1", "tasks", "T-2", json!({"status":"done"})).unwrap();
+
+        assert_eq!(out.entry_id, "T-2");
+        assert_eq!(
+            out.entries_total, 3,
+            "an entry update must never change the row count"
+        );
+        assert_eq!(out.changed_fields, vec!["status".to_string()]);
+
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        let tasks = params["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0]["status"], "open");
+        assert_eq!(tasks[1]["status"], "done");
+        assert_eq!(tasks[2]["status"], "open");
+        assert_eq!(
+            tasks[0]["note"], "first",
+            "fields the patch did not name must survive"
+        );
+    }
+
+    /// Null deletes a field, matching the params merge-patch semantics the
+    /// caller already knows from `patch={params:…}`.
+    #[test]
+    fn update_entry_null_deletes_a_field() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        update_entry(&mut cat, "art1", "tasks", "T-1", json!({"note": null})).unwrap();
+
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert!(params["tasks"][0].get("note").is_none());
+        assert_eq!(params["tasks"][0]["status"], "open");
+    }
+
+    /// A typo'd id must not silently write nothing — the whole point of this
+    /// path is that the caller stops hand-building the array, so a no-op that
+    /// reports success would be worse than the bug it replaces.
+    #[test]
+    fn update_entry_rejects_an_unknown_entry_id() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        let err =
+            update_entry(&mut cat, "art1", "tasks", "T-9", json!({"status":"done"})).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("T-9"),
+            "the error must name the missing id: {msg}"
+        );
+
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["tasks"].as_array().unwrap().len(), 3);
+    }
+
+    /// Entry ids are a citation surface — `entry_cite` rows key on
+    /// `<slug>:<local>` — so re-keying a row through a field patch would
+    /// strand every citation of it with no cascade to repair them.
+    #[test]
+    fn update_entry_refuses_to_rewrite_the_entry_id() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        let err = update_entry(&mut cat, "art1", "tasks", "T-1", json!({"id":"T-99"})).unwrap_err();
+        assert!(
+            err.to_string().contains("id"),
+            "the error must say the id field is off limits: {err}"
+        );
+    }
+
+    /// Same guard `append_entry` carries: the collection named must be the one
+    /// the artifact declared, or the caller is writing to a key nothing reads.
+    #[test]
+    fn update_entry_rejects_a_collection_the_artifact_did_not_declare() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+
+        let err = update_entry(
+            &mut cat,
+            "art1",
+            "findings",
+            "T-1",
+            json!({"status":"done"}),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("findings"),
+            "the error must name the collection that was passed: {err}"
+        );
+    }
+
     #[test]
     fn merge_params_missing_artifact_returns_false() {
         let cat = Catalog::open_in_memory().unwrap();
-        let found = merge_params(&cat, "nope", &json!({"x": 1})).unwrap();
+        let found = merge_params(&cat, "nope", &json!({"x": 1})).unwrap().found;
         assert!(!found);
     }
     #[test]
@@ -715,7 +1084,7 @@ mod tests {
         a.params_schema = Some(serde_json::to_string(&schema).unwrap());
         upsert(&cat, &a).unwrap();
         let patch = json!({"count": 42});
-        let found = merge_params(&cat, "art1", &patch).unwrap();
+        let found = merge_params(&cat, "art1", &patch).unwrap().found;
         assert!(found);
         let row = get(&cat, "art1").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
