@@ -570,18 +570,16 @@ duplicate that is worded differently, which is the collision that actually happe
 
 ## Final step
 
-**Two calls, and the split is not optional.**
+One call. `artifact_create` — `kind=tracker`, `status=active`, `rel_path`
+(`docs/trackers/<slug>.md`), `title`, `topic`, `body` (Step 6), and `augment={...}`.
 
-1. `artifact_create` — `kind=tracker`, `status=active`, `rel_path` (`docs/trackers/<slug>.md`),
-   `title`, `topic`, `body` (Step 6), and `augment={prompt, params}`.
-   **`prompt` and `params` are the ONLY augmentation fields `create` accepts.** Anything else passed
-   inside `augment` is silently discarded.
-2. `artifact_augment(id=..., merge=true, ...)` — attach `render_template` (Step 5), `params_schema`
-   (Step 4) and `entry_collection` (Step 5b). **`merge=true` matters:** `merge=false` overwrites all
-   seven augmentation fields, resetting the `prompt`/`params` you just set.
+`augment` takes the **whole** augmentation, so there is no follow-up call to forget:
+`prompt` (required), `params` (Step 3), `render_template` (Step 5), `params_schema` (Step 4),
+`entry_collection` (Step 5b), `append_mode`, `history_cap`. An unknown key is **rejected, not
+ignored** — a typo fails loudly instead of vanishing.
 
-Then read the artifact back and confirm those fields are non-null before assuming it renders or
-filters.
+To change an augmentation afterwards use `artifact_augment(id=..., merge=true, ...)`.
+**`merge=true` matters:** `merge=false` overwrites all seven fields, resetting everything you omit.
 "#;
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).unwrap_or_default();
@@ -640,7 +638,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "existing_trackers": existing,
         "existing_trackers_total": total_trackers,
         "intent": a.intent,
-        "next_step": "Pick archetype. Compose spec (prompt, params, render_template, params_schema, body). Call artifact_create with kind=tracker, status=active, and augment={prompt,params}.",
+        "next_step": "Pick an archetype, then call librarian(tracker_design, archetype=\"<name>\") for its examples. Compose the spec and call artifact_create with kind=tracker, status=active, body, and augment={prompt, params, render_template, params_schema, entry_collection} — augment takes the full augmentation in one call, and rejects unknown keys.",
     });
 
     if total_trackers > EXISTING_TRACKERS_CAP {
