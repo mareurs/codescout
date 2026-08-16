@@ -40,6 +40,43 @@ A guard can have an excellent corrective message *and* fire on commands its own 
 says to allow. Those are independent properties. TU-7 established the first; this establishes
 the third.
 
+## Findings index
+
+> Mirrored from the catalog's `findings` collection. The catalog is **machine-local and not in
+> git**, so this table is the only form a reader outside this machine can see — keep them in sync
+> when a row's status changes (`docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md`,
+> which bit this very tracker on its first status update).
+
+| ID | Finding | Sev | Status | Target |
+|---|---|---|---|---|
+| GF-1 | `git` is unconditionally unbounded — 64% of its IL-3 refusals are self-bounded (30% of the family). **Incomplete fix** of `2026-05-18-il3-overtriggers-bounded-lhs`, whose remedy created this very list | high | open | `src/util/path_security.rs` |
+| GF-2 | The flag-conditional mechanism already exists for `grep`/`find` — `git` never got it; the fix extends, not invents | high | open | `src/util/path_security.rs` |
+| GF-3 | `shell_on_source` refuses 22% out-of-project paths where the suggested `symbols` alternative cannot serve, plus 24% read-only metadata | med | open | `docs/issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md` |
+| GF-4 | Refusals teach the CALL, not the PREDICATE: 96% immediate compliance, 3% immediate repeat, **47% per-session repeat** | med | open | `src/prompts/guides/iron-laws-detail.md` |
+| GF-5 | Guide delivery is success-path-only, so `iron-laws-detail` cannot arrive when a gate fires — 1 fetch vs 557 violations. **Contradicts** the shipped pull-only rationale *"a caller who needs the detail has already read the pointer"* | high | open | `src/tools/core/types.rs` |
+| GF-6 | IL-1 is the sick family on the learning axis — 71% per-session repeat, 7.4 per session, worst 33 over 7 hours | med | open | `src/util/path_security.rs` |
+| GF-7 | **Negative result:** IL-4/IL-5 repeat 0% across 18 sessions. A total, file-intrinsic predicate teaches on first contact — do not "improve" these; keep as regression control | info | closed | — |
+| GF-8 | `untrusted-content` fetched 0 times in 30 days — now **declared** rather than silently missing: `PULL_ONLY_GUIDE_TOPICS` marks it *PENDING BL-25* | med | mitigated | `src/prompts/mod.rs` |
+
+### Reconciliation with BL-25 phase 1 (shipped mid-audit)
+
+`72f39849` + `73ccb495` landed while this audit was being written. `PULL_ONLY_GUIDE_TOPICS`
+now names every untriggered topic with a documented reason, and
+`every_guide_topic_is_triggered_or_declared_pull_only` fails the build **both** ways —
+untriggered-and-unlisted, *and* a stale entry that later gains a trigger. The allowlist names
+exactly the four topics this audit measured as untriggered, so the two passes agree on the
+inventory and disagree on one rationale:
+
+> `iron-laws-detail` — *"The gate text and its exceptions … A caller who needs the detail has
+> already read the pointer."*
+
+This audit measured that caller. **1 fetch in 30 days against 557 Iron-Law violations**, with
+the pointer present in *both* pull surfaces. That is A-10's failure mode — on-demand guidance
+is obeyed as reliably as always-visible guidance *once fetched*, and its failure is never being
+fetched — and GF-5 gives the structural reason it cannot be fetched at the one moment it is
+wanted. Recorded as a conflict, not a correction: the allowlist entry shipped **before** this
+measurement existed, and the call is the user's.
+
 ## Corpus
 
 Single project (codescout), avoiding the project-confounding TU-N § Method caveats records.
