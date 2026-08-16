@@ -1,5 +1,5 @@
 ---
-id: '6c0952e8908fbf00'
+id: bf3ab8aeab43c7fc
 kind: bug
 status: fixed
 title: artifact(update) rejects extra.kind with a hint naming a parameter update does not accept

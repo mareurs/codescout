@@ -1,12 +1,8 @@
 ---
-id: b2b57ae3019c9391
+id: '5086e3c7c0b9d83c'
 kind: tracker
 status: active
 title: Research Index
-owners: []
-tags: []
-topic: null
-time_scope: null
 ---
 
 

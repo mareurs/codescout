@@ -1,5 +1,5 @@
 ---
-id: '286ac62b5a821cec'
+id: '391010a8b66bd713'
 kind: tracker
 status: archived
 title: Index freshness signal for external consumers (re-enable companion auto-reindex)

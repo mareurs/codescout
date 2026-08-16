@@ -1,5 +1,5 @@
 ---
-id: '365b599f3573b1c0'
+id: '02d2d9d8a7eeec2e'
 kind: bug
 status: fixed
 title: 'BUG: conditionally-required params are advertised as optional — 41% of live schema errors are a param the schema never said was required'

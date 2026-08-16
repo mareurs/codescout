@@ -1,5 +1,5 @@
 ---
-id: '009968cb2c46374f'
+id: ce8b21ed4762de34
 kind: bug
 status: fixed
 title: 'BUG: shared catalog silently serves 179 dead rows (deleted repos never pruned) — doctor detects, but nothing runs it and find/search return ghosts'

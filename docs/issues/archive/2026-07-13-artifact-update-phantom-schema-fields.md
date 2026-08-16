@@ -1,5 +1,5 @@
 ---
-id: '258d7eb859a12041'
+id: d40ce730e603467a
 kind: bug
 status: fixed
 title: 'BUG: artifact(update) schema documents `owner`, `activeForm`, `addBlocks`, `addBlockedBy` — none exist anywhere in the implementation'
@@ -10,9 +10,7 @@ tags:
 - artifact-tool
 - update
 - schema
-topic: null
-time_scope: null
-opened: '2026-07-13'
+opened: 2026-07-13
 owner: marius
 severity: low
 ---

@@ -1,5 +1,5 @@
 ---
-id: c7ba92f5bb519482
+id: c04ed720336733d4
 kind: bug
 status: fixed
 title: 'BUG: ProjectStatus''s embedding backend classifier misreports two configs that backend_is_local doesn''t recognize'

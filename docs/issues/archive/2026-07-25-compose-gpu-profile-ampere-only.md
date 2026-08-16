@@ -1,5 +1,5 @@
 ---
-id: '4e175b7087805b30'
+id: '2db2966ea4b0ee7a'
 kind: bug
 status: fixed
 title: docker-compose `gpu` profile pins Ampere-only TEI images (`86-1.8`) — unusable on Turing/CC 7.5 cards

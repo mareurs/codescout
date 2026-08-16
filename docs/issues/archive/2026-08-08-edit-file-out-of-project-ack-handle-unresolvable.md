@@ -1,5 +1,5 @@
 ---
-id: a99388a299352d21
+id: '0594672add81c972'
 kind: bug
 status: fixed
 title: edit_file's out-of-project ack handle does not resolve — the hint it prints cannot be followed

@@ -1,17 +1,14 @@
 ---
-id: '437c392eefa936fc'
+id: d608e8623c2ae09d
 kind: tracker
 status: archived
 title: Agent Memory & Timeline Research — April 2026
-owners: []
 tags:
 - librarian-mcp
 - research
 - agent-memory
 - timeline
 - versioning
-topic: null
-time_scope: null
 ---
 
 

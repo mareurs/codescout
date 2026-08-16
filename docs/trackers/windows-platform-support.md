@@ -1,5 +1,5 @@
 ---
-id: '42dfdfc8b1522192'
+id: '52451519052d207c'
 kind: tracker
 status: active
 title: Windows Platform Support — WIN-N Issue Index
@@ -12,7 +12,6 @@ tags:
 - portability
 - ci
 topic: windows
-time_scope: null
 ---
 
 # Windows Platform Support — WIN-N Issue Index

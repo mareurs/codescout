@@ -1,5 +1,5 @@
 ---
-id: e4087db51d3d3bd6
+id: '277bd6f599332641'
 kind: bug
 status: fixed
 title: 'BUG: semantic_search end-to-end is ~990 ms while the measured retrieval stages sum to ~32 ms — roughly 950 ms is unaccounted for'

@@ -1,5 +1,5 @@
 ---
-id: fc5dfce843caa841
+id: '8c9bb90ffa9a7f36'
 kind: bug
 status: fixed
 title: librarian(reindex, reembed=true) silently no-ops without force=true — reports success, embeds nothing

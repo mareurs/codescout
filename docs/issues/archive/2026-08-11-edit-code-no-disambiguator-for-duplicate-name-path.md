@@ -1,5 +1,5 @@
 ---
-id: '51d5a80b7fe2f125'
+id: '034f1c144ca02932'
 kind: bug
 status: fixed
 title: 'BUG: edit_code has no way to disambiguate two symbols with an identical name_path, so a duplicate impl block cannot be removed or replaced without reverting the file'

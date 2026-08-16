@@ -1,5 +1,5 @@
 ---
-id: '3a8ae5f8cf96e5ea'
+id: '995a78e6a6020e27'
 kind: bug
 status: fixed
 title: 'BUG: artifact(get) preview.headings silently capped at 20 (MAX_HEADINGS) with no signal, while line_count reflects the full file'
@@ -11,10 +11,8 @@ tags:
 - preview
 - silent-cap
 - trackers
-topic: null
-time_scope: null
-closed: '2026-07-10'
-opened: '2026-07-10'
+closed: 2026-07-10
+opened: 2026-07-10
 related:
 - docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md
 - docs/issues/2026-07-09-artifact-get-full-true-body-silent-truncation.md

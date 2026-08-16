@@ -1,5 +1,5 @@
 ---
-id: aab4cfc52a5e7504
+id: b9363175de6956eb
 kind: bug
 status: fixed
 title: 'BUG: doctor''s check_ads_colon flags every Windows-indexed abs_path as an ADS-colon violation (verbatim-prefix drive-letter miss)'
@@ -10,10 +10,8 @@ tags:
 - cross-platform
 - librarian-doctor
 - path-normalization
-topic: null
-time_scope: null
-closed: '2026-07-07'
-opened: '2026-07-07'
+closed: 2026-07-07
+opened: 2026-07-07
 related:
 - docs/issues/2026-07-07-artifact-get-full-body-silent-truncation.md
 severity: medium

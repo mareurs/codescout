@@ -1,19 +1,16 @@
 ---
-id: '88398b061917d789'
+id: a4d09cb7a8cb0212
 kind: bug
 status: fixed
 title: 'BUG: Windows path-separator audit missed .display() sites without chained .to_string()'
-owners: []
 tags:
 - windows
 - cross-platform
 - test-portability
 - follow-up
 - audit-methodology
-topic: null
-time_scope: null
-closed: '2026-07-13'
-opened: '2026-07-07'
+closed: 2026-07-13
+opened: 2026-07-07
 owner: marius
 related:
 - docs/issues/2026-07-07-windows-glob-overview-path-separator-test-mismatch.md

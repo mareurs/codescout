@@ -1,19 +1,16 @@
 ---
-id: '9c034ab9429ff2bf'
+id: '64efc41ac6686afb'
 kind: bug
 status: fixed
 title: 'BUG: peer::server/peer::client + lsp::manager mux-lock tests intermittently fail under full parallel `cargo test --lib`'
-owners: []
 tags:
 - testing
 - flaky
 - peer
 - lsp-mux
 - parallel
-topic: null
-time_scope: null
-closed: '2026-07-05'
-opened: '2026-07-03'
+closed: 2026-07-05
+opened: 2026-07-03
 owner: marius
 related: []
 severity: low

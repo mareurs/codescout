@@ -1,5 +1,5 @@
 ---
-id: '87ff73c8d0ae9c72'
+id: '598b9ca001e8602b'
 kind: bug
 status: fixed
 title: 'CI never ran or linted codescout-embed: bare `cargo test`/`cargo clippy` resolve to the root package only'

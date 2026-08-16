@@ -1,5 +1,5 @@
 ---
-id: '19b108e4d047d0ac'
+id: cfcd46acc27d92f5
 kind: bug
 status: fixed
 title: Documented CodeRankEmbed GGUF source nomic-ai/CodeRankEmbed-GGUF returns 401 — dense embedder cannot be provisioned from a clean checkout

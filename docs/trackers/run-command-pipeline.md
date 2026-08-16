@@ -1,15 +1,12 @@
 ---
-id: '16bbad9e601dc081'
+id: '5d022cd3b41009f4'
 kind: tracker
 status: draft
 title: run_command(pipeline=[...]) design
-owners: []
 tags:
 - run_command
 - pipeline
 - il3
-topic: null
-time_scope: null
 ---
 
 # Tracker — `run_command(pipeline=[...])`

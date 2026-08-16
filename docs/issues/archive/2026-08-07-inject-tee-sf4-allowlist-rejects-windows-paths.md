@@ -1,5 +1,5 @@
 ---
-id: '52710fd548bee569'
+id: ef4b3640359e5b06
 kind: bug
 status: fixed
 title: inject_tee's SF-4 path allowlist rejects every Windows path, making tee injection unreachable on Windows
@@ -8,10 +8,10 @@ tags:
 - run_command
 - tee
 - path-handling
-opened: 2026-08-07
 closed: 2026-08-07
-severity: medium
+opened: 2026-08-07
 owner: marius
+severity: medium
 ---
 
 ## Summary

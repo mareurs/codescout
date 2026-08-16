@@ -1,5 +1,5 @@
 ---
-id: d965b9fd79298e46
+id: df72b757a225acf0
 kind: bug
 status: fixed
 title: 'BUG: audit-doc-refs'' summary counters did not partition n_refs_found, and a mid-index LSP produced false SymbolMissing verdicts (both fixed 2026-08-07; the original gate flap was removed earlier by severity re-banding)'

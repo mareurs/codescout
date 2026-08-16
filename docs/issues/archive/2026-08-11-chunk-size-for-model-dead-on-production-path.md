@@ -1,5 +1,5 @@
 ---
-id: '7438a064c8d61f86'
+id: d2072751251dbf3e
 kind: bug
 status: fixed
 title: 'BUG: chunk_size_for_model''s model-derived chunk budget is dead code on the production indexing path'

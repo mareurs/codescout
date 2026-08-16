@@ -1,5 +1,5 @@
 ---
-id: '875e5d03d980ceac'
+id: '2bd71246fc807cba'
 kind: bug
 status: fixed
 title: 'BUG: the overflow hint''s own recommended recovery needs `[*]`, which json_path rejects — agents fall back to shelling out, 11% of handle recoveries fail'

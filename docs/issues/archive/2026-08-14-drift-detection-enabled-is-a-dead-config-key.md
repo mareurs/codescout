@@ -1,5 +1,5 @@
 ---
-id: a2d5ce3fe9211977
+id: '544787671db14c0b'
 kind: bug
 status: fixed
 title: 'BUG: drift_detection_enabled is a config key no codescout code reads, still documented as functional on two manual pages, and companion gates a dead sqlite query on it'

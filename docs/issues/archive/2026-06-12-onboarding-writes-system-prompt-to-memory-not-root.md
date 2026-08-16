@@ -1,5 +1,5 @@
 ---
-id: e492592986c67138
+id: '44afbc18878be5d8'
 kind: bug
 status: fixed
 title: 'BUG: onboarding writes the system prompt via memory(topic="system-prompt") → lands in .codescout/memories/, but the always-on injection reads the root .codescout/system-prompt.md — onboarded projects silently get an empty "## Custom Instructions"'
@@ -11,8 +11,6 @@ tags:
 - prompt-builder
 - system-prompt
 - server-instructions
-topic: null
-time_scope: null
 ---
 
 # BUG: onboarding writes the system prompt via `memory(topic="system-prompt")` → lands in `.codescout/memories/`, but the always-on injection reads the root `.codescout/system-prompt.md`

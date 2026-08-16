@@ -1,16 +1,13 @@
 ---
-id: '3a95d897e0677b0d'
+id: bf3923b2ef6bd2c0
 kind: bug
 status: fixed
 title: 'artifact(update): body edits persist when params validation fails — non-atomic patch'
-owners: []
 tags:
 - librarian
 - artifact-update
 - atomicity
 - augmentation
-topic: null
-time_scope: null
 closed: 2026-06-13
 ---
 

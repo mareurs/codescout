@@ -1,5 +1,5 @@
 ---
-id: '0a15c81150c4cce7'
+id: '26a793b432e0f29c'
 kind: bug
 status: fixed
 title: 'BUG: a write-scope denial does not name `approve_write` — 26% of denials are followed by retrying the same denied write'

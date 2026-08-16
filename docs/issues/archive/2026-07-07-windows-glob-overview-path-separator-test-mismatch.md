@@ -1,18 +1,15 @@
 ---
-id: '3bf933638427fd21'
+id: b1a431114f8a0bcb
 kind: bug
 status: fixed
 title: 'BUG: symbols glob overview builds "file" JSON field via Path::display(), breaking on Windows path separators'
-owners: []
 tags:
 - windows
 - cross-platform
 - test-portability
 - symbols-tool
-topic: null
-time_scope: null
-closed: '2026-07-07'
-opened: '2026-07-07'
+closed: 2026-07-07
+opened: 2026-07-07
 owner: marius
 related:
 - docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md

@@ -1,19 +1,16 @@
 ---
-id: '260752eb609a8903'
+id: '8e7c6b1b041eebd7'
 kind: bug
 status: fixed
 title: 'BUG: two more list_overview.rs display-string sites use Path::display() instead of forward-slash normalization'
-owners: []
 tags:
 - windows
 - cross-platform
 - test-portability
 - symbols-tool
 - follow-up
-topic: null
-time_scope: null
-closed: '2026-07-07'
-opened: '2026-07-07'
+closed: 2026-07-07
+opened: 2026-07-07
 owner: marius
 related:
 - docs/issues/2026-07-07-windows-glob-overview-path-separator-test-mismatch.md

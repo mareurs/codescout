@@ -1,5 +1,5 @@
 ---
-id: '79b2591f4ed05715'
+id: '7226c373e544cb11'
 kind: bug
 status: fixed
 title: memory(read) `sections` filter only matches `###`, but 15 of 21 memories use `##` — section targeting is unusable, including on gotchas

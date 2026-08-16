@@ -1,5 +1,5 @@
 ---
-id: '2faaf32abe069400'
+id: '2785179d2ae84664'
 kind: bug
 status: fixed
 title: 'BUG: every `cargo test` run leaks ~144 sqlite-vec databases into the real `~/.codescout/embeddings/` — 69,429 files / 23 GB accumulated'

@@ -1,5 +1,5 @@
 ---
-id: b0e3905454edcba7
+id: '65d727548a2b125a'
 kind: bug
 status: fixed
 title: 'BUG: artifact(get, full=true) silently truncates body on large trackers with no truncation indicator'
@@ -9,10 +9,8 @@ tags:
 - codescout-tool
 - librarian
 - windows-audit-tangent
-topic: null
-time_scope: null
-closed: '2026-07-10'
-opened: '2026-07-07'
+closed: 2026-07-10
+opened: 2026-07-07
 related:
 - docs/issues/2026-07-07-doctor-ads-colon-verbatim-prefix-false-positive.md
 severity: med

@@ -1,5 +1,5 @@
 ---
-id: '21f6d21b3bf82c30'
+id: '07c7f9e5d92217b6'
 kind: bug
 status: fixed
 title: audit_doc_refs flags JSON/config pointers as missing file paths with severity high

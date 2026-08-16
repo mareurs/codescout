@@ -1,5 +1,5 @@
 ---
-id: '197843bd0a5c4fd5'
+id: '000ed425ab6cc63f'
 kind: bug
 status: fixed
 title: 'BUG: symbols() keeps reporting pre-checkout content after an external git checkout, until an explicit LSP flush'

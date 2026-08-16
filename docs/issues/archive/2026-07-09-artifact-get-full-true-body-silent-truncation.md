@@ -1,5 +1,5 @@
 ---
-id: '98dc447e9c72eacc'
+id: '71e5af0de38b8107'
 kind: bug
 status: fixed
 title: 'BUG: artifact(get, full=true) → read_file($.body) silently truncates large bodies with no overflow marker'
@@ -11,10 +11,8 @@ tags:
 - silent-failure
 - read_file
 - json_path
-topic: null
-time_scope: null
-closed: '2026-07-10'
-opened: '2026-07-09'
+closed: 2026-07-10
+opened: 2026-07-09
 owner: marius
 related:
 - '2026-07-09-artifact-get-heading-exact-match-only'

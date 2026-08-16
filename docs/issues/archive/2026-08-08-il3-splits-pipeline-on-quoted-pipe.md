@@ -1,5 +1,5 @@
 ---
-id: b86d81f12983f566
+id: '409ba8bb92cb559c'
 kind: bug
 status: fixed
 title: 'BUG: IL3 splits a pipeline on a bare `|`, so a quoted pipe inside an argument reports a violation on a command that has no pipe'

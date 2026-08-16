@@ -1,5 +1,5 @@
 ---
-id: a2899c126f1e7771
+id: e7353641aafe0098
 kind: bug
 status: fixed
 title: 'BUG: the librarian guard is keyed on YAML quoting, so 15 of 27 trackers are unprotected'

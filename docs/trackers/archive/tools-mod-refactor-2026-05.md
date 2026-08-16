@@ -1,12 +1,8 @@
 ---
-id: ccd1cda1b4135fff
+id: '4cd61afd6996dc07'
 kind: tracker
 status: archived
 title: src/tools — Phase 7 File Splits (B→C→A) — COMPLETE
-owners: []
-tags: []
-topic: null
-time_scope: null
 ---
 
 Continuation of the codescout refactoring plan. Three splits, done in order of risk:

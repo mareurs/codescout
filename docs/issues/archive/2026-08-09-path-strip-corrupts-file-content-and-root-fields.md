@@ -1,5 +1,5 @@
 ---
-id: ece908f37854e557
+id: '34aea1d30360c0f8'
 kind: bug
 status: fixed
 title: post_process strips the project root from file CONTENT and collapses root-valued fields to ""

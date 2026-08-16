@@ -1,5 +1,5 @@
 ---
-id: e000f27a6dd6c0a0
+id: '6a00ae742eac71bb'
 kind: bug
 status: fixed
 title: 'BUG: append_entry assigns next monotonic ID from params only, colliding when body already has a newer entry (params/body ID drift)'

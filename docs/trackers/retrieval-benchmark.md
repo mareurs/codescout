@@ -1,5 +1,5 @@
 ---
-id: '8e09ca67f463027e'
+id: cc4843e5c1a020bd
 kind: tracker
 status: active
 title: Retrieval Benchmark — pinned 25-TC log
@@ -10,8 +10,6 @@ tags:
 - benchmark
 - qdrant
 - embedding
-topic: null
-time_scope: null
 ---
 
 ## Why this tracker exists

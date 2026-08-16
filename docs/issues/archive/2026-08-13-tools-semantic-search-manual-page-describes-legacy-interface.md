@@ -1,5 +1,5 @@
 ---
-id: ec267997e2048d87
+id: af4d8e130ee2834e
 kind: bug
 status: fixed
 title: docs/manual/src/tools/semantic-search.md documents the retired legacy sqlite-vec interface, not the current Qdrant stack

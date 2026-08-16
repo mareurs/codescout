@@ -1,5 +1,5 @@
 ---
-id: '2c8690b597f76fa4'
+id: '4ed74d1556284d90'
 kind: bug
 status: fixed
 title: 'BUG: edit_code cannot remove or relocate a non-empty module, and edit_file''s "fn " content filter blocks pure deletions too'

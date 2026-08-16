@@ -1,5 +1,5 @@
 ---
-id: c63b594c54199e81
+id: '790e34f82ec93c1b'
 kind: bug
 status: fixed
 title: 'BUG: grep''s zero/absent result is silent about the hidden-path skip, so `.github/` reads as "not present anywhere"'

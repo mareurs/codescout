@@ -1,5 +1,5 @@
 ---
-id: '7b7eb30878f91348'
+id: d2aee3a281db70fc
 kind: bug
 status: fixed
 title: 'BUG: read_file toml_key/yaml_key returns false "key not found" for keys past the 30-entry summary cap (correctness)'
@@ -12,10 +12,8 @@ tags:
 - yaml
 - correctness
 - silent-cap
-topic: null
-time_scope: null
-closed: '2026-07-10'
-opened: '2026-07-10'
+closed: 2026-07-10
+opened: 2026-07-10
 related:
 - docs/issues/2026-07-10-silent-cap-missing-overflow-signals-audit.md
 - docs/issues/2026-07-10-extract-toml-key-branch-order-mixed-files-unreachable.md

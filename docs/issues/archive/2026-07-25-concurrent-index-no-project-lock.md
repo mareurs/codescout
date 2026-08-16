@@ -1,5 +1,5 @@
 ---
-id: '87a8cb14f9b1eb84'
+id: '87142a387b479263'
 kind: bug
 status: fixed
 title: Concurrent `codescout index` on one project has no mutual exclusion — duplicate runs double the embedding workload

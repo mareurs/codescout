@@ -1,5 +1,5 @@
 ---
-id: f85d79f54a12f7a1
+id: '1dea5090a3a2f5ad'
 kind: bug
 status: fixed
 title: 'BUG: the Audit Doc Refs gate never scans CHANGELOG.md or CONTRIBUTING.md — 18 broken refs and 8 high findings hide there'

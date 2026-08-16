@@ -1,5 +1,5 @@
 ---
-id: '697ee9464df1d7bf'
+id: e74382e8c3483370
 kind: bug
 status: fixed
 title: 'BUG: omnibus — survey/query tools return limit-capped results with no "more exists" signal (silent-cap family)'
@@ -14,10 +14,8 @@ tags:
 - read_file
 - audit
 - omnibus
-topic: null
-time_scope: null
-fixed: '2026-07-10'
-opened: '2026-07-10'
+fixed: 2026-07-10
+opened: 2026-07-10
 related:
 - docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
 - docs/issues/2026-07-10-read-file-buffer-refs-silently-drop-navigation-params.md

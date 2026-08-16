@@ -1,5 +1,5 @@
 ---
-id: '43b9ba3071ee53de'
+id: ec21d94e3f156b65
 kind: bug
 status: fixed
 title: 'BUG: body_edits replace+include_subsections silently destroys prior section content when the whole-file write is net larger'

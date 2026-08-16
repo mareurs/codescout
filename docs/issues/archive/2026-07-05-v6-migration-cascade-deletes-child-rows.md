@@ -1,9 +1,8 @@
 ---
-id: '7b73a5a33df03e80'
+id: '829caa39046eff40'
 kind: bug
 status: fixed
 title: v6 catalog migration cascade-deletes augmentation/events/links/observations (DROP TABLE under foreign_keys=ON)
-owners: []
 tags:
 - librarian
 - catalog
@@ -11,10 +10,8 @@ tags:
 - data-loss
 - sqlite
 - foreign-keys
-topic: null
-time_scope: null
-closed: '2026-07-05'
-opened: '2026-07-05'
+closed: 2026-07-05
+opened: 2026-07-05
 owner: marius
 related:
 - docs/issues/2026-07-02-tool-usage-patterns-augmentation-lost.md

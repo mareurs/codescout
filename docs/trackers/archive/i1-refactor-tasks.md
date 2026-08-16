@@ -1,16 +1,13 @@
 ---
-id: '64f10cc45d802a11'
+id: '505ce029c2dbfc46'
 kind: tracker
 status: archived
 title: I1 Refactor — Task List
-owners: []
 tags:
 - task_list
 - goal-tracker
 - cross-pollination
 - i1-refactor
-topic: null
-time_scope: null
 ---
 
 ## Tasks

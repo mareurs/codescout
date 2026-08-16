@@ -1,14 +1,11 @@
 ---
-id: fc97be512112fea4
+id: f1312ba0f324b049
 kind: tracker
 status: draft
 title: Doc Ref Audit
-owners: []
 tags:
 - codescout
 - doc-ref-audit
-topic: null
-time_scope: null
 ---
 
 Auto-managed by `librarian(audit_doc_refs)`.

@@ -1,5 +1,5 @@
 ---
-id: '49e562fcc9ab125b'
+id: '242183e81b9d4e58'
 kind: bug
 status: fixed
 title: audit_doc_refs reports lsp_languages_offline:[rust] while the LSP is up and answering

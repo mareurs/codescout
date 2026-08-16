@@ -1,5 +1,5 @@
 ---
-id: '2149583d7f1faf37'
+id: '1c8a719022cb50bc'
 kind: bug
 status: fixed
 title: 'artifact body_edits: a nested ``` fence closes an enclosing ```` fence, so code comments become headings'

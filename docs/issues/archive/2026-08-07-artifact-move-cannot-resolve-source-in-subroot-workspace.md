@@ -1,5 +1,5 @@
 ---
-id: '8405aa53461ea537'
+id: fce8bfb22d07734a
 kind: bug
 status: fixed
 title: artifact(move) cannot resolve a source path that artifact(create)/find handle, when the managed root is the home dir and the project is a sub-root

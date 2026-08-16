@@ -1,5 +1,5 @@
 ---
-id: '04cefabc58e23c88'
+id: '2b8bc4cee820db57'
 kind: bug
 status: fixed
 title: 'BUG: format_hover''s in_code_block is dead state — it strips fence delimiters from docstrings but never actually tracks a code block'

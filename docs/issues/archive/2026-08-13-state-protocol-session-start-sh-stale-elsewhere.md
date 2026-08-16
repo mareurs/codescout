@@ -1,5 +1,5 @@
 ---
-id: db5fe93344e0371b
+id: '2859865900073454'
 kind: bug
 status: fixed
 title: docs/state-protocol.md still names companion's session-start hook `.sh` in four other rows (actual file is `.mjs`)

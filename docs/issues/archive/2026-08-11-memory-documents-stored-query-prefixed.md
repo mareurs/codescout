@@ -1,5 +1,5 @@
 ---
-id: '01529662e7fe6aa5'
+id: '022a6e2ed108a196'
 kind: bug
 status: fixed
 title: 'Memory documents are stored query-prefixed: CodeDenseAdapter routes writes through the query seam'

@@ -1,5 +1,5 @@
 ---
-id: '07308f0077b9ea21'
+id: eb01cc2ba8270522
 kind: bug
 status: fixed
 title: 'BUG: artifact(find) ignores the workspace= pin — scope resolves to the active project; scope="all" silently downgrades to umbrella with a self-referential expand hint'

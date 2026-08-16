@@ -1,18 +1,15 @@
 ---
-id: '13164fb35d6f71ed'
+id: '077359e35c369754'
 kind: bug
 status: fixed
 title: 'BUG: artifact(action="create") cannot set time_scope or custom frontmatter — recognized field hardcoded to None, no passthrough param'
-owners: []
 tags:
 - librarian
 - artifact-create
 - artifact-update
 - frontmatter
 - tracker
-topic: null
-time_scope: null
-closed: '2026-06-19'
+closed: 2026-06-19
 ---
 
 

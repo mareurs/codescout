@@ -1,5 +1,5 @@
 ---
-id: '8a4db17751b1e233'
+id: ebd7a3f2deb7a0d8
 kind: bug
 status: fixed
 title: Copy-based `.env` profile flow drifts — local `.env` pins a nonexistent CODESCOUT_MODEL_DIR that compose reads by default

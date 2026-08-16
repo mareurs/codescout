@@ -1,5 +1,5 @@
 ---
-id: '76b47df029338177'
+id: d61e3b535e2cae4a
 kind: bug
 status: fixed
 title: 'BUG: artifact(create, kind="bug") defaults status to `draft` — not in the bug vocabulary, and invisible to the canonical open-bug query'

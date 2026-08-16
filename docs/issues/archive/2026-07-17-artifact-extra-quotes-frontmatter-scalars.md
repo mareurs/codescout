@@ -1,5 +1,5 @@
 ---
-id: cf725e8e3605f1d2
+id: '5dad4bea44b8759b'
 kind: bug
 status: fixed
 title: 'BUG: artifact(create/update, extra={...}) quotes hyphenated-key scalar values in frontmatter — breaks downstream regex consumers (e.g. SessionStart next-sweep-due nudge)'

@@ -1,5 +1,5 @@
 ---
-id: '4fb67c0a804cba13'
+id: '82468dd001929c61'
 kind: bug
 status: fixed
 title: 'BUG: artifact(action="update", status=...) silently drops the top-level status param the schema documents; only patch={status} works'

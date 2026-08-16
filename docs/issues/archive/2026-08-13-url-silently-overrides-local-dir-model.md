@@ -1,5 +1,5 @@
 ---
-id: '2b33e87e487ea469'
+id: af360522945961be
 kind: bug
 status: fixed
 title: 'BUG: a configured url silently discards a `local-dir:` model — the offline guarantee fails open, and the crate''s own hard-error guard is unreachable from the retrieval path'

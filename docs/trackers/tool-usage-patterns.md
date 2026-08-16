@@ -1,15 +1,13 @@
 ---
-id: abc513d3ee0f0b50
+id: f2ecdd76a6189efb
 kind: tracker
 status: active
 title: Tool Usage Patterns
-owners: []
 tags:
 - grep
 - prompt-quality
 - iron-law-7
 topic: tool usage patterns audit optimization prompt quality
-time_scope: null
 ---
 
 

@@ -1,5 +1,5 @@
 ---
-id: f3c9339e7e7a6822
+id: '34af2515a4681274'
 kind: bug
 status: wontfix
 title: 'BUG: one codescout MCP server accumulates per abandoned-but-live Claude Code session — 18 held open, oldest 93.5h, ~1 GiB RSS. Nothing is orphaned and the shutdown path is correct; only an idle timeout can collect them'

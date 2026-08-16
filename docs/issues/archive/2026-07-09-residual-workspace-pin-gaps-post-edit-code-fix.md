@@ -1,15 +1,12 @@
 ---
-id: '5695424c48c90964'
+id: '7271b9b25e4e5b42'
 kind: bug
 status: fixed
 title: 'BUG: residual workspace_override pin gaps found while auditing the edit_code write-path bug (peer.rs, server.rs::post_process, usage telemetry x2, lsp_mux_override, onboarding.rs)'
-owners: []
 tags:
 - workspace-pin
 - audit
 - residual
-topic: null
-time_scope: null
 ---
 
 ## Summary

@@ -1,12 +1,8 @@
 ---
-id: '9bd3484eca701d4f'
+id: '58466edde236951b'
 kind: bug
 status: fixed
 title: 'BUG: artifact(update) rewrites bug-file frontmatter to canonical shape — emits id/title/topic/time_scope as explicit null, reflows inline tags'
-owners: []
-tags: []
-topic: null
-time_scope: null
 ---
 
 # BUG: artifact(update) rewrites bug-file frontmatter to canonical shape, emitting explicit `null`s

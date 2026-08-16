@@ -1,5 +1,5 @@
 ---
-id: '63279f39570cd44a'
+id: '27c69239416f3667'
 kind: bug
 status: fixed
 title: 'BUG: artifact `extra` writes a key that collides with a canonical frontmatter key, and the duplicate silently drops the artifact out of its own kind'

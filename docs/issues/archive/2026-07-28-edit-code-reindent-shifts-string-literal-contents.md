@@ -1,5 +1,5 @@
 ---
-id: b2473c4a0731aaf9
+id: '73330cfbc81cbb76'
 kind: bug
 status: fixed
 title: edit_code reindent shifts multi-line string-literal contents, and cargo fmt cannot undo it

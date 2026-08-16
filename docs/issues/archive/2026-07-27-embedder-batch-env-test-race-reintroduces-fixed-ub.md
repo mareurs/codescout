@@ -1,5 +1,5 @@
 ---
-id: d9463a43a52d3984
+id: '0aa1ac16d9910f99'
 kind: bug
 status: fixed
 title: 'BUG: embedder resolve_batch_size tests reintroduce the just-fixed EnvGuard+#[serial] env race (a656f8cec220d347), plus same pattern live in indexer.rs'

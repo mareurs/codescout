@@ -1,5 +1,5 @@
 ---
-id: '973f0c0f6721ea83'
+id: c537dc92295c2517
 kind: bug
 status: fixed
 title: artifact(update) silently drops top-level `extra` when `patch` is also passed

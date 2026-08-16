@@ -1,5 +1,5 @@
 ---
-id: '5043d3c2e3e4bbfd'
+id: '7fccb387dc7334cd'
 kind: bug
 status: fixed
 title: Bench worktree's gitdir still points at the pre-rename repo path, orphaning it from git

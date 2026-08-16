@@ -1,5 +1,5 @@
 ---
-id: '8dfa0da20703f46c'
+id: '5fec6397997603cb'
 kind: bug
 status: fixed
 title: 'BUG: artifact(create) silently drops `topic` — not a recognized create param, hardcoded to null'
@@ -9,9 +9,7 @@ tags:
 - librarian
 - artifact-tool
 - create
-topic: null
-time_scope: null
-opened: '2026-07-13'
+opened: 2026-07-13
 owner: marius
 severity: low
 ---

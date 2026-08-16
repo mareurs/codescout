@@ -1,5 +1,5 @@
 ---
-id: '851fa9e1096ff1fa'
+id: a790fc262d6d3c92
 kind: bug
 status: fixed
 title: 'BUG: audit_doc_refs'' gitignore cap consults .gitignore but not the index, dropping refs under tracked-but-ignored dirs below the CI gate'

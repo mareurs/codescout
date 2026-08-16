@@ -1,5 +1,5 @@
 ---
-id: cdadfba57082cb14
+id: '875e834b95286445'
 kind: bug
 status: fixed
 title: 'BUG: edit_code write-path resolution ignores the workspace= pin — structural edits land in the session-default project, not the pinned workspace'
@@ -10,10 +10,8 @@ tags:
 - workspace-pin
 - regression
 - write-path
-topic: null
-time_scope: null
-closed: '2026-07-09'
-opened: '2026-07-09'
+closed: 2026-07-09
+opened: 2026-07-09
 severity: high
 ---
 

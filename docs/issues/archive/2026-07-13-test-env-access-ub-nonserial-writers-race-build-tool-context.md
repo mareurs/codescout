@@ -1,14 +1,10 @@
 ---
-id: a656f8cec220d347
+id: d4ab34c71d668020
 kind: bug
 status: fixed
 title: 'BUG: test env-access UB — non-#[serial] env writers race build_tool_context''s ~17 env reads (disjoint serial_test vs ENV_LOCK)'
-owners: []
-tags: []
-topic: null
-time_scope: null
-closed: '2026-07-13'
-opened: '2026-07-13'
+closed: 2026-07-13
+opened: 2026-07-13
 owner: marius
 severity: medium
 ---
