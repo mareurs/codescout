@@ -184,12 +184,27 @@ below.
    broken the very measurement that found the bug. The new test asserts that substring for exactly
    this reason.
 
-2. **Class B, hint fix — not done.** Replacing the generic *"Add the required 'X' parameter"*
-   template with a shape-carrying example is a separate change to a shared error path.
+2. **Class B, hint fix — DONE in `c057ff5a`** (concurrent session, same day; this entry was
+   written while it was still outstanding and is reconciled here rather than left stale).
+   The generic *"Add the required 'X' parameter to the tool call"* — roughly 13 of the 34 — is
+   replaced by hints that show the call: `grep` with no pattern now answers *"Pass the regex to
+   search for, e.g. pattern=\"fn my_func\" — 'query' and 'regex' are also accepted."*
 
-3. **Class C, leniency — not done.** Accepting a one-sided line range is a behaviour change, not a
-   description change; lowest urgency (nothing since May) and lowest risk, per the original
-   ranking.
+   Two mechanisms, because a shared table alone is provably insufficient: a name→hint table for
+   the seven names whose meaning is identical everywhere, plus **per-site** hints for `path` and
+   `action`, which mean different things in different tools. A shared entry for `path` would be
+   confidently wrong at two sites out of three *and* read as authoritative — the same
+   failure mode as the `kind=` hint fixed in `99fa967f`.
+
+   **Class B is not entirely closed.** Its other emitter is serde's bare `missing field 'X'`
+   — which is exactly how `artifact(update)` without `patch` fails. Class A covered that one by
+   *description*; the error itself still names the field without the action that wanted it, and
+   fixing it is error mapping in the librarian adapter rather than the shared helper.
+
+3. **Class C, leniency — still not done.** Accepting a one-sided line range is a behaviour
+   change, not a description change; lowest urgency (nothing since May) and lowest risk, per the
+   original ranking. This is the only part of the original three-class plan still outstanding,
+   alongside the serde half of Class B noted above.
 
 The sweep the filing asked for was run, and it found a **fourth tool**.
 
