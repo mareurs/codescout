@@ -406,6 +406,86 @@ the question assumed one, which is the entry's main content. Two corrections wor
 
 <!-- Insert new CAP-N entries above the "## Anti-goals" heading. Also add an Index row.
 
+## CAP-4 — Cross-session collision hint: tell a session when another one just touched this file
+
+**Ask (from the operator, 2026-08-16).** Track recently-modified trackers/files and, when
+edits to the same file are recorded under different sessions, hint the current session
+about it. Turn "two agents share a working tree" from something each session discovers by
+losing work into something the server says out loud.
+
+**The failure is measured, not projected.** Three annexations happened in one day on this
+repo, all recorded in `docs/trackers/reconnaissance-patterns.md` R-90:
+
+- a filed bug file swept into `618acd57`, a commit about benchmark ground truth;
+- a guide dedup cut swept into `148aabe6`, a commit about comment-marker parsing;
+- and the reverse direction — this session swept a concurrent session's file rename into
+  `543086d1`, a commit about tracker policy, *while following R-90's own remedy*.
+
+Nothing was lost from disk in any of the three; what was lost was the commit message, and
+with it the reason. `git log -- <path>` now attributes a guide deletion to an
+`audit_doc_refs` commit. R-90's rule was also wrong twice before it was right, which is the
+argument for a structural gate over a discipline: the discipline was authored, executed,
+and corrected by the same session inside an hour, and still failed.
+
+**Substrate check — the data already exists, one field is broken.** `tool_calls` already
+records `tool_name`, `called_at`, `cc_session_id`, `project_root` and (under `--debug`,
+which is the deployed configuration on this host — see CAP-1) `input_json` carrying the
+target path. A prototype is a SQL query, not a feature:
+
+```sql
+SELECT COALESCE(json_extract(input_json,'$.path'),
+                json_extract(input_json,'$.file_path'),
+                json_extract(input_json,'$.rel_path')) AS target,
+       COUNT(DISTINCT cc_session_id) AS sessions, COUNT(*) AS writes
+FROM tool_calls
+WHERE called_at >= date('now') AND input_json IS NOT NULL
+  AND tool_name IN ('edit_file','edit_code','edit_markdown','create_file','artifact')
+GROUP BY target HAVING COUNT(DISTINCT cc_session_id) > 1;
+```
+
+Run 2026-08-16 it returned **12 files written by two sessions the same day**, including
+`src/tools/core/types.rs` and `src/prompts/mod.rs`, both of which this session edited. So
+the signal is real and present.
+
+**Blocker — do not build on `cc_session_id` until it is fixed.**
+`docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md`:
+`src/usage/mod.rs:100-104` resolves the id from the shared per-project
+`.codescout/cc_session_id` file and never reads `CLAUDE_CODE_SESSION_ID`, while
+`src/server.rs:235-247` prefers the env var *because the file collides across concurrent
+windows*. Two sessions therefore write rows under one id — the exact case this capability
+exists to detect. The query above under-reports for that reason; the true collision count is
+higher than 12.
+
+**Shape.** Three decisions, none settled:
+
+1. **Signal.** (a) `usage.db` rows — names the other session, sees only codescout writes.
+   (b) File mtime against a per-session last-seen map — catches *any* external writer
+   (the operator's editor, a rebase, a script) but cannot say who. (c) The librarian's
+   `field_patch` events — artifact-only, already carries authorship. Lean **(b) as the
+   trigger, (a) as the attributor**: mtime is cheap and universal, usage.db turns "someone
+   changed this" into "session X changed this 4 minutes ago".
+2. **Where it fires.** On write is too late for the sweep case — the damage there happens at
+   `git commit`, not at edit time. Candidates: on the *first* touch of a file per session
+   (cheap, early), on `run_command` when the command starts with `git commit`/`git add`
+   (precise, narrow), or both. The commit case is the one with measured cost.
+3. **What it says.** A hint that names the file, the other session, and the age of its edit
+   — and, for the commit case, the concrete remedy R-90 landed on:
+   `git commit --only <paths>`, which is the form that actually isolates. A hint that only
+   says "be careful" reproduces the discipline that already failed.
+
+**Relationship to CAP-1.** Same substrate, opposite direction. CAP-1 is intra-session and
+retrospective (*what did I touch, for compaction prep*); CAP-4 is cross-session and
+proactive (*who else is here, before I commit*). CAP-1's proposed always-on `touch_target`
+extraction is exactly what CAP-4 needs to work off the shipped default rather than only on a
+`--debug` host — so CAP-4 is a second consumer that strengthens the case for that field, and
+the two should be scoped together.
+
+**Open question worth answering first.** Would the detector have fired *usefully* on the
+three real sweeps, or only noisily? Twelve colliding files in one day is a lot of hints if
+every one fires. Replay the day's rows against a candidate rule (first-touch only? only
+when the other session's edit is unstaged? only at `git commit`?) and count true positives
+against total fires before writing any code. The base arm is a query.
+
 ## CAP-N — <title>
 
 **Ask.** What the capability is, in the requester's words where possible.
