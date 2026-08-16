@@ -855,8 +855,11 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
                                                     (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
          Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
-         Only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) piped to a\n\
-         trimmer (head, tail, grep, sort, ...) is blocked.\n\n\
+         Only unbounded LHS (cargo, npm, pytest, rg, fd, grep -r, bare find, ...) piped to a\n\
+         trimmer (head, tail, grep, sort, ...) is blocked.\n\
+         `git` is unbounded ONLY without an output limiter: `git log -3`,\n\
+         `git status --short`, `git show --stat` are bounded and may be piped;\n\
+         `--oneline` is not a limiter (it bounds width, not line count).\n\n\
          Rerun the command bare and query the returned @cmd_* buffer."
     ))
 }
