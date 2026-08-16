@@ -20,6 +20,177 @@ Three buckets: **hits** (scout caught drift), **misses** (scout missed,
 downstream gate caught), **proposals** (vocabulary expansions for the
 skill).
 
+## The seven laws (distilled 2026-08-16)
+
+Ninety-one entries written over three months state **seven laws**. Read these
+first; the entries below are the evidence for how each was earned, not seven
+different things to remember.
+
+The distillation was produced by classifying every entry's full text (three
+parallel passes, 99 graded instances — more than 91 because nine ids carried two
+lessons each). Counts are of instances, not ids.
+
+---
+
+### A — Ground truth is the artifact. Everything else is a claim about it. (35 · 35%)
+
+**Law.** A doc, a bug file, a plan, an error message, a memory, a subagent's
+report, a commit message, and your own prior belief are all *claims*. Open the
+thing they describe before acting on them.
+
+**Sub-shapes, each its own recurrence chain.**
+
+- *The bug file you are implementing from* — R-49 → R-62 → R-78 → R-80 → R-84.
+  Its `## Symptom` was observed; its `## Root cause` is usually someone's
+  unverified reading, and its `## Fix` is a plan. Run the one command that
+  falsifies the root cause before writing code.
+- *The error message* — R-35 → R-71 → R-82. A tool's own diagnostic is a
+  hypothesis about itself, and its remediation hint is a claim about an API.
+- *The document, memory, or plan naming code* — R-13, R-14, R-64, R-69, R-74.
+
+**Do.** Name the artifact that would settle it, and open it. If you cannot name
+one, you are not verifying — you are re-reading your own belief.
+
+---
+
+### B — The instrument decides the answer. (18 · 18%)
+
+**Law.** A result is evidence about the *configuration that produced it* before
+it is evidence about the code. Build features, feature flags, which binary, which
+tree, which platform, which transport, which process — each silently changes what
+a command can possibly report.
+
+**Chain.** R-81 → R-86 → R-89 → R-91, with R-91 the general case: *state what a
+measurement cannot see before attaching a conclusion to it.*
+
+**Do.** Before citing any output as evidence about code you have edited this
+session, run a probe that can only succeed on the build you think you are
+running — and confirm the serving *process* postdates that build. Those are two
+facts, and mtime answers neither (R-89).
+
+---
+
+### E — The blast radius is wider than the thing you edited. (17 · 17%)
+
+**Law.** Changing a symbol obliges enumerating what consumes it — callers, trait
+implementors, data fixtures, generated surfaces, serde shapes, other copies of
+the same heuristic. `references()` sees calls; it does not see closures,
+fixtures, or a second hand-written copy.
+
+**Do.** Enumerate consumers before the edit, not after the gate reddens.
+
+---
+
+### C — A search that finds nothing is evidence about the search. (16 · 16%)
+
+**Law.** Absence is a claim about coverage. A file-scoped grep cannot prove
+"never", a bounded search cannot authorise a deletion, and a view is not the set.
+
+**Chain.** R-3 → R-73b → R-77 → R-79 → R-87 — the entries themselves label these
+"third", "fourth", "fifth" recurrence. This is the law the ledger has failed
+hardest to internalise.
+
+**Do.** Phrase the query as the question you actually have, scope it to the tree
+rather than the file, and require two independent positive signals before letting
+a negative result authorise removal.
+
+---
+
+### D — A test that cannot fail is not coverage. (7 · 7%)
+
+**Law.** A test proves something only if it runs and only about what it
+exercises. Three ways it silently doesn't: never compiled (feature-gated into a
+lane nothing enables), filtered out, or testing the callee while nothing tests
+the dispatch that selects it.
+
+**Chain.** R-70 → R-73 → R-76.
+
+**Do.** Confirm the test *runs* before citing it. After any extraction, ask what
+now chooses this, and mutate that choice — deleting the dispatch, not breaking
+the function.
+
+---
+
+### F — A subagent knows only what the brief told it. (3 · 3%)
+
+**Law.** Dispatch is a seam. Session state, pinned refs, and what the controller
+already discovered do not travel unless written down; a SHA in a brief is a claim
+with an expiry date.
+
+**Exemplars.** R-9, R-68, R-72b.
+
+---
+
+### G — The answer may already be on record. (3 · 3%)
+
+**Law.** Not a falsified claim — a lookup never performed. The bug ledger, an
+existing comment, a concurrent session's measurement, or an in-repo implementation
+of the convention you are about to hand-roll.
+
+**Exemplars.** R-55, R-60.
+
+---
+
+### What this pass found about the ledger itself
+
+- **Graph clustering does not work here**, tried twice: all `R-N` mentions as
+  edges put 80 of 91 in one component; explicit `kin`/`recurrence` edges only,
+  60 of 91. That is not a method failure, it is the finding — everything is kin
+  to everything because these are seven laws restated with different nouns.
+- **57 of 91 entries cite kin.** Authors have been hand-linking clusters for
+  three months; the clusters existed and had no name until now.
+- **Six entries are labelled recurrences outright**, and the C-chain contains a
+  self-declared *fifth*. The ledger records its own failures to prevent.
+- **Only 16 of 63 body entries carry a `Status:` line**, and only two record a
+  discharge — R-1 and R-3, both promoted to SKILL.md in May and still sitting in
+  the active file. There is no disposition field, which is why `Promote-when`
+  criteria go unharvested and why the archive policy had nothing to enforce
+  against. **Adding a `Status:` to every entry is the single highest-value
+  structural change to this tracker.**
+- **Removal recovers less than entry counts imply.** Archiving 13 of 91 entries
+  cut 5.8%, not ~14%, because roughly a third of the corpus lives in
+  self-contained index-table rows rather than bodies. Second measurement of the
+  same effect that day (the D1 guide dedup realised 41% of its byte estimate).
+
+### Reproducing the per-entry assignment
+
+The per-entry table (theme, canonical law, `promote-when` state, `dup-of`) is
+deliberately **not** transcribed here. It is not the expensive part: deriving the
+seven themes was, and they are above. Re-classifying entries against a taxonomy
+that already exists is mechanical, and transcribing 99 rows across two suffix
+schemes — this file's date-based `b`, and the reading-order `a`/`b` one classifier
+used — is exactly where a wrong id would enter and be trusted.
+
+To reproduce: classify each entry's full text against A-G above, one primary
+theme each, and record `dup-of` strictly (near-identical law, not merely same
+theme). Read **both** formats — heading entries and self-contained index rows —
+or roughly a third of the corpus is invisible, which is the error that produced
+the id collisions in the first place.
+
+The chains recorded under each law are the durable output of that pass and should
+be treated as findings, not as a summary to re-derive.
+
+### Still open after this pass
+
+1. **Three supersessions for R-67..R-91 are NOT applied.** The classifier that
+   found them labelled collisions `a`/`b` by reading order while this file's
+   suffixes go by date, so its `R-73b` and this file's `R-73b` are different
+   entries. They need per-entry re-identification against the suffixed file
+   before archiving — acting on that mapping would let the id-collision defect
+   corrupt the cleanup meant to fix it.
+2. **R-90's `Promote-when` may already have fired.** Its criterion is "a third
+   instance"; its own body documents one (`543086d1`, the mirror-direction
+   annexation). If it has, the ratified policy says promote — and R-90's
+   promotion target is adopting per-session git worktrees as the default for
+   concurrent sessions. That is a workflow change and needs a human call.
+3. **The A-chain and C-chain are candidates for promotion, not archiving.** A at
+   35% and the five-deep C recurrence are the two laws this project demonstrably
+   cannot hold in working memory; they belong in a surface that is delivered, not
+   in a 228 KB file that must be opened. Note the constraint: seven of ten
+   `get_guide` topics have no trigger at all
+   (`docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`,
+   BL-25), so "put it in a guide" is not by itself delivery.
+
 ## Index
 
 > **Id-suffix convention (2026-08-16).** Nine ids had been allocated twice, to
