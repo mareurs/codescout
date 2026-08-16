@@ -35,6 +35,26 @@ This tracker is the canonical log going forward. Every run is anchored to:
 If the table above ever needs a new `baseline_sha`, treat all prior rows as compromised
 and start a new section here.
 
+
+## Machines
+
+Runs in this log were produced on two different machines. Record the **label**, never "this
+machine" — a tracker that says "this machine" is false the moment it is read on the other one.
+
+| label | hardware | accelerators | how the stack is served |
+|---|---|---|---|
+| `desktop-threadripper` | AMD Ryzen Threadripper PRO 3975WX, 32 cores | **RTX A5000 24 GB** (CUDA) **and** **RX 7800 XT 16 GB** (ROCm) — both present | `-amd` containers on the Radeon (dense/rerank/sparse at :48081/:48083/:48084); the A5000 has also hosted `llama-server` directly (e.g. `:43302` for the nomic run) |
+| `laptop` | — | single **6 GiB** card | the `-gpu` container names used in § Prerequisites; TEI at `--dtype float16` could not warm up here, which forced the GGUF/llama-server reranker swap |
+
+Two consequences worth internalising before comparing any two rows:
+
+- **A dual-GPU host is not one environment.** `desktop-threadripper` can serve the same model
+  from CUDA/A5000 or from ROCm/Radeon, with different latency and different VRAM ceilings.
+  Recording only the machine is not enough — record which accelerator served the run.
+- **The 6 GiB ceiling changed scores, not just latency.** It is why `.env.amd` carried
+  `CODESCOUT_DISABLE_SPARSE=1`, which config layer 2 then fed to every profile, making the
+  2026-07-28 reranker A/B dense-only — the axis its author called *"the one I was least aware
+  of while measuring"*.
 ## How to run a bench
 
 ### Prerequisites
@@ -186,20 +206,28 @@ relative — known gap.
 
 ## History
 
-### 2026-08-16 — the pinned table spans at least three machines, and never said so; bench worktree was a foreign-host leftover and is now deleted
+### 2026-08-16 — the pinned table spans two machines, and never said so; bench worktree was a foreign-host leftover and is now deleted
 
 Started as "let's run the benchmark" and ended without a run, because the preconditions did
 not hold and one of them invalidates comparison itself.
 
 **1. Host is a comparability axis this tracker never anchored.** The section above pins every
-run to a worktree, a collection, and a config block. It does not pin the machine. Reading
-back through the log, at least three are involved:
+run to a worktree, a collection, and a config block. It does not pin the machine. Two are
+involved, now named in § Machines:
 
-| entry | hardware, as its own text records it |
-|---|---|
-| 2026-05-12 nomic-embed-code | *"llama-server (CUDA, **RTX A5000 24GB**)"* — NVIDIA |
-| 2026-07-28 reranker swap | *"this **6 GiB** card"*; TEI at float16 could not warm up |
-| 2026-08-16 (this entry) | Threadripper PRO 3975WX + **Radeon RX 7800 XT, 16 GiB**, `-amd` containers |
+| entry | hardware, as its own text records it | machine |
+|---|---|---|
+| 2026-05-12 nomic-embed-code | *"llama-server (CUDA, **RTX A5000 24GB**)"* | `desktop-threadripper`, on its A5000 |
+| 2026-07-28 reranker swap | *"this **6 GiB** card"*; TEI at float16 could not warm up | `laptop` |
+| 2026-08-16 (this entry) | Threadripper PRO 3975WX; **A5000 24 GB idle**, stack served from **RX 7800 XT 16 GB** via `-amd` containers | `desktop-threadripper` |
+
+**Corrected 2026-08-16, same day.** The first version of this entry said "at least three
+machines" and treated the A5000 as a third host. Wrong: the A5000 and the Radeon are **both in
+the desktop** (`nvidia-smi` and `rocm-smi` each report one card, and `lspci` shows both on the
+same bus). The error came from a GPU probe written as `rocm-smi || nvidia-smi` — ROCm answered,
+so the NVIDIA branch never ran, and a single-GPU picture was reported from a check structurally
+incapable of seeing the second card. Same failure shape as the retracted bug below: the
+measurement was real, but it could not observe the thing the claim was about.
 
 This is not cosmetic. Every p50/p95 in the table is a property of its host. Worse, VRAM
 pressure changed **scores** too: the 6 GiB box is why `.env.amd` carried
@@ -207,11 +235,17 @@ pressure changed **scores** too: the 6 GiB box is why `.env.amd` carried
 session's entire reranker A/B dense-only — the axis its author called *"the one I was least
 aware of while measuring"*. `host` is now in the anchored list above.
 
-**Consequence:** the champion row (**37/75**, CodeRank Q4 no-prefix boost=5.0, dense+sparse+rerank)
-was not measured on this desktop. Re-running that config here would conflate ~3 months of code
-changes with a machine change — the same multi-dimension confound the 2026-07-28 entry
-correctly refused to draw a conclusion from. **On this host the suite starts a NEW baseline
-section; it does not continue the table above.**
+**Consequence — revised after the correction above.** The champion row (**37/75**, CodeRank Q4
+no-prefix boost=5.0, dense+sparse+rerank) *was* measured on `desktop-threadripper`, so it is far
+closer to comparable than first stated. What still differs is the **accelerator and serving
+path**: 2026-05-12 ran embedders as bare `llama-server` processes (the nomic arm explicitly on
+CUDA/A5000), whereas today the stack is `-amd` containers on the Radeon. Latency is therefore
+not comparable; scores plausibly are, but nothing pins which card served the 2026-05-12
+CodeRank arm, so that remains an inference rather than a record.
+
+**Therefore: a run here is logged as a new baseline section carrying an explicit
+`host: desktop-threadripper` + accelerator field, and may be *compared* to the 37/75 row with
+that caveat stated — not silently appended to the table as if it continued it.**
 
 **2. `.worktrees/bench` was a foreign-host leftover — deleted.** Its `.git` file read
 `gitdir: /home/marius/work/claude/code-explorer/.git/worktrees/bench`, a repo path that does
