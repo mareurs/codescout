@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - progressive-disclosure
 - buffer-handles
@@ -122,27 +122,51 @@ is often unnecessary, and make it work when it is.**
 
 ## Fix
 
-**1. Make the generic fallback shape-aware.** Instead of restating the byte count, describe the
-payload: top-level keys, the largest array's name and length, and — where cheap — a head of it. That
-turns the envelope from metadata into a map, and benefits every tool lacking a bespoke summary, not
-just the librarian's.
+**Status: fix 1 done (`2099d4ce`), fixes 2 and 3 still open.** Marked `mitigated` rather
+than `fixed`, and deliberately NOT archived — the widest case is handled, the bug is not.
 
-**2. Give the librarian per-action summaries.** `get` should name the artifact's title, status and
-section headings; `find` should list the matched titles. Both are small and are the question the
-caller asked. Keep the existing truncation warning as an additional line, not a precondition.
+**1. Make the generic fallback shape-aware. — DONE (`2099d4ce`).** It now returns the
+top-level keys (so a `json_path` can be aimed without a second call), each array's length,
+and short scalars verbatim, since those are frequently the answer outright. Bounded: a wide
+object must not spend the whole summary budget listing keys, and a large value is *named,
+not inlined* — inlining it would undo the buffering that produced the envelope.
 
-**3. Consider always emitting a small preview alongside the handle.** The current model is
-all-or-nothing per result. A fixed-size head (the first N entries of the dominant array) would make
-the common "just show me what is in there" case free.
+One thing worth pinning, because it decided where the fix went: this is not librarian code.
+The fallback lives in `src/tools/core/types.rs`, so **every** tool lacking a bespoke
+`format_compact` was taking it; the librarian is just where it was loudest. Fixing
+`librarian/adapter.rs` instead would have left every other such tool untouched.
 
-Fix 1 is the widest win for the least code and should come first.
+**2. Give the librarian per-action summaries. — not done.** `get` naming the artifact's
+title, status and section headings; `find` listing the matched titles. Fix 1 now gets some
+of this incidentally — `title` and `status` are short scalars and so appear — but headings
+and matched-title lists are still absent, and those are the question the caller asked.
 
+Note the sequencing constraint this section already recorded: *"Keep the existing
+truncation warning as an additional line, not a precondition."* That rework belongs to fix
+2 and was left alone here. The existing precondition guards a real silent-truncation bug
+that once cost duplicate sections
+(`docs/issues/archive/2026-07-09-artifact-get-full-true-body-silent-truncation.md`), so it
+is not to be relaxed casually.
+
+**3. Always emit a small preview alongside the handle. — not done.** Still the right idea
+and still the largest change of the three.
 ## Tests added
 
-`N/A — not yet fixed.` A regression test should assert on the *observable* envelope: buffer an
-`artifact(get)` response and assert its `summary` names the artifact's title, not only its byte
-count. Asserting that `format_compact` returns `Some` would pass while the string stayed useless.
+Two in `src/tools/format.rs`, both against the real emitter.
 
+- `the_generic_fallback_describes_the_payload_instead_of_the_envelope` — built on the shape
+  of a real librarian `artifact(get)` response, the measured case. Asserts the key count,
+  that the big field is *named*, array sizes, short scalars verbatim — and, negatively,
+  that a 20 KB body is **not** inlined and the whole description stays under 600 bytes. The
+  negative assertions are the load-bearing ones: a describer that solves this bug by
+  pasting the payload back has reintroduced the problem buffering exists to solve.
+- `describe_payload_shape_handles_arrays_and_declines_scalars` — root arrays report element
+  keys (what a `[*]` projection needs to name a field), and bare scalars / empty objects
+  return `None` so the caller keeps its own wording rather than being handed a description
+  of a scalar.
+
+Gate: `cargo fmt` + `cargo clippy --all-targets -D warnings` clean, `cargo test --lib`
+3770 passed / 0 failed / 7 ignored.
 ## Workarounds
 
 - Follow the envelope's `hint` — since 2026-08-16 it names a real path derived from the payload's
