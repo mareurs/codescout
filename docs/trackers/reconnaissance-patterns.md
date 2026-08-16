@@ -292,7 +292,8 @@ be treated as findings, not as a summary to re-derive.
 | R-94 | 2026-08-16 | hit ×1, miss ×2 (self-caught) | A wiring inventory is not a delivery inventory, and it is wrong in both directions | BL-25 (guide topics nothing triggers) |
 | R-95 | 2026-08-16 | hit ×5 → rule | A deferral rationale is a claim, and it is the least-audited kind | BL-11 / BL-12 / BL-16 worktree cluster |
 | R-97 | 2026-08-16 | miss (self-caught) → rule | **A classifier you just wrote has been calibrated on exactly one case: the one that made you write it.** Shipped `snapshot_drift` with the gate "body line-anchors ≥1 `PREFIX-N`", fitted to the tracker that motivated the bug; the SECOND real tracker was a false positive (params-canonical by design, 14 of 68 ids mentioned incidentally). The population was enumerable all along and is bimodal with no overlap — 100% contiguous-prefix (11 in sync) / 61% prefix (the real lag) / 21% scattered (the false positive) — so the discriminator was one script away. Same day, same shape, second instance: the audit itself reported "3 of 28 drifted" in a codescout conversation when the 28 spanned seven repos and one finding was another project's. Rule: run a new classifier over the whole enumerable corpus and read the distribution; the motivating case is the worst validation set, being the one it was fitted to. | BL-29; `0dbfd0ee`, `af2508b4`. Kin R-96 (same law, applied to tests rather than results), R-92, R-95, R-90 |
-| R-98 | 2026-08-16 | miss (self-caught) → rule | An id read from a scan is stale the moment a peer session writes — re-check at the point of allocation, and against the working tree, not `HEAD` | near-miss on collision #10; `a1ac0317` (sweep) vs `c60242ac` (peer's R-97). Kin R-90, R-94, R-97 |
+| R-99 | 2026-08-16 | hit | Three unrelated-looking ledger defects had one root cause — the entry template named one field of four and mentioned the index row as an aside. A convention documented anywhere but the thing authors copy is not a convention | 13 orphaned bodies + 39 missing dispositions + 9 duplicate ids, all in this file; fix is the template rewrite. Kin R-94, R-97, R-98 |
+| R-98 | 2026-08-16 | miss (self-caught) → rule | An id read from a scan is stale the moment a peer session writes — re-check at the point of allocation, and against the working tree, not `HEAD` | near-miss on collision #10; `a1ac0317` (sweep) vs `2f94ce40` (peer's R-97 — originally cited as `c60242ac`, orphaned by their amend). Kin R-90, R-94, R-97 |
 | R-96 | 2026-08-16 | miss (self-caught) → rule | Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason | GF-1 / GF-2, `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` |
 | R-1 | 2026-05-19 | hit → promoted | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
 | R-2 | 2026-05-19 | **archived** → R-4 + R-34 | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
@@ -2740,8 +2741,21 @@ file: allocate above the new max, and do not commit that file until their work i
 committed, or you annex it (R-90).
 
 **Status:** open — single datapoint, but fully evidenced. `a1ac0317` is this sweep;
-`c60242ac` is the peer's R-97, committed minutes after the working-tree write that the
-re-check caught. The sweep's own invariant (every body entry has an index row) then
+`2f94ce40` is the peer's R-97, committed minutes after the working-tree write that the
+re-check caught.
+
+**Second instance, same shape, self-inflicted (2026-08-16).** This entry originally
+cited that commit as `c60242ac` — the SHA it carried when the log was read. The peer
+then `git commit --amend`ed it, minting `2f94ce40` and orphaning `c60242ac`, which now
+survives only in the reflog. The citation inside an entry *about* reading stale facts
+from a shared checkout was itself stale within minutes, and would have rotted silently
+— an orphaned SHA still resolves locally via reflog, so `git cat-file -t` says `commit`
+and nothing complains until a gc or a fresh clone. This does **not** fire the
+Promote-when below, which is scoped to id allocation; it shows that scope is too
+narrow. The general form: **any fact read from a shared checkout — max-id, SHA, file
+contents, `git status` — is a snapshot a peer can invalidate before you write.**
+Re-read at the write, and prefer a stable handle (entry id, path, subject line) over a
+SHA while a peer may still be amending. The sweep's own invariant (every body entry has an index row) then
 survived that peer write untouched — they added both formats for R-97 without ever
 seeing the commit, which is weak evidence that the convention is discoverable from the
 file alone.
@@ -2754,10 +2768,106 @@ hazard), R-94 (a declaration inventory and a delivery inventory diverge), R-97 (
 validated only against the case that motivated it), and law B — here the instrument was
 right and its *timing* was wrong, which the law does not currently cover.
 
+## R-99 — The convention lives in the template, or it does not live
+
+**Verdict:** hit (root cause found by asking why three unrelated defects co-occurred)
+· **Observed:** 2026-08-16, the R-N index-coverage + disposition sweep.
+
+**Seam:** any long-lived ledger with an author-facing entry template.
+
+**What happened.** Three defects were repaired in this file in one pass, and they
+looked unrelated: 13 body entries with no Index row; 39 of 57 entries with no
+disposition field; nine ids allocated twice. Each already had a *documented*
+convention somewhere in the file — the Index section carries an id-suffix note that
+prescribes counting both entry formats, and the distillation notes call adding a
+`Status:` "the single highest-value structural change to this tracker".
+
+**The root cause was one place.** The `## Template for new entries` block named
+exactly one field, `**Verdict:**`, and mentioned the index row as a passive aside
+("Also update the Index table row at the top"). It said nothing about `Status:`,
+nothing about `Promote-when:`, and nothing about how to allocate an id. Every author
+who followed the template produced an entry missing precisely what the template
+omitted — which is the entire defect set, and nothing else.
+
+**The generalisation.** A convention documented anywhere *other than* the artifact
+the author actually copies is not a convention — it is a fact about the file that the
+next author will not read. Prose elsewhere in the same file does not count: the
+id-suffix note sits ~200 lines above the template, was written by someone who had
+just finished repairing nine collisions, and collision #10 was still one stale scan
+away (R-98). The test is not "is it written down somewhere"; it is "is it in the
+thing that gets copied".
+
+**Fixed here** by moving all three into the template — the both-formats id scan with
+its re-run-at-the-write caveat, the five-column index row plus the `comm` check that
+detects orphans, and `Status:` marked required with the reason it is required.
+
+**Promote-when:** a second ledger (T-N / F-N / W-N / GF-N / BL-N) found to have a
+defect class whose root cause is an under-specified entry template → promote to the
+reconnaissance SKILL.md as a scout step: *before appending to an unfamiliar ledger,
+read its template and diff it against what existing entries actually carry.*
+
+**Status:** open — single datapoint, but one covering three independent defect classes
+in a single file, and the fix is applied in the same commit. The template is now the
+thing to audit, not the entries.
+
+**Kin:** R-98 (the id half of this, and why the scan caveat now lives in the
+template), R-94 (a declaration inventory and a delivery inventory diverge), R-97 (a
+rule validated only against the case that motivated it — here, a template validated
+against no case at all).
+
 ## Template for new entries
 
-<!-- Insert new R-N entries above this line via:
-     edit_markdown(action="insert_before",
-                   heading="## Template for new entries",
-                   content="## R-N — title\n**Verdict:** ...\n...")
-     Also update the Index table row at the top. -->
+<!-- Insert new R-N entries above this line.
+
+  1. ALLOCATE THE ID LAST, counting BOTH entry formats — this ledger has two
+     (`## R-N` bodies and self-contained `| R-N |` index rows):
+
+       { grep -o '^## R-[0-9]*' <file>; grep -o '^| R-[0-9]*' <file>; } \
+         | grep -o '[0-9]*$' | sort -n | tail -1
+
+     Re-run it in the SAME BREATH as the write, not at the start of the pass. A
+     peer session in the same checkout can take the id in between (R-98), and a
+     check against `HEAD` reports it free while it already exists in the working
+     tree. Allocating from a stale max is how the first nine collisions happened
+     — see the id-suffix note under `## Index`.
+
+  2. WRITE THE BODY:
+
+       edit_markdown(action="insert_before",
+                     heading="## Template for new entries",
+                     content="## R-N — title\n\n"
+                             "**Verdict:** hit | miss [×N] → rule · "
+                             "**Observed:** YYYY-MM-DD, <context>\n\n"
+                             "**Seam:** <what was unverified>\n\n"
+                             "<narrative>\n\n"
+                             "**Promote-when:** <falsifiable criterion>\n\n"
+                             "**Status:** open — <N datapoints>\n\n"
+                             "**Kin:** R-x, R-y\n")
+
+  3. ADD THE INDEX ROW — five columns, matching the header:
+
+       | R-N | YYYY-MM-DD | verdict | pattern | evidence |
+
+     EVERY body entry must have one. Verify with:
+
+       comm -23 <(grep -o '^## R-[0-9]*b\?' <file> | sed 's/^## //' | sort -u) \
+                <(grep -o '^| R-[0-9]*b\?' <file> | sed 's/^| //'  | sort -u)
+
+     Empty output = clean. This check found 13 orphaned bodies on 2026-08-16.
+
+  REQUIRED FIELDS — `**Status:**` IS NOT OPTIONAL. It is the disposition field,
+  and it is the only thing that makes a fired `Promote-when` harvestable. Its
+  absence is why 39 of 57 entries carried no disposition and why criteria went
+  unharvested for three months. Write it even when the answer is
+  "open — single datapoint".
+
+  WHEN A CRITERION FIRES, UPDATE THE STATUS LINE. Recording a firing only in
+  prose leaves it invisible to every field-presence sweep — that is exactly how
+  R-89, R-90 and R-91 sat fully adjudicated and uncounted. And note the trap that
+  cost two probes on 2026-08-16: detect these fields by STRUCTURAL anchor
+  (line-start, key prefix), never by keyword. Prose and field share a vocabulary
+  by construction, so `grep -c 'Status:'` also counts sentences *about* Status,
+  and `/fired/` matches "the tell that should have fired".
+
+  Why this block carries all of it: R-99. A convention documented anywhere other
+  than the thing authors copy is not a convention. -->
