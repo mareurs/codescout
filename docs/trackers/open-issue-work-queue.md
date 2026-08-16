@@ -62,7 +62,14 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | open | `e557d0f2c9429b5d` |
 | BL-20 | 1 | params merge-patch wipes entry arrays wholesale — no guard, no report, no git backup | open | `29e65b54ee689dec` |
 | BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | open | `3fb33d4da0791fe6` |
-| BL-22 | 1 | reindex re-keys moved artifacts and cascade-deletes their events (11 lost in one measured call) | open | `0dc35c5053dabcee` |
+| BL-22 | 1 | `move` broke the `id == hash(abs_path)` invariant, so the next reindex cascade-deleted the history | **done** | `0dc35c5053dabcee` |
+| BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | open | `6149f4cfeaa6fab9` |
+
+> **params lag the body on BL-1 and BL-22.** Both are `done` here and still `open`
+> in the live `tasks` array. Flipping one row's status needs the wholesale array
+> replace that already wiped this tracker once, and there is no entry-grain update
+> — that is BL-20. Two rows now carry the cost, which is the argument for BL-20's
+> fix 3. Reconcile once it lands; this snapshot is the git-backed truth until then.
 
 Next actions per row live in each bug's `## Resume`, and in the live params — not duplicated here,
 because a snapshot that carries instructions goes stale in the way that matters most.

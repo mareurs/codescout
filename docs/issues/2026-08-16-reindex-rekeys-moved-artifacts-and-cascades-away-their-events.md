@@ -1,20 +1,20 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- catalog-drift
+- archive-flow
+- event-log
+- data-loss
+closed: 2026-08-16
 opened: 2026-08-16
-closed:
-severity: high
 owner: marius
 related:
-  - docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
-  - docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
-  - docs/trackers/open-issue-work-queue.md
-tags:
-  - librarian
-  - catalog-drift
-  - archive-flow
-  - event-log
-  - data-loss
-kind: bug
+- docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md
+- docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+- docs/trackers/open-issue-work-queue.md
+severity: high
 ---
 
 # BUG: reindex re-keys a moved artifact and cascade-deletes its event history — the sanctioned archive path destroys the record it exists to protect
@@ -77,8 +77,24 @@ Linux, codescout `0.15.0`, branch `experiments`, MCP stdio. Catalog at
 `src/librarian/catalog/artifact.rs`; the corpus-wide half measured directly
 against the catalog DB, queries in § Evidence.*
 
-**`move` is not the culprit — it is correct.** `src/librarian/tools/mv.rs:15-106`
-renames the file and upserts with
+> **Correction, 2026-08-16.** The first version of this section had the direction
+> backwards — it called `move` correct and `reindex` the culprit. That was wrong,
+> and it was wrong in the way the Iron Law warns about: it *sounded* right (the
+> call that preserves data must be the good one) and I wrote it before reading
+> `doctor.rs`. **The codebase states the opposite invariant outright, in prose, in
+> two places** (`src/librarian/tools/doctor.rs`, module docs and `reseat_worktree`):
+>
+> > Catalog identity is `id == artifact_id_from_abs(abs_path)`, so a bare
+> > `abs_path` UPDATE that kept `id_w` would leave the row mismatched, and the
+> > next MAIN-repo reindex's `artifact::upsert` pre-clean would delete it —
+> > cascading away exactly the history this exists to preserve.
+>
+> That is a precise description of what `move` was doing. `reindex` is
+> implementing the stated model; `move` is the one breaking it. Corrected
+> analysis below.
+
+**`move` broke the invariant.** `src/librarian/tools/mv.rs:15-106`
+renamed the file and upserted with
 
 ```rust
 let updated_row = ArtifactRow {
@@ -90,11 +106,19 @@ let updated_row = ArtifactRow {
 };
 ```
 
-Identity is treated as stable and path as a mutable field. Events survive.
+— treating identity as stable and path as a mutable field. That is precisely the
+"bare `abs_path` UPDATE" `doctor.rs` says must never happen. It leaves a row whose
+id no longer hashes from its path: a live tripwire, armed until the next walk.
 
-**`reindex` holds the opposite model.** It derives an artifact's id from its
-`abs_path`, so the same file at a new path is a new artifact. It upserts the
-archive path under the freshly-derived id.
+**`reindex` implements the stated model.** It derives an artifact's id from its
+`abs_path` (`src/librarian/indexer.rs:152`) and looks the row up *by that id*
+(`indexer.rs:166`), so a mismatched row is invisible to it. `existing` comes back
+`None`, a fresh id is minted, and the walk reports the file as `added`.
+
+`doctor`'s `reseat_worktree` already solves exactly this situation the right way:
+mint `id_m = artifact_id_from_abs(new_path)`, then `graft::graft_rows` folds the
+old row's events, links, observations and augmentation onto it before deleting it.
+`move` simply never adopted that pattern.
 
 **`upsert` then executes the delete that does the damage** —
 `src/librarian/catalog/artifact.rs:152-154`:
@@ -259,8 +283,30 @@ every archive.
 
 1. **Hypothesis:** `artifact(action="move")` re-keys the artifact.
    **Test:** read `src/librarian/tools/mv.rs:15-106`.
-   **Verdict:** rejected — `..row.clone()` preserves the id explicitly, and the
-   response echoes the original id. `move` is correct in isolation.
+   **Verdict:** rejected on the fact (it preserved the id) but the *conclusion I
+   drew from it* — "so `move` is correct" — was wrong. Preserving the id is the
+   defect, not the proof of innocence. See hypothesis 5.
+
+5. **Hypothesis:** identity is genuinely ambiguous in this codebase, so either
+   half could reasonably be called the bug.
+   **Test:** grep the invariant rather than reason about it —
+   `src/librarian/tools/doctor.rs` states `id == artifact_id_from_abs(abs_path)`
+   twice, `reseat_worktree` is built entirely around maintaining it, and
+   `migrate_v6`'s implicit id migration depends on the pre-clean that enforces it.
+   **Verdict:** rejected — three code surfaces implement path-derived identity and
+   nothing implements stable identity. The ambiguity was in the docs
+   (`tracker-conventions` told callers to "cite by stable ID"), not in the code.
+
+6. **Hypothesis:** the cheapest fix is to teach the indexer to fall back to an
+   `abs_path` lookup before minting a new id.
+   **Test:** implemented it; the regression test went green. Then read
+   `src/librarian/catalog/migrate_v6.rs:12-23`.
+   **Verdict:** rejected and reverted. That module documents relying on the
+   pre-clean to absorb an id-algorithm change, and its own reviewer note says a
+   future hash change must add an explicit migration instead. A silent abs_path
+   fallback would defeat both, and would make the invariant unenforceable by
+   tolerating every violation instead of surfacing it. The fix belongs at the one
+   call site that breaks the rule.
 
 2. **Hypothesis:** the events were orphaned (left keyed to a dead id), so a
    repair could re-point them.
@@ -279,39 +325,102 @@ every archive.
 
 ## Fix
 
-Not yet implemented. The design question comes first: **is an artifact's id
-path-derived or stable?** The codebase currently answers both ways. Options, in
-increasing order of ambition:
+**Implemented 2026-08-16 on `experiments`.** Identity model chosen deliberately
+(user decision, recorded here because the alternatives were live): **path-derived** —
+`id = sha256(abs_path)`, as `doctor.rs` already states and `migrate_v6` already
+relies on. `move` was made to maintain it instead of breaking it.
 
-1. **Teach reindex to recognise a move.** Before minting a new id for a path,
-   look for an existing row whose `file_sha256` matches and whose `abs_path` no
-   longer exists — that is a rename, so update the row's path in place rather
-   than re-keying. Cheapest, and it fixes the archive flow without touching the
-   identity model.
+`src/librarian/tools/mv.rs` now does what `doctor`'s `reseat_worktree` does:
 
-2. **Make `upsert`'s abs_path DELETE loud, or refuse it.** Line 152 silently
-   destroys a row with history. At minimum it should return what it deleted so
-   the caller can report it; better, refuse when the doomed row has events and
-   require an explicit reseat. This is the same shape as BL-20's params wipe and
-   BL-21's guard gap — **a destructive write with no report and no opt-in**, the
-   third instance found this session.
+```rust
+let new_id = ids::artifact_id_from_abs(&new_full);
+artifact::upsert(&cat, &ArtifactRow { id: new_id.clone(), abs_path: new_full.clone(), ..row.clone() })?;
+let grafted = if new_id != a.id {
+    Some(graft::graft_rows(&mut cat, &a.id, &new_id)?)
+} else { None };
+```
 
-3. **Decouple identity from path.** A stable minted id with `abs_path` as a
-   plain mutable column removes the whole class. Largest change; also the one
-   that makes "cite artifacts by id in prose" durable, which the tracker
-   conventions already assume.
+`graft_rows` re-points events, observations, links and `event_edges`, merges the
+augmentation, and deletes the old row — in one `IMMEDIATE` transaction. After it,
+`id == hash(path)` holds again, so the next reindex hits `ON CONFLICT(id)` instead
+of the pre-clean `DELETE` and nothing is lost.
 
-Whatever is chosen, **the frontmatter `id:` must be rewritten when the id
-changes**, or files will keep asserting dead ids.
+**The response now reports the re-key rather than hiding it:**
 
+```json
+{"id": "<new>", "previous_id": "<old>", "id_changed": true,
+ "history_grafted": {"events": 1, "observations": 0, "links": 1, "event_edges": 0},
+ "old_abs_path": "...", "new_abs_path": "...", "moved": true}
+```
+
+The id changing is **by design** under this model, and was already the documented
+cost (`migrate_v6`: *"External citations to the old IDs go stale — that's the
+documented user-visible cost"*). What was not by design is that it happened
+*silently and later*, at the next reindex, taking the history with it. Now it
+happens at move time, atomically, with the history intact and both ids reported.
+
+### Docs corrected in the same commit
+
+Three surfaces asserted the old contract:
+
+- `src/librarian/tools/artifact.rs` — `new_rel_path`'s schema description now
+  states that a move mints a new id and names the response fields. This is the
+  surface an agent actually reads before calling.
+- `src/prompts/guides/librarian.md` § *Archiving / Moving Trackers* — documents
+  the re-key, the graft, and the two consequences (re-point citations; never
+  cache an id across a move).
+- `src/prompts/guides/tracker-conventions.md` — **"Cite by stable ID in prose"**
+  was simply false for 16-hex artifact ids and is now split: entry IDs (`F-3`,
+  `BUG-40`) are stable, artifact ids are not, prefer an entry ID or rel_path for
+  anything likely to be archived. Its `link_scan` note also claimed the pre-clean
+  drops a moved artifact's links — no longer true, since the move grafts them.
+
+## Worktree interaction
+
+Raised during implementation: a re-key could plausibly strand the worktree
+overlay's bookkeeping. Checked each surface rather than assumed.
+
+| Surface | Keyed by | Effect of a re-key |
+|---|---|---|
+| `worktree_registration` | `worktree_root` **path** (PK) | none — no artifact id in the table |
+| `worktree_of` lineage link | `artifact_link(src_id, dst_id)` | **follows** — `repoint_history` updates *both* endpoints |
+| `shadow_main_pairs` | the lineage link + shadow `abs_path` | resolves either way; both inputs follow |
+| shadow vs. main of the same file | distinct `abs_path` → distinct ids | independent; a move in one cannot touch the other |
+| tracker *created* in a worktree | `artifact_id_from_abs` already | unchanged — creation was always path-derived |
+| `mv` on a main artifact from a worktree | — | already refused before this change |
+
+The load-bearing one is the lineage link, because `merge_worktree` finds shadows
+through it: if it did not follow a main-side re-key, merging would silently stop
+seeing a shadow it is supposed to fold. `repoint_history` updates `src_id` **and**
+`dst_id` (`src/librarian/catalog/graft.rs`), so it does — and
+`shadow_main_pairs_follows_a_main_twin_re_keyed_by_a_move` now pins that, with a
+baseline assertion before the move so the test cannot pass vacuously.
 ## Tests added
 
-None yet — bug is `open`. The regression test is a three-step integration:
-create an artifact with an event → `move` it → `reindex` → assert the id is
-unchanged **and** `artifact_event(action="list")` still returns the event. Note
-that a test asserting only "the id survives `move`" passes today and proves
-nothing; the reindex step is the whole test.
+- `move_carries_history_onto_the_new_id_and_survives_a_reindex`
+  (`src/librarian/tools/mv.rs`) — the regression test. Seeds an event, moves the
+  artifact, asserts the response reports the new id, the old id no longer
+  resolves, the history landed on the new id — **then reindexes and asserts it is
+  still there.** Written first and watched fail (`left: aabbccdd11223344, right:
+  b6d380ce1bc5e21b`).
 
+  The reindex step is the whole test. Asserting only that history follows the move
+  passes the moment `graft_rows` is wired up and would still pass if the row were
+  left mismatched — the deletion happens on a later walk.
+
+- `shadow_main_pairs_follows_a_main_twin_re_keyed_by_a_move`
+  (`src/librarian/tools/worktree.rs`) — the overlay's lineage pairing survives a
+  main-side re-key. Asserts the baseline pair *before* the move too, so it fails
+  if the fixture stops producing a pair at all.
+
+- `move_renames_file_and_updates_catalog` and
+  `move_succeeds_for_active_project_absent_from_legacy_roots` **updated** — both
+  asserted the old id still resolved after a move. Neither reindexed, so both
+  passed on a contract that expired on the next walk. They now assert
+  `previous_id` / `id_changed` and that the old row does not linger.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test` 3860 passed / 0 failed / 45 ignored.
 ## Workarounds
 
 - **After archiving, re-resolve the id** before citing it:
@@ -326,27 +435,28 @@ nothing; the reindex step is the whole test.
 
 ## Resume
 
-Start at `src/librarian/catalog/artifact.rs:152-154` (the DELETE) and
-`src/librarian/tools/mv.rs:15-106` (the id-preserving upsert that reindex
-undoes). Decide the identity question before writing code — option 1 is a local
-fix, option 3 is the real one, and picking 1 without recording the decision will
-leave the same contradiction in place for the next surface that moves a file.
+**Fixed on `experiments`.** Verify live after the next `cargo rb` + `/mcp`: archive
+any bug through `artifact(action="move", …)` and check the response carries
+`id_changed: true` with a non-null `history_grafted`, then run
+`librarian(action="reindex")` and confirm `artifact_event(action="list",
+artifact_id=<new id>)` still returns the artifact's events.
 
-Write the integration test first (create → event → move → reindex → assert id
-and event survive) and watch it fail at the reindex step.
+The corpus-wide acceptance measurement is the event-density gap in § Evidence:
+bugs archived *after* this fix should carry events at roughly the live-file rate
+(~0.65/row), not 0.02. That needs a fresh cohort, so it is a later check, not a
+blocker.
 
-Fallout from this bug still outstanding in the repo, to fix once the id model is
-settled:
+**Not repaired by this fix, and not repairable:** the history already destroyed —
+11 events in the measured call, and whatever the 348 previously-archived bug files
+and the `docs/trackers/archive/` cohort lost before it. Those rows were
+cascade-deleted, not orphaned (0 orphans of 1845), so there is nothing to
+re-point. The bodies are in git; the event logs are gone.
 
-- `docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`
-  frontmatter asserts `id: '875e5d03d980ceac'`; the live id is `2bd71246fc807cba`.
-- `docs/trackers/open-issue-work-queue.md` BL-1 row cites the dead id, in both
-  the body snapshot and the `tasks` params entry. **The params copy was left
-  deliberately**: there is no entry-grain update (BL-20), so correcting one
-  field of one row requires the wholesale array replace that already wiped this
-  tracker once. A one-field correction is currently unsafe to make — which is
-  the clearest argument yet for BL-20's fix 3.
-
+**Follow-up worth its own bug, not fixed here:** a moved file's frontmatter still
+asserts the id it had before the move, so an archived artifact's `id:` line is
+wrong the moment `move` returns. Nothing rewrites it and nothing reads it for
+identity, so this is drift rather than breakage — but it is drift that reads as
+authoritative.
 ## References
 
 - `src/librarian/catalog/artifact.rs:137-187` — `upsert`, and the abs_path DELETE at 152

@@ -34,7 +34,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         )));
     }
 
-    let cat = ctx.catalog.lock();
+    let mut cat = ctx.catalog.lock();
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
@@ -88,7 +88,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let content = std::fs::read_to_string(&new_full)?;
     let file_sha256 = crate::librarian::util::sha_of_bytes(content.as_bytes());
 
+    // Catalog identity is `id == artifact_id_from_abs(abs_path)` — stated in
+    // `doctor.rs` and relied on by `migrate_v6`'s implicit id migration. Keeping
+    // the old id while rewriting `abs_path` leaves that invariant broken, and the
+    // next reindex's `artifact::upsert` pre-clean (`DELETE FROM artifact WHERE
+    // abs_path=? AND id != ?`) deletes the row — cascading its events, links,
+    // observations and augmentation away, silently and later.
+    //
+    // So do what `doctor`'s `reseat_worktree` does for the same situation: seed a
+    // row at the path-derived id, then graft the history across and drop the old
+    // row. `graft_rows` re-points `artifact_link` on BOTH endpoints, so a
+    // `worktree_of` lineage edge survives whether it was the shadow or the main
+    // twin that moved.
+    // docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+    let new_id = crate::librarian::ids::artifact_id_from_abs(&new_full);
     let updated_row = crate::librarian::catalog::artifact::ArtifactRow {
+        id: new_id.clone(),
         abs_path: new_full.clone(),
         updated_at: now,
         file_mtime,
@@ -97,8 +112,32 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
     artifact::upsert(&cat, &updated_row)?;
 
+    // Two transactions (`upsert` autocommits, `graft_rows` runs its own IMMEDIATE
+    // tx) — same shape as `reseat_worktree`. A crash between them leaves both rows
+    // present with the history still on the old one: recoverable by re-running,
+    // not data loss.
+    let grafted = if new_id != a.id {
+        Some(crate::librarian::catalog::graft::graft_rows(
+            &mut cat, &a.id, &new_id,
+        )?)
+    } else {
+        None
+    };
+
     Ok(json!({
-        "id": a.id,
+        "id": new_id,
+        // The id is derived from the path, so a move mints a new one. Reported
+        // explicitly: prose that cites the old id has to be re-pointed, and a
+        // caller that assumed stability would otherwise find out via a later
+        // `unknown id` error.
+        "previous_id": a.id,
+        "id_changed": grafted.is_some(),
+        "history_grafted": grafted.map(|r| json!({
+            "events": r.events_repointed,
+            "observations": r.observations_repointed,
+            "links": r.links_repointed,
+            "event_edges": r.event_edges_repointed,
+        })),
         "old_abs_path": to_forward_slash(&old_full),
         "new_abs_path": to_forward_slash(&new_full),
         "moved": true
@@ -182,9 +221,127 @@ mod tests {
         assert!(tmp.path().join("docs/archive/foo.md").exists());
         assert!(!tmp.path().join("docs/trackers/foo.md").exists());
 
+        // The id is derived from the path, so a move mints a new one and reports
+        // both. History follows via `graft_rows` — see
+        // `move_carries_history_onto_the_new_id_and_survives_a_reindex`.
+        assert_eq!(result["previous_id"], "aabbccdd11223344");
+        assert_eq!(result["id_changed"], true);
+
         let cat = ctx.catalog.lock();
-        let row = artifact::get(&cat, "aabbccdd11223344").unwrap().unwrap();
+        let new_id = result["id"].as_str().unwrap();
+        let row = artifact::get(&cat, new_id).unwrap().unwrap();
         assert!(row.abs_path.ends_with("docs/archive/foo.md"));
+        assert!(
+            artifact::get(&cat, "aabbccdd11223344").unwrap().is_none(),
+            "the old id must not linger as a second row"
+        );
+    }
+
+    /// A move must carry the artifact's history onto the new id, and that id
+    /// must survive the next reindex.
+    ///
+    /// Catalog identity is `id == artifact_id_from_abs(abs_path)` — stated in
+    /// `src/librarian/tools/doctor.rs` and relied on by `migrate_v6`. A move that
+    /// kept the old id while rewriting `abs_path` leaves that invariant broken,
+    /// and the next reindex's `artifact::upsert` pre-clean (`DELETE FROM artifact
+    /// WHERE abs_path=? AND id != ?`) deletes the row — cascading its events,
+    /// links, observations and augmentation away.
+    ///
+    /// Measured 2026-08-16 against the live catalog: one reindex following a
+    /// 22-tracker archive sweep took the event count from 1845 to 1834 while
+    /// reporting `removed: 0`.
+    /// docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+    ///
+    /// **The reindex step is the whole test.** Asserting only that history
+    /// follows the move passes the moment `graft_rows` is wired up, and would
+    /// still pass if the row were left mismatched — the deletion happens later,
+    /// on a walk the test never runs.
+    #[tokio::test]
+    async fn move_carries_history_onto_the_new_id_and_survives_a_reindex() {
+        use crate::librarian::catalog::events;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let old_id = "aabbccdd11223344";
+
+        // History the artifact accumulated while it was live.
+        {
+            let cat = ctx.catalog.lock();
+            events::insert(
+                &cat,
+                &events::TestEventRowBuilder::new(old_id, "note").build(),
+            )
+            .unwrap();
+        }
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": old_id,
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let archived = tmp.path().join("docs/archive/foo.md");
+        let new_id = crate::librarian::ids::artifact_id_from_abs(&archived);
+
+        assert_eq!(
+            result["id"].as_str(),
+            Some(new_id.as_str()),
+            "move must report the id the artifact now has, not the one it had"
+        );
+
+        {
+            let cat = ctx.catalog.lock();
+            assert!(
+                artifact::get(&cat, old_id).unwrap().is_none(),
+                "the old id must not survive — it no longer matches the path it hashes from"
+            );
+            let row = artifact::get(&cat, &new_id)
+                .unwrap()
+                .expect("the artifact must live under the path-derived id");
+            assert!(row.abs_path.ends_with("docs/archive/foo.md"));
+            assert!(
+                events::latest_for_artifact(&cat, &new_id)
+                    .unwrap()
+                    .is_some(),
+                "the event history must be grafted onto the new id, not cascade-deleted"
+            );
+        }
+
+        // The step that matters: a walk over the repo must now hit ON CONFLICT(id)
+        // rather than the abs_path pre-clean, and leave the history alone.
+        {
+            let cat = ctx.catalog.lock();
+            let rules = crate::librarian::classify::load_rules(
+                "[[rule]]\nglob = \"**/docs/**/*.md\"\nkind = \"tracker\"\n",
+            )
+            .unwrap();
+            crate::librarian::indexer::index_repo_sync(
+                &cat,
+                &rules,
+                tmp.path(),
+                &globset::GlobSet::empty(),
+                false,
+                false,
+                false,
+            )
+            .unwrap();
+
+            assert!(
+                artifact::get(&cat, &new_id).unwrap().is_some(),
+                "the reindex must not re-key the artifact it just found in place"
+            );
+            assert!(
+                events::latest_for_artifact(&cat, &new_id)
+                    .unwrap()
+                    .is_some(),
+                "the event history must survive the reindex"
+            );
+        }
     }
 
     #[tokio::test]
@@ -266,9 +423,20 @@ mod tests {
         assert_eq!(result["moved"], true);
         assert!(tmp.path().join("docs/archive/foo.md").exists());
         assert!(!tmp.path().join("docs/trackers/foo.md").exists());
+        // The id is derived from the path, so a move mints a new one and reports
+        // both. History follows via `graft_rows` — see
+        // `move_carries_history_onto_the_new_id_and_survives_a_reindex`.
+        assert_eq!(result["previous_id"], "aabbccdd11223344");
+        assert_eq!(result["id_changed"], true);
+
         let cat = ctx.catalog.lock();
-        let row = artifact::get(&cat, "aabbccdd11223344").unwrap().unwrap();
+        let new_id = result["id"].as_str().unwrap();
+        let row = artifact::get(&cat, new_id).unwrap().unwrap();
         assert!(row.abs_path.ends_with("docs/archive/foo.md"));
+        assert!(
+            artifact::get(&cat, "aabbccdd11223344").unwrap().is_none(),
+            "the old id must not linger as a second row"
+        );
     }
 
     #[tokio::test]

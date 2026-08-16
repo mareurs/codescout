@@ -482,4 +482,78 @@ mod tests {
             "must not false-match the fixe1 sibling via unescaped `_` wildcard"
         );
     }
+
+    /// A move re-keys its artifact (`id = sha256(abs_path)`) and grafts the
+    /// history onto the new id. The overlay pairs shadow to main through a
+    /// `worktree_of` link, so the question this answers is whether that lineage
+    /// survives the main twin being archived mid-session.
+    ///
+    /// It does, because `graft::repoint_history` re-points `artifact_link` on
+    /// BOTH endpoints (`src_id` and `dst_id`) — the shadow keeps pointing at the
+    /// main row under its new id, and `merge_worktree` still finds the pair.
+    /// docs/issues/2026-08-16-reindex-rekeys-moved-artifacts-and-cascades-away-their-events.md
+    #[test]
+    fn shadow_main_pairs_follows_a_main_twin_re_keyed_by_a_move() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+
+        let main_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/docs/trackers/t.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&main_id)
+                .with_abs_path("/repo/docs/trackers/t.md")
+                .build(),
+        )
+        .unwrap();
+
+        let shadow_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/.worktrees/feat/docs/trackers/t.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&shadow_id)
+                .with_abs_path("/repo/.worktrees/feat/docs/trackers/t.md")
+                .build(),
+        )
+        .unwrap();
+
+        links::insert(
+            &cat,
+            &links::LinkRow {
+                src_id: shadow_id.clone(),
+                dst_id: main_id.clone(),
+                rel: LINEAGE_REL.into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            shadow_main_pairs(&cat, "/repo/.worktrees/feat").unwrap(),
+            vec![(main_id.clone(), shadow_id.clone())],
+            "baseline: the pair resolves before the move"
+        );
+
+        // Archive the MAIN twin, exactly as `mv::call` now does it: seed a row at
+        // the path-derived id, then graft the old row's history onto it.
+        let archived_id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+            "/repo/docs/trackers/archive/t.md",
+        ));
+        artifact::upsert(
+            &cat,
+            &TestArtifactRowBuilder::new(&archived_id)
+                .with_abs_path("/repo/docs/trackers/archive/t.md")
+                .build(),
+        )
+        .unwrap();
+        crate::librarian::catalog::graft::graft_rows(&mut cat, &main_id, &archived_id).unwrap();
+
+        assert_eq!(
+            shadow_main_pairs(&cat, "/repo/.worktrees/feat").unwrap(),
+            vec![(archived_id, shadow_id)],
+            "the lineage edge must follow the main twin's new id, or merge_worktree \
+             silently stops seeing the shadow it is supposed to fold"
+        );
+    }
 }

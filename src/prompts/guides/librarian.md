@@ -316,6 +316,28 @@ Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
 get_guide("tracker-conventions"). At the artifact layer, `artifact(action="move",
 new_rel_path=...)` is the safe path — it updates the catalog atomically.
 
+**A move mints a new id.** Catalog identity is `id = sha256(abs_path)`, so moving a
+file necessarily re-keys it. `move` seeds the row at the new id, grafts the artifact's
+events, links, observations and augmentation across, and drops the old row — all of
+that in one call. The response reports both ends:
+
+```
+{"id": "<new>", "previous_id": "<old>", "id_changed": true,
+ "history_grafted": {"events": 3, "links": 1, ...}, "moved": true}
+```
+
+Two consequences worth planning for:
+
+- **Re-point prose that cites the old id**, in the same commit as the move — the
+  same discipline the guide already requires for citations of the old *path*.
+  `id_changed: true` is the signal.
+- **Do not cache an id across a move.** The old id stops resolving immediately;
+  a later call with it returns `unknown id`.
+
+A bare `git mv` skips all of this: the row keeps pointing at the vanished path, and
+the next `reindex` mints a fresh id for the new one — with no graft, so the events go
+with the old row.
+
 To remove an artifact entirely, `artifact(action="delete", id=...)` deletes the file **and**
 the catalog row in one step, cascading (FK `ON DELETE CASCADE`) to the artifact's augmentation,
 links, observations, and events — no orphaned rows. The artifact must live under a managed

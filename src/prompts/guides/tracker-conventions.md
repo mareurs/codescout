@@ -73,10 +73,18 @@ Archive through the catalog — `artifact(action="move", id=…,
 new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
 sha256(abs_path)`, so a hand-move orphans the catalog row.
 
-**Then re-point the citations, in the same commit as the move.** The move changes
-the file's path, and archiving is a bug file's *normal* end state — so every
-citation of `docs/issues/<slug>.md` anywhere in the repo is a scheduled break, and
-the move is the moment it fires. Measured 2026-08-08: three archive moves left **25**
+**The move mints a new id, and reports it.** Because the id is derived from the
+path, archiving necessarily re-keys the artifact; `move` grafts its events, links,
+observations and augmentation onto the new id in the same call and returns
+`{"id": <new>, "previous_id": <old>, "id_changed": true}`. Read the new id from the
+response — the old one stops resolving immediately, and a later call with it
+returns `unknown id`.
+
+**Then re-point the citations, in the same commit as the move —
+paths *and* ids.** The move changes both, and archiving is a bug file's *normal*
+end state — so every citation of `docs/issues/<slug>.md`, and every citation of
+that artifact's 16-hex id, is a scheduled break, and the move is the moment it
+fires. Measured 2026-08-08: three archive moves left **25**
 dangling refs across 15 files, and the one in `docs/manual/src/concepts/`
 failed CI's `Audit Doc Refs` gate on the tip commit of a release promotion.
 
@@ -191,18 +199,25 @@ behavior — including the session-passover pattern — see
 
 How artifacts reference each other, and who maintains the link graph:
 
-- **Cite by stable ID in prose.** Entry IDs in their ledger's namespace
+- **Cite by ID in prose.** Entry IDs in their ledger's namespace
   (`A-11`, `F-3`, `BUG-40`), artifact ids (16-hex) or rel_paths across
   files, `<repo>:<ID>` across repos. Prose is the ONLY write surface for
   citations — never hand-create `cites` edges.
+  **Entry IDs are stable; artifact ids are not.** A 16-hex artifact id is
+  `sha256(abs_path)`, so it changes whenever the file moves — archiving one is
+  the common case. Prefer an entry ID or a rel_path when the target is likely to
+  be archived, and re-point 16-hex citations in the same commit as the move
+  (`id_changed: true` in the move response is the signal).
 - **`link_scan` derives the edges.** `librarian(action="link_scan")` parses
   artifact bodies, resolves citations (entry tokens by their defining
   heading; archived definers lose ties to active ones; ambiguous tokens are
   reported, never guessed), and materializes/prunes scanner-owned
   `rel="cites"` edges. `write=false` (default) reports; `write=true`
   applies. Idempotent — safe to re-run any time, and the repair path after
-  moves/reindex (the catalog's abs_path pre-clean cascade-drops a moved
-  artifact's links; the scan heals them).
+  reindex. `artifact(action="move")` now grafts an artifact's links onto its
+  new id itself, so the move no longer drops them; the scan is what heals the
+  cases that bypass it — a bare `git mv`, or any other route that leaves a row
+  whose id does not match its path for the abs_path pre-clean to cascade-drop.
 - **Manual rels are few and deliberate:** `evidence-for`, `promoted-to`,
   `refutes` via `artifact(action="link")` — use sparingly; a wrong edge
   pollutes context packing. `supersedes` is side-effectful (flips dst

@@ -99,7 +99,7 @@ impl Tool for Artifact {
                 },
                 "start_line": { "type": "integer", "description": "get: 1-indexed start of line slice" },
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive end of line slice" },
-                "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists." },
+                "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists. NOTE: a move MINTS A NEW ID (id = sha256(abs_path)); the artifact's events, links, observations and augmentation are grafted onto it and the old row is dropped. The response carries `id` (new), `previous_id`, `id_changed` and `history_grafted` — read the new id from there, re-point prose citing the old one, and never reuse a cached id across a move." },
                 "rel_path": { "type": "string", "description": "create: relative path for new file. In find results: path relative to repo root — does NOT include the repo name (use the `repo` field for that). When filtering by path use contains/prefix on the path portion only, e.g. {\"contains\": {\"field\": \"rel_path\", \"value\": \"docs/trackers\"}}." },
                 "repo": { "type": "string", "description": "create: workspace root name (git repo basename). Omit to infer from active project — rel_path is then treated as project-relative and the subdir prefix is prepended automatically." },
                 "title": { "type": "string", "description": "create: artifact title" },
