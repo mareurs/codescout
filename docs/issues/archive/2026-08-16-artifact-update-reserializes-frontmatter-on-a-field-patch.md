@@ -1,7 +1,7 @@
 ---
-id: '861b565a934fcb2c'
+id: 82ba248228301486
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(update) re-serializes the whole frontmatter block on a single-field patch, so the mandated archive step reformats hand-authored YAML'
 tags:
 - librarian
@@ -9,6 +9,7 @@ tags:
 - update
 - archive
 - blast-radius
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -159,59 +160,74 @@ is vulnerable.
 
 ## Fix
 
-Not implemented. Proposed, in ADR form:
+Fixed on `experiments`. Both halves of the proposed decision landed, plus a third branch the
+proposal did not know about.
 
-**Decision:** name the boundary in `frontmatter.rs` — a *normalizing* writer and a
-*preserving* writer — and route single-scalar field patches through the preserving one.
-Generalize `replace_id_line` to `replace_scalar_line(doc, key, value)`, using the identical
-delimiter scan, the identical `scalar_can_be_bare` quoting, and the identical decline-rather-
-than-guess contract.
+**The rename.** `update_in_place` → `rewrite_frontmatter_normalizing`. The name now states the
+contract, so the next engineer needing "change one field without disturbing the file" no
+longer reaches for the reformatter by reading. Four tests carrying the old name were renamed
+with it — a test named after a function that no longer exists is the same defect one layer up.
 
-**Context:** one repair path was fixed on measured evidence; its sibling was reasoned about
-and left. The property that distinguishes them is not *which tool called* but *whose form the
-file is* — librarian-owned or human-owned.
+**The preserving writer, generalized.** `replace_id_line` →
+`replace_scalar_line(doc, key, value)`. The key was already a hardcoded literal inside that
+function; parameterizing it removes a constant rather than inventing an interface, so the
+rule-of-three discipline is not in tension here. Same delimiter scan, same
+`scalar_can_be_bare` quoting, same decline-rather-than-guess contract.
 
-**Alternatives considered:**
+**Two hazards the id-only ancestor could not reach**, found while generalizing and both
+mutation-verified:
 
-- *Leave it.* One file per deliberate call is a real argument, and this may sit below the
-  line. Rejected because the call is the mandated archive step and the failure is silent.
-- *Rename only* (`update_in_place` -> `rewrite_frontmatter_normalizing`). Cheapest, and
-  captures much of the value, since the defect is that the name misleads. Viable as a first
-  commit even if the splice never lands.
-- *Guard: refuse when the round-trip would change more than the targeted line.* Rejected for
-  the same reason BL-34 rejected it — a guard sited where a fix belongs.
-- *Report `reformatted: true` in the response.* Honest, still reformats.
+- *An apostrophe in the value.* Ids are hex; a title or topic is not. Emitted raw inside
+  single quotes it closes the quote early and corrupts **every following line of the block** —
+  a one-field write costing the whole document. Now escaped by doubling, per YAML
+  single-quoted style.
+- *A newline in the value.* It cannot be one line, so there is no splice to make.
+  `replace_scalar_line` declines and the caller re-serializes.
 
-**Consequences:**
+**The third branch, which measuring found and prose would have excused.** The proposal named
+two call sites. Rather than repeat this bug's own root cause — a sibling waved through in
+writing — the `patch.body` branch got a test instead of a sentence. It failed, with the
+identical seven-line signature: a body overwrite was re-emitting the frontmatter because
+`write(&fm, new_body)` rebuilds the whole document. Fixed with `replace_body(doc, new_body)`,
+the mirror-image primitive: everything through the closing delimiter is the author's, only
+what follows changes.
 
-- now easier: the documented archive step stops being destructive on hand-authored YAML;
-  the two primitives' names finally describe their contracts.
-- now harder: two write paths for one field. `owners`/`tags` (sequences) and *absent* fields
-  have no line to splice and must still go through `write`, so the split is conditional and
-  the tests must pin which path fired. That is real cost and it is the strongest argument for
-  the rename-only option.
-
-**Change scenarios absorbed:** archiving a hand-authored tracker or ADR in any repo reachable
-via umbrella scope; any future single-field repair arm on `doctor`.
-
-**Revisit-when:** if a third caller needs single-field frontmatter writes, the duplication
-dictates the shape and the abstraction stops being a guess (rule of three).
-
-**Confidence:** high on the defect (measured); medium on the fix shape — the sequence and
-absent-field cases keep `write` alive, so the boundary is not as clean as BL-34's was.
-
+**Wiring.** `patch_changes_frontmatter(patch)` and `try_preserving_frontmatter_patch(doc,
+patch)` in `update.rs`. All three branches now try the splice first and fall back to
+`rewrite_frontmatter_normalizing` only when one cannot express the change — an absent key, a
+sequence field (`owners`/`tags`), an `extra` map, a newline value, or no frontmatter block at
+all. The splice is **all-or-nothing**: the first key with no line aborts the whole attempt,
+because a half-spliced, half-stale block is worse than one honest re-serialization.
 ## Tests added
 
-None — not fixed. The regression test must assert **byte equality outside the patched line**
-against a fixture hostile to normalization: flow sequence, double-quoted title,
-`{Placeholder}` value, null key, nested map at non-canonical indent, and a key order the
-struct would not produce. Asserting only that `status` changed is what let this through.
+**Two in `update.rs`, both watched fail first, both driving the real tool** — not
+`rewrite_frontmatter_normalizing` directly, because a unit test on a shared primitive cannot
+catch a caller that routes around it:
 
-Drive it through the **real tool** — `artifact(action="update")` — not through
-`update_in_place` directly. This session has now hit the "test exercises the mechanism but
-not the call site" shape five times; a unit test on the primitive cannot catch a caller that
-routes around it.
+- `patching_one_scalar_field_leaves_every_other_frontmatter_byte_alone` — RED reproduced all
+  seven lines in the harness, including `created:` → `YYYY-MM-DD: null` and the `id` quote
+  flip between the two writers.
+- `overwriting_the_body_leaves_the_hand_authored_frontmatter_alone` — this one was written to
+  *test* an assumption rather than confirm a known defect, and it failed. That is the whole
+  reason it exists.
 
+Both use a fixture hostile to normalization: double-quoted title, flow sequence,
+`{YYYY-MM-DD}` flow mapping, explicit null, nested map at four-space indent, and a key order
+the struct does not produce.
+
+**Four new in `frontmatter.rs`**, covering the genuinely-new code paths:
+`replace_scalar_line_escapes_an_apostrophe_in_the_value`,
+`replace_scalar_line_declines_a_value_that_cannot_be_one_line`,
+`replace_body_preserves_the_frontmatter_block_verbatim`,
+`replace_body_preserves_crlf_frontmatter`.
+
+**Mutation-verified.** Both new guards were broken deliberately and each killed exactly its
+own test — the apostrophe mutation failing with `malformed frontmatter YAML: did not find
+expected key`, i.e. the whole block unparseable, which is the predicted corruption. **22
+sibling tests stayed green**, and that number is the measure of what the suite was blind to
+before these two.
+
+Gate: **3965 tests**, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`.
 ## Workarounds
 
 For a hand-authored artifact in a foreign repo, flip status by editing the file directly
@@ -221,17 +237,16 @@ restore any `{Placeholder}` lines by hand.
 
 ## Resume
 
-Decide between *rename-only* and *rename + `replace_scalar_line`*. The rename is a small,
-safe first commit and removes the trap that caused this; the splice is the actual fix and
-carries the conditional-path cost named above.
+None — all three frontmatter-touching branches fixed and covered.
 
-Whichever is chosen, re-run the probe in this file's Reproduction section afterwards — it is
-six calls, self-cleaning, and it is what turned this from an inference into a measurement.
-
+One thing worth carrying forward rather than closing: this bug was *caused* by a sentence in
+BL-34 excusing an unmeasured sibling, and during its own fix the same shape appeared again —
+a third branch the proposal had not counted. It cost one test to find. **The probe is the
+cheap move; the sentence is the expensive one.** Recorded in the Snow Lion's
+`platform-law-leaks-at-call-sites` memory as datapoint (5) with a fourth standing note.
 ## References
 
 - `docs/issues/archive/2026-08-16-frontmatter-id-repair-reserializes-the-whole-block.md` — BL-34, the same mechanism at `mv`
 - `src/librarian/tools/update.rs:111-134` — `apply_frontmatter_patch` and its three branches
 - `src/librarian/frontmatter.rs:180-185` — `update_in_place`, the normalizing writer
 - `src/librarian/frontmatter.rs:203-244` — `replace_id_line`, the preserving writer
-

@@ -133,6 +133,59 @@ fn apply_frontmatter_patch(
     merge_extra(fm, &patch.extra);
 }
 
+/// Whether this patch writes any frontmatter field at all. Shared by the two
+/// branches in [`call`] that must choose between the preserving and normalizing
+/// writers — a body-only patch must not touch the block, and a patch that does
+/// write fields still tries the splice first.
+fn patch_changes_frontmatter(patch: &UpdatePatch) -> bool {
+    patch.status.is_some()
+        || patch.title.is_some()
+        || patch.owners.is_some()
+        || patch.tags.is_some()
+        || patch.topic.is_some()
+        || patch.time_scope.is_some()
+        || patch.extra.is_some()
+}
+
+/// Attempt the *preserving* write of a frontmatter patch: splice each targeted
+/// scalar's own line and leave every other byte of the document alone.
+///
+/// Returns `None` — meaning "fall back to
+/// [`crate::librarian::frontmatter::rewrite_frontmatter_normalizing`]" — whenever
+/// a splice cannot express the patch:
+///
+/// - `owners`/`tags` are sequences and `extra` is a map, so none of them has a
+///   single line to replace;
+/// - a targeted key is absent from the block, so there is no line to splice and
+///   writing the field at all requires re-emitting;
+/// - the value carries a newline, which cannot be one line
+///   (`replace_scalar_line` declines).
+///
+/// The fallback is not a defect, it is the honest boundary. This path exists so
+/// the *common* single-scalar patch stops reformatting a hand-authored file — it
+/// does not replace the serializer. BL-36.
+fn try_preserving_frontmatter_patch(doc: &str, patch: &UpdatePatch) -> Option<String> {
+    if patch.owners.is_some() || patch.tags.is_some() || patch.extra.is_some() {
+        return None;
+    }
+    let mut out = doc.to_string();
+    let mut spliced = false;
+    for (key, value) in [
+        ("status", patch.status.as_deref()),
+        ("title", patch.title.as_deref()),
+        ("topic", patch.topic.as_deref()),
+        ("time_scope", patch.time_scope.as_deref()),
+    ] {
+        let Some(value) = value else { continue };
+        // `?` on the first key that has no line: an all-or-nothing splice. A
+        // partial one would leave the block half-spliced and half-stale, which is
+        // worse than one honest re-serialization.
+        out = crate::librarian::frontmatter::replace_scalar_line(&out, key, value)?;
+        spliced = true;
+    }
+    spliced.then_some(out)
+}
+
 /// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
 /// Mirrors the batch semantics of `edit_markdown`'s `edits=[...]`. Used by
 /// `artifact(update, patch={body_edits: [...]})` to provide surgical body
@@ -355,20 +408,31 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
             _ => new_body.clone(),
         };
-        crate::librarian::frontmatter::write(&fm, &format!("\n{actual_body}\n"))
+        let rendered_body = format!("\n{actual_body}\n");
+        // A body overwrite has no business re-emitting the frontmatter, and a
+        // field patch alongside it usually splices. Fall back to `write` only
+        // when a splice cannot express the change — an absent key, a sequence
+        // field, or a document with no frontmatter block to preserve. BL-36.
+        let preserved_head = if patch_changes_frontmatter(patch) {
+            try_preserving_frontmatter_patch(&original, patch)
+        } else {
+            Some(original.clone())
+        };
+        preserved_head
+            .and_then(|head| crate::librarian::frontmatter::replace_body(&head, &rendered_body))
+            .unwrap_or_else(|| crate::librarian::frontmatter::write(&fm, &rendered_body))
     } else if let Some(edits) = &patch.body_edits {
         let mut working = original.clone();
-        let fm_changing = patch.status.is_some()
-            || patch.title.is_some()
-            || patch.owners.is_some()
-            || patch.tags.is_some()
-            || patch.topic.is_some()
-            || patch.time_scope.is_some()
-            || patch.extra.is_some();
-        if fm_changing {
-            working = crate::librarian::frontmatter::update_in_place(&working, |fm| {
-                apply_frontmatter_patch(fm, patch);
-            })?;
+        if patch_changes_frontmatter(patch) {
+            working = match try_preserving_frontmatter_patch(&working, patch) {
+                Some(preserved) => preserved,
+                None => crate::librarian::frontmatter::rewrite_frontmatter_normalizing(
+                    &working,
+                    |fm| {
+                        apply_frontmatter_patch(fm, patch);
+                    },
+                )?,
+            };
         }
         apply_body_edits(&working, edits, &mut consumed_subsections).map_err(|e| {
             // Extract nudge inputs in a scoped block so the borrow of `e` ends
@@ -413,9 +477,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
         })?
     } else {
-        crate::librarian::frontmatter::update_in_place(&original, |fm| {
-            apply_frontmatter_patch(fm, patch);
-        })?
+        match try_preserving_frontmatter_patch(&original, patch) {
+            Some(preserved) => preserved,
+            None => {
+                crate::librarian::frontmatter::rewrite_frontmatter_normalizing(&original, |fm| {
+                    apply_frontmatter_patch(fm, patch);
+                })?
+            }
+        }
     };
 
     if body_changing && !a.force && original.len() >= SHRINK_GUARD_MIN_BYTES {
@@ -612,8 +681,9 @@ pub(crate) fn write_field_to_frontmatter(
             )
         }
     })?;
-    let new_content =
-        crate::librarian::frontmatter::update_in_place(&original, |fm| match field {
+    let new_content = crate::librarian::frontmatter::rewrite_frontmatter_normalizing(
+        &original,
+        |fm| match field {
             "status" => {
                 if let Some(s) = value.as_str() {
                     fm.status = Some(s.into());
@@ -635,7 +705,8 @@ pub(crate) fn write_field_to_frontmatter(
                 }
             }
             _ => unreachable!("guarded by WRITABLE check above"),
-        })?;
+        },
+    )?;
     std::fs::write(&full, &new_content)?;
     Ok(())
 }
@@ -761,6 +832,138 @@ mod tests {
 
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.status, "archived");
+    }
+
+    /// Regression: docs/issues/2026-08-16-artifact-update-reserializes-frontmatter-on-a-field-patch.md
+    /// (BL-36). A single-field patch used to re-emit the entire block from the
+    /// parsed struct, so a hand-authored file came back requoted, reordered, with
+    /// flow sequences exploded to block style, null keys dropped, and — worst —
+    /// `created: {YYYY-MM-DD}` expanded into `created:\n  YYYY-MM-DD: null`,
+    /// because a `{Placeholder}` is valid YAML for a flow mapping. Measured on a
+    /// probe: one field patched, seven lines changed, six unrequested.
+    ///
+    /// Two things this test does deliberately. The fixture is **hostile to
+    /// normalization** — asserting only that `status` changed is exactly what let
+    /// BL-34's mechanism survive at this call site. And it drives the **real
+    /// tool**, not `rewrite_frontmatter_normalizing` directly, because a unit test
+    /// on a shared primitive cannot catch a caller that routes around it.
+    #[tokio::test]
+    async fn patching_one_scalar_field_leaves_every_other_frontmatter_byte_alone() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "hand.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        // Overwrite with YAML the librarian would never emit: a double-quoted
+        // title, a flow sequence, a `{Placeholder}` flow mapping, an explicit
+        // null, a nested map at four-space indent, and a key order the struct
+        // does not produce.
+        let hostile = format!(
+            r#"---
+id: {id}
+kind: spec
+status: draft
+title: "Hand Authored"
+tags: [alpha, beta]
+created: {{YYYY-MM-DD}}
+owner: marius
+topic: null
+nested:
+    deep: value
+---
+
+# Body
+
+text
+"#
+        );
+        let path = tmp.path().join("hand.md");
+        std::fs::write(&path, &hostile).unwrap();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "archived"}}),
+        )
+        .await
+        .unwrap();
+
+        let expected = hostile.replace("status: draft", "status: archived");
+        let actual = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            actual, expected,
+            "only the `status:` line may change — every other byte is the author's"
+        );
+    }
+
+    /// The sibling of the test above, written because BL-36's own lesson is that
+    /// a fix's prose excusing an unmeasured call site is a claim, not a decision.
+    /// `patch.body` is the third frontmatter-touching branch in `call`; it rebuilds
+    /// the document as `write(&fm, new_body)`, so the block is re-emitted even
+    /// though the caller asked only for a new body.
+    #[tokio::test]
+    async fn overwriting_the_body_leaves_the_hand_authored_frontmatter_alone() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "hand2.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let hostile = format!(
+            r#"---
+id: {id}
+kind: spec
+status: draft
+title: "Hand Authored"
+tags: [alpha, beta]
+created: {{YYYY-MM-DD}}
+owner: marius
+topic: null
+nested:
+    deep: value
+---
+
+# Body
+
+text
+"#
+        );
+        let path = tmp.path().join("hand2.md");
+        std::fs::write(&path, &hostile).unwrap();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "# New\n\nreplaced prose\n"}}),
+        )
+        .await
+        .unwrap();
+
+        // Everything up to and including the closing delimiter is the author's.
+        let fm_end = hostile[4..].find("\n---\n").map(|i| i + 4 + 5).unwrap();
+        let fm_block = &hostile[..fm_end];
+        let actual = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            actual.starts_with(fm_block),
+            "a body overwrite must not touch the frontmatter block\n  want prefix: {fm_block:?}\n  got:         {actual:?}"
+        );
+        assert!(
+            actual.contains("replaced prose"),
+            "the body should still have been replaced; got: {actual:?}"
+        );
     }
 
     /// Regression: docs/issues/archive/2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md

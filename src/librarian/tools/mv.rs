@@ -160,7 +160,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// return the file's post-repair content.
 ///
 /// **Only an id already present is rewritten.** A file carrying none is not
-/// asserting anything false, and `frontmatter::update_in_place` would *insert* a
+/// asserting anything false, and `frontmatter::rewrite_frontmatter_normalizing` would *insert* a
 /// block rather than skip — stamping an `id:` is exactly what subjects a file to
 /// the librarian guard, so archiving a prose tracker like
 /// `docs/trackers/skill-frictions.md` would quietly make `edit_markdown` refuse
@@ -197,7 +197,7 @@ pub(super) fn repair_frontmatter_id(
         return Ok(content);
     }
 
-    match crate::librarian::frontmatter::replace_id_line(&content, new_id) {
+    match crate::librarian::frontmatter::replace_scalar_line(&content, "id", new_id) {
         Some(rewritten) => {
             std::fs::write(path, &rewritten)?;
             Ok(rewritten)
@@ -370,9 +370,9 @@ mod tests {
         );
     }
 
-    /// The other half, and the reason this is not simply `update_in_place`.
+    /// The other half, and the reason this is not simply the normalizing writer.
     ///
-    /// `frontmatter::update_in_place` inserts a frontmatter block when none exists,
+    /// `frontmatter::rewrite_frontmatter_normalizing` inserts a frontmatter block when none exists,
     /// so applying it unconditionally would stamp an `id:` onto files that never had
     /// one — and a stamped id is exactly what subjects a file to the librarian guard
     /// (BL-33). Archiving `docs/trackers/skill-frictions.md` would silently make it
@@ -430,7 +430,7 @@ mod tests {
 
     /// BL-34, asserted at the caller.
     ///
-    /// `frontmatter::replace_id_line`'s own tests prove the splice; they cannot prove
+    /// `frontmatter::replace_scalar_line`'s own tests prove the splice; they cannot prove
     /// `move` *reaches for* it. That gap is exactly how the re-serialization shipped —
     /// `move_rewrites_the_frontmatter_id_it_just_invalidated` was green throughout,
     /// because it only ever asserted that the id changed.

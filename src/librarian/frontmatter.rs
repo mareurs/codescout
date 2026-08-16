@@ -177,32 +177,107 @@ fn scalar_can_be_bare(s: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn update_in_place(doc: &str, edit: impl FnOnce(&mut Frontmatter)) -> Result<String> {
+pub fn rewrite_frontmatter_normalizing(
+    doc: &str,
+    edit: impl FnOnce(&mut Frontmatter),
+) -> Result<String> {
     let (fm_opt, body) = parse(doc)?;
     let mut fm = fm_opt.unwrap_or_default();
     edit(&mut fm);
     Ok(write(&fm, body))
 }
 
-/// Swap the frontmatter's top-level `id:` line for `new_id`, leaving every other
-/// byte of the document untouched.
+/// Swap the frontmatter's top-level `<key>:` line for `value`, leaving every
+/// other byte of the document untouched.
 ///
-/// [`update_in_place`] is the wrong primitive for a one-field repair: it re-emits
-/// the whole block from the parsed struct, so a hand-authored file comes back
-/// requoted, reordered, with flow sequences rendered as block ones and null keys
-/// dropped. Worse, a `{Placeholder}` is valid YAML for a *flow mapping*, so an ADR
-/// template's `created: {YYYY-MM-DD}` round-trips into `created:\n  YYYY-MM-DD: null`
-/// — semantically identical, and no longer a placeholder.
+/// [`rewrite_frontmatter_normalizing`] is the wrong primitive for a one-field
+/// write: it re-emits the whole block from the parsed struct, so a hand-authored
+/// file comes back requoted, reordered, with flow sequences rendered as block
+/// ones and null keys dropped. Worse, a `{Placeholder}` is valid YAML for a
+/// *flow mapping*, so an ADR template's `created: {YYYY-MM-DD}` round-trips into
+/// `created:\n  YYYY-MM-DD: null` — semantically identical, and no longer a
+/// placeholder.
 ///
-/// Measured 2026-08-16 through the identical call: 3.5 changed lines per file on a
-/// librarian-written corpus, **30** on a hand-authored one. Value-preserving and
-/// form-preserving are different properties; a repair owes both. BL-34.
+/// Measured twice through real callers. `move`: 3.5 changed lines per file on a
+/// librarian-written corpus, **30** on a hand-authored one (BL-34). Then
+/// `artifact(update, patch={status})` on a hostile fixture: one field requested,
+/// **seven** lines changed, six unrequested (BL-36). Value-preserving and
+/// form-preserving are different properties; a targeted write owes both.
 ///
-/// Returns `None` when there is no frontmatter, or none carrying a top-level `id:`
-/// — a file that declares nothing is not declaring anything wrong.
-pub fn replace_id_line(doc: &str, new_id: &str) -> Option<String> {
+/// Returns `None` when there is nothing to splice — no frontmatter, or no
+/// top-level `<key>:` line in it. That is a *decline*, not a failure: the caller
+/// decides whether to fall back to the normalizing writer or leave the file
+/// alone. Both callers do so deliberately, and for opposite reasons — `move`
+/// leaves the file alone (a stale id is a broken citation; a reformat is data
+/// loss), `update` falls back (the field must be written, and an absent key has
+/// no line to replace).
+pub fn replace_scalar_line(doc: &str, key: &str, value: &str) -> Option<String> {
     // Same delimiter scan `parse` performs, so the two agree on where the
     // frontmatter ends — a splice that disagreed would edit body text.
+    let after_open = if doc.starts_with("---\r\n") {
+        5
+    } else if doc.starts_with("---\n") {
+        4
+    } else {
+        return None;
+    };
+
+    // A value carrying a newline cannot BE a single line, so there is no splice
+    // to make. Decline and let the caller choose — same contract as a missing key.
+    if value.contains('\n') {
+        return None;
+    }
+
+    let prefix = format!("{key}:");
+    let rest = &doc[after_open..];
+    let mut idx = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed == "---" {
+            // Closing delimiter with no top-level `<key>:` above it. Any match
+            // below is body text.
+            return None;
+        }
+        // `trimmed`, not `line`, and no trim_start: an indented `<key>:` belongs
+        // to a nested mapping, not to the artifact.
+        if trimmed.starts_with(&prefix) {
+            let start = after_open + idx;
+            // `trimmed.len()` stops before the line ending, so the original `\n`
+            // or `\r\n` is carried through untouched by the tail splice.
+            let end = start + trimmed.len();
+            let rendered = if scalar_can_be_bare(value) {
+                format!("{key}: {value}")
+            } else {
+                // YAML single-quoted style escapes an apostrophe by doubling it.
+                // The id-only ancestor of this function never hit that — ids are
+                // hex — but a title or topic can carry one, and emitting it raw
+                // would close the quote early and corrupt the whole block.
+                format!("{key}: '{}'", value.replace('\'', "''"))
+            };
+            let mut out = String::with_capacity(doc.len() + rendered.len());
+            out.push_str(&doc[..start]);
+            out.push_str(&rendered);
+            out.push_str(&doc[end..]);
+            return Some(out);
+        }
+        idx += line.len();
+    }
+    None
+}
+
+/// Swap the document's body, leaving the frontmatter block byte-identical.
+///
+/// The twin of [`replace_scalar_line`] for the other half of the file. A body
+/// overwrite has no business re-emitting the frontmatter, but
+/// `write(&fm, new_body)` does exactly that — measured on a hostile fixture, a
+/// `patch={body}` call reformatted six frontmatter lines it was never asked to
+/// touch, including expanding `created: {YYYY-MM-DD}` into a nested null. BL-36.
+///
+/// `new_body` is written verbatim after the closing delimiter's line ending, so
+/// the caller owns the leading blank line exactly as it does with [`write`].
+/// Returns `None` when the document has no frontmatter block to preserve — there
+/// is nothing to protect, and [`write`] is then the right call.
+pub fn replace_body(doc: &str, new_body: &str) -> Option<String> {
     let after_open = if doc.starts_with("---\r\n") {
         5
     } else if doc.starts_with("---\n") {
@@ -214,28 +289,13 @@ pub fn replace_id_line(doc: &str, new_id: &str) -> Option<String> {
     let rest = &doc[after_open..];
     let mut idx = 0usize;
     for line in rest.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed == "---" {
-            // Closing delimiter with no top-level `id:` above it. Any `id:` below
-            // is body text.
-            return None;
-        }
-        // `trimmed`, not `line`, and no trim_start: an indented `id:` belongs to a
-        // nested mapping, not the artifact.
-        if trimmed.starts_with("id:") {
-            let start = after_open + idx;
-            // `trimmed.len()` stops before the line ending, so the original `\n` or
-            // `\r\n` is carried through untouched by the tail splice.
-            let end = start + trimmed.len();
-            let rendered = if scalar_can_be_bare(new_id) {
-                format!("id: {new_id}")
-            } else {
-                format!("id: '{new_id}'")
-            };
-            let mut out = String::with_capacity(doc.len() + rendered.len());
-            out.push_str(&doc[..start]);
-            out.push_str(&rendered);
-            out.push_str(&doc[end..]);
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            // Past the closing delimiter's own line ending: everything before this
+            // point is the author's frontmatter, byte for byte.
+            let body_start = after_open + idx + line.len();
+            let mut out = String::with_capacity(body_start + new_body.len());
+            out.push_str(&doc[..body_start]);
+            out.push_str(new_body);
             return Some(out);
         }
         idx += line.len();
@@ -458,9 +518,9 @@ mod tests {
     }
 
     #[test]
-    fn update_in_place_preserves_untouched_fields() {
+    fn rewrite_frontmatter_normalizing_preserves_untouched_fields() {
         let doc = "---\nkind: spec\nstatus: draft\ntitle: Original\n---\n\nbody\n";
-        let updated = update_in_place(doc, |fm| {
+        let updated = rewrite_frontmatter_normalizing(doc, |fm| {
             fm.status = Some("active".into());
         })
         .unwrap();
@@ -470,9 +530,9 @@ mod tests {
     }
 
     #[test]
-    fn update_in_place_inserts_frontmatter_if_absent() {
+    fn rewrite_frontmatter_normalizing_inserts_frontmatter_if_absent() {
         let doc = "# Heading\n\nbody\n";
-        let updated = update_in_place(doc, |fm| {
+        let updated = rewrite_frontmatter_normalizing(doc, |fm| {
             fm.kind = Some("doc".into());
         })
         .unwrap();
@@ -504,11 +564,11 @@ mod tests {
     }
 
     #[test]
-    fn update_in_place_does_not_introduce_null_keys() {
+    fn rewrite_frontmatter_normalizing_does_not_introduce_null_keys() {
         // A real bug file's shape: no id/title/topic/time_scope keys at all.
         // Flipping `status` must not conjure those keys into existence.
         let doc = "---\nstatus: open\nseverity: medium\nkind: bug\n---\n\nbody\n";
-        let updated = update_in_place(doc, |fm| {
+        let updated = rewrite_frontmatter_normalizing(doc, |fm| {
             fm.status = Some("fixed".into());
         })
         .unwrap();
@@ -520,15 +580,19 @@ mod tests {
     }
 
     #[test]
-    fn update_in_place_is_idempotent_after_first_normalization() {
+    fn rewrite_frontmatter_normalizing_is_idempotent_after_first_pass() {
         // Re-serializing through serde cannot preserve the source's key order or
         // inline-vs-block scalar style, so the FIRST update of a hand-written file
         // still normalizes its shape. What must hold is that the normalization is
         // one-time: updating an already-normalized file changes nothing but the
         // field being set. Otherwise every update would re-churn the same file.
         let doc = "---\nstatus: open\nseverity: medium\nkind: bug\ntags: [a, b]\n---\n\nbody\n";
-        let once = update_in_place(doc, |fm| fm.status = Some("investigating".into())).unwrap();
-        let twice = update_in_place(&once, |fm| fm.status = Some("investigating".into())).unwrap();
+        let once =
+            rewrite_frontmatter_normalizing(doc, |fm| fm.status = Some("investigating".into()))
+                .unwrap();
+        let twice =
+            rewrite_frontmatter_normalizing(&once, |fm| fm.status = Some("investigating".into()))
+                .unwrap();
         assert_eq!(
             once, twice,
             "a second identical update must be a no-op; churn is not allowed to recur"
@@ -540,13 +604,14 @@ mod tests {
     /// The fixture is deliberately hostile to normalization — a flow sequence, a
     /// double-quoted title, a `{Placeholder}` (valid YAML for a flow *mapping*),
     /// and two null/empty keys. Every one of those is something
-    /// `update_in_place` rewrites, and the reason this needs a different primitive.
+    /// `rewrite_frontmatter_normalizing` rewrites, and the reason this needs a
+    /// different primitive.
     ///
     /// The assertion is byte equality against the document with only that one line
     /// substituted. Asserting merely that the id changed is what let the
     /// re-serialization through in the first place.
     #[test]
-    fn replace_id_line_touches_only_the_id_line() {
+    fn replace_scalar_line_touches_only_the_targeted_line() {
         let doc = concat!(
             "---\n",
             "kind: adr\n",
@@ -560,7 +625,8 @@ mod tests {
             "\n# Body\n\nSome prose with an id: like token.\n",
         );
 
-        let out = replace_id_line(doc, "bbbbbbbbbbbbbbbb").expect("a top-level id: line exists");
+        let out = replace_scalar_line(doc, "id", "bbbbbbbbbbbbbbbb")
+            .expect("a top-level id: line exists");
 
         assert_eq!(
             out,
@@ -574,8 +640,8 @@ mod tests {
     /// The one thing a line splice must not lose relative to `write`: an id YAML
     /// would resolve to a non-string still has to come back quoted.
     #[test]
-    fn replace_id_line_quotes_an_id_yaml_would_misread() {
-        let out = replace_id_line("---\nid: abc\nkind: bug\n---\n", "1234567890123456")
+    fn replace_scalar_line_quotes_a_value_yaml_would_misread() {
+        let out = replace_scalar_line("---\nid: abc\nkind: bug\n---\n", "id", "1234567890123456")
             .expect("an id line exists");
         assert_eq!(
             out, "---\nid: '1234567890123456'\nkind: bug\n---\n",
@@ -584,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn replace_id_line_declines_when_there_is_nothing_to_replace() {
+    fn replace_scalar_line_declines_when_there_is_nothing_to_replace() {
         for (label, doc) in [
             (
                 "no frontmatter at all",
@@ -604,7 +670,7 @@ mod tests {
             ),
         ] {
             assert!(
-                replace_id_line(doc, "bbbbbbbbbbbbbbbb").is_none(),
+                replace_scalar_line(doc, "id", "bbbbbbbbbbbbbbbb").is_none(),
                 "{label}: must decline rather than rewrite"
             );
         }
@@ -613,9 +679,83 @@ mod tests {
     /// CRLF documents exist in this corpus (`handles_trailing_crlf` above), and a
     /// splice that assumed `\n` would eat the `\r` and corrupt every following line.
     #[test]
-    fn replace_id_line_preserves_crlf_line_endings() {
-        let out = replace_id_line("---\r\nid: abc\r\nkind: bug\r\n---\r\n", "ffffffffffffffff")
-            .expect("an id line exists");
+    fn replace_scalar_line_preserves_crlf_line_endings() {
+        let out = replace_scalar_line(
+            "---\r\nid: abc\r\nkind: bug\r\n---\r\n",
+            "id",
+            "ffffffffffffffff",
+        )
+        .expect("an id line exists");
         assert_eq!(out, "---\r\nid: ffffffffffffffff\r\nkind: bug\r\n---\r\n");
+    }
+
+    /// Generalizing from `id` to any key opened a hazard the ancestor could not
+    /// reach: ids are hex, but a title or topic can carry an apostrophe. Emitted
+    /// raw inside single quotes it closes the quote early and corrupts every
+    /// following line of the block — a one-field write costing the whole document.
+    #[test]
+    fn replace_scalar_line_escapes_an_apostrophe_in_the_value() {
+        let out = replace_scalar_line(
+            "---\nid: abc\ntitle: old\n---\n# b\n",
+            "title",
+            "It's a #hash: colon",
+        )
+        .expect("a title line exists");
+
+        let (fm, _) = parse(&out).expect("the block must still parse after the splice");
+        assert_eq!(
+            fm.expect("frontmatter").title.as_deref(),
+            Some("It's a #hash: colon"),
+            "the value must round-trip through YAML exactly; emitted: {out:?}"
+        );
+    }
+
+    #[test]
+    fn replace_scalar_line_declines_a_value_that_cannot_be_one_line() {
+        assert!(
+            replace_scalar_line("---\nid: abc\ntitle: old\n---\n", "title", "two\nlines").is_none(),
+            "a newline cannot live on a spliced single line — decline so the caller re-serializes"
+        );
+    }
+
+    /// `replace_body` is the mirror image of `replace_scalar_line`: the frontmatter
+    /// block belongs to the author byte-for-byte, and only what follows the closing
+    /// delimiter may change. Measured need — `patch={body}` re-emitted six
+    /// frontmatter lines it was never asked to touch (BL-36).
+    #[test]
+    fn replace_body_preserves_the_frontmatter_block_verbatim() {
+        let doc = concat!(
+            "---\n",
+            "title: \"Kept\"\n",
+            "tags: [a, b]\n",
+            "created: {YYYY-MM-DD}\n",
+            "---\n",
+            "\nold body\n",
+        );
+
+        assert_eq!(
+            replace_body(doc, "\nnew body\n").expect("a frontmatter block exists"),
+            concat!(
+                "---\n",
+                "title: \"Kept\"\n",
+                "tags: [a, b]\n",
+                "created: {YYYY-MM-DD}\n",
+                "---\n",
+                "\nnew body\n",
+            ),
+            "the flow sequence, the quoted title and the placeholder must all survive"
+        );
+        assert!(
+            replace_body("# no frontmatter\n", "x").is_none(),
+            "nothing to preserve means `write` is the right call, not a splice"
+        );
+    }
+
+    #[test]
+    fn replace_body_preserves_crlf_frontmatter() {
+        assert_eq!(
+            replace_body("---\r\nid: abc\r\n---\r\nold\n", "new\n").expect("block exists"),
+            "---\r\nid: abc\r\n---\r\nnew\n"
+        );
     }
 }

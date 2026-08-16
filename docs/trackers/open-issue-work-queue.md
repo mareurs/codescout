@@ -76,7 +76,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
-| BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | open | `861b565a934fcb2c` |
+| BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were

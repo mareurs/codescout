@@ -159,7 +159,10 @@ under `body_edits`, once in the plain-patch `else` branch with no body change at
 **Root cause:** The `body_edits` frontmatter-touch-up path was added after the plain-patch
 path and the closure was copied rather than shared.
 **Fix:** Extract `fn apply_frontmatter_patch(fm: &mut Frontmatter, patch: &UpdatePatch)` and
-call it from both `update_in_place` closures.
+call it from both normalizing-writer closures. (The primitive those closures pass through was
+named `update_in_place` at the time; renamed to `rewrite_frontmatter_normalizing` on
+2026-08-16 — BL-36 — because the old name read as *surgical* while the function re-emits the
+whole block, and that misreading is what let a reformat ship at three call sites.)
 **Predicted impact:** ~20 duplicated lines removed inside a single function — purely
 mechanical, lowest risk of the whole backlog (both call sites are in the same function,
 same test suite covers both).
