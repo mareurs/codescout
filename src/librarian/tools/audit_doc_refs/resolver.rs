@@ -1,5 +1,6 @@
 use super::severity;
 use super::{RefCandidate, RefKind, Resolution, Severity, Verdict};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// The `.gitignore` matcher plus the index-derived directory set required to read
@@ -19,11 +20,60 @@ pub struct TrackedIgnore {
     pub tracked_dirs: std::collections::HashSet<String>,
 }
 
+/// Why a language's symbol resolutions could not be completed.
+///
+/// The three causes are not interchangeable, and the field these used to feed —
+/// `scan_meta.lsp_languages_offline` — asserted the rarest of them about all three.
+/// [`Self::LspBehindIndex`] is the sharp case: that branch fires only when the server
+/// **answered**, so reporting it as "offline" is a false statement about a live
+/// dependency. It is not a harmless word — on 2026-08-16 a tracker-hygiene sweep read
+/// `lsp_languages_offline: ["rust"]`, concluded rust-analyzer was down, and discarded a
+/// scan whose numbers were fine; `references()` answered from that same server seconds
+/// later.
+///
+/// Note what this does NOT change: `scan_meta.degraded` staying `true` for
+/// `LspBehindIndex` is correct and deliberate. A mid-index server silently costs 60-69
+/// resolutions, which is why `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`
+/// added that branch. The coverage really was incomplete. Only the word "offline" was wrong.
+///
+/// See `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DegradedCause {
+    /// No language server is wired for this scan at all — `ctx.lsp` is `None`.
+    /// The only cause for which "offline" was ever an honest word.
+    NoServer,
+    /// The server answered, but returned a symbol tree without a name tree-sitter finds
+    /// in the same file: it is mid-index. Transient — re-running against the same warm
+    /// server resolves it. The server is provably up.
+    LspBehindIndex,
+    /// The server did not answer within `LSP_FIRST_CALL_BUDGET`. Usually a cold start,
+    /// and usually transient, but indistinguishable from a hung server without probing
+    /// further — so it is reported as what it is, not as either guess.
+    NoAnswerWithinBudget,
+}
+
+impl DegradedCause {
+    /// The `snake_case` name this serializes as, for prose and template rendering.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoServer => "no_server",
+            Self::LspBehindIndex => "lsp_behind_index",
+            Self::NoAnswerWithinBudget => "no_answer_within_budget",
+        }
+    }
+}
+
 pub struct ResolveCtx<'a> {
     pub repo_root: &'a Path,
     pub memory_globs: &'a [globset::Glob],
     pub lsp: Option<std::sync::Arc<dyn crate::lsp::ops::LspProvider>>,
-    pub degraded_languages: std::cell::RefCell<Vec<String>>,
+    /// Languages whose resolutions were incomplete, each paired with why.
+    ///
+    /// The cause is carried rather than discarded because the three are not
+    /// interchangeable — see [`DegradedCause`]. Collapsing them to a bare language name
+    /// is what let a live, answering server be reported as offline.
+    pub degraded_languages: std::cell::RefCell<Vec<(String, DegradedCause)>>,
     /// Basename → list of relative paths in the workspace. Used by
     /// `resolve_file_path` as a fallback when a bare basename (no `/`) doesn't
     /// literally exist at the repo root. Built once per audit run in
@@ -367,7 +417,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     };
     let lang = detect_language(path_str);
     let Some(lsp) = ctx.lsp.clone() else {
-        note_degraded(ctx, lang);
+        note_degraded(ctx, lang, DegradedCause::NoServer);
         return Resolution {
             verdict: Verdict::Unknown,
             severity: Severity::Low,
@@ -429,7 +479,11 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 // also why `scan_meta.degraded` read `false` on every cold run that lost
                 // 60-69 resolutions.
                 // See docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md
-                note_degraded(ctx, lang);
+                //
+                // The cause is `LspBehindIndex` precisely because the server ANSWERED
+                // here. Reporting this as "offline" was the defect in
+                // docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md.
+                note_degraded(ctx, lang, DegradedCause::LspBehindIndex);
                 Resolution {
                     verdict: Verdict::Unknown,
                     severity: Severity::Low,
@@ -450,7 +504,9 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             }
         }
         None => {
-            note_degraded(ctx, lang);
+            // `client_within_budget` gave up, or `document_symbols` errored. A cold
+            // start looks exactly like a hung server from here, so neither is claimed.
+            note_degraded(ctx, lang, DegradedCause::NoAnswerWithinBudget);
             Resolution {
                 verdict: Verdict::Unknown,
                 severity: Severity::Low,
@@ -472,7 +528,7 @@ fn detect_language(path: &str) -> &'static str {
         _ => "unknown",
     }
 }
-/// Record that a language server could not answer for `lang`.
+/// Record that `lang`'s resolutions were incomplete, and why.
 ///
 /// `"unknown"` is deliberately excluded. `detect_language` above maps six
 /// extensions; every other path part in a `file_symbol` ref — a `.sh`, `.toml`,
@@ -486,10 +542,16 @@ fn detect_language(path: &str) -> &'static str {
 /// conflating the two is what made a proposed fix — gate on `degraded` — unusable,
 /// since it would have failed every run ever.
 ///
+/// `cause` is required rather than defaulted: the caller is the only place that knows
+/// which of the three happened, and the whole defect being fixed here came from a
+/// surface that had thrown that distinction away.
+///
 /// See `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
-fn note_degraded(ctx: &ResolveCtx<'_>, lang: &str) {
+fn note_degraded(ctx: &ResolveCtx<'_>, lang: &str, cause: DegradedCause) {
     if lang != "unknown" {
-        ctx.degraded_languages.borrow_mut().push(lang.to_string());
+        ctx.degraded_languages
+            .borrow_mut()
+            .push((lang.to_string(), cause));
     }
 }
 
@@ -1276,7 +1338,14 @@ mod tests {
         };
         let r = resolve_ref(&c, &ctx);
         assert_eq!(r.verdict, Verdict::Unknown);
-        assert!(ctx.degraded_languages.borrow().iter().any(|l| l == "rust"));
+        // `NoServer` is the one cause for which "offline" was ever an honest word — no
+        // LSP is wired at all here. Pinning the cause, not just the language, is what
+        // keeps this distinguishable from the two live-server cases.
+        assert_eq!(
+            &*ctx.degraded_languages.borrow(),
+            &[("rust".to_string(), DegradedCause::NoServer)],
+            "no LSP wired at all is `NoServer`"
+        );
     }
     /// A path part with no LSP mapping is **out of scope**, not degraded coverage.
     /// Recording it made `scan_meta.degraded` true on every run — including all fifteen
@@ -1352,8 +1421,17 @@ mod tests {
         // incomplete scan from a complete one — `degraded` read false on every cold run.
         assert_eq!(
             &*ctx.degraded_languages.borrow(),
-            &["rust".to_string()],
+            &[("rust".to_string(), DegradedCause::LspBehindIndex)],
             "an LSP lagging behind the AST must mark the scan degraded"
+        );
+        // And it must be recorded as `LspBehindIndex` specifically, because the server
+        // ANSWERED on this path. Calling it offline is the defect in
+        // docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md: a reader
+        // took that word literally and discarded a scan whose numbers were sound.
+        assert_eq!(
+            ctx.degraded_languages.borrow()[0].1.as_str(),
+            "lsp_behind_index",
+            "a server that answered must never be reported as offline"
         );
         assert!(
             r.notes

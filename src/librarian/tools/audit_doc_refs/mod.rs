@@ -98,8 +98,50 @@ pub struct ScanMeta {
     pub last_scan_commit: Option<String>,
     pub n_files_scanned: u32,
     pub n_refs_found: u32,
+    /// Coverage was incomplete. Accurate as-is, and deliberately unchanged: a mid-index
+    /// server really does cost resolutions, which is why
+    /// `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md` made
+    /// this true for that case.
     pub degraded: bool,
-    pub lsp_languages_offline: Vec<String>,
+    /// Languages whose resolutions were incomplete.
+    ///
+    /// Renamed from `lsp_languages_offline`, which was an honest description of only one
+    /// of the three causes and a false claim about the other two — most sharply about a
+    /// server that answered. The `alias` keeps trackers written under the old name
+    /// loading; nothing needs to migrate, since every scan overwrites the field.
+    ///
+    /// See `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
+    #[serde(default, alias = "lsp_languages_offline")]
+    pub lsp_languages_degraded: Vec<String>,
+    /// Per-language reasons behind `degraded`, deduplicated and sorted.
+    ///
+    /// This is the field that makes the flag actionable. `lsp_behind_index` says the
+    /// server is up and mid-index, so re-running resolves it; `no_server` says no
+    /// re-run will help. The old surface could not express that difference, so a reader
+    /// had to guess — and guessed wrong.
+    #[serde(default)]
+    pub degraded_causes: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// A scan's degradation state: which languages came back incomplete, and why.
+///
+/// Bundled rather than threaded as two parallel arguments so the language list and the
+/// causes behind it cannot drift apart — the whole defect this replaces came from a
+/// surface that carried the languages and dropped the reasons.
+#[derive(Debug, Clone, Default)]
+pub struct Degradation {
+    /// Languages whose resolutions were incomplete, sorted and deduplicated.
+    pub languages: Vec<String>,
+    /// Per-language causes, sorted and deduplicated.
+    /// See [`resolver::DegradedCause`] for what each one means and what it implies.
+    pub causes: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+impl Degradation {
+    /// Whether coverage was incomplete — the `scan_meta.degraded` flag.
+    pub fn is_degraded(&self) -> bool {
+        !self.languages.is_empty()
+    }
 }
 
 pub mod merger;
@@ -395,11 +437,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         all_warnings.extend(warns);
     }
 
-    let offline: Vec<String> = {
-        let mut v = resolve_ctx.degraded_languages.borrow().clone();
-        v.sort();
-        v.dedup();
-        v
+    // Split the (language, cause) pairs into the two shapes the surfaces want: the flat
+    // language list the tracker template renders, and the per-language cause map that
+    // makes `degraded` actionable — `lsp_behind_index` means re-running helps, `no_server`
+    // means it will not.
+    let degradation = {
+        let pairs = resolve_ctx.degraded_languages.borrow();
+        let mut causes: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for (lang, cause) in pairs.iter() {
+            causes
+                .entry(lang.clone())
+                .or_default()
+                .push(cause.as_str().to_string());
+        }
+        for v in causes.values_mut() {
+            v.sort();
+            v.dedup();
+        }
+        // The map is already keyed by language and BTreeMap-ordered, so the flat list
+        // comes out sorted and deduplicated for free.
+        Degradation {
+            languages: causes.keys().cloned().collect(),
+            causes,
+        }
     };
 
     let (tracker_id, tracker_path) = if args.emit_tracker {
@@ -413,7 +473,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             files.len(),
             now,
             &commit,
-            offline.clone(),
+            degradation.clone(),
         )
         .await
         {
@@ -430,7 +490,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let response = build_response(
         &all_findings,
         &all_warnings,
-        &offline,
+        &degradation,
         files.len(),
         tracker_id.as_deref(),
         tracker_path.as_deref(),
@@ -670,7 +730,7 @@ async fn upsert_tracker(
     n_files: usize,
     now: chrono::DateTime<chrono::Utc>,
     commit: &str,
-    offline: Vec<String>,
+    degradation: Degradation,
 ) -> Result<(String, String)> {
     let (tracker_id, tracker_path) = if let Some(id) = &args.tracker_id {
         let path = find_tracker_path(ctx, id)
@@ -690,8 +750,9 @@ async fn upsert_tracker(
     new_params.scan_meta.last_scan_commit = Some(commit.to_string());
     new_params.scan_meta.n_files_scanned = n_files as u32;
     new_params.scan_meta.n_refs_found = n_refs_found;
-    new_params.scan_meta.degraded = !offline.is_empty();
-    new_params.scan_meta.lsp_languages_offline = offline;
+    new_params.scan_meta.degraded = degradation.is_degraded();
+    new_params.scan_meta.lsp_languages_degraded = degradation.languages;
+    new_params.scan_meta.degraded_causes = degradation.causes;
     new_params.parse_warnings = warnings;
 
     write_tracker_params(ctx, &tracker_id, &new_params).await?;
@@ -882,7 +943,7 @@ fn bucket(verdict: Verdict) -> Bucket {
 fn build_response(
     findings: &[Finding],
     warnings: &[ParseWarning],
-    offline: &[String],
+    degradation: &Degradation,
     n_files: usize,
     tracker_id: Option<&str>,
     tracker_path: Option<&str>,
@@ -989,8 +1050,13 @@ fn build_response(
         "overflow": overflow,
         "parse_warnings": warnings,
         "scan_meta": {
-            "degraded": !offline.is_empty(),
-            "lsp_languages_offline": offline,
+            "degraded": degradation.is_degraded(),
+            // Was `lsp_languages_offline`. The old key asserted "offline" about a server
+            // the `lsp_behind_index` branch had just measured as ANSWERING — and a reader
+            // acted on it, discarding a sound scan. `degraded_causes` carries the
+            // distinction the flat list threw away.
+            "lsp_languages_degraded": degradation.languages,
+            "degraded_causes": degradation.causes,
         },
         "exit_code": exit_code,
     }))
@@ -1128,7 +1194,16 @@ mod tests {
             Verdict::Unknown,
         ];
         let findings: Vec<Finding> = all.iter().map(|v| mk_finding(*v, Severity::Low)).collect();
-        let r = build_response(&findings, &[], &[], 1, None, None, "never").unwrap();
+        let r = build_response(
+            &findings,
+            &[],
+            &Degradation::default(),
+            1,
+            None,
+            None,
+            "never",
+        )
+        .unwrap();
 
         let found = r["n_refs_found"].as_u64().unwrap();
         let sum = r["n_refs_resolved"].as_u64().unwrap()
@@ -1150,7 +1225,7 @@ mod tests {
     #[test]
     fn resolved_basename_counts_as_resolved_everywhere() {
         let f = [mk_finding(Verdict::ResolvedBasename, Severity::Low)];
-        let r = build_response(&f, &[], &[], 1, None, None, "low").unwrap();
+        let r = build_response(&f, &[], &Degradation::default(), 1, None, None, "low").unwrap();
         assert_eq!(
             r["exit_code"], 0,
             "a successful basename resolution must not trip --fail-on low"
@@ -1166,7 +1241,7 @@ mod tests {
     #[test]
     fn ambiguous_basename_still_counts_against_the_gate() {
         let f = [mk_finding(Verdict::AmbiguousBasename, Severity::Med)];
-        let r = build_response(&f, &[], &[], 1, None, None, "med").unwrap();
+        let r = build_response(&f, &[], &Degradation::default(), 1, None, None, "med").unwrap();
         assert_eq!(
             r["exit_code"], 1,
             "an ambiguous basename must still trip --fail-on med"
@@ -1185,7 +1260,7 @@ mod tests {
             let r = build_response(
                 &[mk_finding(Verdict::Missing, Severity::High)],
                 &[],
-                &[],
+                &Degradation::default(),
                 1,
                 None,
                 None,
@@ -1212,7 +1287,7 @@ mod tests {
         // the original defect was a gate that reported success while gating
         // nothing.
         assert!(
-            build_response(&[], &[], &[], 0, None, None, "medium").is_err(),
+            build_response(&[], &[], &Degradation::default(), 0, None, None, "medium").is_err(),
             "an unknown fail_on value must error rather than behave like `never`"
         );
     }
@@ -1220,14 +1295,32 @@ mod tests {
     #[test]
     fn fail_on_never_is_always_zero() {
         let findings = vec![mk_finding(Verdict::Missing, Severity::High)];
-        let result = build_response(&findings, &[], &[], 1, None, None, "never").unwrap();
+        let result = build_response(
+            &findings,
+            &[],
+            &Degradation::default(),
+            1,
+            None,
+            None,
+            "never",
+        )
+        .unwrap();
         assert_eq!(result["exit_code"], 0);
     }
 
     #[test]
     fn fail_on_high_ignores_med_severity() {
         let findings = vec![mk_finding(Verdict::Missing, Severity::Med)];
-        let result = build_response(&findings, &[], &[], 1, None, None, "high").unwrap();
+        let result = build_response(
+            &findings,
+            &[],
+            &Degradation::default(),
+            1,
+            None,
+            None,
+            "high",
+        )
+        .unwrap();
         assert_eq!(
             result["exit_code"], 0,
             "a Med finding should not trip fail_on=high"
@@ -1237,7 +1330,16 @@ mod tests {
     #[test]
     fn fail_on_high_trips_on_high_severity() {
         let findings = vec![mk_finding(Verdict::Missing, Severity::High)];
-        let result = build_response(&findings, &[], &[], 1, None, None, "high").unwrap();
+        let result = build_response(
+            &findings,
+            &[],
+            &Degradation::default(),
+            1,
+            None,
+            None,
+            "high",
+        )
+        .unwrap();
         assert_eq!(result["exit_code"], 1);
     }
 
@@ -1246,7 +1348,7 @@ mod tests {
         let med = build_response(
             &[mk_finding(Verdict::Missing, Severity::Med)],
             &[],
-            &[],
+            &Degradation::default(),
             1,
             None,
             None,
@@ -1258,7 +1360,7 @@ mod tests {
         let high = build_response(
             &[mk_finding(Verdict::Missing, Severity::High)],
             &[],
-            &[],
+            &Degradation::default(),
             1,
             None,
             None,
@@ -1273,7 +1375,7 @@ mod tests {
         let low = build_response(
             &[mk_finding(Verdict::Missing, Severity::Low)],
             &[],
-            &[],
+            &Degradation::default(),
             1,
             None,
             None,
@@ -1291,7 +1393,7 @@ mod tests {
         let result = build_response(
             &[mk_finding(Verdict::Unknown, Severity::Low)],
             &[],
-            &[],
+            &Degradation::default(),
             1,
             None,
             None,
@@ -1309,7 +1411,7 @@ mod tests {
         let result = build_response(
             &[mk_finding(Verdict::Resolved, Severity::Low)],
             &[],
-            &[],
+            &Degradation::default(),
             1,
             None,
             None,
@@ -1327,7 +1429,7 @@ mod tests {
         let result = build_response(
             &[mk_finding(Verdict::Unknown, Severity::Low)],
             &[],
-            &[],
+            &Degradation::default(),
             1,
             None,
             None,
@@ -1342,10 +1444,80 @@ mod tests {
 
     #[test]
     fn fail_on_unknown_value_is_rejected() {
-        let err = build_response(&[], &[], &[], 1, None, None, "critical").unwrap_err();
+        let err = build_response(&[], &[], &Degradation::default(), 1, None, None, "critical")
+            .unwrap_err();
         assert!(
             format!("{err}").contains("critical"),
             "error should name the bad value; got: {err}"
+        );
+    }
+
+    /// The scan may report incomplete coverage; it may not report a live server as down.
+    ///
+    /// `lsp_behind_index` fires only on a branch where the server ANSWERED, and the old
+    /// key name — `lsp_languages_offline` — asserted the opposite. That is not a
+    /// cosmetic complaint: on 2026-08-16 a tracker-hygiene sweep read
+    /// `lsp_languages_offline: ["rust"]`, concluded rust-analyzer was down, and threw
+    /// away a scan whose numbers were fine.
+    ///
+    /// See `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
+    #[test]
+    fn scan_meta_reports_degradation_without_calling_a_live_server_offline() {
+        let degradation = Degradation {
+            languages: vec!["rust".to_string()],
+            causes: [("rust".to_string(), vec!["lsp_behind_index".to_string()])]
+                .into_iter()
+                .collect(),
+        };
+        let r = build_response(&[], &[], &degradation, 1, None, None, "never").unwrap();
+        let meta = &r["scan_meta"];
+
+        // `degraded` stays true — coverage really was incomplete, and the 2026-08-06 fix
+        // that made it so is deliberately preserved.
+        assert_eq!(meta["degraded"], true, "coverage was incomplete: {meta}");
+        assert_eq!(meta["lsp_languages_degraded"][0], "rust");
+
+        // The cause is what makes the flag actionable: a caller reading `lsp_behind_index`
+        // knows the server is up and re-running will resolve it.
+        assert_eq!(meta["degraded_causes"]["rust"][0], "lsp_behind_index");
+
+        assert!(
+            meta.get("lsp_languages_offline").is_none(),
+            "the key that made the false claim must be gone, not merely joined: {meta}"
+        );
+        assert!(
+            !meta.to_string().contains("offline"),
+            "no part of scan_meta may call a server that answered offline: {meta}"
+        );
+    }
+
+    /// The rename must not silently blank an existing tracker's recorded state.
+    ///
+    /// `ScanMeta` is deserialized from a tracker's persisted params, so dropping the
+    /// `serde(alias)` would read every pre-rename tracker as "never degraded" — a
+    /// second false claim, introduced by the fix for the first. Pinned here because
+    /// nothing else would fail if the alias were removed.
+    #[test]
+    fn scan_meta_still_loads_a_tracker_written_under_the_old_field_name() {
+        let old = serde_json::json!({
+            "last_scan_at": "2026-08-06T00:00:00Z",
+            "last_scan_commit": "deadbeef",
+            "n_files_scanned": 276,
+            "n_refs_found": 44,
+            "degraded": true,
+            "lsp_languages_offline": ["rust"],
+        });
+        let meta: ScanMeta = serde_json::from_value(old).expect("old params must still load");
+
+        assert_eq!(
+            meta.lsp_languages_degraded,
+            vec!["rust".to_string()],
+            "the alias must carry the old value across the rename"
+        );
+        assert!(meta.degraded, "the flag itself is unchanged by the rename");
+        assert!(
+            meta.degraded_causes.is_empty(),
+            "a tracker written before causes existed has none — absent, not invented"
         );
     }
 

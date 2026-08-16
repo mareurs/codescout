@@ -1,7 +1,7 @@
 **Last scan:** {{ scan_meta.last_scan_at }} ({{ scan_meta.last_scan_commit }}) —
 {{ issues|selectattr("status","equalto","open")|list|length }} open /
 {{ issues|length }} total
-{% if scan_meta.degraded %} — ⚠ degraded ({{ scan_meta.lsp_languages_offline|join(", ") }} offline){% endif %}
+{% if scan_meta.degraded %} — ⚠ coverage incomplete for {{ scan_meta.lsp_languages_degraded|join(", ") }}{% for lang, causes in scan_meta.degraded_causes|dictsort %} ({{ lang }}: {{ causes|join(", ") }}){% endfor %}{% endif %}
 
 | # | severity | reason | status | ref | found in |
 |---|---|---|---|---|---|
