@@ -270,9 +270,9 @@ in 7 live surfaces**; `link_scan` heals catalog edges but not prose. Repointed a
 `mcp.json`, cross-repo paths). Historical specs/plans/archived-bug-files that cite the old
 paths were deliberately left alone — they are records of what was true then.
 
-**Bugs filed this sweep:** `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`,
+**Bugs filed this sweep:** `docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`,
 `docs/issues/archive/2026-08-16-artifact-update-kind-hint-misroutes.md` (paths as they
-resolve now — the second was fixed in `99fa967f` and archived the same day).
+resolve now — both were fixed the same day, in `56fe1dd4` and `99fa967f`, and archived).
 
 **Fixes applied:** this commit.
 
@@ -365,7 +365,7 @@ project runs D1 at prefix-scope so future sweeps stop reading "D1: 0" as corpus-
 
 ## HY-6 — `audit_doc_refs`'s `degraded` flag reports a live LSP as offline, and scan size is a proxy for the real cause
 
-**Kind:** miss · **Sweep:** 2026-08-16 · **Status:** open (bug filed)
+**Kind:** miss · **Sweep:** 2026-08-16 · **Status:** fixed — `56fe1dd4`, same day
 
 Mid-sweep, a ~40-file `audit_doc_refs` returned `degraded: true` with
 `lsp_languages_offline: ["rust"]`, and the sweep provisionally discarded its numbers as
@@ -385,10 +385,31 @@ degrades a mid-size scan and not a small one.
 tree-sitter-backed and succeeds whether or not the LSP is up, so it cannot distinguish the
 states. One `references()` call can, and costs one round-trip.
 
-Filed as `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`. Sibling of
-R-89 in `docs/trackers/reconnaissance-patterns.md` ("a tool's output is evidence about the
-code only if the running build contains it") — this is its twin for tool self-reports: **a
+Filed as `docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`,
+fixed on `experiments` in `56fe1dd4`. Sibling of R-89 in
+`docs/trackers/reconnaissance-patterns.md` ("a tool's output is evidence about the code
+only if the running build contains it") — this is its twin for tool self-reports: **a
 tool's self-reported health field is a claim, not a measurement.**
+
+**Both inferences above were confirmed against source, and the sweep understated the
+problem.** The field had one writer, `resolver.rs::note_degraded`, called from three
+sites — and only one was anything like offline. The second fires on a branch whose own
+comment reads *"The server ANSWERED, and tree-sitter disagrees with it — the server is
+behind its own index"*; the third is a cold-start budget timeout. `note_degraded` took
+only `(ctx, lang)`, so all three collapsed into one list named for the rarest.
+
+That pins the scan-size finding exactly: size is a proxy for *how many chances the run had
+to hit one of those two live-server cases*. A ~40-file scan hits one; a ~3-file scan does
+not. Nothing about server state changes between them — which is what the sweep observed
+and could not yet explain.
+
+The fix carries the cause with the language (`no_server` / `lsp_behind_index` /
+`no_answer_within_budget`) and renames the field to `lsp_languages_degraded`. `degraded`
+itself stays true for the mid-index case, deliberately: a server behind its own index
+costs 60-69 resolutions, so the coverage really was incomplete. **Only the word was
+wrong** — and the sweep's provisional discard of the numbers was, in hindsight, the right
+instinct applied to the wrong field: the scan's coverage was genuinely reduced, just not
+because anything was down.
 
 
 ## Template for new entries
