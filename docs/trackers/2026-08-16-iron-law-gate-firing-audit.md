@@ -52,8 +52,8 @@ the third.
 | GF-1 | `git` is unconditionally unbounded — 50% of its IL-3 refusals are self-bounded (24% of the family). **Incomplete fix** of `2026-05-18-il3-overtriggers-bounded-lhs`, whose remedy created this very list | high | **fixed** `06a53ad3` | `src/util/path_security.rs` |
 | GF-2 | The flag-conditional mechanism already exists for `grep`/`find` — `git` never got it; the fix extends, not invents | high | **fixed** `06a53ad3` | `src/util/path_security.rs` |
 | GF-3 | `shell_on_source` refuses 23% out-of-project paths where the suggested `symbols` alternative cannot serve, plus 16% `wc` | med | **fixed** `be4a679b` + `433100bd` | `src/util/path_security.rs` |
-| GF-4 | Refusals teach the CALL, not the PREDICATE: 96% immediate compliance, 3% immediate repeat, **47% per-session repeat** | med | open | `src/prompts/guides/iron-laws-detail.md` |
-| GF-5 | Guide delivery is success-path-only, so `iron-laws-detail` cannot arrive when a gate fires — 1 fetch vs 557 violations. **Contradicts** the shipped pull-only rationale *"a caller who needs the detail has already read the pointer"* | high | open | `src/tools/core/types.rs` |
+| GF-4 | Refusals teach the CALL, not the PREDICATE: 96% immediate compliance, 3% immediate repeat, **47% per-session repeat** | med | **fixed** `ba591f12` | `src/prompts/mod.rs` `refusal_predicate` |
+| GF-5 | Guide delivery is success-path-only — **premise was wrong**: true of `call_content`, not of the system. The assembly point in `call_tool_inner` already supports a second block on an error | high | **fixed** `ba591f12` | `src/server.rs` |
 | GF-6 | IL-1 is the sick family on the learning axis — 71% per-session repeat, 7.4 per session, worst 33 over 7 hours | med | open | `src/util/path_security.rs` |
 | GF-7 | **Negative result:** IL-4/IL-5 repeat 0% across 18 sessions. A total, file-intrinsic predicate teaches on first contact — do not "improve" these; keep as regression control | info | closed | — |
 | GF-8 | `untrusted-content` fetched 0 times in 30 days — now **declared** rather than silently missing: `PULL_ONLY_GUIDE_TOPICS` marks it *PENDING BL-25* | med | mitigated | `src/prompts/mod.rs` |
@@ -234,6 +234,39 @@ name**, which is a discoverability signal from someone who *was* reaching delibe
 why `progressive-disclosure` has 9 push sites (overflow is a *successful* result shape) while
 `iron-laws-detail` has zero: half the event space is invisible to the hook.
 
+
+### Resolved 2026-08-16 — `ba591f12`
+
+**GF-5's premise did not survive being checked.** "Guide delivery is success-path-only" is
+true of `Tool::call_content` — the `?` after `self.call(..)` means an `Err` never reaches the
+injection hook — but false of the system. One layer up, `call_tool_inner` assembles *both*
+branches into a single `CallToolResult`, and its own comment says so: *"success or error both
+produce a CallToolResult so we can apply post-processing in one place."* Pushing a second
+`Content` block onto an error is the same move `post_process` already makes for the path
+banner. The finding was a true observation about a narrow scope reported as a claim about the
+whole.
+
+**What shipped is the predicate, not the guide.** ~150 bytes per family against
+`iron-laws-detail`'s 9.9 KB, stating the rule *and its exceptions* — the half a refusal cannot
+convey. Four families whose condition is not inferable from the message:
+`il1_read_overlaps_symbol` (71% repeat), `il3_pipe_to_trimmer` (47%), `il3_shell_on_source`,
+`il2_structural_edit`. The table is deliberately partial; an unrecognised family attaches
+nothing, so this cannot become a per-error tax.
+
+**Two placement facts that decided the design**, both of which would have produced a silent
+no-op:
+
+- `post_process` returns early for `run_command` — exactly where IL-3 fires. The append had to
+  go at the assembly point, not there.
+- `GuideLedger::emitted.is_empty()` is the session opener's trigger, so a sentinel key in
+  `emitted` would cost every session that *begins* with a refusal its orientation guide.
+  `notice_once` exists for precisely this and says so in its doc. Mutation-verified: swapping
+  it for `insert` turns exactly one test red, and that test's output shows the following call
+  arriving with no opener.
+
+**Still open on this axis:** whether the predicate actually reduces the 47% per-session repeat
+rate. That is a re-measurement against the § Baselines row, not an inspection, and it needs a
+comparable window of sessions after this commit.
 ## Refactor data pack — IL-3
 
 Everything a change to `is_unbounded_lhs` needs:
