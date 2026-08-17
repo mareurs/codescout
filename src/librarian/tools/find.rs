@@ -42,6 +42,15 @@ struct Args {
     /// Filter to augmented (true) or non-augmented (false) artifacts. Omit to return all.
     #[serde(default)]
     augmented: Option<bool>,
+    /// Advertised top-level in the shared `artifact` schema for `create`, and honored
+    /// here too rather than discarded. `Args` cannot carry `deny_unknown_fields` — the
+    /// dispatcher passes `action` through and the shared schema holds sibling actions'
+    /// keys — so an advertised param absent from this struct is dropped by serde while
+    /// the query still runs, at defaults, and answers with an unfiltered first page.
+    /// `call()` lifts this into `filter` and reports the lift.
+    /// BUG docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md
+    #[serde(default)]
+    rel_path: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -527,11 +536,37 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // ({op:{field,value}} -> {field:{op:value}}) in place rather than erroring,
     // so a malformed filter costs zero retry round-trips. The corrections ride
     // back in the response so the agent still learns the canonical shape.
-    let filter_corrections = a
+    let mut filter_corrections = a
         .filter
         .as_mut()
         .map(crate::librarian::filter::repair_inverted_leaves)
         .unwrap_or_default();
+
+    // Lift a top-level `rel_path` into the filter, on the same Repair-and-Continue
+    // grounds as the inverted-leaf fix above: one unambiguous reading, so repair it and
+    // say so. `contains`, not `eq` — the catalog stores absolute paths while responses
+    // display the relative form, so `eq` on a path as displayed matches nothing (U-35).
+    // Lifting here, before `is_cold_call` and before `rel_path_hint`, is deliberate: the
+    // call stops counting as a cold call (it is a filtered query), and it inherits the
+    // unindexed-file disk scan that a rel_path filter already triggers on an empty page.
+    let mut lift_corrections: Vec<String> = Vec::new();
+    if let Some(rp) = a.rel_path.take() {
+        let leaf = FilterNode::Leaf(
+            [("rel_path".to_string(), json!({"contains": rp.clone()}))]
+                .into_iter()
+                .collect(),
+        );
+        a.filter = Some(match a.filter.take() {
+            Some(existing) => FilterNode::And {
+                and: vec![existing, leaf],
+            },
+            None => leaf,
+        });
+        lift_corrections.push(format!(
+            "top-level `rel_path` lifted into the filter: {{\"rel_path\": {{\"contains\": \"{rp}\"}}}}"
+        ));
+    }
+
     let is_cold_call = a.filter.is_none()
         && a.semantic.is_none()
         && a.kind.is_none()
@@ -815,11 +850,28 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(cat_val) = catalog_value {
         response["catalog"] = cat_val;
     }
+    // Two independent repairs can fire, and each needs its own explanation — a lift
+    // reported under the inverted-leaf hint would tell the caller to fix a shape they
+    // never wrote.
+    let inverted_fired = !filter_corrections.is_empty();
+    let lift_fired = !lift_corrections.is_empty();
+    filter_corrections.extend(lift_corrections);
     if !filter_corrections.is_empty() {
+        let mut hint = String::new();
+        if inverted_fired {
+            hint.push_str("Filter leaf shape is {field: {op: value}}, not {op: {field, value}}. ");
+        }
+        if lift_fired {
+            hint.push_str(
+                "`rel_path` is a create-time param; on find it was read as a \
+                 filter clause. Pass filter={\"rel_path\": {\"contains\": …}} directly \
+                 next time. ",
+            );
+        }
+        hint.push_str("The query ran as corrected; use the canonical form next time.");
         response["corrections"] = serde_json::json!({
             "filter": filter_corrections,
-            "hint": "Filter leaf shape is {field: {op: value}}, not {op: {field, value}}. \
-                     Your filter was auto-corrected and the query ran; use the canonical shape next time.",
+            "hint": hint,
         });
     }
     Ok(response)
@@ -935,6 +987,112 @@ mod tests {
         assert!(
             v["corrections"]["filter"].is_array(),
             "correction note present: {v}"
+        );
+    }
+
+    /// BUG docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md
+    ///
+    /// `rel_path` is an advertised top-level param of the shared `artifact` schema and
+    /// its description is written partly in `find` terms, but `Args` had no such field
+    /// and cannot carry `deny_unknown_fields` — the dispatcher passes `action` through,
+    /// and adding it once broke every `artifact(update)` call. So serde dropped the key
+    /// and the call ran at defaults: no filter, `limit: 50`. The reply was an
+    /// unfiltered first page whose `count` reads as a match total.
+    #[tokio::test]
+    async fn lifts_top_level_rel_path_into_a_contains_filter() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("open-issue-work-queue", "the queue")).unwrap();
+        artifact::upsert(&cat, &sample_row("tracker-hygiene-log", "hygiene")).unwrap();
+
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"rel_path": "open-issue-work-queue"}))
+            .await
+            .expect("a top-level rel_path must not error");
+        assert_eq!(
+            v["count"].as_u64(),
+            Some(1),
+            "rel_path must narrow the query, not be dropped: {v}"
+        );
+    }
+
+    /// A silent lift is the same defect in a new costume. `find` already teaches the
+    /// caller when a filter's *shape* is wrong (see
+    /// `repairs_inverted_filter_and_notes_correction`); a reinterpreted param has to
+    /// ride back the same way, or the caller still cannot tell what query ran.
+    #[tokio::test]
+    async fn reports_the_lifted_rel_path_under_corrections() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("open-issue-work-queue", "the queue")).unwrap();
+
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"rel_path": "open-issue-work-queue"}))
+            .await
+            .unwrap();
+        assert!(
+            v["corrections"]["filter"].is_array(),
+            "the lift must be reported, not applied silently: {v}"
+        );
+    }
+
+    /// `contains`, not `eq`: the catalog stores absolute paths and the relative form in
+    /// responses is a display-time transform, so `eq` on a path as displayed matches
+    /// nothing (U-35 in docs/trackers/codescout-usage-frictions.md). A lift that chose
+    /// `eq` would turn a silent wrong answer into a silent empty one.
+    ///
+    /// The distractor row is load-bearing. An earlier version seeded one row only, so
+    /// `count == 1` held whether or not `rel_path` was honored — it passed before the
+    /// fix and proved nothing.
+    #[tokio::test]
+    async fn lifted_rel_path_uses_contains_so_a_displayed_path_still_matches() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("open-issue-work-queue", "the queue")).unwrap();
+        artifact::upsert(&cat, &sample_row("tracker-hygiene-log", "hygiene")).unwrap();
+
+        let ctx = mk_ctx(cat);
+        // The caller passes the path as responses display it — no /test/code-explorer
+        // prefix — which is exactly the form `eq` against the stored abs_path cannot
+        // match.
+        let v = call(&ctx, json!({"rel_path": "open-issue-work-queue.md"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            v["count"].as_u64(),
+            Some(1),
+            "a displayed-form path must resolve to exactly its own row: {v}"
+        );
+    }
+
+    /// An explicit `filter` stays authoritative — the lift ANDs into it rather than
+    /// replacing it, so a caller who passes both does not silently lose one.
+    #[tokio::test]
+    async fn lifted_rel_path_combines_with_an_explicit_filter() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("open-issue-work-queue", "the queue")).unwrap();
+        artifact::upsert(&cat, &sample_row("open-issue-archive", "the queue")).unwrap();
+
+        let ctx = mk_ctx(cat);
+        let v = call(
+            &ctx,
+            json!({"rel_path": "open-issue", "filter": {"title": {"contains": "queue"}}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v["count"].as_u64(),
+            Some(2),
+            "both clauses must apply, not one: {v}"
+        );
+
+        let narrowed = call(
+            &ctx,
+            json!({"rel_path": "work-queue", "filter": {"title": {"contains": "queue"}}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            narrowed["count"].as_u64(),
+            Some(1),
+            "the rel_path clause must actually narrow inside the AND: {narrowed}"
         );
     }
 

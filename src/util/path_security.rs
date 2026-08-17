@@ -1206,8 +1206,11 @@ fn extract_grep_pattern(segment: &str) -> Option<String> {
 /// Known limits:
 /// - Variable expansion (`cat $FILE`) is undetectable at parse time — accepted.
 /// - Heredocs (`cat <<'EOF'`) read stdin, not a file; any source extension appearing
-///   inside the heredoc body is not a filename argument. Segments containing `<<` are
-///   skipped — the operator unambiguously means stdin redirection.
+///   inside the heredoc body is not a filename argument. The body is removed by
+///   [`strip_heredoc_bodies`] before the segment split, so it cannot contribute
+///   either a filename or a segment boundary. Stripping before the split is
+///   load-bearing: a `|` inside the body would otherwise cut the body into
+///   segments that are each read as a command.
 pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<String> {
     static CMD_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
     static EXT_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
@@ -1218,15 +1221,22 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
         .get_or_init(|| Regex::new(SOURCE_EXTENSIONS).ok())
         .as_ref()?;
 
+    // Analyse shell *structure*, not the raw string: a heredoc body is data, so it
+    // has to go BEFORE the split. Testing for `<<` per-segment afterwards protects
+    // only the segment holding the opener — the body's own pipes have already become
+    // segment boundaries, and each following fragment is then read as a command.
+    // `detect_il3_violation` has stripped first since the pipe gate's heredoc fix;
+    // this gate kept the older approximation. Dropping the body also closes a
+    // bypass the per-segment skip created: `cat src/main.rs <<< x` contains `<<`,
+    // so the whole segment used to be skipped and the read went through.
+    // BUG docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
+    let stripped = strip_heredoc_bodies(command);
+
     // Split on compound-command operators and pipes, respecting quoted strings.
     // Order: "&&"/"||" before "|" so that "||" is not mis-split as two "|" tokens.
-    let segments = split_outside_quotes(command, &["&&", "||", ";", "|"]);
+    let segments = split_outside_quotes(&stripped, &["&&", "||", ";", "|"]);
 
     let blocked = segments.iter().find(|seg| {
-        // Heredoc: the command reads from stdin, not a source file.
-        if seg.contains("<<") {
-            return false;
-        }
         // Only the *first token* of a segment is the actual command being executed.
         // Matching against the first token (not the full segment string) prevents
         // false positives from quoted arguments containing command names, e.g.:
@@ -2451,6 +2461,90 @@ mod tests {
         assert!(
             check_source_file_access_at_root("cat <<'EOF'\nhello\nEOF\n | cat src/main.rs")
                 .is_some()
+        );
+    }
+
+    /// BUG docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
+    ///
+    /// The per-segment `seg.contains("<<")` skip protects only the segment holding
+    /// the opener. One `|` in the body splits the rest of it into segments that are
+    /// then read as commands — so a `git commit -F -` whose message quotes a shell
+    /// pipeline is refused as source-file access. `strip_heredoc_bodies` already
+    /// solved this for the pipe gate (`detect_il3_violation`); this gate never
+    /// adopted it.
+    #[test]
+    fn source_file_access_allows_a_pipe_inside_a_heredoc_body() {
+        assert_eq!(
+            check_source_file_access_at_root("true <<'EOF'\nx | head -1 foo.rs\nEOF"),
+            None,
+            "a heredoc body is data — a pipe in it must not expose the body to the gate"
+        );
+    }
+
+    /// The reported symptom, reproduced exactly: a commit message quoting a shell
+    /// pipeline, where the text after the pipe begins with a reader name and a
+    /// source-extension filename appears later in the same span. That is `tail` plus
+    /// `il3-warn-hook.mjs` here, which is the pair that refused the real commit.
+    ///
+    /// Two earlier versions of this test passed before the fix and so reproduced
+    /// nothing: the bare alternation put no reader at a segment head, and
+    /// `plugin.json` is not a source extension. Both are recorded because the near
+    /// miss is the lesson — a green test proves nothing until you know why it is red.
+    #[test]
+    fn source_file_access_allows_a_commit_message_quoting_a_pipe_alternation() {
+        let cmd = "git commit -F - <<'MSG'\n\
+                   docs: the advisory flags what its own message calls bounded\n\
+                   A `git log -3 | tail -30` drew an IL3 warning, and -3 is a limiter.\n\
+                   il3-warn-hook.mjs:23 decides unbounded LHS from one flat alternation.\n\
+                   MSG";
+        assert_eq!(
+            check_source_file_access_at_root(cmd),
+            None,
+            "committing two markdown files must not read as shell access to source"
+        );
+    }
+
+    /// `<<<` is a here-string: it takes no body, so nothing after it may be
+    /// swallowed. Mirrors `il3_treats_a_here_string_as_having_no_body` on the pipe
+    /// gate — the risk a heredoc-stripping fix introduces is hiding a real read.
+    ///
+    /// The pipe is load-bearing: without an operator there is only one segment, and
+    /// the gate reads a segment's command from its FIRST token, so a read on a later
+    /// line is invisible for reasons that have nothing to do with here-strings. See
+    /// `source_file_access_does_not_split_on_newlines` below.
+    #[test]
+    fn source_file_access_here_string_does_not_swallow_a_following_read() {
+        assert!(
+            check_source_file_access_at_root("cargo test <<< word | cat src/main.rs").is_some(),
+            "a here-string has no body; the following real read must still be caught"
+        );
+    }
+
+    /// A bypass the old per-segment `<<` skip created, found while removing it: a
+    /// here-string puts `<<` in the SAME segment as a real read, so the whole segment
+    /// was skipped and `cat src/main.rs` went through. `<<<` takes no body, so there
+    /// was never anything to excuse here.
+    #[test]
+    fn source_file_access_blocks_a_source_read_on_a_here_string_line() {
+        assert!(
+            check_source_file_access_at_root("cat src/main.rs <<< x").is_some(),
+            "a here-string on the line must not excuse the read next to it"
+        );
+    }
+
+    /// Pins a PRE-EXISTING gap this bug's tests surfaced but do not fix: the segment
+    /// splitter breaks on `&&`, `||`, `;` and `|` — never on a newline. A segment's
+    /// command is its first token, so a source read on a second line is never seen.
+    ///
+    /// Asserting the current (permissive) behaviour deliberately, so that closing the
+    /// gap breaks this test and whoever closes it finds the note.
+    /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    #[test]
+    fn source_file_access_does_not_split_on_newlines() {
+        assert_eq!(
+            check_source_file_access_at_root("echo hi\ncat src/main.rs"),
+            None,
+            "documents today's behaviour, not desired behaviour — see the bug file"
         );
     }
 
