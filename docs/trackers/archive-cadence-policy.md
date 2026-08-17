@@ -199,7 +199,7 @@ trigger (iv) now exists to catch.
   - `docs/trackers/codescout-usage-frictions.md` (18 U-N entries, 528 lines)
   - `docs/trackers/codescout-usage-hookify.md` (6 H-N entries)
   - `docs/trackers/reconnaissance-patterns.md` (5 R-N entries)
-  - `docs/trackers/tool-usage-patterns.md` (augmented artifact `b3fa993849ac83ab`)
+  - `docs/trackers/tool-usage-patterns.md` (augmented artifact `f2ecdd76a6189efb`)
   - Per-work-stream `<topic>-session-log.md` files (F-N / W-N) — already archived when their work stream wraps; policy may not need to extend here.
 - **Related conventions:**
   - `CLAUDE.md § After cherry-pick: cite the master SHA` (extended in T10).

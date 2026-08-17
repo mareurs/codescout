@@ -130,8 +130,14 @@ artifact(action="update_entry", id="f2ecdd76a6189efb",
 > catalog is not in git. That call took this queue from 19 entries to 1 on 2026-08-16.
 > `append_entry` / `update_entry` exist so it is never needed.
 
-**User — browse:** open `docs/trackers/tool-usage-patterns.md`; the live params table is
-rendered at the top by the librarian. Prompt improvement candidates are at the bottom —
+**User — browse:** open `docs/trackers/tool-usage-patterns.md`. The params table is **not in
+the file** — a stored `render_template` is projected into `librarian(action="context")` only,
+and no path writes it to disk (verified 2026-08-17: `render_params` has two callers;
+`context.rs` renders into the context bundle, and `legibility_scan` writes a body with its
+own compiled-in template for one other tracker). What the file holds is prose plus one
+`### T-N` heading per entry. For the structured rows, query them:
+`artifact(action="get", id="f2ecdd76a6189efb", entry_filter={"status": {"eq": "open"}})`.
+Prompt improvement candidates are at the bottom —
 these are the direct inputs to `src/prompts/source.md` (the `server_instructions` surface slice) edits.
 
 ### Ad-Hoc Session Logs — `docs/trackers/<topic>-session-log.md`

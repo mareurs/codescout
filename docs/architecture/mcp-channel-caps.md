@@ -212,7 +212,7 @@ entries scope project skills (`/claude-traces`, `/analyze-usage`,
 instructions. Truncation is not the cause and not the cure.
 
 `docs/trackers/tool-usage-patterns.md` (T-001 → T-010, librarian
-artifact `b3fa993849ac83ab`): the four anti-pattern entries (T-005
+artifact `f2ecdd76a6189efb`): the four anti-pattern entries (T-005
 `npm run build | grep` × 7, T-006 `cat file | head -50`, T-008
 `edit_file` drift, T-009 onboarding gate, T-010 schema-migration bug)
 all involve rules the model **did see** (Iron Laws 1–3 survive
@@ -312,7 +312,7 @@ restart the service when the investigation closes.
 - `docs/trackers/skill-frictions.md` — audited, no truncation-caused
   entries.
 - `docs/trackers/tool-usage-patterns.md` — audited, no
-  truncation-caused entries (artifact id `b3fa993849ac83ab`).
+  truncation-caused entries (artifact id `f2ecdd76a6189efb`).
 - `src/tools/core/types.rs:18` — `MAX_INLINE_TOKENS = 2_500`
 - `src/server.rs::from_parts` — instructions composition site.
 - `src/server.rs::build_resource_registry` — resource composition site.

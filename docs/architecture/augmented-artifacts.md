@@ -26,7 +26,7 @@ prose for human reading is still useful. Two problems:
 
 Augmented artifacts decouple the two without divorcing them: data lives in
 the catalog DB as structured `params`; the markdown body holds prose; an
-optional `render_template` can project params into the body whenever the
+optional `render_template` projects params into the `librarian(action="context")` bundle whenever the
 artifact refreshes.
 
 ## Two faces: time-aware log and on-demand skill
@@ -38,7 +38,8 @@ carries four things, and a reader — human or LLM — gets all of them at once:
    `entry_collection` makes them filterable with
    `artifact(action="get", entry_filter=…)`.
 2. **Rendering** — an optional `render_template` projects `params` into the
-   markdown body, so the human view never drifts from the data.
+   `librarian(action="context")` bundle — **not** into the `.md` file on disk. See
+   § *How render_template works* for what this does and does not keep in sync.
 3. **An embedded skill** — the augmentation `prompt` is a standing instruction,
    surfaced as a `[LIVE]` blockquote whenever the artifact enters a
    `librarian(action="context")` bundle. It tells the next agent *how to
@@ -51,7 +52,7 @@ carries four things, and a reader — human or LLM — gets all of them at once:
 
 Read one way it is a **time-aware log** (face 4) you can replay; read another it
 is an **on-demand skill** (face 3) the agent loads just-in-time. Two living
-proofs carry all four faces: `tool-usage-patterns` (id `b3fa993849ac83ab`) and
+proofs carry all four faces: `tool-usage-patterns` (id `f2ecdd76a6189efb`) and
 `doc-ref-audit` (id `fc97be512112fea4`).
 
 **Why state this explicitly.** Usage telemetry across two independent codebases
@@ -69,7 +70,7 @@ An augmented artifact has **three controllable channels**:
 
 | Channel | Where it lives | Lifecycle | Edited by |
 |---|---|---|---|
-| **Body** | The `.md` file on disk | Re-rendered when artifact refreshes (if `render_template` set) | Auto-render OR human via `edit_markdown` |
+| **Body** | The `.md` file on disk | Written by whoever edits it — **never auto-rendered from params** | Auto-render OR human via `edit_markdown` |
 | **Params** | Catalog DB row (`augmentations.params`) | Mutated via `artifact_augment(merge=true, ...)` or by the producing tool | Programmatic only — never hand-edit a managed file's params via filesystem |
 | **Prompt** | Catalog DB row (`augmentations.prompt`) | Set once at augmentation; carries the LLM-facing instruction for `artifact_refresh(gather)` | `artifact_augment(merge=false, prompt=..., params=...)` to replace |
 
@@ -206,7 +207,7 @@ deliberately replacing the entire augmentation.
 
 When set, `render_template` is a MiniJinja template that runs every time
 the artifact body refreshes. It receives `params` as input and produces
-the markdown snippet that becomes (or merges into) the body.
+the markdown snippet.
 
 Example shape from a goal tracker:
 
@@ -221,10 +222,33 @@ Example shape from a goal tracker:
 The body's `## Progress` section is auto-managed; the rest of the markdown
 is hand-written prose that explains what the artifact is for and why.
 
-**Without `render_template`**, the body is whatever the prompt + LLM
-produces during `artifact_refresh(gather) → artifact(update)`. With it,
-the body is mechanically derived from params and the LLM's job is just to
-update params correctly.
+**Where the render actually goes (verified against the code, 2026-08-17).**
+`render_params` has exactly two production callers, and only one of them uses
+the augmentation's *stored* template:
+
+| Caller | Destination | Uses the stored `render_template`? |
+|---|---|---|
+| `src/librarian/tools/context.rs` | the `librarian(action="context")` markdown bundle, under the `[LIVE]` header | yes |
+| `legibility_scan::render_managed_body` | the `.md` file body | **no** — `include_str!("./render_template.j2")`, compiled in, for the `legibility-backlog` tracker only |
+
+So **the stored `render_template` never reaches the file on disk.** The refresh
+path does not consume it: every `render_template` occurrence in
+`tools/refresh.rs` and `tools/update.rs` is a test fixture set to `None`. The
+body is whatever the prompt + LLM produce during `artifact_refresh(gather) →
+artifact(update, commit_refresh=true)`, with or without a template.
+
+The one tracker whose body *does* track params proves the rule rather than
+breaking it: `legibility_scan` had to write its own body-projector, and the
+function's doc comment says why — *"Fixes F-8: previously `params` updated but
+the body stayed stale, forcing a manual re-render after every scan."* It exists
+because the general mechanism does not.
+
+**Consequence for design.** Params are invisible to anyone reading the file on
+disk or on a git host. Never make `params` the canonical home for entries that
+are cited by id: `link_scan` derives an entry token's definition from a
+**heading** and nothing else, so a params row defines no token. Params are for
+lifecycle state; the body heading is the entry's identity. See
+`get_guide("tracker-conventions")` § *Entry-level standard*.
 
 ## Worked examples
 
@@ -246,26 +270,41 @@ artifact(action="get", id="fc97be512112fea4", full=true)
 read_file("@tool_*", json_path="$.augmentation.params")
 ```
 
-### `tool-usage-patterns` — id `b3fa993849ac83ab`
+### `tool-usage-patterns` — id `f2ecdd76a6189efb`
 
 - **Body** (`docs/trackers/tool-usage-patterns.md`): full markdown prose,
   ~200+ lines. Per-observation analysis.
 - **Params**: structured `observations` array — id, tool, verdict, prompt
   gap, status — per T-N entry.
 - **Prompt**: refreshes the top-of-body table from `observations`.
-- **`render_template`**: projects `observations[]` into a "live params
-  table" that's rendered at the top of the file on refresh.
+- **`render_template`**: projects `observations[]` into a table that appears in
+  the `librarian(action="context")` bundle. **It is not in the file.**
 
-The split is **structured-at-top, prose-at-bottom** — humans grok the
-prose, the LLM updates params, the table auto-syncs.
+**Two corrections to this example (2026-08-17).** The heading's id is stale —
+the artifact is `f2ecdd76a6189efb`, as CLAUDE.md and the file's own frontmatter
+both state. And the split is *not* "structured-at-top, prose-at-bottom": the
+file on disk contains frontmatter, prose, and 22 `### T-N` headings, with **zero
+table rows and no rendered block**. The structured rows live only in the catalog;
+reach them with `artifact(action="get", id="f2ecdd76a6189efb", entry_filter={…})`.
+
+That shape is the good one, incidentally — one heading per entry is what keeps
+its `T-N` citations resolvable. Measured project-wide the same day, this tracker
+contributed **zero** dangling entry tokens, while a sibling ledger carrying rows
+instead of headings contributed roughly thirty.
 
 ## Common gotchas
 
 - **Silent param wipe** (the `merge=false` foot-gun) — see lifecycle table
   above. Always prefer `merge=true` when patching.
-- **The body file looks unchanged after a params update** — render_template
-  hasn't run. Force a refresh: `artifact_refresh(gather)` → synthesize →
-  `artifact(update, commit_refresh=true)`.
+- **The body file looks unchanged after a params update** — that is the designed
+  behaviour, not a stale render. The stored `render_template` is projected into
+  `librarian(action="context")`, never into the file, and the refresh path does
+  not consume it at all. A refresh cycle cannot fix this because there is nothing
+  to fix. If the body must show the data, write it there yourself via
+  `artifact(update, patch={body_edits: […]})` — or accept that the catalog is the
+  only home for it and query with `entry_filter`. (This bullet previously told
+  readers to "force a refresh", sending them into a cycle that cannot change the
+  file.)
 - **`read_markdown` rejects the file** — managed artifact gate is firing.
   Route through `artifact(get, full=true)` then `read_file` with
   `json_path` to extract the field you need.
@@ -303,4 +342,4 @@ Do NOT augment when:
   (see `src/librarian/catalog/augmentation.rs::merge_params`)
 - Templates: MiniJinja syntax with `params` as the sole top-level binding
 - Two reference artifacts: `fc97be512112fea4` (doc-ref-audit),
-  `b3fa993849ac83ab` (tool-usage-patterns)
+  `f2ecdd76a6189efb` (tool-usage-patterns)
