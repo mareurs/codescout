@@ -781,13 +781,18 @@ HY-10 (ledger vs. tracker; same one-field-of-four root cause), `archive-cadence-
 Two things changed under D10 today, both from `archive-cadence-policy` § 3 being ratified
 as amended, and one of them is a precondition the skill cannot check for itself.
 
-> ⚠️ **Not yet in force.** The step-5 rewrite is committed to `claude-plugins`
-> (`9d9ecc2`) but absent from all three profile caches, because the plugin cache is keyed
-> by `plugin.json` version and that commit did not bump it. Any session invoking the skill
-> today still reads the two-step form. Measured 2026-08-17;
-> `docs/issues/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`.
-> Until a bump lands, treat the sub-steps below as the procedure to follow **manually** —
-> the skill will not prompt for them.
+> ✅ **In force as of 1.16.8** (verified 2026-08-17: all three profiles' `installPath`
+> resolve to `codescout-companion/1.16.8`, and all three copies carry the new step 5).
+>
+> It was briefly not. `9d9ecc2` committed the rewrite without bumping `plugin.json`, and
+> the plugin cache is keyed by version — so all three profiles kept serving the two-step
+> form and the change was inert. Worth keeping in the entry rather than editing away,
+> because it is the failure mode a *procedure* change has and a policy change does not:
+> `archive-cadence-policy` § 3 and `get_guide("tracker-conventions")` were live the moment
+> they were committed, while the skill's step 5 — the thing that decides what a sweep
+> actually does — was not. Filed as
+> `docs/issues/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`,
+> which stays open at `mitigated`: this instance is repaired, nothing yet gates the next one.
 
 **1. Step 5 is three sub-steps, not two.** `artifact(update, status)` →
 `artifact(move, …-YYYY-MM-DD.md)` → **repoint citations of the old path AND the old
