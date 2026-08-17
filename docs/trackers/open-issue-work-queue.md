@@ -427,6 +427,72 @@ already built — including one pinning the case that matters most for a
 re-armed refusal: no worktrees, never activated, still allowed. Bug archived
 (`1523556488a95de2` → `a742a50ea6723daf`); citations of the old path in
 `src/tools/core/types.rs`, `guards.rs`, `tests.rs` re-pointed in the same pass.
+### 2026-08-17 — BL-14, BL-15, BL-37(partial); and `experiments` was red at a clean tree
+
+Compaction handoff for the BL-N run. Everything below is on `experiments`; gate green at
+`9ad5818d` — `cargo fmt --check` clean, `clippy --all-targets -D warnings` clean,
+`cargo test` **4055 passed / 0 failed / 45 ignored**.
+
+**Closed**
+
+| Item | Fix | Archive |
+|---|---|---|
+| BL-15 / B-6 — read-only metadata blocked on source paths | `90c5aea1` | `c4211712` |
+| BL-14 / B-1 — `force=true` discarded in silence on whole-file reads | `2703410e` | `201628f9` |
+| `frontmatter_max` dropped at the MCP boundary | `4cdafd9a` | `8a91e950` |
+
+**BL-37 — partial.** Interim priority-ordered trim shipped (`30f3df81`; note shortened
+`9f4807ef`). Open on the **carrier decision alone**, which is the maintainer's.
+
+**Fixed outside the queue**
+
+- `bf485a00` — `append_entry`'s hint asserted `##` for every ledger; now derived from the
+  body (mode of the existing entry headings). `docs/PROGRESSIVE_DISCOVERABILITY.md` gained
+  **Anti-Pattern 5 — Asserting a Convention the Tool Never Read** as the standing rule.
+- `fd9e63d0` — Iron Law 3 describes two gates three paragraphs apart that share vocabulary
+  (`wc` appears in three roles on one page); signposted.
+- `9ad5818d` — **`experiments` was red at a clean tree.** `90d76d8a` re-armed
+  `guard_worktree_write` deliberately and left `tests/integration.rs` asserting the removed
+  behaviour. Inverted rather than deleted; the odd-looking
+  `assert!(is_project_explicitly_activated)` is now the point, not the premise.
+
+**Filed** — `audit_doc_refs` `include_str!` false positive (fixed by a peer, `da55100a`);
+`/mcp` refreshes schemas but not `server_instructions`; U-40 (`old_string` "not found" cannot
+distinguish a bad needle from a bad haystack); U-41 (`snapshot_stale` overclaims); R-101, R-102.
+
+#### Standing hazards for the next session — read before writing anything
+
+1. **Writes now require an explicit activate in this repo.** `90d76d8a` re-armed the
+   worktree guard on `is_project_chosen_this_session`, and this checkout has two linked
+   worktrees, so the first `edit_code` / `edit_file` of a session is **refused** until
+   `workspace(action="activate", path="/home/marius/work/claude/codescout")`. Hit live on
+   2026-08-17. Working as designed; not a bug.
+2. **A peer session shares this tree.** It broke compilation three times mid-turn
+   (`audit_doc_refs`, `link_scan`), so `cargo test` is not always available. Commit by
+   **pathspec**, never `git add -A`; use `cargo fmt -- <file>` rather than whole-tree fmt.
+   A full-suite red is worth attributing before assuming it is yours.
+3. **`cargo test --lib` does not build `tests/integration.rs`** — memory
+   `cargo-test-lib-skips-integration`. That is exactly how a deliberate behaviour change
+   left HEAD red for ~40 minutes.
+4. **The instructions surface cannot be verified from the session that renders it.** The
+   workaround, and it works: speak MCP to the release binary directly —
+   `echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' | ./target/release/codescout start --project .`
+   That is how `30f3df81` was verified on the wire.
+5. **Reindex before any `artifact(find)` you will act on.** Measured twice today: the
+   catalog lagged disk by one file, and a lagging catalog and an empty filesystem return
+   byte-identical answers.
+
+#### Resume
+
+Nine bugs open. Next by evidence quality: **`artifact(find)` is silent about unindexed
+files** — fix shape settled by precedent (make the zero self-describing, as `grep`'s
+hidden-path skip was), needs care because `find` is on the hot path. Then the **BL-37
+carrier decision**, which is a design call rather than an implementation.
+
+Promotion is **not** blocked by any of the above, but is not gated either: `0 941`
+fast-forward available, code gate green, and `docs/RELEASE.md`'s step-4 documentation gate
+is unrun — the CHANGELOG / mdBook / README checks, plus the audit re-run against a **fresh
+clone**, which the file warns is the one green not to believe from a working tree.
 ### Resume — state at compaction, 2026-08-16
 
 **15 of 35 rows open.** Phase 1 remaining: **BL-4, BL-19** (BL-29 is phase 1 but the other
