@@ -7,7 +7,6 @@ tags:
   - reconnaissance
   - skill-meta
   - scout
-id: 5696563f06b2c222
 ---
 
 # Reconnaissance patterns

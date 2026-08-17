@@ -7,7 +7,6 @@ tags:
   - reconnaissance
   - archive
   - skill-meta
-id: 8477430affe6f450
 ---
 
 # Reconnaissance patterns — archived entries
