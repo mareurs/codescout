@@ -55,31 +55,76 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
     let mut instructions = SERVER_INSTRUCTIONS.to_string();
 
     if let Some(status) = project_status {
-        let dynamic = build_project_status_block(status);
-        instructions.push_str(&fit_dynamic_block(&instructions, &dynamic));
+        let segments = build_project_status_segments(status);
+        instructions.push_str(&fit_dynamic_block(&instructions, &segments));
     }
 
     instructions
 }
 
-/// Render the dynamic `## Project Status` suffix. Split out from
-/// [`build_server_instructions`] so its length can be measured and trimmed before it is
-/// appended, rather than discovered to be too long by a client that says nothing.
-fn build_project_status_block(status: &ProjectStatus) -> String {
+/// Drop order for one `## Project Status` segment when the channel cannot carry it all.
+///
+/// Derived from the bug's own Workarounds list rather than invented: a segment another
+/// surface reproduces on demand is cheap to lose, and one only this channel delivers is
+/// not. `Ord` follows declaration order, so sorting ascending drops `Substitutable` first.
+///
+/// BL-37: the previous fitting cut from the tail, and the tail is where the user's own
+/// text lives — so `## Custom Instructions` went first and the memories list, which
+/// `memory(action="list")` reproduces, went last. Measured on a three-language project
+/// with eight memories: the memories line is ~137 chars and did not fit the ~225 of room,
+/// while the custom-instructions line is ~70 and would have. Ordering here is not only a
+/// better choice of loss; it delivers content that was being dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StatusPriority {
+    /// Reachable on demand elsewhere: `memory(action="list")` for the memory names,
+    /// `get_guide("workspace-state")` for the topology, `index(action="status")` for the
+    /// index, memory `gotchas` for the Kotlin block.
+    Substitutable,
+    /// The user wrote it and nothing else surfaces it to the agent.
+    UserAuthored,
+    /// Never dropped. Losing the worktree banner sends commits to the wrong branch;
+    /// losing the header or the active-project line leaves everything else unattributed.
+    Anchor,
+}
+
+/// One line-or-block of the `## Project Status` suffix, with what it costs to lose.
+///
+/// `label` names the segment in the trim note. Naming the loss is the point — an agent
+/// told *what* went can ask for it, where "something was trimmed" only tells it to
+/// distrust the whole block.
+struct StatusSegment {
+    text: String,
+    label: &'static str,
+    priority: StatusPriority,
+}
+
+/// Render the dynamic suffix as droppable segments. See [`build_project_status_block`]
+/// for the concatenated form, which is what the renderer's own tests assert on.
+fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
     /// Memory topic lists grow without bound (18 on this repo), and unbounded is exactly
     /// what a fixed channel cannot carry. The names are a pointer, not the content.
     const MAX_MEMORY_NAMES: usize = 8;
 
-    let mut out = String::from("\n\n## Project Status\n\n");
+    let mut segs: Vec<StatusSegment> = Vec::new();
+
+    segs.push(StatusSegment {
+        text: String::from("\n\n## Project Status\n\n"),
+        label: "header",
+        priority: StatusPriority::Anchor,
+    });
 
     // "Active project" wording makes the implicit launch-time activation explicit —
     // agents see at a glance that activation happened without needing a separate tool
     // call signal. Pairs with the worktree line below so the activated root is never
     // ambiguous.
-    out.push_str(&format!(
-        "- **Active project:** {} at `{}`\n",
-        status.name, status.path
-    ));
+    segs.push(StatusSegment {
+        text: format!(
+            "- **Active project:** {} at `{}`\n",
+            status.name, status.path
+        ),
+        label: "active project",
+        priority: StatusPriority::Anchor,
+    });
 
     if let Some(wt) = &status.worktree {
         let branch = wt.branch.as_deref().unwrap_or("<detached HEAD>");
@@ -90,43 +135,57 @@ fn build_project_status_block(status: &ProjectStatus) -> String {
             .unwrap_or_else(|| "<unknown>".to_string());
         // Explicit worktree banner — when present, the agent must NOT assume the
         // activated root is the canonical checkout. Changes here flow into commits,
-        // branches, and PRs on the worktree's branch, not the main repo's.
-        out.push_str(&format!("- **Worktree:** branch `{branch}` of `{main}`\n"));
+        // branches, and PRs on the worktree's branch, not the main repo's. Anchor for
+        // that reason: it is the one segment whose absence causes a wrong WRITE.
+        segs.push(StatusSegment {
+            text: format!("- **Worktree:** branch `{branch}` of `{main}`\n"),
+            label: "worktree",
+            priority: StatusPriority::Anchor,
+        });
     }
 
     if !status.languages.is_empty() {
-        out.push_str(&format!(
-            "- **Languages:** {}\n",
-            status.languages.join(", ")
-        ));
+        segs.push(StatusSegment {
+            text: format!("- **Languages:** {}\n", status.languages.join(", ")),
+            label: "languages",
+            priority: StatusPriority::Substitutable,
+        });
     }
 
-    if !status.memories.is_empty() {
+    let memories = if !status.memories.is_empty() {
         // Bare list — the action verb is documented on the `memory` tool itself.
         let shown = status.memories.len().min(MAX_MEMORY_NAMES);
         let mut names = status.memories[..shown].join(", ");
         if status.memories.len() > shown {
             names.push_str(&format!(", +{} more", status.memories.len() - shown));
         }
-        out.push_str(&format!("- **Memories:** {names}\n"));
+        format!("- **Memories:** {names}\n")
     } else {
-        out.push_str("- **Memories:** None yet — run `onboarding` to create project memories\n");
-    }
+        "- **Memories:** None yet — run `onboarding` to create project memories\n".to_string()
+    };
+    segs.push(StatusSegment {
+        text: memories,
+        label: "memories",
+        priority: StatusPriority::Substitutable,
+    });
 
-    if status.has_index {
-        out.push_str("- **Semantic index:** Built — `semantic_search` is ready to use\n");
-    } else {
-        out.push_str(
-            "- **Semantic index:** Not built — run `index(action='build')` to enable `semantic_search`\n",
-        );
-    }
+    segs.push(StatusSegment {
+        text: if status.has_index {
+            "- **Semantic index:** Built — `semantic_search` is ready to use\n".to_string()
+        } else {
+            "- **Semantic index:** Not built — run `index(action='build')` to enable `semantic_search`\n"
+                .to_string()
+        },
+        label: "index status",
+        priority: StatusPriority::Substitutable,
+    });
 
     // Workspace topology — inject project table when there are sibling projects.
     if let Some(projects) = &status.workspace {
         if !projects.is_empty() {
-            out.push_str("\n## Workspace Projects\n\n");
-            out.push_str("| Project | Root | Languages | Depends On |\n");
-            out.push_str("|---------|------|-----------|------------|\n");
+            let mut table = String::from("\n## Workspace Projects\n\n");
+            table.push_str("| Project | Root | Languages | Depends On |\n");
+            table.push_str("|---------|------|-----------|------------|\n");
             for p in projects {
                 let langs = if p.languages.is_empty() {
                     "—".to_string()
@@ -138,64 +197,155 @@ fn build_project_status_block(status: &ProjectStatus) -> String {
                 } else {
                     p.depends_on.join(", ")
                 };
-                out.push_str(&format!(
+                table.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
                     p.id, p.root, langs, deps
                 ));
             }
-            out.push_str(
+            table.push_str(
                 "\nUse `project: \"<id>\"` in `symbols` / `semantic_search` / `memory` to scope to a specific project.\n",
             );
+            segs.push(StatusSegment {
+                text: table,
+                label: "workspace table",
+                priority: StatusPriority::Substitutable,
+            });
         }
     }
 
     // Language-specific warnings — only injected when the project uses the language.
     if status.languages.iter().any(|l| l == "kotlin") {
-        out.push_str(KOTLIN_KNOWN_ISSUES);
+        segs.push(StatusSegment {
+            text: KOTLIN_KNOWN_ISSUES.to_string(),
+            label: "kotlin known issues",
+            priority: StatusPriority::Substitutable,
+        });
     }
 
     if let Some(prompt) = &status.system_prompt {
-        out.push_str("\n\n## Custom Instructions\n\n");
-        out.push_str(prompt);
-        out.push('\n');
+        segs.push(StatusSegment {
+            text: format!("\n\n## Custom Instructions\n\n{prompt}\n"),
+            label: "custom instructions",
+            priority: StatusPriority::UserAuthored,
+        });
     }
 
-    out
+    segs
 }
 
-/// Trim `dynamic` so `static_part + dynamic` fits the channel, cutting at a **line**
-/// boundary and naming the loss.
+/// Render the dynamic `## Project Status` suffix. Split out from
+/// [`build_server_instructions`] so its length can be measured and trimmed before it is
+/// appended, rather than discovered to be too long by a client that says nothing.
+///
+/// The concatenation of [`build_project_status_segments`] in display order — i.e. the
+/// whole block, before any fitting. The renderer's own tests assert on this; what the
+/// channel actually delivers is [`fit_dynamic_block`]'s output.
+///
+/// Test-only since BL-37: production renders from segments so the fitting can drop them
+/// individually. It stays because three tests assert the RENDERER is correct independently
+/// of what the channel can carry — that separation is BL-37's standing reproduction, and
+/// concatenating segments by hand in each of them would put the same logic in three places.
+#[cfg(test)]
+fn build_project_status_block(status: &ProjectStatus) -> String {
+    build_project_status_segments(status)
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect()
+}
+
+/// Trim the `## Project Status` segments so `static_part + status` fits the channel,
+/// dropping whole segments **by priority** and naming what went.
 ///
 /// The client cuts from the tail at a fixed char count, mid-token, and says nothing — so
-/// anything not fitted here vanishes silently. Dropping whole lines producer-side is
-/// strictly better: the same content goes, but the agent learns that it went. Same
-/// principle as `truncate_compact`'s head-placement fix and the librarian's promoted
-/// overflow hints — when a channel truncates from the tail, ordering and an explicit
-/// signal are the cheap fixes; the budget is the expensive one.
-fn fit_dynamic_block(static_part: &str, dynamic: &str) -> String {
-    const NOTE: &str = "- (status trimmed — it did not fit the MCP instructions channel)\n";
-
+/// anything not fitted here vanishes silently. Dropping producer-side is strictly better:
+/// the same content goes, but the agent learns that it went, and now *which* went.
+///
+/// BL-37: the drop order used to be the tail, and the tail is where the user's own text
+/// lives — `## Custom Instructions` was sacrificed first, the memories list last. Priority
+/// now dominates; within one priority the LATER segment still goes first, so this change
+/// only ever reorders *across* tiers and reproduces the old behaviour inside one.
+fn fit_dynamic_block(static_part: &str, segments: &[StatusSegment]) -> String {
     let budget = CLIENT_INSTRUCTIONS_CHAR_LIMIT
         .saturating_sub(CHANNEL_SAFETY_MARGIN)
         .saturating_sub(static_part.chars().count());
 
-    if dynamic.chars().count() <= budget {
-        return dynamic.to_string();
+    let len = |i: usize| segments[i].text.chars().count();
+    let total: usize = (0..segments.len()).map(len).sum();
+    if total <= budget {
+        return segments.iter().map(|s| s.text.as_str()).collect();
     }
 
-    let room = budget.saturating_sub(NOTE.chars().count());
-    let mut kept = String::new();
-    let mut used = 0usize;
-    for line in dynamic.split_inclusive('\n') {
-        let len = line.chars().count();
-        if used + len > room {
+    let mut order: Vec<usize> = (0..segments.len()).collect();
+    order.sort_by_key(|&i| (segments[i].priority, std::cmp::Reverse(i)));
+
+    // The note costs room too, and it grows as it names more losses — so it is inside the
+    // comparison from the first drop rather than subtracted once up front.
+    let mut dropped = vec![false; segments.len()];
+    let mut labels: Vec<&'static str> = Vec::new();
+    let mut used = total;
+    for &i in &order {
+        if used + trim_note(&labels).chars().count() <= budget {
             break;
         }
-        kept.push_str(line);
-        used += len;
+        if segments[i].priority == StatusPriority::Anchor {
+            continue;
+        }
+        dropped[i] = true;
+        used -= len(i);
+        labels.push(segments[i].label);
     }
-    kept.push_str(NOTE);
-    kept
+
+    let kept: String = (0..segments.len())
+        .filter(|&i| !dropped[i])
+        .map(|i| segments[i].text.as_str())
+        .collect();
+    let note = trim_note(&labels);
+    if kept.chars().count() + note.chars().count() <= budget {
+        return kept + &note;
+    }
+
+    // Every droppable segment is gone and the anchors alone still overflow — a
+    // pathological project path, or a static slice grown to the cap. The hard guarantee
+    // (the total NEVER exceeds the channel, so the static slice is never sacrificed)
+    // outranks segment integrity, so fall back to the pre-BL-37 line cut.
+    // `production_render_fits_the_client_channel` is the invariant this branch keeps true.
+    const SHORT_NOTE: &str = "- (status trimmed to fit the MCP instructions channel)\n";
+    if SHORT_NOTE.chars().count() > budget {
+        return String::new();
+    }
+    let room = budget - SHORT_NOTE.chars().count();
+    let mut out = String::new();
+    let mut used = 0usize;
+    for line in kept.split_inclusive('\n') {
+        let n = line.chars().count();
+        if used + n > room {
+            break;
+        }
+        out.push_str(line);
+        used += n;
+    }
+    out.push_str(SHORT_NOTE);
+    out
+}
+
+/// The trim note: keeps the phrase `status trimmed` — two channel invariants assert on
+/// it — and adds *what* was lost.
+///
+/// Naming the loss is the point. An agent told which segment went can ask for it by its
+/// own route (`memory(action="list")`, `get_guide("workspace-state")`); "something was
+/// trimmed" only tells it to distrust the whole block. Capped, because a note that grows
+/// with the losses it reports can consume the budget it is reporting on.
+fn trim_note(dropped: &[&'static str]) -> String {
+    const MAX_NAMED_DROPS: usize = 3;
+    if dropped.is_empty() {
+        return String::new();
+    }
+    let named = dropped.len().min(MAX_NAMED_DROPS);
+    let mut list = dropped[..named].join(", ");
+    if dropped.len() > named {
+        list.push_str(&format!(", +{} more", dropped.len() - named));
+    }
+    format!("- (status trimmed to fit the MCP instructions channel: {list})\n")
 }
 
 /// Topic names registered as compiled-in `get_guide(topic)` content.
@@ -778,6 +928,140 @@ mod tests {
         let status_pos = block.find("## Project Status").unwrap();
         let custom_pos = block.find("## Custom Instructions").unwrap();
         assert!(custom_pos > status_pos);
+    }
+
+    /// BL-37 interim fix. `fit_dynamic_block` dropped from the TAIL, and the tail is where
+    /// the user's own text lives — so `## Custom Instructions` was sacrificed first and the
+    /// memories list, which `memory(action="list")` reproduces on demand, was kept longest.
+    /// That is the worst available order: it discards what only this channel carries and
+    /// preserves what another surface already offers.
+    ///
+    /// The first assertion is the control. Without it a fixture that happens to fit would
+    /// pass this test while exercising none of the trimming path.
+    #[test]
+    fn an_overflowing_status_keeps_the_user_s_own_text_over_a_substitutable_list() {
+        let status = ProjectStatus {
+            name: "my-project".into(),
+            path: "/tmp/my-project".into(),
+            languages: vec!["rust".into(), "python".into(), "typescript".into()],
+            memories: vec![
+                "architecture".into(),
+                "conventions".into(),
+                "development-commands".into(),
+                "domain-glossary".into(),
+                "gotchas".into(),
+                "language-patterns".into(),
+                "onboarding".into(),
+                "project-overview".into(),
+            ],
+            has_index: false,
+            system_prompt: Some("Always run the integration suite before pushing.".into()),
+            workspace: None,
+            worktree: None,
+        };
+
+        let rendered = build_server_instructions(Some(&status));
+        assert!(
+            rendered.contains("trimmed"),
+            "the fixture must overflow the channel or this test proves nothing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("Always run the integration suite before pushing."),
+            "the user's own instructions must outlive a memories list that \
+             `memory(action=\"list\")` reproduces on demand; got:\n{rendered}"
+        );
+    }
+
+    /// The worktree banner is the other segment nothing else supplies, and its absence is
+    /// not merely inconvenient: an agent that assumes the activated root is the canonical
+    /// checkout commits to the wrong branch. It must outlive every substitutable line.
+    #[test]
+    fn an_overflowing_status_keeps_the_worktree_banner() {
+        let status = ProjectStatus {
+            name: "my-project".into(),
+            path: "/tmp/wt/my-project".into(),
+            languages: vec!["rust".into(), "python".into(), "typescript".into()],
+            memories: vec![
+                "architecture".into(),
+                "conventions".into(),
+                "development-commands".into(),
+                "domain-glossary".into(),
+                "gotchas".into(),
+                "language-patterns".into(),
+                "onboarding".into(),
+                "project-overview".into(),
+            ],
+            has_index: true,
+            system_prompt: Some("Always run the integration suite before pushing.".into()),
+            workspace: None,
+            worktree: Some(WorktreeInfo {
+                branch: Some("feat/x".into()),
+                main_repo: Some(std::path::PathBuf::from("/tmp/main")),
+                name: Some("x".into()),
+            }),
+        };
+
+        let rendered = build_server_instructions(Some(&status));
+        assert!(
+            rendered.contains("trimmed"),
+            "the fixture must overflow or this test proves nothing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("**Worktree:**"),
+            "a dropped worktree banner sends commits to the wrong branch; got:\n{rendered}"
+        );
+    }
+
+    /// A trim that says only "something went" tells the agent to distrust the whole block.
+    /// One that names the segment tells it which route to take instead —
+    /// `memory(action="list")`, `get_guide("workspace-state")`, memory `gotchas`. The
+    /// naming is the difference between a warning and an instruction.
+    #[test]
+    fn a_trim_names_what_it_dropped() {
+        let status = ProjectStatus {
+            name: "my-project".into(),
+            path: "/tmp/my-project".into(),
+            languages: vec!["rust".into(), "kotlin".into()],
+            memories: (0..30).map(|i| format!("memory-topic-{i}")).collect(),
+            has_index: true,
+            system_prompt: None,
+            workspace: None,
+            worktree: None,
+        };
+
+        let rendered = build_server_instructions(Some(&status));
+        assert!(
+            rendered.contains("status trimmed to fit the MCP instructions channel: "),
+            "the note must name the losses, not just announce one; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("kotlin known issues"),
+            "the Kotlin block is the largest droppable segment and cannot fit at any \
+             position — the agent's only chance of knowing it exists is being told it \
+             went; got:\n{rendered}"
+        );
+    }
+
+    /// The note grows with the losses it reports, so an uncapped one can consume the
+    /// budget it exists to explain. Three names carry the signal; a count carries the rest.
+    #[test]
+    fn the_trim_note_caps_the_names_it_lists() {
+        let none = trim_note(&[]);
+        assert!(none.is_empty(), "no drops, no note");
+
+        let two = trim_note(&["memories", "languages"]);
+        assert!(two.contains("memories, languages"));
+        assert!(
+            !two.contains("more"),
+            "two names fit without a count: {two}"
+        );
+
+        let five = trim_note(&["a", "b", "c", "d", "e"]);
+        assert!(five.contains("a, b, c, +2 more"), "got: {five}");
+        assert!(
+            five.chars().count() < 90,
+            "the note must stay small next to the ~289-char budget it reports on: {five}"
+        );
     }
 
     #[test]
