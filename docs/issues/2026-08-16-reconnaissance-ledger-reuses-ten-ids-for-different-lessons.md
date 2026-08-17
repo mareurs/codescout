@@ -186,6 +186,47 @@ theme + canonical-law + supersession table that should be attached to whichever
 option is chosen, since it is the input to the archive pass the ratified
 `archive-cadence-policy.md` now authorises.
 
+---
+
+## Status 2026-08-17 — one half fixed, the other half not fixable by renaming
+
+**The dangling half is fixed.** The 48 entries that existed only as `| R-N |`
+index rows had no defining heading anywhere, so every citation of them resolved
+to nothing. Migrating them into headed sections in the existing archive
+(`bc1221cd`) took project-wide dangling citations from **720 to 615**, and R-N
+tokens in the dangling sample from **30 of 39 to zero**. The live ledger now
+holds 58 index rows against 58 body sections — no orphans.
+
+**The suffix half is worse than "ambiguous".** `link_scan`'s entry-token grammar
+is `\b[A-Z]{1,3}-\d+\b`, and `extract.rs`'s own comment states that suffixed
+sub-entries **deliberately do not match**, because digit→letter is not a word
+boundary. So `R-72b`, `R-73b`, `R-74b`, `R-76b` are not merely ambiguous — they
+are **not valid entry tokens at all**. They can never be defined, never be
+cited, and never appear in the link graph. The repair chose a form the resolver
+cannot represent.
+
+**And the rationale that chose it is falsified.** The id-suffix note kept the
+bare number for the EARLIER instance so that *"the 57 existing kin-citations
+still resolve to what they most likely meant"*. At the resolver the earlier
+instance was usually the row-only one, so bare `R-55` / `R-56` / `R-57` / `R-58`
+resolved to **nothing** rather than to the older lesson — all four sat in the
+dangling sample until the migration. The note also lists nine suffixed ids where
+only seven exist in-file: `R-56b` and `R-59b` were minted by `52fca682` and
+archived by `b6bb6377` in the very next pass. Both corrected in `a1ac0317`.
+
+**What is still open, and the decision has changed shape.** Renaming cannot fix
+the suffixed ids, because *any* suffix is unrepresentable; they need fresh
+numeric ids. That is exactly what the note rejected, in order to preserve which
+instance a citation meant — but that benefit is now known to be **false at the
+resolver**, since the bare tokens resolve to nothing. The tradeoff should be
+re-decided on that basis rather than re-inherited.
+
+Prevention is tracked separately: **CAP-5** (server-assigned ids, so collisions
+stop being possible) and **HY-9** / proposed detector D12 (a sweep that sees
+unresolvable citations at all). The entry-level rules are now in
+`get_guide("tracker-conventions")` § *Entry-level standard*, which states the id
+grammar and forbids suffixes.
+
 ## References
 
 - `docs/trackers/reconnaissance-patterns.md`

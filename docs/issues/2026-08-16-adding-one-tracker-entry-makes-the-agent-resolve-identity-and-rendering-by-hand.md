@@ -160,6 +160,50 @@ sibling staleness bug, so they should be scoped together or explicitly split.
 Start by counting how many of the seven `docs/TAXONOMY.md` prefixes are prose
 versus augmented; if most are already augmented, (1) may not be worth building.
 
+**ANSWERED 2026-08-17 — the escape hatch does not apply.** Of the **10 numeric
+prefixes** in `docs/TAXONOMY.md` (F, W, R, U, H, T, WIN, A, PV, CAP), exactly
+**one** is machine-allocated: **PV-N**, whose row names
+`artifact(action="append_entry", id_prefix="PV", entry_collection="items")` and
+calls it "atomic monotonic id". The other nine are hand-allocated. Two of them
+(T-N, WIN-N) *had* augmented backing and still prescribed a hand-built array —
+fixed in `9943164e`. So (1) is worth building.
+
+**And the substrate check in this file's Fix section is out of date, in a way
+that makes the fix smaller.** Verified against
+`src/librarian/catalog/augmentation.rs::append_entry` on 2026-08-17:
+
+- The allocator is **already cross-process atomic** — it runs inside a single
+  `IMMEDIATE` transaction, documented as safe under both intra-process and
+  cross-process concurrency with `busy_timeout`. The two-session race this bug
+  describes is already solved *for callers that can reach it*.
+- The allocator **already scans the body**. `body_claimed_indices(body,
+  id_prefix)` folds in ids claimed by both `## PREFIX-N` sections *and*
+  `| PREFIX-N |` index rows, and takes `max(params_next, body_max + 1)`, warning
+  when params lags the body. Fix (1)'s "scan the body's headings for
+  `^#+ <PREFIX>-(\d+)`" is therefore **already implemented** — just unreachable
+  without an `entry_collection`.
+
+So the gap is **coupling, not absence**: allocation is welded to a params write,
+so a prose tracker cannot reach an allocator that would otherwise serve it.
+
+**One correction to Fix (1)'s shape.** It says an action that "returns the next
+free number". A lookup that returns an id for the caller to then write is still
+read-then-write, and a peer can take the id in between — measured on 2026-08-17
+with a four-minute margin (R-98). Atomicity is the property, not the lookup: the
+id must be assigned by the call that writes the entry.
+
+**One requirement Fix (1) does not yet name.** `link_scan`'s `def_re` is
+`^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+` — a heading defines its token *only* as
+`R-N — title`. So a server-side writer that formats the heading itself removes a
+second defect class: an entry can never be born undefined. See HY-9 in
+`docs/trackers/tracker-hygiene-log.md`.
+
+Design now lives in **CAP-5** (`docs/trackers/capability-proposals.md`), which
+carries the revised proposal: invert the dependency and extract the allocator so
+both a params writer and a body writer depend on it, rather than adding an
+`append_section` sibling that would encode a storage distinction as an API one.
+This bug remains the friction evidence; CAP-5 is the design.
+
 ## References
 
 - `docs/TAXONOMY.md` — the seven id prefixes, none machine-allocated

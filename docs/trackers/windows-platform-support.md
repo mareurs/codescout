@@ -163,8 +163,9 @@ When a Windows issue is found or its status changes:
 1. `artifact(action="get", id="52451519052d207c", entry_filter={...})` — confirm it is not
    already tracked.
 2. `artifact(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={area, status, summary, ref, since})` — the server assigns the next WIN-N atomically. To flip a status use `artifact(action="update_entry", entry_collection="issues", entry_id="WIN-N", fields={status: "..."})`. **Never** `artifact_augment(merge=true, params={issues:[...]})`: RFC 7396 replaces the array wholesale, which took the sibling T-N queue from 19 entries to 1 on 2026-08-16.
-   — next free integer; never reuse or delete; flip status + cite the fixing
-   commit (master-side SHA after cherry-pick) in `ref`.
+   Never reuse or delete a WIN-N id. When a fix lands, flip `status` in place via
+   `update_entry` and cite the fixing commit (master-side SHA after cherry-pick)
+   in `ref`.
 3. Re-sync the "## Issue index" table above with the render_template columns.
 4. For a brand-new incident, also open a `docs/issues/<date>-<slug>.md` and cite
    it in `ref`.
