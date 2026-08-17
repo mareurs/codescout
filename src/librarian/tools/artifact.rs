@@ -315,7 +315,7 @@ mod tests {
     }
 
     /// Class-level guard for the family
-    /// `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md` belongs to.
+    /// `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md` belongs to.
     ///
     /// **This one passes today.** It is a tripwire for the next variant, not a
     /// reproduction of this one — `rel_path` is labelled `create:`, so a label-driven
@@ -375,7 +375,7 @@ mod tests {
     }
 
     /// The doc half of
-    /// `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md`, and the part
+    /// `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md`, and the part
     /// that actually caused the wrong call.
     ///
     /// `rel_path`'s description opened `create: relative path for new file` and then

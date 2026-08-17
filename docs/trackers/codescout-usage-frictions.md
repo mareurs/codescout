@@ -1850,7 +1850,9 @@ That second half then teaches the **inverted** leaf shape — `{"contains": {"fi
 
 **Class note:** this is a third variant of a family already archived here — `2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md`, `2026-07-13-artifact-create-drops-topic.md`, `2026-07-13-artifact-update-phantom-schema-fields.md`. The first two were params honored *nowhere*; the third, phantom keys backed nowhere, fixed by deleting them plus the test `input_schema_has_no_phantom_update_fields`. `rel_path` is the variant that test cannot catch: it **is** legitimately backed — by `create`. Nothing asserts a key is honored by the action whose description claims it.
 
-**Filed:** `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md`.
+**Filed:** `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md` (archived 2026-08-17, id `7d9e2dc48eb2b128`).
+
+**Verified on the wire** after `cargo rb` + `/mcp`: `artifact(action="find", rel_path="docs/trackers/open-issue-work-queue.md")` returned `count: 1` — the correct row — with `corrections.filter` naming the lift. The same call returned 50 unrelated rows before the fix.
 
 **Status:** fixed on `experiments`, commit `4fad1aa4` (cherry-picked from `0a955491`; a fast-forward was unavailable because the bookkeeping commit landed on `experiments` after the branch was cut). `find::Args` gains `rel_path` and lifts it into `filter={"rel_path":{"contains": v}}` with the lift reported under `corrections`; the schema description drops its inverted-leaf example. The durable half is `schema_keys_labelled_find_are_honored_by_find` — which, note, **cannot reach `rel_path`**, because that key is labelled `create:` and a label-driven sweep misses it by construction. The gap between a key's label and its prose is the bug, and `rel_path_description_and_find_support_agree` is what closes it.
 
@@ -1971,7 +1973,17 @@ Sentence one is the correct rule; sentence two is a strictly narrower mechanism,
 
 **Workaround that works today:** write the message to a file and use `git commit -F <path>`. The command string then contains neither the pipes nor the filenames. This is the same workaround U-22 documented, still needed for the case its fix did not cover.
 
-**Filed:** `docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md`.
+**Filed:** `docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` (archived 2026-08-17, id `f4784780d5413db1`).
+
+**Verified on the wire** after `cargo rb` + `/mcp`, all four cases:
+
+| command | before | after |
+|---|---|---|
+| heredoc body containing a pipe | blocked | **runs** (exit 0) |
+| `cat src/main.rs <<< x` | **allowed** | blocked |
+| real pipe after a closed heredoc | blocked | blocked |
+
+The second row is the bypass this fix closed, and it is the one worth re-reading: it was **permitted** before. The third is the guard — a careless heredoc-stripping fix hides a genuine read behind a heredoc, and it holds.
 
 **Status:** fixed on `experiments`, commit `4fad1aa4` (cherry-picked from `0a955491`). The fix idea above was wrong in a useful way: it proposed writing a `strip_heredoc_bodies` helper, and that helper **already existed** (`src/util/path_security.rs:747`), already called by `detect_il3_violation`. Only `check_source_file_access` kept the older approximation — so this was one call site that never adopted an existing contract, and the fix is a two-line ordering change. Removing the per-segment skip also closed a bypass nobody had noticed: a here-string puts `<<` in the same segment as a real read, so `cat src/main.rs <<< x` was skipped entirely. Mutation-verified.
 

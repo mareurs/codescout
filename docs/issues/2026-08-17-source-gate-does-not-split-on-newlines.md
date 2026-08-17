@@ -1,12 +1,18 @@
 ---
-status: open
-opened: 2026-08-17
-closed:
-severity: medium
-owner: marius
-related: ['docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md']
-tags: [iron-law, il3, run-command, path-security, bypass]
 kind: bug
+status: open
+tags:
+- iron-law
+- il3
+- run-command
+- path-security
+- bypass
+closed: null
+opened: 2026-08-17
+owner: marius
+related:
+- docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
+severity: medium
 ---
 
 # BUG: the source gate splits on `&&`, `||`, `;` and `|` but never on a newline, so a source read on the second line of a multi-line command is never seen
@@ -19,7 +25,7 @@ not a separator, so in a multi-line command only the first line's command is eve
 considered. `echo hi\ncat src/main.rs` reads project source and is allowed.
 
 Found while writing regression tests for
-`docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` — the first
+`docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` — the first
 draft of a here-string test failed for this reason rather than the one it was written
 for, which is what surfaced the gap.
 
@@ -163,7 +169,7 @@ shares the separator list, the fix is one place; if it has its own, both need it
 
 ## References
 
-- `docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` — the
+- `docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` — the
   sibling defect in the same function, fixed in the same branch; this gap was surfaced
   by its tests.
 - `docs/trackers/codescout-usage-frictions.md` — U-45 (the sibling, caller's side).

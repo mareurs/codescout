@@ -1,5 +1,5 @@
 ---
-id: '73fd209da1f001e5'
+id: f4784780d5413db1
 kind: bug
 status: fixed
 title: 'BUG: the source gate splits on `|` before applying its heredoc carve-out, so one pipe in a heredoc body blocks the command — `git commit -F -` with a message quoting a regex is refused as source-file access'
@@ -253,14 +253,33 @@ For non-commit cases, `acknowledge_risk: true` bypasses the gate, but prefer the
 
 ## Resume
 
-Archive this file via `artifact(action="move", …)` and re-point citations of both its path
-and its 16-hex id — the fix is on `experiments` (`4fad1aa4`), which is the archive trigger.
+N/A — closed. Fixed on `experiments` at **`4fad1aa4`** and archived 2026-08-17 after wire
+verification.
 
-Gate the archive on **wire** verification, not just the suite: a `cargo rb` + `/mcp` is
-required before the fix is live in any session, and the two-line repro from *Minimal
-reproduction* is the check. The first rebuild after the fix was cut did **not** contain it
-— it was built from `f273f187`, one commit before the cherry-pick — which is exactly the
-kind of thing a green `cargo test` does not tell you.
+**No pending-master-SHA line, deliberately.** `git rev-list --left-right --count
+master...experiments` returns `0 955` — a zero on the left means `master` is a strict
+ancestor, so the promotion path is **fast-forward**, not cherry-pick: `master` will move
+onto this exact commit and `4fad1aa4` already *is* the master SHA. Writing the
+pending-SHA line here would send a later session hunting for a second SHA that will never
+exist.
+
+(The cherry-pick that *did* happen was branch → `experiments`, one level down, and is
+recorded in *Fix*. That one did mint a new SHA, which is why the citations were re-pointed
+from `0a955491` to `4fad1aa4`.)
+
+**Wire-verified after `cargo rb` + `/mcp`**, four cases:
+
+| command | before | after |
+|---|---|---|
+| `true <<'EOF'` / `x \| head -1 foo.rs` / `EOF` | blocked | **exit 0** |
+| `cat src/main.rs <<< x` | **allowed** | blocked |
+| `cat <<'EOF'` … `EOF \| cat src/main.rs` | blocked | blocked |
+
+Row two is the bypass this fix closed — it was permitted before. Row three is the guard
+that a careless heredoc-stripping fix would break.
+
+One open descendant: `docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md`,
+surfaced by these tests and deliberately not fixed here.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-45 (this friction), U-44 (the hook's

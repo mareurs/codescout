@@ -1229,7 +1229,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // this gate kept the older approximation. Dropping the body also closes a
     // bypass the per-segment skip created: `cat src/main.rs <<< x` contains `<<`,
     // so the whole segment used to be skipped and the read went through.
-    // BUG docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
+    // BUG docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
     let stripped = strip_heredoc_bodies(command);
 
     // Split on compound-command operators and pipes, respecting quoted strings.
@@ -2464,7 +2464,7 @@ mod tests {
         );
     }
 
-    /// BUG docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
+    /// BUG docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
     ///
     /// The per-segment `seg.contains("<<")` skip protects only the segment holding
     /// the opener. One `|` in the body splits the rest of it into segments that are

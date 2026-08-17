@@ -1,5 +1,5 @@
 ---
-id: '674359c8d4396147'
+id: 7d9e2dc48eb2b128
 kind: bug
 status: fixed
 title: 'BUG: artifact(find) silently drops a top-level `rel_path` and returns page 1 of the catalog as `count: 50` — the number that reads as a match total is the default limit'
@@ -309,20 +309,34 @@ before the results.
 
 ## Resume
 
-Archive this file via `artifact(action="move", …)` and re-point citations of both its path
-and its 16-hex id — the fix is on `experiments` (`4fad1aa4`), which is the archive trigger.
-Gate the archive on **wire** verification: `artifact(action="find", rel_path="…")` must
-return the single matching row plus a `corrections` note, which needs `cargo rb` + `/mcp`
-first.
+N/A — closed. Fixed on `experiments` at **`4fad1aa4`** and archived 2026-08-17 after wire
+verification.
 
-Two follow-ups this fix deliberately did **not** take on:
+**No pending-master-SHA line, deliberately.** `git rev-list --left-right --count
+master...experiments` returns `0 955` — a zero on the left means `master` is a strict
+ancestor, so the promotion path is **fast-forward**: `master` moves onto this exact commit
+and `4fad1aa4` already *is* the master SHA. The line would send a later session hunting a
+SHA that will never exist. (The cherry-pick recorded in *Fix* was branch → `experiments`,
+a level below, and did mint a new SHA — hence the re-point from `0a955491`.)
+
+**Wire-verified after `cargo rb` + `/mcp`:**
+
+```
+artifact(action="find", rel_path="docs/trackers/open-issue-work-queue.md")
+→ count: 1   (was 50)
+  corrections.filter: ["top-level `rel_path` lifted into the filter:
+                       {\"rel_path\": {\"contains\": \"docs/trackers/open-issue-work-queue.md\"}}"]
+  corrections.hint:   "`rel_path` is a create-time param; on find it was read as a filter
+                       clause. Pass filter={\"rel_path\": {\"contains\": …}} directly next time."
+```
+
+Two follow-ups this fix deliberately did **not** take on, both still open:
 
 1. **Extend the parity probe to the other actions.** Scoped to `find` because that is where
-   the defect was measured. Extending it is mechanical but not free: each action needs a
-   probe value ill-typed for *its* `Args` (`[]` is unsound where a `Vec` field exists) and
-   whatever required params it has, so the only possible error is the type error. The
-   groundwork — label extraction from `input_schema()` — is already in the test.
-2. **`repo`** carries a `create:` label and is the nearest sibling in shape to `rel_path`;
+   the defect was measured. Each action needs a probe value ill-typed for *its* `Args` (`[]`
+   is unsound where a `Vec` field exists) plus its required params, so the only possible
+   error is the type error. The label extraction from `input_schema()` is already written.
+2. **`repo`** carries a `create:` label and is the nearest sibling in shape to `rel_path` —
    worth one look for the same label-versus-prose mismatch.
 ## References
 

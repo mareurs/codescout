@@ -48,7 +48,7 @@ struct Args {
     /// keys — so an advertised param absent from this struct is dropped by serde while
     /// the query still runs, at defaults, and answers with an unfiltered first page.
     /// `call()` lifts this into `filter` and reports the lift.
-    /// BUG docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md
+    /// BUG docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md
     #[serde(default)]
     rel_path: Option<String>,
 }
@@ -990,7 +990,7 @@ mod tests {
         );
     }
 
-    /// BUG docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md
+    /// BUG docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md
     ///
     /// `rel_path` is an advertised top-level param of the shared `artifact` schema and
     /// its description is written partly in `find` terms, but `Args` had no such field
