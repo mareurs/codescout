@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 41
+entry_high_water_U: 43
 entry_prefix: U
 ---
 
@@ -1818,3 +1818,68 @@ check. Same reasoning that kept U-40 out of `docs/issues/` once the probe showed
 had behaved correctly.
 
 **Status:** open — friction recorded, no fix shipped.
+
+---
+
+### U-42 — `artifact(find)` silently drops a top-level `rel_path` and answers with page 1 of the whole catalog
+
+**Observed:** 2026-08-17, resuming after compaction. Wanted the catalog row for one tracker file:
+
+```
+artifact(action="find", rel_path="docs/trackers/open-issue-work-queue.md")
+```
+
+**Got:** `count: 50` and a list of 50 real artifacts — a heading-swallow bug, the hygiene log, TAXONOMY, an onboarding doc — none of them the file asked for. No error, no warning, no `corrections` block. The same question written as a filter returned exactly one row:
+
+```
+artifact(action="find", filter={"rel_path": {"contains": "open-issue-work-queue"}})
+→ count: 1
+```
+
+**Mechanism — read, not inferred** (HEAD `637b9d37`). `find::Args` (`src/librarian/tools/find.rs:16-45`) has no `rel_path` field and no `#[serde(deny_unknown_fields)]`, so serde drops the key and the call runs at defaults in both dimensions that mattered: `filter: None`, and `limit: 50` from `default_limit()` (`src/librarian/tools/find.rs:47-49`). **`count: 50` was never a match count — it was the page size.** The number that reads as a result *is* the default.
+
+**Why the schema invites it.** `rel_path` is an advertised top-level param (`src/librarian/tools/artifact.rs:105`). Its description opens `create: relative path for new file` and then spends two more sentences on a different action — *"In find results: path relative to repo root…"* and *"When filtering by path use contains/prefix…"*. An agent looking for how to find by path finds `rel_path`, described in find terms, at top level. Of the 37 action-labelled properties in that schema, this is the one whose prose crosses actions.
+
+That second half then teaches the **inverted** leaf shape — `{"contains": {"field": "rel_path", "value": …}}` — which `repair_node` (`src/librarian/filter.rs:243-250`) exists to correct, and whose comment calls it *"the most common filter error"* per usage.db. Verified on the wire: the inverted form runs, and returns `corrections.filter` with the rewrite plus a hint teaching the canonical shape. So the schema propagates the error its own repair path absorbs.
+
+**The asymmetry is the friction.** `find` already has a Repair-and-Continue surface: hand it a *malformed* filter and it repairs, reports, and teaches. Hand it *no* filter because the key was dropped, and it says nothing at all. The louder mistake gets the help; the silent one gets a well-formed, plausible, wrong answer.
+
+**Cost:** 1 wasted round-trip and a near-miss on a wrong conclusion — 50 plausible rows read as "the query matched 50 things" rather than "the query never ran." Same shape as R-104 (`docs/trackers/reconnaissance-patterns.md`), one step further: a **non**-zero from a report is also a claim about your query, and a count equal to the default limit is the tell.
+
+**Fix idea:** lift a top-level `rel_path` into `filter={"rel_path":{"contains": v}}` and report it under `corrections`, exactly as the inverted-leaf repair already does — the `lift_top_level_param!` precedent (`src/librarian/tools/update.rs:289-303`), which exists because this same class shipped twice on `update`. `deny_unknown_fields` is **not** available here: the dispatcher passes `action` down into the sub-tool's `Args`, and adding it once broke every `artifact(update)` call (`src/librarian/tools/artifact.rs:262-269`). Separately, split `rel_path`'s description so find guidance lives on `filter`, and delete the inverted example.
+
+**Class note:** this is a third variant of a family already archived here — `2026-07-20-artifact-update-toplevel-status-param-silently-dropped.md`, `2026-07-13-artifact-create-drops-topic.md`, `2026-07-13-artifact-update-phantom-schema-fields.md`. The first two were params honored *nowhere*; the third, phantom keys backed nowhere, fixed by deleting them plus the test `input_schema_has_no_phantom_update_fields`. `rel_path` is the variant that test cannot catch: it **is** legitimately backed — by `create`. Nothing asserts a key is honored by the action whose description claims it.
+
+**Filed:** `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md`.
+
+**Status:** open.
+
+---
+
+### U-43 — The shell-on-source gate counts every relative path as in-project, so a `cd` out of the repo is refused with a hint that cannot be followed
+
+**Observed:** 2026-08-17, extracting the artifact schema to a scratch file under `$CLAUDE_JOB_DIR/tmp` — outside the project — and running `awk` over it:
+
+```
+run_command("cd /home/marius/.claude-kat/jobs/44c01c0f/tmp && awk '…' artifact_head.rs")
+→ shell access to source files is blocked
+  hint: use read_file(path, start_line, end_line), symbols(path), … instead
+```
+
+**Got:** a refusal whose remedy is unusable — `read_file`/`symbols` resolve against the active project, and the file is not in it. Copying the byte-identical file to `artifact_head.txt` and re-running made it pass, which first read as *"the gate discriminates on extension, not location."* **That reading was wrong**, and only reading the guard showed it.
+
+**Mechanism — read, not inferred.** `segment_reads_project_source` (`src/util/path_security.rs:1295-1299`) does check membership, through `path_is_within_project` (`src/util/path_security.rs:1307-1320`) — which states its own assumption:
+
+> *"Relative paths are inside by construction — `run_command` executes with the project root as its cwd."*
+
+`run_command` does start at the project root, but the command may `cd` elsewhere first and nothing tracks that. So the bare token `artifact_head.rs` takes the `is_relative() → true` branch and is classified as project source. The extension was necessary, not sufficient — the rename passed because it failed the extension half, not because location was ever re-evaluated.
+
+**Why it matters: it is the residue of a fix shipped the day before.** The membership check landed 2026-08-16 in `433100bd` ("fix(il3): stop blocking source reads outside the project", GF-3 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`) precisely to stop refusals whose hint could not be followed — measured then at **25 of 111** `il3_shell_on_source` refusals naming a path outside the project. The `cd`-then-relative slice survives that fix, and the fix's own justification applies to it verbatim.
+
+**Cost:** 1 wasted round-trip, plus one wrong mechanism that would have shipped as this entry's explanation had the guard source not been opened. The workaround — rename to a non-source extension — is discoverable and teaches the wrong lesson.
+
+**Fix idea:** resolve a relative token against the segment's *effective* cwd rather than the project root. `check_source_file_access` already splits on `&&`/`;`/`|`, so a leading `cd <path>` in the segment is available at the point the decision is made. Keep the conservative bias: no `cd` seen, or an unresolvable `cd` target, still means inside.
+
+**Filed:** `docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`.
+
+**Status:** open.
