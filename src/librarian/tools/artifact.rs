@@ -315,63 +315,174 @@ mod tests {
     }
 
     /// Class-level guard for the family
-    /// `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md` belongs to.
+    /// `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md` belongs
+    /// to — generalised from `find` alone to every action the dispatcher routes.
     ///
-    /// **This one passes today.** It is a tripwire for the next variant, not a
-    /// reproduction of this one — `rel_path` is labelled `create:`, so a label-driven
-    /// sweep cannot reach it by construction, and the doc half is pinned separately by
-    /// `rel_path_description_does_not_instruct_find_callers`. Mutation-verified: change
-    /// any `find:`-labelled key's name in `input_schema()` without adding the field to
-    /// `find::Args` and this goes red.
+    /// `input_schema_has_no_phantom_update_fields` above asserts a key is backed by *some*
+    /// action. That is not enough, and `rel_path` was the proof: it **was** backed — by
+    /// `create` — while its description also instructed `find`, whose `Args` had no such
+    /// field, so serde discarded it and the query answered with an unfiltered first page.
+    /// `Args` cannot carry `deny_unknown_fields` (the dispatcher passes `action` down, and
+    /// adding it once broke every `artifact(update)` call), so nothing else catches this.
     ///
-    /// `input_schema_has_no_phantom_update_fields` asserts a key is backed by *some*
-    /// action. That is the gap this closes: a key can be real, backed by a sibling
-    /// action, and silently discarded by the one whose label it carries — because
-    /// `Args` cannot carry `deny_unknown_fields` (the dispatcher passes `action` down,
-    /// and adding it once broke every `artifact(update)` call).
+    /// **Why the probe compares two calls instead of asserting one fails.** For each
+    /// property labelled `<action>:`, that action is called twice: once with its required
+    /// params alone, once with the same plus the key set to a value ill-typed for its
+    /// *declared schema type*. A key the sub-tool honors is type-checked, so the second call
+    /// fails differently from the first. A key it discards is dropped by serde, so both
+    /// calls behave identically — and identical is the defect.
     ///
-    /// The probe exploits serde's asymmetry: a key that IS a field gets type-checked,
-    /// so an ill-typed value errors; a key that is NOT a field is silently discarded,
-    /// so the same value succeeds. `[]` is invalid for every type in `find::Args`
-    /// (`Option<String>`, `Option<bool>`, `usize`, `Option<Scope>`, `Option<FilterNode>`)
-    /// — check that before reusing the probe on an action whose `Args` holds a `Vec`,
-    /// where `[]` would be accepted and the probe would read as a pass.
+    /// Asserting "the second call errors" would be vacuous here: most actions have required
+    /// params and error either way. Comparing outcomes is what makes the probe sound for
+    /// them, and it is why this generalises where the original find-only version could not.
+    ///
+    /// Required params are type-valid dummies chosen to **fail resolution**: a nonexistent
+    /// id, an escaping `rel_path`. That failure is the point — it is reached *after*
+    /// deserialisation, so a deserialisation error is visibly different from it. `create` in
+    /// particular must not succeed, or its own second call would hit "already exists" and
+    /// differ for the wrong reason.
     #[tokio::test]
-    async fn schema_keys_labelled_find_are_honored_by_find() {
+    async fn every_action_labelled_schema_key_is_honored_by_that_action() {
+        const NO_SUCH_ID: &str = "0000000000000000";
+        const ACTIONS: [&str; 12] = [
+            "find",
+            "get",
+            "create",
+            "update",
+            "move",
+            "delete",
+            "graft",
+            "link",
+            "graph",
+            "state_at",
+            "append_entry",
+            "update_entry",
+        ];
+
+        // Keys whose backing field accepts arbitrary JSON, so no value is ill-typed for them
+        // and the probe cannot speak. Each entry is an admission of blindness, not a pass —
+        // keep the list short and justified.
+        const ACCEPTS_ANY_JSON: [&str; 0] = [];
+
+        fn required(action: &str) -> serde_json::Map<String, Value> {
+            let mut m = serde_json::Map::new();
+            match action {
+                "get" | "graph" | "delete" => {
+                    m.insert("id".into(), json!(NO_SUCH_ID));
+                }
+                "update" => {
+                    m.insert("id".into(), json!(NO_SUCH_ID));
+                    m.insert("patch".into(), json!({}));
+                }
+                "move" => {
+                    m.insert("id".into(), json!(NO_SUCH_ID));
+                    m.insert("new_rel_path".into(), json!("docs/nope.md"));
+                }
+                "graft" => {
+                    m.insert("from_id".into(), json!(NO_SUCH_ID));
+                    m.insert("into_id".into(), json!("1111111111111111"));
+                }
+                "append_entry" => {
+                    m.insert("id".into(), json!(NO_SUCH_ID));
+                    m.insert("id_prefix".into(), json!("ZZ"));
+                }
+                "update_entry" => {
+                    m.insert("id".into(), json!(NO_SUCH_ID));
+                    m.insert("entry_collection".into(), json!("nope"));
+                    m.insert("entry_id".into(), json!("ZZ-1"));
+                    m.insert("fields".into(), json!({}));
+                }
+                "link" => {
+                    m.insert("src_id".into(), json!(NO_SUCH_ID));
+                    m.insert("dst_id".into(), json!("1111111111111111"));
+                    m.insert("rel".into(), json!("cites"));
+                }
+                "state_at" => {
+                    m.insert("artifact_id".into(), json!(NO_SUCH_ID));
+                }
+                "create" => {
+                    m.insert("kind".into(), json!("bug"));
+                    m.insert("title".into(), json!("probe"));
+                    // Escaping path: refused before anything is written, so the baseline is
+                    // stable and no file is created.
+                    m.insert("rel_path".into(), json!("../probe-must-not-exist.md"));
+                }
+                _ => {}
+            }
+            m
+        }
+
+        // A value that cannot deserialise into the declared JSON type.
+        fn ill_typed(declared: &str) -> Value {
+            if declared == "array" {
+                json!(0)
+            } else {
+                json!([])
+            }
+        }
+
+        fn outcome(r: &anyhow::Result<Value>) -> String {
+            match r {
+                Ok(v) => format!("ok:{v}"),
+                Err(e) => format!("err:{e}"),
+            }
+        }
+
         let schema = Artifact.input_schema();
         let props = schema["properties"]
             .as_object()
-            .expect("schema has properties");
+            .expect("schema has properties")
+            .clone();
 
-        let find_keys: Vec<String> = props
-            .iter()
-            .filter(|(name, spec)| {
-                // `action` is the dispatcher's own key, not any sub-tool's.
-                *name != "action"
-                    && spec["description"]
-                        .as_str()
-                        .is_some_and(|d| d.starts_with("find:"))
-            })
-            .map(|(name, _)| name.clone())
-            .collect();
+        let mut checked = 0usize;
+        let mut unhonored: Vec<String> = Vec::new();
+        for (name, spec) in &props {
+            if name == "action" || ACCEPTS_ANY_JSON.contains(&name.as_str()) {
+                continue;
+            }
+            let Some(desc) = spec["description"].as_str() else {
+                continue;
+            };
+            // Label convention: the description opens `<action>: …`.
+            let Some(action) = desc.split(':').next() else {
+                continue;
+            };
+            if !ACTIONS.contains(&action) {
+                continue;
+            }
+            let declared = spec["type"].as_str().unwrap_or("string");
+
+            let ctx = mk_ctx();
+            let mut base_args = required(action);
+            base_args.insert("action".into(), json!(action));
+            let base = Artifact.call(&ctx, Value::Object(base_args.clone())).await;
+
+            let mut probe_args = base_args;
+            probe_args.insert(name.clone(), ill_typed(declared));
+            let probed = Artifact.call(&ctx, Value::Object(probe_args)).await;
+
+            if outcome(&base) == outcome(&probed) {
+                unhonored.push(format!("{action}:{name} (declared {declared})"));
+            }
+            checked += 1;
+        }
 
         assert!(
-            !find_keys.is_empty(),
-            "expected some find-labelled schema keys; the label convention may have changed"
+            unhonored.is_empty(),
+            "these schema keys are labelled for an action whose Args has no such field, so \
+             serde discards them silently — exactly as find discarded rel_path. Either add \
+             the field or move the guidance off the key: {unhonored:?}"
         );
-
-        let ctx = mk_ctx();
-        for key in &find_keys {
-            let result = Artifact
-                .call(&ctx, json!({"action": "find", key.as_str(): []}))
-                .await;
-            assert!(
-                result.is_err(),
-                "schema labels `{key}` as a find param, but find::Args has no such \
-                 field — serde discards it and the query runs at defaults, returning \
-                 an unfiltered first page whose count reads as a match total"
-            );
-        }
+        // 37 labelled keys across the 12 actions as of 2026-08-17, all honored. The floor
+        // leaves room for the schema to shrink without a false alarm while still catching a
+        // break in the `<action>:` label convention, which would otherwise make this test
+        // quietly stop checking anything — the exact failure mode it exists to prevent.
+        assert!(
+            checked >= 30,
+            "expected the sweep to cover most of the schema's ~37 labelled keys, covered \
+             {checked} — the `<action>:` label convention may have changed, which would make \
+             this test silently stop checking"
+        );
     }
 
     /// The doc half of
