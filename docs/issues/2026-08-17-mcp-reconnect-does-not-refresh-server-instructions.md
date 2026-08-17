@@ -90,6 +90,34 @@ does not distinguish the two. It does not need to: the operational consequence i
 `d2cf4449`: *"NOTE: source.md is compiled in. Needs cargo rb + /mcp before a live session
 sees the restored clause."* Necessary, not sufficient.
 
+### Two live conversations, two DIFFERENT frozen states
+
+`397ca32b` confirmed this bug from a second session using a two-marker method, and reported
+that session's instructions in **state 1**. Read against the same table, the session that
+filed this bug is in **state 2** — a different one:
+
+| marker | state 1 (pre-`391fdcdc`) | state 2 (post-`391fdcdc`) | state 3 (post-`d2cf4449`) | filing session |
+|---|---|---|---|---|
+| IL-1 overlap clause | present | absent | present | **absent** |
+| `## Workspace gate` section | present | absent | absent | **absent** |
+| quickref `docs/trackers` row | present | present | absent | **present** |
+
+Three markers, one consistent reading: state 2, which is the surface compiled into
+`3d7f13ce` — the binary that served this conversation's first connection, and the one
+`usage.db` recorded for its earliest calls.
+
+This is stronger than either observation alone, and it rules out one more alternative.
+A host that re-read `initialize.instructions` late, or served them from any shared or
+global cache, would have to show the **same** text in both conversations. It does not: two
+sessions running against the same repo, at the same minute, hold instructions compiled from
+two different builds — each one the build that was live when *that* conversation first
+connected.
+
+So the freeze is **per-conversation and at first connect**, not per-host and not
+time-based. Which also means the staleness silently grows with conversation age: the longer
+a session runs, the further its instructions drift from the binary answering its calls. A
+long-lived session is the *most* likely to be reasoning from a surface nobody ships any
+more, and nothing in its context marks the text as old.
 ### Independent confirmation, and a two-marker fingerprint that dates the live text
 
 Added 2026-08-17 by the session that authored `d2cf4449` and `8d44ee08` — the two commits
