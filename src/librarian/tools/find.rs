@@ -217,7 +217,7 @@ fn build_hints(
     // rows and `scope="all"` delivered 2. The earlier fix gated on `applied.scope`,
     // which held at umbrella scope (where its test lives) and left the repo-scope
     // twin reporting an unreachable total. See
-    // docs/issues/2026-08-17-find-more-in-workspace-hint-counts-rows-the-alias-cannot-reach.md.
+    // docs/issues/archive/2026-08-17-find-more-in-workspace-hint-counts-rows-the-alias-cannot-reach.md.
     if !matches!(applied.scope, Scope::Umbrella | Scope::All)
         && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {

@@ -1,5 +1,5 @@
 ---
-id: f7ed94fbc1952bc5
+id: e8094b832491b358
 kind: bug
 status: fixed
 title: 'BUG: artifact(find)''s more_in_workspace hint counts rows scope="all" can never reach — the 2026-07-17 fix gated on applied scope, so the self-reference survives one level down'
@@ -172,7 +172,14 @@ Why the umbrella is genuinely the ceiling, confirmed at
 returns machine-wide rows for an active project, so no advice could have made
 the old count reachable.
 
-Change: `src/librarian/tools/find.rs::build_hints`. Branch `experiments`.
+Change: `src/librarian/tools/find.rs::build_hints`, plus the two prompt surfaces
+that documented the old contract (`src/prompts/guides/librarian-runtime.md`,
+`src/librarian/prompts/companion_hint.md`).
+
+Fix SHA `9cdb2f50` (**`experiments`**). `master` is a strict ancestor at archive
+time (`git rev-list --left-right --count master...experiments` → `0 894`), so the
+promotion path is fast-forward and this SHA already *is* the master SHA — no
+second SHA to record later.
 ## Tests added
 
 `librarian::tools::find::tests::scope_all_widens_to_workspace` — extended rather
@@ -209,14 +216,13 @@ the home project afterward.
 
 ## Resume
 
-One step left before archiving: the fix is verified by the test suite but **not
-yet observed on the wire**. `build_hints` is compiled in, so a live MCP session
-keeps the old behavior until `cargo rb` plus a `/mcp` reconnect. After
-reconnecting, re-run the two calls quoted under **Symptom** and confirm
-`more_in_umbrella` and `more_in_workspace` now sum with `count` to the true
-catalog total, that `expand` lists `scope="all"` once, and that `scope="all"`
-returns exactly `count + more_in_umbrella`. Then archive via
-`artifact(action="move", …)`.
+N/A — verified on the wire after `cargo rb` + `/mcp`, not only by the suite.
+At repo scope: `more_in_umbrella: 2`, `more_in_workspace: 21` (was 23 — the
+reachable delta is no longer double-counted), `more_in_workspace_hint` present,
+and `expand: ["scope=\"all\""]` with a single entry. Following it resolved to
+`applied: "umbrella"` and returned 13, matching repo-total 11 + 2 exactly. The
+remaining 21 rows are reported as beyond the ceiling and offered no scope
+expansion, which is the corrected contract.
 ## References
 
 - `src/librarian/tools/find.rs:111-278` — `build_hints`
