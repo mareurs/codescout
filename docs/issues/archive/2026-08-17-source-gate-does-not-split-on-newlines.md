@@ -196,19 +196,28 @@ to get past it.
 
 ## Resume
 
-N/A — closed. Fixed on `experiments` at **`308014b5`**, promoted by fast-forward, so no
-pending-master-SHA line: `master` moves onto this exact commit and `308014b5` already *is*
-the master SHA.
+N/A — closed. Fixed on `experiments` at **`308014b5`**, promoted by fast-forward, so that
+is also the master-side SHA and there is no second one to record. Archived 2026-08-17 after
+wire verification.
 
-Wire verification still owed: not live in any running MCP server until `cargo rb` + `/mcp`.
-The probes are `run_command("echo hi\ncat src/main.rs")` — must be refused — and
-`run_command("git commit -m \"one\ncat src/main.rs\"")` — must run, proving the
-quoted-newline guard holds outside the test harness too. Archive after that.
+**Wire-verified after `cargo rb` + `/mcp`**, all three cases:
+
+| command | before | after |
+|---|---|---|
+| `echo hi` / `cat src/main.rs` | **allowed** | blocked |
+| `echo "one` / `cat src/main.rs"` (quoted) | allowed | allowed |
+| `echo hi` / `cargo test \| grep FAILED` | **allowed** | IL-3 blocked |
+
+Row one is the filed bug. Row two is the false-positive guard holding outside the test
+harness. Row three is the sibling false negative, and its refusal message is the proof the
+segmentation is right rather than merely stricter — it names **`cargo test`** as the
+unbounded left-hand side and suggests `run_command("echo hi\ncargo test")`, so the gate
+identified the real pipe LHS across the newline boundary instead of stopping at `echo`.
 
 One stale reference deliberately left: the archived sibling
-`docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` still
-names the pre-rename test. Archived files are historical snapshots — rewriting one to match
-a later rename would falsify the record it exists to preserve.
+`docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` calls
+this an "open descendant" and names the pre-rename test. Archived files are historical
+snapshots — rewriting one to match later work falsifies the record it exists to preserve.
 ## References
 
 - `docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md` — the

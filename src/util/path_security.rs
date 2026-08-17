@@ -797,7 +797,7 @@ fn pipeline_segments(command: &str) -> Vec<String> {
     // the segment's first token and `echo hi\ncargo test | grep FAILED` went undetected.
     // Quote-safe without further work — `split_outside_quotes` tracks quote state across
     // line breaks, and a backslash-newline continuation is consumed by its escape branch.
-    // BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    // BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
     split_outside_quotes(command, &["&&", "||", ";", "\n"])
 }
 
@@ -1247,7 +1247,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // multi-line command was one segment, and `echo hi\ncat src/main.rs` read project
     // source unchecked. Quote-safety needs no extra work — `split_outside_quotes` carries
     // quote state across line breaks, so a newline inside "..." is data.
-    // BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    // BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
     let segments = split_outside_quotes(&stripped, &["&&", "||", ";", "|", "\n"]);
 
     let blocked = segments.iter().find(|seg| {
@@ -2553,7 +2553,7 @@ mod tests {
     ///
     /// This test asserted the permissive behaviour as a deliberate tripwire until the
     /// gap was closed; it now asserts the fix.
-    /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    /// BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
     #[test]
     fn source_file_access_splits_on_newlines() {
         assert!(
@@ -2649,7 +2649,7 @@ mod tests {
     }
 
     /// A newline is a separator like any other once it is in `seps`.
-    /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    /// BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
     #[test]
     fn split_outside_quotes_newline() {
         let parts = split_outside_quotes("echo hi\ncat src/main.rs", &["&&", "||", ";", "|", "\n"]);
@@ -3150,7 +3150,7 @@ EOF"#;
     /// Sibling of the source gate's newline gap, in the pipe gate: `pipeline_segments`
     /// splits on `&&`, `||` and `;` but not on a newline, so a multi-line command is one
     /// segment and the pipe's real LHS is not the segment's first token.
-    /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    /// BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
     #[test]
     fn il3_detects_a_piped_unbounded_command_on_a_later_line() {
         let cmd = "echo hi\ncargo test | grep FAILED";

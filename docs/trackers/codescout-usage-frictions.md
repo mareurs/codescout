@@ -1987,7 +1987,7 @@ The second row is the bypass this fix closed, and it is the one worth re-reading
 
 **Status:** fixed on `experiments`, commit `4fad1aa4` (cherry-picked from `0a955491`). The fix idea above was wrong in a useful way: it proposed writing a `strip_heredoc_bodies` helper, and that helper **already existed** (`src/util/path_security.rs:747`), already called by `detect_il3_violation`. Only `check_source_file_access` kept the older approximation — so this was one call site that never adopted an existing contract, and the fix is a two-line ordering change. Removing the per-segment skip also closed a bypass nobody had noticed: a here-string puts `<<` in the same segment as a real read, so `cat src/main.rs <<< x` was skipped entirely. Mutation-verified.
 
-A third gate defect surfaced from these tests and is filed separately, unfixed: the segment splitter never breaks on a newline, so `echo hi\ncat src/main.rs` is allowed (`docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md`).
+A third gate defect surfaced from these tests and was filed separately, then **fixed** at `308014b5` and archived (`docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md`, id `2f686e4b0ccd4fc6`): the segment splitter never broke on a newline, so `echo hi\ncat src/main.rs` read project source unchecked. Reviewing the sibling pipe gate for the same gap — which that bug's plan said to do — found it there too, with the opposite sign: `pipeline_segments` had the same omission as a false **negative**, so a piped `cargo test` on line two escaped IL-3 entirely.
 
 ---
 
