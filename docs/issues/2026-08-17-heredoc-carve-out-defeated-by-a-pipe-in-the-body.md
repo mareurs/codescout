@@ -1,7 +1,7 @@
 ---
 id: '73fd209da1f001e5'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the source gate splits on `|` before applying its heredoc carve-out, so one pipe in a heredoc body blocks the command — `git commit -F -` with a message quoting a regex is refused as source-file access'
 tags:
 - iron-law
@@ -10,6 +10,7 @@ tags:
 - path-security
 - false-positive
 - heredoc
+closed: 2026-08-17
 opened: 2026-08-17
 owner: marius
 related:
@@ -175,37 +176,62 @@ third patch.
 
 ## Fix
 
-Not yet implemented. Excise heredoc regions **before** splitting:
+**Fixed** on branch `worktree-il3-gate-and-find-lift`, commit `0a955491` (pushed to
+`origin`). **Not yet on `experiments`** — merging that branch is the remaining step, and
+is why this file is `fixed` but not archived.
 
-1. Scan the raw command for `<<-?\s*['"]?(\w+)['"]?`. From the end of that line, drop
-   everything through the first subsequent line whose trimmed content equals the
-   delimiter.
-2. Split the remainder with `split_outside_quotes` exactly as today, and drop the
-   now-redundant per-segment `seg.contains("<<")` check — or keep it as a cheap backstop.
-3. **Conservative bias, unchanged:** an unterminated heredoc drops to end-of-command
-   (matching today's effective behavior for the first segment). Never let a malformed
-   heredoc *open* the gate on a segment that follows a real, non-heredoc pipe.
-4. Apply to the IL-3 pipe gate too if it shares the split — one heredoc-stripping helper,
-   used by both, is the point. Check `src/tools/run_command/inner.rs:308` for the call
-   sites.
+**The plan in this file's first draft was wrong in a useful way.** It proposed writing a
+`strip_heredocs` helper. That helper already existed: `strip_heredoc_bodies`
+(`src/util/path_security.rs:747`), and `detect_il3_violation` had been calling it since
+the *pipe* gate's own heredoc fix. Only `check_source_file_access` kept the older
+approximation. So this was never missing machinery — it was **one call site that never
+adopted an existing contract**, which is the `platform-law-leaks-at-call-sites` shape, and
+the fix is an ordering change of two lines:
 
+```rust
+let stripped = strip_heredoc_bodies(command);
+let segments = split_outside_quotes(&stripped, &["&&", "||", ";", "|"]);
+```
+
+The per-segment `if seg.contains("<<") { return false; }` is deleted, now redundant.
+
+**Removing it closed a second, independent bypass** — found by doing the fix rather than
+by the original investigation. A here-string puts `<<` in the *same* segment as a real
+read, so `cat src/main.rs <<< x` matched the skip and the whole segment was dismissed:
+the source read went through. `<<<` takes no body, so there was never anything to excuse.
+
+The doc comment that described the removed mechanism ("Segments containing `<<` are
+skipped") is rewritten rather than left behind — it now states that stripping happens
+before the split, and why that order is load-bearing.
 ## Tests added
 
-None yet. Planned, in `src/util/path_security.rs` tests alongside
-`check_source_file_access_at_root` (`src/util/path_security.rs:2233-2235`):
+All in `src/util/path_security.rs`, beside the existing heredoc cases.
 
-- `heredoc_body_with_a_pipe_is_not_scanned_for_source_reads` — the failing case; RED today.
-- `heredoc_body_without_a_pipe_stays_allowed` — the control; green today and must stay so,
-  since it is what a split-order fix could regress.
-- `a_real_pipe_after_a_closed_heredoc_is_still_scanned` — the one a careless fix breaks:
-  `true <<'EOF'\nbody\nEOF\ncat src/main.rs | head -1` must remain refused.
-- `unterminated_heredoc_swallows_to_end_of_command` — pins the conservative bias.
-- Mutation check: restore the split-then-test order and confirm only the first test goes
-  red.
+- `source_file_access_allows_a_pipe_inside_a_heredoc_body` — the two-line repro.
+  Watched RED (returned the refusal hint), then GREEN.
+- `source_file_access_allows_a_commit_message_quoting_a_pipe_alternation` — the reported
+  symptom. **Two earlier drafts of this test passed before the fix and so reproduced
+  nothing**: the bare alternation put no reader name at a segment head, and `plugin.json`
+  turns out not to be a source extension. The pair that actually fired was `tail` plus
+  `il3-warn-hook.mjs`. Both dead ends are recorded in the test's own comment.
+- `source_file_access_blocks_a_source_read_on_a_here_string_line` — the bypass above.
+  Written *after* the fix, so **mutation-verified**: restoring the per-segment skip fails
+  exactly this test and leaves the other 27 green, which also proves the two mechanisms
+  are independent.
+- `source_file_access_here_string_does_not_swallow_a_following_read` — guard. The pipe in
+  it is load-bearing; the first draft omitted it and failed for an unrelated reason (see
+  the sibling bug on newline splitting).
+- `source_file_access_does_not_split_on_newlines` — pins a *pre-existing* gap this work
+  surfaced but does not fix, asserting today's permissive behavior deliberately as a
+  tripwire. See `docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md`.
 
-The third test is the important one. The fix removes text from the gate's view, so the
-risk it introduces is a genuine violation hidden behind a heredoc.
+Pre-existing tests that had to stay green and did:
+`source_file_access_blocks_cat_rs_file_after_heredoc_segment` (a real pipe after a closed
+heredoc is still scanned — the case a careless fix breaks) and
+`source_file_access_allows_cat_heredoc_with_source_ext_in_content`.
 
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
+**4069 passed, 0 failed, 45 ignored**.
 ## Workarounds
 
 Write the message or payload to a file and pass the path:
@@ -223,13 +249,12 @@ For non-commit cases, `acknowledge_risk: true` bypasses the gate, but prefer the
 
 ## Resume
 
-Add a `strip_heredocs(command) -> String` helper in `src/util/path_security.rs` and call it
-at the top of `check_source_file_access`, before `split_outside_quotes`. Write
-`heredoc_body_with_a_pipe_is_not_scanned_for_source_reads` first and watch it fail on the
-two-line repro. Then check whether the IL-3 pipe gate performs its own split
-(`src/tools/run_command/inner.rs` around the `check_source_file_access` call at :308) and
-route it through the same helper, so the fix covers both gates rather than one.
+Merge `worktree-il3-gate-and-find-lift` into `experiments`, then archive this file via
+`artifact(action="move", …)` and re-point citations of both its path and its 16-hex id.
 
+Note the fix is **not live in any running MCP server** until `cargo rb` + `/mcp` — the
+session that wrote it still had to use `git commit -F <file>` to get past the gate it was
+fixing. Verify on the wire afterwards with the two-line repro from *Minimal reproduction*.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-45 (this friction), U-44 (the hook's
@@ -240,4 +265,3 @@ route it through the same helper, so the fix covers both gates rather than one.
 - `src/util/path_security.rs` — `check_source_file_access`, `split_outside_quotes`,
   `segment_reads_project_source`.
 - `src/tools/run_command/inner.rs:308` — the call site.
-

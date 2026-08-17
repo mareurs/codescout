@@ -1,7 +1,7 @@
 ---
 id: '674359c8d4396147'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(find) silently drops a top-level `rel_path` and returns page 1 of the catalog as `count: 50` — the number that reads as a match total is the default limit'
 tags:
 - librarian
@@ -9,6 +9,7 @@ tags:
 - find
 - schema
 - silent-drop
+closed: 2026-08-17
 opened: 2026-08-17
 owner: marius
 related:
@@ -209,37 +210,83 @@ and `src/librarian/tools/update.rs:295-302`:
 
 ## Fix
 
-Not yet implemented. Plan, in the order the codebase's own precedent suggests:
+**Fixed** on branch `worktree-il3-gate-and-find-lift`, commit `0a955491` (pushed to
+`origin`). **Not yet on `experiments`** — merging that branch is the remaining step, and is
+why this file is `fixed` but not archived.
 
-1. **Lift, don't reject.** Accept `rel_path: Option<String>` on `find::Args` and lift it
-   into `filter={"rel_path":{"contains": v}}`, reporting the rewrite under `corrections`
-   exactly as the inverted-leaf repair already does. This is the `lift_top_level_param!`
-   pattern (`src/librarian/tools/update.rs:289-303`), which exists because this class
-   shipped twice on `update`. Repair is unambiguously safe here in a way it is not on a
-   write: `find` is a read, and there is exactly one sensible reading of a path-valued
-   `rel_path` on a query. Use `contains`, not `eq` — `eq` compares against the stored
-   absolute path (U-35).
-2. **Split the description.** Move the find guidance off `rel_path` and onto `filter`,
-   and delete the inverted example rather than leaving the schema teaching the error
-   `repair_node` corrects.
-3. **Close the class, not the instance.** Add a schema-hygiene test asserting that for
-   every property whose description is labelled `<action>:`, that action's `Args` has a
-   field of that name (or an explicit, named allowlist entry saying why not). That is the
-   guard the family has been missing through four separate bugs; `rel_path` is simply the
-   first one where the key was real.
+All three planned steps shipped.
 
+**1. Lift, don't reject.** `find::Args` gains `rel_path: Option<String>`, and `call()`
+lifts it into `filter={"rel_path": {"contains": v}}`, reporting the rewrite under
+`corrections` — the `lift_top_level_param!` pattern from
+`src/librarian/tools/update.rs`, which exists because this class shipped twice on
+`update`. `contains`, not `eq` (U-35).
+
+Two placement details that are not incidental:
+
+- The lift runs **before `is_cold_call`**, so a `rel_path` call correctly stops counting
+  as a cold call — it is a filtered query.
+- It also runs **before `rel_path_hint`**, so it inherits, for free, the existing
+  behaviour where an empty page from a `rel_path` filter triggers a disk scan for
+  matching-but-unindexed files. A caller who searches by path and gets nothing now learns
+  whether the file exists but is not indexed.
+
+The `corrections.hint` is composed per repair rather than being one fixed string: a lift
+reported under the inverted-leaf hint would tell the caller to fix a filter shape they
+never wrote.
+
+**2. Split the description.** `rel_path`'s schema entry keeps its `create:` label, states
+the find shorthand it now genuinely supports, and **drops the inverted-leaf example** that
+was teaching the shape `repair_node` exists to correct — the one its own comment calls the
+most common filter error.
+
+**3. Close the class.** `schema_keys_labelled_find_are_honored_by_find` — see *Tests
+added*.
 ## Tests added
 
-None yet — the fix is unimplemented. Planned, with the failure each must show first:
+**`src/librarian/tools/find.rs`** — four, all watched RED first:
 
-- `find_lifts_top_level_rel_path_into_a_contains_filter` — RED today: returns the
-  unfiltered page. Must go green returning the single matching row.
-- `find_reports_the_lifted_rel_path_under_corrections` — a lift the caller cannot see is
-  the same silent behavior in a new costume; assert the `corrections` key by name.
-- `every_action_labelled_schema_key_is_honored_by_that_action` — the class-level parity
-  test. RED today on `rel_path` alone; mutation-verify by re-labelling another property's
-  description and confirming it fails.
+- `lifts_top_level_rel_path_into_a_contains_filter` — RED at `count: 2` (the unfiltered
+  page) against an expected 1.
+- `reports_the_lifted_rel_path_under_corrections` — a silent lift is the same defect in a
+  new costume, so the report is asserted by name.
+- `lifted_rel_path_uses_contains_so_a_displayed_path_still_matches` — the U-35 interaction.
+- `lifted_rel_path_combines_with_an_explicit_filter` — the lift ANDs into an explicit
+  filter rather than replacing it, asserted in both directions (both clauses apply; the
+  `rel_path` clause actually narrows inside the AND).
 
+**`src/librarian/tools/artifact.rs`** — two:
+
+- `schema_keys_labelled_find_are_honored_by_find` — the class-level guard, and the durable
+  half of this fix. It **passes today**, so it is a tripwire for the next variant rather
+  than a reproduction of this one; **mutation-verified** by adding a `find:`-labelled
+  schema key with no backing field, which makes it fail naming that key. The probe uses
+  serde's asymmetry: a key that IS a field type-checks and rejects `[]`, a key that is not
+  is silently discarded and the call succeeds. `[]` is invalid for every type in
+  `find::Args`, which is noted in the test because the probe is unsound for an `Args`
+  holding a `Vec`.
+- `rel_path_description_and_find_support_agree` — the doc half. The invariant is **not**
+  "never mention another action": mentioning `find` is now correct, because `find` honors
+  the key. It is that the mention and the support must agree, which was false before and is
+  true now.
+
+**Two of these tests were vacuous passes before being corrected**, and both are recorded in
+their own comments:
+
+- `schema_keys_labelled_find_are_honored_by_find` cannot reach `rel_path` at all — the key
+  is labelled `create:`, so a label-driven sweep misses it *by construction*. That is
+  precisely why the doc-half test exists separately, and it is the sharpest statement of
+  the bug: the defect lives in the gap between a key's label and its prose.
+- `lifted_rel_path_uses_contains_…` first seeded one row, so `count == 1` held whether or
+  not `rel_path` was honored.
+
+A third near-miss is worth recording here because it is the same failure mode one level up:
+the first version of this test file's sibling assertion searched the description for
+`{"contains"`, which also matches the **canonical** `{"rel_path": {"contains": …}}`. The
+inverted shape's real signature is the `"field"` key.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
+**4069 passed, 0 failed, 45 ignored**.
 ## Workarounds
 
 Use the filter form, with `contains` on a path fragment:
@@ -258,16 +305,18 @@ before the results.
 
 ## Resume
 
-Implement step 1 in `src/librarian/tools/find.rs`: add `rel_path: Option<String>` to
-`Args`, and in `call()` fold it into the filter alongside `merge_kind_status`, appending a
-`corrections.filter` note in the same shape `repair_node` emits. Write
-`find_lifts_top_level_rel_path_into_a_contains_filter` first and watch it fail with the
-50-row page. Then step 3, which is where the durable value is — the parity test over
-`input_schema()` is what stops variant five.
+Merge `worktree-il3-gate-and-find-lift` into `experiments`, then archive this file via
+`artifact(action="move", …)` and re-point citations of both its path and its 16-hex id.
 
-Note `src/librarian/tools/find.rs` was uncommitted in a concurrent session's working tree
-on 2026-08-17; re-check `git status` and rebase onto their work before editing it.
+Two follow-ups this fix deliberately did **not** take on:
 
+1. **Extend the parity probe to the other actions.** Scoped to `find` because that is where
+   the defect was measured. Extending it is mechanical but not free: each action needs a
+   probe value ill-typed for *its* `Args` (`[]` is unsound where a `Vec` field exists) and
+   whatever required params it has, so the only possible error is the type error. The
+   groundwork — label extraction from `input_schema()` — is already in the test.
+2. **`repo`** carries a `create:` label and is the nearest sibling in shape to `rel_path`;
+   worth one look for the same label-versus-prose mismatch.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-42 (this friction), U-35 (`rel_path`
@@ -280,4 +329,3 @@ on 2026-08-17; re-check `git status` and rebase onto their work before editing i
   `docs/issues/archive/2026-07-10-artifact-filter-inversion-misleading-hint.md`.
 - `src/librarian/tools/find.rs`, `src/librarian/tools/artifact.rs`,
   `src/librarian/tools/update.rs`, `src/librarian/filter.rs`.
-
