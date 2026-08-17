@@ -91,6 +91,13 @@ unbounded pipe (`cargo`, `npm`, `pytest`, `git`, `rg`, `fd`,
 `awk`, `sed`, non-recursive `grep` — the output is naturally
 bounded, so a downstream pipe is fine.
 
+**Two gates, same words — read both before concluding.** Everything
+above is the PIPE gate. `cat`, `awk`, `sed` and `grep` are bounded
+LHS here and still refused on a *source file* by the read-mode gate
+below. `wc` is the sharpest case: forbidden as a trimmer on the
+RIGHT of a pipe, allowed as a command on the left, and allowed on a
+source path. A sentence about one gate says nothing about the other.
+
 **Windows note:** prefer codescout-native discovery
 (`tree(glob=...)`, `grep(pattern=...)`) over shell `find`. On
 Windows `find` is ambiguous — cmd.exe ships its own `find` (a
