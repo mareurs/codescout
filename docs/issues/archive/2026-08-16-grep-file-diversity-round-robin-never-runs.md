@@ -1,13 +1,13 @@
 ---
-id: '5f6cfe1acdfda38d'
+id: 2a9fd7654cf82013
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep''s file-diversity round-robin never runs, so overflow hints name walk-order files, not hot ones'
 tags:
 - grep
 - progressive-disclosure
 - file_group
-closed: null
+closed: 2026-08-16
 opened: 2026-08-16
 owner: marius
 related:
@@ -152,40 +152,97 @@ collect-at-`max` shape:
 
 ## Fix
 
-Not implemented. Two candidate shapes, with different costs:
+Fixed on `experiments`. **Fix (1) — over-collect, then cap** — chosen after answering the
+question § Resume asked, which changed where the fix belongs.
 
-1. **Over-collect, then cap.** Walk to `max * K` (or to the byte budget alone) and let
-   `cap_grouped` do its job with `budget = max`. Restores diversity and makes `total` a
-   real count over a wider sample — but it is exactly the unbounded-collection behaviour
-   the 4.4M-token incident was fixed by bounding, so `K` must be small and the byte clamp
-   must stay authoritative.
-2. **Rank the hint's file list separately.** Leave collection alone and accept that
-   `visible` is walk-ordered, but stop advertising the top-3 as if ranked. Cheaper and
-   strictly honest, but does not give the caller a more useful sample.
+### The sibling check came first, and moved the boundary
 
-(1) is the better result and the riskier change; (2) is a message fix in the same spirit
-as the BL-2 fix. Prefer deciding with a measurement of real `grep` overflow rates rather
-than in the abstract.
+§ Resume said: *check whether `symbol/display.rs` and `symbol/references.rs` share the
+collect-at-budget-then-cap-at-budget shape — if they do, the fix belongs closer to
+`cap_grouped` than to `grep`.*
 
+- **`references.rs:264` is clean.** Its `locations` come from the LSP's full reference list
+  and are never bounded before the call, so `budget < total` is the normal case and the
+  round-robin already runs there.
+- **`display.rs` no longer calls `cap_grouped` at all** — `references(cap_grouped)` returns
+  three files, and that is not one of them. The line cited in § Resume is stale.
+- **`grep.rs` has TWO call sites, not one.** `Grep::call` (`:340`) *and* `grep_in_buffer`
+  (`:902`), each with its own collect-at-`max` loop. The filing named only the first.
+
+So the defect is grep's, not `cap_grouped`'s — and it is in both of grep's paths. Fixing only
+the reported one would have left the buffer path exactly as broken, with nothing to prompt
+anyone to look again.
+
+### What changed
+
+`COLLECTION_OVERSAMPLE = 4`. Collection walks to `limit * 4` candidates and `cap_grouped`
+trims back to `limit`, so `budget < total` becomes the normal case and the round-robin
+finally runs.
+
+Three properties keep this safe:
+
+- **`MAX_TOTAL_MATCH_BYTES` is untouched and remains the authoritative payload bound.** The
+  4.4M-token incident § Hypotheses cites was fixed by bounding *bytes*, not by bounding the
+  count — so oversampling the count does not re-open it. On a heavy corpus the byte budget
+  still stops the walk first.
+- **Oversampling changes what the trimmer chooses *from*, not how many it returns.** Output
+  is still capped at `limit`.
+- **Simple mode only.** Context mode returns merged blocks flat, without `cap_grouped`, so
+  oversampling there would return more blocks than were asked for. `collect_limit` falls
+  back to `max` when `context_lines > 0`.
+
+The overflow hint's `stopped_at` had to change with it: collection now stops at the candidate
+cap, so `"Collection stopped at limit=4"` would be false. It reads
+`"the candidate cap (16) for limit=4"`. *"Raise limit"* stays the right advice, since
+`collect_limit` scales with it.
+
+### Interaction with BL-2 — the dead branch came back to life
+
+BL-2 left the `"Showing N of M"` branch in place with a comment: *"Currently unreachable …
+kept correct rather than deleted, so decoupling the display budget from the collection cap
+stays a one-line change."* That decoupling is this fix, and the branch is now reachable and
+correct: when collection completes inside the candidate cap, every match **was** counted, so
+printing the denominator is honest. BL-2 forbade printing a denominator that was never
+counted — not printing one at all.
 ## Tests added
 
-None — not fixed. Whichever fix lands needs a test asserting a *caller*-level property:
-that a capped grep over an N-file corpus spans more than one file's worth of the budget.
-The existing `cap_grouped` unit tests cannot catch this, which is the whole point.
+**`grep_capped_result_spans_files_by_diversity_not_walk_order`** — the caller-level test §
+Tests added asked for. 3 files x 3 matches, `limit=4`. Asserts the visible set spans **all
+three** files at exactly `2/1/1` (round-robin gives every file one before any file gets a
+second), that the budget is still 4, that `total` is the true 9, that the hint prints
+`"Showing 4 of 9"`, and that `total_is_lower_bound` is **absent** because nothing was cut off.
 
+Before the fix that same corpus returned 3 matches from one file and 1 from another — two
+files, not three. `cap_grouped`'s own unit tests were green throughout, which is exactly why
+this had to be asserted at the caller.
+
+**`grep_capped_collection_never_renders_as_a_complete_result` (BL-2) — fixture widened, not
+relaxed.** Its 3x3 corpus with `limit=4` no longer caps, because 9 candidates fit inside the
+cap of 16 — and "Showing 4 of 9" there is *honest*, so the old assertions would have been
+pinning the wrong thing. The corpus is now 8 files x 3 = 24, which genuinely exhausts the
+candidate cap, and every original assertion survives unchanged: the floor flag, the
+"true total is unknown" wording, and the header `capped` marker.
+
+That distinction is the whole reason to widen rather than weaken: BL-2's invariant is
+*never print a denominator you did not count*, and it still holds exactly.
+
+Gate: **3980 tests**, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`.
 ## Workarounds
 
-Treat the overflow hint's file list as "files seen first", not "files with the most
-matches". For a genuine ranking use `mode="files"`, which counts per file without the
-collection cap.
+Obsolete. The hint's file list is now ranked over a 4x-wider sample, so it names files with
+more matches rather than files the walker reached first.
 
+`mode="files"` is still the right tool for a genuine per-file ranking — it counts without the
+collection cap at all — and the hint still points at it.
 ## Resume
 
-Decide between fix (1) and fix (2) above. Before deciding, check whether
-`src/tools/symbol/display.rs:223` and `src/tools/symbol/references.rs:363` have the same
-collect-at-budget-then-cap-at-budget shape — if they do, the fix belongs closer to
-`cap_grouped` than to `grep`.
+None. Both grep call sites fixed, `references.rs` checked and clean, `display.rs`'s cited
+call site confirmed stale.
 
+One number is a judgement rather than a measurement: `COLLECTION_OVERSAMPLE = 4`. It is large
+enough to give the round-robin real choice and small enough that the byte clamp still
+dominates on heavy corpora. If a future measurement of real overflow rates suggests a
+different value, it is a one-line change with a doc comment explaining what it trades.
 ## References
 
 - `docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md` — found while fixing it

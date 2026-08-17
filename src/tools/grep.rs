@@ -82,6 +82,13 @@ impl Tool for Grep {
         let context_lines = optional_u64_param(&input, "context_lines")
             .unwrap_or(0)
             .min(20) as usize;
+        // Simple mode oversamples so `cap_grouped` has something to choose from; context
+        // mode returns blocks flat and must stop at what was asked for. BL-31.
+        let collect_limit = if context_lines == 0 {
+            max.saturating_mul(COLLECTION_OVERSAMPLE)
+        } else {
+            max
+        };
         let ignore_case = input
             .get("ignore_case")
             .and_then(|v| v.as_bool())
@@ -211,7 +218,8 @@ impl Tool for Grep {
                             "line": i + 1,
                             "content": content
                         }));
-                        if matches.len() >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
+                        if matches.len() >= collect_limit || emitted_bytes >= MAX_TOTAL_MATCH_BYTES
+                        {
                             hit_cap = true;
                             byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                             break 'outer;
@@ -336,6 +344,11 @@ impl Tool for Grep {
             // Named for what it is: a cap on the NUMBER of matches. It was called
             // `budget`, which reads as a size bound and is how a `limit: 40` search
             // came to emit 4.4M tokens.
+            //
+            // This budget is `max`, while collection ran to `collect_limit` — the two
+            // are deliberately DIFFERENT now. While they were equal, `cap_grouped`
+            // early-returned on `budget >= total` every single time and its
+            // file-diversity round-robin was unreachable from grep. BL-31.
             let max_matches = max;
             let (visible, total, files) = cap_grouped(matches, max_matches);
             let truncated = hit_cap || total > visible.len();
@@ -374,7 +387,14 @@ impl Tool for Grep {
                             "raising limit will not help — shorten the matched lines or",
                         )
                     } else {
-                        (format!("limit={max}"), "raise limit, or")
+                        // Name the real threshold. Collection walks to `collect_limit`,
+                        // not to `limit`, so "stopped at limit=4" would be false after
+                        // BL-31 — though "raise limit" stays the right advice, since
+                        // `collect_limit` scales with it.
+                        (
+                            format!("the candidate cap ({collect_limit}) for limit={max}"),
+                            "raise limit, or",
+                        )
                     };
                     format!(
                         "Collection stopped at {stopped_at}, so the true total is unknown — \
@@ -385,11 +405,11 @@ impl Tool for Grep {
                         files
                     )
                 } else {
-                    // Currently unreachable: `truncated` is `hit_cap || total >
-                    // visible.len()`, and the second disjunct cannot fire while
-                    // `max` serves as both thresholds. Kept correct rather than
-                    // deleted, so decoupling the display budget from the collection
-                    // cap stays a one-line change.
+                    // Reachable since BL-31 decoupled the two thresholds: collection
+                    // ran to `collect_limit` without stopping early, so every match was
+                    // counted and `total` is exact. Printing the denominator here is
+                    // honest — which is precisely the condition BL-2 required, not a
+                    // relaxation of it.
                     format!(
                         "Showing {} of {} matches across {} files. \
                          To trim, {narrow}. \
@@ -719,6 +739,27 @@ const MAX_MATCH_BYTES: usize = 2_000;
 /// per-match clamp cannot reach: many matches, each individually reasonable.
 const MAX_TOTAL_MATCH_BYTES: usize = 60_000;
 
+/// How many candidate matches simple-mode collection gathers per unit of `limit`
+/// before [`cap_grouped`] trims back down to `limit`.
+///
+/// Collection used to stop at exactly `limit`, which made `cap_grouped`'s
+/// file-diversity round-robin **unreachable**: it early-returns when
+/// `budget >= total`, and `total` could never exceed the budget. So the capped result
+/// was simply the first `limit` matches in filesystem walk order, and the overflow
+/// hint's "narrow with one of" list named whichever files the walker happened to reach
+/// first rather than the ones with the most matches — measured live, every suggested
+/// file held exactly one match, which cannot reduce an already-capped result. BL-31.
+///
+/// Oversampling changes how many candidates the trimmer chooses *from*; it does not
+/// change how many are returned. `MAX_TOTAL_MATCH_BYTES` is deliberately unchanged and
+/// remains the authoritative payload bound — a `limit: 40` search once emitted 4.4M
+/// tokens, and that was fixed by bounding **bytes**, not by bounding the count. On a
+/// heavy corpus the byte budget still stops the walk first.
+///
+/// Applies to simple mode only. Context mode returns its merged blocks flat, without
+/// `cap_grouped`, so oversampling there would return more blocks than were asked for.
+const COLLECTION_OVERSAMPLE: usize = 4;
+
 /// Clamp one emitted match to `MAX_MATCH_BYTES`, marking the cut.
 ///
 /// The marker is not decoration. A silently truncated result reads as complete —
@@ -764,6 +805,15 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     let context_lines = optional_u64_param(input, "context_lines")
         .unwrap_or(0)
         .min(20) as usize;
+    // Same decoupling as the filesystem path: simple mode oversamples so `cap_grouped`
+    // has candidates to choose from, context mode returns blocks flat. BL-31 — this
+    // function carries the identical collect-at-`max`, cap-at-`max` shape and the bug
+    // report named only its sibling.
+    let collect_limit = if context_lines == 0 {
+        max.saturating_mul(COLLECTION_OVERSAMPLE)
+    } else {
+        max
+    };
     let ignore_case = input
         .get("ignore_case")
         .and_then(|v| v.as_bool())
@@ -825,7 +875,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
                     "line": i + 1,
                     "content": content,
                 }));
-                if matches.len() >= max || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
+                if matches.len() >= collect_limit || emitted_bytes >= MAX_TOTAL_MATCH_BYTES {
                     hit_cap = true;
                     byte_capped |= emitted_bytes >= MAX_TOTAL_MATCH_BYTES;
                     break;
@@ -1374,27 +1424,32 @@ mod tests {
         );
     }
 
-    /// BL-2 / `docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md`.
-    ///
-    /// `max` is BOTH the collection break threshold and `cap_grouped`'s budget
-    /// (bound once at `:81`, reused at `:339`), so whenever the walk stops early
-    /// `visible.len() == total` and the overflow hint rendered "Showing N of N
-    /// matches" — byte-identical to what a genuinely complete result prints.
-    ///
-    /// The defect IS that identity, so a test inspecting only the capped string
-    /// would have passed against the buggy output. Both rows are therefore
-    /// load-bearing: the `complete` row pins what "nothing was hidden" looks like,
-    /// and was green before the fix.
-    ///
-    /// Mutation caught: restoring `Showing {n} of {total}` makes the capped render
-    /// indistinguishable from the complete one again.
     #[tokio::test]
+    /// BL-2 / `docs/issues/archive/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md`.
+    ///
+    /// When the walk stops early the total is a floor, and the hint must never print a
+    /// denominator it did not count — "Showing N of N matches" is byte-identical to what
+    /// a genuinely complete result prints, so a reader cannot tell a capped sample from
+    /// an exhaustive one.
+    ///
+    /// The defect IS that identity, so a test inspecting only the capped string would
+    /// have passed against the buggy output. Both rows are load-bearing: the `complete`
+    /// row pins what "nothing was hidden" looks like, and was green before the fix.
+    ///
+    /// **Fixture widened for BL-31.** It used to be 3 files x 3 matches with `limit=4`,
+    /// which capped because collection stopped at `limit`. Collection now runs to
+    /// `limit * COLLECTION_OVERSAMPLE`, so that corpus is counted in full and "Showing 4
+    /// of 9" became *honest* — the denominator is real. The corpus is now large enough
+    /// to exhaust the candidate cap, which is what this test is actually about. Widening
+    /// it rather than relaxing the assertion keeps BL-2's invariant exactly as strict.
     async fn grep_capped_collection_never_renders_as_a_complete_result() {
         use serde_json::json;
         let dir = tempdir().unwrap();
-        // 3 files x 3 matches = 9. limit=4 stops the walk inside the second file,
-        // so `files == 2` whatever order the walker visits them in.
-        for name in ["a.rs", "b.rs", "c.rs"] {
+        // 8 files x 3 matches = 24. limit=4 gathers 4*4=16 candidates and stops there,
+        // so the true total is genuinely unknown.
+        for name in [
+            "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs",
+        ] {
             std::fs::write(
                 dir.path().join(name),
                 "fn target_1() {}\nfn target_2() {}\nfn target_3() {}\n",
@@ -1424,14 +1479,14 @@ mod tests {
         // --- control row: a complete result hides nothing and says so by omission.
         assert!(
             complete.get("overflow").is_none(),
-            "limit=50 over 9 matches must not overflow, got: {complete}"
+            "limit=50 over 24 matches must not overflow, got: {complete}"
         );
-        assert_eq!(complete["total"].as_u64(), Some(9));
+        assert_eq!(complete["total"].as_u64(), Some(24));
 
         // --- the row under test.
         let overflow = capped
             .get("overflow")
-            .expect("limit=4 over 9 matches must overflow");
+            .expect("limit=4 over 24 matches must overflow");
         assert_eq!(
             overflow
                 .get("total_is_lower_bound")
@@ -1466,6 +1521,84 @@ mod tests {
             header.contains("capped"),
             "the capped result's FIRST line must not read as a plain count — that is \
              the line a reader anchors on. Got: {header}"
+        );
+    }
+
+    /// BL-31 / `docs/issues/archive/2026-08-16-grep-file-diversity-round-robin-never-runs.md`.
+    ///
+    /// `cap_grouped` exists to preserve file diversity when a result is trimmed, but
+    /// grep bound `max` as BOTH the collection break threshold and the cap budget — so
+    /// `cap_grouped` was always handed a vector no larger than its budget, took its
+    /// `budget >= total` early return, and its round-robin never ran. The capped result
+    /// was the first `limit` matches in walk order.
+    ///
+    /// This asserts at the **caller** level, which is the whole point: `cap_grouped`'s
+    /// own unit tests exercise the round-robin directly with `budget < total` and were
+    /// green throughout. Nothing tested that a caller ever reached it.
+    #[tokio::test]
+    async fn grep_capped_result_spans_files_by_diversity_not_walk_order() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        // 3 files x 3 matches = 9, well inside the candidate cap (4*4=16), so every
+        // match is counted and the trim is a genuine choice rather than a truncation.
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(
+                dir.path().join(name),
+                "fn target_1() {}\nfn target_2() {}\nfn target_3() {}\n",
+            )
+            .unwrap();
+        }
+
+        let ctx = test_ctx().await;
+        let res = Grep
+            .call(
+                json!({ "pattern": "target", "path": dir.path().to_str().unwrap(), "limit": 4 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let groups = res["file_groups"]
+            .as_array()
+            .expect("simple mode returns file_groups");
+        assert_eq!(
+            groups.len(),
+            3,
+            "a 4-match budget over 3 equally-hot files must span ALL THREE (2/1/1), not \
+             spend 3 of 4 on whichever file the walker reached first. Got: {res}"
+        );
+
+        let shown: usize = groups
+            .iter()
+            .map(|g| g["items"].as_array().map_or(0, |m| m.len()))
+            .sum();
+        assert_eq!(shown, 4, "the budget itself is unchanged, got: {res}");
+        let per_file: Vec<usize> = groups
+            .iter()
+            .map(|g| g["items"].as_array().map_or(0, |m| m.len()))
+            .collect();
+        assert_eq!(
+            per_file,
+            vec![2, 1, 1],
+            "round-robin gives every file one before any file gets a second, got: {res}"
+        );
+
+        // Every match was counted, so the denominator is real — this is the branch BL-2
+        // had to keep "correct but unreachable" while the two thresholds were the same
+        // number. Fixing diversity brought it back to life.
+        assert_eq!(res["total"].as_u64(), Some(9));
+        let hint = res["overflow"]["hint"]
+            .as_str()
+            .expect("a trimmed result overflows");
+        assert!(
+            hint.contains("Showing 4 of 9"),
+            "when collection completed, printing the true denominator is honest — BL-2 \
+             forbade printing one that was never counted, not printing one at all. \
+             Got: {hint}"
+        );
+        assert!(
+            res["overflow"].get("total_is_lower_bound").is_none(),
+            "nothing was cut off, so the total is exact and must not be flagged a floor"
         );
     }
 
