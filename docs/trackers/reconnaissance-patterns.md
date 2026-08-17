@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 100
+entry_high_water_R: 101
 entry_prefix: R
 ---
 
@@ -2828,6 +2828,60 @@ rationale nobody re-audits — here the rationale was sound and simply unread), 
 filed root cause is a hypothesis), R-99 (the convention lives where authors look), and
 law G (the answer may already be on record).
 
+## R-101 — A test that DISTINGUISHES two hypotheses is not confirmation of one — check which way it points
+
+**Observed:** 2026-08-17, filing
+`docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`. A
+`high` audit finding flagged a correct doc; the ref was `./render_template.j2`, quoted from
+an `include_str!` argument. I hypothesised the resolver joined the ref to the *markdown
+file's* directory rather than the Rust source's.
+
+**The test I ran, and recorded as confirming:** rewrite the ref repo-relative, re-run the
+audit. Result: `n_refs_resolved` 17477 → 17478, `n_refs_broken` unchanged. I wrote
+*"confirmed — the base directory was the whole of it"*.
+
+**Why that is backwards.** Under a markdown-relative join the base would have been
+`docs/architecture/`, so the rewritten ref would have resolved as
+`docs/architecture/src/librarian/…` — which does not exist, and the ref would have stayed
+broken. It resolved. So the outcome *rules out* the markdown-relative base and establishes
+`repo_root`. The measurement was correct, discriminating, and already in my hands; I read
+its sign wrong, in the direction I had already committed to in prose two paragraphs above.
+
+The real mechanism needed two halves, neither wrong alone: `resolve_file_path` joins
+`repo_root`, where a leading `./` buys nothing; and `try_basename_fallback` opened with
+`if raw_ref.contains('/') { return None }`, so the ref was disqualified from the fallback
+**by the very prefix that made the positional attempt fail**. Corrected in `da55100a`,
+which also found that my sketched parser-side fix was unreachable — `tokenize_code_span`
+splits on `(` and `"`, so the macro context is gone before classification runs.
+
+**The pattern.** Before recording a verdict, state what the *other* hypothesis predicts for
+the same test. If both predict the observed outcome, the test discriminates nothing and the
+verdict is unearned. If they predict opposite outcomes — the good case — then the test is
+strong, and that is exactly when reading its sign from the direction you already lean is
+most costly, because a strong test wrongly signed produces a *confident* wrong answer
+rather than a weak one. A confirmation you can write without naming the counter-prediction
+is a coherence check on your own prose, not a measurement.
+
+This is the Conclude Last rule's twin, one level in: Conclude Last stops you narrating before
+you evaluate. R-101 is the failure that survives it — I *did* evaluate, and evaluated a
+real measurement, but scored it against one hypothesis instead of two.
+
+**What limited the damage:** the bug file marked the root cause **inferred, not cited**,
+naming the two files whose branches had not been read and adding a `## Resume` saying *"the
+behaviour is measured; the code path is not."* `da55100a` opens by citing exactly that
+marking — *"The bug filed this root cause as inferred and said so. Reading it corrected the
+mechanism."* The prescription survived the wrong mechanism: option (b), fall through to the
+basename fallback, was adopted verbatim. Labelling an inference as an inference is what
+makes a wrong mechanism cheap to correct instead of something the next session builds on.
+
+**Detector, usable in one line:** for every `**Verdict:** confirmed`, write the sentence
+*"under the rival hypothesis this test would have shown ___"*. If that sentence cannot be
+completed, the verdict is not yet earned.
+
+**Status:** open — recorded 2026-08-17, single datapoint. Promote to the Hypotheses-tried
+section of `docs/issues/_TEMPLATE.md` when a second verdict is found to have been scored
+against one hypothesis; the template's **Verdict** field is where the counter-prediction
+line belongs.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
