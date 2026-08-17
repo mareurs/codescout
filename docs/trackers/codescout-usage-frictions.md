@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 43
+entry_high_water_U: 44
 entry_prefix: U
 ---
 
@@ -1881,5 +1881,45 @@ run_command("cd /home/marius/.claude-kat/jobs/44c01c0f/tmp && awk '…' artifact
 **Fix idea:** resolve a relative token against the segment's *effective* cwd rather than the project root. `check_source_file_access` already splits on `&&`/`;`/`|`, so a leading `cd <path>` in the segment is available at the point the decision is made. Keep the conservative bias: no `cd` seen, or an unresolvable `cd` target, still means inside.
 
 **Filed:** `docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`.
+
+**Status:** open.
+
+---
+
+### U-44 — The IL3 warn-hook's unbounded-LHS list contains the commands its own message calls bounded, so it contradicts itself in a single response
+
+**Observed:** 2026-08-17, while committing U-42/U-43. `git log -3 --format='%s' | tail -30` — a pipe the IL3 rule explicitly permits, because `-3` is an output limiter — drew an IL3 warning. The server ran it: `exit_code: 0`.
+
+**Got:** the advisory and its own counter-example in the same message.
+
+```
+run_command("ls docs | head -2")
+→ exit_code: 0   stdout: adrs\nagents      ← server allowed it
+
+PreToolUse hook: IL3 warning — piped `ls docs | head -2` to a log-trimmer.
+  … bounded-LHS pipes (ls/cat/awk/sed/find -maxdepth N) pass through.
+```
+
+The hook flags `ls | head` and then, four lines later, names `ls` as a command that passes through.
+
+**Mechanism — read, not inferred.** `claude-plugins/codescout-companion/hooks/il3-warn-hook.mjs:23`:
+
+```js
+const LHS = '(cargo|npm|pnpm|yarn|python|pytest|go|mvn|gradle|git|find|ls|grep|cat|diff|du|stat|rg|fd)';
+```
+
+One flat alternation, no limiter check and no bounded set. It lists `ls`, `cat`, `diff`, `du`, `stat`, `find` and `grep` — which the server's gate treats as **bounded** — alongside `cargo` and `pytest`, which are genuinely unbounded. `git` is in the list unconditionally, where the server's rule is *"`git` is unbounded ONLY without an output limiter: `git log -3`, `git status --short`, `git show --stat` are bounded and may be piped."* Nothing in the hook can see a limiter.
+
+So the false-positive surface is not one command — it is every bounded-LHS pipe the Iron Law deliberately carves out. Measured this session: 3 warnings on 3 legal pipes, 0 true positives.
+
+**Why it matters more than noise.** It is the same failure U-41 names for `snapshot_stale`: an advisory that fires on correct behavior trains the reader to skip it, and IL3's true positives (a piped `cargo test`) are the ones worth catching. It is also the shape of U-22 — an IL3 detector false positive — recurring in the sibling implementation rather than the same one, which is the tell that the rule is duplicated rather than shared: the server has the predicate with its carve-outs, the hook has a hand-copied approximation, and only one of them was updated.
+
+**Cost:** noise on every legal bounded pipe, plus the second-order cost of a self-contradicting message — a reader who trusts the warning over the adjacent text will rewrite working commands into two-call buffer round-trips for no reason.
+
+**Fix idea:** split the alternation into `UNBOUNDED` (cargo, npm, pnpm, yarn, python, pytest, go, mvn, gradle, rg, fd, recursive grep, `find` without `-maxdepth`) and treat everything else as bounded; add the git-limiter carve-out (`-N`, `--max-count`, `--porcelain`, `--short`, `--stat`, `-n`, and *not* `--oneline`, which bounds width rather than line count). The server's own predicate is the specification — port it rather than re-approximating it, or better, have the hook defer to the server entirely, since the message already admits the server is the enforcer.
+
+**Version-bump trap for whoever fixes this:** each of the three profiles resolves plugins from its own version-keyed cache, so editing `il3-warn-hook.mjs` in the source repo changes behavior in **no** profile until `.claude-plugin/plugin.json` `version` is bumped (currently `1.16.8`) and the install records are refreshed in all three of `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`. A content-only edit verifies as "no change" and reads as a failed fix.
+
+**Filed:** `docs/issues/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md`.
 
 **Status:** open.
