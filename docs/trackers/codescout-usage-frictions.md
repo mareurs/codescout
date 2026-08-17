@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 44
+entry_high_water_U: 45
 entry_prefix: U
 ---
 
@@ -1921,5 +1921,56 @@ So the false-positive surface is not one command — it is every bounded-LHS pip
 **Version-bump trap for whoever fixes this:** each of the three profiles resolves plugins from its own version-keyed cache, so editing `il3-warn-hook.mjs` in the source repo changes behavior in **no** profile until `.claude-plugin/plugin.json` `version` is bumped (currently `1.16.8`) and the install records are refreshed in all three of `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`. A content-only edit verifies as "no change" and reads as a failed fix.
 
 **Filed:** `docs/issues/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md`.
+
+**Status:** open.
+
+---
+
+### U-45 — The heredoc carve-out in the source gate covers only the segment holding `<<`, so one `|` anywhere in the body re-exposes it — and this one blocks, it does not warn
+
+**Observed:** 2026-08-17, committing U-44. `git commit -F -` with a heredoc message was **refused** — not warned — because the message body quotes a regex alternation full of `|` characters. The gate split the *prose* on those pipes, found a segment beginning `head`, found a filename elsewhere in the same span, and read it as `head <source-file>`.
+
+**Got:** `shell access to source files is blocked`, on a `git commit`. No source file was read; none was named as an argument.
+
+**Minimal reproduction — one token apart.** Control, allowed:
+
+```
+run_command("true <<'EOF'\nhead -1 foo.rs\nEOF")   → exit_code: 0
+```
+
+Add `x | ` to the body and nothing else:
+
+```
+run_command("true <<'EOF'\nx | head -1 foo.rs\nEOF")
+→ shell access to source files is blocked
+```
+
+The heredoc carve-out works in the first case and is gone in the second.
+
+**Mechanism — read, not inferred.** `check_source_file_access` (`src/util/path_security.rs:1211-1277`) splits the command on `&&`, `||`, `;` and `|` **first**, then tests each segment:
+
+```rust
+let blocked = segments.iter().find(|seg| {
+    // Heredoc: the command reads from stdin, not a source file.
+    if seg.contains("<<") {
+        return false;
+    }
+```
+
+The skip is per-segment, so it protects only the segment that literally contains `<<`. A heredoc body is opaque data, but the split has already chopped it into segments, and every segment after the first `|` is scanned as if it were a command. Its own doc comment states the broader intent it does not implement:
+
+> *"Heredocs (`cat <<'EOF'`) read stdin, not a file; **any source extension appearing inside the heredoc body is not a filename argument.** Segments containing `<<` are skipped — the operator unambiguously means stdin redirection."*
+
+Sentence one is the correct rule; sentence two is a strictly narrower mechanism, and the gap between them is the bug. Ordering is the fix: a heredoc is a *region*, so it has to be excised before the split, not tested after it.
+
+**Why this is not U-22.** U-22 is the same *shape* — shell syntax read out of opaque string content — and is `fixed-verified` at `codescout-companion:d64749e`. But that fix strips **quoted** substrings in the **hook**, and this is unquoted heredoc body hitting the **server's source gate**, a different gate on the enforcing side. U-22 also scoped out compound decomposition explicitly, which is precisely the mechanism here. So the de-quoting pass cannot reach it, and the third instance of this shape in this ledger (with U-44) is the argument that the shape, not any single regex, is what needs fixing.
+
+**Cost:** one hard-blocked commit and a rewrite of the message to drop the alternation, then a second block, then the file route. Severity is a step above U-22 and U-44: this one refuses work rather than adding noise, and the diagnostic names source-file access for a command that reads no file, so the message actively misdirects.
+
+**Fix idea:** excise heredoc regions before `split_outside_quotes` — on seeing `<<[-]?['\"]?DELIM`, drop everything through the line matching `DELIM`, then split what remains. `split_outside_quotes` already exists and already respects quotes; heredocs need the same treatment one level up. Keep the conservative bias: an unterminated heredoc drops to end-of-command.
+
+**Workaround that works today:** write the message to a file and use `git commit -F <path>`. The command string then contains neither the pipes nor the filenames. This is the same workaround U-22 documented, still needed for the case its fix did not cover.
+
+**Filed:** `docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md`.
 
 **Status:** open.
