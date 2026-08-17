@@ -22,102 +22,180 @@ new instances will fail with:\n\n\
 codescout detects this and fails fast with a clear error. **Workaround:** close \
 the other session first, or use a single codescout instance for Kotlin projects.";
 
-/// Build the full server instructions string, optionally appending
-/// dynamic project status.
+/// The MEASURED client limit for MCP `initialize.instructions`, in **characters**.
+///
+/// Claude Code cuts the field at exactly 2048 chars. Measured 2026-08-16 by locating a
+/// live session's own truncation point inside the rendered slice: the delivered prefix
+/// ended mid-token at `- "symbol-navigatio`, which is byte 2092 and **char 2048** of
+/// `build_server_instructions(None)`. 2048 is 2^11, not a coincidence.
+///
+/// The unit matters and was previously wrong. The old constant was named
+/// `MAX_INSTRUCTIONS_CHARS` and compared against `String::len()`, which counts **bytes**
+/// — and this surface is dense with em-dashes and arrows, so the same slice measured
+/// 2127 bytes and 2081 chars. A byte budget over-counts the surface *and* the old value
+/// (2200) sat above the real cliff, so the gate was wrong twice over while staying green.
+///
+/// See `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.
+pub(crate) const CLIENT_INSTRUCTIONS_CHAR_LIMIT: usize = 2048;
+
+/// Characters held back from the measured cliff. The limit was observed on one client
+/// build; another may cut a little lower, and a surface that arrives whole everywhere is
+/// worth 48 characters.
+pub(crate) const CHANNEL_SAFETY_MARGIN: usize = 48;
+
+/// Build the full server instructions string, optionally appending dynamic project
+/// status — **guaranteeing** the result fits the client channel.
+///
+/// The static slice is never sacrificed. Whatever does not fit is taken from the tail of
+/// the dynamic block, at a line boundary, with the loss named. That inverts the previous
+/// behaviour, where the client cut a fixed char count mid-token with no signal at all and
+/// the `get_guide` pointer list — the mechanism by which a model discovers deeper
+/// guidance exists — was exactly what fell off the end.
 pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> String {
     let mut instructions = SERVER_INSTRUCTIONS.to_string();
 
     if let Some(status) = project_status {
-        instructions.push_str("\n\n## Project Status\n\n");
-        // "Active project" wording makes the implicit launch-time activation
-        // explicit — agents see at a glance that activation happened without
-        // needing a separate tool call signal. Pairs with the worktree line
-        // below so the activated root is never ambiguous.
-        instructions.push_str(&format!(
-            "- **Active project:** {} at `{}`\n",
-            status.name, status.path
-        ));
-        if let Some(wt) = &status.worktree {
-            let branch = wt.branch.as_deref().unwrap_or("<detached HEAD>");
-            let main = wt
-                .main_repo
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "<unknown>".to_string());
-            // Explicit worktree banner — when present, the agent must NOT
-            // assume the activated root is the canonical checkout. Changes
-            // here flow into commits, branches, and PRs on the worktree's
-            // branch, not the main repo's.
-            instructions.push_str(&format!("- **Worktree:** branch `{branch}` of `{main}`\n"));
-        }
-        if !status.languages.is_empty() {
-            instructions.push_str(&format!(
-                "- **Languages:** {}\n",
-                status.languages.join(", ")
-            ));
-        }
-        if !status.memories.is_empty() {
-            // Bare list — the action verb is documented on the `memory` tool
-            // itself. Keeping this short matters because the whole Project
-            // Status block lands in Claude Code's ~2 KB instructions cut zone
-            // (see docs/architecture/mcp-channel-caps.md); a long action-hint
-            // suffix here would push the tail of the memory list off the cliff.
-            instructions.push_str(&format!("- **Memories:** {}\n", status.memories.join(", ")));
-        } else {
-            instructions.push_str(
-                "- **Memories:** None yet — run `onboarding` to create project memories\n",
-            );
-        }
-        if status.has_index {
-            instructions
-                .push_str("- **Semantic index:** Built — `semantic_search` is ready to use\n");
-        } else {
-            instructions.push_str(
-                "- **Semantic index:** Not built — run `index(action='build')` to enable `semantic_search`\n",
-            );
-        }
-
-        // Workspace topology — inject project table when there are sibling projects.
-        if let Some(projects) = &status.workspace {
-            if !projects.is_empty() {
-                instructions.push_str("\n## Workspace Projects\n\n");
-                instructions.push_str("| Project | Root | Languages | Depends On |\n");
-                instructions.push_str("|---------|------|-----------|------------|\n");
-                for p in projects {
-                    let langs = if p.languages.is_empty() {
-                        "—".to_string()
-                    } else {
-                        p.languages.join(", ")
-                    };
-                    let deps = if p.depends_on.is_empty() {
-                        "—".to_string()
-                    } else {
-                        p.depends_on.join(", ")
-                    };
-                    instructions.push_str(&format!(
-                        "| {} | {} | {} | {} |\n",
-                        p.id, p.root, langs, deps
-                    ));
-                }
-                instructions.push_str(
-                    "\nUse `project: \"<id>\"` in `symbols` / `semantic_search` / `memory` to scope to a specific project.\n",
-                );
-            }
-        }
-
-        // Language-specific warnings — only injected when the project uses the language.
-        if status.languages.iter().any(|l| l == "kotlin") {
-            instructions.push_str(KOTLIN_KNOWN_ISSUES);
-        }
-
-        if let Some(prompt) = &status.system_prompt {
-            instructions.push_str("\n\n## Custom Instructions\n\n");
-            instructions.push_str(prompt);
-            instructions.push('\n');
-        }
+        let dynamic = build_project_status_block(status);
+        instructions.push_str(&fit_dynamic_block(&instructions, &dynamic));
     }
 
     instructions
+}
+
+/// Render the dynamic `## Project Status` suffix. Split out from
+/// [`build_server_instructions`] so its length can be measured and trimmed before it is
+/// appended, rather than discovered to be too long by a client that says nothing.
+fn build_project_status_block(status: &ProjectStatus) -> String {
+    /// Memory topic lists grow without bound (18 on this repo), and unbounded is exactly
+    /// what a fixed channel cannot carry. The names are a pointer, not the content.
+    const MAX_MEMORY_NAMES: usize = 8;
+
+    let mut out = String::from("\n\n## Project Status\n\n");
+
+    // "Active project" wording makes the implicit launch-time activation explicit —
+    // agents see at a glance that activation happened without needing a separate tool
+    // call signal. Pairs with the worktree line below so the activated root is never
+    // ambiguous.
+    out.push_str(&format!(
+        "- **Active project:** {} at `{}`\n",
+        status.name, status.path
+    ));
+
+    if let Some(wt) = &status.worktree {
+        let branch = wt.branch.as_deref().unwrap_or("<detached HEAD>");
+        let main = wt
+            .main_repo
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        // Explicit worktree banner — when present, the agent must NOT assume the
+        // activated root is the canonical checkout. Changes here flow into commits,
+        // branches, and PRs on the worktree's branch, not the main repo's.
+        out.push_str(&format!("- **Worktree:** branch `{branch}` of `{main}`\n"));
+    }
+
+    if !status.languages.is_empty() {
+        out.push_str(&format!(
+            "- **Languages:** {}\n",
+            status.languages.join(", ")
+        ));
+    }
+
+    if !status.memories.is_empty() {
+        // Bare list — the action verb is documented on the `memory` tool itself.
+        let shown = status.memories.len().min(MAX_MEMORY_NAMES);
+        let mut names = status.memories[..shown].join(", ");
+        if status.memories.len() > shown {
+            names.push_str(&format!(", +{} more", status.memories.len() - shown));
+        }
+        out.push_str(&format!("- **Memories:** {names}\n"));
+    } else {
+        out.push_str("- **Memories:** None yet — run `onboarding` to create project memories\n");
+    }
+
+    if status.has_index {
+        out.push_str("- **Semantic index:** Built — `semantic_search` is ready to use\n");
+    } else {
+        out.push_str(
+            "- **Semantic index:** Not built — run `index(action='build')` to enable `semantic_search`\n",
+        );
+    }
+
+    // Workspace topology — inject project table when there are sibling projects.
+    if let Some(projects) = &status.workspace {
+        if !projects.is_empty() {
+            out.push_str("\n## Workspace Projects\n\n");
+            out.push_str("| Project | Root | Languages | Depends On |\n");
+            out.push_str("|---------|------|-----------|------------|\n");
+            for p in projects {
+                let langs = if p.languages.is_empty() {
+                    "—".to_string()
+                } else {
+                    p.languages.join(", ")
+                };
+                let deps = if p.depends_on.is_empty() {
+                    "—".to_string()
+                } else {
+                    p.depends_on.join(", ")
+                };
+                out.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    p.id, p.root, langs, deps
+                ));
+            }
+            out.push_str(
+                "\nUse `project: \"<id>\"` in `symbols` / `semantic_search` / `memory` to scope to a specific project.\n",
+            );
+        }
+    }
+
+    // Language-specific warnings — only injected when the project uses the language.
+    if status.languages.iter().any(|l| l == "kotlin") {
+        out.push_str(KOTLIN_KNOWN_ISSUES);
+    }
+
+    if let Some(prompt) = &status.system_prompt {
+        out.push_str("\n\n## Custom Instructions\n\n");
+        out.push_str(prompt);
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Trim `dynamic` so `static_part + dynamic` fits the channel, cutting at a **line**
+/// boundary and naming the loss.
+///
+/// The client cuts from the tail at a fixed char count, mid-token, and says nothing — so
+/// anything not fitted here vanishes silently. Dropping whole lines producer-side is
+/// strictly better: the same content goes, but the agent learns that it went. Same
+/// principle as `truncate_compact`'s head-placement fix and the librarian's promoted
+/// overflow hints — when a channel truncates from the tail, ordering and an explicit
+/// signal are the cheap fixes; the budget is the expensive one.
+fn fit_dynamic_block(static_part: &str, dynamic: &str) -> String {
+    const NOTE: &str = "- (status trimmed — it did not fit the MCP instructions channel)\n";
+
+    let budget = CLIENT_INSTRUCTIONS_CHAR_LIMIT
+        .saturating_sub(CHANNEL_SAFETY_MARGIN)
+        .saturating_sub(static_part.chars().count());
+
+    if dynamic.chars().count() <= budget {
+        return dynamic.to_string();
+    }
+
+    let room = budget.saturating_sub(NOTE.chars().count());
+    let mut kept = String::new();
+    let mut used = 0usize;
+    for line in dynamic.split_inclusive('\n') {
+        let len = line.chars().count();
+        if used + len > room {
+            break;
+        }
+        kept.push_str(line);
+        used += len;
+    }
+    kept.push_str(NOTE);
+    kept
 }
 
 /// Topic names registered as compiled-in `get_guide(topic)` content.
@@ -677,6 +755,11 @@ mod tests {
     }
 
     #[test]
+    /// Retargeted 2026-08-16 (BL-9). The renderer's job — emit `## Custom Instructions`
+    /// after the status lines — is unchanged and still asserted here. What changed is the
+    /// *channel*: the MCP `instructions` field is capped at 2048 chars and a custom prompt
+    /// does not fit alongside the static slice, so asserting on
+    /// `build_server_instructions` would now be asserting that the trim is broken.
     fn build_with_system_prompt_appends_custom_section() {
         let status = ProjectStatus {
             name: "my-project".into(),
@@ -688,12 +771,12 @@ mod tests {
             workspace: None,
             worktree: None,
         };
-        let result = build_server_instructions(Some(&status));
-        assert!(result.contains("## Custom Instructions"));
-        assert!(result.contains("Always use pytest."));
-        // Custom instructions should come after project status
-        let status_pos = result.find("## Project Status").unwrap();
-        let custom_pos = result.find("## Custom Instructions").unwrap();
+        let block = build_project_status_block(&status);
+        assert!(block.contains("## Custom Instructions"));
+        assert!(block.contains("Always use pytest."));
+        // Custom instructions come after project status.
+        let status_pos = block.find("## Project Status").unwrap();
+        let custom_pos = block.find("## Custom Instructions").unwrap();
         assert!(custom_pos > status_pos);
     }
 
@@ -744,15 +827,19 @@ mod tests {
             ]),
             worktree: None,
         };
-        let result = build_server_instructions(Some(&status));
-        assert!(result.contains("## Workspace Projects"));
-        assert!(result.contains("mcp-server"));
-        assert!(result.contains("python-services"));
-        assert!(result.contains("python-services/"));
+        // Asserted on the RENDERER, not on `build_server_instructions`: a workspace
+        // table cannot fit the 2048-char MCP instructions channel alongside the static
+        // slice, so the shipped surface trims it with a note (BL-9). Testing the whole
+        // render here would be asserting that the trim is broken.
+        let block = build_project_status_block(&status);
+        assert!(block.contains("## Workspace Projects"));
+        assert!(block.contains("mcp-server"));
+        assert!(block.contains("python-services"));
+        assert!(block.contains("python-services/"));
         // depends_on rendered for python-services
-        assert!(result.contains("mcp-server"));
+        assert!(block.contains("mcp-server"));
         // scoping hint present
-        assert!(result.contains("project: \"<id>\""));
+        assert!(block.contains("project: \"<id>\""));
     }
 
     #[test]
@@ -857,9 +944,12 @@ mod tests {
             workspace: None,
             worktree: None,
         };
-        let result = build_server_instructions(Some(&status));
+        // Renderer-level, for the same reason as the workspace-table test above: the
+        // Kotlin block exceeds what the 2048-char instructions channel can carry next to
+        // the static slice, so the shipped surface trims it with a note (BL-9).
+        let block = build_project_status_block(&status);
         assert!(
-            result.contains("kotlin-lsp"),
+            block.contains("kotlin-lsp"),
             "Kotlin project must include Kotlin known issues"
         );
     }
@@ -1338,27 +1428,114 @@ mod tests {
 mod redesign_invariants {
     use super::*;
 
-    /// Maximum byte length of the rendered `server_instructions` slice
-    /// (`build_server_instructions(None)`). Claude Code silently truncates the
-    /// MCP `initialize.instructions` field at ~2000 bytes — see
-    /// `docs/architecture/mcp-channel-caps.md`. The 2200 cap gives ~200 bytes
-    /// of headroom for the dynamic `## Project Status` block that runtime
-    /// appends; growth beyond this risks truncating Iron Laws themselves
-    /// rather than just the dynamic suffix. If you need to add content,
-    /// author a `get_guide(topic)` entry and reference it from the slice.
-    const MAX_INSTRUCTIONS_CHARS: usize = 2200;
+    /// Maximum **character** length of the static `server_instructions` slice
+    /// (`build_server_instructions(None)`).
+    ///
+    /// Sits below `CLIENT_INSTRUCTIONS_CHAR_LIMIT - CHANNEL_SAFETY_MARGIN` (2000) so the
+    /// dynamic `## Project Status` block still has room to arrive. `fit_dynamic_block`
+    /// guarantees the *total* never exceeds the channel; this budget is what keeps the
+    /// dynamic half from being trimmed to nothing on every session.
+    ///
+    /// Two things about this constant were wrong before 2026-08-16 and are worth stating
+    /// so they are not re-introduced. It was **2200**, above the measured 2048-char
+    /// cliff — a cap set past the edge it exists to protect. And it was compared against
+    /// `String::len()`, which counts **bytes**: the same slice measures 2127 bytes and
+    /// 2081 chars, because the surface is dense with em-dashes and arrows. The gate was
+    /// green throughout and the surface shipped truncated the whole time.
+    ///
+    /// If you need to add content, author a `get_guide(topic)` entry and reference it
+    /// from the slice — do not raise this number.
+    const STATIC_SLICE_CHAR_BUDGET: usize = 1900;
 
     #[test]
     fn source_md_under_cap() {
         let rendered = build_server_instructions(None);
+        let chars = rendered.chars().count();
         assert!(
-            rendered.len() <= MAX_INSTRUCTIONS_CHARS,
-            "server instructions are {} chars; cap is {}. \
-             Cut content or move it to get_guide.",
+            chars <= STATIC_SLICE_CHAR_BUDGET,
+            "static server instructions are {chars} chars ({} bytes); budget is {}. \
+             Cut content or move it to get_guide — do not raise the budget. \
+             NOTE the unit: the client cuts at {} CHARACTERS, not bytes.",
             rendered.len(),
-            MAX_INSTRUCTIONS_CHARS,
+            STATIC_SLICE_CHAR_BUDGET,
+            crate::prompts::CLIENT_INSTRUCTIONS_CHAR_LIMIT,
         );
     }
+
+    /// The gate the old one was not.
+    ///
+    /// `source_md_under_cap` measures `build_server_instructions(None)` — but **every**
+    /// production call passes `Some(&status)`, which appends the whole Project Status
+    /// block. Measured 2026-08-16: the bare render was 2127 bytes and passed the old
+    /// 2200-byte cap, while the render that actually ships was 2350. The green test was
+    /// measuring a string nobody receives.
+    ///
+    /// This is R-86's shape — *name every deployment mode the component has and ask
+    /// which one the test constructed and which one production runs* — reached
+    /// independently, from a cap rather than an LSP transport.
+    #[test]
+    fn production_render_fits_the_client_channel() {
+        let status = ProjectStatus {
+            name: "codescout".into(),
+            path: "/home/marius/work/claude/codescout".into(),
+            // Deliberately hostile: a real repo carries ~18 memory topics, and the list
+            // is the one part of this block that grows without bound.
+            languages: vec!["rust".into(), "kotlin".into(), "python".into()],
+            memories: (0..30)
+                .map(|i| format!("memory-topic-number-{i}"))
+                .collect(),
+            has_index: true,
+            system_prompt: Some("A long custom instruction block. ".repeat(20)),
+            workspace: None,
+            worktree: None,
+        };
+
+        let rendered = build_server_instructions(Some(&status));
+        let chars = rendered.chars().count();
+        let ceiling =
+            crate::prompts::CLIENT_INSTRUCTIONS_CHAR_LIMIT - crate::prompts::CHANNEL_SAFETY_MARGIN;
+        assert!(
+            chars <= ceiling,
+            "production render is {chars} chars; the client cuts at {}. \
+             The dynamic block must be trimmed to fit, never allowed to push the \
+             static slice over the cliff.",
+            crate::prompts::CLIENT_INSTRUCTIONS_CHAR_LIMIT,
+        );
+
+        // The static slice must survive INTACT — its last line is precisely what the
+        // client used to cut, and losing it costs the model every `get_guide` pointer.
+        assert!(
+            rendered.contains("\"symbol-navigation\""),
+            "the final static line must arrive whole; it is the one that was being cut"
+        );
+        assert!(
+            rendered.contains("status trimmed"),
+            "a trim must announce itself — the whole defect was that the loss was silent"
+        );
+    }
+
+    /// A status block that fits must not be touched: the trim exists for the overflow
+    /// case, and a note on every session would be noise that teaches nothing.
+    #[test]
+    fn a_status_block_that_fits_is_left_alone() {
+        let status = ProjectStatus {
+            name: "x".into(),
+            path: "/tmp/x".into(),
+            languages: vec!["rust".into()],
+            memories: vec!["architecture".into(), "conventions".into()],
+            has_index: true,
+            system_prompt: None,
+            workspace: None,
+            worktree: None,
+        };
+        let rendered = build_server_instructions(Some(&status));
+        assert!(rendered.contains("- **Memories:** architecture, conventions\n"));
+        assert!(
+            !rendered.contains("status trimmed"),
+            "no trim note when nothing was trimmed"
+        );
+    }
+
     /// B-9 regression
     /// (docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md):
     /// the guide once claimed `cat src/foo.rs` was "allowed on bounded files".

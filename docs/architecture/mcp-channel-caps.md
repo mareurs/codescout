@@ -13,7 +13,10 @@ related: []
 
 Claude Code silently truncates the MCP `initialize.instructions` field and
 each tool's `description` field at ~2 KB per block, appending the literal
-marker `… [truncated]`. MCP resources are not exposed to the model at all
+marker `… [truncated]`. **The `instructions` limit was pinned exactly on
+2026-08-16: 2048 characters** — see § *Exact limit* below. The "~2 KB"
+figure throughout the rest of this document is the original estimate and is
+left as written; where a number is load-bearing, use 2048 chars. MCP resources are not exposed to the model at all
 in this profile. Tool call results remain the only model-accessible channel
 with significant content budget.
 
@@ -73,6 +76,38 @@ clause. Iron Law #3 itself survives only the first paragraph; Law #4
 onward, the librarian guide, the progressive-disclosure tips, the
 anti-patterns table — all dead.
 
+
+### Exact limit — 2048 characters (2026-08-16)
+
+The estimate above is ~2 KB and the trace reports 2,145 chars *JSON-escaped*,
+which inflates the count. The real limit was pinned by locating a live
+session's own cut point inside the rendered slice:
+
+| quantity | value |
+|---|---|
+| `build_server_instructions(None)` | 2127 bytes / 2081 chars |
+| delivered prefix ended at | `- "symbol-navigatio` |
+| that offset | byte **2092** / char **2048** |
+
+**2048 = 2^11**, which is not a coincidence, and the unit is **characters,
+not bytes** — the two differ by 46 on this surface because it is dense with
+em-dashes and arrows.
+
+That distinction was load-bearing. codescout's own gate was named
+`MAX_INSTRUCTIONS_CHARS`, set to 2200, and compared against `String::len()`
+— so it was above the cliff *and* counting the wrong unit, and stayed green
+while the surface shipped truncated. It is now `STATIC_SLICE_CHAR_BUDGET =
+1900` measured in chars, with `build_server_instructions` guaranteeing the
+total fits by trimming the dynamic `## Project Status` block rather than
+letting the client cut the Iron Laws.
+
+A consequence worth stating plainly for anyone sizing this channel: at 2048
+chars, the static slice plus a *useful* Project Status block do not both
+fit. Kotlin known-issues, the workspace project table, and user Custom
+Instructions each exceed the leftover budget on their own and are trimmed
+with an explicit note. Delivering them needs a different channel.
+
+See `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.
 ## Evidence — per-tool `description` field truncated at ~2 KB
 
 To verify whether per-tool descriptions share the same cap, codescout

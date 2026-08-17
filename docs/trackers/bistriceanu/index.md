@@ -70,7 +70,7 @@ deliberately avoided — the ledger is for defects we have seen, and B-4 is exac
 | B-7 | Librarian catalog silently empty — `count: 0`, `exit_code: 0`, no error | librarian | not reproduced here | — (needs his `abs_path: ""` explained) |
 | B-8 | Stale `~/.cargo/bin/codescout` wins PATH and no-ops two hooks | install | not reproduced; memory drift real | — |
 | B-9 | `get_guide("iron-laws-detail")` asserts a `cat` that the gate refuses | guides | **FIXED `43fac6c8` + regression test; archived** | [`…-iron-laws-detail-guide-claims-cat-on-source-is-allowed`](../../issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md) |
-| B-10 | `server_instructions` reached the model truncated mid-word | prompt surface | **reproduced in this repo's own sessions** | [`…-server-instructions-truncated-before-reaching-the-model`](../../issues/2026-08-15-server-instructions-truncated-before-reaching-the-model.md) |
+| B-10 | `server_instructions` reached the model truncated mid-word | prompt surface | **reproduced in this repo's own sessions** | [`…-server-instructions-truncated-before-reaching-the-model`](../../issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md) |
 | B-11 | IL3 hook predicate ~75% false-positive | companion hook | unverified | — |
 | B-12 | Fresh subagents reach for native Bash `grep` before the MCP tool | dispatch | observed, 2/4 | — (candidate `T-N`) |
 | B-13 | Companion hook fails closed when the MCP server is not connected | companion hook | unverified | — |
@@ -318,7 +318,18 @@ whether `wc` *should* be carved out, not whether it currently is.
 2,203 bytes against a real ~2 KB client cut.
 
 **Status here: REPRODUCED — in this repo's own sessions, on Linux.** Filed as
-[`docs/issues/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`](../../issues/2026-08-15-server-instructions-truncated-before-reaching-the-model.md).
+[`docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`](../../issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md).
+
+**FIXED 2026-08-16.** His report was right and the number was worse than either of us
+assumed. The client limit is **2048 characters** — measured by locating a live session's own
+cut point inside the rendered slice (byte 2092 / char 2048, mid-token in
+`- "symbol-navigatio`). The repo's gate was wrong in three independent ways at once: the cap
+was `2200` (above the cliff), it was compared against `String::len()` which counts **bytes**
+not chars (2127 vs 2081 on this surface), and it measured
+`build_server_instructions(None)` while every production call passes `Some(&status)` — 2127
+green versus 2350 actually shipped. `build_server_instructions` now *guarantees* the static
+slice arrives whole and announces any trim of the dynamic block. The blocks that cannot fit
+at any ordering are split out as BL-37.
 
 The session that wrote this tracker received the surface cut at the identical point:
 
