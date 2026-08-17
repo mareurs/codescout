@@ -66,7 +66,7 @@ deliberately avoided — the ledger is for defects we have seen, and B-4 is exac
 | B-3 | `truncate_compact` cuts from the tail — where the overflow line lives | core/types | **fixed** `bb2a9625` | [`…-truncate-compact-tail-cut-destroys-overflow-signal`](../../issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md) |
 | B-4 | `format_semantic_search` discards its own `truncated` flag | `semantic_search` | **already fixed** — no task | — |
 | B-5 | `grep` prints a self-refuting `Showing 400 of 400` | `grep` | **reproduced** | [`…-grep-showing-n-of-n-when-collection-hit-cap`](../../issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md) |
-| B-6 | Read-only metadata blocked on source paths | `run_command` | **reproduced**, his mechanism wrong | [`…-read-only-metadata-commands-blocked-on-source-paths`](../../issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md) |
+| B-6 | Read-only metadata blocked on source paths | `run_command` | **fixed** 2026-08-17 — his mechanism was wrong, and so was ours | [`…-read-only-metadata-commands-blocked-on-source-paths`](../../issues/archive/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md) |
 | B-7 | Librarian catalog silently empty — `count: 0`, `exit_code: 0`, no error | librarian | not reproduced here | — (needs his `abs_path: ""` explained) |
 | B-8 | Stale `~/.cargo/bin/codescout` wins PATH and no-ops two hooks | install | not reproduced; memory drift real | — |
 | B-9 | `get_guide("iron-laws-detail")` asserts a `cat` that the gate refuses | guides | **FIXED `43fac6c8` + regression test; archived** | [`…-iron-laws-detail-guide-claims-cat-on-source-is-allowed`](../../issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md) |
@@ -216,7 +216,14 @@ both.
 **Reported:** D3 in his design doc, flagged by him as minor.
 
 **Status here: behaviour REPRODUCED, diagnosis REFUTED, 2026-08-15.** Filed as
-[`docs/issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md`](../../issues/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md).
+[`docs/issues/archive/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md`](../../issues/archive/2026-08-15-read-only-metadata-commands-blocked-on-source-paths.md).
+
+**Closed 2026-08-17 (`90c5aea1`, experiments).** Both of us had the mechanism wrong, in
+opposite directions. He read a command list where the gate is two predicates; this tracker
+recorded "by path, no per-command carve-out", which was also false — `SOURCE_ACCESS_COMMANDS`
+is half the gate. His repro blocked on `sed`, not on the `ls` he blamed. `wc` was the only
+command in the report ever blocked, and it came off the list on 2026-08-16. The guide now
+states the two-part predicate and derives its command list from the constant by test.
 
 He concluded `wc` was "in the block list" and left open whether that was deliberate.
 **There is no command list.** `src/tools/run_command/inner.rs:305-315` calls
