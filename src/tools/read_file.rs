@@ -40,7 +40,7 @@ impl Tool for ReadFile {
                 "limit": { "type": "integer", "description": "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted." },
                 "json_path": { "type": "string", "description": "JSON subtree by path (e.g. \"$.dependencies\")." },
                 "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." },
-                "force": { "type": "boolean", "description": "Skip source-symbol hint and read the raw line range." }
+                "force": { "type": "boolean", "description": "Skip source-symbol hint and read the raw line range. Line ranges only — an oversized whole-file read is summarised either way." }
             }
         })
     }
@@ -691,6 +691,49 @@ fn read_with_line_range(
     Ok(result)
 }
 
+/// The overflow hint for a whole-file read that was summarised instead of returned.
+///
+/// `forced` is not a formatting flag. It is the answer to a question the caller asked
+/// and the tool silently discarded: `force=true` bypasses the symbol-overlap refusal on
+/// a LINE RANGE (`read_with_line_range`), and has never bypassed the size budget —
+/// `read_full_file` accepted the parameter and dropped it without a word.
+///
+/// Kept as a drop rather than made to work, deliberately. Progressive disclosure is the
+/// project's design principle (`docs/PROGRESSIVE_DISCOVERABILITY.md`), the input schema
+/// already scopes `force` to "the raw line range", and Iron Law 1 says the same. So the
+/// defect is the SILENCE, not the budget — the same shape, and the same fix, as
+/// `docs/issues/archive/2026-08-07-grep-zero-match-silent-about-hidden-skip.md`: make the
+/// result self-describing rather than change what the tool does.
+///
+/// The note is conditional on purpose. One that fired on every oversized read would be
+/// boilerplate rather than a signal, and `outline_hint_stays_silent_about_force_when_not_forced`
+/// pins that half.
+///
+/// Pure, so the wording is testable without a ToolContext or a >10 KB fixture on disk.
+fn outline_hint(file_id: &str, is_source: bool, forced: bool) -> String {
+    let mut hint = if is_source {
+        format!(
+            "Outline only — no file content included. For source, prefer \
+             symbols(path) then symbols(name='...', include_body=true). To read \
+             lines: read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+        )
+    } else {
+        format!(
+            "Outline only — no file content included. Read ranges from the buffer: \
+             read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+        )
+    };
+    if forced {
+        hint.push_str(
+            " force=true had no effect on this read: it bypasses the symbol-overlap \
+             refusal on a line range, not the size budget, so the file was still \
+             summarised. Pass start_line/end_line together with force=true to read a \
+             range inline.",
+        );
+    }
+    hint
+}
+
 /// Handle a full-file read (no range, no navigation param).
 ///
 /// Large files are summarised and buffered. Small files are returned inline,
@@ -756,18 +799,11 @@ fn read_full_file(
         result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
             shown: 0,
             total: summarised_lines,
-            hint: if is_source {
-                format!(
-                    "Outline only — no file content included. For source, prefer \
-                     symbols(path) then symbols(name='...', include_body=true). To read \
-                     lines: read_file(path=\"{file_id}\", start_line=N, end_line=M)."
-                )
-            } else {
-                format!(
-                    "Outline only — no file content included. Read ranges from the buffer: \
-                     read_file(path=\"{file_id}\", start_line=N, end_line=M)."
-                )
-            },
+            hint: outline_hint(
+                &file_id,
+                is_source,
+                input["force"].as_bool().unwrap_or(false),
+            ),
             next_offset: None,
             by_file: None,
             by_file_overflow: 0,
@@ -1470,6 +1506,62 @@ mod tests {
         assert!(
             !text.trim_start().starts_with('{'),
             "read_file output must be text, not JSON, got: {text}"
+        );
+    }
+
+    /// `read_file(path, force=true)` on an oversized whole file returns an outline and
+    /// zero content lines. That is correct — `force` scopes to a line range in both the
+    /// input schema and Iron Law 1, and letting it defeat the size budget would defeat
+    /// progressive disclosure. What was wrong is that the parameter was accepted and
+    /// dropped in silence, so the caller had no way to learn that the thing they asked
+    /// for is not a thing this path does.
+    ///
+    /// Measured 2026-08-17 at `021c130d` before the fix: `read_file("src/librarian/
+    /// classify.rs", force=true)` on a 10,559-byte file returned `showing 0 of 378`
+    /// with a hint that never mentioned `force`.
+    /// `docs/issues/2026-08-15-read-file-force-ignored-on-full-reads.md`.
+    #[test]
+    fn outline_hint_says_force_did_not_apply_when_forced() {
+        let hint = super::outline_hint("@file_abc", true, true);
+        assert!(
+            hint.contains("force=true"),
+            "a discarded force=true must be named in the hint; got: {hint}"
+        );
+        assert!(
+            hint.contains("start_line"),
+            "naming the drop is only half — the hint must say what DOES work; got: {hint}"
+        );
+    }
+
+    /// The complement, and it is the half that keeps the fix from becoming noise: a
+    /// caller who never passed `force` must not be told anything about it. A note that
+    /// fires unconditionally is not a signal, it is boilerplate the reader learns to skip.
+    #[test]
+    fn outline_hint_stays_silent_about_force_when_not_forced() {
+        for is_source in [true, false] {
+            let hint = super::outline_hint("@file_abc", is_source, false);
+            assert!(
+                !hint.contains("force"),
+                "unforced read mentions force (is_source={is_source}); got: {hint}"
+            );
+        }
+    }
+
+    /// The runtime note only reaches a caller who already spent the call. The schema is
+    /// the surface they read BEFORE spending it, so it has to carry the same scope —
+    /// "read the raw line range" describes what `force` does and leaves what it does not
+    /// do to inference, which is how it came to be read as a general escape hatch.
+    #[test]
+    fn force_schema_says_what_a_whole_file_read_does() {
+        use crate::tools::core::Tool;
+        let schema = ReadFile.input_schema();
+        let desc = schema["properties"]["force"]["description"]
+            .as_str()
+            .expect("force is a declared property with a description");
+        assert!(
+            desc.contains("whole-file"),
+            "the force description must state the whole-file behaviour, not only the \
+             line-range one; got: {desc}"
         );
     }
 
