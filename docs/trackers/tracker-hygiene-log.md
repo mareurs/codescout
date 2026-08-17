@@ -509,6 +509,73 @@ reconciliation, 11 → 23 rows), `0dbfd0ee` (majority gate + the false positive 
 fixed), `af2508b4` (scope correction). Kin: HY-5 (a Phase-5 action creating drift
 Phase 5 does not repair), R-97, R-95.
 
+## HY-9 — Miss: entry-level citation breakage is invisible to every live detector, and it is the largest defect class yet measured
+
+**Type:** miss · **Observed:** 2026-08-17, the R-N index-coverage + disposition sweep.
+
+**The gap.** D1–D5 / D9 / D10 all compare a declaration to an observation at **file**
+granularity — index rows naming files, frontmatter vs catalog rows, git mtimes. D1
+"index-drift" fires when a *file* is absent from the index. None of them can see an
+**entry** that has fallen out of its own ledger. Measured with
+`librarian(action="link_scan", write=false, scope="project")`:
+
+- **720 dangling citations of 3359 (21%)**, plus 391 ambiguous;
+- of the dangling sample, 39 are entry tokens — **30 are `R-N`, 0 are `T-N`**.
+
+**Root cause, and why it is structural rather than sloppy authoring.** `link_scan`
+derives an entry token's definition from a **heading**, and from nothing else
+(`src/librarian/tools/link_scan/extract.rs`: *"collecting entry-token DEFINITIONS
+(from headings)"*). A ledger with **two** entry formats — `## R-N` bodies and
+self-contained `| R-N |` index rows — therefore defines nothing at all for its
+row-only entries. `reconnaissance-patterns.md` carries 106 rows against 58 bodies, so
+48 entries are cited but undefined. `tool-usage-patterns.md` carries 22 `T-N` headings
+and 0 rows, and contributes **zero** danglings. The defect is the two-format design.
+
+**It also silently falsified a ratified convention.** The id-suffix note (2026-08-16)
+kept the bare number for the EARLIER instance of each collision so that *"the 57
+existing kin-citations still resolve to what they most likely meant"*. But the earlier
+instance is usually the row-only one — so bare `R-55` / `R-56` / `R-57` / `R-58`
+resolve to **nothing**, rather than to the older lesson. All four are in the dangling
+sample. The rationale was written, ratified, and never re-audited (kin R-95).
+
+**Which v2 slot this is.** Closest is **D7 (citation format)** — but the fit is
+imperfect and the difference matters: these citations are well-*formed* and merely
+unresolvable. Resolvability has a different evidence pair and a different fix, so D7
+should either widen explicitly or this should land as its own detector.
+
+**Proposed D12 — citation-resolvability.**
+
+| | |
+|---|---|
+| **Fires when** | `librarian(action="link_scan", write=false)` reports a `dangling` EntryToken whose prefix belongs to a tracker in the sweep's scope |
+| **Evidence pair** | *declared:* a kin citation naming `R-N` · *observed:* no artifact body defines `R-N` via a heading |
+| **Proposed fix** | give the entry a heading — in the live file if still open, in the archive artifact if compacted. **Never** delete the citation to silence the finding |
+| **Confidence** | high on detection (deterministic resolver, shipped with tests), medium on the fix — live-vs-archived is a per-entry judgment |
+| **Cost** | one `link_scan` call, read-only by default |
+
+**Two conditions, inherited verbatim from HY-8 because they are the same two mistakes:**
+
+1. **Filter to the sweep's scope, and do not quote the sample as a census.**
+   `link_scan` reported 1023 artifacts scanned, and its `dangling` / `ambiguous` arrays
+   are **capped at 50**. The 720 is the count; the 50 is what you can read.
+2. **A dangling token is not automatically a missing heading.** It can be a typo, a
+   cross-repo token (resolved separately as `CrossRepo`), or a prefix no ledger owns.
+   Triage one finding at a time; never batch.
+
+**Why this is safe to act on.** Archival does *not* break citations: `resolve.rs`'s
+`single_archived_definer_still_resolves` asserts a unique definer wins even when
+archived (*"archived is not nonexistent"*), and
+`archived_tie_break_resolves_to_sole_active_definer` covers the duplicate case. So the
+compaction path is **body → archived section with its heading**, never body → bare row.
+Row-reduction is precisely what created these 720.
+
+**Promote-when:** one sweep runs D12 and triages its findings. If a reject reason is
+ever *"the citation was the error, not the missing heading"*, record it — that is the
+signal the fix side is inverted.
+
+**Evidence:** `link_scan` counts above; `extract.rs` (headings define tokens);
+`resolve.rs` tests named above. Kin: HY-8 (the sibling entry-level detector, and the
+same two conditions), R-95, R-99.
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:
