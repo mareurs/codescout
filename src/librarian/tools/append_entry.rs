@@ -106,17 +106,51 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                  surrounding entries if any turn up.",
             ),
         };
+        // Which input governed is the diagnostic the caller could not see. Only one
+        // relation earns words: the committed mark leading BOTH the live body and this
+        // machine's reservation table, so the mark alone accounts for the number.
+        //
+        // `frontmatter_max > body_max` on its own does NOT mean compaction — it is also
+        // true immediately after any ordinary reservation, which is why the strict
+        // comparison is against both other inputs.
+        //
+        // Stated as fact in the guidance prose and deliberately NOT under `warning`:
+        // that register means "off-golden-path, reconsider before proceeding"
+        // (PROGRESSIVE_DISCOVERABILITY Pattern 5a), and a compacted ledger is a CORRECT
+        // state the archive cadence produced on purpose. Tagging it would train agents
+        // to repair it. The cause is left as alternatives rather than asserted, because
+        // the three integers cannot tell compaction from a fresh clone (Anti-Pattern 5).
+        // docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md
+        let compaction_note = match outcome.frontmatter_max {
+            Some(fm)
+                if fm > outcome.body_max.unwrap_or(0) && fm > outcome.reserved_max.unwrap_or(0) =>
+            {
+                format!(
+                    " The committed frontmatter mark ({fm}) alone accounts for this id — it \
+                     leads both the live body ({body}) and this machine's reservation table. \
+                     Expected where entries were compacted out to an archive companion, or \
+                     where the reservation table postdates them (a fresh clone, or an \
+                     artifact(move)); neither is drift.",
+                    body = outcome
+                        .body_max
+                        .map_or_else(|| "none".to_string(), |b| b.to_string()),
+                )
+            }
+            _ => String::new(),
+        };
         return Ok(json!({
             "id": outcome.id,
             "artifact_id": target,
             "reserved": true,
             "body_max": outcome.body_max,
+            "reserved_max": outcome.reserved_max,
+            "frontmatter_max": outcome.frontmatter_max,
             "next_step": format!(
                 "Reserved {id} and recorded the ledger's high-water mark in frontmatter; the \
                  entry itself is yours to write. Add the section as \
                  `{heading} {id} — <title>` — link_scan defines an entry token only \
                  in that shape, so a heading without the dash-and-title defines nothing and \
-                 every citation of {id} dangles.{level_note}",
+                 every citation of {id} dangles.{level_note}{compaction_note}",
                 id = outcome.id
             ),
         }));
@@ -540,6 +574,88 @@ mod tests {
             !hint.contains("this ledger's existing entries use"),
             "nothing is headed here, so the hint must not claim to have observed a \
              level, got: {hint}"
+        );
+    }
+
+    /// `AllocateOutcome` carries three derivation inputs and the prose branch reported
+    /// one. Which input governed is the diagnostic — the caller saw `body_max` with
+    /// nothing to compare it against. These are facts about the allocation, so they go
+    /// out as data rather than under a severity-tagged guidance key.
+    /// `docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
+    #[tokio::test]
+    async fn reservation_reports_all_three_derivation_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n# Ledger\n\n## R-41 — an entry\n",
+        )
+        .unwrap();
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let first = call(&ctx, json!({"id": "art1", "id_prefix": "R"}))
+            .await
+            .unwrap();
+        assert_eq!(first["body_max"], 41);
+        assert!(
+            first.get("reserved_max").is_some(),
+            "reserved_max must be present even when null, or absent reads as zero: {first}"
+        );
+        assert!(
+            first.get("frontmatter_max").is_some(),
+            "frontmatter_max must be present even when null: {first}"
+        );
+        assert!(first["frontmatter_max"].is_null(), "no mark existed yet");
+
+        // The second call is where all three are populated: the first wrote the
+        // committed mark and recorded the reservation.
+        let second = call(&ctx, json!({"id": "art1", "id_prefix": "R"}))
+            .await
+            .unwrap();
+        assert_eq!(second["id"], "R-43");
+        assert_eq!(second["body_max"], 41, "the body did not move");
+        assert_eq!(second["reserved_max"], 42);
+        assert_eq!(second["frontmatter_max"], 42);
+    }
+
+    /// The one state worth naming in words: the committed mark leads the body, which
+    /// means entries were compacted out to an archive companion. It is a CORRECT state
+    /// produced by the archive cadence, so it must not arrive under `warning` — that
+    /// register means "off-golden-path, reconsider before proceeding" and would train
+    /// agents to repair a ledger that policy deliberately shaped this way.
+    #[tokio::test]
+    async fn reservation_names_compaction_without_calling_it_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: HY\nentry_high_water_HY: 11\n---\n\n\
+             # Ledger\n\nEntries through HY-11 live in the archive companion.\n",
+        )
+        .unwrap();
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let result = call(&ctx, json!({"id": "art1", "id_prefix": "HY"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["id"], "HY-12", "the committed mark governs");
+        assert!(result["body_max"].is_null(), "the live body claims no id");
+        assert_eq!(result["frontmatter_max"], 11);
+
+        let next_step = result["next_step"].as_str().unwrap();
+        assert!(
+            next_step.contains("compact"),
+            "the governing input must be named in words, not left as three integers \
+             for the caller to compare: {next_step}"
+        );
+        assert!(
+            result.get("warning").is_none(),
+            "a compacted ledger is correct, not off-golden-path: {result}"
         );
     }
 
