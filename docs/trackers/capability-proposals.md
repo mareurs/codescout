@@ -402,11 +402,43 @@ the source of every id defect measured on this repo on 2026-08-16/17:
 - **It is unavailable to every tracker that broke.** `append_entry` requires an augmentation
   with a declared `entry_collection`. `reconnaissance-patterns.md` (58 entries),
   `tracker-hygiene-log.md` (9) and this file (5) all have `entry_collection: null`; two of
-  the three have `augmentation: null` outright. For these, no atomic path exists and hand
+  the three have `augmentation: null` outright. For these, the allocator is unreachable and hand
   allocation is the only option the tool surface offers. `update_entry` has the same
   precondition.
 - Nothing in the action set appends a **body section**: `find | get | create | update | move
   | delete | graft | link | graph | state_at | append_entry | update_entry`.
+
+**Substrate check, corrected 2026-08-17 after reading the code rather than the tool
+description.** The first version of this check overstated the gap, and the correction makes
+the proposal smaller. Verified in `src/librarian/catalog/augmentation.rs::append_entry`:
+
+- **The allocator is already cross-process safe.** It runs inside a single `IMMEDIATE`
+  transaction — the doc comment states the read-max-write is safe under *both*
+  intra-process and cross-process concurrency, paired with `busy_timeout`. CAP-5's open
+  question about the concurrency guarantee is therefore **answered**: it is exactly the
+  guarantee the two-sessions-one-checkout case needs.
+- **The allocator already reads the markdown body.** `body_claimed_indices(body, id_prefix)`
+  folds in the ids the body claims via *both* `## PREFIX-N` sections and index-table rows,
+  and `next = params_next.max(body_max + 1)`. The both-formats scan the id-suffix note
+  prescribes by hand is already implemented server-side. A `warning` fires when params lags
+  the body. Prior art: `docs/issues/archive/2026-07-20-append-entry-id-drift-params-vs-body.md`.
+- **The documented flow already puts the body first** — the comment names it as "body
+  section → index row → `append_entry`", and calls the markdown body "the canonical
+  human-readable surface". The substrate already voted for headings-as-canonical; a
+  params-canonical redesign would be arguing against it.
+
+**So the defect is coupling, not absence.** Id allocation — a general, body-aware,
+transactional service — is welded to a params write. A caller must possess an
+`entry_collection` to obtain an id, which means the one thing a prose tracker needs is
+gated on the one thing it does not have. That is the wall in the wrong place.
+
+**Revised proposal: invert the dependency, do not add a sibling action.** Extract the
+allocator (transaction + `body_claimed_indices` + `next_index`) so that *both* the params
+writer and a body writer depend on it. Adding `append_section` alongside `append_entry`
+would encode a **storage** distinction as an **API** distinction — forcing every caller to
+know whether a tracker is augmented, which is exactly the knowledge the abstraction should
+absorb. Two actions for one concept is the smell; one allocator with two writers is the
+shape.
 
 **Why a `get_next_index` would not fix it.** A query that returns the next free id moves the
 race rather than removing it: the agent still does read-then-write, and a peer can take the
