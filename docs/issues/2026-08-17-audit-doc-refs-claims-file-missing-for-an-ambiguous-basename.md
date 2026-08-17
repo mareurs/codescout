@@ -21,11 +21,37 @@ four does not reach for it, while its own doc comment claims parity with the one
 
 ## Symptom (Effect)
 
-Measured 2026-08-17 on `docs/trackers/tracker-hygiene-log.md`:
+**Still open and reproducible.** Re-verified 2026-08-17 against the binary built at 13:41
+(HEAD `201628f9`; no commit has touched `src/librarian/tools/audit_doc_refs/` since
+`f6140205`). Scoped run over this file plus `docs/trackers/tracker-hygiene-log.md` — every
+`file_symbol` finding, and nothing filtered out:
 
 ```
-med  file_symbol  resolver.rs::note_degraded   verdict: file_missing
+file_missing   med  resolver.rs::note_degraded              <- this file:27
+file_missing   med  resolver.rs::path_evidence              <- this file:114
+file_missing   med  resolver.rs::note_degraded              <- tracker-hygiene-log.md:397
+resolved       low  refresh.rs::call                        <- this file:71
+resolved       low  severity.rs::cap_inferred_path          <- this file:114
 ```
+
+`scan_meta.degraded: false`, so the LSP answered — these are not cold-start or
+server-behind-index artifacts (the failure mode of
+`docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`).
+
+**That table is a controlled experiment, not just a reproduction.** Five refs of the
+*identical* `basename::symbol` shape, three of them in one file, and the verdict splits on
+exactly one variable:
+
+| path part | files with that basename | verdict |
+|---|---|---|
+| `resolver.rs` | **2** | `file_missing` |
+| `refresh.rs` | 1 | `resolved` |
+| `severity.rs` | 1 | `resolved` |
+
+So the basename shorthand demonstrably works — `refresh.rs::call` and
+`severity.rs::cap_inferred_path` resolve through it. It fails only on **ambiguity**, which
+is what rules out "the shorthand is broken" and pins the defect on the all-or-nothing
+branch in § Root cause.
 
 The symbol exists, and it is in the auditor's own implementation file:
 
@@ -36,26 +62,36 @@ symbols(name="note_degraded")
 ```
 
 So `audit_doc_refs` reports a function inside `audit_doc_refs/resolver.rs` as living in a
-missing file.
-
+missing file — twice over, since `path_evidence` is in that same file.
 ## Reproduction
 
-Commit `021c130d`, branch `experiments`.
+Commit `201628f9`, branch `experiments`, binary built 13:41. **Re-verified 2026-08-17** with
+a four-line fixture that discriminates every case at once — four refs, no truncation, no
+surface drops to reason around:
 
-1. In any tracked markdown file, write a `file_symbol` ref whose path part is a basename
-   with two or more matches in the repo — `` `resolver.rs::note_degraded` `` works, since
-   `src/` holds two `resolver.rs`:
+```markdown
+Full repo-relative path: `src/librarian/tools/audit_doc_refs/resolver.rs::note_degraded`
+Partial path:            `audit_doc_refs/resolver.rs::note_degraded`
+Bare ambiguous basename: `resolver.rs::note_degraded`
+Bare unique basename:    `refresh.rs::call`
+```
 
-   ```
-   src/librarian/tools/audit_doc_refs/resolver.rs
-   src/tools/symbol/call_edges/resolver.rs
-   ```
+`librarian(action="audit_doc_refs", emit_tracker=false, paths=[…])` →
 
-2. `librarian(action="audit_doc_refs", emit_tracker=false, paths=["<that file>"])`
-3. → `verdict: file_missing`, `ref_kind: file_symbol`.
-4. Change the ref to a bare `` `resolver.rs` `` (a `file_path`) and re-run →
-   `AmbiguousBasename`, which is the accurate verdict.
+| Ref form | Verdict | Severity |
+|---|---|---|
+| full repo-relative path | `resolved` | low |
+| partial path (`audit_doc_refs/resolver.rs`) | **`file_missing`** | med |
+| bare **ambiguous** basename (`resolver.rs`, 2 matches) | **`file_missing`** | med |
+| bare **unique** basename (`refresh.rs`, 1 match) | `resolved` | low |
 
+Rows 3 and 4 are the bug: identical shape, opposite verdicts, and the only difference is
+how many files carry the basename. Rows 1 and 2 are the workaround boundary (§ Workarounds).
+`scan_meta.degraded: false` on every run, so no row is an LSP artifact.
+
+This fixture is what § Tests added should become — it is already minimal, already
+discriminating, and it pins the two correct behaviours alongside the two defective ones, so
+a fix cannot pass it by making everything resolve.
 ## Environment
 
 Linux, `experiments` @ `021c130d`. Affects any repo with a duplicated filename cited
@@ -142,6 +178,24 @@ struct field access. All `med` or `low`, none gating. The convention for a delib
 unreal path is to name it **bare**, un-code-spanned — documented in CLAUDE.md for
 `docs/ARCHITECTURE.md` and applied in `021c130d`.
 
+
+### Severity is capped by `cap_inferred_path`, verified on a surface with no drop
+
+The two naturally-occurring instances both landed `med`, but for **surface** reasons —
+`severity_reason: issues_drop` in a `docs/issues/` file and `historical_drop` in the
+tracker. Neither proves the path-evidence cap does anything, so the claim that this bug
+cannot gate CI was untested. Probed directly on a full-severity surface
+(`docs/architecture/`, no drop applies):
+
+```
+resolver.rs::note_degraded   file_missing   med   severity_reason: inferred_path
+refresh.rs::call             resolved       low   severity_reason: policy_default
+```
+
+`inferred_path` is `cap_inferred_path` firing, so the cap holds on the surface that matters
+and `high` stays reserved for "definitely a local path, definitely gone". **That is why this
+filing is `low` rather than `medium`** — measured, not reasoned. The ratified archive gate
+("0 high findings") is not exposed to this bug.
 ## Hypotheses tried
 
 1. **Hypothesis:** `resolve_file_symbol` never received the basename fallback its siblings
@@ -171,18 +225,47 @@ Then correct the parity comment to state what is actually true after the change.
 
 ## Tests added
 
-None. Wanted: a fixture repo with two files sharing a basename, asserting that a
-`basename::symbol` ref reports `AmbiguousBasename` rather than `FileMissing`. Worth
-asserting for all three ref kinds in one test, since the recurring defect in this family is
-the four resolvers drifting apart — a per-kind parity test is the guard that would have
-caught 2026-08-06's item 2 as well.
+None yet. The fixture is already written and verified — see § Reproduction. Turn those four
+lines into a test asserting all four verdicts, not just the two broken ones: a fix that made
+every form resolve would be wrong, and only rows 1 and 4 catch that.
 
+Worth widening to all three basename-accepting ref kinds (`file_path`, `file_line`,
+`file_symbol`) in one test. The recurring defect in this family is the four resolvers
+drifting apart — 2026-08-06's item 2 was `resolve_file_line` missing a fallback
+`resolve_file_path` already had — so a per-kind parity table is the guard that would have
+caught that one too, and would catch the next.
 ## Workarounds
 
-Cite the symbol with enough path to be unique —
-`` `audit_doc_refs/resolver.rs::note_degraded` `` — or with the full repo-relative path.
-The positional lookup then succeeds and the basename branch is never reached.
+Cite the symbol with the **full repo-relative path** —
+`src/librarian/tools/audit_doc_refs/resolver.rs::note_degraded` resolves, because the
+positional lookup succeeds and the basename branch is never reached.
 
+That ref is written inline here on purpose, so this file's own audit is the proof: a scoped
+`audit_doc_refs` reports it `resolved / low` while the two bare-basename forms above it
+report `file_missing / med`. Verified 2026-08-17 — the first draft of this section put the
+working form in a fenced block, where it was never extracted and so never tested, and
+asserted it worked from reasoning alone.
+
+**A partial path does NOT work, and this file said it did until 2026-08-17.** The original
+text suggested `audit_doc_refs/resolver.rs::note_degraded` — "enough path to be unique".
+That prescription is wrong, and `basename_candidate`
+(`src/librarian/tools/audit_doc_refs/resolver.rs:151-157`) is why:
+
+```rust
+let stripped = raw_ref.strip_prefix("./").unwrap_or(raw_ref);
+if stripped.is_empty() || stripped.contains('/') {
+    return None;
+}
+```
+
+Any `/` disqualifies the ref from the basename fallback, while a path that is not
+repo-root-relative fails the positional attempt — so a partial path is unresolvable **both
+ways**. That is the identical dead zone the same function's doc comment describes for
+`./`-prefixed refs, which was
+`docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
+I walked into it while writing the workaround for its sibling bug.
+
+Either give the whole path or give the bare basename. There is no middle.
 ## Resume
 
 Read `unique_basename_path` and `try_basename_fallback` together
