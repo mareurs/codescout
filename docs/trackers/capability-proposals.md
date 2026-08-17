@@ -11,6 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
+entry_high_water_CAP: 6
 entry_prefix: CAP
 ---
 

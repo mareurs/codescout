@@ -10,6 +10,7 @@ tags:
 entry_prefix: HY
 next-sweep-due: 2026-09-15
 sweep-interval-days: 30
+entry_high_water_HY: 12
 ---
 
 # Tracker hygiene log
@@ -772,6 +773,76 @@ surface per line), not a reason to wait for substrate.
 **Related:** HY-5 §1 (path drift after archive moves — the sibling direction, still open),
 HY-10 (ledger vs. tracker; same one-field-of-four root cause), `archive-cadence-policy` §3
 (where archived entries land, which decides what "active" scopes to).
+
+## HY-12 — D10's archive step gained a third sub-step and a precondition: the ledger's committed mark must exist before the first compaction
+
+**Kind:** hit (procedure change, verified live) · **Sweep:** 2026-08-17 (out-of-cadence) · **Status:** open
+
+Two things changed under D10 today, both from `archive-cadence-policy` § 3 being ratified
+as amended, and one of them is a precondition the skill cannot check for itself.
+
+**1. Step 5 is three sub-steps, not two.** `artifact(update, status)` →
+`artifact(move, …-YYYY-MM-DD.md)` → **repoint citations of the old path AND the old
+16-hex id**, verified by a scoped `audit_doc_refs`. The third is the one HY-5 §1 measured
+getting skipped, and the skill's own text omitted it while
+`get_guide("tracker-conventions")` mandated it for the identical operation on bug files.
+The timestamped name is also now load-bearing rather than cosmetic: `artifact(move)`
+fails if the destination exists, so a stream that wraps, is archived, is restarted at the
+live path and wraps again could not be archived at all. A ledger's **entry-level**
+archive companion is the opposite case — stable name, no timestamp, check it exists
+first, or the namespace forks into ambiguous tokens.
+
+Run end to end on two bug files today (`dc2d1dd8`): six citations repointed across four
+files, `link_scan` reporting `edges_missing: 0, edges_stale: 0` afterwards, and dangling
+unchanged at 613. Two checks worth copying from `release-promotion-session-log`, which
+used the same technique before: grep for `archive/archive` → 0 (the replacement inserts
+`archive/` into the substring it matches, so it must be idempotent), and a diff-shape
+assertion — 2 insertions / 2 deletions per source file, because a pure path repoint is a
+1:1 line swap and any other ratio means the sed did more than repoint.
+
+**2. New precondition — compaction now depends on a committed counter.** A ledger's id
+high-water mark lives in its own frontmatter as `entry_high_water_<PREFIX>`, written by
+the allocator (`0364c23a`). Compaction is safe *because* a body edit preserves the
+frontmatter block byte for byte. But the mark self-installs on first allocation and did
+not exist before today, so a ledger compacted while it has no mark falls back to the
+machine-local reservation — which does not survive a clone or an `artifact(move)`.
+
+*Measured 2026-08-17, after `cargo rb`:* five ledgers declare `entry_prefix`
+(`capability-proposals`, `codescout-usage-frictions`, `codescout-usage-hookify`,
+`reconnaissance-patterns`, `tracker-hygiene-log`) and **none carried a mark** until the
+HY-12 allocation stamped one on this file. The others install theirs on next use.
+
+The reason this is currently safe, and the reason it is contingent: compaction so far has
+moved the **oldest** entries out. `reconnaissance-patterns` live body max is `R-100`
+against its companion's `R-86`, so the live body still holds the true maximum and the
+mark will install correctly. A sweep that archives the newest entries, or the whole file,
+is exactly when the mark has to exist already — and promote-or-die is the policy that
+will start doing that.
+
+**Operative for the next sweep:** before running D10 on a ledger, check that its
+frontmatter carries `entry_high_water_<PREFIX>`. If it does not, allocate one id first
+(`append_entry` with no `entry_collection` — the reserved id may go unused, integers are
+cheap and the convention already forbids reuse) so the mark installs while the live body
+still agrees with history. This is cheap now and unrecoverable later.
+
+**Also verified live, worth recording because it is the property the write turns on:** the
+allocator's frontmatter write is surgical. On this file — hand-authored, with a quoted
+`id:`, a block-sequence `tags:`, and hyphenated keys — the diff was **1 insertion, 0
+deletions**. A normalizing rewrite would have changed several lines (BL-34 measured 30 on
+a hand-authored corpus), which is why `frontmatter::upsert_int_line` exists rather than
+reusing the normalizing writer.
+
+**Two issues opened during this pass**, both tool-observability rather than hygiene:
+`docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
+(the response hides which input governed — so an agent cannot see the compacted-ledger
+signal that precondition 2 is about) and
+`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`
+(a resolvability query across both finding arrays silently answers half — relevant to
+HY-9's proposed D12, which consumes exactly those arrays).
+
+**Related:** HY-5 §1 (path drift after archive moves — its proposal is now adopted in D10
+step 5c), HY-9 (D12 on link_scan's arrays), HY-11 (promotion-pointer drift; its
+prerequisite `**Promoted-to:**` field is still unwritten).
 
 ## Template for new entries
 

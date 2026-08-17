@@ -6,6 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
+entry_high_water_R: 100
 entry_prefix: R
 ---
 
