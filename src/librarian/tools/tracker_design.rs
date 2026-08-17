@@ -68,9 +68,12 @@ fn archetype_menu() -> Value {
     json!(list)
 }
 
-/// Every archetype name — used to resolve a requested one and to name the valid
-/// options when resolution fails.
-fn archetype_names() -> Vec<String> {
+/// Every archetype name — used to resolve a requested one, to name the valid
+/// options when resolution fails, and to populate the `archetype` enum in
+/// `Librarian::input_schema`. That last caller is why this is `pub(super)`
+/// rather than private: the schema must be *derived* from this list, never
+/// hand-copied, or the two drift and the tool advertises names it refuses.
+pub(super) fn archetype_names() -> Vec<String> {
     archetypes()
         .as_array()
         .map(|a| {

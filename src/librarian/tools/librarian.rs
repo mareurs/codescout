@@ -66,6 +66,15 @@ impl Tool for Librarian {
                 "force": { "type": "boolean", "description": "reindex: ignore cached file hashes and re-walk every file (re-classification; does NOT by itself force re-embedding — see reembed)" },
                 "reembed": { "type": "boolean", "description": "reindex: also queue every file for re-embedding even when its content hash is unchanged. Use after enabling embeddings for the first time, or after switching embedding models/backends, on an already-indexed project — otherwise unchanged content is silently never (re-)embedded." },
                 "intent": { "type": "string", "description": "tracker_design: free-form intent (optional)" },
+                "archetype": {
+                    "type": "string",
+                    // Derived, never hand-copied: the response's `archetype_detail` and
+                    // `next_step` both instruct the caller to pass this, so a schema that
+                    // omits it (or lists stale names) makes the tool's own instructions
+                    // unfollowable by any client that validates against the schema.
+                    "enum": super::tracker_design::archetype_names(),
+                    "description": "tracker_design: fetch ONE archetype in full — params_shape_example, params_schema_example, render_template_example, body_skeleton, prompt_template. Omit for the menu (name + when_to_use only); the full examples are ~95% of the payload, so they are fetched one at a time once a choice is made. An unknown name is refused with the list of valid ones."
+                },
                 "commit": { "type": "string", "description": "workspace_state_at: git commit hash as time-travel cutoff. Exactly one of commit or timestamp required." },
                 "timestamp": { "type": "integer", "format": "int64", "description": "workspace_state_at: unix epoch ms as cutoff. Exactly one of commit or timestamp required." },
                 "kinds": {
@@ -151,6 +160,42 @@ mod tests {
             .await
             .unwrap();
         assert!(v["archetypes"].is_array());
+    }
+
+    /// `tracker_design`'s response tells the caller, twice (`archetype_detail`
+    /// and `next_step`), to call back with `archetype="<name>"`. Until
+    /// 2026-08-17 the input schema did not declare that parameter at all, so
+    /// any client that validates arguments against the schema could not follow
+    /// the tool's own instruction — the handler accepted it, the contract
+    /// denied it existed.
+    ///
+    /// The enum must be DERIVED from `archetype_names()`, never hand-copied: a
+    /// copied list drifts the moment an archetype is added, and then the schema
+    /// advertises a set the handler refuses (or hides one it accepts).
+    #[test]
+    fn input_schema_declares_archetype_derived_from_the_live_names() {
+        let schema = Librarian.input_schema();
+        let props = &schema["properties"];
+        assert!(
+            props["archetype"].is_object(),
+            "input_schema must declare `archetype` — tracker_design's next_step \
+             instructs callers to pass it. Declared properties: {:?}",
+            props.as_object().map(|o| o.keys().collect::<Vec<_>>())
+        );
+
+        let declared: Vec<String> = props["archetype"]["enum"]
+            .as_array()
+            .expect("`archetype` must carry an enum of the valid names")
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        let live = crate::librarian::tools::tracker_design::archetype_names();
+
+        assert!(!live.is_empty(), "archetype_names() returned no names");
+        assert_eq!(
+            declared, live,
+            "the schema's `archetype` enum must equal archetype_names() exactly"
+        );
     }
 
     #[tokio::test]
