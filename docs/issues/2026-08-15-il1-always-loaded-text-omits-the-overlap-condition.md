@@ -441,6 +441,25 @@ offending text. That test is the reason a third deletion cannot pass silently.
 
 Do not re-derive the character budget from § Fix's table — see § Evidence,
 *Regression*, for the live numbers and why that table is retired.
+
+**And do not try to eyeball the restored clause in a running session.** `d2cf4449`'s
+commit message says *"Needs cargo rb + /mcp before a live session sees the restored
+clause"* — that is wrong for this surface, and the error is mine. A `/mcp` reconnect
+refreshes tool schemas and behaviour, **not** `server_instructions`
+(`docs/issues/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`).
+Measured from this session: after four rebuilds and four reconnects the live block
+still carried a `## Workspace gate` section that `391fdcdc` deleted the previous day,
+so it had not been rebuilt from any of today's binaries.
+
+The authoritative check is the fixture, and it passes:
+
+```
+$ grep -c 'overlaps a symbol' tests/fixtures/prompt_surfaces/server_instructions.md
+1
+```
+
+plus `cargo test --lib prompt_surfaces`. To see the text injected for real, open a NEW
+conversation — the authoring session is structurally the one observer that cannot.
 ## References
 
 - `src/tools/read_file.rs:544-565` — the gate

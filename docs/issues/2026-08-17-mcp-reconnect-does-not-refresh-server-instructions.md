@@ -90,6 +90,47 @@ does not distinguish the two. It does not need to: the operational consequence i
 `d2cf4449`: *"NOTE: source.md is compiled in. Needs cargo rb + /mcp before a live session
 sees the restored clause."* Necessary, not sufficient.
 
+### Independent confirmation, and a two-marker fingerprint that dates the live text
+
+Added 2026-08-17 by the session that authored `d2cf4449` and `8d44ee08` — the two commits
+this bug names. Confirmed, with a sharper instrument than "the text did not change".
+
+A single marker only shows staleness. **Two markers that moved in opposite directions
+pin which build the live instructions came from**, because the surface passed through three
+distinguishable states in two days:
+
+| State | `overlaps a symbol` | `## Workspace gate` |
+|---|:---:|:---:|
+| before `391fdcdc` (2026-08-16) | present | present |
+| after `391fdcdc` (the 1900-char refit) | **absent** | **absent** |
+| after `d2cf4449` (clause restored, section stays cut) | present | absent |
+
+The shipped surface right now, from the fixture that CI checks:
+
+```
+$ grep -c 'overlaps a symbol' tests/fixtures/prompt_surfaces/server_instructions.md
+1
+$ grep -c 'Workspace gate' tests/fixtures/prompt_surfaces/server_instructions.md
+0
+```
+
+So the surface is in the third state. The instructions **in this session's context** carry
+the overlap clause *and* a full `## Workspace gate` section with its own heading and body —
+which is the first state, from a build no later than 2026-08-16.
+
+That session had by then rebuilt with `cargo rb` four times and reconnected `/mcp` four
+times, including once immediately after `d2cf4449`. The live text moved not at all, and it
+is not merely stale-by-one — it predates a refit that deleted an entire section.
+
+**Why this is worth more than a second datapoint.** It rules out the most comfortable
+alternative reading, that the reconnect refreshes instructions but the *specific edit* had
+not landed in the binary yet. A section deleted the previous day is still present, so the
+text cannot have been rebuilt from any of today's binaries. Whatever the host is doing, it
+is not re-reading `initialize.instructions` on reconnect.
+
+It also gives the next author a cheap self-check that needs no tooling: pick any **two**
+surface markers whose presence differs between the last two states, and read them off the
+live block. One marker cannot distinguish "not refreshed" from "not yet built"; two can.
 ## Hypotheses tried
 
 1. **Hypothesis:** the reconnect did not take, so nothing refreshed.
@@ -130,6 +171,23 @@ Verify prompt-surface edits against the fixture and the `prompt_surfaces` tests.
 claim a surface change is live from inside the session that authored it — the session is
 structurally the one observer that cannot see it.
 
+Concretely, the check that *is* authoritative:
+
+```
+grep -c '<the new text>' tests/fixtures/prompt_surfaces/server_instructions.md
+cargo test --lib prompt_surfaces
+```
+
+The fixture is regenerated with `UPDATE_PROMPT_SNAPSHOTS=1`, so it is what the build
+ships; the live block in the authoring session is not evidence either way.
+
+And a correction to the phrasing this bug flags, from the session that wrote it: the
+`NOTE:` line on a mixed commit needs to split the two, because `cargo rb` + `/mcp` is the
+right instruction for one half and misleading for the other —
+
+> Tool code and schemas: `cargo rb` + `/mcp`.
+> Prompt surfaces: not observable in this session; verified by fixture + `prompt_surfaces`
+> tests, and eyeballable only in a NEW conversation.
 ## Resume
 
 Decide whether the doc fix belongs in `src/prompts/README.md` alone or also in a
@@ -144,4 +202,3 @@ restored clause, composition-at-start is confirmed and caching is ruled out.
 - `docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md` — the sibling
   reconnect-semantics bug, about guide bodies rather than instructions; its fix made
   `guide_hints_emitted` persist across `/mcp` restarts within one conversation.
-
