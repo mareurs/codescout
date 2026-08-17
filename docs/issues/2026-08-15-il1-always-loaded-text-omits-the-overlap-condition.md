@@ -222,6 +222,61 @@ glue, and cross-symbol slices.
 Revised characterisation: this is not "a guard that fires too often". It is **one guard serving two
 populations**, healthy for the larger one and structurally wrong for the ~28% that want
 non-definition text.
+### Regression: the clause was deleted again on 2026-08-16, and the cap arithmetic above is retired (added 2026-08-17)
+
+Step 3's wording did not survive one day. `391fdcdc` — *fix(prompts): the
+instructions channel is 2048 CHARACTERS — measure it, then fit it* — refitted the
+slice and paid for part of it by reverting exactly this clause:
+
+```diff
+-   read_file is right for imports/glue — refused only when the
+-   range overlaps a symbol; force=true reads it anyway.
++   read_file is right for imports/glue; force=true overrides.
+```
+
+So the surface spent 2026-08-16 through 2026-08-17 back in the state this bug
+describes. Nothing failed: no test asserted the clause, and the refit's own goal
+(fit 1900 chars) was met. A 57-character clause that reads like prose is exactly
+what a character-budget pass deletes first — which is the argument for a guard
+rather than a re-edit.
+
+**The § Fix cap table is retired.** It reasons from a 2200-**byte** budget with 11
+bytes of headroom, and that rule is now known to have been wrong twice over: the
+unit was bytes where the client cuts characters, and 2200 sat *above* the measured
+2048-char cliff it existed to protect (`CLIENT_INSTRUCTIONS_CHAR_LIMIT`,
+`src/prompts/mod.rs:39`; BL-9). Do not re-derive anything from that table.
+
+The real accounting, measured 2026-08-17:
+
+| | Chars |
+|---|---|
+| Budget (`STATIC_SLICE_CHAR_BUDGET`) | 1900 |
+| Slice as `391fdcdc` left it | 1722 |
+| Restore the IL1 condition | **+57** |
+| Drop the `docs/trackers → artifact(find/get)` quickref row | **−68** |
+| After | **1711** |
+
+The clause was affordable all along — there were 178 characters of headroom, not
+11. It was cut under an accounting error, and the refit had no test telling it
+what the 57 characters were worth.
+
+**Why that row was the right thing to sell.** It is a routing preference, not a
+gate: ignoring it costs one redundant read, where ignoring IL1's condition costs a
+refusal. And it is stated in full in `get_guide("librarian")` § *docs/trackers/ —
+Backing Store, Not a Docs Folder* ("Never read files there directly with
+`read_markdown` or `read_file`"), which **auto-injects on the first `artifact`
+call of a session** — verified in the session that made this edit, which received
+it unprompted. So the rule still reaches any agent doing tracker work.
+
+**A second-order cost caught by two tests, worth recording.** The static slice and
+the dynamic `## Project Status` block share one pool:
+`2048 − 48 (CHANNEL_SAFETY_MARGIN) − static`. At +57 with no offsetting cut, the
+dynamic budget fell 278 → 221 and `fit_dynamic_block` began trimming real content —
+`build_with_worktree_emits_worktree_banner` and
+`build_with_no_memories_suggests_onboarding` both failed, having lost the worktree
+banner and the index hint respectively. Growing IL1 by 57 characters silently
+spends 57 characters of *someone else's* surface. Both tests pass at 1711, which
+leaves the dynamic block 289 — more room than it had before this change.
 ## Hypotheses tried
 
 1. **Hypothesis:** the guide is wrong and needs fixing (doc-vs-code drift, like the sibling bug
@@ -362,23 +417,30 @@ cost rather than asserting a preference.
 
 ## Resume
 
-Steps 1 and 2 are implemented and regression-tested (§ Tests added); step 3's wording is authored.
-**One gate remains before this can be called fixed or archived:**
+Step 3's wording is restored and now **guarded**, which is the change of state
+since 2026-08-16. `prompts::redesign_invariants::il1_states_the_overlap_condition_not_just_the_permission`
+asserts IL1 names both the overlap condition and `force=true`, and it is
+mutation-verified: reinstating `391fdcdc`'s wording turns it red and prints the
+offending text. That test is the reason a third deletion cannot pass silently.
 
-1. **Run the subtract-and-measure protocol on the step-3 wording change** —
+**One gate still stands, unchanged:**
+
+1. **Run the subtract-and-measure protocol on the wording** —
    `artifact(action="get", id="59ebeebb6ed05c89", heading="Protocol — subtract-and-measure
-   (P-1..P-8)")`, harness `../prompt-engineering/`. Run the **base arm first**; if it is already at
-   ceiling, revert the `source.md` change rather than ship it. Steps 1-2 are code with tests and are
-   not subject to this gate; only the prompt edit is.
+   (P-1..P-8)")`, harness `../prompt-engineering/`. Base arm first; if it is already at
+   ceiling, revert rather than ship. Steps 1-2 are code with tests and are not subject
+   to this gate; only the prompt edit is. Until this run exists the wording is a
+   candidate, and the bug stays `open` on that alone — not on anything unimplemented.
 
-2. **Then re-measure the refusal population.** The acceptance number is in § Evidence: 244 refused
-   reads carrying arguments, of which 103 match `start == 1 && end <= 60`. If the fix works, that
-   sub-population goes to zero and total IL1 refusals drop by roughly 40%. Re-run the § Method query
-   from `docs/trackers/2026-08-15-tool-usage-investigation.md` on a single project — month-over-month
-   across projects is confounded.
+2. **Then re-measure the refusal population.** Acceptance number in § Evidence: 244
+   refused reads carrying arguments, 103 matching `start == 1 && end <= 60`. If the fix
+   works that sub-population goes to zero and total IL1 refusals drop ~40%. Re-run the
+   § Method query from `docs/trackers/2026-08-15-tool-usage-investigation.md` on a single
+   project — month-over-month across projects is confounded. Date-bound to after the
+   `cargo rb` that carried the head-read exemption.
 
-Note the head-read exemption only takes effect for sessions running a build that carries it
-(`cargo rb` + `/mcp`), so any re-measurement must date-bound to after that rebuild.
+Do not re-derive the character budget from § Fix's table — see § Evidence,
+*Regression*, for the live numbers and why that table is retired.
 ## References
 
 - `src/tools/read_file.rs:544-565` — the gate

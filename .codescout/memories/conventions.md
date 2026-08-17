@@ -72,6 +72,7 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
 Any tool rename, addition, or behavior change requires updating all three prompt surfaces.
 The build-time test `prompt_surfaces_reference_only_real_tools` catches stale tool names; `claude_md_contains_no_deprecated_tool_names` guards `CLAUDE.md`.
 Bump `ONBOARDING_VERSION` only for `onboarding_prompt` surface changes — never for `server_instructions`.
+The static slice cap is **1900 characters** (`STATIC_SLICE_CHAR_BUDGET`), below the measured 2048-**char** client cliff (`CLIENT_INSTRUCTIONS_CHAR_LIMIT`, `src/prompts/mod.rs:39`). Count characters, not bytes — the old rule said "2200 bytes", which was both the wrong unit and above the cliff it existed to protect, and stayed green for months. Never raise it; move content to a `get_guide(topic)` **and wire the topic's trigger**. Full operational detail (bump matrix, verify-slice hazard) + the writing style guide live in `src/prompts/README.md`.
 
 
 ## Bug Tracking

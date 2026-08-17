@@ -1616,6 +1616,42 @@ mod redesign_invariants {
         );
     }
 
+    /// IL1's always-loaded text must state the CONDITION, not just the permission.
+    ///
+    /// `read_file`'s gate refuses a source range whenever it overlaps a named symbol.
+    /// A wording that says only "read_file is right for imports/glue" grants far more
+    /// than the gate allows, and agents plan reads against the always-loaded text
+    /// rather than the on-demand guide — which is accurate but must be asked for.
+    /// That gap produced the largest single error class in the recorded corpus: 416
+    /// refusals across 89 sessions, 4.7 per session
+    /// (docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md).
+    ///
+    /// This is a REGRESSION guard, not a style check. The condition was authored,
+    /// then deleted again by the slice refit that fitted the channel to 1900 chars
+    /// (391fdcdc). That is the failure mode worth a test: the clause is 57 characters,
+    /// it reads like filler to anyone counting budget, and its absence costs more
+    /// than everything the refit saved. Whatever removes it should fail here first.
+    #[test]
+    fn il1_states_the_overlap_condition_not_just_the_permission() {
+        let rendered = build_server_instructions(None);
+        // Everything before Iron Law 2's marker is the header plus IL1.
+        let il1 = rendered
+            .split("2. NEVER")
+            .next()
+            .expect("server instructions must contain Iron Law 2");
+        assert!(
+            il1.contains("overlap"),
+            "Iron Law 1 must state WHEN a line-range read is refused — that the range \
+             overlaps a symbol — not merely that read_file is right for glue. Pay for \
+             it elsewhere; do not drop the condition. IL1 read:\n{il1}"
+        );
+        assert!(
+            il1.contains("force=true"),
+            "Iron Law 1 must name the escape hatch beside the condition, or the \
+             condition reads as a dead end. IL1 read:\n{il1}"
+        );
+    }
+
     #[test]
     fn server_instructions_does_not_concat_librarian() {
         // After Task 14 lands, the librarian block must not be appended.

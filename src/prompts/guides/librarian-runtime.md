@@ -13,7 +13,16 @@ caps, the catalog DB location, or the event-authorship protocol.
 
 Listing tools (`artifact(find)`, `librarian(context)`) default to the
 active project and hide archived/superseded rows. Responses include a
+`scope` block (applied scope + resolved `abs_path` / `git_root` /
+`umbrella`) and a `hints` block reporting extra rows: `more_in_repo`,
+`more_in_umbrella`, `hidden_archived`. The `expand` list names the exact
+args to widen, and every count it covers is reachable by passing them.
 
+`more_in_workspace` is the exception and is **not** in `expand`: it counts
+catalog rows beyond the umbrella ceiling, which no `scope` value reaches —
+`scope="all"` aliases to umbrella when the project has one, and errors when
+it does not. Treat it as "rows exist elsewhere on this machine"; to read
+them, activate the owning project.
 
 **Umbrellas are user-declared** in `workspace.toml` `[[umbrella]]`
 blocks. `scope="umbrella"` errors if no umbrella is declared.

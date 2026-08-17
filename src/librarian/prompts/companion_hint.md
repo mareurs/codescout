@@ -60,7 +60,28 @@ has set on the host.
 Responses include a `scope` block (`{applied, abs_path, git_root, umbrella, …}`)
 and `hints` listing how many extra rows live at wider scopes:
 
+```
+"hints": {
+  "more_in_repo": 4,
+  "more_in_umbrella": 2,
+  "hidden_archived": 3,
+  "expand": ["scope=\"repo\"", "scope=\"all\""]
+}
+```
 
+Widen by passing `scope: "repo" | "umbrella" | "all"`:
+
+- `repo` — artifacts under the active project's enclosing git repo (nearest
+  `.git` ancestor; falls back to project path).
+- `umbrella` — artifacts under any member of the umbrella the active project
+  belongs to (declared in `workspace.toml`).
+- `all` — **an alias for `umbrella`** when the active project has one, and an
+  error when it does not. Not a machine-wide escape hatch: umbrella is the
+  widest scope any value reaches.
+
+Because of that alias, a `more_in_workspace` hint — catalog rows beyond the
+umbrella — is reported **without** an `expand` entry, since no `scope` value
+fetches them. Activate the owning project to read those.
 
 Surface archived rows with `include_archived: true`. An explicit `status`
 filter wins over the archived-hide default.
@@ -72,6 +93,10 @@ filter wins over the archived-hide default.
 name = "my-platform"
 members = ["/abs/path/to/svc-a", "/abs/path/to/svc-b"]
 ```
+
+With no umbrellas declared, **both `scope: "umbrella"` and `scope: "all"` error** —
+`all` requires an umbrella precisely so it cannot silently cross into unrelated
+projects. Use `repo`.
 
 
 ## Gotchas

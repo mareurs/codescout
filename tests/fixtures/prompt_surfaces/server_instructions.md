@@ -5,7 +5,8 @@ Subagents inherit these rules. Pass them along.
 
 1. NEVER full-read source → symbols(path) overview,
    symbols(name=..., include_body=true) bodies. Line-range
-   read_file is right for imports/glue; force=true overrides.
+   read_file is right for imports/glue — refused only when the
+   range overlaps a symbol; force=true reads it anyway.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
    (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk,
@@ -22,7 +23,6 @@ Subagents inherit these rules. Pass them along.
 - Exact string/regex → grep(pattern, glob, mode="files")
 - Who calls X → references(symbol, path) — NOT grep
 - Structural code edit → edit_code | Text/import edit → edit_file
-- docs/trackers → artifact(find/get), never read_markdown/read_file
 - After workspace(activate, foreign) → activate home before turn end
 
 ## Deeper guidance
