@@ -2887,6 +2887,52 @@ regression is invisible to every other gate.
 
 **Status:** validated.
 
+## W-27 — A gate's default threshold made its exit code structurally incapable of failing
+
+**Observed:** 2026-08-17, re-running the promotion check after a compaction, about to
+report "all gates green, fast-forward available" for an 891-commit promotion.
+
+**Pattern:** Before citing a gate's exit code as a verdict, read the gate's threshold
+parameter *and its default*. `librarian(action="audit_doc_refs")` takes `fail_on`, and it
+defaults to `never` — so its exit code is 0 under every possible repo state. The prior
+session had reported `exit_code=0` next to `n_refs_broken=10383` and reconciled the two as
+"the gate passes despite the count". Both halves were wrong. The count is not a defect
+count: `n_refs_found` is `findings.len()` and a finding is *every ref examined*, resolved
+ones included. And the exit code was not a verdict at all.
+
+Re-running the identical call with `fail_on="high"` — the value `.github/workflows/ci.yml`
+line 370 actually passes — returned `exit_code=1`.
+
+**Counterfactual:** The promotion would have been recommended, and taken, on a tip commit
+whose `Audit Doc Refs` job fails. The finding came from a docs commit landed the same day
+(`a1540c8c`): `docs/architecture/augmented-artifacts.md` line 232 quoted a dot-slash-prefixed
+`include_str!` argument verbatim, and the auditor resolved it against the markdown file's
+directory instead of the Rust source's. One `high` among 46,692 refs was enough to fail the
+build. Fixed in `674bf885`; the tool-side false positive is filed at
+`docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
+
+**Confirming data points:**
+
+1. This session — `fail_on` defaults to a value that cannot fail.
+2. Same shape as R-86 (name every mode the component has, then ask which one the test
+   constructed) — asked of a *parameter* rather than a transport.
+
+**Impact:** high — a green that would read identically in a broken world is worse than no
+check at all, because it gets cited as evidence.
+
+**Promote-when:** a second gate is found whose default threshold, timeout, or severity
+floor makes its pass/fail structurally one-sided. At 2 datapoints, promote into
+`docs/RELEASE.md`'s ship sequence as: cite a gate's verdict only with its threshold named
+alongside it.
+
+**Status:** validated — single datapoint, caught before the promotion was taken.
+
+**Aside, worth its own line.** Allocating this id required scanning *both* entry formats.
+Defining `## W-N` headings stop at W-21; W-22 through W-26 exist only as rows in the Wins
+Index table, and two of them are already cited above. A heading-only scan would have
+allocated W-22 on top of five live entries — the exact hazard
+`get_guide("tracker-conventions")` § *One entry format, never two* describes, observed here
+rather than read about.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
