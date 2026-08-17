@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 45
+entry_high_water_U: 46
 entry_prefix: U
 ---
 
@@ -1974,3 +1974,43 @@ Sentence one is the correct rule; sentence two is a strictly narrower mechanism,
 **Filed:** `docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md`.
 
 **Status:** open.
+
+---
+
+### U-46 — `audit_doc_refs` reads `e.g` and `1.16.8` as module paths and `contains/prefix` as a file path — two FP mechanisms, 12 of 50 findings
+
+**Observed:** 2026-08-17, running a scoped `audit_doc_refs` over the four bug files written for U-42–U-45 as the doc-side gate before committing.
+
+**Got:** `exit_code: 0`, `n_refs_found: 109`, `n_refs_resolved: 52`, `n_refs_broken: 29`, `n_refs_unknown: 28`. Reading the 50 shown findings rather than trusting the zero — R-104 — **none** was a real broken reference. The breakdown by kind:
+
+```
+36  file_path
+12  module_path
+ 2  file_line
+```
+
+Two distinct false-positive mechanisms, both triggered by punctuation in prose:
+
+| `raw_ref` | Classified | Actually |
+|---|---|---|
+| `contains/prefix` | `file_path` | two op names joined by a slash, quoted from a schema description |
+| `ls/cat/awk/sed/find` | `file_path` | a command list from the gate's own hint text |
+| `e.g` | `module_path` | an abbreviation |
+| `1.16.8` | `module_path` | a plugin version number |
+| `ext_re.is_match`, `expanded.is_relative`, `expanded.starts_with` | `module_path` | Rust method calls on locals, inside quoted code |
+| `corrections.filter` | `module_path` | a JSON response key path |
+| `usage.db` | `file_path` | a filename with no directory |
+
+The remainder are legitimate non-resolutions and correctly reported: deliberate repro fixtures (`foo.rs`, `x.rs` — `foo.rs` *not* existing is the point of U-45), cross-repo `claude-plugins/…` paths, and ephemeral session-scratch paths in evidence sections.
+
+**Mechanism — partly inferred, and said so.** Not traced to a line this pass. The pattern in the data is that a slash makes a token a `file_path` candidate and a dot makes it a `module_path` candidate, with no test that the shape is *plausible* for the kind — `e.g` has no path-like structure beyond the dot, and `1.16.8` is three integers. The `module_path` half is the same family as U-15 ("mis-parses Rust `::` separator + classifies git refs as paths") and U-17 (39 FPs from instructional placeholders), which is why this is one entry rather than three: the classifier has a recall-first bias and no cheap plausibility filter.
+
+**Severity is lower than it first looks, and the correction is the point.** These never gate. CI runs `--fail-on high` (`.github/workflows/ci.yml:370`), and every one of these is `Med` after `issues_drop` capping — `fail_on=high` ignores Med (`src/librarian/tools/audit_doc_refs/mod.rs:1168`, pinned by `fail_on_high_ignores_med_severity`). An earlier read of this same data claimed they "would gate at med in an ADR"; that was wrong in the direction that matters, because it inflates a precision issue into a CI risk. The real cost is **report noise**: 29 broken + 28 unknown, all benign, is a haystack a reader has to walk before finding a real drift — and the tool is documented as *manual*, run when drift is suspected, which is exactly when a 57-item benign list is most expensive.
+
+It would gate for anyone running `--fail-on med`, which is the setting a team tightening doc hygiene reaches for first.
+
+**Fix idea:** add a plausibility filter before emitting, not after — reject `module_path` candidates whose segments are all-numeric (`1.16.8`), whose final segment is a known English abbreviation (`e.g`, `i.e`, `etc`), or that resolve to a local-variable method call already inside a fenced code block; reject `file_path` candidates with no path-ish segment and a known-prose separator. Cheaper alternative, and probably the right first move: extend the existing `cap_code_comment` treatment so a ref extracted from **inside a fenced block** in a bug file drops to `Low` — most of the 12 `module_path` FPs here are quoted code, and quoted code is a citation of nothing.
+
+**Not filed as a bug** — same reasoning as U-40 and U-41. Nothing is wrong, lost, or gated; the classifier's recall-first bias is a deliberate design stance and the capping layer is already absorbing the consequence. This is friction with the precision of a correct-by-design check, and it belongs with U-15 and U-17 as evidence for a future precision pass rather than as a fifth open bug.
+
+**Status:** open — friction recorded, no fix shipped.
