@@ -423,7 +423,7 @@ fn subsection_guard_error(
 /// `prefix` locates the entry for batch callers (`"edits[3]: "`,
 /// `"body_edits[0]: "`) and is empty for the single-edit path.
 ///
-/// See `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+/// See `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
 pub(crate) fn require_new_string<'a>(edit: &'a Value, prefix: &str) -> Result<&'a str> {
     let has_content = edit.get("content").is_some();
 

@@ -1,5 +1,5 @@
 ---
-id: '3a678913656b3c38'
+id: 85982e8f57d2dd90
 kind: bug
 status: fixed
 title: 'BUG: sibling tools name the same two concepts differently — symbols uses name_path but edit_code wants symbol, edit_markdown uses content but edit_code wants body — two failed calls to insert one function'
@@ -17,7 +17,7 @@ find-then-edit workflow the Iron Laws prescribe.
 
 Low severity by itself. Filed because it is the benign half of a pattern whose
 severe half is
-`docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`,
+`docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`,
 where the same class of key mix-up is silent and destructive.
 
 ## Symptom (Effect)
@@ -130,7 +130,7 @@ bug `2026-08-15-conditionally-required-params-advertised-optional.md` measured t
 class against them. All new text goes in the *hint*, which is additive.
 
 Not done, and deliberately: `edit_markdown` was NOT taught to accept `body`. Its
-sibling defect (`docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`,
+sibling defect (`docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`,
 fixed in the same commit) hinges on `action="edit"` distinguishing a missing
 replacement from an intentional empty one; adding more accepted spellings of the
 replacement there widens exactly the surface that had to be narrowed. Aliasing is
@@ -173,8 +173,20 @@ Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
 
 ## Resume
 
-N/A — both aliases accepted, advertised in the schema, named in the refusals, and
-tested.
+N/A — both aliases accepted, advertised in the schema, named in the refusals,
+tested, and confirmed on the wire after `cargo rb` + `/mcp`:
+
+```
+edit_code(path=…, action="replace", name_path="body_param")
+→ ok: false
+  error: action 'replace' requires 'body'
+  hint:  Pass the code as body="..." — … `content` is accepted as an alias
+         (that is edit_markdown's name for the same argument).
+```
+
+The address resolved from `name_path` — the call reached the *body* precondition
+instead of `missing 'symbol'`, which is the same positive signal the unit test
+asserts — and the refusal names the other alias unprompted.
 
 Option 3 from § Fix (one name per concept across all four tools) stays unactioned by
 choice, not by omission. Revisit only if usage data shows the mismatch still costing
@@ -183,5 +195,5 @@ actually observed, and a rename would spend prompt-surface characters that Iron 
 currently needs.
 ## References
 
-- `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md` — the severe, silent instance of the same key-mix-up class
+- `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md` — the severe, silent instance of the same key-mix-up class
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — tool-contract and guidance conventions

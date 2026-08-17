@@ -360,7 +360,7 @@ impl Tool for Grep {
             // search offered three files "(3 matches)" each while holding 11, 5 and 18,
             // and never named the file holding 20. Every figure in the hint was wrong
             // and so was the selection.
-            // docs/issues/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md
+            // docs/issues/archive/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md
             let precap_top: Vec<(String, usize)> = group_by_file(&matches)
                 .iter()
                 .take(3)
@@ -1458,7 +1458,7 @@ mod tests {
     /// fewer real matches. Ranking on capped counts puts it first; ranking on the
     /// true tally puts `hot.rs` first. A fixture without such a decoy cannot tell
     /// the two implementations apart.
-    /// docs/issues/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md
+    /// docs/issues/archive/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md
     #[tokio::test]
     async fn grep_overflow_hint_counts_and_ranks_before_the_cap() {
         use serde_json::json;

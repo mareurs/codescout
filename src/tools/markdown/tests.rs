@@ -192,7 +192,7 @@ async fn edit_markdown_accepts_file_path_alias() {
 ///
 /// The load-bearing assertion is the second one: refusing is good, but leaving the
 /// file untouched is the property that was actually violated.
-/// See `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+/// See `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
 #[tokio::test]
 async fn edit_action_with_content_instead_of_new_string_is_refused_and_changes_nothing() {
     let (dir, ctx) = project_ctx().await;

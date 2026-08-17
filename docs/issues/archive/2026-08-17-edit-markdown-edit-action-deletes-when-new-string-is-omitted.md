@@ -1,5 +1,5 @@
 ---
-id: a52dc618df71d995
+id: f05be046c6c373d8
 kind: bug
 status: fixed
 title: 'BUG: edit_markdown action="edit" defaults a missing new_string to empty, so a content/new_string mix-up silently DELETES the matched text — 5 bad edits across 4 files in one session, 3 of them committed'
@@ -229,7 +229,23 @@ about the change, **read back any section edited via `action="edit"`** —
 
 ## Resume
 
-N/A for this defect — all three sites are guarded and mutation-verified.
+N/A for this defect — all three sites are guarded, mutation-verified, and confirmed
+on the wire after `cargo rb` + `/mcp`. The original failing call, replayed verbatim
+against a scratch file:
+
+```
+edit_markdown(action="edit", heading="## Section A",
+              old_string="keep this sentence", content="replaced sentence")
+→ ok: false
+  error: new_string is required for action="edit"
+  hint:  Rename content to new_string — 'edit' performs a scoped old_string ->
+         new_string swap and never reads content (that key belongs to 'replace' /
+         'insert_before' / 'insert_after'). To DELETE the matched text, pass
+         new_string="" explicitly.
+```
+
+and a read-back confirmed the file still contains `keep this sentence` — the
+property that was actually violated, not merely the refusal.
 
 One deliberate follow-up, worth its own bug file rather than reopening this one:
 **`edit_markdown` reports nothing about what it changed.** The success envelope is

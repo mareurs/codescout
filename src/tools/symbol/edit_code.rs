@@ -76,7 +76,7 @@ const BODY_PARAM_HINT: &str = "Pass the code as body=\"...\" — for 'replace' t
 /// Unlike `edit_markdown`'s `action="edit"`, an absent value here is never silently
 /// treated as empty — both call sites refuse. That asymmetry is deliberate: an empty
 /// replacement is meaningful for a scoped text swap and meaningless as a symbol body.
-/// docs/issues/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
+/// docs/issues/archive/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
 fn body_param(input: &Value) -> Option<&str> {
     input
         .get("body")
@@ -179,7 +179,7 @@ impl Tool for EditCode {
         // to first — calls this same address `name_path`, so the value gets copied
         // straight from that call into this one. Refusing the sibling's spelling made
         // the prescribed find-then-edit handoff cost a round-trip.
-        // docs/issues/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
+        // docs/issues/archive/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
         let name_path = crate::tools::require_str_param_or_hint(
             &input,
             "symbol",

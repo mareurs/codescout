@@ -1,5 +1,5 @@
 ---
-id: a2f2dba5c76dad95
+id: 4176d661e5b2a989
 kind: bug
 status: fixed
 title: 'BUG: grep''s overflow narrowing hint ranks and reports the per-file CAPPED display count, so it recommends 3-match files and never names the 20-match one'
@@ -222,7 +222,22 @@ The totals in the envelope are trustworthy; only the per-file breakdown is not.
 
 ## Resume
 
-N/A — root cause traced, fixed, and mutation-verified.
+N/A — root cause traced, fixed, mutation-verified, and confirmed on the wire after
+`cargo rb` + `/mcp`. The exact pair of calls from § Symptom, re-run:
+
+```
+grep(pattern="render_template", glob="src/**/*.rs", mode="files")
+→ 20  tracker_design.rs | 18  augment.rs | 11  augmentation.rs | …
+
+grep(pattern="render_template", glob="src/**/*.rs", mode="content")
+→ To trim, narrow with one of: path=".../tracker_design.rs" (20 matches),
+  path=".../augment.rs" (18 matches), path=".../catalog/augmentation.rs" (11 matches).
+```
+
+Every figure now matches `mode="files"` exactly, the ranking is the true one, and no
+`+` appears because collection completed. Before the fix the same call offered three
+files annotated `(3 matches)` — holding 11, 5 and 18 — and never named the file
+holding 20.
 
 One observation left deliberately unactioned: `grep_overflow_hint_names_top_files`
 remains as it was. It is now redundant with the new test on every property it

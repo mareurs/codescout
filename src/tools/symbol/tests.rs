@@ -7154,7 +7154,7 @@ async fn edit_code_advertises_every_conditionally_required_param() {
 /// `name_path` must get past address resolution and complain about the *body*
 /// instead. That proves the alias resolved without depending on a successful
 /// language-server round-trip.
-/// docs/issues/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
+/// docs/issues/archive/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
 #[tokio::test]
 async fn edit_code_accepts_the_sibling_tools_names_for_symbol_and_body() {
     let dir = tempdir().unwrap();

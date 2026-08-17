@@ -1553,7 +1553,7 @@ text
     /// their content asserted by any test, which makes this the worst of the three
     /// places to lose text silently.
     ///
-    /// See `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+    /// See `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
     #[test]
     fn body_edits_edit_action_with_content_is_refused_and_changes_nothing() {
         let body = "## Foo\n\nkeep this sentence\n";
