@@ -345,7 +345,7 @@ fn trim_note(dropped: &[&'static str]) -> String {
     if dropped.len() > named {
         list.push_str(&format!(", +{} more", dropped.len() - named));
     }
-    format!("- (status trimmed to fit the MCP instructions channel: {list})\n")
+    format!("- (status trimmed: {list})\n")
 }
 
 /// Topic names registered as compiled-in `get_guide(topic)` content.
@@ -1031,7 +1031,7 @@ mod tests {
 
         let rendered = build_server_instructions(Some(&status));
         assert!(
-            rendered.contains("status trimmed to fit the MCP instructions channel: "),
+            rendered.contains("status trimmed: "),
             "the note must name the losses, not just announce one; got:\n{rendered}"
         );
         assert!(
@@ -1039,6 +1039,44 @@ mod tests {
             "the Kotlin block is the largest droppable segment and cannot fit at any \
              position — the agent's only chance of knowing it exists is being told it \
              went; got:\n{rendered}"
+        );
+    }
+
+    /// The note competes with the content it reports on, so its size is a budget
+    /// decision rather than a wording preference. Pinned with REALISTIC labels, because
+    /// the sibling bound uses one-character names and a 116-char note slipped under it.
+    ///
+    /// Provenance, and a correction worth keeping. A wire check against the release
+    /// binary showed this repo's delivered status carrying only the active-project line,
+    /// and I attributed the missing `Languages` line to the note's length. Rebuilding
+    /// that case in-process refuted it: with the long note, `Languages` survives. The
+    /// real status has six droppable segments — it carries a workspace table and a custom
+    /// prompt, and its memory names are far longer — where the fixture had three. It was
+    /// simply bigger. The note's cost is real and worth bounding; the eviction was never
+    /// demonstrated, and this test pins only the half that was. See R-102.
+    #[test]
+    fn the_trim_note_stays_small_next_to_the_budget_it_reports_on() {
+        // The labels this actually ships with, at the length they actually are.
+        let note = trim_note(&[
+            "kotlin known issues",
+            "workspace table",
+            "index status",
+            "memories",
+        ]);
+        assert!(
+            note.contains("kotlin known issues, workspace table, index status, +1 more"),
+            "got: {note}"
+        );
+
+        // The dynamic budget is ~289 chars (2048 − 48 − a 1711-char static slice) and a
+        // status line runs 40–85, so a note past ~90 spends a line's worth of room on
+        // bookkeeping. The pre-2026-08-17 wording — "status trimmed to fit the MCP
+        // instructions channel: …" — measures 116 here, and is what this bound refuses.
+        assert!(
+            note.chars().count() <= 90,
+            "the note costs {} chars of a ~289-char budget, a status line's worth of \
+             bookkeeping: {note}",
+            note.chars().count()
         );
     }
 
