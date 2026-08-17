@@ -1,7 +1,7 @@
 ---
 id: e04115d9477d280b
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: run_command passes the command to `sh -c` verbatim, so backticks in a commit message are substituted — and the diagnostic names the wrong cause'
 owners:
 - marius
@@ -121,26 +121,66 @@ and already trusted for gating decisions.
 
 ## Fix
 
-**Do not auto-repair.** Escaping backticks silently would break legitimate command
-substitution, and the repair-and-continue law (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`)
-sets a higher bar for writes: accept an explicit target, never guess one. A commit is a write.
+**The diagnostic half is implemented; the detection gate is deliberately not.** The bug
+offered the gate as the main proposal and the diagnostic as a *"cheaper alternative worth
+measuring first"* — that alternative is what shipped, because it needs no
+false-positive estimate and closes the actively-harmful half on its own.
 
-Proposed: a narrow, high-precision **detection + teaching refusal** —
+`substitution_diagnostic(command, stderr)` in `src/tools/run_command/output.rs` returns a
+one-line cause when the shell reports a substitution failure. Three properties, each
+chosen against a way this could have gone wrong:
 
-- Fire when a `-m` / `--message` argument (or any double-quoted argv element of a `git
-  commit`) contains an unescaped `` ` `` or `$(`.
-- Return `RecoverableError` naming the cause and both runnable corrections:
-  - `git commit -F <file>` — write the message to a file first;
-  - single-quote the message, escaping inner single quotes.
+- **Anchored on the shell's own marker** (`command substitution:` in stderr), not on
+  command shape. A command that genuinely wanted substitution and got it emits no marker,
+  so this cannot fire on working substitution — which is exactly the false-positive risk
+  that made the gate need measuring first.
+- **Only claims a cause it can point at.** The command must also contain a backtick or
+  `$(`; the marker alone (from a nested script or alias) yields nothing, because naming a
+  cause not visible in the caller's own string is a guess.
+- **Disowns the misleading line.** When `Argument list too long` co-occurs, the message
+  says it is a CONSEQUENCE, not the cause. That line is the actual damage in the reported
+  incident: plausible, self-consistent, and wrong, and acting on it means shortening the
+  commit body for no benefit.
 
-Cheaper alternative worth measuring first: leave the gate alone and fix only the
-**diagnostic**, by detecting the `sh: command substitution:` marker in stderr and prefixing
-a one-line cause. That closes the misleading-`Argument list too long` half at near-zero risk.
+No repair is attempted, per the bug's own reasoning and
+`docs/adrs/2026-07-10-repair-and-continue-input-handling.md` — a commit is a write, and a
+write never has its target guessed.
 
+**Attached so it actually arrives.** The value rides on `result["shell_cause"]`, computed
+*before* the buffer/summarise branch (one arm moves `raw_stderr` into the response) and
+attached on **both** exit paths, including the `buffer_only` early return. `format_run_command`
+appends it after all branch logic, in the same position and for the same reason as
+`timeout_hint`: `format_compact` is what `call_content` renders, and a field that function
+does not read reaches nobody — the defect filed as
+`docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
+
+Status `mitigated`, not `fixed`: the substitution still happens, and a message whose
+backticks *parse* is still silently mangled rather than refused. What is fixed is that a
+failure now names its cause. The detection gate remains open as the root-cause fix — see
+§ Resume.
+
+Fix SHA: this commit, on `experiments`.
 ## Tests added
 
-None yet.
+Four in `src/tools/run_command/tests.rs`, over a `SUBSTITUTION_STDERR` const holding the
+reported incident's stderr verbatim — all four errors, in order, so the fixture is the
+real input rather than a paraphrase of it.
 
+| Test | Mutation it catches |
+|---|---|
+| `substitution_diagnostic_names_the_cause_and_disowns_the_misleading_line` | dropping the `Argument list too long` clause, or the runnable `git commit -F` correction |
+| `substitution_diagnostic_is_silent_when_substitution_worked` | switching detection from the shell marker to command shape — which would fire on every backtick-bearing command, including working ones |
+| `substitution_diagnostic_is_silent_when_the_command_shows_no_substitution` | claiming a cause not visible in the caller's string |
+| `format_compact_surfaces_the_shell_cause_on_every_output_shape` | the boundary — asserted through **both** the short-output and buffered shapes, which render from different branches |
+
+**Mutation-verified on the boundary test**, which is the one worth checking because a
+correct field that never renders is indistinguishable from no fix at all. Removing the
+`format_run_command` append turns it red with the compact render reduced to
+`✗ exit 126 · 0 lines` — cause invisible, exactly the shape of the
+`frontmatter_max`-dropped-at-the-boundary defect.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
+4030 passed / 0 failed / 45 ignored.
 ## Workarounds
 
 - `git commit -F <path>` with the message written via a quoted heredoc (`<<'EOF'`, quoted
@@ -149,15 +189,20 @@ None yet.
 
 ## Resume
 
-Undecided between the two fixes above. The diagnostic-only fix is cheap and strictly
-positive; the detection gate needs a false-positive estimate first — measure how often a
-`git commit -m` in the corpus legitimately wants substitution (expected: never).
+The diagnostic is in. What remains is the **detection gate**, and its blocker is unchanged:
+measure how often a `git commit -m` in the corpus legitimately wants substitution (expected:
+never) before refusing on shape. `.codescout/usage.db` `tool_calls.input_json` holds the
+commands — the same source the IL-gate firing audit used.
 
-Note `run_command`'s IL-3 gate already does exactly this kind of command-shape analysis, so
-if the detection route is taken it belongs beside `is_unbounded_lhs`, not in a new module —
-see `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` (GF-N), which is auditing that
-same function's firing correctness.
+Two notes for whoever takes it:
 
+- It belongs beside `is_unbounded_lhs` in `src/util/path_security.rs`, not in a new module.
+  `run_command`'s IL-3 gate already does this class of command-shape analysis, and
+  `shell_tokens` is already trusted for gating decisions.
+- The gate would catch the case this fix cannot: a message whose backticks **parse** as a
+  command, so the shell substitutes successfully and silently mangles the commit body with
+  no marker in stderr and no error at all. That is the more dangerous half and the
+  diagnostic is blind to it by construction.
 ## References
 
 - `src/platform/unix.rs:65` — the `sh -c "$cmd"` wrapper
@@ -165,4 +210,3 @@ same function's firing correctness.
 - `docs/issues/archive/2026-05-19-run-command-eval-backtick-eof.md` — deferred hypothesis #4
 - `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` — why not auto-repair
 - `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` — the sibling audit of `run_command` gate shape
-

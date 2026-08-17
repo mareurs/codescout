@@ -46,6 +46,58 @@ pub(crate) fn rebuild_buffered_summary(raw: Value, output_id: &str) -> Value {
     Value::Object(map)
 }
 
+/// Name the cause when the shell performed command substitution the caller did not intend.
+///
+/// `run_command` hands its string to `sh -c` verbatim, so a backtick or `$(…)` is evaluated
+/// **even inside a quoted argument**. The commonest victim in this repo is a commit message:
+/// the house style cites symbols and paths in backticks, and `git commit -m "…"` is the
+/// most frequent multi-line command in the workflow, so the two collide constantly.
+///
+/// What makes this worth a dedicated diagnostic rather than leaving stderr to speak: the
+/// shell emits a cluster of unrelated-looking errors and often *ends* with
+/// `Argument list too long`. That line is a plausible, self-consistent, and wrong
+/// explanation — the message genuinely was long — and acting on it means shortening the
+/// commit body, which fixes nothing and loses content. The real cause sits mid-cluster in
+/// `sh: command substitution:`, which reads as noise unless you already know.
+///
+/// Detection anchors on the **shell's own marker**, not on command shape. A command that
+/// genuinely wanted substitution and got it emits no such marker, so this cannot fire on
+/// working substitution — and no repair is attempted, per the repair-and-continue rule that
+/// a write must never have its target guessed
+/// (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
+///
+/// See `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<String> {
+    if !stderr.contains("command substitution:") {
+        return None;
+    }
+    // Only claim a cause we can point at in the command the caller actually sent.
+    let culprit = if command.contains('`') {
+        "a backtick"
+    } else if command.contains("$(") {
+        "a `$(...)`"
+    } else {
+        return None;
+    };
+
+    let mut msg = format!(
+        "The shell performed command substitution on {culprit} in this command. \
+         run_command passes the string to `sh -c` verbatim, so backticks and `$(...)` are \
+         evaluated even inside a quoted argument."
+    );
+    if stderr.contains("Argument list too long") {
+        msg.push_str(
+            " The `Argument list too long` line is a CONSEQUENCE of that substitution, not \
+             the cause — shortening the argument will not fix it.",
+        );
+    }
+    msg.push_str(
+        " For a commit message, write it to a file and use `git commit -F <file>`, or \
+         single-quote the message (escaping any inner single quotes).",
+    );
+    Some(msg)
+}
+
 pub(crate) async fn handle_successful_output(
     original_command: &str,
     raw_stdout: String,
@@ -111,6 +163,10 @@ pub(crate) async fn handle_successful_output(
     } else {
         None
     };
+
+    // Computed BEFORE the branch below: one arm moves `raw_stderr` into the response, and
+    // the diagnostic has to cover every output shape — buffered summary included.
+    let shell_cause = substitution_diagnostic(original_command, &raw_stderr);
 
     // --- Step 6: Decide whether to buffer + summarize ---
     let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
@@ -179,6 +235,11 @@ pub(crate) async fn handle_successful_output(
                 ));
             }
             // buffer_only => tee injection was skipped (unfiltered_tmpfile is None).
+            // This path returns early, so it needs its own attachment — the one at the
+            // bottom of the function cannot reach it.
+            if let Some(cause) = shell_cause {
+                result["shell_cause"] = json!(cause);
+            }
             return Ok(result);
         }
 
@@ -248,6 +309,10 @@ pub(crate) async fn handle_successful_output(
         }
     }
 
+    if let Some(cause) = shell_cause {
+        result["shell_cause"] = json!(cause);
+    }
+
     Ok(result)
 }
 
@@ -297,6 +362,14 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     // Append timeout hint after all branch logic so it covers every output shape.
     if let Some(hint) = result["timeout_hint"].as_str() {
         s.push_str(&format!("\n⚠ timeout: {hint}"));
+    }
+
+    // Same placement, same reason: a shell-substitution cause applies to any exit shape,
+    // and the compact renderer is what `call_content` shows — a field this function does
+    // not read reaches nobody, which is the defect filed as
+    // `docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
+    if let Some(cause) = result["shell_cause"].as_str() {
+        s.push_str(&format!("\n⚠ cause: {cause}"));
     }
 
     s

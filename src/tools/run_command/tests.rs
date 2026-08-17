@@ -2504,6 +2504,108 @@ fn run_command_format_compact_short_output() {
     assert!(text.contains("exit 0"), "got: {text}");
 }
 
+/// The real stderr from the reported incident, verbatim. Four errors, and the one that
+/// reads most like an explanation is the wrong one.
+/// See `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+const SUBSTITUTION_STDERR: &str = "Usage: grep [OPTION]... PATTERNS [FILE]...\n\
+     Try 'grep --help' for more information.\n\
+     sh: command substitution: line 1: syntax error near unexpected token `...'\n\
+     sh: line 1: `self.call(...).await?'\n\
+     sh: line 1: ?: command not found\n\
+     sh: line 1: /usr/bin/git: Argument list too long\n";
+
+#[test]
+fn substitution_diagnostic_names_the_cause_and_disowns_the_misleading_line() {
+    use super::output::substitution_diagnostic;
+
+    let cmd = "git commit -m \"fix: rename `is_unbounded_lhs` and `self.call(...).await?`\"";
+    let cause = substitution_diagnostic(cmd, SUBSTITUTION_STDERR)
+        .expect("the shell's own marker is present, so the cause must be named");
+
+    assert!(
+        cause.contains("command substitution"),
+        "must name the mechanism: {cause}"
+    );
+    assert!(
+        cause.contains("backtick"),
+        "must name what in the command triggered it: {cause}"
+    );
+    // The load-bearing assertion: the last stderr line is a self-consistent WRONG
+    // explanation, and acting on it loses commit-message content for no benefit.
+    assert!(
+        cause.contains("CONSEQUENCE"),
+        "must disown `Argument list too long` as a consequence, or the caller shortens \
+         the message and fixes nothing: {cause}"
+    );
+    assert!(
+        cause.contains("git commit -F"),
+        "must give a runnable correction: {cause}"
+    );
+}
+
+/// Anchored on the shell's marker, not on command shape — so a command that genuinely
+/// wanted substitution and got it stays silent. Without this the diagnostic would fire on
+/// every backtick-bearing command, including the working ones.
+#[test]
+fn substitution_diagnostic_is_silent_when_substitution_worked() {
+    use super::output::substitution_diagnostic;
+
+    let cmd = "echo \"today is `date +%F`\"";
+    assert!(
+        substitution_diagnostic(cmd, "").is_none(),
+        "no shell marker means no claim"
+    );
+    assert!(
+        substitution_diagnostic(cmd, "some unrelated warning\n").is_none(),
+        "unrelated stderr must not be read as a substitution failure"
+    );
+}
+
+/// The marker without any substitution syntax in the command we were handed: the failure
+/// came from somewhere else (a nested script, an alias), so claiming a cause we cannot
+/// point at in the caller's own string would be a guess.
+#[test]
+fn substitution_diagnostic_is_silent_when_the_command_shows_no_substitution() {
+    use super::output::substitution_diagnostic;
+
+    assert!(
+        substitution_diagnostic("bash script.sh", SUBSTITUTION_STDERR).is_none(),
+        "the cause must be visible in the caller's command to be claimed"
+    );
+}
+
+/// The boundary test. `format_compact` is what `call_content` renders, and it builds a
+/// one-liner from a fixed set of keys — so a field it does not read reaches nobody, no
+/// matter how correct the JSON is. That is the defect filed as
+/// `docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`,
+/// and this test is what stops it recurring here.
+#[test]
+fn format_compact_surfaces_the_shell_cause_on_every_output_shape() {
+    let tool = RunCommand;
+
+    let short = json!({
+        "stdout": "", "stderr": SUBSTITUTION_STDERR, "exit_code": 126,
+        "shell_cause": "The shell performed command substitution on a backtick …"
+    });
+    let text = tool.format_compact(&short).unwrap();
+    assert!(
+        text.contains("cause:"),
+        "short-output shape must surface the cause: {text}"
+    );
+
+    // Same assertion through the buffered shape, which renders from a different branch.
+    let buffered = json!({
+        "type": "generic", "exit_code": 126, "output_id": "@cmd_abc123",
+        "shell_cause": "The shell performed command substitution on a backtick …"
+    });
+    let text = tool.format_compact(&buffered).unwrap();
+    assert!(
+        text.contains("cause:"),
+        "buffered shape must surface it too — the attachment is after the branch \
+         precisely so both are covered: {text}"
+    );
+}
+
 // Fix A: buffer-only queries should use BUFFER_QUERY_INLINE_CAP, not
 // the summarization threshold. A 100-line result should be returned fully inline.
 #[tokio::test]
