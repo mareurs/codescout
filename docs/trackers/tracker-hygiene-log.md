@@ -576,6 +576,78 @@ signal the fix side is inverted.
 **Evidence:** `link_scan` counts above; `extract.rs` (headings define tokens);
 `resolve.rs` tests named above. Kin: HY-8 (the sibling entry-level detector, and the
 same two conditions), R-95, R-99.
+## HY-10 — A ledger is a much narrower thing than a tracker, and F-N/W-N cannot be declared at all as currently namespaced
+
+**Type:** finding + blocker · **Observed:** 2026-08-17, wiring server-side id allocation to the ledgers.
+
+**What now exists.** `append_entry` serves prose ledgers (`50d7453e`, `fddb7408`):
+omit `entry_collection` and the server reserves the next id under an `IMMEDIATE`
+transaction, deriving the maximum from the body's own headings and index rows. Four
+ledgers allocate this way today — R-N, U-N, H-N, and HY-N. This entry's own id was
+the first that HY-N issued.
+
+**The ratio that matters, and why "declare every tracker" is the wrong instinct.**
+`artifact(find, kind="tracker", augmented=false)` returns **27** rows under
+`docs/trackers/`. Exactly **three** were ledgers. The rest are design docs, research
+notes, and finished session logs — prose files with no id namespace at all.
+Declaring them would guard files nobody appends entries to, route every typo fix
+through `artifact(update)`, and buy nothing. **Ledger is narrower than tracker, and
+here the ratio is 3:27.** Any sweep or detector that reasons over "trackers" while
+meaning "ledgers" will be wrong by an order of magnitude — worth pinning before D11
+or D12 is written against the wider set.
+
+**The blocker: F-N and W-N cannot be declared as they are namespaced.**
+`docs/TAXONOMY.md` scopes them per work stream — "per-work-stream friction
+observation" — so every session log owns its own `F-1..F-N` counter, and there are
+at least **eight** live session logs. Declaring them individually would create eight
+artifacts each defining `F-1`. The resolver's rule for a token with several definers
+is: prefer the sole *active* one, otherwise report **Ambiguous**. Eight active
+definers means every bare `F-N` citation resolves to nothing usable.
+
+That is not a projection. `link_scan` currently reports **418 ambiguous**
+citations, and the first one sampled is `W-13`, defined in two artifacts —
+`2dd9d90bc83f9f49` (bug-fix session log) and `e6697aea0ee3ea37` (release-promotion
+session log). D10's own distill-then-archive note already says per-file `F-1`/`W-1`
+numbering "pollutes citation resolution". Declaring more of them would
+industrialise the pollution rather than fix it.
+
+**Three ways out, none free — this needs a human call:**
+
+1. **One shared F/W namespace** allocated centrally across all session logs.
+   Citations resolve. Cost: an id no longer says which work stream produced it, and
+   existing per-file citations become wrong.
+2. **A prefix per work stream** (`BF-1` for bug-fix, `RP-1` for release-promotion).
+   Citations resolve *and* stay attributable. Cost: a new prefix per stream, which
+   TAXONOMY explicitly resists — "ask whether it really earns a slot".
+3. **Leave F/W undeclared.** They keep hand-allocating and stay ambiguous, but
+   nothing degrades further. A legitimate choice for a namespace whose entries are
+   mostly consumed inside one work stream and then distilled away by D10.
+
+**Implication for the proposed D12.** Report `dangling` and `ambiguous` separately
+and treat them differently. A dangling token is usually a missing heading, fixable
+per entry. An ambiguous one is usually a **namespace design defect**, not fixable
+per entry — a per-finding fix attempt would thrash, and batch-gating the two classes
+together would be the wrong shape.
+
+**A caveat that changes where the declaration should live.** These four declarations
+sit in the **augmentation row**, and the catalog is machine-local and git-ignored. So
+a fresh clone has no declarations at all: `append_entry` there answers "no
+augmentation" for every ledger, and the allocation high-water marks vanish with the
+DB. The *reservations* are recoverable — `body_claimed_indices` re-derives the maximum
+from the committed body, which is exactly why the allocator reads the body — but the
+**declaration is not**. That is a direct argument for putting `entry_prefix` in
+**frontmatter**, which is committed, rather than in the augmentation: a ledger's
+identity should travel with the repo, not with one profile's SQLite file. Same defect
+family as HY-8/BL-29, where 54 of 68 rows existed nowhere but one DB on one of three
+profiles.
+
+**Promote-when:** the F/W namespace decision is taken, either way → record it here,
+and if a shared or per-stream scheme is chosen, add the ledger declarations in the
+same pass so the two never drift.
+
+**Kin:** HY-9 (D12, and the ambiguous half of the same scan), R-98 (the allocation
+race), R-100, CAP-5.
+
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:
