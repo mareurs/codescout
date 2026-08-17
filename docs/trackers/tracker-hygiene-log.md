@@ -10,7 +10,7 @@ tags:
 entry_prefix: HY
 next-sweep-due: 2026-09-15
 sweep-interval-days: 30
-entry_high_water_HY: 12
+entry_high_water_HY: 13
 ---
 
 # Tracker hygiene log
@@ -856,6 +856,148 @@ HY-9's proposed D12, which consumes exactly those arrays).
 **Related:** HY-5 §1 (path drift after archive moves — its proposal is now adopted in D10
 step 5c), HY-9 (D12 on link_scan's arrays), HY-11 (promotion-pointer drift; its
 prerequisite `**Promoted-to:**` field is still unwritten).
+
+## HY-13 — Proposal: compress the entry vocabulary to the spellings already dominant, and let the sweep move the standard as well as enforce it
+
+**Kind:** proposal · **Sweep:** 2026-08-17 (out-of-cadence, user-raised) · **Status:** open
+
+An agent writing a tracker entry currently guesses the vocabulary, because there isn't one
+— there are 208. That guessing has a measured cost on the *read* side too: an exact-match
+query for a status silently answers a fraction of the truth.
+
+### The measurement
+
+*Measured 2026-08-17 over `docs/trackers/*.md` (live only):*
+
+| Probe | Count |
+|---|---|
+| `^**Status:**` lines | **281** |
+| distinct **raw** values | **208** |
+| distinct **normalized heads** (token before the first dash/paren/period) | **33** |
+| lines fusing prose into the field | **196 — 69%** |
+| distinct line-start `**Field:**` names | **214** |
+
+Two findings sharper than the totals:
+
+**A trailing period forks a value in half.** `validated` → 31 occurrences; `validated.`
+→ 16. Same for `fixed-verified` (18 / 5) and `open` (5 / 4). The period is invisible to a
+reader and fatal to a grep, and it has already split the three most common statuses.
+
+**Thirty-three heads describe about seven concepts.** The "the fix landed" concept alone
+has twelve spellings across 119 uses — `fixed-verified`, `fixed-shipped`,
+`fixed-shipped to experiments`, `shipped`, `fixed`, `closed`, `closed via H-1`,
+`closed via H-2`, `fixed-via-bug-tracker`, `fixed-verified, same session`,
+`fixed-verified as a *finding*`, and one carrying a whole sentence. `wontfix` has four,
+`promoted` five, and `proposed`/`proposal` are the same word twice.
+
+*Disclosure:* 2 of the 281 matches are `docs/templates/session-log.md`'s own **enum list**
+matching the regex — the keyword-vs-prescription trap from
+`get_guide("tracker-conventions")` § *Detecting these fields*, committed inside the
+measurement of that very rule. Immaterial at 0.7%, but the count is a floor, not a census.
+
+### The standard is discovered, not decreed
+
+The brief was to use what feels natural. The data says what that is: `fixed-verified`
+(96), `validated` (85), `open` (36) and `mitigated` (13) already carry **82%** of all
+statuses. So the standard adopts the **plurality spelling in each concept cluster** rather
+than inventing tidier words. Nobody has to learn anything; the long tail is what changes.
+
+Keep the two axes — they are real design, not sprawl. Frictions *resolve*; wins *graduate*.
+That is why there are two dominant heads rather than one, and
+`docs/templates/session-log.md` already encodes it as two status tables.
+
+**Frictions** (F-N, U-N, T-N, HY-N, and R-N used as a friction):
+
+| Token | Means | Absorbs |
+|---|---|---|
+| `open` | not resolved | `open as design note` |
+| `fixed-verified` | fix landed **and** confirmed | the eleven other spellings above |
+| `mitigated` | workaround in place, root cause open | — |
+| `wontfix` | deliberate; reason on the next line | `wontfix-false-alarm`, `wontfix-by-design`, `not shipped as …` |
+| `promoted` | ownership moved; destination in its own field | `promoted-to-bug-tracker`, `promoted to SKILL.md`, `drafted into SKILL.md preemptively` |
+| `deferred` | deliberately parked | — |
+
+**Wins** (W-N): `validated` · `promoted` · `archived`.
+
+Six plus three, `promoted` shared — down from 33 heads and 208 raw strings.
+
+### Two structural rules that matter more than the word list
+
+1. **The Status line carries the token and nothing else.** 69% currently fuse the
+   justification in, which is exactly why no exact-match query works. Move it to the next
+   line. This is § *Detecting these fields*' anchor-on-structure rule turned inward onto the
+   trackers' own fields.
+2. **No trailing period.** It has already split the three most-used values.
+
+Neither rule is about vocabulary, and both would survive a different word list — which is
+the argument for landing them first.
+
+### D13 status-vocabulary conformance (proposed)
+
+| Field | Value |
+|---|---|
+| **Fires when** | An entry's Status head is not in the standard, **or** the line carries trailing prose, **or** it ends with a period |
+| **Evidence pair** | *declared* `fixed-verified`; *observed* `fixed-shipped (claude-plugins:bd20a8a, 2026-05-23). Stale handles replaced…` |
+| **Proposed fix** | one of three verdicts — see below, and note the second is not a fix at all |
+| **Confidence** | high for period-and-prose (syntactic); medium for synonym normalization; **low by design** for anything unrecognized |
+| **Cost** | one regex pass; the normalization map is the standard table above |
+
+**Three verdicts, and the middle one is why this is not a decree.**
+
+- **normalize** — a known synonym. Rewrite to the standard spelling; the prose moves to
+  its own line, never deleted.
+- **promote** — an **unrecognized** value used ≥ 3 times across ≥ 2 trackers. Do *not*
+  rewrite it: propose adding it to the standard. A word people keep reaching for is
+  evidence the standard is missing a concept, and the project's practice outranks the
+  table. This is the direction the brief asked for — the sweep updates the standard, not
+  only the entries.
+- **query** — a genuine one-off. Ask the author; never guess a mapping.
+
+**Two conditions this ledger requires of every proposal.** Scope findings to the sweep's
+repo (this count is `docs/trackers/*.md` in codescout only, `archive/` excluded — archived
+entries are historical records and must not be normalized). And a finding is not
+automatically a fix: `deferred`, `promotion-eligible` and
+`promote-when **fired**` may each be a concept the table lacks rather than an error.
+
+**Enforcement is asymmetric, the same way id allocation is.** An augmented tracker with an
+`entry_collection` can carry a `params_schema` enum that *rejects* a bad value at write
+time — real prevention. Prose ledgers, which are nine of the ten prefixes in
+`docs/TAXONOMY.md`, have no schema, so D13 is the only enforcement they can have. Ship the
+enum for `tool-usage-patterns` (T-N) alongside D13 and the pair covers both shapes.
+
+### Phase 2, deliberately not phase 1 — field names
+
+214 distinct `**Field:**` names, ~15 carrying 90% of the uses. Synonym clusters visible in
+the top 28 alone: `Fix idea / Pointer` (112) / `Fix idea` (23) / `Fix` (19);
+`Confirming data points` (84) / `Confirming data` (14); `Probable cause` (111) /
+`Root cause` (21); `Pattern` (106) / `Iron Law / pattern` (28). Same plurality principle
+applies. Status goes first because status is the field that gates the queries that already
+exist — the verify-open cadence and promote-when harvesting both read it, and both are
+currently reading a fraction.
+
+### Sibling problem, explicitly NOT this one
+
+The same guessing cost appears in **tool output** vocabularies, where a tracker standard
+cannot reach it: `link_scan` names the cited token `raw` in `dangling[]` and `token` in
+`ambiguous[]`, and `audit_doc_refs` verdicts are
+`resolved | missing | resolved_basename | file_missing | unknown` — a filter written
+against a guessed `ok` printed resolved refs as problems. Both mistakes were made on
+2026-08-17, hours apart, by the same agent. Those need code or docs changed, and the first
+is filed as
+`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`.
+Naming the split here so the two halves are not conflated: **this entry standardizes what
+agents write; that issue standardizes what tools return.**
+
+**Promote-when:** the standard table lands in `get_guide("tracker-conventions")` §
+*Entry-level standard* and `docs/templates/session-log.md` — whichever comes first — at
+which point this entry becomes `promoted`, with the destination recorded in the
+`**Promoted-to:**` field HY-11 is waiting on. Until ratified, treat the table above as a
+proposal and keep writing the plurality spellings, which is already what 82% of entries do.
+
+**Related:** HY-11 (promotion-pointer drift — its `**Promoted-to:**` field is the
+destination half of `promoted` here, so the two should land together), HY-9 (D12), HY-12
+(D10's precondition), and `get_guide("tracker-conventions")` § *Required fields*, which
+already says `**Status:**` is not optional — this entry says what it is allowed to contain.
 
 ## Template for new entries
 
