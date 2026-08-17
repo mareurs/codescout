@@ -89,6 +89,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
         let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
         let outcome = augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix)?;
+        // Phrase the hint in the LEDGER'S shape, never in one we picked. The hard-coded
+        // `##` here told the `###` U-N ledger to write H2 — against its 36 siblings, its
+        // own augmentation prompt, and docs/TAXONOMY.md, all three of which say H3. When
+        // the body heads nothing there is no observation to report, and saying so is the
+        // point: a default announced as a default is not a lie; a default announced as a
+        // convention is. U-40 in docs/trackers/codescout-usage-frictions.md.
+        let (heading, level_note) = match outcome.heading_level {
+            Some(n) => (
+                "#".repeat(n),
+                " That is the level this ledger's existing entries use.",
+            ),
+            None => (
+                "##".to_string(),
+                " That level is a DEFAULT — this ledger heads no entry yet, so match the \
+                 surrounding entries if any turn up.",
+            ),
+        };
         return Ok(json!({
             "id": outcome.id,
             "artifact_id": target,
@@ -96,10 +113,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "body_max": outcome.body_max,
             "next_step": format!(
                 "Reserved {id} and recorded the ledger's high-water mark in frontmatter; the \
-                 entry itself is yours to write. Add the section, and make the \
-                 heading exactly `## {id} — <title>` — link_scan defines an entry token only \
+                 entry itself is yours to write. Add the section as \
+                 `{heading} {id} — <title>` — link_scan defines an entry token only \
                  in that shape, so a heading without the dash-and-title defines nothing and \
-                 every citation of {id} dangles.",
+                 every citation of {id} dangles.{level_note}",
                 id = outcome.id
             ),
         }));
@@ -459,6 +476,70 @@ mod tests {
             std::fs::read_to_string(&md).unwrap(),
             "---\nkind: tracker\nentry_prefix: R\nentry_high_water_R: 43\n---\n\n# Ledger\n\n## R-41 — an entry\n",
             "the second reservation must splice the existing line, not append a second"
+        );
+    }
+
+    /// U-40. The hint asserted `## <id> — <title>` for every ledger. The U-N ledger
+    /// keeps entries at `###` — as do its 36 siblings, its own augmentation prompt, and
+    /// `docs/TAXONOMY.md` — so an agent following the hint wrote a heading matching
+    /// nothing around it. The level was derivable from the body the allocator already
+    /// reads; asserting it instead is the whole defect, and it is the same shape as the
+    /// two other lies fixed today: a tool stating a convention it never looked up.
+    #[tokio::test]
+    async fn reservation_hint_uses_the_ledgers_own_heading_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: U\n---\n\n# Ledger\n\n### U-38 — a\n\n### U-39 — b\n",
+        )
+        .unwrap();
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let result = call(&ctx, json!({"id": "art1", "id_prefix": "U"}))
+            .await
+            .unwrap();
+        let hint = result["next_step"].as_str().unwrap();
+
+        // Backticked so `### U-40` cannot be satisfied by a `## U-40` substring match.
+        assert!(
+            hint.contains("`### U-40 — <title>`"),
+            "the hint must name the level this ledger actually uses, got: {hint}"
+        );
+    }
+
+    /// The complement, and the half that keeps the fix honest. With nothing headed —
+    /// a first entry, or an index of rows — there IS no observed level, and the hint
+    /// must say its suggestion is a default rather than quietly pick one. A tool that
+    /// cannot tell you which of those it is doing is the original bug at one remove.
+    #[tokio::test]
+    async fn reservation_hint_admits_when_the_heading_level_is_a_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n| ID | Title |\n|----|-------|\n| F-7 | a row |\n",
+        )
+        .unwrap();
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let result = call(&ctx, json!({"id": "art1", "id_prefix": "F"}))
+            .await
+            .unwrap();
+        let hint = result["next_step"].as_str().unwrap();
+
+        assert!(
+            hint.contains("DEFAULT"),
+            "with no headed entry the hint must flag its level as a default, got: {hint}"
+        );
+        assert!(
+            !hint.contains("this ledger's existing entries use"),
+            "nothing is headed here, so the hint must not claim to have observed a \
+             level, got: {hint}"
         );
     }
 

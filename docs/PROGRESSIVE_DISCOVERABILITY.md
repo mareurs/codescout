@@ -252,6 +252,44 @@ The overflow hint should present these in this order.
 
 ---
 
+### Anti-Pattern 5: Asserting a Convention the Tool Never Read
+
+A hint that states a project convention is making a **claim**, and the tool is on the hook
+for it. If the convention is derivable from data the tool already has, derive it. If it is
+not derivable, say the value is a default — do not present a guess in the same voice as an
+observation.
+
+`append_entry`'s reservation hint said, for every ledger:
+
+> Add the section, and make the heading exactly `## <id> — <title>`
+
+The U-N ledger keeps its entries at `###`, as do its 36 existing entries, its own
+augmentation prompt, and `docs/TAXONOMY.md`. An agent that followed the hint wrote a
+heading matching nothing around it. The level was sitting in the body the allocator
+already parses to compute `body_max` — one scan away, never taken.
+
+The fix has two halves, and the second is the one that gets skipped:
+
+```rust
+let (heading, level_note) = match outcome.heading_level {
+    Some(n) => ("#".repeat(n), " That is the level this ledger's existing entries use."),
+    None    => ("##".to_string(), " That level is a DEFAULT — this ledger heads no entry yet…"),
+};
+```
+
+Deriving it when possible is obvious. **Announcing the fallback as a fallback** is what
+keeps the tool honest in the case where it genuinely cannot know — and that case is
+indistinguishable from the derived one unless the hint says so.
+
+The general test: read the hint as a sentence and ask *what would have to be true for this
+to be wrong?* If the answer is "the project uses a different convention" and the tool never
+looked, the hint is a guess wearing an instruction's clothes. Same family as Anti-Pattern 3
+— a hint that does not depend on the actual result is not guidance, it is decoration.
+
+See `U-40` in `docs/trackers/codescout-usage-frictions.md`, and
+`body_entry_heading_level` in `src/librarian/catalog/augmentation.rs`.
+
+---
 ## How Claude Code Processes Tool Output
 
 Understanding the consumer is essential for designing good tool output. Key behaviors:
@@ -322,6 +360,9 @@ When adding a tool that returns variable-length data:
 - [ ] If the tool fetches data, does `format_for_user()` preview that data (not just count it)?
 - [ ] Is the preview capped (5–8 items) to avoid verbosity?
 - [ ] Is there a `… +N more` trailer when items are omitted?
+- [ ] Does any hint state a project convention (a heading shape, a path layout, a naming
+      rule)? If so: is it **derived** from the artifact, and when it cannot be derived,
+      does the hint say the value is a default? (Anti-Pattern 5)
 
 ---
 

@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 39
+entry_high_water_U: 40
 entry_prefix: U
 ---
 
@@ -1705,3 +1705,58 @@ rather than discarded. Seven tests, two mutations each killing exactly one test,
 construction everywhere, so counting them would have warned on nearly every zero-match and
 taught readers to skip the warning. Still inert in a live MCP session until `cargo rb` +
 reconnect.
+
+### U-40 — A multi-line `old_string` failed as "not found" on text that was verbatim present, and the error cannot tell a bad needle from a bad haystack
+
+**Observed:** 2026-08-17, adding a paragraph to `src/prompts/guides/iron-laws-detail.md`
+after the "Bounded LHS is allowed" block.
+
+**Call:** `edit_markdown(action="edit", heading="## Iron Law 3: …", old_string=<three
+lines copied out of the file>, new_string=<the same three lines plus a new paragraph>)`.
+
+**Got:**
+
+```
+old_string not found in section '## Iron Law 3: `run_command` output → buffer, not pipe'.
+The text must match exactly (whitespace-sensitive).
+scoped_miss_tier: "no_close"
+```
+
+Those three lines had just been read twice — once by `grep` against the file, once by
+`get_guide("iron-laws-detail")` off the wire. They were verbatim present.
+
+**Cause — mine, not the tool's, and that is the point.** The `old_string` reached the
+server carrying literal `\n` two-character sequences instead of newlines, so it genuinely
+was not in the file. A **single-line** anchor succeeded on the next call.
+
+**Why it is still a friction.** The message and the remedy point in opposite directions.
+*"not found … must match exactly (whitespace-sensitive)"* describes a haystack that moved,
+so the reflex is to re-read the file — which I did, twice, and both reads *confirmed* the
+text was there, which made the tool look wrong rather than the query. Nothing in the
+response separates "your needle is malformed" from "the file changed".
+`scoped_miss_tier: "no_close"` is the one field that does separate them, and it is
+undocumented: a near-miss means the file drifted; `no_close` on text you just read means
+your string is corrupt. The signal exists and says nothing to the reader.
+
+**Verified, not assumed.** Two rival hypotheses: (H1) `edit_markdown` rejects multi-line
+`old_string`; (H2) the escaping was mine. Probe — a two-line `old_string` with real
+newlines against a scratch `.md` outside the project. It succeeded and replaced both
+lines, refuting H1. Filing H1 as a tool bug would have been a false report against a tool
+that behaved correctly; the probe cost two calls and one scratch file, deleted after. See
+R-101 for the general form — name what the rival hypothesis predicts before recording a
+verdict.
+
+**Fix idea.** Make `no_close` self-describing instead of a raw tier name: when the miss is
+`no_close` **and** the `old_string` spans more than one line, say which of the two causes
+is likelier and name both. Exactly the shape of U-39 one tool over — the zero was right,
+the silence about *why* was the defect.
+
+**Also observed in the same act.** `append_entry`'s `next_step` said the heading must be
+`## U-40 — <title>` (H2). This ledger's own augmentation prompt mandates
+`### U-N — <title>` (H3), all 36 existing entries use H3, and `docs/TAXONOMY.md` says H3.
+The resolver's `def_re` does not anchor on `#`, so both levels resolve — but an agent that
+follows the response boilerplate writes a heading inconsistent with every sibling. The
+generic hint should defer to the ledger's own convention, or say "match the surrounding
+entries".
+
+**Status:** open — friction recorded, no fix shipped.

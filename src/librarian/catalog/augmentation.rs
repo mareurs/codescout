@@ -687,6 +687,14 @@ pub struct AllocateOutcome {
     /// Highest index the ledger's COMMITTED frontmatter mark carried on entry.
     /// The only one of the three that survives a clone, a move, or compaction.
     pub frontmatter_max: Option<u64>,
+    /// Heading level this ledger's existing entry sections use, when it has any.
+    ///
+    /// Carried so the caller can phrase its "now write the section" hint in the
+    /// ledger's own shape instead of asserting one. `None` means the body headed
+    /// nothing — and the caller must then say the level is a default rather than an
+    /// observation. See `body_entry_heading_level`, and U-40 in
+    /// `docs/trackers/codescout-usage-frictions.md` for what the assertion cost.
+    pub heading_level: Option<usize>,
 }
 
 /// Frontmatter key by which an artifact declares itself a ledger owning an id
@@ -907,6 +915,7 @@ pub fn allocate_entry_id(
         body_max,
         reserved_max,
         frontmatter_max,
+        heading_level: body_entry_heading_level(body, id_prefix),
     })
 }
 
@@ -1010,6 +1019,36 @@ pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collecti
     re.captures_iter(body)
         .filter_map(|c| c[1].parse::<u64>().ok())
         .collect()
+}
+
+/// The heading level this ledger already uses for its `<id_prefix>-N` entry sections.
+///
+/// `None` when the body line-anchors no such heading: a params-only tracker, an index of
+/// rows with no sections, or a ledger's very first entry. That distinction is the whole
+/// point. Callers use this to phrase a hint, and a hint that ASSERTS a level it never
+/// read is how `append_entry` came to tell the `###` U-N ledger to write `##` — against
+/// its 36 siblings, its own augmentation prompt, and `docs/TAXONOMY.md`, all three of
+/// which say `###` (U-40 in `docs/trackers/codescout-usage-frictions.md`).
+///
+/// The **mode**, not the max or the first match: a ledger can carry a stray heading at
+/// another depth — a compacted archive section, a hand-written aside — and the level a
+/// new entry should match is the one its siblings overwhelmingly use. Ties break to the
+/// shallowest, matching markdown's own nesting sense.
+///
+/// Deliberately NOT folded into `body_claimed_indices`: that function answers "which ids
+/// does the body claim", and its answer counts index rows, which have no heading level at
+/// all. Two questions, two scanners, one shared shape.
+pub(crate) fn body_entry_heading_level(body: &str, id_prefix: &str) -> Option<usize> {
+    let esc = regex::escape(id_prefix);
+    let re = regex::Regex::new(&format!(r"(?m)^(#{{1,6}})[ \t]+[`*\[]*{esc}-\d+\b")).ok()?;
+    let mut counts: std::collections::BTreeMap<usize, usize> = Default::default();
+    for c in re.captures_iter(body) {
+        *counts.entry(c[1].len()).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(level, n)| (n, std::cmp::Reverse(level)))
+        .map(|(level, _)| level)
 }
 
 /// Does this body actually MAINTAIN a snapshot of `params`, or does it merely
@@ -1772,6 +1811,39 @@ mod tests {
         // `F` must not match `FX-9`, and `F-12x` is not `F-12`.
         let body = "## FX-900 — other tracker\n## F-12x — malformed\n## F-2 — real\n";
         assert_eq!(body_claimed_indices(body, "F"), [2].into_iter().collect());
+    }
+
+    #[test]
+    fn body_entry_heading_level_reads_the_level_the_siblings_use() {
+        // The U-N ledger's real shape: H3 sections under an H1 title. Asserting H2
+        // here — which the hint used to do unconditionally — is the defect (U-40).
+        let body = "# Ledger\n\n### U-38 — a\n\n### U-39 — b\n";
+        assert_eq!(body_entry_heading_level(body, "U"), Some(3));
+    }
+
+    #[test]
+    fn body_entry_heading_level_takes_the_mode_not_the_first_or_the_max() {
+        // A stray heading at another depth — a compacted archive section, an aside —
+        // must not decide the level for every future entry. Two H3s outvote one H2.
+        let body = "## R-1 — old, hand-written\n### R-2 — a\n### R-3 — b\n";
+        assert_eq!(body_entry_heading_level(body, "R"), Some(3));
+    }
+
+    #[test]
+    fn body_entry_heading_level_is_none_when_nothing_is_headed() {
+        // Index rows carry no heading level, and a first entry has no sibling to
+        // match. Both must read as "unknown" rather than as a default, or the caller
+        // cannot tell an asserted level from an observed one.
+        let body = "# Ledger\n\n| ID | Title |\n|----|-------|\n| F-7 | a row |\n";
+        assert_eq!(body_entry_heading_level(body, "F"), None);
+        assert_eq!(body_entry_heading_level("# Empty\n", "F"), None);
+    }
+
+    #[test]
+    fn body_entry_heading_level_respects_prefix_boundaries() {
+        // Same boundary rule as body_claimed_indices: `F` must not match `FX-9`.
+        let body = "###### FX-900 — other ledger\n## F-2 — real\n";
+        assert_eq!(body_entry_heading_level(body, "F"), Some(2));
     }
 
     #[test]
