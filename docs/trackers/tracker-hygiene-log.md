@@ -781,6 +781,14 @@ HY-10 (ledger vs. tracker; same one-field-of-four root cause), `archive-cadence-
 Two things changed under D10 today, both from `archive-cadence-policy` § 3 being ratified
 as amended, and one of them is a precondition the skill cannot check for itself.
 
+> ⚠️ **Not yet in force.** The step-5 rewrite is committed to `claude-plugins`
+> (`9d9ecc2`) but absent from all three profile caches, because the plugin cache is keyed
+> by `plugin.json` version and that commit did not bump it. Any session invoking the skill
+> today still reads the two-step form. Measured 2026-08-17;
+> `docs/issues/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`.
+> Until a bump lands, treat the sub-steps below as the procedure to follow **manually** —
+> the skill will not prompt for them.
+
 **1. Step 5 is three sub-steps, not two.** `artifact(update, status)` →
 `artifact(move, …-YYYY-MM-DD.md)` → **repoint citations of the old path AND the old
 16-hex id**, verified by a scoped `audit_doc_refs`. The third is the one HY-5 §1 measured
