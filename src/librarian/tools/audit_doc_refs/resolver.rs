@@ -1887,6 +1887,124 @@ mod tests {
         assert_eq!(r.verdict, Verdict::FileMissing);
     }
 
+    /// The three ref kinds that accept a basename shorthand, and the one path-part
+    /// shape each is given. Held in one place so a new basename-accepting kind has an
+    /// obvious home in the parity tests below.
+    const BASENAME_KINDS: [(RefKind, &str); 3] = [
+        (RefKind::FilePath, "mod.rs"),
+        (RefKind::FileLine, "mod.rs:12"),
+        (RefKind::FileSymbol, "mod.rs::helper"),
+    ];
+
+    fn parity_ctx<'a>(
+        repo_root: &'a std::path::Path,
+        index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+    ) -> ResolveCtx<'a> {
+        ResolveCtx {
+            repo_root,
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        }
+    }
+
+    /// PARITY. Every bug in this family has been one resolver lagging its siblings on
+    /// an identical path part: 2026-05-17 gave `resolve_file_path` and `resolve_link`
+    /// the basename index; 2026-08-06 gave `resolve_file_line` the fallback it lacked;
+    /// 2026-08-17 fixed a leading-`./` case in the first and then this all-or-nothing
+    /// lookup in `resolve_file_symbol`. Four fixes, one shape, each found by a human
+    /// reading a wrong report.
+    ///
+    /// So the invariant is asserted once for ALL kinds rather than per kind. A fifth
+    /// resolver that forgets is a red test, not a bug report.
+    ///
+    /// Scope note: parity binds the **path-part stage only**. What happens after it
+    /// legitimately differs — `file_line` range-checks, `file_symbol` asks the LSP —
+    /// so the three tests below assert what that stage concluded, never the final
+    /// verdict of a successful lookup.
+    #[test]
+    fn every_basename_kind_reports_ambiguous_for_a_colliding_basename() {
+        let tmp = TempDir::new().unwrap();
+        for (kind, raw) in BASENAME_KINDS {
+            let mut index = std::collections::HashMap::new();
+            index.insert(
+                "mod.rs".to_string(),
+                vec![
+                    std::path::PathBuf::from("src/a/mod.rs"),
+                    std::path::PathBuf::from("src/b/mod.rs"),
+                ],
+            );
+            let ctx = parity_ctx(tmp.path(), index);
+
+            let r = resolve_ref(&cand(raw, "docs/spec.md", kind), &ctx);
+            assert_eq!(
+                r.verdict,
+                Verdict::AmbiguousBasename,
+                "{kind:?} must report ambiguity, not absence, for `{raw}`"
+            );
+            assert_eq!(r.severity, Severity::Med, "{kind:?}");
+        }
+    }
+
+    /// The discriminating half: a basename with NO match must still read as missing for
+    /// every kind. Without this, a resolver could satisfy the ambiguity test by calling
+    /// everything ambiguous and would hide genuinely dead references.
+    ///
+    /// The variant differs by kind on purpose — `file_symbol` says `FileMissing` because
+    /// it can distinguish a missing file from a missing symbol, which the other two
+    /// cannot — so the assertion is over the missing FAMILY, not one variant.
+    #[test]
+    fn every_basename_kind_reports_missing_for_a_basename_with_no_match() {
+        let tmp = TempDir::new().unwrap();
+        for (kind, raw) in BASENAME_KINDS {
+            let ctx = parity_ctx(tmp.path(), std::collections::HashMap::new());
+
+            let r = resolve_ref(&cand(raw, "docs/spec.md", kind), &ctx);
+            assert!(
+                matches!(r.verdict, Verdict::Missing | Verdict::FileMissing),
+                "{kind:?} must report the missing family for `{raw}`, got {:?}",
+                r.verdict
+            );
+        }
+    }
+
+    /// A unique basename must get PAST the path-part stage for every kind. The stage's
+    /// success is the shared invariant; what each kind does next is its own business, so
+    /// this asserts only that neither failure verdict was reached.
+    #[test]
+    fn every_basename_kind_gets_past_the_path_stage_for_a_unique_basename() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src/only")).unwrap();
+        // 40 lines, so the `file_line` row's `:12` is in range and the stage's success
+        // is not masked by a LineOob from a too-short fixture.
+        std::fs::write(
+            tmp.path().join("src/only/mod.rs"),
+            "fn helper() {}\n".repeat(40),
+        )
+        .unwrap();
+
+        for (kind, raw) in BASENAME_KINDS {
+            let mut index = std::collections::HashMap::new();
+            index.insert(
+                "mod.rs".to_string(),
+                vec![std::path::PathBuf::from("src/only/mod.rs")],
+            );
+            let ctx = parity_ctx(tmp.path(), index);
+
+            let r = resolve_ref(&cand(raw, "docs/spec.md", kind), &ctx);
+            assert!(
+                !matches!(
+                    r.verdict,
+                    Verdict::Missing | Verdict::FileMissing | Verdict::AmbiguousBasename
+                ),
+                "{kind:?} must resolve the unique basename `{raw}`, got {:?}",
+                r.verdict
+            );
+        }
+    }
+
     #[test]
     fn resolver_ambiguous_when_basename_matches_multiple_files() {
         let tmp = TempDir::new().unwrap();
