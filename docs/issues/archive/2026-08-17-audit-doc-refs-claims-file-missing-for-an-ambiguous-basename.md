@@ -213,8 +213,39 @@ filing is `low` rather than `medium`** — measured, not reasoned. The ratified 
 
 ## Fix
 
-**Fixed 2026-08-17 in `3faddb15` (`experiments`).** Promotion to `master` is a
-fast-forward, so this SHA *is* the master SHA once promoted — no second one to record.
+**Fixed 2026-08-17 in `3faddb15` (`experiments`), replayed on the wire.** Promotion to
+`master` is a fast-forward, so this SHA *is* the master SHA once promoted — no second one to
+record.
+
+**Wire replay** against the release binary built 14:01, running the § Reproduction fixture
+plus a no-match row. Every form, nothing filtered:
+
+| Ref form | Before | After |
+|---|---|---|
+| full repo-relative path | `resolved` / low | `resolved` / low — unchanged |
+| partial path | `file_missing` / med | `file_missing` / med — unchanged, correctly ineligible |
+| bare **ambiguous** basename | **`file_missing`** | **`ambiguous_basename`** / med |
+| bare **unique** basename | `resolved` / low | `resolved` / low — unchanged |
+| bare basename, **no match** | — | `file_missing` / med — still missing |
+
+The three naturally-occurring instances all flipped too — `resolver.rs::note_degraded` in
+this file and in `docs/trackers/tracker-hygiene-log.md`, and `resolver.rs::path_evidence`
+— each now `ambiguous_basename`.
+
+**The wire showed one thing the unit test structurally could not.** `severity_reason` moved
+from the inherited `issues_drop` to `basename_ambiguous`, and the finding now carries a
+`notes` field naming the collision:
+
+```
+basename matches 2 files: src/librarian/tools/audit_doc_refs/resolver.rs,
+                          src/tools/symbol/call_edges/resolver.rs
+```
+
+That is the difference between an honest verdict and an *actionable* one — the author is
+told which two files to disambiguate between. The unit test supplies its own synthetic
+`basename_index` (`src/a/mod.rs`, `src/b/mod.rs`), so it could never have surfaced this;
+only a run that builds the index from the real repo can. Which is the argument for the
+replay standard this family is held to, restated with evidence.
 
 The `else` arm of the path-resolution branch in `resolve_file_symbol` now consults
 `try_basename_fallback`:
@@ -307,17 +338,11 @@ I walked into it while writing the workaround for its sibling bug.
 Either give the whole path or give the bare basename. There is no middle.
 ## Resume
 
-One step left before archiving: **replay on the wire.** The fix is compiled into the test
-binary but the running MCP server serves the previous release build, so `cargo rb` + `/mcp`
-is required, then re-run the § Reproduction fixture and confirm the bare ambiguous basename
-reports `AmbiguousBasename` / med instead of `file_missing`. That is the standard this
-family is held to — `f6140205` archived its sibling as *"replayed on the wire"* — and it is
-stronger than a green unit test, because the unit test supplies its own
-`basename_index` while the wire path builds one from the real repo.
+N/A — fixed, replayed on the wire, archived.
 
-After the replay: archive through the catalog to `docs/issues/archive/`, and re-point the
-citations of this path in the same commit — `src/librarian/tools/audit_doc_refs/resolver.rs`
-carries one in the new tests' doc comment.
+The follow-up worth carrying is not about this bug: the **per-kind parity table** over
+`file_path` / `file_line` / `file_symbol` (§ Tests added). Four resolvers, four separate
+catch-up fixes, and one table would have caught every one of them.
 ## References
 - `src/librarian/tools/audit_doc_refs/resolver.rs:429-558` — `resolve_file_symbol`
 - `src/librarian/tools/audit_doc_refs/resolver.rs:163` — `try_basename_fallback`, and the

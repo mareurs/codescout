@@ -1836,7 +1836,7 @@ mod tests {
     /// Reaches its verdict before the LSP branch, so `lsp: None` is not a limitation
     /// here: an ambiguous path part means there is no single file to ask about.
     ///
-    /// docs/issues/2026-08-17-audit-doc-refs-claims-file-missing-for-an-ambiguous-basename.md
+    /// docs/issues/archive/2026-08-17-audit-doc-refs-claims-file-missing-for-an-ambiguous-basename.md
     #[test]
     fn resolver_file_symbol_reports_ambiguous_basename() {
         let tmp = TempDir::new().unwrap();
