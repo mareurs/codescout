@@ -2013,6 +2013,101 @@ mod tests {
         assert_eq!(second.reserved_max, Some(42));
     }
 
+    /// RED — pinned by
+    /// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
+    /// Run with `cargo test -- --ignored` to watch it fail.
+    ///
+    /// The counterpart to the test above. There the body lags the reservation and
+    /// the reservation saves us. Here BOTH lag the ledger's real history, which is
+    /// the case this function's safety argument does not cover:
+    ///
+    /// * compaction moves entries OUT of the live body into an archive companion —
+    ///   the ladder `get_guide("tracker-conventions")` mandates — so `body_max` is
+    ///   not monotonic;
+    /// * `graft_rows` omits `entry_reservation` from its re-point list and then
+    ///   cascade-deletes the source row, so `artifact(move)` drops the reservation.
+    ///   Archiving IS a move. A fresh clone, a second machine, or a worktree
+    ///   shadow's distinct `artifact_id` each have the same effect.
+    ///
+    /// With both understating, the `.max(1)` floor hands back `HY-1` — which the
+    /// archived companion still defines. That is worse than a plain collision:
+    /// `link_scan`'s resolver binds a token to its sole ACTIVE definer, so every
+    /// historical citation of `HY-1` silently re-points to the new, unrelated entry
+    /// while `dangling` and `ambiguous` both stay flat.
+    #[test]
+    #[ignore = "red until the high-water mark is committed — docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md"]
+    fn allocate_entry_id_never_reissues_an_id_the_archive_still_defines() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("ledger.md");
+        let archive = dir.path().join("ledger-archived-entries.md");
+        let entries: String = (1..=10)
+            .map(|n| format!("## HY-{n} — entry {n}\n\n"))
+            .collect();
+
+        std::fs::write(
+            &live,
+            format!("---\nkind: tracker\nentry_prefix: HY\n---\n\n# Ledger\n\n{entries}"),
+        )
+        .unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("live");
+        art.abs_path = live.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        assert_eq!(
+            allocate_entry_id(&mut cat, "live", "HY").unwrap().id,
+            "HY-11",
+            "precondition: this ledger's history runs to HY-10"
+        );
+
+        // Compaction. The entries keep their headings in the companion — reducing
+        // them to bare rows would destroy their definitions, which is a different
+        // defect. The archive artifact is seeded so the fixture states WHY a low id
+        // is wrong, and so candidate fix B (also scan the companion) has something
+        // to read; the allocator does not open this file today.
+        std::fs::write(
+            &archive,
+            format!(
+                "---\nkind: tracker\nstatus: archived\nentry_prefix: HY\n---\n\n# Archived\n\n{entries}"
+            ),
+        )
+        .unwrap();
+        let mut arch = sample_art("archived");
+        arch.abs_path = archive.clone();
+        arch.status = "archived".to_string();
+        art_upsert(&cat, &arch).unwrap();
+
+        std::fs::write(
+            &live,
+            "---\nkind: tracker\nentry_prefix: HY\n---\n\n# Ledger\n\nEntries archived.\n",
+        )
+        .unwrap();
+
+        // Counter loss — what the move's cascade, a fresh clone, or a worktree
+        // shadow's distinct artifact_id each produce.
+        cat.conn
+            .execute(
+                "DELETE FROM entry_reservation WHERE artifact_id = 'live'",
+                [],
+            )
+            .unwrap();
+
+        let out = allocate_entry_id(&mut cat, "live", "HY").unwrap();
+        let n: u64 = out
+            .id
+            .strip_prefix("HY-")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("unparseable id {}", out.id));
+        assert!(
+            n > 10,
+            "reissued {} — HY-1..HY-10 are still defined by the archived companion, \
+             and the resolver binds each token to its sole ACTIVE definer, so this \
+             re-points history silently instead of dangling",
+            out.id
+        );
+    }
+
     /// One ledger can host several namespaces — a session log carries both F-N
     /// frictions and W-N wins — so `entry_prefix` accepts a sequence, and the
     /// high-water marks must not bleed into each other. Reservations are keyed

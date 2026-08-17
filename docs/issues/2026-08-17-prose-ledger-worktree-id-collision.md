@@ -25,9 +25,25 @@ protection with it.
 
 ## Symptom (Effect)
 
-Not yet observed — latent, found by reading the new prose branch against the
-merge path. Predicted observable after merging a worktree branch that appended
-to a prose ledger both trees touched:
+Not observed in the wild, but **reproduced under test 2026-08-17**. Main allocates
+`HY-11`; a worktree session against the same ledger allocates `HY-11` again:
+
+```
+---- librarian::tools::append_entry::tests::prose_allocation_from_a_worktree_collides_with_the_main_checkout stdout ----
+thread '...' panicked at src/librarian/tools/append_entry.rs:697:9:
+assertion `left != right` failed: the worktree re-issued HY-11: the shadow is a
+different artifact_id so the reservation misses, and merge_worktree can only renumber
+params rows — so two `## HY-11 — …` sections merge into one file and the token becomes
+uncitable
+  left: String("HY-11")
+ right: "HY-11"
+```
+
+The test's *preceding* assertion — `out["artifact_id"] != main_id` — passed, which is
+what makes the failure meaningful: the shadow fork genuinely happened, so this is the
+overlay path allocating a duplicate, not a fixture that failed to look like a worktree.
+
+Predicted state after merging such a branch:
 
 ```
 docs/trackers/tracker-hygiene-log.md
@@ -38,7 +54,6 @@ link_scan:  HY-11 -> Ambiguous { total: 2 }   # both definers active, same file
             every external citation of HY-11 gets no edge
 merge_worktree: entries_renumbered: 0          # the path was never reachable
 ```
-
 ## Reproduction
 
 Commit `66487591`, branch `experiments`. This repo currently has two linked
@@ -110,8 +125,10 @@ finds `active.len() == 2` → `Ambiguous`, no edge
 at `resolve.rs:339`). Loud, unlike the sibling bug — but it lands after the
 merge, when both entries are already written and one must be renumbered by hand.
 
-*Status of this analysis:* inferred from the four call sites cited above —
-**not measured at runtime.**
+*Status of this analysis:* **measured 2026-08-17** — `cargo test --lib -- --ignored
+prose_allocation_from_a_worktree` reproduces the duplicate id, with the fork itself
+asserted rather than assumed (output in § Symptom). The four call sites above are each
+read from the cited lines.
 
 ## Evidence
 
@@ -182,19 +199,32 @@ is a papercut.
 
 ## Tests added
 
-None yet. Both fixes want the same red test first, against `66487591`:
+`prose_allocation_from_a_worktree_collides_with_the_main_checkout` —
+`src/librarian/tools/append_entry.rs:615`. **Red on purpose**, carrying
+`#[ignore = "red until prose allocation is refused from a worktree — …"]` so the default
+gate stays green; run it with `cargo test -- --ignored`.
 
-- seed a prose ledger (`entry_prefix` in frontmatter, `## HY-10` in the body) in
-  a `wt_ctx` worktree context via
-  `crate::librarian::tools::worktree::test_support::seed_main_tracker`;
-- allocate once from the main id and once through the worktree context;
-- assert the two returned ids differ.
+Placed immediately after `append_from_worktree_lands_on_shadow_not_main`, which is the
+protected params-branch twin — the pair reads as one story about what the prose branch
+did not inherit.
 
-Under Fix A the second call becomes a `RecoverableError` instead, and the test
-asserts the refusal plus zero shadow artifacts / zero `worktree_fork` events —
-copying the discriminating assertions in
-`append_with_cites_from_worktree_is_refused`.
+Two fixture decisions worth keeping if the test is rewritten under Fix A:
 
+- **Its own fixture, not `wt_ctx` / `seed_main_tracker`.** Those seed
+  `/repo/docs/trackers/t.md`, a path with no file behind it — fine for the params branch,
+  which reads params from the DB, but `allocate_entry_id` reads the ledger body off disk
+  and hard-errors on a missing file. The fixture writes real files into a tempdir at both
+  the main and worktree paths, which is also what git actually gives a fresh worktree.
+- **The worktree root is nested inside the repo** (`repo/.worktrees/feat`), matching this
+  project's own layout. `is_main_checkout_artifact` discriminates by
+  `under(main) && !under(worktree)`, so nesting resolves correctly — verified by the
+  discriminating assertion passing.
+
+Under Fix A the second call becomes a `RecoverableError`, and the assertions become: the
+refusal fires, and zero shadow artifacts / zero `worktree_fork` events / zero
+`worktree_of` links exist afterwards — copy those from
+`append_with_cites_from_worktree_is_refused`, which learned that ordering lesson the hard
+way in the 2026-07-17 regression.
 ## Workarounds
 
 **Append to prose ledgers from the main checkout only.** This is already the
@@ -204,12 +234,16 @@ fold it into the ledger from the main checkout after the merge.
 
 ## Resume
 
-Write the red test described in **Tests added** in
-`src/librarian/tools/append_entry.rs`'s `tests` module, next to
-`append_from_worktree_lands_on_shadow_not_main` (which supplies the `wt_ctx` +
-`seed_main_tracker` setup). Assert the two ids collide today; that is the
-premise to re-check before implementing Fix A.
+The red test exists and the premise is measured, so the next action is implementation:
+**Fix A** — mirror the `cites` guard in the prose branch of
+`src/librarian/tools/append_entry.rs`, refusing when
+`is_main_checkout_artifact(cp, &row.abs_path)` holds, and refusing **before**
+`resolve_write_target` can fork. Then rewrite the test's assertions per § Tests added and
+drop its `#[ignore]`.
 
+Do not skip the documentation half: a refusal nobody can predict is a papercut. Add it to
+`get_guide("tracker-conventions")` § *Entry ids* next to the existing
+"let the server allocate" rule.
 ## References
 - `src/librarian/tools/append_entry.rs:60-62` — the prose branch's fork + allocate
 - `src/librarian/tools/append_entry.rs:86-97` — the `cites` refusal to mirror

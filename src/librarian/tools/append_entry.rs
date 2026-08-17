@@ -589,6 +589,120 @@ mod tests {
         assert!(!main_aug.params.contains("from-worktree"), "main untouched");
     }
 
+    /// RED — pinned by
+    /// `docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md`.
+    /// Run with `cargo test -- --ignored` to watch it fail.
+    ///
+    /// The params branch is protected and the test above is the proof: it lands on
+    /// the shadow, and `merge_worktree` renumbers the collision on the way back via
+    /// `graft::fold_entries`. The prose branch inherits the fork and none of the
+    /// protection. It resolves the same shadow — a DIFFERENT `artifact_id`, so the
+    /// reservation lookup misses and `body_max` comes from the worktree's own
+    /// checkout copy — and then nothing can renumber it: `merge_worktree`'s fold
+    /// sits inside `if let Some(coll_name) = &coll`, and the `worktree_fork` event
+    /// snapshots `base_params` with no body counterpart to diff a prose section
+    /// against.
+    ///
+    /// Two `## HY-11 — …` headings then land in one file. Both definers are ACTIVE
+    /// and in the same artifact, so the resolver reports `Ambiguous` and every
+    /// external citation of HY-11 gets no edge at all.
+    ///
+    /// Own fixture rather than `wt_ctx` / `seed_main_tracker`: those seed
+    /// `/repo/docs/trackers/t.md`, a path with no file behind it, and the prose
+    /// branch reads the ledger body off disk.
+    #[tokio::test]
+    #[ignore = "red until prose allocation is refused from a worktree — docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md"]
+    async fn prose_allocation_from_a_worktree_collides_with_the_main_checkout() {
+        use crate::librarian::current_project::CurrentProject;
+        use crate::librarian::ids;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let main_root = dir.path().join("repo");
+        // Nested under the repo, as this project's own worktrees are
+        // (`.claude/worktrees/`, `.worktrees/`). `is_main_checkout_artifact`
+        // discriminates by `under(main) && !under(worktree)`, so nesting is fine.
+        let wt_root = main_root.join(".worktrees/feat");
+        let rel = "docs/trackers/ledger.md";
+        let body = "---\nkind: tracker\nentry_prefix: HY\n---\n\n# Ledger\n\n## HY-10 — the newest entry\n";
+
+        // Both checkouts hold the same file at fork time — what git gives a fresh
+        // worktree, and why both trees derive the same body_max.
+        for root in [&main_root, &wt_root] {
+            std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+            std::fs::write(root.join(rel), body).unwrap();
+        }
+
+        let main_abs = main_root.join(rel);
+        let main_id = ids::artifact_id_from_abs(&main_abs);
+
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: wt_root.clone(),
+                git_root: wt_root.clone(),
+                main_root: Some(main_root.clone()),
+                umbrella: None,
+            }))
+            .build();
+
+        // A prose ledger: catalogued, frontmatter-declared, NO augmentation and no
+        // entry_collection. That shape is nine of the ten prefixes in TAXONOMY.md.
+        let now = chrono::Utc::now().timestamp_millis();
+        {
+            let cat = ctx.catalog.lock();
+            art_upsert(
+                &cat,
+                &ArtifactRow {
+                    id: main_id.clone(),
+                    abs_path: main_abs.clone(),
+                    kind: "tracker".to_string(),
+                    status: "active".to_string(),
+                    title: Some("Ledger".to_string()),
+                    owners: vec![],
+                    tags: vec![],
+                    topic: None,
+                    time_scope: None,
+                    source: None,
+                    created_at: now,
+                    updated_at: now,
+                    file_mtime: now,
+                    file_sha256: "x".to_string(),
+                    confidence: 1.0,
+                },
+            )
+            .unwrap();
+        }
+
+        // The main checkout's own session allocates first.
+        let main_alloc = {
+            let mut cat = ctx.catalog.lock();
+            augmentation::allocate_entry_id(&mut cat, &main_id, "HY")
+                .unwrap()
+                .id
+        };
+        assert_eq!(main_alloc, "HY-11", "precondition: main issues HY-11");
+
+        let out = call(&ctx, json!({"id": main_id, "id_prefix": "HY", "entry": {}}))
+            .await
+            .unwrap();
+
+        // Discriminating: if the fixture failed to look like a worktree session, the
+        // call would allocate against MAIN's reservation and get HY-12 — passing for
+        // the wrong reason. Assert the fork really happened before judging the id.
+        assert_ne!(
+            out["artifact_id"], main_id,
+            "fixture must fork a shadow, or the assertion below proves nothing"
+        );
+
+        assert_ne!(
+            out["id"], main_alloc,
+            "the worktree re-issued {main_alloc}: the shadow is a different \
+             artifact_id so the reservation misses, and merge_worktree can only \
+             renumber params rows — so two `## {main_alloc} — …` sections merge \
+             into one file and the token becomes uncitable"
+        );
+    }
+
     #[tokio::test]
     async fn append_with_cites_writes_entry_cite_and_not_artifact_link() {
         let ctx = mk_ctx();

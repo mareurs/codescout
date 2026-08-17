@@ -25,9 +25,21 @@ unrelated entry. No dangling count moves; no ambiguity is reported.
 
 ## Symptom (Effect)
 
-Not yet observed in the wild — this is a latent defect found by reading the
-allocator against the resolver. The predicted observable is the absence of a
-symptom, which is what makes it severity `high`:
+Not observed in the wild, but **reproduced under test 2026-08-17**. A ledger whose
+history runs to `HY-10`, with its entries compacted into an archived companion and its
+reservation gone, allocates **`HY-1`**:
+
+```
+---- librarian::catalog::augmentation::tests::allocate_entry_id_never_reissues_an_id_the_archive_still_defines stdout ----
+thread '...' panicked at src/librarian/catalog/augmentation.rs:2102:9:
+reissued HY-1 — HY-1..HY-10 are still defined by the archived companion, and the
+resolver binds each token to its sole ACTIVE definer, so this re-points history
+silently instead of dangling
+```
+
+The damaging part is what does *not* appear. Because the archived definer is
+`active: false` and the reissued one is active, the resolver returns an `Edge` rather
+than `Ambiguous` or `Dangling`:
 
 ```
 before:  HY-1 (archived companion)  <- 6 citations resolve here
@@ -36,6 +48,7 @@ after:   HY-1 (archived companion)      0 citations resolve here
 link_scan: dangling +0, ambiguous +0
 ```
 
+So no metric moves, and no sweep can find it after the fact.
 ## Reproduction
 
 Commit `66487591`, branch `experiments`. The allocator is compiled in but not
@@ -123,8 +136,10 @@ not turn every archived tracker into an ambiguity generator" (`resolve.rs:17-19`
 — and it is precisely what converts this reissue from a reported ambiguity into
 an unreported wrong edge. The defect is the *combination*, not the tie-break.
 
-*Status of this analysis:* inferred from the three sources cited above and from
-the shipped tests' semantics — **not measured at runtime.** See Resume.
+*Status of this analysis:* **measured 2026-08-17** — `cargo test --lib -- --ignored
+allocate_entry_id_never_reissues` reproduces the reissue (output in § Symptom). The
+three mechanisms above are each read from the cited lines; their *combination* is what
+the test exercises end to end.
 
 ## Evidence
 
@@ -206,16 +221,26 @@ stops silently resetting the counter.
 
 ## Tests added
 
-None yet. The regression test the fix needs, and which should be written first
-so it fails against `66487591`:
+`allocate_entry_id_never_reissues_an_id_the_archive_still_defines` —
+`src/librarian/catalog/augmentation.rs:2039`. **Red on purpose**, carrying
+`#[ignore = "red until the high-water mark is committed — …"]` so the default gate stays
+green; run it with `cargo test -- --ignored`. Delete the `#[ignore]` attribute when the
+fix lands — that is the whole ceremony.
 
-- allocate up to N on a ledger; move its entries to an archive artifact whose
-  status is `archived`; delete the `entry_reservation` row (simulating clone or
-  the move cascade); allocate again; assert the returned id is **> N**.
-- a resolver-side companion asserting that a live definer and an archived
-  definer of the same token do not silently produce an `Edge` for a token whose
-  numbering the ledger has already retired.
+It is placed immediately after
+`allocate_entry_id_does_not_reissue_when_the_body_has_not_caught_up`, which is its exact
+counterpart: there the body lags the reservation and the reservation saves us; here both
+lag the ledger's real history.
 
+The fixture also seeds the archived companion artifact even though the allocator never
+opens it, for two reasons — it states in-place *why* a low id is wrong, and it gives
+candidate Fix B something to read without rewriting the test.
+
+Still wanted, and not yet written: a resolver-side companion asserting that a live
+definer and an archived definer of the same token do not silently produce an `Edge` for
+a number the ledger has already retired. That one needs a policy decision first — the
+tie-break is correct for its stated purpose, so the assertion has to name a narrower
+condition than "two definers".
 ## Workarounds
 
 - **Do not compact a ledger's entries out of its live body and archive the file
@@ -231,13 +256,14 @@ so it fails against `66487591`:
 
 ## Resume
 
-Write the failing test described in **Tests added** against
-`src/librarian/catalog/augmentation.rs` — a `#[test]` in that module's `tests`
-block, following `allocate_entry_id_serializes_across_independent_connections`
-for the two-connection setup. That converts "inferred, not measured" into a red
-test, and it is the premise a later session should re-check before designing the
-fix. Then decide between Fix A and Fix B above.
+The red test exists and the premise is now measured, so the next action is the design
+call, not more investigation: **choose Fix A or Fix B** in § Fix. A is recommended —
+commit `entry_high_water` to frontmatter beside `entry_prefix`, making the counter a
+fact about the ledger rather than about one machine's database.
 
+Whichever is chosen, `entry_reservation` must also join `repoint_history`'s table list
+in `src/librarian/catalog/graft.rs`, or `artifact(move)` keeps silently resetting the
+counter — that part is independent of A-vs-B and can land first.
 ## References
 
 - `src/librarian/catalog/augmentation.rs` — `allocate_entry_id`, `ENTRY_PREFIX_KEY`,
