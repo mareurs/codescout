@@ -190,6 +190,16 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **Writes are now refused when git worktrees exist and no project was chosen this
+  session.** `guard_worktree_write` gated on `is_project_explicitly_activated`, which the
+  `current_dir()` startup fallback sets in essentially every session — so the guard never
+  fired in production, and the write target was whatever the server happened to resolve at
+  launch. It now gates on `is_project_chosen_this_session`, which only
+  `workspace(action="activate")` sets. **In a checkout with linked worktrees this refuses
+  the first write of a session until you activate**, and the refusal names the candidate
+  roots. Repos with no worktrees are unaffected, and that case is pinned by its own test.
+  See `docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md`.
+
 - **sqlite-vec indexes now live under the project root, not `$HOME`.** The store
   directory resolves as `CODESCOUT_SQLITE_DIR` if set, else
   `<project_root>/.codescout/embeddings/`, else — for callers with no project root at
@@ -261,6 +271,53 @@ All notable changes to codescout are documented here.
   which background operation was running at time of death.
 
 ### Fixed
+
+- **`edit_markdown(action="edit")` deleted the matched text when `new_string` was
+  omitted.** The key was read as `unwrap_or("")`, so a `content`/`new_string` mix-up —
+  the sibling edit tools disagree on the name — turned a scoped replacement into a silent
+  deletion and returned `{"status":"ok"}`. Three independent read sites now require the
+  key to be **present**; `new_string: ""` still deletes, so deliberate deletion stays
+  reachable and is distinguishable from a typo. The third site was
+  `artifact(update, patch={body_edits})`, which edits trackers and bug files — the
+  artifacts least likely to have their content asserted by any test. See
+  `docs/issues/archive/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+
+- **`read_file(path, force=true)` was accepted and discarded on a whole-file read.**
+  `force` bypasses the symbol-overlap refusal on a *line range*; it never bypassed the
+  size budget, and letting it would defeat progressive disclosure. The defect was the
+  silence — the parameter went in and nothing came back to say it had no effect. The
+  overflow hint now says so and names the call that does work, and the schema says it
+  before the call is spent. See
+  `docs/issues/archive/2026-08-15-read-file-force-ignored-on-full-reads.md`.
+
+- **`grep`'s overflow hint ranked and reported the per-file count *after* capping.** The
+  cap flattens files to a handful each, so nearly everything tied and path-ascending
+  order decided the ranking — it offered three-match files and never named the one
+  holding twenty. Candidates now come from a pre-cap tally, with a `16+` floor marker
+  when collection itself stopped early, so the fix does not trade one piece of false
+  precision for another. See
+  `docs/issues/archive/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md`.
+
+- **`## Project Status` was trimmed from the tail, which is where the user's own text
+  lives.** When the block exceeded the MCP `instructions` channel, `## Custom
+  Instructions` was sacrificed first and the memories list — which
+  `memory(action="list")` reproduces on demand — was kept longest. Segments are now
+  dropped by priority: substitutable content first, user-authored text next, and the
+  active-project and worktree lines never, since a missing worktree banner sends commits
+  to the wrong branch. The note names what it dropped rather than only announcing that
+  something went. The two genuinely oversized blocks (Kotlin known issues, an unbounded
+  custom prompt) still cannot fit at any position; see
+  `docs/issues/2026-08-16-project-status-blocks-do-not-fit-the-instructions-channel.md`.
+
+- **`append_entry` asserted a heading level it never read, and reported one of its three
+  derivation inputs.** The reservation hint told every ledger to write `## <id> — <title>`
+  while the `U-N` ledger — along with its own augmentation prompt and `docs/TAXONOMY.md` —
+  uses `###`. The level is now derived from the body the allocator already scans, and when
+  a ledger heads nothing the hint says its suggestion is a **default** rather than sounding
+  certain. The response also carries `reserved_max` and `frontmatter_max` beside
+  `body_max`, so a caller can see which input governed — in particular a committed mark
+  leading both others, which means the ledger was compacted. See
+  `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
 
 - **Project-root stripping is now field-aware, not a text-level guess.** Tool results
   used to have their absolute project root stripped by `post_process`

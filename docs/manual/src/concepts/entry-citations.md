@@ -32,6 +32,72 @@ the tracker needs a refresh.
 
 Use this instead of a read-then-write for any monotonic-id tracker.
 
+## Ledgers, and entries that live in prose
+
+The call above assumes the entries are **params rows**. Most numbered surfaces in a
+codescout repo are not: their entries are `## R-42 — <title>` body sections, with no
+`entry_collection` at all. Those are **ledgers**, and a ledger is a much narrower thing
+than a tracker — an artifact that owns an id namespace.
+
+Declare one in **frontmatter**, not in the catalog:
+
+```yaml
+entry_prefix: R          # or a sequence, for a ledger owning two namespaces:
+entry_prefix:            #   a session log carrying both F-N frictions and W-N wins
+  - F
+  - W
+```
+
+Frontmatter because the catalog is machine-local and git-ignored: a declaration stored
+only in the augmentation is absent in a fresh clone, and every `append_entry` there
+fails.
+
+Then **omit `entry_collection`** to reserve an id without writing anything:
+
+```text
+artifact(action="append_entry", id="<ledger-id>", id_prefix="R")
+→ { "id": "R-42", "reserved": true,
+    "body_max": 41, "reserved_max": 41, "frontmatter_max": 41,
+    "next_step": "… Add the section as `## R-42 — <title>` …" }
+```
+
+The reservation is recorded inside the same transaction that reads the maximum, so a
+concurrent session observes it and gets `R-43`. That is what makes it safe to write the
+body in a **separate** call — and it is the property a bare "next free index" lookup does
+not have. The response reports all three inputs the counter is derived from, and the hint
+names the heading level **this** ledger's existing entries use rather than assuming one.
+
+### The counter travels with the repo
+
+A ledger carries its own high-water mark in committed frontmatter, one key per namespace,
+written by the allocator:
+
+```yaml
+entry_prefix: HY
+entry_high_water_HY: 11
+```
+
+Do not hand-edit it downward, and do not drop it when compacting. It is the only one of
+the three inputs that survives a fresh clone, an `artifact(action="move")`, and compaction
+— the live body's maximum *falls* when entries move to an archive companion, and the
+machine-local reservation does not travel at all. Without the committed mark a
+compacted-then-archived ledger reissues `HY-1`, and because the resolver binds a token to
+its sole **active** definer, every historical citation silently re-points to the new entry
+with no dangling or ambiguous count moving.
+
+When the committed mark leads both other inputs, the reservation says so in words: that
+state means the ledger was compacted, or the checkout is fresh, and it is expected rather
+than drift.
+
+### From the main checkout only
+
+`append_entry` refuses id allocation from a worktree session, on the same grounds it
+refuses `cites`. An entry id is ledger-wide state and must key to the main tracker; left
+unguarded, the worktree's shadow row is a different `artifact_id`, so both trees issue the
+same number — and nothing repairs it at merge, because the renumber only covers params
+rows. Record it in a worktree-local file and fold it in from the main checkout after the
+merge.
+
 ## Citing another entry
 
 Pass `cites` alongside the entry:

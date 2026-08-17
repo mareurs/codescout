@@ -1,5 +1,10 @@
 # Embedding without a server
 
+> ⚠ **Unreleased — on the `experiments` branch only.** Not in v0.15.0 and not on
+> crates.io; the API may change without notice. The full cohort is listed under
+> `[Unreleased]` in
+> [CHANGELOG.md](https://github.com/mareurs/codescout/blob/experiments/CHANGELOG.md).
+
 codescout can embed in-process with a small ONNX model — no GPU, no embedding
 server, no daemon. This is the recommended setup for a laptop, a CI box, or any
 host that cannot reach an embedding endpoint.
