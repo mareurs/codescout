@@ -72,7 +72,7 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
 Any tool rename, addition, or behavior change requires updating all three prompt surfaces.
 The build-time test `prompt_surfaces_reference_only_real_tools` catches stale tool names; `claude_md_contains_no_deprecated_tool_names` guards `CLAUDE.md`.
 Bump `ONBOARDING_VERSION` only for `onboarding_prompt` surface changes — never for `server_instructions`.
-Full operational detail (bump matrix, 2200-byte slice cap, verify-slice hazard) + the writing style guide live in `src/prompts/README.md`.
+
 
 ## Bug Tracking
 
