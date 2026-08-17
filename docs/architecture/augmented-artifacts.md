@@ -229,7 +229,7 @@ the augmentation's *stored* template:
 | Caller | Destination | Uses the stored `render_template`? |
 |---|---|---|
 | `src/librarian/tools/context.rs` | the `librarian(action="context")` markdown bundle, under the `[LIVE]` header | yes |
-| `legibility_scan::render_managed_body` | the `.md` file body | **no** — `include_str!("./render_template.j2")`, compiled in, for the `legibility-backlog` tracker only |
+| `legibility_scan::render_managed_body` | the `.md` file body | **no** — a compiled-in `include_str!` of `src/librarian/tools/legibility_scan/render_template.j2`, for the `legibility-backlog` tracker only |
 
 So **the stored `render_template` never reaches the file on disk.** The refresh
 path does not consume it: every `render_template` occurrence in
