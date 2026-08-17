@@ -1078,7 +1078,17 @@ const SOURCE_EXTENSIONS: &str = r"\.(rs|py|ts|tsx|js|cjs|mjs|jsx|go|java|kt|kts|
 ///
 /// (GF-3 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`; 18 of 111
 /// measured `il3_shell_on_source` refusals.)
-const SOURCE_ACCESS_COMMANDS: &str = r"\b(cat|head|tail|sed|awk|less|more|grep)\b";
+///
+/// A list rather than a hand-written alternation, because
+/// `get_guide("iron-laws-detail")` documents these names to the agent and drifted
+/// from them twice: once claiming a bounded-file carve-out that never existed
+/// (B-9), then claiming the gate ignores the command entirely — which outlived
+/// `wc`'s removal by a day and told the agent `wc` and `ls` were blocked when
+/// neither was. `iron_laws_detail_gate_names_every_blocked_command` now derives
+/// the guide's list from this one, so the next edit here fails the build until
+/// the guide follows.
+pub(crate) const SOURCE_ACCESS_COMMANDS: &[&str] =
+    &["cat", "head", "tail", "sed", "awk", "less", "more", "grep"];
 
 /// Split `s` on any separator in `seps` that appears *outside* single- or
 /// double-quoted strings. Separators are checked in order — put longer
@@ -1202,7 +1212,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     static CMD_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
     static EXT_RE: std::sync::OnceLock<Option<Regex>> = std::sync::OnceLock::new();
     let cmd_re = CMD_RE
-        .get_or_init(|| Regex::new(SOURCE_ACCESS_COMMANDS).ok())
+        .get_or_init(|| Regex::new(&format!(r"\b({})\b", SOURCE_ACCESS_COMMANDS.join("|"))).ok())
         .as_ref()?;
     let ext_re = EXT_RE
         .get_or_init(|| Regex::new(SOURCE_EXTENSIONS).ok())
@@ -1253,9 +1263,10 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
             }
         }
         "sed" | "awk" => "use read_file(path, start_line, end_line), symbols(path), \
-             symbols(name=..., include_body=true), or grep(regex) instead. \
-             Re-run with acknowledge_risk: true if you need raw shell access."
+                 symbols(name=..., include_body=true), or grep(regex) instead. \
+                 Re-run with acknowledge_risk: true if you need raw shell access."
             .to_string(),
+
         _ => "use read_file(path, start_line, end_line) or symbols(path) + \
              symbols(name=..., include_body=true) instead. \
              Re-run with acknowledge_risk: true if you need raw shell access."

@@ -1,7 +1,8 @@
 # Iron Laws — gates, exceptions, and edge cases
 
 Per-law expansion of the six Iron Laws in the `server_instructions`
-surface. The static slice is intentionally compact (2200-byte cap);
+surface. The static slice is intentionally compact (1900-character cap,
+sized under the MCP channel's measured 2048-CHARACTER limit);
 this guide carries the gate error text, exceptions, and edge cases
 that don't fit in the slice itself.
 
@@ -96,13 +97,25 @@ Windows `find` is ambiguous — cmd.exe ships its own `find` (a
 string filter) that shadows the Unix `find`, and `find "x"` with
 no file argument reads stdin and hangs the command.
 
-**Read-mode for source code is blocked — by path, not by command.**
-`cat`, `wc`, `sed`, `ls` on `src/foo.rs` all refuse with `shell access
-to source files is blocked`, regardless of how bounded or read-only
-the command is: the gate's predicate is the source *path* in the
-resolved command, and there is no per-command carve-out. Route
-through `symbols` / `read_file` / `grep`, or pass
-`acknowledge_risk: true` for genuine raw shell access.
+**Read-mode for source code is blocked — content readers, not every
+command.** Two predicates must BOTH hold within one compound segment:
+its *first token* is a content-reading command — `cat`, `head`,
+`tail`, `sed`, `awk`, `less`, `more`, `grep` — **and** the segment
+names a source-file extension. So `cat src/foo.rs` refuses with
+`shell access to source files is blocked`, while
+`git commit -m "fix tail-50 in output_buffer.rs"` passes: `git` is not
+a content reader, even though the message contains both `tail` and
+`.rs`. Route through the codescout `symbols` / `read_file` / `grep`
+tools, or pass `acknowledge_risk: true` for genuine raw shell access.
+
+**Metadata commands are NOT blocked.** `wc`, `ls`, `stat`, `du` and
+`file` return a measurement *of* the content rather than the content
+itself, and codescout ships no tool that returns a line count — so
+refusing them named an alternative that does not exist. `wc` came off
+the blocked list on 2026-08-16 for that reason. The line this list
+draws is content vs a measurement of content, **not** read-only vs
+mutating: `head` and `tail` are read-only and stay blocked, because
+they return the file's bytes.
 
 **Why this matters:** every `@cmd_*` buffer is queryable for the
 rest of the session via `grep PATTERN @cmd_xxx`, `tail -N @cmd_xxx`,

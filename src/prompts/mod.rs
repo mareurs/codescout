@@ -1538,21 +1538,62 @@ mod redesign_invariants {
 
     /// B-9 regression
     /// (docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md):
-    /// the guide once claimed `cat src/foo.rs` was "allowed on bounded files".
-    /// The gate is a *path* predicate (`check_source_file_access`, called from
-    /// `src/tools/run_command/inner.rs` Step 2.5) with no per-command carve-out —
-    /// measured 0/10 unaided survival against the false sentence
-    /// (prompt-engineering scenarios/conclude-last, trap t2). The guide must state
-    /// the block and the real override, and never re-grow the phantom carve-out.
+    /// the guide once claimed `cat src/foo.rs` was "allowed on bounded files" —
+    /// measured 0/10 unaided survival against that sentence
+    /// (prompt-engineering scenarios/conclude-last, trap t2). The phantom
+    /// carve-out must never regrow.
+    ///
+    /// The original fix over-corrected, and this test used to pin the
+    /// over-correction: "by path, not by command". That was false the day it was
+    /// written — `check_source_file_access` is a TWO-part predicate, a
+    /// content-reader command name AND a source extension. The framing then
+    /// outlived `wc`'s removal from the list (2026-08-16) and left the guide
+    /// telling the agent that `wc` and `ls` were blocked when neither was.
+    /// Guarding against both false sentences is this test's job; keeping the
+    /// command list itself honest is
+    /// `iron_laws_detail_gate_names_every_blocked_command`'s.
     #[test]
-    fn iron_laws_detail_gate_claim_matches_path_predicate() {
+    fn iron_laws_detail_never_regrows_the_bounded_file_carve_out() {
         let body = crate::prompts::topic_body("iron-laws-detail").expect("guide registered");
         assert!(
             !body.contains("allowed on bounded files"),
             "B-9 false claim resurfaced: the shell gate has no bounded-file carve-out"
         );
-        assert!(body.contains("by path, not by command"));
+        assert!(
+            !body.contains("by path, not by command"),
+            "the gate is a content-reader command name AND a source extension; \
+             describing it as path-only is what kept `wc` and `ls` documented as \
+             blocked after they stopped being"
+        );
         assert!(body.contains("acknowledge_risk: true"));
+    }
+
+    /// The guide prints the blocked-command list to the agent, so that list and
+    /// `SOURCE_ACCESS_COMMANDS` are one contract with two copies. Deriving the
+    /// assertion from the constant is what makes the next edit to the gate fail
+    /// the build until the guide follows: when `wc` came off the list on
+    /// 2026-08-16 the guide went on naming it for a day, and nothing noticed
+    /// because no test read both.
+    #[test]
+    fn iron_laws_detail_gate_names_every_blocked_command() {
+        let body = crate::prompts::topic_body("iron-laws-detail").expect("guide registered");
+        for cmd in crate::util::path_security::SOURCE_ACCESS_COMMANDS {
+            assert!(
+                body.contains(&format!("`{cmd}`")),
+                "iron-laws-detail never names `{cmd}`, which the gate blocks"
+            );
+        }
+        // The complement carries the same weight. These return a measurement OF
+        // the content rather than the content, so they are deliberately absent —
+        // and the guide documents them as usable. Re-adding one silently
+        // falsifies that half.
+        for cmd in ["wc", "ls", "stat", "du", "file"] {
+            assert!(
+                !crate::util::path_security::SOURCE_ACCESS_COMMANDS.contains(&cmd),
+                "`{cmd}` is blocked again — the guide lists it as an allowed \
+                 metadata command, so update that paragraph in the same commit"
+            );
+        }
     }
 
     /// BL-26 regression: `artifact(action="move")` mints a NEW id — catalog
