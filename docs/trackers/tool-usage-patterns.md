@@ -464,6 +464,83 @@ tells you something real about the file. A gate that stays quiet tells you only 
 predicate returned false — which may mean "not managed" or may mean the predicate cannot
 see what it is looking at. Do not read silence as clearance, and when about to write up
 "no guard exists here", run the call that would prove it.
+### T-23 — `edit_markdown(action="edit")` given `content` instead of `new_string`, five times, deleting silently
+
+**Tool:** `edit_markdown` · **Verdict:** wrong-tool · **Session:** `2c518eb6`
+
+Five calls of the shape `edit_markdown(action="edit", heading, old_string, content=…)`.
+`content` is the replacement key for `replace` / `insert_*` and is simply unread by `edit`,
+whose key is `new_string` — which was read as `.unwrap_or("")`. So each call deleted the
+matched text and returned `{"status": "ok"}`.
+
+| File | Lost | Reached |
+|---|---|---|
+| `CLAUDE.md` | prompt-cap sentence | `a8fdf055` — repaired by a peer in `179c48a7` |
+| `.codescout/memories/conventions.md` | prompt-cap line | `a8fdf055` |
+| `src/prompts/guides/librarian-runtime.md` | the `hints` description | `9cdb2f50` |
+| `src/librarian/prompts/companion_hint.md` | example JSON + bullet list | `9cdb2f50` |
+| `src/prompts/source.md` | Iron Law 1's overlap clause | caught pre-commit |
+
+Three of five reached commits with `fmt`, `clippy` and 3991 tests green: neither guide has
+content assertions, and the body-shrink guard only fires past 50%. **Detection was
+incidental** — the next action measured the prompt slice's character count and it had gone
+*down* 61 when it should have gone *up* 57. Without a number to contradict, all five would
+have shipped.
+
+Worth noting how the peer's repair reads: `179c48a7`'s subject is *"finish `a8fdf055`'s cap
+correction — repair the sentence, fix the sibling"*. That is a follow-up improvement, not
+damage control — which is how a silent deletion enters the record as ordinary churn.
+
+**Tool side, fixed** (`f05be046c6c373d8`, archived): all **three** read sites now require
+`new_string` to be present, name `content` when it is passed instead, and refuse both keys
+together. `new_string=""` still deletes — the explicit empty string is what separates asking
+for a deletion from forgetting the replacement, which the old default could not do.
+
+The filed root cause named only **two** of the three sites. A grep scoped to the tool that
+*names* the parameter finds two; only a repo-wide search for the expression found
+`update.rs:224` in `apply_body_edits` — the worst of them, because that is the
+`artifact(update, patch={body_edits})` path and it edits trackers and bug files.
+
+**Caller side, not fixable by any guard.** `edit_markdown`'s success envelope is
+`{"status": "ok"}` plus a hint about unread sections, reporting nothing about what changed.
+`artifact(update)` already emits `prev_bytes` / `new_bytes` on its `field_patch` event for
+exactly this reason. Until an equivalent exists here: **read back any section edited via
+`action="edit"` rather than trusting the ok.**
+
+### T-24 — A `git log -S` zero that was about to overturn a peer's dated claim
+
+**Tool:** `run_command` · **Verdict:** debatable · **Session:** `2c518eb6`
+
+Reviewing a peer session's guide fix, which asserted *"`wc` came off the blocked list on
+2026-08-16"*. To check it I ran:
+
+```
+git log -S 'wc|stat' --format=… -- src/util/path_security.rs
+```
+
+Exit 0, no output. **`-S` is a literal-string pickaxe** — without `--pickaxe-regex` the
+alternation is searched as the five-character string `wc|stat`, which appears nowhere. The
+empty result was a fact about my regex, not about the history, and I was one step from
+reporting the peer's claim as unsupported.
+
+Re-run in the correct shape:
+
+```
+git log -3 --pickaxe-regex -S '\bwc\b' -- src/util/path_security.rs
+→ be4a679b 2026-08-16 fix(il3): stop blocking wc on source — it returns a count, not content
+```
+
+Their claim was exactly right.
+
+Kin to **T-19**, with the failure one layer earlier: T-19's zero came from a *limit*, this
+one from *syntax*, and both are indistinguishable from a substantive zero at the call site.
+No tool fix applies — `git log -S` behaving literally is correct and documented.
+
+**The rule, with its risk multiplier named:** this zero was about to be used to *contradict
+another agent's specific, dated, falsifiable claim*. A zero that would let you overturn
+someone else's measurement earns one confirming query in a different shape before the
+conclusion — because the cost of being wrong is not a re-run, it is a wrong correction
+entered into the record.
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)

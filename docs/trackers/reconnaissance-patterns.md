@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 102
+entry_high_water_R: 103
 entry_prefix: R
 ---
 
@@ -2944,6 +2944,71 @@ having run one — and about the labelling that keeps that survivable.
 already past the usual promotion bar. Promote to `docs/issues/_TEMPLATE.md` by making the
 measured/inferred split a required sub-field of `## Root cause` rather than a paragraph of
 guidance inside it, and add a Fix-time step: *re-read the root cause once the fix compiles.*
+## R-103 — A blast-radius audit is not a correctness audit, and enumerating the call sites makes it feel like both
+
+**Observed:** 2026-08-17, fixing
+`docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`
+(`da55100a`). The change altered `basename_candidate`, the eligibility rule shared by
+`try_basename_fallback` and `unique_basename_path`.
+
+**What I did, and it was the right method.** I enumerated every caller — `resolve_file_path`,
+`resolve_file_line`, `resolve_link`, `resolve_file_symbol` — and read each one. That audit
+paid: `resolve_link` anchors `./` to the markdown file's own directory, so stripping `./`
+for fallback purposes would have let a same-basename file anywhere in the tree satisfy a
+broken relative link. I guarded it and mutation-verified the guard.
+
+**What I missed, in lines I had just read.** `resolve_file_symbol` called
+`unique_basename_path` and fell through to `FileMissing` — and that helper returns `None`
+for **both** zero matches and two-or-more, so a file existing *twice* was reported as gone.
+A pre-existing defect, independent of my change, sitting in the exact `else` arm I had read
+to decide my change was safe there. The peer session found it hours later (`3faddb15`).
+
+**Why complete coverage did not help.** The population was right and every member was
+visited. The *question* was singular: **"does my change break this caller?"** I never asked
+**"is this caller correct?"** Those are different audits over the same list, and doing the
+first thoroughly produces the felt sense of having done both — enumerating the call sites
+is the expensive part, so once it is done the mind treats the list as discharged.
+
+**The tell that suppressed the second question, and it is the sharp half.** The comment
+directly above that code asserted the invariant:
+
+> Same basename shorthand `resolve_file_path` and `resolve_file_line` accept … Without this
+> the three ref kinds disagree about identical path parts.
+
+I read that as evidence the parity existed. It described **intent**, not behaviour — only
+the unique half was implemented. `3faddb15`'s own comment names it: *"The comment above used
+to assert this while only the unique half was implemented."* A comment claiming an invariant
+is the cheapest possible false positive: it sits exactly where you would look to verify, and
+reads as confirmation.
+
+**Counterfactual.** `FileMissing` carries gating severity — it is the verdict that failed CI
+in the parent bug. Any doc citing `mod.rs::helper` where `mod.rs` is ambiguous would have
+gated the build on a correct doc, which is the same class of false positive the parent bug
+was filed for. Cost was low only because a second session read the same code with a
+different question.
+
+**The rule.** When a change forces you to enumerate a caller set, make **two** passes over
+it and name them separately:
+
+1. *Does my change break this caller?* — blast radius.
+2. *Is this caller correct, independent of my change?* — correctness.
+
+And treat any in-code comment asserting cross-site parity as a **hypothesis to check**, not
+as evidence. You are already reading those lines; it is the cheapest moment to check the
+claim and the moment you are least likely to, because the comment is answering the question
+you came with.
+
+**Relationship to R-101 and R-102.** Same family, third distinct failure. R-101 mis-scores a
+test that was run. R-102 never runs one and survives on the inferred label. R-103 runs the
+right audit over the right population against too few questions. In all three the instrument
+was sound and the framing was not — which is why none of them is caught by re-reading more
+carefully.
+
+**Status:** open — single datapoint, fully evidenced (`da55100a` is the incomplete audit,
+`3faddb15` the correction, and both comments are quotable). **Promote-when:** a second
+blast-radius audit is found to have missed an independent defect in a site it visited — then
+promote to the reconnaissance SKILL.md Phase 1 as an explicit two-pass step, since Phase 1
+currently says "read callers if shape changes" and that phrasing asks only question 1.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
