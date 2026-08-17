@@ -1,7 +1,7 @@
 ---
 id: '3a678913656b3c38'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: sibling tools name the same two concepts differently — symbols uses name_path but edit_code wants symbol, edit_markdown uses content but edit_code wants body — two failed calls to insert one function'
 ---
 
@@ -99,31 +99,72 @@ needed to reproduce; the open question is what to do about it.
 
 ## Fix
 
-Not implemented, and the right move is a judgment call rather than a defect fix.
-Three options, cheapest first:
+Implemented — options 1 and 2 from the original plan. Option 3 (converging the
+vocabulary repo-wide) is deliberately not taken: it would churn every prompt surface
+and guide documenting these names, against a character budget that is already the
+binding constraint on `server_instructions`.
 
-1. **Accept `name_path` as an alias for `symbol` on `edit_code`** (and keep
-   `symbol` canonical). One-line param aliasing, no breaking change, removes the
-   more likely of the two slips — the address is what gets copied from the
-   preceding `symbols` call.
-2. **Name both errors at once.** Validate the payload key alongside the address
-   so a caller with both keys wrong learns both in one refusal. Turns two
-   round-trips into one whenever a caller carries a whole call shape over.
-3. **Converge the vocabulary** — pick one name per concept across all four
-   tools, with aliases for the old ones. Widest fix, and the only one that stops
-   this recurring; also the one most likely to churn every prompt surface and
-   guide that documents these params.
+The alias infrastructure already existed and was already tested —
+`require_str_param_or_hint(input, name, aliases, hint)` in
+`src/tools/core/params.rs`, with canonical-wins-over-alias precedence covered by
+`require_str_param_or_hint_prefers_canonical_over_alias`. The fix is to use it.
 
-Recommend 1 + 2. Option 3 should be weighed against the prompt-surface character
-budget, since several of these names appear in `server_instructions` and in the
-guides.
+In `src/tools/symbol/edit_code.rs`:
 
+- **`name_path` is accepted for `symbol`.** `require_str_param(&input, "symbol")`
+  becomes `require_str_param_or_hint(&input, "symbol", &["name_path"], …)`. This is
+  the more valuable of the two: the address is what gets copied out of the preceding
+  `symbols` call.
+- **`content` is accepted for `body`,** via a small `body_param(input)` helper shared
+  by the `replace` and `insert` arms so they cannot drift.
+- **Both refusals name their alias**, through a shared `BODY_PARAM_HINT` and the
+  `symbol` hint text. An alias that only helps callers who already know it exists
+  helps nobody — the mistake is made by callers reasoning from the sibling tool.
+- **The schema advertises both**, so they are discoverable without first triggering a
+  refusal.
+
+The error *messages* are held byte-stable — `"action 'replace' requires 'body'"` and
+`"action 'insert' requires 'body'"`. `src/usage/db.rs` classifies error families by
+these strings (`normalize_err_family_maps_the_unclassified_head`), and the archived
+bug `2026-08-15-conditionally-required-params-advertised-optional.md` measured this
+class against them. All new text goes in the *hint*, which is additive.
+
+Not done, and deliberately: `edit_markdown` was NOT taught to accept `body`. Its
+sibling defect (`docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`,
+fixed in the same commit) hinges on `action="edit"` distinguishing a missing
+replacement from an intentional empty one; adding more accepted spellings of the
+replacement there widens exactly the surface that had to be narrowed. Aliasing is
+safe where an absent value is refused outright, which is the case for both
+`edit_code` arms and not for `edit_markdown`'s scoped swap.
+
+Fix SHA: this commit, on `experiments`. `master` is a strict ancestor at fix time,
+so the promotion path is fast-forward and this SHA is already the master SHA.
 ## Tests added
 
-None yet. For option 1, an alias test asserting `edit_code` accepts `name_path`
-and `symbol` interchangeably and errors identically when neither is present. For
-option 2, a test that a call missing both keys names both in one error.
+Two, in `src/tools/symbol/tests.rs`.
 
+`edit_code_accepts_the_sibling_tools_names_for_symbol_and_body` asserts the aliases
+resolve — **without needing a live language-server edit**. The trick is to assert on
+*which* precondition fails: a call carrying `name_path` and no body must get past
+address resolution and complain about the body instead. That is positive evidence the
+alias took effect, and it costs no LSP round-trip:
+
+| Call | Must NOT say | Must say |
+|---|---|---|
+| `name_path` + no body | `missing 'symbol'` | `requires 'body'` |
+| `symbol` + `content` | `requires 'body'` | — |
+
+`edit_code_refusals_name_the_accepted_aliases` covers the discoverability half:
+the missing-symbol refusal names `name_path`, the missing-body refusal names
+`content`, and the schema advertises both. Without these the aliases would work while
+remaining invisible, which fixes the second attempt and not the first — and the first
+attempt is the one that costs the round-trip.
+
+Modelled on `edit_code_advertises_every_conditionally_required_param`, which
+established the pattern of asserting runtime refusal and schema text together.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test` 4017 passed / 0 failed / 45 ignored.
 ## Workarounds
 
 `edit_code` takes `symbol` and `body`. When carrying a symbol address over from a
@@ -132,12 +173,15 @@ option 2, a test that a call missing both keys names both in one error.
 
 ## Resume
 
-Decide between options 1–3 above. If option 1, find `edit_code`'s argument
-deserialization and add a serde alias for `symbol`, then the alias test under
-**Tests added**.
+N/A — both aliases accepted, advertised in the schema, named in the refusals, and
+tested.
 
+Option 3 from § Fix (one name per concept across all four tools) stays unactioned by
+choice, not by omission. Revisit only if usage data shows the mismatch still costing
+refused calls after the aliases have shipped — the aliases cover the two directions
+actually observed, and a rename would spend prompt-surface characters that Iron Law 1
+currently needs.
 ## References
 
 - `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md` — the severe, silent instance of the same key-mix-up class
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — tool-contract and guidance conventions
-

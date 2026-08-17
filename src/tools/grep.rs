@@ -350,6 +350,22 @@ impl Tool for Grep {
             // early-returned on `budget >= total` every single time and its
             // file-diversity round-robin was unreachable from grep. BL-31.
             let max_matches = max;
+            // Rank the narrowing candidates on the PRE-cap tally, and keep owned
+            // copies so the borrow ends before `cap_grouped` takes `matches`.
+            //
+            // These used to be read off `group_by_file(&visible)` — the post-cap set —
+            // which counts what SURVIVED the diversity round-robin rather than what
+            // matched. The cap flattens nearly every file to the same small number, so
+            // the sort tied almost everything and fell back to path order: one real
+            // search offered three files "(3 matches)" each while holding 11, 5 and 18,
+            // and never named the file holding 20. Every figure in the hint was wrong
+            // and so was the selection.
+            // docs/issues/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md
+            let precap_top: Vec<(String, usize)> = group_by_file(&matches)
+                .iter()
+                .take(3)
+                .map(|g| (g.file.to_string(), g.items.len()))
+                .collect();
             let (visible, total, files) = cap_grouped(matches, max_matches);
             let truncated = hit_cap || total > visible.len();
             let groups = group_by_file(&visible);
@@ -362,10 +378,15 @@ impl Tool for Grep {
             if truncated {
                 // Pattern 1 (PROGRESSIVE_DISCOVERABILITY.md): concrete + copy-paste-ready.
                 // `groups` is already sorted by count desc by group_by_file.
-                let top: Vec<String> = groups
+                // A `+` when collection itself stopped early: the pre-cap tally is
+                // then a floor for that file too, and a bare number would re-import
+                // the same false precision one level down.
+                let top: Vec<String> = precap_top
                     .iter()
-                    .take(3)
-                    .map(|g| format!("path=\"{}\" ({} matches)", g.file, g.items.len()))
+                    .map(|(file, n)| {
+                        let plus = if hit_cap { "+" } else { "" };
+                        format!("path=\"{file}\" ({n}{plus} matches)")
+                    })
                     .collect();
                 let narrow = if top.is_empty() {
                     "narrow with a more specific pattern or add path=<file>".to_string()
@@ -1421,6 +1442,75 @@ mod tests {
         assert!(
             hint.contains("matches"),
             "hint must include match counts so the model can pick, got: {hint}"
+        );
+    }
+
+    /// The narrowing hint must report and rank on the **pre-cap** per-file tally.
+    ///
+    /// `grep_overflow_hint_names_top_files` above has a skewed fixture but only
+    /// asserts the hint *mentions* the hot file — never the number — so it stayed
+    /// green while every count in the hint was wrong. The counts came off
+    /// `group_by_file(&visible)`, i.e. what survived the diversity round-robin,
+    /// which flattens files to a handful each; the sort then tied nearly
+    /// everything and fell back to `group_by_file`'s path-ascending tiebreak.
+    ///
+    /// `aaa_decoy.rs` is the discriminator: alphabetically first, but with far
+    /// fewer real matches. Ranking on capped counts puts it first; ranking on the
+    /// true tally puts `hot.rs` first. A fixture without such a decoy cannot tell
+    /// the two implementations apart.
+    /// docs/issues/2026-08-17-grep-narrowing-hint-ranks-by-capped-display-count.md
+    #[tokio::test]
+    async fn grep_overflow_hint_counts_and_ranks_before_the_cap() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        let many: String = (0..40).map(|i| format!("fn target_{i}() {{}}\n")).collect();
+        std::fs::write(dir.path().join("hot.rs"), many).unwrap();
+        // Sorts first by path, holds far fewer matches.
+        std::fs::write(
+            dir.path().join("aaa_decoy.rs"),
+            "fn target_x() {}\nfn target_y() {}\nfn target_z() {}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("mid.rs"), "fn target_m() {}\n").unwrap();
+
+        let ctx = test_ctx().await;
+        // limit=15 caps the DISPLAY (15 of 44) without capping collection — the
+        // candidate cap is a multiple of `limit`, so a smaller limit truncates the
+        // walk too and every tally becomes a floor (`40` would read `16+`). This
+        // isolates the display cap, which is the thing under test.
+        let result = Grep
+            .call(
+                json!({ "pattern": "target", "path": dir.path().to_str().unwrap(), "limit": 15 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let hint = result["overflow"]["hint"]
+            .as_str()
+            .expect("limit=15 against 44 matches must overflow with a hint");
+
+        // Exactly 40, with no `+`: collection was complete, so the tally is a
+        // count rather than a floor. Ranking on the post-cap set would report a
+        // single-digit number here.
+        assert!(
+            hint.contains("hot.rs\" (40 matches)"),
+            "hint must report hot.rs's TRUE match count (40), not the post-cap \
+                 display count; got: {hint}"
+        );
+
+        // And the ranking must be by that tally, not by the capped tie. Paths in
+        // the hint are absolute, so compare on the tail.
+        let first_candidate = hint
+            .split("path=\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .expect("hint must offer at least one path=");
+        assert!(
+            first_candidate.ends_with("hot.rs"),
+            "the highest-match file must be offered FIRST; ranking on capped \
+                 counts ties every file and falls back to path order, which would \
+                 put aaa_decoy.rs here. got first candidate: {first_candidate}"
         );
     }
 

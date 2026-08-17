@@ -7142,6 +7142,117 @@ async fn edit_code_advertises_every_conditionally_required_param() {
     }
 }
 
+/// The two sibling-vocabulary aliases, asserted without needing a live LSP edit.
+///
+/// `symbols` — the tool Iron Law 1 routes discovery through — calls the symbol
+/// address `name_path`, while `edit_code` calls it `symbol`; `edit_markdown` and
+/// `artifact(update)` call the payload `content`, while `edit_code` calls it `body`.
+/// Callers copy a whole call shape from one tool to the next, so each mismatch cost a
+/// refused call on the prescribed find-then-edit path.
+///
+/// The trick here is to assert on WHICH precondition fails: a call carrying
+/// `name_path` must get past address resolution and complain about the *body*
+/// instead. That proves the alias resolved without depending on a successful
+/// language-server round-trip.
+/// docs/issues/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
+#[tokio::test]
+async fn edit_code_accepts_the_sibling_tools_names_for_symbol_and_body() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+
+    // `name_path` fills the symbol slot.
+    let msg = EditCode
+        .call(
+            json!({"name_path": "f", "path": "src/lib.rs", "action": "replace"}),
+            &ctx,
+        )
+        .await
+        .expect_err("no body was passed, so the call must still be refused")
+        .to_string();
+    assert!(
+        !msg.contains("missing 'symbol'"),
+        "`name_path` must be accepted as an alias for `symbol`; got: {msg}"
+    );
+    assert!(
+        msg.contains("requires 'body'"),
+        "with the address resolved, the call should reach the NEXT precondition — \
+         that is what shows the alias took effect rather than the call failing \
+         earlier for its own reasons; got: {msg}"
+    );
+
+    // ...and `content` fills the body slot, so that precondition stops firing.
+    let msg = EditCode
+        .call(
+            json!({"symbol": "f", "path": "src/lib.rs", "action": "replace",
+                   "content": "pub fn f() { let _unused = 1; }"}),
+            &ctx,
+        )
+        .await
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(
+        !msg.contains("requires 'body'"),
+        "`content` must be accepted as an alias for `body`; got: {msg}"
+    );
+}
+
+/// A refusal has to teach the alias, or the alias only helps callers who already
+/// know it exists — which is nobody, since the mistake is made by callers reasoning
+/// from the sibling tool.
+#[tokio::test]
+async fn edit_code_refusals_name_the_accepted_aliases() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+
+    let msg = EditCode
+        .call(json!({"path": "src/lib.rs", "action": "remove"}), &ctx)
+        .await
+        .expect_err("omitting the symbol must be refused")
+        .to_string();
+    assert!(
+        msg.contains("name_path"),
+        "the missing-symbol refusal must name the accepted alias; got: {msg}"
+    );
+
+    let msg = EditCode
+        .call(
+            json!({"symbol": "f", "path": "src/lib.rs", "action": "insert"}),
+            &ctx,
+        )
+        .await
+        .expect_err("omitting the body must be refused")
+        .to_string();
+    assert!(
+        msg.contains("content"),
+        "the missing-body refusal must name the accepted alias; got: {msg}"
+    );
+
+    // And the schema must advertise both, so a caller can discover them without
+    // first triggering a refusal.
+    let schema = EditCode.input_schema();
+    assert!(
+        schema["properties"]["symbol"]["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("name_path"),
+        "schema must advertise the `symbol` alias"
+    );
+    assert!(
+        schema["properties"]["body"]["description"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("content"),
+        "schema must advertise the `body` alias"
+    );
+}
+
 #[tokio::test]
 async fn symbols_overview_scope_libraries_includes_library_files() {
     let project_dir = tempdir().unwrap();

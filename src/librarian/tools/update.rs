@@ -221,7 +221,10 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
                     "Pass {action: \"edit\", heading, old_string, new_string, replace_all?}.",
                 )
             })?;
-            let new_string = edit["new_string"].as_str().unwrap_or("");
+            let new_string = crate::tools::markdown::edit_markdown::require_new_string(
+                edit,
+                &format!("body_edits[{i}]: "),
+            )?;
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             crate::tools::markdown::edit_markdown::perform_scoped_edit(
                 &buf,
@@ -1541,6 +1544,61 @@ text
             "replace-without-content error must name action='edit'; got: {msg}"
         );
     }
+
+    /// `apply_body_edits` is a THIRD independent read site for `new_string` —
+    /// separate from `edit_markdown`'s single-edit and `plan_batch` paths, not a
+    /// wrapper around either. It carried the same `unwrap_or("")` default, so
+    /// `artifact(update, patch={body_edits: [...]})` could delete a tracker or bug
+    /// section and report success. Trackers are the artifacts least likely to have
+    /// their content asserted by any test, which makes this the worst of the three
+    /// places to lose text silently.
+    ///
+    /// See `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+    #[test]
+    fn body_edits_edit_action_with_content_is_refused_and_changes_nothing() {
+        let body = "## Foo\n\nkeep this sentence\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Foo",
+            "action": "edit",
+            "old_string": "keep this sentence",
+            "content": "replaced sentence",
+        })];
+        let msg = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect_err("body_edits edit without new_string must be refused")
+            .to_string();
+        assert!(
+            msg.contains("new_string is required"),
+            "must refuse rather than silently delete; got: {msg}"
+        );
+        assert!(
+            msg.contains("body_edits[0]"),
+            "the error must locate the entry using THIS path's prefix, not \
+             edit_markdown's `edits[0]`; got: {msg}"
+        );
+    }
+
+    /// Deliberate deletion through `body_edits` stays reachable.
+    #[test]
+    fn body_edits_edit_action_with_explicit_empty_new_string_still_deletes() {
+        let body = "## Foo\n\ndrop this. keep this.\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Foo",
+            "action": "edit",
+            "old_string": "drop this. ",
+            "new_string": "",
+        })];
+        let out = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect("explicit empty replacement must apply");
+        assert!(
+            !out.contains("drop this"),
+            "deletion should have applied: {out}"
+        );
+        assert!(
+            out.contains("keep this."),
+            "only the match should go: {out}"
+        );
+    }
+
     /// An opted-in `include_subsections` replace proceeds, but the headings
     /// it destroyed come back in `consumed`. Before this, the ONE guard built
     /// to notice "replace is about to wipe a nested heading" was skipped by

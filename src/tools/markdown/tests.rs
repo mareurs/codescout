@@ -184,6 +184,190 @@ async fn edit_markdown_accepts_file_path_alias() {
     );
 }
 
+/// `action="edit"` + `content` is the mistake this whole guard exists for: `content`
+/// is the right key for `replace` / `insert_*`, is declared in the same schema, and
+/// was simply unread here — so `new_string` defaulted to `""` and the call DELETED
+/// the match and returned success. Five such calls damaged four files in one
+/// session, three of them reaching commits with a green gate.
+///
+/// The load-bearing assertion is the second one: refusing is good, but leaving the
+/// file untouched is the property that was actually violated.
+/// See `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+#[tokio::test]
+async fn edit_action_with_content_instead_of_new_string_is_refused_and_changes_nothing() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    let original = "# Title\n\nkeep this sentence\n";
+    std::fs::write(&file, original).unwrap();
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "edit",
+                "old_string": "keep this sentence",
+                "content": "replaced sentence",
+            }),
+            &ctx,
+        )
+        .await;
+
+    let msg = format!("{result:?}");
+    assert!(
+        msg.contains("new_string is required"),
+        "must refuse rather than silently delete; got: {msg}"
+    );
+    assert!(
+        msg.contains("content"),
+        "the error must name the key the caller actually passed, or it reads as \
+         a missing-param error and the caller re-sends `content`; got: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        original,
+        "a refused edit must leave the file byte-identical — the original defect \
+         deleted old_string and reported ok"
+    );
+}
+
+/// The bare form: `action="edit"` with neither `new_string` nor `content`. Same
+/// destructive default, without the wrong-key clue, so the hint has to teach the
+/// explicit-empty-string form instead.
+#[tokio::test]
+async fn edit_action_without_any_replacement_key_is_refused() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    let original = "# Title\n\nkeep this sentence\n";
+    std::fs::write(&file, original).unwrap();
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "edit",
+                "old_string": "keep this sentence",
+            }),
+            &ctx,
+        )
+        .await;
+
+    let msg = format!("{result:?}");
+    assert!(
+        msg.contains("new_string is required"),
+        "omitting the replacement entirely must refuse; got: {msg}"
+    );
+    assert!(
+        msg.contains("new_string=\\\"\\\"") || msg.contains(r#"new_string="""#),
+        "the hint must name the explicit-empty form, since deletion is a real use \
+         case that this guard would otherwise make unreachable; got: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        original,
+        "a refused edit must leave the file byte-identical"
+    );
+}
+
+/// Deliberate deletion stays reachable — and must, or this guard would trade one
+/// defect for a missing capability. `new_string: ""` is the difference between
+/// asking for a deletion and forgetting the replacement; the old default could
+/// not tell those apart, which is the entire bug.
+#[tokio::test]
+async fn edit_action_with_explicit_empty_new_string_still_deletes() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "# Title\n\ndrop this. keep this.\n").unwrap();
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "edit",
+                "old_string": "drop this. ",
+                "new_string": "",
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "explicit empty replacement must apply: {result:?}"
+    );
+
+    let body = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        !body.contains("drop this"),
+        "deletion should have applied: {body}"
+    );
+    assert!(
+        body.contains("keep this."),
+        "only the match should go: {body}"
+    );
+}
+
+/// Both keys present means the caller is describing two different actions at once.
+/// Picking one silently is what let the original defect hide, so it is refused.
+#[tokio::test]
+async fn edit_action_rejects_both_new_string_and_content() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    let original = "# Title\n\nalpha\n";
+    std::fs::write(&file, original).unwrap();
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "edit",
+                "old_string": "alpha",
+                "new_string": "beta",
+                "content": "gamma",
+            }),
+            &ctx,
+        )
+        .await;
+
+    let msg = format!("{result:?}");
+    assert!(
+        msg.contains("both new_string and content"),
+        "an ambiguous pair must be refused, not silently resolved; got: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        original,
+        "a refused edit must leave the file byte-identical"
+    );
+}
+
+/// The batch path is a SECOND read site with its own copy of the default, so a fix
+/// applied only to the single-edit path leaves the hole open here. Covered
+/// separately for that reason, not for symmetry.
+#[test]
+fn batch_edit_action_requires_new_string() {
+    let doc = "## A\n\nhello world\n";
+    let edits = json!([{
+        "heading": "## A",
+        "action": "edit",
+        "old_string": "hello",
+        "content": "goodbye",
+    }]);
+    let err = super::edit_markdown::plan_batch(doc, edits.as_array().unwrap(), false)
+        .expect_err("batch edit without new_string must be refused")
+        .to_string();
+    assert!(
+        err.contains("new_string is required"),
+        "batch path must refuse too; got: {err}"
+    );
+    assert!(
+        err.contains("edits[0]"),
+        "batch errors must locate the offending entry; got: {err}"
+    );
+}
+
 /// Synthesize markdown content with `lines` total lines and `sections` H2 sections.
 fn synth_md(lines: usize, sections: usize) -> String {
     let mut out = String::from("# Title\n\n");

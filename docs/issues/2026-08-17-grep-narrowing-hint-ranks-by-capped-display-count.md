@@ -1,7 +1,7 @@
 ---
 id: a2f2dba5c76dad95
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep''s overflow narrowing hint ranks and reports the per-file CAPPED display count, so it recommends 3-match files and never names the 20-match one'
 ---
 
@@ -77,25 +77,47 @@ Linux, codescout `experiments` @ `66487591`, stdio MCP, release binary built
 
 ## Root cause
 
-Unknown — under investigation. Not yet traced to a line.
+**Traced 2026-08-17.** The hypothesis below was right. `src/tools/grep.rs`, simple
+mode:
 
-The observable behaviour is consistent with the narrowing candidates being
-computed from the **already-capped result rows** rather than from the raw
-per-file tally: every displayed file is truncated to at most 3 rows by the
-diversity cap (26 files × ≤3 = the 50 shown), so a ranking over displayed rows
-ties nearly everything at 3 and then falls back to display order. That is a
-hypothesis from the numbers, not a read of the code.
+```rust
+let (visible, total, files) = cap_grouped(matches, max_matches);
+let truncated = hit_cap || total > visible.len();
+let groups = group_by_file(&visible);          // <- post-cap
+...
+let top: Vec<String> = groups
+    .iter()
+    .take(3)
+    .map(|g| format!("path=\"{}\" ({} matches)", g.file, g.items.len()))
+    .collect();
+```
 
-Likely interacts with `d8c2b23d` *(fix(grep): give cap_grouped something to
-choose from, so diversity actually runs)* — that commit made the per-file cap
-actually bind, which is exactly the condition that flattens the counts the hint
-ranks on. Before it, the ranking may well have been correct because the cap was
-not reducing anything. Worth checking whether the hint was built when
-`cap_grouped` was a no-op.
+`groups` is built from `visible`, the set that survived `cap_grouped`'s
+file-diversity round-robin. So `g.items.len()` is the **displayed** row count, and
+`group_by_file`'s "size desc, ties by path asc" sort runs over those capped numbers.
+The cap flattens nearly every file to the same small count, so almost everything
+ties and the path-ascending tiebreak decides the ranking — which is why the offered
+candidates looked arbitrary.
+
+`groups` itself is correct for its other use, `groups_to_json(&groups)`: that IS the
+displayed grouping. Only the hint needed the pre-cap tally, and it was reusing the
+nearest available variable.
+
+**Confined to the filesystem path.** `grep_in_buffer` also calls
+`cap_grouped` + `group_by_file(&visible)`, but builds only generic overflow text
+("Many matches. Narrow the pattern.") with no per-file candidates — so it never had
+this defect and needed no change.
+
+**The `d8c8` interaction was real.** `d8c2b23d` (*give cap_grouped something to
+choose from, so diversity actually runs*) decoupled the collection limit from the
+display budget. Before it, `cap_grouped` early-returned on `budget >= total` every
+time and `visible == matches`, which made the post-cap tally *equal* the pre-cap
+tally — so this code was correct when written and was silently invalidated by the
+commit that made the cap start binding. The comment at the collection site says as
+much about a sibling symptom (BL-31).
 
 Measured 2026-08-17: the two calls quoted under **Symptom**, run back to back
 against the rebuilt binary.
-
 ## Evidence
 
 ### The totals are right, which is what makes the annotations credible
@@ -124,31 +146,73 @@ this repo routinely has two sessions writing.
 
 ## Fix
 
-Not implemented. The hint should rank candidates by the **true** per-file tally
-and report that number — the same tally `mode="files"` already computes and
-prints, so the data exists on the same code path and no extra scan is needed.
+Implemented in `src/tools/grep.rs`. The narrowing candidates are now computed from
+the **pre-cap** match set, before `cap_grouped` consumes it:
 
-With true counts the example hint becomes actionable: *narrow with
-`tracker_design.rs` (20), `augment.rs` (18), `augmentation.rs` (11)* — three
-files holding 49 of 115 matches, versus the current three holding 19.
+```rust
+let precap_top: Vec<(String, usize)> = group_by_file(&matches)
+    .iter()
+    .take(3)
+    .map(|g| (g.file.to_string(), g.items.len()))
+    .collect();
+let (visible, total, files) = cap_grouped(matches, max_matches);
+```
 
-Two smaller points worth folding in:
+Owned `(String, usize)` pairs rather than borrowed `FileGroup`s, because
+`group_by_file` borrows `matches` and `cap_grouped` takes it by value — the borrow
+has to end before the move. Cost is one extra grouping pass over the collected
+matches, bounded by the collection limit.
 
-- Where a suggested path's true count still exceeds the display budget, say so,
-  or the agent narrows once and overflows again.
-- Consider promoting `mode="files"` ahead of the path list when the distribution
-  is flat, since a per-file summary is strictly more useful than an arbitrary
-  pick from a tie.
+This reuses `group_by_file`'s existing "size desc, ties by path asc" ordering rather
+than introducing a second ranking rule; the only change is *what it is given*.
+`groups_to_json(&groups)` still uses the post-cap grouping, which is correct for the
+displayed rows.
 
+**Plus the floor marker.** When `hit_cap` is set, collection itself stopped early, so
+even the pre-cap tally is a lower bound for that file — the count renders as `16+`
+rather than `16`. Without this the fix would have replaced one piece of false
+precision with another one level down. This surfaced during testing rather than
+design: a `limit=5` probe reported `(16+ matches)` for a file holding 40, because the
+candidate cap is a multiple of `limit` and had truncated the walk at 20.
+
+On the example from § Symptom the hint now offers `tracker_design.rs` (20),
+`augment.rs` (18), `augmentation.rs` (11) — three files holding 49 of 115 matches,
+where it previously offered three holding 19 and misreported each as 3.
+
+Fix SHA: this commit, on `experiments`. `master` is a strict ancestor at fix time,
+so the promotion path is fast-forward and this SHA is already the master SHA.
 ## Tests added
 
-None yet. The regression test wants a fixture whose per-file distribution is
-skewed *past* the cap — e.g. one file with 10 matches and five with 1 — then
-asserts the hint's first candidate is the 10-match file and that its annotation
-reads 10, not the capped 3. A flat fixture cannot fail, which is presumably how
-this shipped: any fixture small enough not to trigger the cap makes the capped
-count equal the true count, and the bug is invisible.
+`tools::grep::tests::grep_overflow_hint_counts_and_ranks_before_the_cap`.
 
+The interesting part is why the **existing** test did not catch this.
+`grep_overflow_hint_names_top_files` already had a skewed fixture (40 / 2 / 1) and
+already overflowed — it sat directly on the bug and stayed green, because it asserts
+only that the hint *mentions* `hot.rs` and that the word "matches" appears. It never
+asserts a number. A test can occupy exactly the right position and still be blind to
+the defect if it checks presence where the defect is in a value.
+
+The new test pins both halves:
+
+- **The count.** `hot.rs" (40 matches)` exactly, with no `+`. Ranking on the post-cap
+  set reports a single-digit number here — the mutation below produced `11`.
+- **The ranking.** `aaa_decoy.rs` is the discriminator: alphabetically first, only 3
+  real matches. Ranking on capped counts ties the files and falls back to path order,
+  putting the decoy first; ranking on the true tally puts `hot.rs` first. Without a
+  decoy that sorts before the hot file, no fixture can tell the two implementations
+  apart.
+
+`limit=15` is chosen deliberately: it caps the display (15 of 44) without capping
+collection, so the tally is a count rather than a floor and the assertion can be an
+exact number. A smaller limit truncates the walk too — the first draft used
+`limit=5` and had to assert `16+`, which is a weaker statement.
+
+**Mutation-verified.** Restoring the original
+`groups.iter().take(3).map(|g| … g.items.len())` turns it red with
+`path=".../hot.rs" (11 matches)` — the defect verbatim, on a file holding 40.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test` 4017 passed / 0 failed / 45 ignored.
 ## Workarounds
 
 Treat the `(N matches)` annotations and the path selection as unreliable
@@ -158,16 +222,14 @@ The totals in the envelope are trustworthy; only the per-file breakdown is not.
 
 ## Resume
 
-Locate where the narrowing candidates are assembled in `src/tools/grep.rs` and
-determine whether they are derived from the capped rows or from a raw tally
-(`cap_grouped` is the function `d8c2b23d` touched — start there). Confirm the
-hypothesis in § Root cause before changing anything; if the candidates already
-use a raw tally, the defect is in the annotation only and the fix is smaller.
-Then add the skewed-distribution test under **Tests added**.
+N/A — root cause traced, fixed, and mutation-verified.
 
+One observation left deliberately unactioned: `grep_overflow_hint_names_top_files`
+remains as it was. It is now redundant with the new test on every property it
+checks, but it is also the I-5 regression guard for the hint being
+copy-paste-ready at all, so it is kept rather than merged.
 ## References
 
 - `src/tools/grep.rs` — grep implementation, incl. `cap_grouped`
 - `d8c2b23d` — *fix(grep): give cap_grouped something to choose from, so diversity actually runs*
 - `docs/PROGRESSIVE_DISCLOSURE.md` — output sizing and overflow-hint conventions
-

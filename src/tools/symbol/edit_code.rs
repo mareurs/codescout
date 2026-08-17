@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use crate::tools::{guard_worktree_write, require_str_param, RecoverableError, Tool, ToolContext};
+use crate::tools::{guard_worktree_write, RecoverableError, Tool, ToolContext};
 use crate::util::text::reindent_to;
 
 use super::display::{
@@ -59,6 +59,31 @@ fn required_for(actions: &[&str]) -> String {
     format!("REQUIRED for action={list}.")
 }
 
+/// Recovery text for a missing `body`, shared by the `replace` and `insert` arms so
+/// the two cannot drift apart.
+const BODY_PARAM_HINT: &str = "Pass the code as body=\"...\" — for 'replace' the new \
+     symbol body, for 'insert' the code to inject. `content` is accepted as an alias \
+     (that is edit_markdown's name for the same argument).";
+
+/// Read the replacement code, accepting `content` as an alias for `body`.
+///
+/// `edit_markdown` and `artifact(update)` call this argument `content`, `edit_code`
+/// calls it `body`, and callers carry a whole call shape over from one to the other.
+/// The alias costs nothing and removes a round-trip from the find-then-edit path the
+/// Iron Laws prescribe. Canonical `body` wins if both are present, matching
+/// `require_str_param_or_hint`'s precedence.
+///
+/// Unlike `edit_markdown`'s `action="edit"`, an absent value here is never silently
+/// treated as empty — both call sites refuse. That asymmetry is deliberate: an empty
+/// replacement is meaningful for a scoped text swap and meaningless as a symbol body.
+/// docs/issues/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
+fn body_param(input: &Value) -> Option<&str> {
+    input
+        .get("body")
+        .or_else(|| input.get("content"))
+        .and_then(|v| v.as_str())
+}
+
 pub struct EditCode;
 
 #[async_trait::async_trait]
@@ -83,7 +108,10 @@ impl Tool for EditCode {
             "type": "object",
             "required": ["symbol", "path", "action"],
             "properties": {
-                "symbol":   { "type": "string" },
+                "symbol":   {
+                    "type": "string",
+                    "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\". Alias: `name_path` (symbols()' name for the same address) is accepted."
+                },
                 "path":     { "type": "string" },
                 "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"] },
                 "new_name": {
@@ -97,7 +125,8 @@ impl Tool for EditCode {
                     "type": "string",
                     "description": format!(
                         "{} 'replace': the new symbol body. 'insert': the code to inject. \
-                         Not read by 'rename' or 'remove'.",
+                         Not read by 'rename' or 'remove'. Alias: `content` \
+                         (edit_markdown's name for the same argument) is accepted.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
                 },
@@ -146,7 +175,19 @@ impl Tool for EditCode {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         guard_worktree_write(ctx).await?;
-        let name_path = require_str_param(&input, "symbol")?;
+        // `name_path` is an accepted alias: `symbols` — the tool Iron Law 1 sends you
+        // to first — calls this same address `name_path`, so the value gets copied
+        // straight from that call into this one. Refusing the sibling's spelling made
+        // the prescribed find-then-edit handoff cost a round-trip.
+        // docs/issues/2026-08-17-symbol-addressing-and-replacement-params-differ-across-sibling-edit-tools.md
+        let name_path = crate::tools::require_str_param_or_hint(
+            &input,
+            "symbol",
+            &["name_path"],
+            "Name the symbol, e.g. symbol=\"MyStruct/my_method\" for a method or \
+             symbol=\"my_fn\" for a free function. `name_path` is accepted as an alias \
+             (that is symbols()' name for the same address).",
+        )?;
         let rel_path = require_path_param(&input)?;
         // `action` indexes a different enum per tool, so the shared table has no entry.
         // The per-action requirements themselves are Class A, already in the schema
@@ -178,8 +219,14 @@ impl Tool for EditCode {
             }
             "remove" => self.do_remove(ctx, name_path, rel_path, at_line).await,
             "replace" => {
-                let Some(body) = input["body"].as_str() else {
-                    return Err(RecoverableError::new("action 'replace' requires 'body'").into());
+                let Some(body) = body_param(&input) else {
+                    // Message text held stable — usage.db classifies error families by
+                    // this string. The recovery goes in the hint.
+                    return Err(RecoverableError::with_hint(
+                        "action 'replace' requires 'body'".to_string(),
+                        BODY_PARAM_HINT.to_string(),
+                    )
+                    .into());
                 };
                 // Optional `attributes: Vec<String>` — when present (even if
                 // empty) it overrides the body-leads-with-decorator heuristic
@@ -226,8 +273,12 @@ impl Tool for EditCode {
                 Ok(result)
             }
             "insert" => {
-                let Some(body) = input["body"].as_str() else {
-                    return Err(RecoverableError::new("action 'insert' requires 'body'").into());
+                let Some(body) = body_param(&input) else {
+                    return Err(RecoverableError::with_hint(
+                        "action 'insert' requires 'body'".to_string(),
+                        BODY_PARAM_HINT.to_string(),
+                    )
+                    .into());
                 };
                 let position = input["position"].as_str().unwrap_or("after");
                 self.do_insert(ctx, name_path, rel_path, body, position, at_line)

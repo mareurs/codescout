@@ -405,6 +405,61 @@ fn subsection_guard_error(
     )
 }
 
+/// Resolve `action="edit"`'s replacement text, requiring the key to be **present**.
+///
+/// This used to be `edit["new_string"].as_str().unwrap_or("")` at three independent
+/// sites, so omitting the key deleted every match of `old_string` and reported
+/// success. The natural way to omit it is to pass `content` — the correct key for
+/// `replace` / `insert_*`, declared in the same schema, and simply unread by this
+/// action — which turned a one-word slip into silent data loss. The mirror mistake
+/// (`replace` without `content`) was already refused *with a pointer to this
+/// action*; only this direction fell through, and it fell into the destructive
+/// branch.
+///
+/// Deleting via `edit` stays supported — pass `new_string: ""`. That explicit empty
+/// string is the difference between asking for a deletion and forgetting the
+/// replacement, which is precisely what the old default could not distinguish.
+///
+/// `prefix` locates the entry for batch callers (`"edits[3]: "`,
+/// `"body_edits[0]: "`) and is empty for the single-edit path.
+///
+/// See `docs/issues/2026-08-17-edit-markdown-edit-action-deletes-when-new-string-is-omitted.md`.
+pub(crate) fn require_new_string<'a>(edit: &'a Value, prefix: &str) -> Result<&'a str> {
+    let has_content = edit.get("content").is_some();
+
+    if let Some(s) = edit.get("new_string").and_then(|v| v.as_str()) {
+        // Both keys present: the caller is describing two different actions at
+        // once. Ignoring one silently is how the original defect stayed invisible.
+        if has_content {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "{prefix}action=\"edit\" was given both new_string and content, \
+                     and content is not read by this action"
+                ),
+                "content belongs to 'replace' / 'insert_before' / 'insert_after'. \
+                 Drop content to keep the scoped swap, or change the action.",
+            )
+            .into());
+        }
+        return Ok(s);
+    }
+
+    let hint = if has_content {
+        "Rename content to new_string — 'edit' performs a scoped old_string -> \
+         new_string swap and never reads content (that key belongs to 'replace' / \
+         'insert_before' / 'insert_after'). To DELETE the matched text, pass \
+         new_string=\"\" explicitly."
+    } else {
+        "Pass the replacement for old_string, e.g. new_string=\"let x = 2;\". \
+         To DELETE the matched text, pass new_string=\"\" explicitly."
+    };
+    Err(RecoverableError::with_hint(
+        format!("{prefix}new_string is required for action=\"edit\""),
+        hint,
+    )
+    .into())
+}
+
 // No longer called from production code as of Task 4 (perform_scoped_edit now
 // delegates to plan_scoped_edit + apply_planned_edits); still exercised by
 // #[cfg(test)] tests. Unused for now -- a later task strips this allow.
@@ -597,7 +652,7 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
             let old_string = edit["old_string"].as_str().ok_or_else(|| {
                 anyhow::anyhow!("edits[{}]: old_string is required for action='edit'", i)
             })?;
-            let new_string = edit["new_string"].as_str().unwrap_or("");
+            let new_string = require_new_string(edit, &format!("edits[{i}]: "))?;
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             plan_scoped_edit(
                 snapshot,
@@ -1280,7 +1335,7 @@ impl Tool for EditMarkdown {
 
             new_content = if action == "edit" {
                 let old_string = crate::tools::require_str_param(&input, "old_string")?;
-                let new_string = input["new_string"].as_str().unwrap_or("");
+                let new_string = require_new_string(&input, "")?;
                 let replace_all_val = parse_bool_param(&input["replace_all"]);
                 perform_scoped_edit(
                     &new_content,

@@ -1,7 +1,7 @@
 ---
 id: a52dc618df71d995
 kind: bug
-status: open
+status: fixed
 title: 'BUG: edit_markdown action="edit" defaults a missing new_string to empty, so a content/new_string mix-up silently DELETES the matched text — 5 bad edits across 4 files in one session, 3 of them committed'
 ---
 
@@ -60,19 +60,29 @@ single-edit path and the `edits[]` batch path.
 
 ## Root cause
 
-Two sites default the replacement to the empty string instead of requiring it:
+**Correction (2026-08-17, at implementation time): there are THREE read sites, not
+two.** The original entry below enumerated two, from a grep scoped to
+`edit_markdown.rs`. The third lives in a different file and is a separate
+implementation rather than a wrapper:
 
-- `src/tools/markdown/edit_markdown.rs:1283` (single-edit path) —
-  `let new_string = input["new_string"].as_str().unwrap_or("");`
-- `src/tools/markdown/edit_markdown.rs:600` (batch path) —
-  `let new_string = edit["new_string"].as_str().unwrap_or("");`
+| Site | Path |
+|---|---|
+| single-edit | `src/tools/markdown/edit_markdown.rs:1283` |
+| batch (`edits[]`) | `src/tools/markdown/edit_markdown.rs:600` |
+| **`body_edits[]`** | **`src/librarian/tools/update.rs:224`** — `apply_body_edits` |
+
+All three read `edit["new_string"].as_str().unwrap_or("")`. The third is the worst
+of them: it is the `artifact(update, patch={body_edits: […]})` path, so it edits
+trackers and bug files — the artifacts least likely to have their content asserted
+by any test. A search scoped to the tool that *names* the parameter finds two of
+three; the population was only visible from a repo-wide grep for the expression.
 
 `""` is then a legitimate replacement all the way down `plan_scoped_edit`, so a
-deletion is indistinguishable from an intended one. Deleting via `edit` IS a
-real use case, which is why the default looks harmless in isolation.
+deletion is indistinguishable from an intended one. Deleting via `edit` IS a real
+use case, which is why the default looks harmless in isolation.
 
 What makes it a defect rather than a sharp edge is the **asymmetry** with the
-sibling action, at `edit_markdown.rs:98`:
+sibling action. `edit_markdown.rs:98`:
 
 ```rust
 .ok_or_else(|| anyhow::anyhow!("content is required for the 'replace' action \
@@ -80,18 +90,17 @@ sibling action, at `edit_markdown.rs:98`:
   action='edit' with old_string + new_string"))?;
 ```
 
-So `replace` without `content` is refused *with a pointer to `edit`'s shape*, and
-`old_string` missing is refused too (verified — the error is
-`missing 'old_string' parameter`). The authors clearly considered the pairing.
-Only `edit` without `new_string` falls through, and it falls through into the
-destructive branch.
+and `update.rs:218-221` carries the same guard for its own path. So `replace`
+without `content` is refused *with a pointer to `edit`'s shape*, and `old_string`
+missing is refused too. The authors clearly considered the pairing at every site.
+Only `edit` without `new_string` fell through, at all three, into the destructive
+branch.
 
-`content` is not rejected either: it is a declared key used by `replace` /
-`insert_*`, so passing it to `edit` is schema-valid and silently ignored. The
-call is therefore well-formed by every check the tool applies.
+`content` was not rejected either: it is a declared key used by `replace` /
+`insert_*`, so passing it to `edit` was schema-valid and silently ignored. The call
+was therefore well-formed by every check the tool applied.
 
 Measured 2026-08-17: 5 calls, 4 files, 3 committed before detection (see Evidence).
-
 ## Evidence
 
 ### The blast radius in one session
@@ -146,44 +155,71 @@ churn. It repaired `CLAUDE.md` only; `conventions.md` stayed broken.
 
 ## Fix
 
-Not implemented. The fix is small and the choice is about which of two rules to
-apply:
+Implemented — both directions from the original plan, plus the third site.
 
-1. **Require `new_string` for `action="edit"`.** Mirrors `edit_markdown.rs:98`
-   exactly, including the cross-pointer in the message. Deleting text then needs
-   an explicit `new_string=""`, which is the honest way to ask for a deletion.
-   This is the recommended direction: it makes the destructive path opt-in and
-   costs one line at each of the two sites.
-2. **Reject keys the action does not use.** Passing `content` to `action="edit"`
-   (or `new_string` to `replace`) is always a mistake about which action is
-   running. Rejecting it catches this class rather than this instance, and would
-   also have caught it in the `edits[]` batch path.
+One shared helper, `edit_markdown::require_new_string(edit, prefix)`
+(`src/tools/markdown/edit_markdown.rs`), now serves all three call sites:
 
-They compose, and doing both is still small. Direction 1 alone leaves
-`content`-to-`edit` silently ignored; direction 2 alone permits a bare
-`action="edit"` + `old_string` deletion with no replacement key at all.
+- **Requires the key to be present**, rather than defaulting to `""`. Presence, not
+  emptiness, is the test — so `new_string: ""` still deletes, and deliberate
+  deletion stays reachable. That explicit empty string is exactly the distinction
+  the old default could not make.
+- **Names the wrong key when it sees it.** If `content` is present instead, the
+  refusal says so and tells the caller to rename it, rather than emitting a generic
+  missing-parameter error that invites re-sending `content`.
+- **Refuses `new_string` and `content` together.** Both present means the caller is
+  describing two different actions at once; silently picking one is how the original
+  defect stayed invisible.
+- `prefix` locates the entry per path — `""`, `"edits[3]: "`, `"body_edits[0]: "` —
+  so the batch paths keep their own addressing rather than borrowing each other's.
 
-Independently: **the response should report what changed.** Every one of these
-five calls would have been caught immediately by a `bytes_before`/`bytes_after`
-or `replacements: N` field in the `ok` envelope. `artifact(update)` already
-emits `prev_bytes`/`new_bytes` on its `field_patch` event for exactly this
-reason; `edit_markdown` returns `{"status": "ok"}` and a hint about unread
-sections.
+Modelled on `subsection_guard_error`'s shape (`RecoverableError::with_hint` plus an
+optional batch index), so it reads like the guards already in that file.
 
+Deliberately **not** done: the envelope change. `edit_markdown` still returns
+`{"status": "ok"}` with no `replacements` count or byte delta, and every one of the
+five bad calls would also have been caught by that. It is a wider fix covering the
+whole silent-no-op/over-op class rather than this key, so it belongs in its own
+change — see § Resume.
+
+Fix SHA: this commit, on `experiments`. `master` is a strict ancestor at fix time,
+so the promotion path is fast-forward and this SHA is already the master SHA.
 ## Tests added
 
-None yet. Three are needed, and the third is the one that matters:
+Seven, and the split across files is the point: three independent read sites need
+three independent guards, or a revert at one site passes on the strength of the
+others' coverage.
+
+`src/tools/markdown/tests.rs`:
 
 | Test | Mutation it catches |
 |---|---|
-| `edit_action_requires_new_string` | restoring `.unwrap_or("")` at the single-edit site |
-| `batch_edit_action_requires_new_string` | the same at `plan_batch` — the batch path is a separate read site and would otherwise keep the hole |
-| `edit_action_rejects_content_key` | re-admitting the wrong-action key that made the slip silent |
+| `edit_action_with_content_instead_of_new_string_is_refused_and_changes_nothing` | the single-edit site reverting to `unwrap_or("")` |
+| `edit_action_without_any_replacement_key_is_refused` | narrowing the guard to only the wrong-key case |
+| `edit_action_with_explicit_empty_new_string_still_deletes` | over-tightening into requiring a non-empty replacement, which would remove a real capability |
+| `edit_action_rejects_both_new_string_and_content` | re-admitting the ambiguous pair |
+| `batch_edit_action_requires_new_string` | the `edits[]` site specifically — a second read site with its own copy of the default |
 
-A test asserting `new_string=""` still deletes should accompany them, so the
-deliberate-deletion use case is pinned as intentional rather than left to be
-re-discovered as a regression.
+`src/librarian/tools/update.rs`:
 
+| Test | Mutation it catches |
+|---|---|
+| `body_edits_edit_action_with_content_is_refused_and_changes_nothing` | the `apply_body_edits` site, and that its error uses `body_edits[0]` rather than `edits[0]` |
+| `body_edits_edit_action_with_explicit_empty_new_string_still_deletes` | deliberate deletion through the artifact path |
+
+The load-bearing assertion in the file-based tests is not that the call is refused —
+it is that **the file is byte-identical afterwards**. Refusing is the mechanism;
+leaving the text alone is the property that was violated.
+
+**Mutation-verified.** Reverting `update.rs`'s call site alone to
+`edit["new_string"].as_str().unwrap_or("")` turns
+`body_edits_edit_action_with_content_is_refused_and_changes_nothing` red, and the
+failure prints the defect verbatim: the call **succeeded** and returned
+`"## Foo\n"` — the sentence gone. Its sibling deliberate-deletion test stayed green
+through the mutation, confirming the two assert different things.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test` 4017 passed / 0 failed / 45 ignored.
 ## Workarounds
 
 Use `new_string` for `action="edit"` and `content` for `action="replace"` /
@@ -193,13 +229,16 @@ about the change, **read back any section edited via `action="edit"`** —
 
 ## Resume
 
-Implement direction 1 + 2 at `src/tools/markdown/edit_markdown.rs:1283` and
-`:600`, modelling the error text on the existing `:98` message so both
-directions of the mix-up point at the other action. Add the four tests under
-**Tests added**. Then consider the envelope change (`replacements` count or
-byte delta) as a separate, wider fix — it covers the whole class of silent
-no-op/over-op edits, not just this key.
+N/A for this defect — all three sites are guarded and mutation-verified.
 
+One deliberate follow-up, worth its own bug file rather than reopening this one:
+**`edit_markdown` reports nothing about what it changed.** The success envelope is
+`{"status": "ok"}` plus a hint about unread sections. `artifact(update)` already
+emits `prev_bytes` / `new_bytes` on its `field_patch` event for exactly this reason.
+A `replacements: N` count or a byte delta would have caught all five bad calls in
+this incident independently of the key check, and would cover the wider class —
+edits that matched nothing, or matched more than intended — which no guard on
+parameter names can reach.
 ## References
 
 - `src/tools/markdown/edit_markdown.rs:1283` — single-edit read site
@@ -207,4 +246,3 @@ no-op/over-op edits, not just this key.
 - `src/tools/markdown/edit_markdown.rs:98` — the guard that exists for the mirror case
 - `179c48a7`, `a8fdf055`, `9cdb2f50` — the commits carrying and repairing the damage
 - `docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md` — the bug being fixed when this one surfaced
-
