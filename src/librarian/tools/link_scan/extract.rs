@@ -37,7 +37,7 @@ impl CitationKind {
     /// stability promise, so using it as an API meant a variant rename silently changed
     /// the output — the failure mode is a consumer's filter quietly matching nothing,
     /// which is the same shape as the `raw`/`token` split this accompanies
-    /// (`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`).
+    /// (`docs/issues/archive/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`).
     ///
     /// The strings are deliberately IDENTICAL to what `Debug` produced, so this is a
     /// fragility fix and not an output change — pinned by

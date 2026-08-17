@@ -63,7 +63,7 @@ struct Args {
 ///
 /// So the fix is a constructor rather than a rename: a rename leaves three literals free
 /// to diverge again, and the module had no tests to notice
-/// (`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`).
+/// (`docs/issues/archive/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`).
 fn finding(src_id: &str, c: &extract::Citation, extra: Value) -> Value {
     let mut out = json!({
         "src_id": src_id,
@@ -320,7 +320,7 @@ mod tests {
     /// which is why the fix is a single constructor rather than a rename — a rename
     /// leaves three literals free to diverge again.
     ///
-    /// docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md
+    /// docs/issues/archive/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md
     #[test]
     fn every_finding_array_names_the_cited_text_the_same_way() {
         let c = cite("F-3");

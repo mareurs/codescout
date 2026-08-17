@@ -853,7 +853,7 @@ inputs are now reported, and the mark-alone case is named in words. The relation
 entry assumed — `frontmatter_max > body_max` — turned out not to isolate compaction, since
 it also holds right after any ordinary reservation; the shipped condition is the mark
 leading both other inputs) and
-`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`
+`docs/issues/archive/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`
 (a resolvability query across both finding arrays silently answers half — relevant to
 HY-9's proposed D12, which consumes exactly those arrays).
 
@@ -988,7 +988,7 @@ cannot reach it: `link_scan` names the cited token `raw` in `dangling[]` and `to
 against a guessed `ok` printed resolved refs as problems. Both mistakes were made on
 2026-08-17, hours apart, by the same agent. Those need code or docs changed, and the first
 is filed as
-`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`.
+`docs/issues/archive/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`.
 Naming the split here so the two halves are not conflated: **this entry standardizes what
 agents write; that issue standardizes what tools return.**
 
