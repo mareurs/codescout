@@ -736,8 +736,10 @@ pub fn allocate_entry_id(
         return Err(RecoverableError::with_hint(
             format!("allocate_entry_id: artifact `{artifact_id}` has no augmentation"),
             "A ledger must be declared before ids can be allocated against it. Attach one with \
-             artifact_augment(id=…, merge=true, prompt=…) — no entry_collection is required for \
-             a prose ledger."
+             artifact_augment(id=…, prompt=…), which CREATES the augmentation — do not pass \
+             merge=true here, it requires an augmentation to already exist and answers \
+             'call artifact_augment first', which is a loop. No entry_collection is needed \
+             for a prose ledger."
                 .to_string(),
         ));
     };
@@ -2015,9 +2017,28 @@ mod tests {
         let mut cat = Catalog::open_in_memory().unwrap();
         art_upsert(&cat, &sample_art("art1")).unwrap();
         let err = allocate_entry_id(&mut cat, "art1", "R").unwrap_err();
+        let text = err.to_string();
         assert!(
-            err.to_string().contains("no augmentation"),
-            "expected a declare-the-ledger error, got: {err}"
+            text.contains("no augmentation"),
+            "expected a declare-the-ledger error, got: {text}"
+        );
+        // A hint that names an impossible call is worse than no hint. The first
+        // draft said `artifact_augment(id=…, merge=true, prompt=…)`, which refuses
+        // with "call artifact_augment first" exactly when no augmentation exists —
+        // the state this error reports. Verified against the live tool.
+        //
+        // Assert on the PRESCRIPTION, not the keyword: the corrected hint mentions
+        // merge=true in order to warn against it, so a bare `!contains("merge=true")`
+        // fails on the fixed text. That is the same trap as counting `grep 'Status:'`
+        // hits in prose about Status — and the first draft of this assertion fell
+        // into it.
+        assert!(
+            text.contains("artifact_augment(id=…, prompt=…)"),
+            "the hint must name a call that works from THIS state: {text}"
+        );
+        assert!(
+            !text.contains("merge=true, prompt"),
+            "the hint must not PRESCRIBE merge=true — it loops: {text}"
         );
     }
 

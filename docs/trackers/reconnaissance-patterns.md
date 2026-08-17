@@ -292,6 +292,7 @@ be treated as findings, not as a summary to re-derive.
 | R-94 | 2026-08-16 | hit ×1, miss ×2 (self-caught) | A wiring inventory is not a delivery inventory, and it is wrong in both directions | BL-25 (guide topics nothing triggers) |
 | R-95 | 2026-08-16 | hit ×5 → rule | A deferral rationale is a claim, and it is the least-audited kind | BL-11 / BL-12 / BL-16 worktree cluster |
 | R-97 | 2026-08-16 | miss (self-caught) → rule | **A classifier you just wrote has been calibrated on exactly one case: the one that made you write it.** Shipped `snapshot_drift` with the gate "body line-anchors ≥1 `PREFIX-N`", fitted to the tracker that motivated the bug; the SECOND real tracker was a false positive (params-canonical by design, 14 of 68 ids mentioned incidentally). The population was enumerable all along and is bimodal with no overlap — 100% contiguous-prefix (11 in sync) / 61% prefix (the real lag) / 21% scattered (the false positive) — so the discriminator was one script away. Same day, same shape, second instance: the audit itself reported "3 of 28 drifted" in a codescout conversation when the 28 spanned seven repos and one finding was another project's. Rule: run a new classifier over the whole enumerable corpus and read the distribution; the motivating case is the worst validation set, being the one it was fitted to. | BL-29; `0dbfd0ee`, `af2508b4`. Kin R-96 (same law, applied to tests rather than results), R-92, R-95, R-90 |
+| R-100 | 2026-08-17 | miss ×2 (self-caught) → rule | A pinned test's rationale is the cheapest refutation of your own bug — read a guard's tests **by name** before filing that it misses a case | librarian-guard bug filed then retracted same day; `bb9a94d7` reverts the stamp it caused. Kin R-92, R-95, R-97 |
 | R-99 | 2026-08-16 | hit | Three unrelated-looking ledger defects had one root cause — the entry template named one field of four and mentioned the index row as an aside. A convention documented anywhere but the thing authors copy is not a convention | 13 orphaned bodies + 39 missing dispositions + 9 duplicate ids, all in this file; fix is the template rewrite. Kin R-94, R-97, R-98 |
 | R-98 | 2026-08-16 | miss (self-caught) → rule | An id read from a scan is stale the moment a peer session writes — re-check at the point of allocation, and against the working tree, not `HEAD` | near-miss on collision #10; `a1ac0317` (sweep) vs `2f94ce40` (peer's R-97 — originally cited as `c60242ac`, orphaned by their amend). Kin R-90, R-94, R-97 |
 | R-96 | 2026-08-16 | miss (self-caught) → rule | Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason | GF-1 / GF-2, `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` |
@@ -2767,36 +2768,101 @@ template), R-94 (a declaration inventory and a delivery inventory diverge), R-97
 rule validated only against the case that motivated it — here, a template validated
 against no case at all).
 
+## R-100 — A pinned test's rationale is the cheapest refutation of your own bug
+
+**Verdict:** miss ×2 (self-caught, one of them after acting) → rule · **Observed:**
+2026-08-17, filing and then retracting the librarian-guard bug.
+
+**Seam:** any claim that a guard, gate or validator "misses" a case.
+
+**What happened.** Measured that 26 of 66 tracker and bug files carry no frontmatter
+`id:` and are therefore invisible to `is_librarian_artifact`. Filed it as a bug, ranked
+three fix options, recommended widening the predicate to `kind: tracker` — and, before
+testing that recommendation, stamped `id:` into the two ledgers I cared about most.
+
+**The refutation was one symbol away.** `src/util/librarian_guard.rs` carries a test
+named `a_catalogued_but_unaugmented_file_stays_directly_editable`, whose doc comment
+states the design outright: guarding by catalog *membership* would refuse
+`docs/RELEASE.md`, `CONTRIBUTING.md` and every ADR, so the predicate is **augmentation**.
+It then names `docs/trackers/skill-frictions.md` as the example that must stay editable —
+a file I had cited in the bug's own Evidence section as proof of the gap.
+
+**What not reading it cost.** The stamp silently disabled `docs/TAXONOMY.md`'s documented
+`edit_markdown` append path for R-N, this repo's most active ledger. Nothing caught it:
+no test covers "the documented call still works". It surfaced only because I probed that
+call directly, after the fact.
+
+**Why the test was the right place to look, and why I skipped it.** A guard's *intended*
+scope lives in the tests that pin its boundaries, not in the function body — the body
+shows what it does, the test shows what it is meant **not** to do. And the miss was not
+for want of proximity: `symbols(path=…)` printed that test's name in the very output I
+used to read the predicate. The name alone contradicted my bug. I read the implementation
+and skipped its neighbours.
+
+**The rule.** Before filing "X misses case Y", enumerate X's tests **by name** and look
+for one that pins Y as deliberate. A test whose name is a sentence about behaviour is a
+design decision under version control. If such a test exists, the finding is not a bug —
+it is a proposal to change policy, which is a different document with a different burden
+of proof. (That reframing is what produced the better answer here: neither predicate
+matches the damage, because every defect measured was entry structure in an *unaugmented*
+file, and the missing concept is a ledger.)
+
+**Second instance, same session, weaker form.** The corrected error hint I then wrote
+prescribed `artifact_augment(id=…, merge=true, prompt=…)` for an artifact with no
+augmentation — which refuses with "call artifact_augment first". A remedy that cannot run
+from the state it describes. Caught by running it against the live tool rather than
+re-reading it. Its regression test then fell into the *keyword* trap while guarding
+against the *prescription* one, which is a third instance of law B in a single day.
+
+**Promote-when:** a second instance of a filed defect refuted by its own subject's test
+names → promote to the reconnaissance SKILL.md as a Phase-1 scout step: for any
+gate/guard/validator claim, enumerate the tests before writing the finding.
+
+**Status:** open — two datapoints in one session, both self-caught, one only after acting.
+The expensive half (acting before checking) is remediated: `bb9a94d7` reverted the stamp
+and restored the documented path.
+
+**Kin:** R-97 (a rule validated only against the case that motivated it), R-95 (a
+rationale nobody re-audits — here the rationale was sound and simply unread), R-92 (a
+filed root cause is a hypothesis), R-99 (the convention lives where authors look), and
+law G (the answer may already be on record).
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
 
-  1. ALLOCATE THE ID LAST, counting BOTH entry formats — this ledger has two
-     (`## R-N` bodies and self-contained `| R-N |` index rows):
+  1. GET THE ID FROM THE SERVER — do not compute it:
 
-       { grep -o '^## R-[0-9]*' <file>; grep -o '^| R-[0-9]*' <file>; } \
-         | grep -o '[0-9]*$' | sort -n | tail -1
+       artifact(action="append_entry", id="5696563f06b2c222", id_prefix="R")
 
-     Re-run it in the SAME BREATH as the write, not at the start of the pass. A
-     peer session in the same checkout can take the id in between (R-98), and a
-     check against `HEAD` reports it free while it already exists in the working
-     tree. Allocating from a stale max is how the first nine collisions happened
-     — see the id-suffix note under `## Index`.
+     No `entry_collection`: this is a prose ledger, so the call reserves the next
+     id under a transaction and writes nothing. The manual both-formats scan this
+     step used to prescribe is obsolete — and it WAS the race. A max read at the
+     start of a pass is stale by the time you write (R-98: a peer took R-97 with a
+     four-minute margin), and allocating from a stale max is how the first nine
+     collisions happened. Never suffix an id either: `R-72b` is not a valid entry
+     token at all, since digit→letter is not a word boundary.
 
-  2. WRITE THE BODY:
+  2. WRITE THE SECTION. `edit_markdown` is refused here — the ledger is augmented —
+     so use:
 
-       edit_markdown(action="insert_before",
-                     heading="## Template for new entries",
-                     content="## R-N — title\n\n"
-                             "**Verdict:** hit | miss [×N] → rule · "
-                             "**Observed:** YYYY-MM-DD, <context>\n\n"
-                             "**Seam:** <what was unverified>\n\n"
-                             "<narrative>\n\n"
-                             "**Promote-when:** <falsifiable criterion>\n\n"
-                             "**Status:** open — <N datapoints>\n\n"
-                             "**Kin:** R-x, R-y\n")
+       artifact(action="update", id="5696563f06b2c222", patch={body_edits: [
+         {heading: "## Template for new entries", action: "insert_before",
+          content: "## R-N — title\n\n"
+                   "**Verdict:** hit | miss [×N] → rule · "
+                   "**Observed:** YYYY-MM-DD, <context>\n\n"
+                   "**Seam:** <what was unverified>\n\n"
+                   "<narrative>\n\n"
+                   "**Promote-when:** <falsifiable criterion>\n\n"
+                   "**Status:** open — <N datapoints>\n\n"
+                   "**Kin:** R-x, R-y\n"}]})
 
-  3. ADD THE INDEX ROW — five columns, matching the header:
+     The heading must be `## R-N — <title>` exactly. `link_scan`'s `def_re` is
+     `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so `## R-100` alone defines NOTHING and
+     every citation of it dangles. A first cut of the 2026-08-17 archive migration
+     used bare headings and pushed the project's dangling count UP, 720 → 761.
+
+  3. ADD THE INDEX ROW in the same call — five columns, matching the header:
 
        | R-N | YYYY-MM-DD | verdict | pattern | evidence |
 
@@ -2816,10 +2882,12 @@ against no case at all).
   WHEN A CRITERION FIRES, UPDATE THE STATUS LINE. Recording a firing only in
   prose leaves it invisible to every field-presence sweep — that is exactly how
   R-89, R-90 and R-91 sat fully adjudicated and uncounted. And note the trap that
-  cost two probes on 2026-08-16: detect these fields by STRUCTURAL anchor
-  (line-start, key prefix), never by keyword. Prose and field share a vocabulary
-  by construction, so `grep -c 'Status:'` also counts sentences *about* Status,
-  and `/fired/` matches "the tell that should have fired".
+  cost three probes across 2026-08-16/17: detect these fields by STRUCTURAL
+  anchor (line-start, key prefix), never by keyword. Prose and field share a
+  vocabulary by construction, so `grep -c 'Status:'` also counts sentences *about*
+  Status, `/fired/` matches "the tell that should have fired", and a test
+  asserting a hint does not say `merge=true` fails on the hint that warns against
+  it.
 
   Why this block carries all of it: R-99. A convention documented anywhere other
   than the thing authors copy is not a convention. -->
