@@ -2,11 +2,11 @@
 kind: tracker
 status: active
 title: Reconnaissance patterns
-owners: []
 tags:
-  - reconnaissance
-  - skill-meta
-  - scout
+- reconnaissance
+- skill-meta
+- scout
+entry_prefix: R
 ---
 
 # Reconnaissance patterns

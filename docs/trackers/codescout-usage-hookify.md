@@ -2,11 +2,11 @@
 kind: tracker
 status: active
 title: Codescout Usage Hookify Candidates — H-N Log
-owners: []
 tags:
-  - pika
-  - hookify
-  - promotion-candidates
+- pika
+- hookify
+- promotion-candidates
+entry_prefix: H
 ---
 
 # Codescout Usage Hookify Candidates — H-N Log

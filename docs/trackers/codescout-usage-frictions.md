@@ -2,11 +2,11 @@
 kind: tracker
 status: active
 title: Codescout Usage Frictions — U-N Log
-owners: []
 tags:
-  - pika
-  - iron-law
-  - usage
+- pika
+- iron-law
+- usage
+entry_prefix: U
 ---
 
 # Codescout Usage Frictions — U-N Log

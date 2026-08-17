@@ -369,7 +369,10 @@ mod tests {
                 params_schema: None,
                 append_mode: false,
                 history_cap: None,
-                // The declaration under test.
+                // Left in place deliberately: the allocator no longer consults the
+                // augmentation at all — the declaration is `entry_prefix` in
+                // frontmatter — so an augmentation being present must not change
+                // the outcome. This fixture is the control for that.
                 entry_collection: None,
                 refreshed_at_commit: None,
             },
@@ -381,7 +384,8 @@ mod tests {
     async fn omitting_entry_collection_reserves_an_id_and_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("ledger.md");
-        let original = "# Ledger\n\n## R-41 — an entry\n";
+        let original =
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n# Ledger\n\n## R-41 — an entry\n";
         std::fs::write(&md, original).unwrap();
 
         let ctx = mk_ctx();
@@ -421,7 +425,7 @@ mod tests {
     async fn a_prose_ledger_refuses_entry_fields_it_would_silently_drop() {
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("ledger.md");
-        std::fs::write(&md, "## R-1 — x\n").unwrap();
+        std::fs::write(&md, "---\nentry_prefix: R\n---\n\n## R-1 — x\n").unwrap();
         let ctx = mk_ctx();
         seed_prose(&ctx, "art1", &md);
 
@@ -442,7 +446,7 @@ mod tests {
     async fn a_prose_ledger_refuses_cites() {
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("ledger.md");
-        std::fs::write(&md, "## R-1 — x\n").unwrap();
+        std::fs::write(&md, "---\nentry_prefix: R\n---\n\n## R-1 — x\n").unwrap();
         let ctx = mk_ctx();
         seed_prose(&ctx, "art1", &md);
 

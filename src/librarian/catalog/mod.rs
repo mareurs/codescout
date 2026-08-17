@@ -217,6 +217,21 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
     if !column_exists(conn, "artifact", "missing_since")? {
         conn.execute("ALTER TABLE artifact ADD COLUMN missing_since INTEGER", [])?;
     }
+    // Entry-id reservations for ledgers. DELIBERATELY separate from
+    // `artifact_augmentation`: a ledger's identity (`entry_prefix` in frontmatter)
+    // is committed and portable, while a reservation is transient, local, and
+    // re-derivable from the committed body — so binding the two would make a
+    // portable declaration depend on a machine-local row. See HY-10.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS entry_reservation (
+           artifact_id   TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+           prefix        TEXT NOT NULL,
+           max_allocated INTEGER NOT NULL,
+           updated_at    TEXT NOT NULL,
+           PRIMARY KEY (artifact_id, prefix)
+         )",
+        [],
+    )?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS catalog_meta (
            key   TEXT PRIMARY KEY,

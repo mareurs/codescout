@@ -673,11 +673,6 @@ pub fn append_entry(
     })
 }
 
-/// Reserved `params` key holding per-prefix allocation high-water marks for
-/// **prose ledgers** — trackers whose entries live in the markdown body rather
-/// than in a params collection.
-const ALLOCATION_KEY: &str = "__allocated";
-
 /// What a prose-ledger allocation assigned, and what it was derived from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllocateOutcome {
@@ -691,29 +686,42 @@ pub struct AllocateOutcome {
     pub reserved_max: Option<u64>,
 }
 
-/// Allocate the next `<id_prefix>-N` for a **prose ledger**: an artifact whose
-/// entries live as `## PREFIX-N` body sections and/or `| PREFIX-N |` index rows
-/// rather than in a params array.
+/// Frontmatter key by which an artifact declares itself a ledger owning an id
+/// namespace. Lives in **frontmatter**, not in the augmentation, because a
+/// ledger's identity has to travel with the repo: the catalog is machine-local
+/// and git-ignored, so an augmentation-based declaration is absent in a fresh
+/// clone (HY-10).
+pub const ENTRY_PREFIX_KEY: &str = "entry_prefix";
+
+/// Allocate the next `<id_prefix>-N` for a **ledger**: an artifact that declares
+/// `entry_prefix: <PREFIX>` in its frontmatter and keeps entries as
+/// `## PREFIX-N` body sections and/or `| PREFIX-N |` index rows.
 ///
-/// This is the allocator's second caller. The split is the point: id *identity*
-/// is a ledger-wide concern, while pushing a row into `params.<entry_collection>`
-/// is one particular storage choice. Nine of the ten numeric prefixes in
-/// `docs/TAXONOMY.md` keep entries in prose, so gating identity on params left
-/// them allocating by hand — which is how the R-N ledger came to reuse nine ids
-/// for unrelated lessons
-/// (`docs/issues/2026-08-16-reconnaissance-ledger-reuses-ten-ids-for-different-lessons.md`).
+/// This is the allocator's second caller, alongside `append_entry`. The split is
+/// the point: id *identity* is a ledger-wide concern, while pushing a row into
+/// `params.<entry_collection>` is one particular storage choice. Nine of the ten
+/// numeric prefixes in `docs/TAXONOMY.md` keep entries in prose, so gating
+/// identity on params left them allocating by hand — which is how the R-N ledger
+/// came to reuse nine ids for unrelated lessons.
 ///
-/// **Why this is race-free even though it does not write the entry.** The
-/// allocation is *recorded* inside the same `IMMEDIATE` transaction that reads
-/// the maximum, so a concurrent caller observes it and receives N+1. Handing
-/// back an id without recording it would only move the race — that is precisely
-/// the defect in a bare "next free index" lookup, measured 2026-08-17 with a
-/// four-minute margin between two sessions computing the same `R-97` (R-98).
-/// Because the reservation is durable, the body write may safely follow in a
-/// separate call, which keeps entry prose unconstrained by any server-side
-/// template.
+/// **Declaration and reservation live in different places, on purpose.** The
+/// declaration is `entry_prefix` in committed frontmatter, so a fresh clone knows
+/// what the ledger is. The reservation high-water mark is a row in
+/// `entry_reservation`, which is machine-local — and that is safe precisely
+/// because it is re-derivable: the allocator reads the committed body every time,
+/// so losing the table costs at most a re-issue of an id whose entry was never
+/// written.
 ///
-/// A reserved-but-never-written id is a deliberate, harmless leak: integers are
+/// **Why this is race-free without writing the entry.** The reservation is
+/// recorded inside the same `IMMEDIATE` transaction that reads the maximum, so a
+/// concurrent caller observes it and receives N+1. Handing back an id without
+/// recording it would only move the race — that is the defect in a bare "next
+/// free index" lookup, measured 2026-08-17 with a four-minute margin between two
+/// sessions computing the same `R-97` (R-98). Because the reservation is durable,
+/// the body write may safely follow in a separate call, which keeps entry prose
+/// unconstrained by any server-side template.
+///
+/// A reserved-but-never-written id leaks an integer. Deliberate: integers are
 /// cheap, and every ledger convention in this repo already forbids reuse.
 pub fn allocate_entry_id(
     cat: &mut Catalog,
@@ -724,31 +732,6 @@ pub fn allocate_entry_id(
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-    let params_text: Option<String> = tx
-        .query_row(
-            "SELECT params FROM artifact_augmentation WHERE artifact_id = ?1",
-            [artifact_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-
-    let Some(params_text) = params_text else {
-        return Err(RecoverableError::with_hint(
-            format!("allocate_entry_id: artifact `{artifact_id}` has no augmentation"),
-            "A ledger must be declared before ids can be allocated against it. Attach one with \
-             artifact_augment(id=…, prompt=…), which CREATES the augmentation — do not pass \
-             merge=true here, it requires an augmentation to already exist and answers \
-             'call artifact_augment first', which is a loop. No entry_collection is needed \
-             for a prose ledger."
-                .to_string(),
-        ));
-    };
-
-    let mut params: Value = serde_json::from_str(&params_text).unwrap_or_else(|_| json!({}));
-    if !params.is_object() {
-        params = json!({});
-    }
-
     let abs_path: Option<String> = tx
         .query_row(
             "SELECT abs_path FROM artifact WHERE id = ?1",
@@ -756,47 +739,84 @@ pub fn allocate_entry_id(
             |r| r.get(0),
         )
         .optional()?;
-    // Same scanner `append_entry` uses: line-anchored headings and index-row
-    // leading cells only, so a prose aside cannot blow a hole in the numbering.
-    let body_claimed = abs_path
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|b| body_claimed_indices(&b, id_prefix))
-        .unwrap_or_default();
+    let Some(abs_path) = abs_path else {
+        return Err(RecoverableError::new(format!(
+            "allocate_entry_id: unknown artifact `{artifact_id}`"
+        )));
+    };
+    let doc = std::fs::read_to_string(&abs_path).map_err(|e| {
+        RecoverableError::new(format!(
+            "allocate_entry_id: cannot read `{abs_path}`: {e} — the ledger's own body is \
+             where the id maximum is derived from"
+        ))
+    })?;
+
+    // One read, three answers: the declaration, the body maximum, and (via the
+    // body) the durability check the caller needs.
+    let (fm, body) = crate::librarian::frontmatter::parse(&doc)
+        .map_err(|e| RecoverableError::new(format!("allocate_entry_id: {e}")))?;
+    // Scalar or sequence: a session log legitimately owns two namespaces (F-N
+    // frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
+    // `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
+    // counters stay independent either way.
+    let declared: Vec<&str> = match fm.as_ref().and_then(|f| f.extra.get(ENTRY_PREFIX_KEY)) {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(items)) => items.iter().filter_map(|v| v.as_str()).collect(),
+        _ => Vec::new(),
+    };
+
+    if declared.is_empty() {
+        return Err(RecoverableError::with_hint(
+            format!("allocate_entry_id: `{abs_path}` does not declare an entry_prefix"),
+            format!(
+                "A ledger declares its id namespace in FRONTMATTER, so the declaration is \
+                 committed and survives a fresh clone: artifact(action=\"update\", id=\"{artifact_id}\", \
+                 patch={{extra: {{\"{ENTRY_PREFIX_KEY}\": \"{id_prefix}\"}}}}). Pass a list for a \
+                 ledger owning two namespaces. No augmentation and no entry_collection are needed."
+            ),
+        ));
+    }
+    if !declared.contains(&id_prefix) {
+        return Err(RecoverableError::with_hint(
+            format!("allocate_entry_id: `{id_prefix}` is not declared by this ledger"),
+            format!(
+                "`{abs_path}` declares `{ENTRY_PREFIX_KEY}: {}` — pass one of those, or add \
+                 `{id_prefix}` to the list.",
+                declared.join(", ")
+            ),
+        ));
+    }
+
+    // Line-anchored headings and index-row leading cells only, so a prose aside
+    // cannot blow a hole in the numbering. Scanned over the BODY, so a prefix
+    // mentioned in frontmatter is not mistaken for an entry.
+    let body_claimed = body_claimed_indices(body, id_prefix);
     let body_max = body_claimed.iter().next_back().copied();
 
-    let reserved_max = params
-        .get(ALLOCATION_KEY)
-        .and_then(|v| v.get(id_prefix))
-        .and_then(|v| v.as_u64());
+    // SQLite has no unsigned integers and rusqlite does not implement FromSql for
+    // u64, so the column round-trips as i64. Clamping at 0 keeps a hand-edited
+    // negative row from wrapping into a colossal id.
+    let reserved_max: Option<u64> = tx
+        .query_row(
+            "SELECT max_allocated FROM entry_reservation WHERE artifact_id = ?1 AND prefix = ?2",
+            rusqlite::params![artifact_id, id_prefix],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(|v| v.max(0) as u64);
 
     let next = body_max
         .map_or(0, |m| m + 1)
         .max(reserved_max.map_or(0, |m| m + 1))
         .max(1);
 
-    let alloc = params
-        .as_object_mut()
-        .expect("params normalised to an object above")
-        .entry(ALLOCATION_KEY)
-        .or_insert_with(|| json!({}));
-    if !alloc.is_object() {
-        *alloc = json!({});
-    }
-    alloc
-        .as_object_mut()
-        .expect("allocation slot normalised to an object above")
-        .insert(id_prefix.to_string(), json!(next));
-
-    // The allocation record is bookkeeping, not part of the tracker's data
-    // contract, so it is deliberately NOT run through `params_schema`: a schema
-    // with `additionalProperties: false` would otherwise make its own ledger
-    // un-allocatable, which is a worse failure than an unvalidated integer.
-    let new_params_text = serde_json::to_string(&params)?;
     tx.execute(
-        "UPDATE artifact_augmentation SET params = ?1,
-         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE artifact_id = ?2",
-        rusqlite::params![new_params_text, artifact_id],
+        "INSERT INTO entry_reservation (artifact_id, prefix, max_allocated, updated_at)
+         VALUES (?1, ?2, ?3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT(artifact_id, prefix) DO UPDATE SET
+           max_allocated = excluded.max_allocated,
+           updated_at    = excluded.updated_at",
+        rusqlite::params![artifact_id, id_prefix, next as i64],
     )?;
     tx.commit()?;
 
@@ -1939,16 +1959,18 @@ mod tests {
         assert_eq!(params["failures"].as_array().unwrap().len(), 2);
     }
 
-    /// A prose ledger declares no `entry_collection`, which is exactly why it
-    /// could not reach the allocator before. Nine of the ten numeric prefixes
-    /// in `docs/TAXONOMY.md` are in this shape.
+    /// A ledger declares its namespace in FRONTMATTER — committed, so the
+    /// declaration survives a fresh clone — and needs no augmentation and no
+    /// entry_collection at all. Nine of the ten numeric prefixes in
+    /// `docs/TAXONOMY.md` are this shape.
     #[test]
-    fn allocate_entry_id_reads_the_body_max_without_an_entry_collection() {
+    fn allocate_entry_id_reads_the_body_max_from_a_frontmatter_declared_ledger() {
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("ledger.md");
         std::fs::write(
             &md,
-            "# Ledger\n\n| ID | Pattern |\n|----|---------|\n| R-9 | a row-only entry |\n\n\
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n\
+                 # Ledger\n\n| ID | Pattern |\n|----|---------|\n| R-9 | a row-only entry |\n\n\
                  ## R-5 — a body entry\n\nprose mentioning R-400, which must not count\n",
         )
         .unwrap();
@@ -1957,9 +1979,6 @@ mod tests {
         let mut art = sample_art("art1");
         art.abs_path = md.clone();
         art_upsert(&cat, &art).unwrap();
-        let mut a = aug("art1");
-        a.params = "{}".to_string();
-        upsert(&cat, &a).unwrap();
 
         let out = allocate_entry_id(&mut cat, "art1", "R").unwrap();
         assert_eq!(out.id, "R-10", "max across BOTH body formats, plus one");
@@ -1975,15 +1994,16 @@ mod tests {
     fn allocate_entry_id_does_not_reissue_when_the_body_has_not_caught_up() {
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("ledger.md");
-        std::fs::write(&md, "## R-41 — an entry\n").unwrap();
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n## R-41 — an entry\n",
+        )
+        .unwrap();
 
         let mut cat = Catalog::open_in_memory().unwrap();
         let mut art = sample_art("art1");
         art.abs_path = md.clone();
         art_upsert(&cat, &art).unwrap();
-        let mut a = aug("art1");
-        a.params = "{}".to_string();
-        upsert(&cat, &a).unwrap();
 
         let first = allocate_entry_id(&mut cat, "art1", "R").unwrap();
         let second = allocate_entry_id(&mut cat, "art1", "R").unwrap();
@@ -1993,15 +2013,24 @@ mod tests {
         assert_eq!(second.reserved_max, Some(42));
     }
 
-    /// One ledger can host several namespaces (a session log carries both F-N
-    /// and W-N). The high-water marks must not bleed into each other.
+    /// One ledger can host several namespaces — a session log carries both F-N
+    /// frictions and W-N wins — so `entry_prefix` accepts a sequence, and the
+    /// high-water marks must not bleed into each other. Reservations are keyed
+    /// per (artifact, prefix) precisely for this.
     #[test]
     fn allocate_entry_id_keeps_prefixes_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("session-log.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n# Session log\n",
+        )
+        .unwrap();
+
         let mut cat = Catalog::open_in_memory().unwrap();
-        art_upsert(&cat, &sample_art("art1")).unwrap();
-        let mut a = aug("art1");
-        a.params = "{}".to_string();
-        upsert(&cat, &a).unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
 
         assert_eq!(allocate_entry_id(&mut cat, "art1", "F").unwrap().id, "F-1");
         assert_eq!(allocate_entry_id(&mut cat, "art1", "F").unwrap().id, "F-2");
@@ -2014,31 +2043,47 @@ mod tests {
 
     #[test]
     fn allocate_entry_id_requires_a_declared_ledger() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("not-a-ledger.md");
+        // Note the fixture: the body DOES carry a `## R-4` heading. A ledger is
+        // declared, never inferred from content — inferring would turn every design
+        // doc that quotes an id into an allocatable namespace. Measured 2026-08-17:
+        // 27 unaugmented trackers in this repo, only THREE of them ledgers.
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\ntitle: A design doc, not a ledger\n---\n\n## R-4 — looks like one\n",
+        )
+        .unwrap();
+
         let mut cat = Catalog::open_in_memory().unwrap();
-        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
         let err = allocate_entry_id(&mut cat, "art1", "R").unwrap_err();
         let text = err.to_string();
         assert!(
-            text.contains("no augmentation"),
+            text.contains("does not declare an entry_prefix"),
             "expected a declare-the-ledger error, got: {text}"
         );
-        // A hint that names an impossible call is worse than no hint. The first
-        // draft said `artifact_augment(id=…, merge=true, prompt=…)`, which refuses
-        // with "call artifact_augment first" exactly when no augmentation exists —
-        // the state this error reports. Verified against the live tool.
-        //
-        // Assert on the PRESCRIPTION, not the keyword: the corrected hint mentions
-        // merge=true in order to warn against it, so a bare `!contains("merge=true")`
-        // fails on the fixed text. That is the same trap as counting `grep 'Status:'`
-        // hits in prose about Status — and the first draft of this assertion fell
-        // into it.
+        // A hint that names an impossible call is worse than no hint. An earlier
+        // draft of this error prescribed `artifact_augment(merge=true, …)`, which
+        // refuses with "call artifact_augment first" exactly when no augmentation
+        // exists — the state the error reported. Caught by running it, not by
+        // re-reading it. Assert the hint names the remedy that works from THIS
+        // state: the frontmatter declaration.
         assert!(
-            text.contains("artifact_augment(id=…, prompt=…)"),
-            "the hint must name a call that works from THIS state: {text}"
+            text.contains("extra") && text.contains("entry_prefix"),
+            "the hint must name the frontmatter declaration: {text}"
         );
         assert!(
-            !text.contains("merge=true, prompt"),
-            "the hint must not PRESCRIBE merge=true — it loops: {text}"
+            // Anchor on the CALL SHAPE, not the word: `!contains("augmentation")`
+            // fails on the correct hint, which mentions augmentation only to say
+            // none is needed. Fourth time in two days that a keyword check counted
+            // a document's discussion of a token as a use of it.
+            !text.contains("artifact_augment("),
+            "the declaration is frontmatter, not an augmentation — a hint pointing at \
+             the catalog would recreate the portability defect HY-10 names: {text}"
         );
     }
 
@@ -2050,16 +2095,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("cat.sqlite");
         let md = dir.path().join("ledger.md");
-        std::fs::write(&md, "# Ledger\n\n## R-41 — an entry\n").unwrap();
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n# Ledger\n\n## R-41 — an entry\n",
+        )
+        .unwrap();
 
         {
             let cat = Catalog::open(&db).unwrap();
             let mut art = sample_art("art1");
             art.abs_path = md.clone();
             art_upsert(&cat, &art).unwrap();
-            let mut a = aug("art1");
-            a.params = "{}".to_string();
-            upsert(&cat, &a).unwrap();
         }
 
         let (p1, p2) = (db.clone(), db.clone());

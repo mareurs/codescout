@@ -7,6 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
+entry_prefix: HY
 next-sweep-due: 2026-09-15
 sweep-interval-days: 30
 ---

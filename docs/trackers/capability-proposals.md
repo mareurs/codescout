@@ -11,6 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
+entry_prefix: CAP
 ---
 
 ## Why this exists

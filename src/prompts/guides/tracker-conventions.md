@@ -158,6 +158,35 @@ The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
 enforced by the citation resolver, and violating them silently breaks the link
 graph. Every figure below was measured on this repo on 2026-08-17.
 
+### Declaring a ledger
+
+A **ledger** is an artifact that owns an id namespace. It is a much narrower thing
+than a tracker: measured 2026-08-17, 27 unaugmented trackers under
+`docs/trackers/` and only **three** were ledgers — the rest are design docs,
+research notes and finished session logs, which own no ids and must stay directly
+editable.
+
+Declare one in **frontmatter**, never only in the catalog:
+
+```yaml
+entry_prefix: R          # or a sequence, for a ledger owning two namespaces:
+entry_prefix:            #   a session log carries both F-N frictions and W-N wins
+  - F
+  - W
+```
+
+Set it with `artifact(action="update", id=…, patch={extra: {"entry_prefix": "R"}})`.
+
+**Frontmatter, because the catalog is machine-local and git-ignored.** A
+declaration stored in the augmentation is absent in a fresh clone, so every
+`append_entry` there fails. The reservation high-water mark *is* catalog-local, and
+that is safe only because it is re-derivable — the allocator re-reads the committed
+body each time. Identity has to travel with the repo; a counter does not.
+
+A ledger is **declared, never inferred**. A design doc that quotes `## R-4` in
+prose is not a namespace, and inferring one from content would make every such doc
+allocatable.
+
 ### Entry ids
 
 The resolver's token grammar is `\b[A-Z]{1,3}-\d+\b` — one to three uppercase
