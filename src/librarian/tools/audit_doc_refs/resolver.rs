@@ -441,19 +441,32 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // Same basename shorthand `resolve_file_path` and `resolve_file_line` accept:
     // a doc citing `refresh.rs::call` means the repo's one `refresh.rs`. Without
     // this the three ref kinds disagree about identical path parts.
+    //
+    // Parity covers BOTH outcomes, which it did not until 2026-08-17: a unique
+    // basename resolves, and an ambiguous one reports `AmbiguousBasename` rather
+    // than claiming the file is gone. The comment above used to assert this while
+    // only the unique half was implemented — see the `else` arm below.
     let direct = ctx.repo_root.join(path_str);
     let path = if direct.exists() {
         direct
     } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
         resolved
     } else {
-        return verdict_with_drops_for_ref(
-            Verdict::FileMissing,
-            path_str,
-            Path::new(&c.md_file),
-            c.position,
-            ctx,
-        );
+        // Ambiguous is not missing. `unique_basename_path` answers "which file?" and so
+        // returns None for BOTH zero matches and two-or-more — which meant this branch
+        // claimed `FileMissing` for a file that exists twice. `try_basename_fallback`
+        // answers "what verdict?", and is the same helper `resolve_file_path` and
+        // `resolve_file_line` use to tell the two apart. Here it can only return
+        // `AmbiguousBasename`: a single match would already have been taken above.
+        return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
+            verdict_with_drops_for_ref(
+                Verdict::FileMissing,
+                path_str,
+                Path::new(&c.md_file),
+                c.position,
+                ctx,
+            )
+        });
     };
     let lang = detect_language(path_str);
     let Some(lsp) = ctx.lsp.clone() else {
@@ -1813,6 +1826,65 @@ mod tests {
         let r = resolve_ref(&cand("mod.rs:12", "docs/spec.md", RefKind::FileLine), &ctx);
         assert_eq!(r.verdict, Verdict::AmbiguousBasename);
         assert_eq!(r.severity, Severity::Med);
+    }
+
+    /// An ambiguous basename in a `file_symbol` ref must report as ambiguous, not as a
+    /// missing FILE — the file is not missing, it exists twice. `file_path` and
+    /// `file_line` already say `AmbiguousBasename` for the identical path part; this is
+    /// the third kind catching up.
+    ///
+    /// Reaches its verdict before the LSP branch, so `lsp: None` is not a limitation
+    /// here: an ambiguous path part means there is no single file to ask about.
+    ///
+    /// docs/issues/2026-08-17-audit-doc-refs-claims-file-missing-for-an-ambiguous-basename.md
+    #[test]
+    fn resolver_file_symbol_reports_ambiguous_basename() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "mod.rs".to_string(),
+            vec![
+                std::path::PathBuf::from("src/a/mod.rs"),
+                std::path::PathBuf::from("src/b/mod.rs"),
+            ],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        };
+
+        let r = resolve_ref(
+            &cand("mod.rs::helper", "docs/spec.md", RefKind::FileSymbol),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::AmbiguousBasename);
+        assert_eq!(r.severity, Severity::Med);
+    }
+
+    /// The discriminating half of the pair above. A basename with NO match must still
+    /// report `FileMissing` — the fix must not turn every unresolvable path part into
+    /// "ambiguous", which would hide genuinely dead references.
+    #[test]
+    fn resolver_file_symbol_still_reports_file_missing_when_no_file_matches() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            gitignore: None,
+        };
+
+        let r = resolve_ref(
+            &cand("gone.rs::helper", "docs/spec.md", RefKind::FileSymbol),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::FileMissing);
     }
 
     #[test]
