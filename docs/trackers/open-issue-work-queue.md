@@ -70,7 +70,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | open | `cfcbee6f7d047a55` |
 | BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | **done, archived** | `5d8584d109d876ea` |
 | BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | **done, archived** | `d082f963f57bd76b` |
-| BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | open | `ffa936075f1f03fd` |
+| BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | **done, archived** | `ba6ab341eab97416` |
 | BL-29 | 1 | `append_entry` writes catalog-only state, so this very snapshot drifts silently — tool says success, git says clean | partial (`99aaf83f` + `6ff00eee` + `0dbfd0ee`): drift reported at write time and by `doctor`; hamsa reconciled; gate now needs majority coverage; **0 trackers adrift** | `0694a4a9946e10fe` |
 | BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | open | `63d36f5da3b200a7` |
 | BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | open | `5f6cfe1acdfda38d` |
