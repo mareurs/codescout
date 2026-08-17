@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-17
-closed:
+closed: 2026-08-17
 severity: low
 owner: marius
 related: []
@@ -87,54 +87,97 @@ warning still concludes correctly-shaped nonsense.
 
 ## Hypotheses tried
 
-1. **Hypothesis:** `raw` and `token` mean different things — `raw` being the
-   pre-normalisation text and `token` the parsed id.
-   **Test:** compare values across both arrays in one scan.
-   **Verdict:** deferred, and it is the question the fix hinges on. Observed values are
-   plain entry tokens in both (`"BUG-40"`, `"F-3"`), so they *look* interchangeable —
-   but `dangling` also reports `kind: "EntryToken"`, which hints `raw` is the generic
-   citation text across several citation kinds (md links, 16-hex ids), where `token`
-   is entry-specific. If so the right fix is to name them apart *deliberately* and
-   document it, not to unify them.
+1. **Hypothesis:** `raw` and `token` mean different things — `raw` being the generic
+   citation text across several kinds, `token` the entry-specific parsed id. The `kind`
+   field appearing only on `dangling` was the circumstantial support.
+   **Test:** read the three `json!` literals at the serialization site instead of
+   inferring intent from the output.
+   **Verdict:** **rejected.** All three arms serialize the same expression:
 
+   ```rust
+   "ambiguous":  { "src_id": row.id, "token": c.raw, "line": …, "candidates": … }
+   "dangling":   { "src_id": row.id, "raw": c.raw, "kind": …, "line": … }
+   "cross_repo": { "src_id": row.id, "raw": c.raw, "line": … }
+   ```
+
+   No distinction existed to preserve — which settles the A-or-B question in § Fix and is
+   why the § Resume warning against unifying before checking could be discharged rather
+   than heeded. `kind`'s absence from two arms was equally accidental: `c.kind` is in
+   scope for all three.
 ## Fix
 
-Not implemented, and the choice depends on hypothesis 1:
+**Fixed 2026-08-17 in `7c218338` (`experiments`).** Fast-forward promotion, so this SHA
+*is* the master SHA once promoted.
 
-**A. Unify** on one name (`token`) with `kind` present on both arrays, if the values
-really are the same concept. Cleanest for callers; a breaking output change.
+**Option A (unify) — but implemented as a constructor, not a rename.** A rename leaves
+three `json!` literals free to diverge again, and `link_scan/mod.rs` had **no tests at
+all**, which is how they drifted side by side in the first place. One construction site
+makes divergence impossible rather than merely corrected:
 
-**B. Keep both names and document the distinction** in `get_guide("librarian")`, if
-`raw` is genuinely the wider concept. Then also state the querying consequence: a
-resolvability sweep must read both keys, and any count taken from one array alone is a
-sample.
+```rust
+fn finding(src_id: &str, c: &extract::Citation, extra: Value) -> Value
+```
 
-Either way, the guidance belongs next to whatever D12 ends up being (HY-9), since that
-detector consumes exactly these arrays.
+Arm-specific fields (`candidates`, `candidates_total`) merge in on top, so unifying the
+shared shape does not flatten what makes `ambiguous` useful.
 
+**Wire change, deliberately.** `ambiguous[].token` is now `ambiguous[].raw`, and `kind`
+is present on all three arrays instead of one. Nothing in-repo consumes these — the
+audience is agents reading a report, and HY-9's proposed D12 is not built — so this is
+the cheapest moment it will ever be.
+
+**One adjacent fragility removed rather than propagated.** `kind` was serialized as
+`format!("{:?}", c.kind)`. `Debug` is a developer-facing rendering with no stability
+promise, so a variant rename silently changed the API — and the failure mode is a
+consumer's filter quietly matching nothing, which is *this bug's own shape* one field
+over. `CitationKind::as_str()` now spells the wire values explicitly, with strings
+identical to what `Debug` produced.
+
+Not done, and deliberately: a `legend` field of the kind
+`audit_doc_refs` gained in `f908e883`. The array names (`ambiguous`, `dangling`,
+`cross_repo`) already carry their meaning, and the harm here was a field NAME splitting
+in two, not a value nobody could interpret. Adding a legend would be answering a
+different bug.
 ## Tests added
 
-None. Wanted regardless of A or B: a test asserting both arrays' entry shapes in one
-place, so the two cannot drift further without a failure. Today nothing compares them.
+Two in `src/librarian/tools/link_scan/mod.rs` — which had none before, and that absence is
+part of the root cause:
 
+- **`every_finding_array_names_the_cited_text_the_same_way`** — the RED test. Asserts all
+  three shapes carry `raw`, `kind`, `src_id`, `line`, **and** that none carries `token`.
+  The absence assertion is the point: `token` is the name that split the vocabulary, so
+  the test pins that no arm can reintroduce it.
+- **`finding_carries_arm_specific_fields_alongside_the_shared_shape`** — guards against
+  over-unifying, i.e. a shared shape that drops `candidates`.
+
+One in `extract.rs`:
+
+- **`citation_kind_wire_values_match_what_debug_emitted`** — asserts `as_str()` equals
+  `format!("{kind:?}")` for every variant, which is what makes the `Debug` swap provably
+  behaviour-preserving. It also fails if a variant is renamed without updating the
+  mapping — the silent-API-change that using `Debug` invited.
+
+**Mutation-verified:** reintroducing `"token"` in the constructor fails the RED test with
+`left: Null, right: "F-3"` on the ambiguous row.
 ## Workarounds
 
-Query both keys, always:
+No longer needed. Historical, for anyone reading a report from a build before this fix:
+query both names, `grep -oE '"(raw|token)":"HY-[0-9]+"'`, and treat a single-array count
+as a floor.
 
-```
-grep -oE '"(raw|token)":"HY-[0-9]+"' @tool_<id>
-```
-
-Or read the arrays separately with `json_path` and treat any single-array count as a
-floor rather than a total.
-
+The general lesson outlives the fix and is worth keeping: **absence from a findings array
+proves nothing** until you have checked the key name AND the cap. `n_refs_found` against a
+50-entry `findings` window is the other half of the same trap
+(`docs/issues/archive/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`).
 ## Resume
 
-Read the finding structs in `src/librarian/tools/link_scan/` (the serialization site) and
-settle hypothesis 1 — whether `raw` spans citation kinds that `token` does not. That
-answer picks A or B; do not unify the names before checking, because a deliberate
-distinction destroyed is worse than an undocumented one.
+One step before archiving: **replay on the wire.** `cargo rb` + `/mcp`, then a scoped
+`link_scan` — confirm `ambiguous[]` entries carry `raw` and `kind`, and that no entry
+carries `token`. The unit test builds findings directly; only the wire path proves the
+three call sites were actually rewired.
 
+Then archive through the catalog and re-point this path's citations in the same commit —
+`src/librarian/tools/link_scan/mod.rs` and `extract.rs` each carry one in a doc comment.
 ## References
 - `src/librarian/tools/link_scan/` — finding serialization
 - `get_guide("tracker-conventions")` § *Detecting these fields* — the anchor-on-structure
