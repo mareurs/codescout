@@ -225,6 +225,37 @@ An undefined-but-cited id becomes a **dangling** citation. A ledger carrying 48
 row-only entries produced ~30 of this project's 39 sampled dangling entry tokens;
 a sibling ledger keeping headings for all its entries produced zero.
 
+
+### Citing an entry — bare, or qualified
+
+Cite by **bare token** when the prefix has exactly one ledger: `R-98`, `HY-10`,
+`T-17`, `CAP-5`.
+
+Cite **qualified by file stem** when several files share a prefix. `F-N` and `W-N`
+are namespaced per work stream, so each session log owns its own counter and
+`F-1…F-5` are defined in *all eight* live logs:
+
+```
+bug-fix-session-log:F-33      → resolves to that log's F-33
+F-33                          → eight definers, Ambiguous, resolves to nothing
+```
+
+The qualifier is the **file stem**, deliberately not `artifact.slug`: slugs are
+lazily minted from `slugify(title)` with `-2` dedup, so they neither exist for most
+artifacts nor can be predicted from the filename — and a citation an author cannot
+predict is not a citation.
+
+A qualifier naming no file in this repo is still a cross-repo reference
+(`codescout:A-11`): reported, never turned into an edge, because edges cannot span
+workspaces. A qualifier that *does* name a file which lacks that entry is
+**dangling**, not ambiguous — the two need different fixes, so they are reported
+separately.
+
+Why this matters: measured 2026-08-17, ~400 ambiguous citations were ~12% of the
+project's total, 49 of 50 sampled were F/W, and the citers were the **durable**
+ledgers — R-N alone accounted for 27 of 50. That is the permanent record losing the
+links to its own evidence, not session logs cross-talking.
+
 ### One entry format, never two
 
 Do not hand-maintain an index table *alongside* body sections. Two formats for one

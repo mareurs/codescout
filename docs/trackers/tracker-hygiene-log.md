@@ -642,9 +642,38 @@ identity should travel with the repo, not with one profile's SQLite file. Same d
 family as HY-8/BL-29, where 54 of 68 rows existed nowhere but one DB on one of three
 profiles.
 
-**Promote-when:** the F/W namespace decision is taken, either way → record it here,
-and if a shared or per-stream scheme is chosen, add the ledger declarations in the
-same pass so the two never drift.
+**Promote-when: FIRED 2026-08-17 — decision taken, and it is a fourth option this
+entry did not list: keep per-log numbering and QUALIFY THE CITATION.** `link_scan`
+now resolves `<file-stem>:F-33` to that log's entry. Consequences, all of which the
+three listed options traded away:
+
+- **No renumbering**, so no existing citation becomes *wrong*. Bare ones stay exactly
+  as ambiguous as they are today until rewritten — a degradation, never a breakage.
+  Both of the renumbering options would have silently repointed live citations.
+- **Attribution survives**, because the qualifier names the work stream. That was the
+  cost of the shared-namespace option.
+- **F/W stay undeclared as ledgers**, which is now a coherent end state rather than a
+  deferral: per-log counters are citable, so there is nothing to unify.
+
+The qualifier is the **file stem**, deliberately not `artifact.slug`. Slugs are
+lazily minted from `slugify(title)` with `-2` dedup, so `"Session Log — Bug-Fix Work
+Stream"` becomes `session-log-bug-fix-work-stream` — unguessable from the filename,
+and absent entirely until something calls `ensure_slug`. A citation form nobody can
+predict is not a citation form.
+
+**What decided it was measuring who cites F/W**, which this entry had not done. Of 50
+sampled ambiguous citations the citers were `reconnaissance-patterns` (27),
+`tracker-hygiene-log` (13), `codescout-usage-frictions` (5),
+`windows-platform-support` (3), `codescout-usage-hookify` (2) — **every one a durable
+ledger, not a single session log.** So option 3 ("leave it, nothing degrades") was
+weaker than written here: the loss is the permanent record's links to its own
+evidence, and R-N is the biggest victim. Sample of 50 of ~400, not a census.
+
+**Still owed:** the ~400 bare citations resolve only once rewritten to the qualified
+form. That is a sweep, not a migration, precisely because nothing breaks in the
+meantime. One useful property for the sweep: a qualified citation whose stem resolves
+but whose entry does not exist now reports as **dangling**, not ambiguous — so a
+rewrite that got the stem right and the number wrong announces itself.
 
 **Kin:** HY-9 (D12, and the ambiguous half of the same scan), R-98 (the allocation
 race), R-100, CAP-5.

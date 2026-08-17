@@ -136,6 +136,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     .insert(RepoPath::from(rel).into_string(), row.id.clone());
             }
         }
+        // Qualifier vocabulary for `<stem>:<TOKEN>` citations. Pushed rather than
+        // inserted: stems collide across directories, and the resolver reports a
+        // collision instead of picking one.
+        if let Some(stem) = row.abs_path.file_stem().and_then(|s| s.to_str()) {
+            corpus
+                .by_stem
+                .entry(stem.to_string())
+                .or_default()
+                .push(row.id.clone());
+        }
     }
 
     // ---- resolution pass ----

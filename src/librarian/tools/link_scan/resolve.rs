@@ -69,6 +69,16 @@ pub struct Corpus {
     pub ids: BTreeSet<String>,
     /// forward-slash repo-relative path → artifact id.
     pub by_rel_path: BTreeMap<String, String>,
+    /// File stem → the artifact ids sharing it. This is the qualifier vocabulary
+    /// for `<stem>:<TOKEN>` citations. A `Vec` because stems are NOT unique
+    /// across directories (two `index.md` files), and a collision has to be
+    /// reported rather than guessed.
+    ///
+    /// The stem, not `artifact.slug`: slugs are lazily minted from
+    /// `slugify(title)` with `-2` dedup, so they neither exist for most rows nor
+    /// can be predicted from the filename — and a citation an author cannot
+    /// predict is not a citation.
+    pub by_stem: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +110,51 @@ pub fn resolve(
     corpus: &Corpus,
 ) -> Option<Outcome> {
     match citation.kind {
-        CitationKind::CrossRepoToken => Some(Outcome::CrossRepo),
+        CitationKind::CrossRepoToken => {
+            // `<qualifier>:<TOKEN>` carries two different intents, told apart by
+            // whether the qualifier names a file in THIS repo:
+            //
+            //   codescout:A-11            cross-REPO — cannot become an edge,
+            //                             because edges do not span workspaces
+            //   bug-fix-session-log:F-33  within-repo QUALIFIED entry citation
+            //
+            // The second exists because per-work-stream namespaces reuse low
+            // numbers: F-1..F-5 and W-1..W-2 are each defined in all eight live
+            // session logs, so a bare `F-33` has eight definers and resolves to
+            // nothing usable. Measured 2026-08-17: ~400 ambiguous citations, 49 of
+            // 50 sampled were F/W, and the citers were the DURABLE ledgers (R-N
+            // alone 27 of 50) losing their links to their own evidence.
+            let Some((qualifier, token)) = citation.raw.split_once(':') else {
+                return Some(Outcome::CrossRepo);
+            };
+            let Some(candidates) = corpus.by_stem.get(qualifier) else {
+                // Unknown qualifier — a real cross-repo ref. Unchanged behaviour.
+                return Some(Outcome::CrossRepo);
+            };
+            match candidates.as_slice() {
+                [only] => {
+                    if only.as_str() == src_id {
+                        return Some(Outcome::SelfCite);
+                    }
+                    if index.definers(token).iter().any(|d| &d.artifact_id == only) {
+                        Some(Outcome::Edge {
+                            dst_id: only.clone(),
+                        })
+                    } else {
+                        // The qualifier resolved but that file defines no such
+                        // entry: a genuinely broken citation, not an ambiguity.
+                        // Worth distinguishing — the fixes differ.
+                        Some(Outcome::Dangling)
+                    }
+                }
+                // Two files share a stem. Report rather than guess: precision-first,
+                // exactly as the bare-token path does.
+                many => Some(Outcome::Ambiguous {
+                    total: many.len(),
+                    candidates: many.iter().take(AMBIGUOUS_CANDIDATE_CAP).cloned().collect(),
+                }),
+            }
+        }
         CitationKind::ArtifactId => {
             if citation.raw == src_id {
                 Some(Outcome::SelfCite)
@@ -453,6 +507,145 @@ mod tests {
             &Corpus::default(),
         );
         assert_eq!(got, Some(Outcome::CrossRepo));
+    }
+
+    /// The pair that states the whole problem and the whole fix. `F-3` is defined
+    /// in two session logs — the real shape, where F-1..F-5 are defined in all
+    /// eight — so bare it is Ambiguous. Qualified by file stem it resolves.
+    #[test]
+    fn a_qualified_citation_resolves_where_the_bare_token_cannot() {
+        let a = ex_with_defs(&["F-3"]);
+        let b = ex_with_defs(&["F-3"]);
+        let idx =
+            DefinitionIndex::build([("bugfix-id", "active", &a), ("release-id", "active", &b)]);
+        let mut corpus = Corpus::default();
+        corpus
+            .by_stem
+            .insert("bug-fix-session-log".into(), vec!["bugfix-id".into()]);
+        corpus.by_stem.insert(
+            "release-promotion-session-log".into(),
+            vec!["release-id".into()],
+        );
+
+        assert!(
+            matches!(
+                resolve(
+                    &cite("F-3", CitationKind::EntryToken),
+                    "doc",
+                    "",
+                    &idx,
+                    &corpus
+                ),
+                Some(Outcome::Ambiguous { .. })
+            ),
+            "the bare token must stay ambiguous — that is the problem being solved"
+        );
+        assert_eq!(
+            resolve(
+                &cite("bug-fix-session-log:F-3", CitationKind::CrossRepoToken),
+                "doc",
+                "",
+                &idx,
+                &corpus
+            ),
+            Some(Outcome::Edge {
+                dst_id: "bugfix-id".into()
+            }),
+        );
+    }
+
+    /// A qualifier naming no file in this repo is a genuine cross-repo reference.
+    /// This is what keeps `codescout:A-11` behaving as before.
+    #[test]
+    fn an_unknown_qualifier_stays_cross_repo() {
+        let a = ex_with_defs(&["A-11"]);
+        let idx = DefinitionIndex::build([("local", "active", &a)]);
+        let mut corpus = Corpus::default();
+        corpus
+            .by_stem
+            .insert("something-else".into(), vec!["local".into()]);
+
+        assert_eq!(
+            resolve(
+                &cite("codescout:A-11", CitationKind::CrossRepoToken),
+                "doc",
+                "",
+                &idx,
+                &corpus
+            ),
+            Some(Outcome::CrossRepo)
+        );
+    }
+
+    /// Qualifier resolves, entry does not exist there. That is a broken citation,
+    /// not an ambiguity — and the distinction matters because the fixes differ:
+    /// a dangling one needs the entry or the citation corrected, an ambiguous one
+    /// needs a namespace decision.
+    #[test]
+    fn a_qualified_citation_to_a_file_without_that_entry_dangles() {
+        let a = ex_with_defs(&["F-3"]);
+        let idx = DefinitionIndex::build([("bugfix-id", "active", &a)]);
+        let mut corpus = Corpus::default();
+        corpus
+            .by_stem
+            .insert("bug-fix-session-log".into(), vec!["bugfix-id".into()]);
+
+        assert_eq!(
+            resolve(
+                &cite("bug-fix-session-log:F-99", CitationKind::CrossRepoToken),
+                "doc",
+                "",
+                &idx,
+                &corpus
+            ),
+            Some(Outcome::Dangling)
+        );
+    }
+
+    /// Stems are not unique across directories (`bistriceanu/index.md` and any
+    /// other `index.md`). Report, never guess — a wrong edge pollutes
+    /// `context(anchor_id)` packing, which consumes rels unfiltered.
+    #[test]
+    fn a_colliding_stem_is_reported_not_guessed() {
+        let a = ex_with_defs(&["B-1"]);
+        let b = ex_with_defs(&["B-1"]);
+        let idx = DefinitionIndex::build([("one", "active", &a), ("two", "active", &b)]);
+        let mut corpus = Corpus::default();
+        corpus
+            .by_stem
+            .insert("index".into(), vec!["one".into(), "two".into()]);
+
+        assert!(matches!(
+            resolve(
+                &cite("index:B-1", CitationKind::CrossRepoToken),
+                "doc",
+                "",
+                &idx,
+                &corpus
+            ),
+            Some(Outcome::Ambiguous { total: 2, .. })
+        ));
+    }
+
+    #[test]
+    fn a_qualified_citation_of_your_own_file_is_a_self_cite() {
+        let a = ex_with_defs(&["F-3"]);
+        let idx = DefinitionIndex::build([("bugfix-id", "active", &a)]);
+        let mut corpus = Corpus::default();
+        corpus
+            .by_stem
+            .insert("bug-fix-session-log".into(), vec!["bugfix-id".into()]);
+
+        assert_eq!(
+            resolve(
+                &cite("bug-fix-session-log:F-3", CitationKind::CrossRepoToken),
+                "bugfix-id",
+                "",
+                &idx,
+                &corpus
+            ),
+            Some(Outcome::SelfCite)
+        );
     }
 
     #[test]
