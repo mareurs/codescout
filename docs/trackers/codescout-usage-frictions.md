@@ -1852,7 +1852,7 @@ That second half then teaches the **inverted** leaf shape — `{"contains": {"fi
 
 **Filed:** `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md`.
 
-**Status:** fixed — branch `worktree-il3-gate-and-find-lift`, commit `0a955491`, pending merge to `experiments`. `find::Args` gains `rel_path` and lifts it into `filter={"rel_path":{"contains": v}}` with the lift reported under `corrections`; the schema description drops its inverted-leaf example. The durable half is `schema_keys_labelled_find_are_honored_by_find` — which, note, **cannot reach `rel_path`**, because that key is labelled `create:` and a label-driven sweep misses it by construction. The gap between a key's label and its prose is the bug, and `rel_path_description_and_find_support_agree` is what closes it.
+**Status:** fixed on `experiments`, commit `4fad1aa4` (cherry-picked from `0a955491`; a fast-forward was unavailable because the bookkeeping commit landed on `experiments` after the branch was cut). `find::Args` gains `rel_path` and lifts it into `filter={"rel_path":{"contains": v}}` with the lift reported under `corrections`; the schema description drops its inverted-leaf example. The durable half is `schema_keys_labelled_find_are_honored_by_find` — which, note, **cannot reach `rel_path`**, because that key is labelled `create:` and a label-driven sweep misses it by construction. The gap between a key's label and its prose is the bug, and `rel_path_description_and_find_support_agree` is what closes it.
 
 ---
 
@@ -1973,7 +1973,7 @@ Sentence one is the correct rule; sentence two is a strictly narrower mechanism,
 
 **Filed:** `docs/issues/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md`.
 
-**Status:** fixed — branch `worktree-il3-gate-and-find-lift`, commit `0a955491`, pending merge to `experiments`. The fix idea above was wrong in a useful way: it proposed writing a `strip_heredoc_bodies` helper, and that helper **already existed** (`src/util/path_security.rs:747`), already called by `detect_il3_violation`. Only `check_source_file_access` kept the older approximation — so this was one call site that never adopted an existing contract, and the fix is a two-line ordering change. Removing the per-segment skip also closed a bypass nobody had noticed: a here-string puts `<<` in the same segment as a real read, so `cat src/main.rs <<< x` was skipped entirely. Mutation-verified.
+**Status:** fixed on `experiments`, commit `4fad1aa4` (cherry-picked from `0a955491`). The fix idea above was wrong in a useful way: it proposed writing a `strip_heredoc_bodies` helper, and that helper **already existed** (`src/util/path_security.rs:747`), already called by `detect_il3_violation`. Only `check_source_file_access` kept the older approximation — so this was one call site that never adopted an existing contract, and the fix is a two-line ordering change. Removing the per-segment skip also closed a bypass nobody had noticed: a here-string puts `<<` in the same segment as a real read, so `cat src/main.rs <<< x` was skipped entirely. Mutation-verified.
 
 A third gate defect surfaced from these tests and is filed separately, unfixed: the segment splitter never breaks on a newline, so `echo hi\ncat src/main.rs` is allowed (`docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md`).
 

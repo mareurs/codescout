@@ -176,9 +176,13 @@ third patch.
 
 ## Fix
 
-**Fixed** on branch `worktree-il3-gate-and-find-lift`, commit `0a955491` (pushed to
-`origin`). **Not yet on `experiments`** — merging that branch is the remaining step, and
-is why this file is `fixed` but not archived.
+**Fixed on `experiments`, commit `4fad1aa4`** — this is the SHA to cite.
+
+Cherry-picked from `0a955491` on `worktree-il3-gate-and-find-lift` (pushed to `origin`).
+A fast-forward was **not** available: the two had diverged by one commit each way, because
+the bookkeeping commit that recorded this fix (`f273f187`) landed on `experiments` after
+the branch was cut. Per the after-cherry-pick rule, the branch-side original orphans on
+the next rebase, so `0a955491` is history and `4fad1aa4` is the citation.
 
 **The plan in this file's first draft was wrong in a useful way.** It proposed writing a
 `strip_heredocs` helper. That helper already existed: `strip_heredoc_bodies`
@@ -249,12 +253,14 @@ For non-commit cases, `acknowledge_risk: true` bypasses the gate, but prefer the
 
 ## Resume
 
-Merge `worktree-il3-gate-and-find-lift` into `experiments`, then archive this file via
-`artifact(action="move", …)` and re-point citations of both its path and its 16-hex id.
+Archive this file via `artifact(action="move", …)` and re-point citations of both its path
+and its 16-hex id — the fix is on `experiments` (`4fad1aa4`), which is the archive trigger.
 
-Note the fix is **not live in any running MCP server** until `cargo rb` + `/mcp` — the
-session that wrote it still had to use `git commit -F <file>` to get past the gate it was
-fixing. Verify on the wire afterwards with the two-line repro from *Minimal reproduction*.
+Gate the archive on **wire** verification, not just the suite: a `cargo rb` + `/mcp` is
+required before the fix is live in any session, and the two-line repro from *Minimal
+reproduction* is the check. The first rebuild after the fix was cut did **not** contain it
+— it was built from `f273f187`, one commit before the cherry-pick — which is exactly the
+kind of thing a green `cargo test` does not tell you.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-45 (this friction), U-44 (the hook's

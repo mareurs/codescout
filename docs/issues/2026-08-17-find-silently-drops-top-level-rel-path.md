@@ -210,9 +210,13 @@ and `src/librarian/tools/update.rs:295-302`:
 
 ## Fix
 
-**Fixed** on branch `worktree-il3-gate-and-find-lift`, commit `0a955491` (pushed to
-`origin`). **Not yet on `experiments`** — merging that branch is the remaining step, and is
-why this file is `fixed` but not archived.
+**Fixed on `experiments`, commit `4fad1aa4`** — this is the SHA to cite.
+
+Cherry-picked from `0a955491` on `worktree-il3-gate-and-find-lift` (pushed to `origin`).
+A fast-forward was **not** available: the two had diverged by one commit each way, because
+the bookkeeping commit that recorded this fix (`f273f187`) landed on `experiments` after
+the branch was cut. Per the after-cherry-pick rule the branch-side original orphans on the
+next rebase, so `0a955491` is history and `4fad1aa4` is the citation.
 
 All three planned steps shipped.
 
@@ -305,8 +309,11 @@ before the results.
 
 ## Resume
 
-Merge `worktree-il3-gate-and-find-lift` into `experiments`, then archive this file via
-`artifact(action="move", …)` and re-point citations of both its path and its 16-hex id.
+Archive this file via `artifact(action="move", …)` and re-point citations of both its path
+and its 16-hex id — the fix is on `experiments` (`4fad1aa4`), which is the archive trigger.
+Gate the archive on **wire** verification: `artifact(action="find", rel_path="…")` must
+return the single matching row plus a `corrections` note, which needs `cargo rb` + `/mcp`
+first.
 
 Two follow-ups this fix deliberately did **not** take on:
 
