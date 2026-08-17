@@ -369,8 +369,26 @@ async fn workflow_symbols_path_types() {
     );
 }
 
+/// Inverted 2026-08-17 by `90d76d8a` (BL-35,
+/// `docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md`).
+///
+/// This test used to assert the opposite, and in doing so it encoded the bug: it claimed
+/// the guard was "bypassed because project was explicitly activated at startup". That
+/// bypass was the defect — `current_dir()`'s startup fallback sets
+/// `is_project_explicitly_activated` in essentially every session, so the write guard
+/// never fired in production at all.
+///
+/// The `assert!(is_project_explicitly_activated)` below is kept deliberately, and is now
+/// the point rather than the premise: the flag is still true, and no longer grants the
+/// bypass. What the guard turns on is `is_project_chosen_this_session` — false until
+/// someone calls `workspace(action="activate")`.
+///
+/// `90d76d8a` added three unit tests in `src/tools/core/tests.rs` but not this one, and
+/// `cargo test --lib` does not build `tests/integration.rs` — see codescout memory
+/// `cargo-test-lib-skips-integration`. That is how a deliberate behaviour change left
+/// `experiments` red.
 #[tokio::test]
-async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
+async fn write_refused_when_worktrees_exist_and_the_project_was_only_resolved_at_startup() {
     use codescout::tools::create_file::CreateFile;
 
     // 1. Create a temp project dir with fake worktree metadata
@@ -385,10 +403,15 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
     let gitdir_content = format!("{}/.git\n", fake_wt_root.display());
     std::fs::write(wt_entry.join("gitdir"), &gitdir_content).unwrap();
 
-    // 2. Create Agent via new(Some(path)) — project_explicitly_activated is now true
-    //    (the server operator already chose the write target at startup)
+    // 2. Create Agent via new(Some(path)) — resolved at startup, NOT chosen by an
+    //    activate call. `is_project_explicitly_activated` is true anyway; that is
+    //    exactly the flag that made the guard dead code.
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-    assert!(agent.is_project_explicitly_activated().await);
+    assert!(
+        agent.is_project_explicitly_activated().await,
+        "the startup fallback still sets this flag — the fix does not change that, it \
+         stops trusting it"
+    );
     let ctx = ToolContext {
         agent,
         lsp: LspManager::new_arc(),
@@ -402,12 +425,20 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
         workspace_override: None,
     };
 
-    // 3. Write should succeed — worktree guard bypassed because project was
-    //    explicitly activated at startup
+    // 3. Write must be REFUSED: worktrees exist and nobody chose a target this session.
     let result = CreateFile
         .call(json!({ "path": "test.txt", "content": "hello" }), &ctx)
         .await;
-    assert!(result.is_ok(), "expected write to succeed, got: {result:?}");
+    let err = result.expect_err("un-activated write with worktrees present must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("worktrees detected"),
+        "the refusal must name the reason, not just deny: {msg}"
+    );
+    assert!(
+        msg.contains("workspace(action='activate')"),
+        "and must name the call that resolves it: {msg}"
+    );
 
     drop(dir);
 }
