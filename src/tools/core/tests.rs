@@ -663,6 +663,65 @@ async fn a_repo_without_worktrees_gets_no_notice() {
     );
 }
 
+/// docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md
+///
+/// The discriminating case the bug named: a project resolved only through
+/// `Agent::new(Some(root))` (the startup/cwd-fallback path) is NOT a choice,
+/// so a write with worktrees present must be refused even though
+/// `is_project_explicitly_activated` is true for that same agent.
+#[tokio::test]
+async fn guard_worktree_write_refuses_when_only_resolved_at_startup() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+
+    assert!(
+        ctx.agent.is_project_explicitly_activated().await,
+        "startup resolution still sets the legacy flag"
+    );
+    let result = guard_worktree_write(&ctx).await;
+    assert!(
+        result.is_err(),
+        "startup resolution is not a choice; the write must be refused"
+    );
+}
+
+/// The other half: once the caller has actually called `activate`, the write
+/// must go through.
+#[tokio::test]
+async fn guard_worktree_write_allows_after_explicit_activate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+    ctx.agent.activate(root.clone(), None).await.unwrap();
+
+    let result = guard_worktree_write(&ctx).await;
+    assert!(
+        result.is_ok(),
+        "the caller chose; the write must be allowed"
+    );
+}
+
+/// The overwhelmingly common case — no linked worktrees at all — must never
+/// start refusing writes just because `activate` was never called.
+#[tokio::test]
+async fn guard_worktree_write_allows_when_no_worktrees_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let ctx = rooted_ctx(&root).await;
+
+    let result = guard_worktree_write(&ctx).await;
+    assert!(
+        result.is_ok(),
+        "no worktrees means no ambiguity; the write must be allowed"
+    );
+}
+
 #[tokio::test]
 async fn call_content_passthrough_small_output() {
     let ctx = bare_ctx().await;

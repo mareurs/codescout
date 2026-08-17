@@ -1,7 +1,7 @@
 ---
-id: '1523556488a95de2'
+id: a742a50ea6723daf
 kind: bug
-status: open
+status: fixed
 title: 'BUG: guard_worktree_write returns Ok on its first line in every real session, because the startup cwd fallback sets the flag it gates on'
 owners:
 - marius
@@ -99,41 +99,41 @@ regression guard, not an oversight, which is why it was not flipped in passing.
 
 ## Fix
 
-Not implemented — deliberately. **Re-arming a dormant refusal path is a
-behaviour change, not a bug fix**, and this repo currently has two live
-worktrees, so turning the guard on starts refusing writes here immediately.
-That is the maintainer's call.
+Option 1 from the three above: swapped the gate in `guard_worktree_write`
+(`src/tools/core/guards.rs:14-45`) from `is_project_explicitly_activated()`
+to `is_project_chosen_this_session()`. One line changed; the doc comment was
+updated to name the distinction explicitly and cite this bug, since the old
+comment was locally plausible while wrong.
 
-Three options:
-
-1. **Gate on the in-session choice.** `Agent::is_project_chosen_this_session()`
-   already exists (added 2026-08-16 for the read notice): false at startup
-   however the root was found, true only after an `activate` call. Swapping
-   `guard_worktree_write` onto it makes the guard mean what its doc comment
-   says. Cost: writes in any worktree-bearing repo refuse until `activate` is
-   called — loud and cheap, but it is a new refusal in an existing workflow.
-2. **Keep `--project` as a choice, demote only the cwd fallback.** Thread the
-   distinction from `run_server` into `Agent::new`. More faithful to the
-   original intent; more plumbing.
-3. **Delete the guard and rely on the read-side notice.** Honest about what
-   ships today, and the notice already names the ambiguity on the first read.
-   Loses the write-time backstop.
-
-Option 1 is the smallest correct change; option 2 is the most faithful. Both
-need the `project_explicitly_activated_with_project` test re-read, since it
-pins the current meaning.
-
-Whatever is chosen, **the two comments must stop contradicting each other** —
-that contradiction is the whole bug, and it survived because each is locally
-plausible.
-
+The maintainer's call was made directly: yes, re-arm the guard, accepting
+that this repo (two live worktrees right now) starts refusing un-activated
+writes immediately. `is_project_chosen_this_session` already existed
+(added 2026-08-16 for the read-side notice) and needed no changes — its own
+doc comment already stated the exact distinction this fix relies on.
 ## Tests added
 
-None yet. When implemented, the discriminating case is a fixture with a seeded
-linked worktree built via `Agent::new(Some(root))` — i.e. the startup path, not
-`activate` — asserting the write is refused. No current test exercises that
-combination, which is why the guard could go dead without anything failing.
+Three, in `src/tools/core/tests.rs`, reusing the `seed_linked_worktree` /
+`rooted_ctx` fixtures already built for the read-side notice tests:
 
+- `guard_worktree_write_refuses_when_only_resolved_at_startup` — the
+  discriminating case this bug named: `Agent::new(Some(root))` (the
+  startup/cwd-fallback path, not `activate`) with a seeded linked worktree.
+  Asserts `is_project_explicitly_activated()` is still `true` (the old,
+  wrong gate) AND `guard_worktree_write` now returns `Err`.
+- `guard_worktree_write_allows_after_explicit_activate` — same fixture,
+  plus an `activate` call. Asserts `Ok`.
+- `guard_worktree_write_allows_when_no_worktrees_exist` — no worktrees
+  seeded, `activate` never called. Asserts `Ok` — the regression guard
+  against re-arming the write guard for every ordinary checkout, not just
+  the worktree-ambiguous one.
+
+All three pass. `cargo clippy --all-targets -- -D warnings` clean.
+`cargo test --lib` (full suite): 3908 passed, 2 failed — both
+`librarian::tools::link_scan::tests::*`, in files (`link_scan/mod.rs`,
+`link_scan/extract.rs`) that were uncommitted, in-progress edits from a
+concurrent session sharing this checkout at the time, not touched by this
+fix. Confirmed via `git status` before drawing that conclusion, not assumed
+from the test names.
 ## Workarounds
 
 Call `workspace(action='activate', path=...)` after switching trees. As of
@@ -143,12 +143,8 @@ one too.
 
 ## Resume
 
-Open, and the blocking question is a decision, not an investigation: which of
-the three options above, given that option 1 starts refusing writes in this
-repo the day it lands.
-
-Do not re-derive the evidence — the probe result and the three code sites above
-are the whole picture. The one thing worth re-reading before deciding is
-`project_explicitly_activated_with_project` (`src/agent/mod.rs:2426`), because
-it is the regression guard that will have to change meaning.
-
+Fixed and closed. The `project_explicitly_activated_with_project` regression
+guard named in the original Resume note did not need to change meaning —
+it still correctly pins `is_project_explicitly_activated()`'s own semantics
+(true for both `--project` and the cwd fallback); this fix only changed
+which flag `guard_worktree_write` reads, not what either flag means.

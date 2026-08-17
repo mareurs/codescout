@@ -54,7 +54,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | open | `772fff5739620581` |
 | BL-11 | 2 | `context`/`workspace_state_at`/`link_scan` never dedup the worktree overlay | done | `d31233700ca979c2` |
 | BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
-| BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | open | `1523556488a95de2` |
+| BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | **done, archived** | `a742a50ea6723daf` |
 | BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | done | `1780acde047ffca2` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | done | `6902806f459fcf62` |
@@ -415,6 +415,18 @@ ADR/FDR templates are byte-identical outside that line — `created: {YYYY-MM-DD
 
 The 26-line repair is left **uncommitted** in `eduplanner-ui`'s working tree. It is the correct
 repair now, but committing into another repo is not this session's call.
+### 2026-08-17 — BL-35 fixed
+
+Swapped `guard_worktree_write`'s gate from `is_project_explicitly_activated` to
+`is_project_chosen_this_session` (option 1 from the bug's own three) — the
+maintainer's call, made directly, accepting that this repo (two live
+worktrees at the time) starts refusing un-activated writes immediately.
+Three regression tests added (`src/tools/core/tests.rs`), reusing the
+`seed_linked_worktree` / `rooted_ctx` fixtures the read-side notice fix had
+already built — including one pinning the case that matters most for a
+re-armed refusal: no worktrees, never activated, still allowed. Bug archived
+(`1523556488a95de2` → `a742a50ea6723daf`); citations of the old path in
+`src/tools/core/types.rs`, `guards.rs`, `tests.rs` re-pointed in the same pass.
 ### Resume — state at compaction, 2026-08-16
 
 **15 of 35 rows open.** Phase 1 remaining: **BL-4, BL-19** (BL-29 is phase 1 but the other

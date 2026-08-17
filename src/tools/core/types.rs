@@ -111,12 +111,12 @@ async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>)
     if ctx.agent.is_project_chosen_this_session().await {
         // The caller already made the choice this notice would ask for.
         //
-        // Deliberately NOT `is_project_explicitly_activated`, which the write
-        // guard uses: that one is set at startup from the `current_dir()`
-        // fallback, so it is true in essentially every session and would
-        // suppress this notice everywhere. Measured 2026-08-16 — see
-        // docs/issues/2026-08-16-worktree-write-guard-is-dead-code-in-production.md
-        // for what that means for `guard_worktree_write` itself.
+        // Deliberately NOT `is_project_explicitly_activated`: that one is set at
+        // startup from the `current_dir()` fallback, so it is true in essentially
+        // every session and would suppress this notice everywhere.
+        // `guard_worktree_write` used to make that same mistake — fixed 2026-08-17,
+        // see docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md —
+        // and now gates on this same flag, for this same reason.
         return None;
     }
     let root = root?;

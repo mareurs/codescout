@@ -6,13 +6,19 @@ use super::types::{RecoverableError, ToolContext};
 /// explicitly called `activate_project` to confirm which project to write to.
 ///
 /// Returns `Ok(())` when writes are allowed:
-/// - Agent explicitly activated a project via `activate_project`
+/// - Agent chose this project during the session via `activate_project`
 /// - No git worktrees exist (no ambiguity)
 ///
 /// Returns `RecoverableError` when writes should be blocked:
-/// - Worktrees exist AND the project was only implicitly set at startup
+/// - Worktrees exist AND the project was only resolved at startup, never chosen
+///
+/// Gates on [`Agent::is_project_chosen_this_session`], not
+/// `is_project_explicitly_activated` — the latter is also true for the
+/// `current_dir()` fallback in `run_server`, which fires in essentially every
+/// session and is a default, not a choice. See BUG
+/// docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md.
 pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
-    if ctx.agent.is_project_explicitly_activated().await {
+    if ctx.agent.is_project_chosen_this_session().await {
         return Ok(());
     }
     let root = ctx
