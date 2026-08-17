@@ -791,7 +791,14 @@ fn pipeline_segments(command: &str) -> Vec<String> {
     // `&&` and `||` before `;` is irrelevant here (disjoint first bytes), but the
     // ordering contract of `split_outside_quotes` is why multi-char separators are
     // listed first. `2>&1` does not read as `&&`: at the `&`, the remainder is `&1`.
-    split_outside_quotes(command, &["&&", "||", ";"])
+    //
+    // A newline is a command separator too, and omitting it was a false NEGATIVE here:
+    // a multi-line command collapsed into one segment, so the pipe's real LHS was not
+    // the segment's first token and `echo hi\ncargo test | grep FAILED` went undetected.
+    // Quote-safe without further work — `split_outside_quotes` tracks quote state across
+    // line breaks, and a backslash-newline continuation is consumed by its escape branch.
+    // BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    split_outside_quotes(command, &["&&", "||", ";", "\n"])
 }
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
@@ -1232,9 +1239,16 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // BUG docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md
     let stripped = strip_heredoc_bodies(command);
 
-    // Split on compound-command operators and pipes, respecting quoted strings.
-    // Order: "&&"/"||" before "|" so that "||" is not mis-split as two "|" tokens.
-    let segments = split_outside_quotes(&stripped, &["&&", "||", ";", "|"]);
+    // Split on compound-command operators, pipes and newlines, respecting quoted
+    // strings. Order: "&&"/"||" before "|" so that "||" is not mis-split as two "|"
+    // tokens; "\n" shares no prefix with the others so its position is free.
+    //
+    // The newline matters because a segment's command is its FIRST token: without it a
+    // multi-line command was one segment, and `echo hi\ncat src/main.rs` read project
+    // source unchecked. Quote-safety needs no extra work — `split_outside_quotes` carries
+    // quote state across line breaks, so a newline inside "..." is data.
+    // BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    let segments = split_outside_quotes(&stripped, &["&&", "||", ";", "|", "\n"]);
 
     let blocked = segments.iter().find(|seg| {
         // Only the *first token* of a segment is the actual command being executed.
@@ -2532,19 +2546,43 @@ mod tests {
         );
     }
 
-    /// Pins a PRE-EXISTING gap this bug's tests surfaced but do not fix: the segment
-    /// splitter breaks on `&&`, `||`, `;` and `|` — never on a newline. A segment's
-    /// command is its first token, so a source read on a second line is never seen.
+    /// A newline is a command separator in shell, exactly like `;`. Before the fix the
+    /// splitter broke on `&&`, `||`, `;` and `|` only, and a segment's command is its
+    /// FIRST token — so a source read on a second line was never seen and
+    /// `echo hi\ncat src/main.rs` read project source unchecked.
     ///
-    /// Asserting the current (permissive) behaviour deliberately, so that closing the
-    /// gap breaks this test and whoever closes it finds the note.
+    /// This test asserted the permissive behaviour as a deliberate tripwire until the
+    /// gap was closed; it now asserts the fix.
     /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
     #[test]
-    fn source_file_access_does_not_split_on_newlines() {
+    fn source_file_access_splits_on_newlines() {
+        assert!(
+            check_source_file_access_at_root("echo hi\ncat src/main.rs").is_some(),
+            "a newline separates commands; a read on the second line must be caught"
+        );
+    }
+
+    /// The false-positive guard, and the one a careless fix breaks: a newline INSIDE a
+    /// quoted argument is data. `split_outside_quotes` tracks quote state across the
+    /// whole string, newlines included, so this holds — but it had never been exercised
+    /// with `\n` in the separator list before.
+    #[test]
+    fn source_file_access_does_not_split_a_newline_inside_a_quoted_argument() {
         assert_eq!(
-            check_source_file_access_at_root("echo hi\ncat src/main.rs"),
+            check_source_file_access_at_root("git commit -m \"line one\ncat src/main.rs\""),
             None,
-            "documents today's behaviour, not desired behaviour — see the bug file"
+            "a newline inside a quoted argument is data, not a separator"
+        );
+    }
+
+    /// A backslash-newline is a line continuation: one command spanning two lines. The
+    /// escape handler skips both characters, so no split happens — and this command
+    /// genuinely IS a read, so it must still block.
+    #[test]
+    fn source_file_access_blocks_a_read_across_a_line_continuation() {
+        assert!(
+            check_source_file_access_at_root("cat \\\n  src/main.rs").is_some(),
+            "a line continuation is one command, and this one reads source"
         );
     }
 
@@ -2608,6 +2646,24 @@ mod tests {
     fn split_outside_quotes_semicolon() {
         let parts = split_outside_quotes("echo done; cat src/main.rs", &["&&", "||", ";", "|"]);
         assert_eq!(parts, vec!["echo done", "cat src/main.rs"]);
+    }
+
+    /// A newline is a separator like any other once it is in `seps`.
+    /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    #[test]
+    fn split_outside_quotes_newline() {
+        let parts = split_outside_quotes("echo hi\ncat src/main.rs", &["&&", "||", ";", "|", "\n"]);
+        assert_eq!(parts, vec!["echo hi", "cat src/main.rs"]);
+    }
+
+    /// And a newline inside quotes is not. This is why adding `\n` to the gate's
+    /// separator list is safe without any other change: quote state is tracked
+    /// character by character across the whole string, so it spans line breaks.
+    #[test]
+    fn split_outside_quotes_newline_inside_double_quotes() {
+        let parts =
+            split_outside_quotes("git commit -m \"one\ntwo\"", &["&&", "||", ";", "|", "\n"]);
+        assert_eq!(parts, vec!["git commit -m \"one\ntwo\""]);
     }
 
     #[test]
@@ -3088,6 +3144,30 @@ EOF"#;
         assert!(
             detect_il3_violation(cmd).is_some(),
             "the second line's pipe must still be seen"
+        );
+    }
+
+    /// Sibling of the source gate's newline gap, in the pipe gate: `pipeline_segments`
+    /// splits on `&&`, `||` and `;` but not on a newline, so a multi-line command is one
+    /// segment and the pipe's real LHS is not the segment's first token.
+    /// BUG docs/issues/2026-08-17-source-gate-does-not-split-on-newlines.md
+    #[test]
+    fn il3_detects_a_piped_unbounded_command_on_a_later_line() {
+        let cmd = "echo hi\ncargo test | grep FAILED";
+        assert!(
+            detect_il3_violation(cmd).is_some(),
+            "a piped cargo test on the second line is still a piped cargo test"
+        );
+    }
+
+    /// The matching false-positive guard: a newline inside quotes must not become a
+    /// segment boundary here either.
+    #[test]
+    fn il3_does_not_split_a_newline_inside_a_quoted_argument() {
+        let cmd = "git commit -m \"line one\ncargo test | grep FAILED\"";
+        assert!(
+            detect_il3_violation(cmd).is_none(),
+            "a pipeline described inside a quoted message is data, not syntax"
         );
     }
 
