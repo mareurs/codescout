@@ -195,6 +195,29 @@ fn build_hints(
         }
     }
 
+    // Two widening hints, measured from DIFFERENT baselines — and the difference
+    // is the whole contract.
+    //
+    // `more_in_umbrella` counts rows a `scope` param can actually fetch, so it is
+    // measured from `here` and it earns an `expand` entry. `scope="all"` aliases to
+    // umbrella whenever the project has one (`resolve_scope`, UmbrellaPolicy::Require),
+    // which makes umbrella the widest reachable scope; excluding Umbrella/All from
+    // the guard is what stops the suggestion re-aliasing to the scope already applied
+    // — the self-reference fixed in
+    // docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md (sub-finding #2).
+    //
+    // `more_in_workspace` counts what lies BEYOND that ceiling, so it is measured
+    // from the umbrella count and it earns NO `expand` entry. No `scope` value
+    // reaches those rows: with an umbrella `all` aliases to umbrella, and without one
+    // `resolve_scope` refuses `all` outright — so the only honest action is to
+    // activate the owning project, which is what its hint says.
+    //
+    // Measuring it from `here` was the defect: the count then included the whole
+    // reachable umbrella delta plus the unreachable remainder, so it advertised 23
+    // rows and `scope="all"` delivered 2. The earlier fix gated on `applied.scope`,
+    // which held at umbrella scope (where its test lives) and left the repo-scope
+    // twin reporting an unreachable total. See
+    // docs/issues/2026-08-17-find-more-in-workspace-hint-counts-rows-the-alias-cannot-reach.md.
     if !matches!(applied.scope, Scope::Umbrella | Scope::All)
         && current.and_then(|c| c.umbrella.as_deref()).is_some()
     {
@@ -207,23 +230,11 @@ fn build_hints(
             exclude_worktrees,
             cutoff_ms,
         )?;
-        let extra = in_umbrella.saturating_sub(here);
-        if extra > 0 {
-            hints.insert("more_in_umbrella".into(), json!(extra));
+        let reachable = in_umbrella.saturating_sub(here);
+        if reachable > 0 {
+            hints.insert("more_in_umbrella".into(), json!(reachable));
         }
-    }
 
-    // Hint that more rows exist beyond the current scope only when there is a
-    // BROADER reachable scope to widen to. `scope="all"` aliases to umbrella
-    // whenever the project has one (see the alias in `call`), so at umbrella
-    // scope the user is already as wide as the scope param can reach —
-    // suggesting scope="all" there just re-aliases to umbrella (self-referential,
-    // and it counts extra-umbrella catalog rows the alias can never reach).
-    // Excluding Umbrella keeps this hint reachable and non-self-referential.
-    // See docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md (sub-finding #2).
-    if !matches!(applied.scope, Scope::All | Scope::Umbrella)
-        && current.and_then(|c| c.umbrella.as_deref()).is_some()
-    {
         let in_workspace = count_for_scope(
             cat,
             base,
@@ -233,9 +244,16 @@ fn build_hints(
             exclude_worktrees,
             cutoff_ms,
         )?;
-        let extra = in_workspace.saturating_sub(here);
-        if extra > 0 {
-            hints.insert("more_in_workspace".into(), json!(extra));
+        let beyond_umbrella = in_workspace.saturating_sub(in_umbrella);
+        if beyond_umbrella > 0 {
+            hints.insert("more_in_workspace".into(), json!(beyond_umbrella));
+            hints.insert(
+                "more_in_workspace_hint".into(),
+                json!(
+                    "these rows sit outside this project's umbrella and no `scope` value \
+                     reaches them — activate the owning project to query them"
+                ),
+            );
         }
     }
 
@@ -267,9 +285,11 @@ fn build_hints(
     if hints.contains_key("more_in_umbrella") {
         expand.push("scope=\"all\"");
     }
-    if hints.contains_key("more_in_workspace") {
-        expand.push("scope=\"all\"");
-    }
+    // Deliberately no entry for `more_in_workspace`: those rows are beyond the
+    // umbrella ceiling and no scope value reaches them, so listing one here would
+    // hand back an action that cannot deliver what was counted. It also pushed the
+    // identical string twice whenever both hints fired, which read as two distinct
+    // remedies for one. `more_in_workspace_hint` carries the action instead.
     if !expand.is_empty() {
         hints.insert("expand".into(), json!(expand));
     }
@@ -872,9 +892,19 @@ mod tests {
         let make_cat = || {
             let cat = Catalog::open_in_memory().unwrap();
             artifact::upsert(&cat, &sample_row("a", "in-project")).unwrap();
+            // Inside the umbrella (member `/test/agents`) but outside the repo —
+            // reachable by widening the scope.
             let mut elsewhere = sample_row("b", "elsewhere");
             elsewhere.abs_path = std::path::PathBuf::from("/test/agents/x/y.md");
             artifact::upsert(&cat, &elsewhere).unwrap();
+            // Outside the umbrella entirely — in the catalog (it is machine-wide and
+            // holds rows for unrelated repos, ghost repos and /tmp) but reachable by
+            // NO scope value. Without this row the two hints below are numerically
+            // identical and the test cannot tell their baselines apart, which is how
+            // more_in_workspace shipped measuring from the wrong one.
+            let mut foreign = sample_row("c", "outside-umbrella");
+            foreign.abs_path = std::path::PathBuf::from("/other/ghost/c.md");
+            artifact::upsert(&cat, &foreign).unwrap();
             cat
         };
 
@@ -915,18 +945,55 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(v_umbrella["count"].as_u64(), Some(1));
+        // The two hints measure from DIFFERENT baselines, so with one row in each
+        // region they must both be 1. Measuring more_in_workspace from `here` — the
+        // shipped defect — makes it 2 and this assertion is what catches it.
+        assert_eq!(
+            v_umbrella["hints"]["more_in_umbrella"].as_u64(),
+            Some(1),
+            "the in-umbrella row is reachable by widening; got hints: {}",
+            v_umbrella["hints"]
+        );
         assert_eq!(
             v_umbrella["hints"]["more_in_workspace"].as_u64(),
             Some(1),
-            "with umbrella → more_in_workspace hint must appear"
+            "exactly the out-of-umbrella row lies beyond the reachable ceiling; \
+             got hints: {}",
+            v_umbrella["hints"]
+        );
+        // Unreachable rows get no `expand` entry, and the reachable one is offered
+        // exactly once — pushing the same string per hint read as two remedies for one.
+        let expand: Vec<&str> = v_umbrella["hints"]["expand"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            expand,
+            vec!["scope=\"all\""],
+            "expand must offer the reachable widening once and nothing for the \
+             unreachable surplus"
+        );
+        assert!(
+            !v_umbrella["hints"]["more_in_workspace_hint"].is_null(),
+            "an unreachable count must carry the action that does work"
         );
 
+        // The contract the old code broke: following `expand` must deliver the
+        // reachable count. count + more_in_umbrella, NOT + more_in_workspace.
         let v_all = call(
             &ctx_umbrella,
             json!({"filter": {"kind": {"eq": "spec"}}, "scope": "all"}),
         )
         .await
         .unwrap();
+        assert_eq!(v_all["scope"]["applied"], "umbrella");
+        let reachable = v_umbrella["count"].as_u64().unwrap()
+            + v_umbrella["hints"]["more_in_umbrella"].as_u64().unwrap();
+        assert_eq!(
+            v_all["count"].as_u64(),
+            Some(reachable),
+            "scope=\"all\" must return exactly what the expand hint promised"
+        );
         assert_eq!(v_all["count"].as_u64(), Some(2));
     }
 

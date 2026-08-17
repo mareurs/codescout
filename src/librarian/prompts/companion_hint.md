@@ -60,22 +60,7 @@ has set on the host.
 Responses include a `scope` block (`{applied, abs_path, git_root, umbrella, …}`)
 and `hints` listing how many extra rows live at wider scopes:
 
-```
-"hints": {
-  "more_in_repo": 4,
-  "more_in_workspace": 27,
-  "hidden_archived": 3,
-  "expand": ["scope=\"repo\"", "scope=\"all\"]"]
-}
-```
 
-Widen by passing `scope: "repo" | "umbrella" | "all"`:
-
-- `repo` — artifacts under the active project's enclosing git repo (nearest
-  `.git` ancestor; falls back to project path).
-- `umbrella` — artifacts under any member of the umbrella the active project
-  belongs to (declared in `workspace.toml`).
-- `all` — pre-scoping workspace-wide.
 
 Surface archived rows with `include_archived: true`. An explicit `status`
 filter wins over the archived-hide default.
@@ -88,7 +73,7 @@ name = "my-platform"
 members = ["/abs/path/to/svc-a", "/abs/path/to/svc-b"]
 ```
 
-With no umbrellas declared, `scope: "umbrella"` errors — use `repo` or `all`.
+
 ## Gotchas
 
 - **No file watcher.** Files added/moved outside `artifact` `action=create`/`action=update` are

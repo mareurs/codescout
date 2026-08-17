@@ -1,7 +1,7 @@
 ---
 id: f7ed94fbc1952bc5
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(find)''s more_in_workspace hint counts rows scope="all" can never reach — the 2026-07-17 fix gated on applied scope, so the self-reference survives one level down'
 ---
 
@@ -142,33 +142,64 @@ artifact(find, kind="bug", filter={"title":{"contains":"scope"}}, include_archiv
 
 ## Fix
 
-Not yet implemented. Two candidate directions, both small:
+Implemented — a **third** direction, cheaper and more honest than the two this
+file originally proposed. Scouting killed both: direction 1 ("suppress the
+hint") would have deleted behavior an existing test explicitly demands
+(`scope_all_widens_to_workspace`: *"with umbrella → more_in_workspace hint must
+appear"*), and direction 2 as written would have mislabelled reachable rows as
+unreachable in that same fixture.
 
-1. **Report only what is reachable.** Compute the workspace count with the alias
-   applied — i.e. count at the scope `scope="all"` would actually resolve to. When
-   an umbrella exists that equals the umbrella count, so `more_in_workspace`
-   naturally stops firing and `more_in_umbrella` carries the signal alone. This
-   removes the duplicate `expand` entry as a side effect.
-2. **Keep the count, fix the advice.** Retain `more_in_workspace` as a genuine
-   "rows exist that this session cannot reach" signal, but pair it with an
-   accurate action — `workspace=<path>` or a new explicit scope — and never
-   `scope="all"`. Preferable if the count is considered useful diagnostics.
+The actual defect is narrower than "the hint is wrong": the two hints were
+measured from the **same baseline** when they describe different regions.
 
-Direction 1 is the smaller change and matches what the existing test already
-asserts at umbrella scope. Direction 2 preserves information that is arguably
-worth surfacing; it needs a reachable action to point at before it is honest.
+| hint | region | baseline | reachable? | in `expand`? |
+|---|---|---|---|---|
+| `more_in_umbrella` | umbrella minus current scope | `here` | yes, via `scope="all"` | yes |
+| `more_in_workspace` | catalog **beyond** the umbrella | `in_umbrella` | no scope value | **no** |
 
-Whichever lands, the `expand` builder must not push the same string for two
-different hints — that alone is a legibility defect.
+Both blocks had identical guards, so they are now one block computing
+`in_umbrella` once. `more_in_workspace` becomes `in_workspace - in_umbrella`
+(was `in_workspace - here`, which double-counted the entire reachable umbrella
+delta) and carries a new `more_in_workspace_hint` naming the action that does
+work — activate the owning project. Its `expand.push` is deleted: `expand` is a
+list of args that *fetch* what was counted, and it also stopped emitting
+`scope="all"` twice as if two hints had two different remedies.
 
+Why the umbrella is genuinely the ceiling, confirmed at
+`src/librarian/tools/scope.rs::resolve_scope`: under `UmbrellaPolicy::Require`,
+`scope="all"` aliases to `Umbrella` when the project has an umbrella and
+**errors** when it does not. There is no configuration in which `scope="all"`
+returns machine-wide rows for an active project, so no advice could have made
+the old count reachable.
+
+Change: `src/librarian/tools/find.rs::build_hints`. Branch `experiments`.
 ## Tests added
 
-None yet. The regression test is the repo-scope twin of
-`scope_all_does_not_self_reference_expand_hint`: same fixture (one in-umbrella
-row, one outside), called at the default repo scope, asserting that whatever
-`expand` offers, following it returns at least `count + more_in_workspace` rows —
-or that the hint is absent.
+`librarian::tools::find::tests::scope_all_widens_to_workspace` — extended rather
+than duplicated, because the bug was that this test could not see the bug. Its
+fixture had one row in the repo and one inside the umbrella, and **nothing beyond
+the umbrella** — so both hints were numerically identical and no assertion could
+distinguish their baselines. Added a third row at `/other/ghost/c.md`, outside
+every umbrella member, mirroring the ghost-repo and `/tmp` rows the real shared
+catalog holds.
 
+With one row per region the test now pins four things: `more_in_umbrella == 1`,
+`more_in_workspace == 1`, `expand == ["scope=\"all\""]` exactly (once, and no
+entry for the unreachable surplus), and the contract the old code broke —
+following `expand` returns `count + more_in_umbrella`, asserted as a computed
+value rather than the literal `2`, so it cannot drift back into agreement by
+coincidence.
+
+**Mutation-verified, not assumed.** Two independent mutations, each turning it
+red with the expected diff:
+
+- `saturating_sub(in_umbrella)` → `saturating_sub(here)` (the shipped defect):
+  `more_in_workspace` becomes `2`, failing on `left: Some(2) / right: Some(1)`.
+- restoring the deleted `expand.push`: `left: ["scope=\"all\"", "scope=\"all\""]`
+  vs `right: ["scope=\"all\""]`.
+
+`scope_all_does_not_self_reference_expand_hint` still passes untouched — the
+umbrella-scope guard it protects is unchanged.
 ## Workarounds
 
 Treat `more_in_workspace` as "rows exist somewhere on this machine", not as a
@@ -178,17 +209,17 @@ the home project afterward.
 
 ## Resume
 
-Decide direction 1 vs 2 above. Direction 1: in `build_hints`
-(`src/librarian/tools/find.rs:216-236`), drop the `Scope::All` count when
-`current.umbrella` is `Some`, and delete the corresponding `expand.push` at
-`find.rs:270-272`. Then add the repo-scope regression test described under
-**Tests added**, modelled on `scope_all_does_not_self_reference_expand_hint`
-(`find.rs:934`) but invoked without a `scope` argument.
-
+One step left before archiving: the fix is verified by the test suite but **not
+yet observed on the wire**. `build_hints` is compiled in, so a live MCP session
+keeps the old behavior until `cargo rb` plus a `/mcp` reconnect. After
+reconnecting, re-run the two calls quoted under **Symptom** and confirm
+`more_in_umbrella` and `more_in_workspace` now sum with `count` to the true
+catalog total, that `expand` lists `scope="all"` once, and that `scope="all"`
+returns exactly `count + more_in_umbrella`. Then archive via
+`artifact(action="move", …)`.
 ## References
 
 - `src/librarian/tools/find.rs:111-278` — `build_hints`
 - `src/librarian/tools/find.rs:934-990` — the umbrella-scope test
 - `docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md` — parent bug, sub-finding #2
 - `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md` — the same alias seen from the other side (`librarian(context)` drops the alias entirely); marked `wontfix`
-

@@ -13,10 +13,7 @@ caps, the catalog DB location, or the event-authorship protocol.
 
 Listing tools (`artifact(find)`, `librarian(context)`) default to the
 active project and hide archived/superseded rows. Responses include a
-`scope` block (applied scope + resolved `abs_path` / `git_root` /
-`umbrella`) and a `hints` block reporting how many extra rows live at
-wider scopes: `more_in_repo`, `more_in_umbrella`, `more_in_workspace`,
-`hidden_archived`. The `expand` list names the exact args to widen.
+
 
 **Umbrellas are user-declared** in `workspace.toml` `[[umbrella]]`
 blocks. `scope="umbrella"` errors if no umbrella is declared.
