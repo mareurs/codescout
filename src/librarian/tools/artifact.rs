@@ -102,7 +102,7 @@ impl Tool for Artifact {
                 "start_line": { "type": "integer", "description": "get: 1-indexed start of line slice" },
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive end of line slice" },
                 "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists. NOTE: a move MINTS A NEW ID (id = sha256(abs_path)); the artifact's events, links, observations and augmentation are grafted onto it and the old row is dropped. The response carries `id` (new), `previous_id`, `id_changed` and `history_grafted` — read the new id from there, re-point prose citing the old one, and never reuse a cached id across a move." },
-                "rel_path": { "type": "string", "description": "create: relative path for new file. In find results: path relative to repo root — does NOT include the repo name (use the `repo` field for that). When filtering by path use contains/prefix on the path portion only, e.g. {\"contains\": {\"field\": \"rel_path\", \"value\": \"docs/trackers\"}}." },
+                "rel_path": { "type": "string", "description": "create: relative path for new file, e.g. 'docs/plans/my-plan.md' — relative to repo root, and NOT including the repo name (use the `repo` field for that). Also accepted on find as a shorthand, where it is lifted to filter={\"rel_path\": {\"contains\": <value>}} and the lift is reported under `corrections`." },
                 "repo": { "type": "string", "description": "create: workspace root name (git repo basename). Omit to infer from active project — rel_path is then treated as project-relative and the subdir prefix is prepended automatically." },
                 "title": { "type": "string", "description": "create: artifact title" },
                 "body": { "type": "string", "description": "create: markdown body" },
@@ -310,6 +310,116 @@ mod tests {
             assert!(
                 props.get(phantom).is_none(),
                 "schema documents `{phantom}` but update.rs has no field backing it"
+            );
+        }
+    }
+
+    /// Class-level guard for the family
+    /// `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md` belongs to.
+    ///
+    /// **This one passes today.** It is a tripwire for the next variant, not a
+    /// reproduction of this one — `rel_path` is labelled `create:`, so a label-driven
+    /// sweep cannot reach it by construction, and the doc half is pinned separately by
+    /// `rel_path_description_does_not_instruct_find_callers`. Mutation-verified: change
+    /// any `find:`-labelled key's name in `input_schema()` without adding the field to
+    /// `find::Args` and this goes red.
+    ///
+    /// `input_schema_has_no_phantom_update_fields` asserts a key is backed by *some*
+    /// action. That is the gap this closes: a key can be real, backed by a sibling
+    /// action, and silently discarded by the one whose label it carries — because
+    /// `Args` cannot carry `deny_unknown_fields` (the dispatcher passes `action` down,
+    /// and adding it once broke every `artifact(update)` call).
+    ///
+    /// The probe exploits serde's asymmetry: a key that IS a field gets type-checked,
+    /// so an ill-typed value errors; a key that is NOT a field is silently discarded,
+    /// so the same value succeeds. `[]` is invalid for every type in `find::Args`
+    /// (`Option<String>`, `Option<bool>`, `usize`, `Option<Scope>`, `Option<FilterNode>`)
+    /// — check that before reusing the probe on an action whose `Args` holds a `Vec`,
+    /// where `[]` would be accepted and the probe would read as a pass.
+    #[tokio::test]
+    async fn schema_keys_labelled_find_are_honored_by_find() {
+        let schema = Artifact.input_schema();
+        let props = schema["properties"]
+            .as_object()
+            .expect("schema has properties");
+
+        let find_keys: Vec<String> = props
+            .iter()
+            .filter(|(name, spec)| {
+                // `action` is the dispatcher's own key, not any sub-tool's.
+                *name != "action"
+                    && spec["description"]
+                        .as_str()
+                        .is_some_and(|d| d.starts_with("find:"))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        assert!(
+            !find_keys.is_empty(),
+            "expected some find-labelled schema keys; the label convention may have changed"
+        );
+
+        let ctx = mk_ctx();
+        for key in &find_keys {
+            let result = Artifact
+                .call(&ctx, json!({"action": "find", key.as_str(): []}))
+                .await;
+            assert!(
+                result.is_err(),
+                "schema labels `{key}` as a find param, but find::Args has no such \
+                 field — serde discards it and the query runs at defaults, returning \
+                 an unfiltered first page whose count reads as a match total"
+            );
+        }
+    }
+
+    /// The doc half of
+    /// `docs/issues/2026-08-17-find-silently-drops-top-level-rel-path.md`, and the part
+    /// that actually caused the wrong call.
+    ///
+    /// `rel_path`'s description opened `create: relative path for new file` and then
+    /// spent two more sentences instructing `find` callers — "In find results…", "When
+    /// filtering by path use contains/prefix…" — with an example in the *inverted* leaf
+    /// shape that `repair_node` exists to correct. An agent looking for how to find by
+    /// path found `rel_path`: top-level, and described in find terms. `find::Args` had
+    /// no such field, so serde discarded it.
+    ///
+    /// The invariant asserted is not "never mention another action" — mentioning `find`
+    /// is now correct, because `find` honors the key. It is that the mention and the
+    /// support must agree. Red before the fix on both halves: the description named
+    /// `find` while `find` dropped the param, and it taught the inverted shape.
+    #[tokio::test]
+    async fn rel_path_description_and_find_support_agree() {
+        let schema = Artifact.input_schema();
+        let desc = schema["properties"]["rel_path"]["description"]
+            .as_str()
+            .expect("rel_path is documented");
+
+        // The discriminator is the `"field"` KEY, not the op name. An earlier version
+        // looked for `{"contains"` and matched the canonical
+        // `{"rel_path": {"contains": …}}` too — the inverted shape is the one that names
+        // its field inside the op object, so that key is what identifies it.
+        assert!(
+            !desc.contains("\"field\""),
+            "rel_path's description carries an inverted filter-leaf example \
+             ({{op: {{field, value}}}}), teaching the shape repair_node exists to \
+             correct: {desc}"
+        );
+
+        if desc.contains("find") {
+            // Same serde probe as `schema_keys_labelled_find_are_honored_by_find`: a
+            // real field type-checks and rejects `[]`; a missing one is discarded and
+            // the call succeeds.
+            let ctx = mk_ctx();
+            let probe = Artifact
+                .call(&ctx, json!({"action": "find", "rel_path": []}))
+                .await;
+            assert!(
+                probe.is_err(),
+                "rel_path's description tells find callers about it, but find::Args has \
+                 no such field — so the param is silently discarded and the query runs \
+                 at defaults. Either honor it on find or stop documenting it there."
             );
         }
     }
