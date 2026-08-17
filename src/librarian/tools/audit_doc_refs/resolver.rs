@@ -125,15 +125,43 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     )
 }
 
+/// The basename-fallback lookup key for `raw_ref`, or `None` when the ref carries
+/// real path structure and must therefore resolve positionally.
+///
+/// A leading `./` is stripped before the no-slash test. That slash is not structure —
+/// it is a "relative to here" marker — and it used to disqualify the ref from the
+/// fallback while buying nothing on the positional attempt: `resolve_file_path` joins
+/// against `repo_root`, so `./x.j2` becomes `<root>/./x.j2` and fails for any file not
+/// sitting at the repo root. The two facts together put every `./`-prefixed ref in a
+/// dead zone — unresolvable positionally AND ineligible for the fallback that exists
+/// for exactly the "named without its full path" case.
+///
+/// What walked into it was a doc quoting Rust: `include_str!("./render_template.j2")`.
+/// The tokenizer splits on `(` and `"`, so the macro context is gone by classification
+/// time; the surviving token's `./` is resolved by rustc against the containing `.rs`
+/// file, which is not a base any consumer of this function knows. Falling through to
+/// the basename index is the honest answer — it resolves a unique target and reports an
+/// ambiguous one, so a genuinely missing include is still caught.
+///
+/// Only one leading `./` is stripped. `././x` and `../x` keep their slashes and stay
+/// positional, which is correct: `..` names a location relative to a base this resolver
+/// does not have.
+///
+/// See `docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
+fn basename_candidate(raw_ref: &str) -> Option<&str> {
+    let stripped = raw_ref.strip_prefix("./").unwrap_or(raw_ref);
+    if stripped.is_empty() || stripped.contains('/') {
+        return None;
+    }
+    Some(stripped)
+}
+
 /// Look up `raw_ref` in the basename index when it has no `/`. Returns
 /// `Some(Resolution)` with `ResolvedBasename` (single hit) or
 /// `AmbiguousBasename` (multiple hits); `None` means "no match — caller should
 /// fall through to the default missing verdict".
 fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resolution> {
-    if raw_ref.contains('/') {
-        return None;
-    }
-    let matches = ctx.basename_index.get(raw_ref)?;
+    let matches = ctx.basename_index.get(basename_candidate(raw_ref)?)?;
     match matches.len() {
         0 => None,
         1 => Some(Resolution {
@@ -167,15 +195,18 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
         }
     }
 }
-/// The single indexed path for a slash-less basename, if exactly one exists.
+/// The single indexed path for a basename-shaped ref, if exactly one exists.
 ///
 /// `try_basename_fallback` answers "what verdict?"; this answers "which file?",
 /// which is what a line-range check needs before it can range-check anything.
+/// Shares `basename_candidate`'s eligibility rule so the two cannot disagree about
+/// which refs are basename-shaped — including the leading-`./` case.
 fn unique_basename_path(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<std::path::PathBuf> {
-    if raw_ref.contains('/') {
-        return None;
-    }
-    match ctx.basename_index.get(raw_ref)?.as_slice() {
+    match ctx
+        .basename_index
+        .get(basename_candidate(raw_ref)?)?
+        .as_slice()
+    {
         [only] => Some(ctx.repo_root.join(only)),
         _ => None,
     }
@@ -368,8 +399,17 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             notes: None,
         };
     }
-    if let Some(r) = try_basename_fallback(path_part, ctx) {
-        return r;
+    // Only UNPREFIXED links get the basename fallback. A `./` or `../` link is
+    // explicitly positioned by its author and was resolved above against md_dir,
+    // which is the base it names; a same-basename file elsewhere in the tree is not
+    // what it points at, and accepting one would silence a genuinely broken relative
+    // link. This guard is load-bearing only because `basename_candidate` now strips a
+    // leading `./` — before that, such a ref fell out of the fallback on its own slash,
+    // so the guard restates the old behaviour explicitly rather than changing it.
+    if !path_part.starts_with("./") && !path_part.starts_with("../") {
+        if let Some(r) = try_basename_fallback(path_part, ctx) {
+            return r;
+        }
     }
     verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
 }
@@ -1807,6 +1847,195 @@ mod tests {
             "notes should report match count: {:?}",
             r.notes
         );
+    }
+
+    /// A `./`-prefixed ref must reach the basename fallback.
+    ///
+    /// Reproduces the reported case exactly: a doc quoting Rust —
+    /// `include_str!("./render_template.j2")` — where the `./` is resolved by rustc
+    /// against the containing `.rs` file, not against anything the doc controls. The
+    /// tokenizer splits on `(` and `"`, so by classification time the macro context
+    /// is gone and only `./render_template.j2` survives.
+    ///
+    /// It then landed in a dead zone: `resolve_file_path` joins against `repo_root`,
+    /// where a leading `./` buys nothing, and the `/` inside that `./` disqualified
+    /// the ref from `try_basename_fallback` — the fallback that exists for precisely
+    /// this "named without its full path" case. Unresolvable positionally AND
+    /// ineligible for the fallback, so it gated as `missing` / `high` and failed CI
+    /// on a correct doc.
+    ///
+    /// Two `render_template.j2` exist in this repo, so the honest verdict is
+    /// `AmbiguousBasename` at Med — informative, and below `--fail-on high`.
+    /// docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md
+    #[test]
+    fn resolver_dot_slash_ref_reaches_the_basename_fallback() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "render_template.j2".to_string(),
+            vec![
+                std::path::PathBuf::from("src/librarian/tools/audit_doc_refs/render_template.j2"),
+                std::path::PathBuf::from("src/librarian/tools/legibility_scan/render_template.j2"),
+            ],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand(
+                "./render_template.j2",
+                "docs/architecture/augmented-artifacts.md",
+                RefKind::FilePath,
+            ),
+            &ctx,
+        );
+        assert_eq!(
+            r.verdict,
+            Verdict::AmbiguousBasename,
+            "a `./`-prefixed ref must reach the basename fallback, not gate as missing"
+        );
+        assert_eq!(r.severity, Severity::Med, "must sit below --fail-on high");
+    }
+
+    /// The unique case, so the fix is not merely "stop gating": a `./`-prefixed ref
+    /// whose basename is unique still resolves to a concrete file, which is what
+    /// keeps a genuinely missing include target catchable.
+    #[test]
+    fn resolver_dot_slash_ref_resolves_when_the_basename_is_unique() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "only_one.j2".to_string(),
+            vec![std::path::PathBuf::from("src/somewhere/only_one.j2")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        };
+        let r = resolve_ref(&cand("./only_one.j2", "docs/x.md", RefKind::FilePath), &ctx);
+        assert_eq!(r.verdict, Verdict::ResolvedBasename);
+        assert!(
+            r.notes
+                .as_ref()
+                .is_some_and(|n| n.contains("src/somewhere/only_one.j2")),
+            "notes should cite the file it resolved to: {:?}",
+            r.notes
+        );
+    }
+
+    /// The boundary: stripping `./` must not turn a ref with real path structure
+    /// into a basename lookup. `./a/b.j2` names a location, so it resolves
+    /// positionally or not at all — otherwise the fix would silence genuinely
+    /// broken relative paths by matching on their last segment.
+    #[test]
+    fn resolver_dot_slash_ref_with_real_structure_is_not_basename_resolved() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "b.j2".to_string(),
+            vec![std::path::PathBuf::from("src/elsewhere/b.j2")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("./src/missing/b.j2", "docs/x.md", RefKind::FilePath),
+            &ctx,
+        );
+        assert_ne!(
+            r.verdict,
+            Verdict::ResolvedBasename,
+            "a multi-segment ref must not be resolved by its last segment"
+        );
+    }
+
+    /// The other boundary, and the one my own fix threatened: a `./` **link** must
+    /// keep gating when it is broken.
+    ///
+    /// `resolve_link` anchors `./` and `../` to the markdown file's own directory —
+    /// unlike `resolve_file_path`, which joins `repo_root`. So in a link the `./` is
+    /// real positional intent, and the file-path fix must not leak into it: stripping
+    /// `./` there would let a same-named file anywhere in the tree satisfy a link that
+    /// points somewhere specific and wrong.
+    ///
+    /// Before `basename_candidate` existed this held for free — the ref fell out of the
+    /// fallback on the slash inside its own `./`. It now needs saying out loud, which is
+    /// what this test is for.
+    #[test]
+    fn resolver_broken_dot_slash_link_still_gates_despite_a_basename_match() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs/manual")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs/elsewhere")).unwrap();
+        // The basename exists — but NOT where the link says it is.
+        std::fs::write(tmp.path().join("docs/elsewhere/target.md"), "# t\n").unwrap();
+
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "target.md".to_string(),
+            vec![std::path::PathBuf::from("docs/elsewhere/target.md")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("./target.md", "docs/manual/page.md", RefKind::Link),
+            &ctx,
+        );
+        assert_eq!(
+            r.verdict,
+            Verdict::Missing,
+            "a `./` link names a location; a basename match elsewhere must not satisfy it"
+        );
+    }
+
+    /// And the converse, so the guard above is not simply switching the fallback off
+    /// for links: an UNPREFIXED link is genuinely ambiguous in this repo (mdBook pages
+    /// are page-relative, the rest of `docs/` is repo-root-relative), so it keeps the
+    /// basename fallback it had before.
+    #[test]
+    fn resolver_unprefixed_link_still_uses_the_basename_fallback() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs/elsewhere")).unwrap();
+        std::fs::write(tmp.path().join("docs/elsewhere/target.md"), "# t\n").unwrap();
+
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "target.md".to_string(),
+            vec![std::path::PathBuf::from("docs/elsewhere/target.md")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("target.md", "docs/manual/page.md", RefKind::Link),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::ResolvedBasename);
     }
 
     /// Still reported, but capped below the CI gate. A bare name earns
