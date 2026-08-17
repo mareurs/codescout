@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-17
-closed:
+closed: 2026-08-17
 severity: low
 owner: marius
 related: []
@@ -213,27 +213,66 @@ filing is `low` rather than `medium`** — measured, not reasoned. The ratified 
 
 ## Fix
 
-Not implemented. One-line shape: in `resolve_file_symbol`, replace the
-`unique_basename_path`-else-`FileMissing` branch with `try_basename_fallback`, keeping
-`unique_basename_path` for the case where a concrete path is needed to hand to the LSP.
-The two are not interchangeable — `try_basename_fallback` answers *"what verdict?"* and
-`unique_basename_path` answers *"which file?"*, as their doc comments say — so the branch
-needs both: fall back for the verdict when the basename is ambiguous, and only attempt
-symbol resolution when a single file was identified.
+**Fixed 2026-08-17 in `3faddb15` (`experiments`).** Promotion to `master` is a
+fast-forward, so this SHA *is* the master SHA once promoted — no second one to record.
 
-Then correct the parity comment to state what is actually true after the change.
+The `else` arm of the path-resolution branch in `resolve_file_symbol` now consults
+`try_basename_fallback`:
 
+```rust
+} else {
+    // Ambiguous is not missing. `unique_basename_path` answers "which file?" and so
+    // returns None for BOTH zero matches and two-or-more — which meant this branch
+    // claimed `FileMissing` for a file that exists twice. `try_basename_fallback`
+    // answers "what verdict?", and is the same helper `resolve_file_path` and
+    // `resolve_file_line` use to tell the two apart. Here it can only return
+    // `AmbiguousBasename`: a single match would already have been taken above.
+    return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
+        verdict_with_drops_for_ref(Verdict::FileMissing, path_str, …)
+    });
+};
+```
+
+`FileMissing` is **preserved** for the genuinely-absent case rather than widened away —
+that is what the companion test pins.
+
+The parity comment above the branch was corrected in the same commit. It had asserted
+*"without this the three ref kinds disagree about identical path parts"* while only the
+unique half was implemented: true of one outcome, false of the other, and doc-vs-code drift
+inside the very fix that introduced the parity.
+
+**Deliberately not done: resolving the ambiguity by searching for the symbol.** Checking
+every candidate file and resolving when exactly one contains the symbol would make
+`resolver.rs::note_degraded` resolve outright, and it is tempting because it makes correct
+docs go clean rather than merely honest. Rejected because it costs one `document_symbols`
+call per candidate per ambiguous ref, on a subsystem whose LSP budget is already the
+subject of three archived bugs (cold-start budget, stubbed-off client, server-behind-index).
+`AmbiguousBasename` is the answer the sibling resolvers give for this input, and parity was
+the defect — so parity is the fix. If the noise ever justifies it, the capability belongs
+behind the same measurement the other three got.
 ## Tests added
 
-None yet. The fixture is already written and verified — see § Reproduction. Turn those four
-lines into a test asserting all four verdicts, not just the two broken ones: a fix that made
-every form resolve would be wrong, and only rows 1 and 4 catch that.
+Two, in `src/librarian/tools/audit_doc_refs/resolver.rs`, placed directly after
+`resolver_file_line_reports_ambiguous_basename` so the three ref kinds' ambiguity tests sit
+together:
 
-Worth widening to all three basename-accepting ref kinds (`file_path`, `file_line`,
-`file_symbol`) in one test. The recurring defect in this family is the four resolvers
-drifting apart — 2026-08-06's item 2 was `resolve_file_line` missing a fallback
-`resolve_file_path` already had — so a per-kind parity table is the guard that would have
-caught that one too, and would catch the next.
+- **`resolver_file_symbol_reports_ambiguous_basename`** — the RED test. Written first,
+  watched fail with `left: FileMissing, right: AmbiguousBasename`, then passed.
+- **`resolver_file_symbol_still_reports_file_missing_when_no_file_matches`** — the
+  discriminating companion. It passed from the start **by design**: it pins the behaviour
+  the fix must not break, since a fix that turned every unresolvable path part into
+  "ambiguous" would hide genuinely dead references, and nothing else would catch that.
+
+**Mutation-verified.** Reverting the `else` arm fails exactly
+`resolver_file_symbol_reports_ambiguous_basename` and leaves 146 audit_doc_refs tests green,
+including the companion — so the test is specific to this fix, and nothing else in the suite
+depended on the old behaviour.
+
+Still wanted, and now the more valuable test: the **per-kind parity table** over
+`file_path` / `file_line` / `file_symbol`, asserting all four verdicts from § Reproduction
+for each kind. Every bug in this family has been one resolver lagging its siblings —
+2026-05-17 for two of them, 2026-08-06 for `file_line`, this one for `file_symbol` — and a
+parity table is the single guard that would have caught all three, plus the next.
 ## Workarounds
 
 Cite the symbol with the **full repo-relative path** —
@@ -268,13 +307,17 @@ I walked into it while writing the workaround for its sibling bug.
 Either give the whole path or give the bare basename. There is no middle.
 ## Resume
 
-Read `unique_basename_path` and `try_basename_fallback` together
-(`src/librarian/tools/audit_doc_refs/resolver.rs:160-210`) and settle how to use both in
-one branch: the verdict must come from the fallback, the LSP call needs a single concrete
-path. Then write the three-kind parity test from § Tests added *first* — it should fail on
-`file_symbol` only, which both confirms this filing and proves the other two resolvers are
-already correct.
+One step left before archiving: **replay on the wire.** The fix is compiled into the test
+binary but the running MCP server serves the previous release build, so `cargo rb` + `/mcp`
+is required, then re-run the § Reproduction fixture and confirm the bare ambiguous basename
+reports `AmbiguousBasename` / med instead of `file_missing`. That is the standard this
+family is held to — `f6140205` archived its sibling as *"replayed on the wire"* — and it is
+stronger than a green unit test, because the unit test supplies its own
+`basename_index` while the wire path builds one from the real repo.
 
+After the replay: archive through the catalog to `docs/issues/archive/`, and re-point the
+citations of this path in the same commit — `src/librarian/tools/audit_doc_refs/resolver.rs`
+carries one in the new tests' doc comment.
 ## References
 - `src/librarian/tools/audit_doc_refs/resolver.rs:429-558` — `resolve_file_symbol`
 - `src/librarian/tools/audit_doc_refs/resolver.rs:163` — `try_basename_fallback`, and the
