@@ -846,9 +846,13 @@ a hand-authored corpus), which is why `frontmatter::upsert_int_line` exists rath
 reusing the normalizing writer.
 
 **Two issues opened during this pass**, both tool-observability rather than hygiene:
-`docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
-(the response hides which input governed — so an agent cannot see the compacted-ledger
-signal that precondition 2 is about) and
+`docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
+(the response hid which input governed — so an agent could not see the compacted-ledger
+signal that precondition 2 is about; **fixed `4cdafd9a`**, archived. All three derivation
+inputs are now reported, and the mark-alone case is named in words. The relation this
+entry assumed — `frontmatter_max > body_max` — turned out not to isolate compaction, since
+it also holds right after any ordinary reservation; the shipped condition is the mark
+leading both other inputs) and
 `docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`
 (a resolvability query across both finding arrays silently answers half — relevant to
 HY-9's proposed D12, which consumes exactly those arrays).

@@ -2577,7 +2577,7 @@ fn substitution_diagnostic_is_silent_when_the_command_shows_no_substitution() {
 /// The boundary test. `format_compact` is what `call_content` renders, and it builds a
 /// one-liner from a fixed set of keys — so a field it does not read reaches nobody, no
 /// matter how correct the JSON is. That is the defect filed as
-/// `docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`,
+/// `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`,
 /// and this test is what stops it recurring here.
 #[test]
 fn format_compact_surfaces_the_shell_cause_on_every_output_shape() {

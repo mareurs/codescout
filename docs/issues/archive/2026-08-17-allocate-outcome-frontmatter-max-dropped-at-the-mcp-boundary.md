@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- ledger
+- entry-ids
+- progressive-disclosure
+- mcp-surface
+closed: 2026-08-17
 opened: 2026-08-17
-closed:
-severity: low
 owner: marius
 related: []
-tags: [librarian, ledger, entry-ids, progressive-disclosure, mcp-surface]
-kind: bug
+severity: low
 ---
 
 # BUG: `append_entry` computes `frontmatter_max` and then drops it, hiding the one signal that says a ledger was compacted
@@ -91,7 +96,7 @@ is diagnostic:
 |---|---|
 | `body_max` governs | normal steady state |
 | `reserved_max` > `body_max` | an id was handed out and the body has not caught up |
-| `frontmatter_max` > `body_max` | **the ledger has been compacted** — entries live in an archive companion |
+| `frontmatter_max` > `body_max` | ~~the ledger has been compacted~~ — **wrong as filed, corrected while implementing.** This relation is also true immediately after *any* ordinary reservation, because the reservation writes the mark. The second call in `reservation_reports_all_three_derivation_inputs` has `frontmatter_max` 42 against `body_max` 41 and is nothing but a normal allocation. The honest condition is the mark leading **both** other inputs |
 
 Only the first two are inferable from the current response, and only because
 `reserved_max` is absent too — so in practice a caller sees `body_max` and nothing to
@@ -107,24 +112,45 @@ compare it against.
 
 ## Fix
 
-Add `"frontmatter_max": outcome.frontmatter_max` and `"reserved_max":
-outcome.reserved_max` to the prose branch's response. Then consider a `warning` field
-on the `frontmatter_max > body_max` case, mirroring the params branch's existing
-`warning` for "params lags the body" — the shapes are analogous and the params one is
-already pinned by `call_warns_when_params_lags_the_body`.
+**Landed `4cdafd9a` (experiments).**
 
-Worth deciding at the same time: whether the warning should fire at all. A compacted
-ledger is a *correct* state, not drift, so the warning must read as information rather
-than a problem — otherwise it trains agents to "repair" a ledger that the archive
-cadence policy deliberately shaped that way.
+All three inputs now ship as data on the prose branch — `body_max`, `reserved_max`,
+`frontmatter_max` — **present even when null**, because an absent key reads as zero to
+anything scanning JSON.
 
+**The warning question: no, and Pattern 5a is why.** `docs/PROGRESSIVE_DISCOVERABILITY.md`
+defines `warning` as *off-golden-path — result is suboptimal but valid, reconsider before
+proceeding*. A compacted ledger is none of those: it is a correct state the archive cadence
+produced on purpose. Tagging it would train agents to "repair" it, which is precisely what
+this file's own Fix section warned about. The three severity keys are also mutually
+exclusive, and this branch already speaks through `next_step` — so the fact goes there, as
+a fact.
+
+**The discriminator in this file's Evidence table was wrong, and implementing it is what
+caught that.** `frontmatter_max > body_max` does not isolate compaction. The shipped
+condition is the mark leading **both** the live body and the reservation table, so the mark
+alone accounts for the number.
+
+And the note names *alternatives* rather than asserting one: compaction, a fresh clone, and
+an `artifact(move)` all produce that state, and three integers cannot tell them apart.
+Asserting "compacted" would have been Anti-Pattern 5 — in the file that gained
+Anti-Pattern 5 the same morning.
 ## Tests added
 
-None yet. Wanted: extend `omitting_entry_collection_reserves_an_id_and_writes_no_entry`
-(`src/librarian/tools/append_entry.rs`) to assert the two new response fields, and a
-new case where the body has been emptied and the mark governs, asserting
-`frontmatter_max` is reported.
+Both in `src/librarian/tools/append_entry.rs`, red observed first, each on the thing that
+was genuinely missing:
 
+- `reservation_reports_all_three_derivation_inputs` — asserts the two new keys are
+  **present** on a first allocation (where both are null) and carry values on the second,
+  where the first call's own reservation and mark have populated them. Failed on
+  `reserved_max` absent from the payload.
+- `reservation_names_compaction_without_calling_it_a_warning` — a ledger whose live body
+  heads nothing and whose committed mark is 11. Asserts `frontmatter_max` is reported, the
+  governing input is named in words rather than left as integers to compare, and that no
+  `warning` key appears. Failed on `frontmatter_max` returning null where 11 was due.
+
+The second test's `warning`-absence assertion is the load-bearing one: it pins the design
+decision, not just the payload, so a later "helpful" warning cannot be added silently.
 ## Workarounds
 
 Read the mark straight out of the file — `entry_high_water_<PREFIX>` is committed
@@ -133,11 +159,7 @@ only the observability is missing.
 
 ## Resume
 
-Add the two fields to the `json!` block in the prose branch of
-`src/librarian/tools/append_entry.rs` and extend the test named above. Decide the
-warning question in § Fix before adding a `warning` field — the answer changes whether
-this is a two-line change or a prompt-surface one.
-
+N/A — fixed and archived.
 ## References
 - `src/librarian/tools/append_entry.rs` — the prose branch's response
 - `src/librarian/catalog/augmentation.rs` — `AllocateOutcome`, `allocate_entry_id`

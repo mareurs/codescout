@@ -152,7 +152,8 @@ attached on **both** exit paths, including the `buffer_only` early return. `form
 appends it after all branch logic, in the same position and for the same reason as
 `timeout_hint`: `format_compact` is what `call_content` renders, and a field that function
 does not read reaches nobody — the defect filed as
-`docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
+`docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
+(fixed `4cdafd9a`, archived).
 
 Status `mitigated`, not `fixed`: the substitution still happens, and a message whose
 backticks *parse* is still silently mangled rather than refused. What is fixed is that a

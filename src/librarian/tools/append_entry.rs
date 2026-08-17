@@ -120,7 +120,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // state the archive cadence produced on purpose. Tagging it would train agents
         // to repair it. The cause is left as alternatives rather than asserted, because
         // the three integers cannot tell compaction from a fresh clone (Anti-Pattern 5).
-        // docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md
+        // docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md
         let compaction_note = match outcome.frontmatter_max {
             Some(fm)
                 if fm > outcome.body_max.unwrap_or(0) && fm > outcome.reserved_max.unwrap_or(0) =>
@@ -581,7 +581,7 @@ mod tests {
     /// one. Which input governed is the diagnostic — the caller saw `body_max` with
     /// nothing to compare it against. These are facts about the allocation, so they go
     /// out as data rather than under a severity-tagged guidance key.
-    /// `docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
+    /// `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
     #[tokio::test]
     async fn reservation_reports_all_three_derivation_inputs() {
         let dir = tempfile::tempdir().unwrap();

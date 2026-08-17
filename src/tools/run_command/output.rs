@@ -367,7 +367,7 @@ pub(crate) fn format_run_command(result: &Value) -> String {
     // Same placement, same reason: a shell-substitution cause applies to any exit shape,
     // and the compact renderer is what `call_content` shows — a field this function does
     // not read reaches nobody, which is the defect filed as
-    // `docs/issues/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
+    // `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
     if let Some(cause) = result["shell_cause"].as_str() {
         s.push_str(&format!("\n⚠ cause: {cause}"));
     }
