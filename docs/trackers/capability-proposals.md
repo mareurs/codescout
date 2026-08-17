@@ -36,6 +36,8 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-1 | 2026-08-15 | proposed | small–medium | Session artifact-touch ledger — expose what this session read and wrote |
 | CAP-2 | 2026-08-15 | brainstorm | large | Second arm — a codescout-issued LLM controller that challenges unverified claims |
 | CAP-3 | 2026-08-15 | research | medium | Background / async tool execution — surface what already works, then decide on MCP `ext-tasks` |
+| CAP-4 | 2026-08-16 | proposed | — | Cross-session collision hint — tell a session when another one just touched this file |
+| CAP-5 | 2026-08-17 | proposed | medium | Server-assigned entry ids for prose trackers — make allocation atomic instead of advisory |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -373,6 +375,85 @@ incentive to write `sleep` loops.
 **Scope note:** the remaining 90% of the >10s band (1,287 calls, ≈9.1h) is `cargo`
 build/test/clippy. Those are genuine long work, not hand-rolled waiting — but they are the primary
 *consumer* of an await primitive, since they are what a caller would background first.
+## CAP-5 — Server-assigned entry ids for prose trackers
+
+**Status:** proposed · **Opened:** 2026-08-17
+
+**The problem.** Entry ids in prose ledgers are allocated by the agent: scan the file for
+the max `PREFIX-N`, add one, write the entry. That read-then-write is not atomic, and it is
+the source of every id defect measured on this repo on 2026-08-16/17:
+
+- **9 ids allocated twice** in `reconnaissance-patterns.md`, because the scan used
+  `grep '^## R-'` and was blind to the file's second entry format (`| R-N |` rows).
+- **A tenth collision missed by about four minutes** on 2026-08-17: a scan returned max 96,
+  a peer session wrote `## R-97` into the working tree, and the re-scan immediately before
+  writing returned 97. Recorded as R-98.
+- **The repair made it worse.** The collision fix appended `a`/`b` suffixes — but the
+  resolver's token grammar is `\b[A-Z]{1,3}-\d+\b`, so `R-72b` is not a valid token at all
+  and can never be defined *or* cited. The convention produced ids the link graph cannot
+  represent.
+
+**Substrate check.**
+
+- `artifact(action="append_entry", id_prefix=…, entry_collection=…)` **already does exactly
+  the right thing, atomically** — it computes the next id from the live max across *both*
+  existing params entries and ids the markdown body already claims (headings / index rows),
+  and returns a `warning` when params lags the body. The primitive exists.
+- **It is unavailable to every tracker that broke.** `append_entry` requires an augmentation
+  with a declared `entry_collection`. `reconnaissance-patterns.md` (58 entries),
+  `tracker-hygiene-log.md` (9) and this file (5) all have `entry_collection: null`; two of
+  the three have `augmentation: null` outright. For these, no atomic path exists and hand
+  allocation is the only option the tool surface offers. `update_entry` has the same
+  precondition.
+- Nothing in the action set appends a **body section**: `find | get | create | update | move
+  | delete | graft | link | graph | state_at | append_entry | update_entry`.
+
+**Why a `get_next_index` would not fix it.** A query that returns the next free id moves the
+race rather than removing it: the agent still does read-then-write, and a peer can take the
+id in between — which is R-98 verbatim. **Atomicity is the property, not the lookup.** An id
+must be assigned by the same call that writes the entry, or it is just a snapshot with a
+shorter shelf life.
+
+**Proposal — `artifact(action="append_section")`** (or an `append_entry` that can also write
+a body section, which is one mechanism rather than two).
+
+| | |
+|---|---|
+| **Inputs** | `id`, `id_prefix`, `title`, `body`, `anchor_heading` (insert before), optional index-row fields |
+| **Server does** | compute the next id across every entry format the file uses → format the heading as `## <ID> — <title>` → insert before the anchor → optionally emit the index row / params row → return the assigned id |
+| **Works on** | any tracker, augmented or prose — no `entry_collection` required |
+
+Four defect classes become structurally impossible rather than matters of discipline:
+
+1. **collisions and the stale-max race** — allocation and write are one operation;
+2. **non-conformant headings** — the server emits `## <ID> — <title>`, which is exactly
+   `def_re`'s shape (`^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`), so an entry can never be born
+   undefined and dangling;
+3. **orphaned index rows** — written in the same call, or not at all;
+4. **suffixed ids** — never generated, because the server owns the format.
+
+**Evidence that discipline alone does not hold.** Each of three independent ledgers carries a
+written instruction telling authors to keep the index in sync, and each violates it:
+`reconnaissance-patterns.md`'s template said "Also update the Index table row at the top" and
+13 bodies had no row; `tool-usage-patterns.md` avoids the problem only by having no index at
+all; and **this file has 5 CAP sections and, until this entry, 3 index rows.** A rule that
+fires only when the author remembers to consult it is not yet a rule.
+
+**Open questions.**
+
+- Should `append_section` write the params row too when the tracker *is* augmented, or should
+  `append_entry` gain a `body_section` option? The latter keeps one mechanism.
+- Concurrency: the write needs the guarantee `append_entry` has today — worth confirming
+  whether that is process-level or file-level, since the failing case is two OS processes
+  sharing one checkout.
+- Missing anchor heading: refuse, or append at end of body?
+- Does this subsume the id half of CAP-4, or complement it? CAP-4 warns about collisions
+  between sessions; CAP-5 removes one class of them at the source.
+
+**Kin:** R-98 (the race, measured), R-99 (the entry template as root cause), HY-9 / proposed
+detector D12 (headings are what define tokens), and the entry-level standard now in
+`get_guide("tracker-conventions")`.
+
 ## Anti-goals
 
 - Not a wishlist. An entry without a substrate check ("what exists today, what is missing") is not
