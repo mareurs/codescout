@@ -1,4 +1,4 @@
-use super::{Severity, Verdict};
+use super::{Severity, SeverityReason, Verdict};
 use std::path::Path;
 
 /// Base severity per verdict, before any path-based drop or cap.
@@ -71,8 +71,8 @@ pub fn cap_inferred_path(
     verdict: Verdict,
     evidence: PathEvidence,
     sev: Severity,
-    reason: &'static str,
-) -> (Severity, &'static str) {
+    reason: SeverityReason,
+) -> (Severity, SeverityReason) {
     // `FileMissing` carries the same inference as `Missing`: a `file_symbol` ref
     // whose path part is a bare name earned its path classification from an
     // extension alone, so a miss there is equally a guess.
@@ -80,7 +80,7 @@ pub fn cap_inferred_path(
         && evidence == PathEvidence::Inferred
         && sev == Severity::High
     {
-        return (Severity::Med, "inferred_path");
+        return (Severity::Med, SeverityReason::InferredPath);
     }
     (sev, reason)
 }
@@ -101,15 +101,15 @@ pub fn cap_code_block(
     verdict: Verdict,
     position: super::RefPosition,
     sev: Severity,
-    reason: &'static str,
-) -> (Severity, &'static str) {
+    reason: SeverityReason,
+) -> (Severity, SeverityReason) {
     if matches!(
         verdict,
         Verdict::Missing | Verdict::FileMissing | Verdict::SymbolMissing
     ) && position == super::RefPosition::FencedBlock
         && sev == Severity::High
     {
-        return (Severity::Med, "code_block");
+        return (Severity::Med, SeverityReason::CodeBlock);
     }
     (sev, reason)
 }
@@ -130,13 +130,13 @@ pub fn cap_gitignored_path(
     verdict: Verdict,
     is_gitignored: bool,
     sev: Severity,
-    reason: &'static str,
-) -> (Severity, &'static str) {
+    reason: SeverityReason,
+) -> (Severity, SeverityReason) {
     if matches!(verdict, Verdict::Missing | Verdict::FileMissing)
         && is_gitignored
         && sev == Severity::High
     {
-        return (Severity::Med, "gitignored_path");
+        return (Severity::Med, SeverityReason::GitignoredPath);
     }
     (sev, reason)
 }
@@ -175,9 +175,9 @@ pub fn released_history_boundary(text: &str, md_path: &Path) -> Option<u32> {
 ///
 /// Promote to full severity when the surface has earned it on evidence, not on
 /// its first day. See SD-1 in docs/trackers/structural-debt-refactor.md.
-pub fn cap_code_comment(severity: Severity, reason: &'static str) -> (Severity, &'static str) {
+pub fn cap_code_comment(severity: Severity, reason: SeverityReason) -> (Severity, SeverityReason) {
     if severity == Severity::High {
-        (Severity::Med, "code_comment_capped")
+        (Severity::Med, SeverityReason::CodeCommentCapped)
     } else {
         (severity, reason)
     }
@@ -204,8 +204,8 @@ pub fn cap_released_history(
     md_line: u32,
     boundary: Option<u32>,
     sev: Severity,
-    reason: &'static str,
-) -> (Severity, &'static str) {
+    reason: SeverityReason,
+) -> (Severity, SeverityReason) {
     let Some(from) = boundary else {
         return (sev, reason);
     };
@@ -216,7 +216,7 @@ pub fn cap_released_history(
             Verdict::Missing | Verdict::FileMissing | Verdict::SymbolMissing
         )
     {
-        return (drop_one(sev), "released_history");
+        return (drop_one(sev), SeverityReason::ReleasedHistory);
     }
     (sev, reason)
 }
@@ -226,20 +226,20 @@ pub fn apply_drops(
     md_file: &Path,
     base: Severity,
     memory_globs: &[globset::Glob],
-) -> (Severity, &'static str) {
+) -> (Severity, SeverityReason) {
     if matches_archive(md_file) {
-        return (drop_one(base), "archive_drop");
+        return (drop_one(base), SeverityReason::ArchiveDrop);
     }
     if matches_memory(md_file, memory_globs) {
-        return (drop_two(base), "memory_drop");
+        return (drop_two(base), SeverityReason::MemoryDrop);
     }
     if matches_issues(md_file) {
-        return (drop_one(base), "issues_drop");
+        return (drop_one(base), SeverityReason::IssuesDrop);
     }
     if matches_historical(md_file) {
-        return (drop_one(base), "historical_drop");
+        return (drop_one(base), SeverityReason::HistoricalDrop);
     }
-    (base, "policy_default")
+    (base, SeverityReason::PolicyDefault)
 }
 
 fn drop_one(s: Severity) -> Severity {

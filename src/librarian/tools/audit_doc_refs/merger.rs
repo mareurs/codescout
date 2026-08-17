@@ -39,7 +39,7 @@ pub fn merge_into_tracker(
             // severity escalates only — applies even for wontfix (tracks worst-ever)
             if severity_rank(f.resolution.severity) > severity_rank(existing.severity) {
                 existing.severity = f.resolution.severity;
-                existing.severity_reason = f.resolution.severity_reason.to_string();
+                existing.severity_reason = f.resolution.severity_reason.as_str().to_string();
             }
         } else if !is_resolved_verdict(f.resolution.verdict)
             && f.resolution.verdict != Verdict::External
@@ -52,7 +52,7 @@ pub fn merge_into_tracker(
                 title: format!("{} — {:?}", f.candidate.raw_ref, f.resolution.verdict)
                     .to_lowercase(),
                 severity: f.resolution.severity,
-                severity_reason: f.resolution.severity_reason.to_string(),
+                severity_reason: f.resolution.severity_reason.as_str().to_string(),
                 status: "open".to_string(),
                 owner: String::new(),
                 ref_kind: f.candidate.ref_kind,
@@ -103,7 +103,8 @@ mod tests {
             resolution: Resolution {
                 verdict,
                 severity: Severity::High,
-                severity_reason: "policy_default",
+                severity_reason:
+                    crate::librarian::tools::audit_doc_refs::SeverityReason::PolicyDefault,
                 notes: None,
             },
         }

@@ -318,10 +318,14 @@ mod tests {
         use crate::librarian::tools::audit_doc_refs::severity::cap_code_comment;
         use crate::librarian::tools::audit_doc_refs::Severity;
 
-        let (sev, reason) = cap_code_comment(Severity::High, "policy_default");
+        let (sev, reason) = cap_code_comment(
+            Severity::High,
+            crate::librarian::tools::audit_doc_refs::SeverityReason::PolicyDefault,
+        );
         assert_eq!(sev, Severity::Med, "high must not gate CI from a comment");
         assert_eq!(
-            reason, "code_comment_capped",
+            reason.as_str(),
+            "code_comment_capped",
             "the reason must say WHY it was downgraded, or a reader cannot \
              tell a capped high from a native med"
         );
@@ -335,9 +339,16 @@ mod tests {
         // The discriminator: a blanket "always Med" would pass the test above
         // while destroying every native reason string.
         for sev in [Severity::Med, Severity::Low] {
-            let (out, reason) = cap_code_comment(sev, "inferred_path");
+            let (out, reason) = cap_code_comment(
+                sev,
+                crate::librarian::tools::audit_doc_refs::SeverityReason::InferredPath,
+            );
             assert_eq!(out, sev, "{sev:?} is already below the gate");
-            assert_eq!(reason, "inferred_path", "reason must survive uncapped");
+            assert_eq!(
+                reason.as_str(),
+                "inferred_path",
+                "reason must survive uncapped"
+            );
         }
     }
 }

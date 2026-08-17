@@ -1,5 +1,5 @@
 use super::severity;
-use super::{RefCandidate, RefKind, Resolution, Severity, Verdict};
+use super::{RefCandidate, RefKind, Resolution, Severity, SeverityReason, Verdict};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -106,7 +106,7 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         return Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
-            severity_reason: "policy_default",
+            severity_reason: SeverityReason::PolicyDefault,
             notes: None,
         };
     }
@@ -167,7 +167,7 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
         1 => Some(Resolution {
             verdict: Verdict::ResolvedBasename,
             severity: Severity::Low,
-            severity_reason: "basename_match",
+            severity_reason: SeverityReason::BasenameMatch,
             notes: Some(format!("resolved by basename to {}", matches[0].display())),
         }),
         n => {
@@ -184,7 +184,7 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
             Some(Resolution {
                 verdict: Verdict::AmbiguousBasename,
                 severity: Severity::Med,
-                severity_reason: "basename_ambiguous",
+                severity_reason: SeverityReason::BasenameAmbiguous,
                 notes: Some(format!(
                     "basename matches {} files: {}{}",
                     n,
@@ -295,7 +295,7 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
-            severity_reason: "policy_default",
+            severity_reason: SeverityReason::PolicyDefault,
             notes: None,
         }
     }
@@ -306,7 +306,7 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         return Resolution {
             verdict: Verdict::External,
             severity: Severity::Low,
-            severity_reason: "policy_default",
+            severity_reason: SeverityReason::PolicyDefault,
             notes: None,
         };
     }
@@ -328,7 +328,7 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 return Resolution {
                     verdict: Verdict::Resolved,
                     severity: Severity::Low,
-                    severity_reason: "policy_default",
+                    severity_reason: SeverityReason::PolicyDefault,
                     notes: None,
                 };
             }
@@ -356,7 +356,7 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         return Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
-            severity_reason: "policy_default",
+            severity_reason: SeverityReason::PolicyDefault,
             notes: None,
         };
     }
@@ -395,7 +395,7 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         return Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
-            severity_reason: "policy_default",
+            severity_reason: SeverityReason::PolicyDefault,
             notes: None,
         };
     }
@@ -422,7 +422,7 @@ fn resolve_module_path_v1(_c: &RefCandidate, _ctx: &ResolveCtx<'_>) -> Resolutio
     Resolution {
         verdict: Verdict::Unknown,
         severity: Severity::Low,
-        severity_reason: "policy_default",
+        severity_reason: SeverityReason::PolicyDefault,
         notes: None,
     }
 }
@@ -474,7 +474,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         return Resolution {
             verdict: Verdict::Unknown,
             severity: Severity::Low,
-            severity_reason: "policy_default",
+            severity_reason: SeverityReason::PolicyDefault,
             notes: None,
         };
     };
@@ -519,7 +519,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 Resolution {
                     verdict: Verdict::Resolved,
                     severity: Severity::Low,
-                    severity_reason: "policy_default",
+                    severity_reason: SeverityReason::PolicyDefault,
                     notes: None,
                 }
             } else if ast_has_symbol(&ast_path, name) {
@@ -540,7 +540,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 Resolution {
                     verdict: Verdict::Unknown,
                     severity: Severity::Low,
-                    severity_reason: "lsp_behind_ast",
+                    severity_reason: SeverityReason::LspBehindAst,
                     notes: Some(format!(
                         "LSP returned {} symbol(s) for this file without `{name}`, but \
                          tree-sitter finds it — the server is mid-index, so the scan is \
@@ -563,7 +563,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             Resolution {
                 verdict: Verdict::Unknown,
                 severity: Severity::Low,
-                severity_reason: "policy_default",
+                severity_reason: SeverityReason::PolicyDefault,
                 notes: None,
             }
         }
@@ -707,7 +707,7 @@ fn outside_project() -> Resolution {
     Resolution {
         verdict: Verdict::Unknown,
         severity: Severity::Low,
-        severity_reason: "policy_default",
+        severity_reason: SeverityReason::PolicyDefault,
         notes: Some("path outside active project; scope=umbrella required".to_string()),
     }
 }
@@ -856,7 +856,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::High);
-        assert_eq!(r.severity_reason, "policy_default");
+        assert_eq!(r.severity_reason.as_str(), "policy_default");
     }
     /// A ref inside a code block is a transcript — a command the reader runs, a
     /// payload they send — so `high`, the gating band, is the wrong report for it.
@@ -877,13 +877,13 @@ mod tests {
         let in_block = resolve_ref(&at(RefPosition::FencedBlock), &ctx(tmp.path(), &[]));
         assert_eq!(in_block.verdict, Verdict::Missing);
         assert_eq!(in_block.severity, Severity::Med);
-        assert_eq!(in_block.severity_reason, "code_block");
+        assert_eq!(in_block.severity_reason.as_str(), "code_block");
 
         // Over-match guard: the same ref written in prose is a citation, and still
         // gates. Without this the cap could swallow every finding and look correct.
         let in_prose = resolve_ref(&at(RefPosition::InlineSpan), &ctx(tmp.path(), &[]));
         assert_eq!(in_prose.severity, Severity::High);
-        assert_eq!(in_prose.severity_reason, "policy_default");
+        assert_eq!(in_prose.severity_reason.as_str(), "policy_default");
     }
 
     /// A gitignored path is *expected* absent, so its absence is not drift. Both
@@ -931,7 +931,7 @@ mod tests {
                 &ctx_gi,
             );
             assert_eq!(r.severity, Severity::Med, "{raw} should not gate");
-            assert_eq!(r.severity_reason, "gitignored_path", "{raw}");
+            assert_eq!(r.severity_reason.as_str(), "gitignored_path", "{raw}");
         }
 
         // Over-match guard: a tracked path that is genuinely gone still gates, in
@@ -945,7 +945,7 @@ mod tests {
             &ctx_gi,
         );
         assert_eq!(tracked.severity, Severity::High);
-        assert_eq!(tracked.severity_reason, "policy_default");
+        assert_eq!(tracked.severity_reason.as_str(), "policy_default");
     }
     /// Docs name a *directory* with a trailing slash — `.claude/worktrees/`,
     /// `.codescout/private-memories/` — and gitignore's own directory rules are
@@ -1010,7 +1010,7 @@ mod tests {
                 &ctx_gi,
             );
             assert_eq!(r.severity, Severity::Med, "{raw} should not gate");
-            assert_eq!(r.severity_reason, "gitignored_path", "{raw}");
+            assert_eq!(r.severity_reason.as_str(), "gitignored_path", "{raw}");
         }
     }
 
@@ -1071,7 +1071,7 @@ mod tests {
             &ctx_gi,
         );
         assert_eq!(missing_workflow.severity, Severity::High);
-        assert_eq!(missing_workflow.severity_reason, "policy_default");
+        assert_eq!(missing_workflow.severity_reason.as_str(), "policy_default");
 
         for raw in [
             // Named by a rule directly, *and* its parent is tracked. The own-path check
@@ -1088,7 +1088,7 @@ mod tests {
                 &ctx_gi,
             );
             assert_eq!(r.severity, Severity::Med, "{raw} should stay capped");
-            assert_eq!(r.severity_reason, "gitignored_path", "{raw}");
+            assert_eq!(r.severity_reason.as_str(), "gitignored_path", "{raw}");
         }
     }
 
@@ -1182,7 +1182,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::Med);
-        assert_eq!(r.severity_reason, "archive_drop");
+        assert_eq!(r.severity_reason.as_str(), "archive_drop");
     }
     /// The project archives in place, so `archive/` appears at several depths.
     /// Keying the drop on the literal `docs/archive/` left retired session logs and
@@ -1204,7 +1204,7 @@ mod tests {
         ] {
             let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
             assert_eq!(r.severity, Severity::Med, "{md}");
-            assert_eq!(r.severity_reason, "archive_drop", "{md}");
+            assert_eq!(r.severity_reason.as_str(), "archive_drop", "{md}");
         }
 
         // Over-match guard: a path merely *containing* the word is not an archive
@@ -1217,7 +1217,7 @@ mod tests {
         ] {
             let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
             assert_eq!(r.severity, Severity::High, "{md}");
-            assert_eq!(r.severity_reason, "policy_default", "{md}");
+            assert_eq!(r.severity_reason.as_str(), "policy_default", "{md}");
         }
     }
     /// Dated ledgers report below the gate; what a reader acts on now does not.
@@ -1244,7 +1244,7 @@ mod tests {
         ] {
             let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
             assert_eq!(r.severity, Severity::Med, "{md} should not gate");
-            assert_eq!(r.severity_reason, "historical_drop", "{md}");
+            assert_eq!(r.severity_reason.as_str(), "historical_drop", "{md}");
         }
 
         // The boundary. Every one of these is read to decide what to do *now*, so a
@@ -1265,7 +1265,7 @@ mod tests {
         ] {
             let r = resolve_ref(&cand(missing, md, RefKind::FilePath), &ctx(tmp.path(), &[]));
             assert_eq!(r.severity, Severity::High, "{md} must keep gating");
-            assert_eq!(r.severity_reason, "policy_default", "{md}");
+            assert_eq!(r.severity_reason.as_str(), "policy_default", "{md}");
         }
     }
 
@@ -1281,7 +1281,7 @@ mod tests {
             &ctx(tmp.path(), &globs),
         );
         assert_eq!(r.severity, Severity::Low);
-        assert_eq!(r.severity_reason, "memory_drop");
+        assert_eq!(r.severity_reason.as_str(), "memory_drop");
     }
 
     #[test]
@@ -1293,7 +1293,7 @@ mod tests {
             &ctx(tmp.path(), &[]),
         );
         assert!(
-            !r.severity_reason.is_empty(),
+            !r.severity_reason.as_str().is_empty(),
             "FilePath severity_reason empty"
         );
         // FileLine: must have a colon-separated line number to satisfy the resolver invariant
@@ -1302,7 +1302,7 @@ mod tests {
             &ctx(tmp.path(), &[]),
         );
         assert!(
-            !r.severity_reason.is_empty(),
+            !r.severity_reason.as_str().is_empty(),
             "FileLine severity_reason empty"
         );
         // Link: external URL
@@ -1310,7 +1310,10 @@ mod tests {
             &cand("https://example.com/gone", "docs/spec.md", RefKind::Link),
             &ctx(tmp.path(), &[]),
         );
-        assert!(!r.severity_reason.is_empty(), "Link severity_reason empty");
+        assert!(
+            !r.severity_reason.as_str().is_empty(),
+            "Link severity_reason empty"
+        );
     }
     /// `high` gates CI, so the band must be reserved for verdicts that are
     /// deterministic on an unchanged tree. This pins the split, because nothing did:
@@ -1731,7 +1734,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::ResolvedBasename);
         assert_eq!(r.severity, Severity::Low);
-        assert_eq!(r.severity_reason, "basename_match");
+        assert_eq!(r.severity_reason.as_str(), "basename_match");
         assert!(
             r.notes
                 .as_ref()
@@ -2031,7 +2034,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::AmbiguousBasename);
         assert_eq!(r.severity, Severity::Med);
-        assert_eq!(r.severity_reason, "basename_ambiguous");
+        assert_eq!(r.severity_reason.as_str(), "basename_ambiguous");
         assert!(
             r.notes.as_ref().is_some_and(|n| n.contains("3 files")),
             "notes should report match count: {:?}",
@@ -2249,7 +2252,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::Med, "inferred path must not gate CI");
-        assert_eq!(r.severity_reason, "inferred_path");
+        assert_eq!(r.severity_reason.as_str(), "inferred_path");
     }
 
     /// The other half of the contract: a ref rooted in a directory that
@@ -2282,7 +2285,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::Med);
-        assert_eq!(r.severity_reason, "inferred_path");
+        assert_eq!(r.severity_reason.as_str(), "inferred_path");
     }
 
     #[test]

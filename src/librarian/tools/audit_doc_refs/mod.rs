@@ -78,11 +78,154 @@ pub enum Severity {
     Low,
 }
 
+/// Why a finding carries the severity it does.
+///
+/// This was a bare `&'static str` until 2026-08-17, set from thirteen literals scattered
+/// across `severity.rs` and `resolver.rs`. `Verdict` and `Severity` beside it were already
+/// serde enums — discoverable, greppable, exhaustive — while the one field a reader most
+/// needs in order to interpret a report had no enumerable domain at all. The cost was
+/// measured on the way in: a filter written against a guessed `"ok"` printed resolved refs
+/// as problems, and a `med` cap was attributed to `issues_drop` when `inferred_path` was
+/// doing the work. Both are the same defect, which is that the domain could only be
+/// learned by reading every producer.
+///
+/// Serialization is unchanged: `rename_all = "snake_case"` reproduces the exact strings
+/// the literals emitted, so no consumer of the JSON sees a difference.
+///
+/// [`Self::as_str`] and [`Self::explain`] are both exhaustive matches on purpose — adding
+/// a variant without describing it is a compile error, which is the property a const array
+/// of names cannot give.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeverityReason {
+    /// No cap applied — the verdict's own default band.
+    PolicyDefault,
+    /// Resolved through the basename index: the ref named a file without its path, and
+    /// exactly one file in the repo carried that basename.
+    BasenameMatch,
+    /// The basename matched more than one file, so the ref is ambiguous rather than broken.
+    BasenameAmbiguous,
+    /// The LSP answered without the symbol but tree-sitter finds it — the server is
+    /// mid-index, so the scan is degraded rather than the reference wrong.
+    LspBehindAst,
+    /// The ref's claim to be repo-relative was INFERRED, not syntactic: no separator at
+    /// all, or a root segment absent from the repo. Keeps `high` for "definitely a local
+    /// path, definitely gone".
+    InferredPath,
+    /// Cited inside a fenced code block, where a path is often illustrative rather than a
+    /// reference.
+    CodeBlock,
+    /// `.gitignore` declares the target generated or machine-local, so its absence from a
+    /// clean checkout is expected.
+    GitignoredPath,
+    /// Found in a source code comment rather than prose.
+    CodeCommentCapped,
+    /// In a released section of a changelog — history, which must not be rewritten to
+    /// satisfy a linter.
+    ReleasedHistory,
+    /// The citing document lives under an `archive/` directory: a retired document citing
+    /// a moved path is expected and must not gate.
+    ArchiveDrop,
+    /// The citing document is a memory file.
+    MemoryDrop,
+    /// The citing document is a bug file under `docs/issues/`.
+    IssuesDrop,
+    /// The citing document lives in a dated-record directory (plans, research, reviews).
+    HistoricalDrop,
+}
+
+impl SeverityReason {
+    /// Every variant. Kept in step with the type by [`Self::as_str`]'s exhaustive match:
+    /// a new variant fails to compile there long before anyone notices this array.
+    pub const ALL: [SeverityReason; 13] = [
+        SeverityReason::PolicyDefault,
+        SeverityReason::BasenameMatch,
+        SeverityReason::BasenameAmbiguous,
+        SeverityReason::LspBehindAst,
+        SeverityReason::InferredPath,
+        SeverityReason::CodeBlock,
+        SeverityReason::GitignoredPath,
+        SeverityReason::CodeCommentCapped,
+        SeverityReason::ReleasedHistory,
+        SeverityReason::ArchiveDrop,
+        SeverityReason::MemoryDrop,
+        SeverityReason::IssuesDrop,
+        SeverityReason::HistoricalDrop,
+    ];
+
+    /// The wire value — identical to the string literal this variant replaced.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SeverityReason::PolicyDefault => "policy_default",
+            SeverityReason::BasenameMatch => "basename_match",
+            SeverityReason::BasenameAmbiguous => "basename_ambiguous",
+            SeverityReason::LspBehindAst => "lsp_behind_ast",
+            SeverityReason::InferredPath => "inferred_path",
+            SeverityReason::CodeBlock => "code_block",
+            SeverityReason::GitignoredPath => "gitignored_path",
+            SeverityReason::CodeCommentCapped => "code_comment_capped",
+            SeverityReason::ReleasedHistory => "released_history",
+            SeverityReason::ArchiveDrop => "archive_drop",
+            SeverityReason::MemoryDrop => "memory_drop",
+            SeverityReason::IssuesDrop => "issues_drop",
+            SeverityReason::HistoricalDrop => "historical_drop",
+        }
+    }
+
+    /// One sentence a reader can act on, without opening the producer.
+    ///
+    /// This is the field's real payload. A reason name tells you which branch fired; it
+    /// does not tell you whether the finding is your problem — and the difference between
+    /// "your severity was capped because the path was inferred" and "capped because the
+    /// citing file is archived" changes what you do next.
+    pub fn explain(self) -> &'static str {
+        match self {
+            SeverityReason::PolicyDefault => "no cap applied — the verdict's default band",
+            SeverityReason::BasenameMatch => {
+                "resolved through the basename index — the ref omitted its path and exactly \
+                 one file matched"
+            }
+            SeverityReason::BasenameAmbiguous => {
+                "the basename matches several files — ambiguous, not broken; name the path"
+            }
+            SeverityReason::LspBehindAst => {
+                "the LSP is mid-index and tree-sitter disagrees with it — the scan is \
+                 degraded, not the reference"
+            }
+            SeverityReason::InferredPath => {
+                "the ref's claim to be repo-relative was inferred, not syntactic — capped \
+                 so `high` still means definitely-local-and-definitely-gone"
+            }
+            SeverityReason::CodeBlock => {
+                "cited inside a fenced code block, where a path is often illustrative"
+            }
+            SeverityReason::GitignoredPath => {
+                "`.gitignore` declares the target generated or machine-local, so its \
+                 absence is expected"
+            }
+            SeverityReason::CodeCommentCapped => "found in a source comment rather than prose",
+            SeverityReason::ReleasedHistory => {
+                "a released changelog section — history, which must not be rewritten to \
+                 satisfy a linter"
+            }
+            SeverityReason::ArchiveDrop => {
+                "the citing document is archived — a retired doc citing a moved path is \
+                 expected and must not gate"
+            }
+            SeverityReason::MemoryDrop => "the citing document is a memory file",
+            SeverityReason::IssuesDrop => "the citing document is a bug file under `docs/issues/`",
+            SeverityReason::HistoricalDrop => {
+                "the citing document is a dated record (plans, research, reviews)"
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
     pub verdict: Verdict,
     pub severity: Severity,
-    pub severity_reason: &'static str,
+    pub severity_reason: SeverityReason,
     pub notes: Option<String>,
 }
 
@@ -1038,6 +1181,25 @@ fn build_response(
         }
     };
 
+    // A legend for the reasons THIS run used, not for the whole enum. `severity_reason`
+    // names the branch that fired; it does not say whether the finding is the reader's
+    // problem, and learning that meant reading thirteen literals across two producers.
+    // Derived from the shown findings so the legend stays proportional to the report —
+    // dumping `SeverityReason::ALL` would hand back documentation to filter instead of
+    // an answer.
+    let severity_legend: serde_json::Map<String, Value> = shown_findings
+        .iter()
+        .filter_map(|f| f.get("severity_reason").and_then(|r| r.as_str()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|name| {
+            SeverityReason::ALL
+                .iter()
+                .find(|r| r.as_str() == name)
+                .map(|r| (name.to_string(), json!(r.explain())))
+        })
+        .collect();
+
     Ok(json!({
         "n_files_scanned": n_files,
         "n_refs_found": findings.len(),
@@ -1047,6 +1209,7 @@ fn build_response(
         "tracker_id": tracker_id,
         "tracker_path": tracker_path,
         "findings": shown_findings,
+        "severity_legend": severity_legend,
         "overflow": overflow,
         "parse_warnings": warnings,
         "scan_meta": {
@@ -1166,7 +1329,7 @@ mod tests {
             resolution: Resolution {
                 verdict,
                 severity,
-                severity_reason: "test",
+                severity_reason: SeverityReason::PolicyDefault,
                 notes: None,
             },
         }
@@ -1870,6 +2033,71 @@ mod tests {
             "a ref in a released section must drop below the gate: {historical}"
         );
         assert_eq!(historical["severity_reason"], "released_history");
+    }
+
+    /// A report that names its own vocabulary. `severity_reason` tells a reader WHICH
+    /// branch capped a finding; it does not tell them whether the finding is their
+    /// problem, and the difference between "capped because the path was inferred" and
+    /// "capped because the citing file is archived" changes what they do next. Learning
+    /// that domain used to mean reading thirteen literals across two producers — which
+    /// is how a `med` cap got attributed to `issues_drop` when `inferred_path` was doing
+    /// the work, and how a filter written against a guessed `"ok"` printed resolved refs
+    /// as problems.
+    ///
+    /// Derived from the findings actually SHOWN, not from `SeverityReason::ALL`. A legend
+    /// listing all thirteen would be documentation the reader has to filter; one listing
+    /// the three in front of them is an answer. The absent-reason assertion below is what
+    /// pins that distinction.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn the_report_explains_every_severity_reason_it_actually_used() {
+        let tmp = TempDir::new().unwrap();
+        // A real `src/` root so both refs read as structural paths — same reason the
+        // changelog test above needs it, and without it both collapse to inferred_path
+        // and the fixture yields only one reason.
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("CHANGELOG.md"),
+            "# Changelog\n\n\
+                 ## [Unreleased]\n\n\
+                 - live claim about `src/still_gone.rs`\n\n\
+                 ## [1.0.0] — 2026-01-01\n\n\
+                 - shipped change to `src/history_gone.rs`\n",
+        )
+        .unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(&ctx, serde_json::json!({"emit_tracker": false}))
+            .await
+            .unwrap();
+
+        let legend = result["severity_legend"]
+            .as_object()
+            .expect("the report must carry a legend for its own severity_reason values");
+
+        // Every reason present in the shown findings is explained.
+        for f in result["findings"].as_array().unwrap() {
+            let reason = f["severity_reason"].as_str().unwrap();
+            let explanation = legend
+                .get(reason)
+                .unwrap_or_else(|| panic!("no legend entry for `{reason}`: {legend:?}"));
+            assert!(
+                explanation.as_str().is_some_and(|s| !s.is_empty()),
+                "legend entry for `{reason}` must be a non-empty sentence"
+            );
+        }
+
+        // This fixture produces both of these, so the legend must carry both.
+        assert!(legend.contains_key("policy_default"), "{legend:?}");
+        assert!(legend.contains_key("released_history"), "{legend:?}");
+
+        // Discriminating: a legend that simply dumped SeverityReason::ALL would pass
+        // every assertion above. Nothing in this fixture is a memory file, so the
+        // reader must not be handed an entry for it.
+        assert!(
+            !legend.contains_key("memory_drop"),
+            "the legend must describe the reasons this run used, not the whole enum: {legend:?}"
+        );
     }
 
     #[test]
