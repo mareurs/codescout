@@ -1,7 +1,7 @@
 ---
-id: '4b4618b310436dbc'
+id: 0078deac99b4d2e8
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(find) answers from the catalog with no signal that N files on disk were never indexed — a bug file committed outside artifact(create) is invisible to every query, including the mandated queue query'
 ---
 
@@ -138,40 +138,72 @@ the two defects share a cause at one remove: a file that never went through
 
 ## Fix
 
-Not implemented. The shape is settled by precedent: make the answer self-describing
-rather than change what is authoritative.
+Implemented as the recommended shape: a staleness hint on `find`, not a change to
+what is authoritative.
 
-**Recommended — a staleness hint on `find`.** Compare a cheap on-disk count for the
-queried scope against the catalog row count, and when disk is larger, add to `hints`:
+`count_disk_md` (`src/librarian/tools/find.rs`) does a single ignore-respecting walk
+(`ignore::WalkBuilder::new(root).standard_filters(true)`) counting `.md` files under
+the resolved scope's root, filtered by the workspace's own `ignore` globset — the
+same two filters `index_repo_sync` applies (`.gitignore`/global-excludes via
+`standard_filters`, then the project `ignore` patterns), minus its `force_include`
+supplemental scan. That last omission can only undercount, which can only suppress
+the hint, never spuriously fire it — the safe direction to be wrong in.
+
+`build_hints` compares that disk count against `count_for_scope(cat, None, …)` — the
+catalog's TOTAL row count for the scope, unfiltered by kind/status, so it is exact
+relative to what a reindex would produce: `index_repo_sync` gives even an
+unclassified file `kind: "unknown"` rather than skipping it, so nothing is excluded
+on classification grounds — only on the same ignore grounds the walk replicates. When
+disk > catalog:
 
 ```
 "unindexed_files": 1,
-"unindexed_hint": "1 file under this scope is not in the catalog and cannot match any
-                   filter; run librarian(action=\"reindex\") to include it"
+"unindexed_hint": "1 file(s) under this scope are not in the catalog and cannot 
+                   match any filter; run librarian(action=\"reindex\") to include them"
 ```
 
-This mirrors `more_in_workspace_hint` (rows exist but this query cannot reach them) and
-the grep completeness warning (a zero that says what it covered). It also has to be
-**cheap** — `find` is called constantly, so a full walk per call is not acceptable; a
-count restricted to the artifact globs, or an mtime-based dirty check on the scope's
-directories, is the right budget.
+**Scope and budget, the two open questions from Resume:**
 
-**Alternative — reindex on session start.** Removes the lag instead of reporting it.
-Rejected as the primary fix: it costs a walk on every session, it still leaves
-mid-session arrivals silent (this file arrived mid-session, from a peer commit), and the
-guide already advises it without effect.
-
-Both could ship; the hint is the one that makes the failure visible rather than merely
-less likely.
-
+- **Which scopes.** `Project` and `Repo` only — the two whose `apply_scope` path
+  prefix (`cp.abs_path`, `cp.git_root`) names one real directory this walk can
+  anchor on. `Umbrella`/`All` span multiple roots and are not covered. `Scope::Repo`
+  is `Scope::default()` — the scope a call with no `scope` param resolves to — so
+  this is the arm that fires for the bug's own reproduction (a bare `find` call).
+  Skipped from inside a linked worktree (`cp.main_root.is_some()`): `index_repo_sync`
+  never indexes a worktree root directly, so a worktree-rooted disk count and the
+  (overlay) catalog count are not the same quantity.
+- **The budget.** Not mtime-based — there is no existing "last reindex" timestamp to
+  diff against, and adding one is new state, not a hint. Measured instead: `git
+  ls-files '*.md' | wc -l` over this repo's ~1100 markdown files took 4ms warm-cache;
+  the in-process `ignore`-crate walk this uses is the same order of magnitude and
+  avoids the subprocess spawn. The walk is bounded by the scope's OWN file count
+  (one project's docs, or one repo's), never the whole workspace — that bound, not a
+  glob restriction, is what keeps it affordable. A rule-glob-restricted walk (the
+  other option Resume floated) was investigated and dropped: every default classify
+  rule is `**/`-prefixed for multi-depth matching (`code-explorer/docs/issues/foo.md`
+  is a real fixture case), so `literal_glob_prefix` — the exact helper
+  `force_include_candidates` uses for this in `indexer.rs` — returns an empty anchor
+  for every one of them. There is no cheaper anchor than the scope root itself.
 ## Tests added
 
-None yet. The regression test seeds an artifact file on disk without going through
-`artifact(action="create")`, runs `find`, and asserts the response carries the
-`unindexed_files` hint — then reindexes and asserts the hint is gone and the row is
-returned. The load-bearing half is the first assertion: a test that only checks
-post-reindex behaviour passes today.
+`unindexed_disk_files_surface_a_staleness_hint_then_clear_after_reindex`
+(`src/librarian/tools/find.rs`), using a REAL tempdir (not the fictitious
+`/test/code-explorer` paths the rest of this file's tests use — `count_disk_md` does
+real disk I/O, so a fake path would silently walk to nothing and pass for the wrong
+reason). Two `.md` files on disk, one catalog row seeded for only one of them:
 
+1. `find` with no `scope` param (the bug's own reproduction shape) asserts
+   `hints.unindexed_files == 1` and `hints.unindexed_hint` names `reindex` — this is
+   the load-bearing half; a test that only checked post-reindex behaviour would pass
+   today, per this bug's own template.
+2. A real `index_repo_sync` call against the same tempdir, then `find` again: asserts
+   the hint is gone and `count == 2`.
+
+All 37 `find` tests pass, including the pre-existing scope/hint suite — none of them
+use a real `git_root`, so `count_disk_md` walks a nonexistent path and returns 0 for
+all of them, which can only suppress the new hint, never spuriously fire it against
+an unrelated assertion. Full gate: `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings`, `cargo test --lib` — 3912 passed, 0 failed, 7 ignored.
 ## Workarounds
 
 Run `librarian(action="reindex")` before any "what's open?" report or backlog triage,
@@ -188,16 +220,14 @@ against the row count from `artifact(find, kind="bug", include_archived=true, li
 
 ## Resume
 
-Decide the staleness-check budget before writing anything — `find` is on the hot path, so
-the mtime-based dirty check is likely the only affordable form, and it needs measuring
-against a cold cache. Then add the hint to `build_hints`
-(`src/librarian/tools/find.rs`), beside `more_in_workspace_hint`, which is the closest
-existing precedent for "rows you cannot reach from here".
-
+Fixed and closed. Not done: the "reindex on session start" alternative this file
+considered and rejected as the *primary* fix remains unimplemented as a
+*supplement* — it would still be worth doing, since it removes the lag for the
+common case rather than only reporting it, but it was correctly out of scope for
+this fix and stays that way.
 ## References
 
 - `docs/issues/archive/2026-08-07-grep-zero-match-silent-about-hidden-skip.md` — the same failure shape, fixed by making the zero self-describing
 - `docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md` — the second defect this file exhibits
 - `src/librarian/tools/find.rs` — `build_hints`, where the hint belongs
 - `get_guide("librarian")` § Gotchas — the documented no-watcher behaviour
-

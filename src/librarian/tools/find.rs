@@ -278,6 +278,61 @@ fn build_hints(
         }
     }
 
+    // Unindexed-on-disk staleness signal. `find` answers from the catalog,
+    // which can legitimately lag disk (no file watcher — see
+    // get_guide("librarian") § Gotchas) — but a lagging catalog and an empty
+    // filesystem otherwise produce byte-identical, silent `count: 0` answers.
+    // See docs/issues/archive/2026-08-17-artifact-find-is-silent-about-files-the-catalog-has-never-seen.md.
+    //
+    // Project and Repo scope only — the two whose `apply_scope` path prefix
+    // (`cp.abs_path`, `cp.git_root` respectively) names a single real
+    // directory this walk can anchor on; Umbrella/All span multiple roots.
+    // `Scope::Repo` is the query default (`Scope::default()`), so this is the
+    // arm that actually fires for a scope-unspecified call — the shape of the
+    // bug's own reproduction. Skipped from inside a linked worktree
+    // (`main_root.is_some()`): `index_repo_sync` never indexes a worktree root
+    // directly, so a worktree-rooted disk count and the (overlay) catalog
+    // count are not the same quantity — comparing them would be a category
+    // error, not a staleness signal. Cheap because the walk is bounded by
+    // this ONE root's own file count, not the workspace's.
+    if matches!(applied.scope, Scope::Project | Scope::Repo) {
+        if let Some(cp) = current {
+            if cp.main_root.is_none() {
+                let disk_root = match applied.scope {
+                    Scope::Project => &cp.abs_path,
+                    _ => &cp.git_root,
+                };
+                let project_ignore = crate::librarian::workspace::compile_ignore(&ws.ignore)
+                    .unwrap_or_else(|_| {
+                        globset::GlobSetBuilder::new()
+                            .build()
+                            .expect("empty globset")
+                    });
+                let disk_count = count_disk_md(disk_root, &project_ignore);
+                let catalog_count = count_for_scope(
+                    cat,
+                    None,
+                    ws,
+                    current,
+                    applied.scope,
+                    exclude_worktrees,
+                    cutoff_ms,
+                )?;
+                let unindexed = disk_count.saturating_sub(catalog_count);
+                if unindexed > 0 {
+                    hints.insert("unindexed_files".into(), json!(unindexed));
+                    hints.insert(
+                        "unindexed_hint".into(),
+                        json!(format!(
+                            "{unindexed} file(s) under this scope are not in the catalog and cannot \
+                             match any filter; run librarian(action=\"reindex\") to include them"
+                        )),
+                    );
+                }
+            }
+        }
+    }
+
     let mut expand = Vec::new();
     if hints.contains_key("more_in_repo") {
         expand.push("scope=\"repo\"");
@@ -436,6 +491,34 @@ fn scan_unindexed_md(
         }
     }
     found
+}
+
+/// Count `.md` files under `abs_root` that a full reindex would produce a
+/// catalog row for. `index_repo_sync` gives even an unclassified file
+/// `kind: "unknown"` rather than skipping it, so nothing is excluded on
+/// classification grounds — only on ignore/gitignore grounds, exactly what
+/// this walk replicates. It omits `index_repo_sync`'s `force_include`
+/// supplemental scan (locally-tracked-but-gitignored paths); that can only
+/// undercount, which can only suppress the staleness hint below, never
+/// spuriously fire it.
+fn count_disk_md(abs_root: &std::path::Path, ignore: &globset::GlobSet) -> usize {
+    let walker = ignore::WalkBuilder::new(abs_root)
+        .standard_filters(true)
+        .build();
+    walker
+        .flatten()
+        .filter(|entry| {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+                return false;
+            }
+            let Ok(rel) = path.strip_prefix(abs_root) else {
+                return false;
+            };
+            let rel = crate::librarian::util::normalize_rel_path(&rel.to_string_lossy());
+            !ignore.is_match(&rel)
+        })
+        .count()
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -1099,6 +1182,78 @@ mod tests {
             "nothing capped → no more_in_scope signal"
         );
     }
+
+    /// docs/issues/archive/2026-08-17-artifact-find-is-silent-about-files-the-catalog-has-never-seen.md
+    ///
+    /// A file dropped onto disk without going through `artifact(action="create")`
+    /// (a `create_file`, `Write`, or peer `git commit`) is invisible to `find` and
+    /// nothing in the response says so — the load-bearing half. Real disk I/O:
+    /// `git_root` must be a real tempdir since `count_disk_md` walks it for real.
+    #[tokio::test]
+    async fn unindexed_disk_files_surface_a_staleness_hint_then_clear_after_reindex() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(root.join("indexed.md"), "# Indexed\n").unwrap();
+        std::fs::write(root.join("unindexed.md"), "# Unindexed\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut indexed = sample_row("indexed", "Indexed");
+        indexed.abs_path = root.join("indexed.md");
+        artifact::upsert(&cat, &indexed).unwrap();
+
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: root.clone(),
+                    git_root: root.clone(),
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .build();
+
+        // The load-bearing assertion: this must fire BEFORE any reindex — a test
+        // that only checks post-reindex behaviour would pass today.
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            out["hints"]["unindexed_files"].as_u64(),
+            Some(1),
+            "one file on disk has no catalog row: {:?}",
+            out["hints"]
+        );
+        assert!(
+            out["hints"]["unindexed_hint"]
+                .as_str()
+                .unwrap()
+                .contains("reindex"),
+            "hint must name the fix: {:?}",
+            out["hints"]
+        );
+
+        // Reindex for real, then the hint must clear and the new row must return.
+        let rules = crate::librarian::classify::default_rules().unwrap();
+        let ignore = globset::GlobSetBuilder::new().build().unwrap();
+        {
+            let cat = ctx.catalog.lock();
+            crate::librarian::indexer::index_repo_sync(
+                &cat, &rules, &root, &ignore, false, false, false,
+            )
+            .unwrap();
+        }
+
+        let out_after = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            out_after["hints"].get("unindexed_files").is_none(),
+            "reindex must clear the staleness hint: {:?}",
+            out_after["hints"]
+        );
+        assert_eq!(
+            out_after["count"].as_u64(),
+            Some(2),
+            "both files are indexed now"
+        );
+    }
+
     #[tokio::test]
     async fn worktree_find_shadows_main_twin_and_flags_overlay() {
         use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
