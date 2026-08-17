@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 101
+entry_high_water_R: 102
 entry_prefix: R
 ---
 
@@ -2882,6 +2882,68 @@ completed, the verdict is not yet earned.
 section of `docs/issues/_TEMPLATE.md` when a second verdict is found to have been scored
 against one hypothesis; the template's **Verdict** field is where the counter-prediction
 line belongs.
+## R-102 — A root cause read from code is a hypothesis about which true statement is the operative one; implementing the fix is the measurement
+
+**Observed:** 2026-08-17, working three bug files in one session. All three had a root
+cause written from careful reading of the code. All three were wrong in a way only
+*building the fix* exposed — not one was caught by re-reading.
+
+**The three, because the shapes differ and that is the finding:**
+
+1. **A negative claim about mechanism.**
+   `2026-08-15-read-only-metadata-commands-blocked-on-source-paths` rebutted a reporter's
+   "`wc` is in the block list" with *"There is no command list … a path predicate … there is
+   no per-command carve-out."* `check_source_file_access` is a **two-part** predicate and
+   `SOURCE_ACCESS_COMMANDS` is half of it. The rebuttal was more confident than the claim it
+   corrected, and more wrong. Its repro was misattributed too: `ls … && sed …` blocked on
+   `sed`, not on the `ls` it blamed.
+
+2. **A correct mechanism with both prescriptions wrong.**
+   `2026-08-15-read-file-force-ignored-on-full-reads` read `read_full_file`'s early return
+   accurately and offered A (make `force` defeat the size budget) or B (declare it
+   range-only). B was already shipped in the schema and Iron Law 1; A would have defeated
+   progressive disclosure. The live defect — the parameter accepted and dropped in silence —
+   was named by neither option.
+
+3. **A diagnostic that does not discriminate.**
+   `2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary` tabled
+   `frontmatter_max > body_max` as meaning the ledger was compacted. It is also true
+   immediately after *any* ordinary reservation, because the reservation writes the mark.
+   The table looked like evidence and was a plausible reading.
+
+**Why reading cannot catch these.** Reading tells you what the code *says*. Every one of
+these root causes was a true statement about the code. What reading does not tell you is
+which of several true statements is the **operative** one — which predicate half fires,
+which of two documented behaviours is already shipped, which relation actually separates
+the cases. That is a question about execution, and only execution answers it. A second
+re-read is the same reader consulting the same belief; it cannot audit itself.
+
+**What made all three cheap to correct: the label.** Each carried, or should have carried,
+the template's *"inferred from `src/x.rs:12` — not measured"* line. `da55100a` opens by
+citing exactly that: *"The bug filed this root cause as inferred and said so. Reading it
+corrected the mechanism."* The prescription survived the wrong mechanism — option (b) was
+adopted verbatim — because the document had already told the next reader which sentence to
+distrust. An unlabelled wrong mechanism is not corrected; it is **built on**.
+
+**Detector, and it costs nothing.** Before filing, mark every root-cause sentence as
+measured or inferred, and prefer the inferred label when unsure. Then, **when the fix is
+implemented, re-read the root cause** — implementing *is* the measurement, and it is the
+last moment the correction is free. Three for three today; in every case the disproof
+arrived while writing the fix, not while reviewing the file.
+
+**The sharpest single tell:** a root cause that asserts an **absence** — "there is no
+command list", "there is no carve-out", "nothing consumes this". Reading establishes
+presence; only a search establishes absence, and the two feel identical from inside the
+file you happen to be reading. Datapoint 1 is this exact shape, and it read as the most
+authoritative sentence in the document.
+
+**Relationship to R-101:** sibling, one layer out. R-101 is about mis-scoring a test you ran. R-102 is about not
+having run one — and about the labelling that keeps that survivable.
+
+**Status:** open — recorded 2026-08-17 with three datapoints from one session, which is
+already past the usual promotion bar. Promote to `docs/issues/_TEMPLATE.md` by making the
+measured/inferred split a required sub-field of `## Root cause` rather than a paragraph of
+guidance inside it, and add a Fix-time step: *re-read the root cause once the fix compiles.*
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
