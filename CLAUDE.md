@@ -208,7 +208,7 @@ codescout's conventions and design principles live in memory (auto-listed at ses
 Before adding or modifying any tool, read `docs/PROGRESSIVE_DISCOVERABILITY.md`. Full error decision tree: `get_guide("error-handling")`. Test isolation: `docs/conventions/test-env-isolation.md`.
 ## Prompt Surface Consistency
 
-Three prompt surfaces (`server_instructions` + `onboarding_prompt` slices of `src/prompts/source.md`, and `build_system_prompt_draft()` in `builders.rs`) must stay tool-name-consistent. Which surfaces exist, when to bump `ONBOARDING_VERSION`,  Stale tool names are gated by `prompt_surfaces_reference_only_real_tools` (3 surfaces) and `claude_md_contains_no_deprecated_tool_names` (this file).
+Three prompt surfaces (`server_instructions` + `onboarding_prompt` slices of `src/prompts/source.md`, and `build_system_prompt_draft()` in `builders.rs`) must stay tool-name-consistent. Which surfaces exist, when to bump `ONBOARDING_VERSION`, the **1900-character** slice cap + shared-branch verify hazard, and the writing style guide → **`src/prompts/README.md`** (short version: memory `conventions`). Stale tool names are gated by `prompt_surfaces_reference_only_real_tools` (3 surfaces) and `claude_md_contains_no_deprecated_tool_names` (this file).
 ## Companion Plugin: codescout-companion
 
 A companion Claude Code plugin (`../claude-plugins/codescout-companion/`) is **always active** here. The rule that bites mid-task: **native `Read`/`Grep`/`Glob`/`Edit`/`Write` on source files and all native `Bash` are hard-denied — use codescout's MCP tools** (`symbols`, `grep`, `edit_code`, `read_file`/`read_markdown`, `run_command`). Full hook inventory, cross-repo flow, and concurrent-multi-workspace rules → **`docs/architecture/companion-plugin.md`**.
@@ -235,7 +235,7 @@ Files:
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
 - `docs/RELEASE.md` — Release cycle, ship sequence, git-workflow safety
 - `docs/architecture/companion-plugin.md` — codescout-companion hook inventory + cross-repo flow
-- `src/prompts/README.md` — prompt-surface rules: surfaces, `ONBOARDING_VERSION`, 2200-byte cap, style guide
+- `src/prompts/README.md` — prompt-surface rules: surfaces, `ONBOARDING_VERSION`, 1900-**character** cap, style guide
 
 Memories (Claude auto-loads these; listed for reference):
 
