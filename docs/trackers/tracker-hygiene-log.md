@@ -10,7 +10,7 @@ tags:
 entry_prefix: HY
 next-sweep-due: 2026-09-15
 sweep-interval-days: 30
-entry_high_water_HY: 13
+entry_high_water_HY: 14
 ---
 
 # Tracker hygiene log
@@ -1002,6 +1002,67 @@ proposal and keep writing the plurality spellings, which is already what 82% of 
 destination half of `promoted` here, so the two should land together), HY-9 (D12), HY-12
 (D10's precondition), and `get_guide("tracker-conventions")` § *Required fields*, which
 already says `**Status:**` is not optional — this entry says what it is allowed to contain.
+
+## HY-14 — Proposal: a structural check for headings no parser can see — six found, and the detector's first draft was worthless
+
+**Kind:** proposal · **Sweep:** 2026-08-17 (out-of-cadence) · **Status:** open
+
+Seven headings in this repo have their `#` marker welded onto the end of the preceding
+paragraph with no newline. They are not headings in any parser: absent from
+`read_markdown`'s heading map, unaddressable by `edit_markdown`, and rendered as run-on
+sentences. Five live ones repaired 2026-08-17, two archived ones deliberately left.
+
+This lands here rather than staying in its bug file because a sweep reads this ledger and
+nobody re-reads `docs/issues/archive/`. Full detail:
+`docs/issues/archive/2026-08-17-a-heading-concatenated-onto-the-previous-line-is-invisible-to-every-reader.md`.
+
+### D14 heading-swallowed-into-prose (proposed)
+
+| Field | Value |
+|---|---|
+| **Fires when** | A `#` run sits mid-line, immediately after a sentence terminator, followed by heading-shaped text |
+| **Evidence pair** | *declared* `### Pattern 6` appears in the file; *observed* absent from `read_markdown`'s heading map, and `edit_markdown` refuses it as not found |
+| **Proposed fix** | split the line; keep whatever separator the siblings use |
+| **Confidence** | high — syntactic, and the repair is unambiguous |
+| **Cost** | one grep over `*.md` |
+
+```
+grep -rnE '[.!?:;]#{2,6} [A-Z0-9`]' --include='*.md' .
+```
+
+**The first draft of that regex was useless and the number is why this entry exists.**
+`[^ \t]#{1,6} ` — "a hash run not at line start" — returned **16,033 matches in 1,027
+files**, because `#` is ubiquitous in prose (`C#`, `#123`, shell comments inside fences).
+The working version adds one discriminator: the **sentence terminator immediately before**
+the hash run. A swallowed heading is glued to the end of a finished sentence; a prose hash
+is not. 15 matches, 7 real, 8 false positives — all legible at a glance.
+
+The lesson is about proposing detectors, not about markdown: **a detector's
+false-positive rate is part of the proposal, and it has to be measured before the proposal
+is written.** Both drafts looked equally reasonable in prose. Only running them separated
+a usable check from noise, and the useless one was one keystroke from shipping in a bug
+file as a recommendation.
+
+**Two conditions this ledger requires.** Scope: counts above are `--include='*.md'` at the
+codescout root, and the two archived instances are **known-exempt**, not misses — archived
+surfaces are historical snapshots under `archive-cadence-policy` § 3. And a finding is not
+a fix: the 8 false positives include a plan that uses `N:### Heading` notation on purpose,
+so D14 must gate each hit rather than batch-repair.
+
+**Where it belongs long-term:** `audit_doc_refs` already walks every markdown file in the
+repo for reference claims, and this is a structural claim about the same files — so the
+natural end state is a check there, not a skill-side grep. Until then D14 lives in the
+sweep.
+
+**Worth noting about the discovery path:** nothing detected this. I found it by trying to
+insert a sibling heading and getting "not found", then disbelieving the error. The three
+surfaces that scan these files all passed it — `read_markdown` silently omits the heading
+(a map with a hole looks like a shorter document), `edit_markdown`'s "not found" reads as
+*you got the name wrong*, and `audit_doc_refs` has no opinion about structure. Kin to
+`R-104`: absence from an index is a claim about the index.
+
+**Related:** HY-13 (vocabulary compression — same shape, one level up: the standard has to
+be measured, not decreed), HY-5 §1, `R-104`.
 
 ## Template for new entries
 
