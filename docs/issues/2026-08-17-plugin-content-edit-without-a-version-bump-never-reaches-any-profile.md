@@ -236,7 +236,7 @@ report green while it does.
   exists
 - `~/<profile>/plugins/installed_plugins.json` — the `installPath` per profile
 - `docs/architecture/companion-plugin.md` — hook inventory and cross-repo flow
-- `docs/issues/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`
+- `docs/issues/archive/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`
   (`50038111`, still open) — the sibling "committed but not live" defect, one surface over.
   Worth reading as a pair: both are cases where the artifact on disk is correct and the
   copy actually being served is not, and in both the author is the least able to notice.

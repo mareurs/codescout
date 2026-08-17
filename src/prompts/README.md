@@ -27,11 +27,18 @@ Read this when touching `source.md` (the single source for the `server_instructi
 
 Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing a surface that produces the **stored per-project system prompt** — the `onboarding_prompt` slice of `source.md`, or `build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system-prompt regeneration for all projects onboarded with the previous version.
 
-**Do NOT bump for `server_instructions` changes** — that surface is injected fresh at every MCP session start (each `/mcp` connect re-reads the sliced text). No cached copy; changes are live on next connect.
+**Do NOT bump for `server_instructions` changes** — that surface is injected fresh at every MCP session start, with no separate cache of its own to invalidate. But "live on next connect" needs a qualifier a `/mcp` reconnect does not satisfy: see the note below.
+
+**`/mcp` reconnect does NOT refresh `server_instructions` in the same conversation.** MCP delivers `instructions` once, in the `initialize` response; the host composes it into the system prompt at conversation start, and a mid-conversation `/mcp` reconnect re-runs `initialize` against the new binary for tool schemas and behavior only — the system prompt already built for this conversation is not rebuilt from it. Measured 2026-08-17 across three reconnects and two rebuilds: tool schemas refreshed each time (`librarian` gained `archetype`, `edit_markdown`'s `new_string` guard went live), while the `instructions` text stayed byte-identical to what the conversation's *first* connection served — in one case, a whole section the source had deleted the previous day. See `docs/issues/archive/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`.
+
+Practical consequence: **never claim a `server_instructions`/`onboarding_prompt` edit is live from inside the session that authored it — that session is structurally the one observer that cannot see it.** Two ways to verify instead:
+
+- Tool code and schemas: `cargo rb` + `/mcp` in the same session, then re-probe.
+- Prompt surfaces: check the fixture (`grep -c '<the new text>' tests/fixtures/prompt_surfaces/server_instructions.md` + `cargo test --lib prompt_surfaces`) — the authoritative check, and the one CI runs. To eyeball the live-injected text itself, start a genuinely **new** conversation against the rebuilt binary.
 
 | Surface | How delivered | Bump needed? |
 |---|---|---|
-| `server_instructions` slice of `source.md` | Loaded fresh at every MCP session start | **No** — live on next connect |
+| `server_instructions` slice of `source.md` | Loaded fresh at every MCP session start | **No** — live for the next NEW conversation's first connect (not a same-conversation `/mcp` reconnect — see the note above) |
 | `onboarding_prompt` slice of `source.md` | Drives stored system-prompt generation | **Yes** — cached per project |
 | `build_system_prompt_draft()` in `builders.rs` | Same — generates stored system prompt | **Yes** — cached per project |
 

@@ -446,7 +446,7 @@ Do not re-derive the character budget from § Fix's table — see § Evidence,
 commit message says *"Needs cargo rb + /mcp before a live session sees the restored
 clause"* — that is wrong for this surface, and the error is mine. A `/mcp` reconnect
 refreshes tool schemas and behaviour, **not** `server_instructions`
-(`docs/issues/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`).
+(`docs/issues/archive/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`, fixed).
 Measured from this session: after four rebuilds and four reconnects the live block
 still carried a `## Workspace gate` section that `391fdcdc` deleted the previous day,
 so it had not been rebuilt from any of today's binaries.

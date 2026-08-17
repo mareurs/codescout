@@ -1,7 +1,7 @@
 ---
-id: '64fb2d6846f49865'
+id: 0e623bae045db6b5
 kind: bug
-status: open
+status: fixed
 title: 'BUG: /mcp reconnect refreshes tool schemas but not server_instructions — a prompt-surface change cannot be verified in the session that made it'
 tags:
 - prompt-surfaces
@@ -174,19 +174,26 @@ live block. One marker cannot distinguish "not refreshed" from "not yet built"; 
 
 ## Fix
 
-Documentation, not code — the host behaviour is not ours to change.
+Documentation, not code — the host behaviour is not ours to change. Fixed in
+`src/prompts/README.md` § Versioning:
 
-`src/prompts/README.md` should state plainly: a `server_instructions` or
-`onboarding_prompt` change is **not** observable in the authoring session. `cargo rb` +
-`/mcp` refreshes tool schemas and tool behaviour only. Verification requires either
+1. Corrected the section's own instance of the claim this bug falsifies
+   ("each `/mcp` connect re-reads the sliced text... changes are live on next
+   connect") — spelled out explicitly that a same-conversation `/mcp`
+   reconnect does **not** rebuild the system prompt, only a genuinely new
+   conversation's first connect does.
+2. Added the corrected two-line split this bug proposed, verbatim:
+   *"Tool code and schemas: `cargo rb` + `/mcp`. Prompt surfaces: not
+   observable in this session; verified by fixture + `prompt_surfaces`
+   tests, and eyeballable only in a NEW conversation."*
+3. Tightened the summary table's `server_instructions` row from the bare
+   "live on next connect" to name which "next connect" it means.
 
-- the snapshot fixture (`tests/fixtures/prompt_surfaces/server_instructions.md`) plus the
-  `prompt_surfaces` tests — the authoritative check, and the one CI runs; or
-- a **new** conversation, if the live-injected text itself must be eyeballed.
-
-The commit-message `NOTE: … needs cargo rb + /mcp` line should split code from surface, so
-the next author does not inherit the wrong expectation.
-
+Left the two historical plan/spec docs that repeat the old phrasing
+(`docs/superpowers/plans/2026-06-08-vdi-reliability-hardening.md`,
+`docs/superpowers/specs/2026-05-03-librarian-progressive-disclosure.md`)
+untouched — frozen design snapshots, not the canonical surface this bug
+named.
 ## Tests added
 
 None — nothing here is codescout behaviour to pin. The existing `prompt_surfaces` snapshot
@@ -218,11 +225,13 @@ right instruction for one half and misleading for the other —
 > tests, and eyeballable only in a NEW conversation.
 ## Resume
 
-Decide whether the doc fix belongs in `src/prompts/README.md` alone or also in a
-commit-message convention note. Optionally distinguish host-composition from prompt-cache
-by starting a fresh session against the *same* running binary: if the new session shows the
-restored clause, composition-at-start is confirmed and caching is ruled out.
-
+Fixed and closed. The doc fix landed in `src/prompts/README.md` only — no
+separate commit-message convention note was added; the README's own
+corrected text is the canonical statement CLAUDE.md already points readers
+at. The optional composition-vs-cache experiment this Resume floated (start
+a fresh session against the same running binary) was not run — the
+two-marker fingerprint in § Evidence already pins the mechanism precisely
+enough that the distinction doesn't change what an author does differently.
 ## References
 
 - `src/prompts/README.md` — prompt-surface rules, `ONBOARDING_VERSION`, the character cap.
