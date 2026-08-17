@@ -19,7 +19,7 @@ impl Tool for Artifact {
          and combine with filter via AND. \
          Trackers are artifacts with kind=tracker — augmented documents that auto-refresh their \
          body via a persistent prompt; call librarian(tracker_design) before creating one. \
-         append_entry atomically assigns the next id and appends to a tracker's entry_collection — \
+         append_entry atomically assigns the next id for any monotonic-ID ledger and, WITH entry_collection, appends the row; WITHOUT it the ledger is prose (`## PREFIX-N` body sections) and the call reserves the id, writing nothing — \
          use it instead of a manual read-then-write for any monotonic-ID tracker (F-N, W-N, T-N, ...). \
          update_entry patches ONE existing entry in place; use it to change a row (e.g. flip a status) \
          instead of patch={params:...}, whose RFC 7396 array semantics replace the whole collection."
@@ -172,7 +172,7 @@ impl Tool for Artifact {
                 },
                 "entry_collection": {
                     "type": "string",
-                    "description": "append_entry/update_entry: the augmentation's entry_collection array to write into (must match the artifact's declared entry_collection)"
+                    "description": "append_entry/update_entry: the augmentation's entry_collection array to write into (must match the artifact's declared entry_collection). OMIT it on append_entry for a PROSE ledger — one whose entries live as `## PREFIX-N` body sections rather than params rows: the call reserves the next id under the same transaction and returns it without writing anything, and you add the section, whose heading must be `## PREFIX-N — <title>` or the entry defines no citable token. Required for update_entry."
                 },
                 "entry_id": {
                     "type": "string",

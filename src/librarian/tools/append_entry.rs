@@ -7,7 +7,11 @@ use serde_json::{json, Value};
 #[derive(Deserialize)]
 struct Args {
     id: String,
-    entry_collection: String,
+    /// Omit for a PROSE ledger — one whose entries live as `## PREFIX-N` body
+    /// sections rather than params rows. The call then reserves an id and
+    /// writes nothing. See `augmentation::allocate_entry_id`.
+    #[serde(default)]
+    entry_collection: Option<String>,
     id_prefix: String,
     #[serde(default = "default_entry")]
     entry: Value,
@@ -26,6 +30,51 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "append_entry: `entry` must be a JSON object",
         ));
     }
+    // PROSE-LEDGER PATH. Nine of the ten numeric prefixes in `docs/TAXONOMY.md`
+    // keep entries as `## PREFIX-N` body sections, not params rows, and so could
+    // not reach the allocator at all — which is why they were allocated by hand,
+    // and why R-N reused nine ids for unrelated lessons. Omitting
+    // `entry_collection` declares this shape: the server reserves the next id
+    // under a transaction and hands it back; the caller writes the body. The
+    // reservation is what makes the split safe (a lookup alone would only move
+    // the race) — see `augmentation::allocate_entry_id`.
+    if a.entry_collection.is_none() {
+        if a.entry.as_object().is_some_and(|o| !o.is_empty()) {
+            return Err(RecoverableError::with_hint(
+                "append_entry: `entry` fields cannot be stored without an `entry_collection`"
+                    .to_string(),
+                "This ledger has no params collection, so those fields would be silently \
+                 dropped. Omit `entry` to reserve an id, then write the fields into the \
+                 markdown body yourself."
+                    .to_string(),
+            ));
+        }
+        if !a.cites.is_empty() {
+            return Err(RecoverableError::with_hint(
+                "append_entry: `cites` is not supported on a prose ledger".to_string(),
+                "Reserve the id, write the body, and cite in prose — link_scan derives the \
+                 edges from the text."
+                    .to_string(),
+            ));
+        }
+        let mut cat = ctx.catalog.lock();
+        let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+        let outcome = augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix)?;
+        return Ok(json!({
+            "id": outcome.id,
+            "artifact_id": target,
+            "reserved": true,
+            "body_max": outcome.body_max,
+            "next_step": format!(
+                "Reserved {id}; nothing was written. Add the section yourself, and make the \
+                 heading exactly `## {id} — <title>` — link_scan defines an entry token only \
+                 in that shape, so a heading without the dash-and-title defines nothing and \
+                 every citation of {id} dangles.",
+                id = outcome.id
+            ),
+        }));
+    }
+
     let mut cat = ctx.catalog.lock();
     // Refuse cites-from-worktree BEFORE resolve_write_target can fork a shadow.
     // The old ordering forked first and refused after, so a refused call still
@@ -50,7 +99,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let outcome = augmentation::append_entry(
         &mut cat,
         &target,
-        &a.entry_collection,
+        a.entry_collection
+            .as_deref()
+            .expect("the None case returned above"),
         &a.id_prefix,
         a.entry,
         &a.cites,
@@ -276,6 +327,133 @@ mod tests {
         .unwrap();
 
         assert_eq!(result["id"], "F-1");
+    }
+
+    /// A prose ledger: augmented (so it is declared) but with NO
+    /// `entry_collection`, because its entries are `## R-N` body sections.
+    fn seed_prose(ctx: &ToolContext, id: &str, abs_path: &std::path::Path) {
+        let now = chrono::Utc::now().timestamp_millis();
+        let cat = ctx.catalog.lock();
+        art_upsert(
+            &cat,
+            &ArtifactRow {
+                id: id.to_string(),
+                abs_path: abs_path.to_path_buf(),
+                kind: "tracker".to_string(),
+                status: "active".to_string(),
+                title: Some("Prose ledger".to_string()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "x".to_string(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+        aug_upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "prose ledger".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                // The declaration under test.
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn omitting_entry_collection_reserves_an_id_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        let original = "# Ledger\n\n## R-41 — an entry\n";
+        std::fs::write(&md, original).unwrap();
+
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let result = call(&ctx, json!({"id": "art1", "id_prefix": "R"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["id"], "R-42",
+            "reserved from the body max, not params"
+        );
+        assert_eq!(result["reserved"], true);
+        assert_eq!(result["body_max"], 41);
+        assert!(
+            result["next_step"].as_str().unwrap().contains("— <title>"),
+            "the hint must teach def_re's heading shape, got: {}",
+            result["next_step"]
+        );
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            original,
+            "a reservation must not touch the file"
+        );
+
+        // The reservation has to survive the read, or the tool re-issues the
+        // same id to the next caller — which is the collision this exists to
+        // prevent.
+        let again = call(&ctx, json!({"id": "art1", "id_prefix": "R"}))
+            .await
+            .unwrap();
+        assert_eq!(again["id"], "R-43");
+    }
+
+    #[tokio::test]
+    async fn a_prose_ledger_refuses_entry_fields_it_would_silently_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(&md, "## R-1 — x\n").unwrap();
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "id_prefix": "R", "entry": {"status": "open"}}),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("cannot be stored"),
+            "dropping the caller's fields silently would be worse than refusing: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_prose_ledger_refuses_cites() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(&md, "## R-1 — x\n").unwrap();
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "id_prefix": "R", "cites": ["R-1"]}),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("cites"), "{err}");
     }
 
     #[tokio::test]
