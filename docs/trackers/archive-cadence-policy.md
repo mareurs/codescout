@@ -22,7 +22,7 @@ compounded. Settling it rather than re-deriving it.
 |---|---|---|
 | 1. Status vocabulary | **A** — cite the master-side SHA; lifecycle stays informal | unchanged |
 | 2. Archive trigger | **ii + iv** — quarterly manual pass, accelerated by release cuts, **plus promote-or-die** | **overturned** |
-| 3. Archive destination | **a** — `docs/trackers/archive/`, one file per source tracker | unchanged |
+| 3. Archive destination | **a**, **narrowed 2026-08-17** — `docs/trackers/archive/`, one file per source tracker, for ENTRY-level archival; whole-file archival takes a `-YYYY-MM-DD` suffix | **amended** (see §3) |
 | 4. Recovery | the librarian's archived-but-indexed model; no new infra | unchanged |
 
 **Why surface 2 was overturned.** The draft rejected (iv) promote-or-die as *"too
@@ -140,7 +140,7 @@ The current `fixed-shipped` / `partially-shipped` / `wontfix` / `open` / `closed
 - **Lean: a or c, picking one.** Both are reasonable; pick the one that matches the existing archive convention. Currently `docs/trackers/archive/` is the active convention.
 
 
-#### Proposed amendment — 2026-08-17: surface 3 conflates two different operations (awaiting ratification)
+#### Amendment — ratified 2026-08-17: surface 3 conflated two different operations
 
 Ratified surface 3 is **(a)** — `docs/trackers/archive/`, one file per source tracker, no
 timestamp. That is correct for the operation it was written about and wrong for a second
@@ -196,10 +196,29 @@ amendment is ratified, D10 step 5 becomes three sub-steps, not two: patch status
 timestamped name, then repoint citations of the old path *and* the old 16-hex id in the same
 commit, verified by a scoped `audit_doc_refs`.
 
-**Open question for the ratifier.** This amendment does not overturn (a); it narrows (a) to
-entry-level archival and adds a rule for the case (a) is silent about. If instead you want one
-rule for both, say which — but note that a single rule has to lose one of the two properties
-above, and losing destination-uniqueness is the one that hard-errors.
+**Ratified 2026-08-17.** (a) is not overturned — it is narrowed to entry-level archival, and
+whole-file archival gets the timestamped rule above. Operative form:
+
+| Operation | Destination |
+|---|---|
+| Entry-level (companion file, appended repeatedly) | `docs/trackers/archive/<ledger>-archived-entries.md` — stable, no timestamp, **check it exists before creating one** |
+| Whole-file (the stream wrapped, happens once) | `docs/trackers/archive/<name>-<YYYY-MM-DD>.md`, the date being the day the stream was declared wrapped |
+
+And the move is not the whole operation. Whole-file archival changes the path, which changes
+`id = sha256(abs_path)`, so citations of both break. The procedure is three steps, not two:
+
+1. `artifact(action="update", patch={status: "archived"})` — or a `supersedes` edge instead,
+   when a successor replaced it;
+2. `artifact(action="move", new_rel_path="docs/trackers/archive/<name>-<YYYY-MM-DD>.md")`,
+   reading the new id out of the response (`id_changed: true`);
+3. **repoint citations of the old path AND the old 16-hex id, in the same commit**, verified by
+   a scoped `audit_doc_refs`. Leave `docs/trackers/archive/**` and superseded session-log
+   rounds alone — those are historical snapshots, and `apply_drops`' `archive_drop` exists so
+   a retired document citing a moved path does not gate.
+
+Step 3 is the half that gets skipped: HY-5 §1 measured 24 moves breaking 8 path references
+across 7 live surfaces, none caught by `link_scan`, one of them failing CI on a release tip.
+The hygiene skill's D10 step 5 has been updated to carry all three.
 ### 4. Recovery — how do archived entries get found?
 
 The librarian indexes archived trackers but hides them by default (`status: archived`). `artifact(action="find", kind="tracker", include_archived=true)` should surface them. Cross-references in active entries that point at archived ones need to keep working — either via the artifact graph or by leaving forwarding stubs.

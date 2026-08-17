@@ -58,6 +58,35 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             ));
         }
         let mut cat = ctx.catalog.lock();
+        // An entry id is a LEDGER-WIDE fact, and a worktree is by definition not the
+        // ledger. Left unguarded, `resolve_write_target` forks a shadow whose distinct
+        // `artifact_id` misses the reservation, so main and the worktree both issue the
+        // same id — and unlike the params branch, nothing can repair it afterwards:
+        // `merge_worktree`'s renumber runs inside `if let Some(coll_name) = &coll` over
+        // params rows, and the `worktree_fork` event snapshots `base_params` with no
+        // body counterpart to diff a prose section against. The two `## PREFIX-N`
+        // sections just merge into one file, giving the token two active definers.
+        //
+        // Same refusal, same reasoning, and the same ORDERING as the `cites` guard
+        // below: it must fire BEFORE resolve_write_target, or a refused call still
+        // leaves behind a shadow row, augmentation, fork event and lineage link (the
+        // 2026-07-17 regression). Hence `is_main_checkout_artifact` here rather than
+        // inspecting the resolved target.
+        // docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md
+        if let Some(cp) = ctx.current_project.as_deref() {
+            if let Some(row) = artifact::get(&cat, &a.id)? {
+                if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
+                    return Err(RecoverableError::with_hint(
+                        "append_entry: id allocation is not supported from a worktree checkout"
+                            .to_string(),
+                        "An entry id is ledger-wide state and must key to the main tracker. \
+                         Reserve the id from the main checkout, or record the entry in a \
+                         worktree-local file and fold it into the ledger after the merge."
+                            .to_string(),
+                    ));
+                }
+            }
+        }
         let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
         let outcome = augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix)?;
         return Ok(json!({
@@ -66,7 +95,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "reserved": true,
             "body_max": outcome.body_max,
             "next_step": format!(
-                "Reserved {id}; nothing was written. Add the section yourself, and make the \
+                "Reserved {id} and recorded the ledger's high-water mark in frontmatter; the \
+                 entry itself is yours to write. Add the section, and make the \
                  heading exactly `## {id} — <title>` — link_scan defines an entry token only \
                  in that shape, so a heading without the dash-and-title defines nothing and \
                  every citation of {id} dangles.",
@@ -381,7 +411,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn omitting_entry_collection_reserves_an_id_and_writes_nothing() {
+    async fn omitting_entry_collection_reserves_an_id_and_writes_no_entry() {
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("ledger.md");
         let original =
@@ -406,10 +436,15 @@ mod tests {
             "the hint must teach def_re's heading shape, got: {}",
             result["next_step"]
         );
+        // A reservation writes the ledger's committed high-water mark and NOTHING
+        // else: the entry is still the caller's to write. Asserted as exact equality
+        // against `original` plus the one spliced line, so any additional or reordered
+        // byte fails here — a normalizing frontmatter rewrite would change several
+        // (BL-34), and that is the failure mode this guards.
         assert_eq!(
             std::fs::read_to_string(&md).unwrap(),
-            original,
-            "a reservation must not touch the file"
+            "---\nkind: tracker\nentry_prefix: R\nentry_high_water_R: 42\n---\n\n# Ledger\n\n## R-41 — an entry\n",
+            "the reservation must add exactly the high-water line"
         );
 
         // The reservation has to survive the read, or the tool re-issues the
@@ -419,6 +454,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(again["id"], "R-43");
+        // ...and the committed mark advances with it, in place rather than duplicated.
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            "---\nkind: tracker\nentry_prefix: R\nentry_high_water_R: 43\n---\n\n# Ledger\n\n## R-41 — an entry\n",
+            "the second reservation must splice the existing line, not append a second"
+        );
     }
 
     #[tokio::test]
@@ -589,45 +630,41 @@ mod tests {
         assert!(!main_aug.params.contains("from-worktree"), "main untouched");
     }
 
-    /// RED — pinned by
+    /// The regression guard for
     /// `docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md`.
-    /// Run with `cargo test -- --ignored` to watch it fail.
     ///
-    /// The params branch is protected and the test above is the proof: it lands on
-    /// the shadow, and `merge_worktree` renumbers the collision on the way back via
-    /// `graft::fold_entries`. The prose branch inherits the fork and none of the
-    /// protection. It resolves the same shadow — a DIFFERENT `artifact_id`, so the
-    /// reservation lookup misses and `body_max` comes from the worktree's own
-    /// checkout copy — and then nothing can renumber it: `merge_worktree`'s fold
-    /// sits inside `if let Some(coll_name) = &coll`, and the `worktree_fork` event
-    /// snapshots `base_params` with no body counterpart to diff a prose section
-    /// against.
+    /// The params branch is protected, and `append_from_worktree_lands_on_shadow_not_main`
+    /// above is the proof: it lands on the shadow, and `merge_worktree` renumbers the
+    /// collision on the way back via `graft::fold_entries`. The prose branch could
+    /// inherit the fork but never that repair — `merge_worktree`'s renumber runs inside
+    /// `if let Some(coll_name) = &coll` over params rows, and the `worktree_fork` event
+    /// snapshots `base_params` with no body counterpart to diff a prose section against.
+    /// Measured before the guard existed: main issued `HY-11`, the worktree issued
+    /// `HY-11` again, and `merge_worktree` reported `entries_renumbered: 0`.
     ///
-    /// Two `## HY-11 — …` headings then land in one file. Both definers are ACTIVE
-    /// and in the same artifact, so the resolver reports `Ambiguous` and every
-    /// external citation of HY-11 gets no edge at all.
+    /// So allocation is refused instead, on exactly the grounds `cites` is refused: an
+    /// entry id is ledger-wide state and must key to the main tracker.
     ///
     /// Own fixture rather than `wt_ctx` / `seed_main_tracker`: those seed
-    /// `/repo/docs/trackers/t.md`, a path with no file behind it, and the prose
-    /// branch reads the ledger body off disk.
+    /// `/repo/docs/trackers/t.md`, a path with no file behind it, and the prose branch
+    /// reads the ledger body off disk. The worktree root is nested inside the repo,
+    /// matching this project's own layout (`.claude/worktrees/`, `.worktrees/`);
+    /// `is_main_checkout_artifact` discriminates by `under(main) && !under(worktree)`,
+    /// so the nesting resolves correctly.
     #[tokio::test]
-    #[ignore = "red until prose allocation is refused from a worktree — docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md"]
-    async fn prose_allocation_from_a_worktree_collides_with_the_main_checkout() {
+    async fn prose_allocation_is_refused_from_a_worktree() {
         use crate::librarian::current_project::CurrentProject;
         use crate::librarian::ids;
         use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         let main_root = dir.path().join("repo");
-        // Nested under the repo, as this project's own worktrees are
-        // (`.claude/worktrees/`, `.worktrees/`). `is_main_checkout_artifact`
-        // discriminates by `under(main) && !under(worktree)`, so nesting is fine.
         let wt_root = main_root.join(".worktrees/feat");
         let rel = "docs/trackers/ledger.md";
         let body = "---\nkind: tracker\nentry_prefix: HY\n---\n\n# Ledger\n\n## HY-10 — the newest entry\n";
 
         // Both checkouts hold the same file at fork time — what git gives a fresh
-        // worktree, and why both trees derive the same body_max.
+        // worktree, and why both trees would otherwise derive the same body_max.
         for root in [&main_root, &wt_root] {
             std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
             std::fs::write(root.join(rel), body).unwrap();
@@ -646,7 +683,7 @@ mod tests {
             .build();
 
         // A prose ledger: catalogued, frontmatter-declared, NO augmentation and no
-        // entry_collection. That shape is nine of the ten prefixes in TAXONOMY.md.
+        // entry_collection. Nine of the ten prefixes in TAXONOMY.md are this shape.
         let now = chrono::Utc::now().timestamp_millis();
         {
             let cat = ctx.catalog.lock();
@@ -673,33 +710,62 @@ mod tests {
             .unwrap();
         }
 
-        // The main checkout's own session allocates first.
+        // Discriminating half: the SAME ledger allocates fine from the main checkout.
+        // Without this the test could pass because the fixture refuses everything.
         let main_alloc = {
             let mut cat = ctx.catalog.lock();
             augmentation::allocate_entry_id(&mut cat, &main_id, "HY")
                 .unwrap()
                 .id
         };
-        assert_eq!(main_alloc, "HY-11", "precondition: main issues HY-11");
+        assert_eq!(main_alloc, "HY-11", "the main checkout must still allocate");
 
-        let out = call(&ctx, json!({"id": main_id, "id_prefix": "HY", "entry": {}}))
+        let err = call(&ctx, json!({"id": main_id, "id_prefix": "HY", "entry": {}}))
             .await
-            .unwrap();
-
-        // Discriminating: if the fixture failed to look like a worktree session, the
-        // call would allocate against MAIN's reservation and get HY-12 — passing for
-        // the wrong reason. Assert the fork really happened before judging the id.
-        assert_ne!(
-            out["artifact_id"], main_id,
-            "fixture must fork a shadow, or the assertion below proves nothing"
+            .unwrap_err();
+        assert!(err.downcast_ref::<RecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the worktree guard, got: {err}"
         );
 
-        assert_ne!(
-            out["id"], main_alloc,
-            "the worktree re-issued {main_alloc}: the shadow is a different \
-             artifact_id so the reservation misses, and merge_worktree can only \
-             renumber params rows — so two `## {main_alloc} — …` sections merge \
-             into one file and the token becomes uncitable"
+        // The guard must refuse BEFORE resolve_write_target forks. The 2026-07-17
+        // regression was a refusal that fired after, so a refused call still
+        // materialized a shadow row, an augmentation, a fork event and a lineage link —
+        // contradicting the "writes nothing" contract. Same assertions as
+        // `append_with_cites_from_worktree_is_refused`.
+        let cat = ctx.catalog.lock();
+        let artifacts: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            artifacts, 1,
+            "must refuse before resolve_write_target forks a shadow artifact row"
+        );
+        let fork_events: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE kind = 'worktree_fork'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fork_events, 0,
+            "must refuse before resolve_write_target emits a worktree_fork event"
+        );
+        let lineage: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_link WHERE rel = 'worktree_of'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            lineage, 0,
+            "must refuse before resolve_write_target inserts a worktree_of lineage link"
         );
     }
 

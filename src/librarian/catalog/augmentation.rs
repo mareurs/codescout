@@ -684,6 +684,9 @@ pub struct AllocateOutcome {
     /// value at or above `body_max` means an id was handed out and the body has
     /// not caught up — see the leak note below.
     pub reserved_max: Option<u64>,
+    /// Highest index the ledger's COMMITTED frontmatter mark carried on entry.
+    /// The only one of the three that survives a clone, a move, or compaction.
+    pub frontmatter_max: Option<u64>,
 }
 
 /// Frontmatter key by which an artifact declares itself a ledger owning an id
@@ -692,6 +695,22 @@ pub struct AllocateOutcome {
 /// and git-ignored, so an augmentation-based declaration is absent in a fresh
 /// clone (HY-10).
 pub const ENTRY_PREFIX_KEY: &str = "entry_prefix";
+
+/// Frontmatter key prefix for a ledger's committed high-water mark, one key per
+/// declared namespace: `entry_high_water_HY: 11`.
+///
+/// **Per-prefix scalar keys rather than one nested map**, because the surgical
+/// frontmatter writers operate on single `key: value` lines
+/// (`frontmatter::upsert_int_line`), and the alternative — re-emitting the whole
+/// block to hold a map — reformats hand-authored files (BL-34). A ledger owning two
+/// namespaces gets two independent keys, which is also what keeps the two counters
+/// independently updatable without a read-modify-write over a shared value.
+pub const ENTRY_HIGH_WATER_PREFIX: &str = "entry_high_water_";
+
+/// The frontmatter key holding `id_prefix`'s committed high-water mark.
+pub fn entry_high_water_key(id_prefix: &str) -> String {
+    format!("{ENTRY_HIGH_WATER_PREFIX}{id_prefix}")
+}
 
 /// Allocate the next `<id_prefix>-N` for a **ledger**: an artifact that declares
 /// `entry_prefix: <PREFIX>` in its frontmatter and keeps entries as
@@ -704,13 +723,22 @@ pub const ENTRY_PREFIX_KEY: &str = "entry_prefix";
 /// identity on params left them allocating by hand — which is how the R-N ledger
 /// came to reuse nine ids for unrelated lessons.
 ///
-/// **Declaration and reservation live in different places, on purpose.** The
-/// declaration is `entry_prefix` in committed frontmatter, so a fresh clone knows
-/// what the ledger is. The reservation high-water mark is a row in
-/// `entry_reservation`, which is machine-local — and that is safe precisely
-/// because it is re-derivable: the allocator reads the committed body every time,
-/// so losing the table costs at most a re-issue of an id whose entry was never
-/// written.
+/// **The counter is derived from three inputs, and committed to one.** `entry_prefix`
+/// and `entry_high_water_<PREFIX>` both live in committed frontmatter, so a fresh
+/// clone knows what the ledger is *and* how far it has counted. `entry_reservation`
+/// is machine-local and now serves only as the within-machine race guard it is
+/// actually good at, and `body_max` is a cross-check. `next` is the max of all three.
+///
+/// An earlier version of this function derived the counter from the reservation and
+/// the body alone, and argued the machine-local table was safe to lose because it was
+/// "re-derivable from the committed body". That premise held only while the live body
+/// contained every id ever issued — and compaction, which moves entries out to an
+/// archive companion, lowers `body_max` by design, while `artifact(move)`'s graft
+/// cascade-deletes the reservation. With both understating, the `.max(1)` floor
+/// reissued `HY-1`, and because the resolver binds a token to its sole ACTIVE definer,
+/// every historical citation silently re-pointed with no dangling or ambiguous count
+/// moving. Measured 2026-08-17;
+/// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
 ///
 /// **Why this is race-free without writing the entry.** The reservation is
 /// recorded inside the same `IMMEDIATE` transaction that reads the maximum, so a
@@ -793,6 +821,23 @@ pub fn allocate_entry_id(
     let body_claimed = body_claimed_indices(body, id_prefix);
     let body_max = body_claimed.iter().next_back().copied();
 
+    // The COMMITTED high-water mark, and the only input that survives the three
+    // operations `body_max` and `reserved_max` cannot: a fresh clone, an
+    // `artifact(move)` (whose graft cascade-deletes the reservation), and
+    // compaction (which lowers `body_max` BY DESIGN when entries move to an
+    // archive companion). Accepts a number or a string, because a hand-written
+    // or previously-quoted value should still be honoured rather than silently
+    // read as absent — reading it as absent is exactly the reissue.
+    let hw_key = entry_high_water_key(id_prefix);
+    let frontmatter_max: Option<u64> =
+        fm.as_ref()
+            .and_then(|f| f.extra.get(&hw_key))
+            .and_then(|v| match v {
+                Value::Number(n) => n.as_u64(),
+                Value::String(s) => s.trim().parse().ok(),
+                _ => None,
+            });
+
     // SQLite has no unsigned integers and rusqlite does not implement FromSql for
     // u64, so the column round-trips as i64. Clamping at 0 keeps a hand-edited
     // negative row from wrapping into a colossal id.
@@ -805,9 +850,13 @@ pub fn allocate_entry_id(
         .optional()?
         .map(|v| v.max(0) as u64);
 
+    // Max of all THREE, so no single input can walk the counter backwards. That is
+    // the whole property: each source is unreliable in a different way, and none of
+    // them is ever wrong in the *high* direction.
     let next = body_max
         .map_or(0, |m| m + 1)
         .max(reserved_max.map_or(0, |m| m + 1))
+        .max(frontmatter_max.map_or(0, |m| m + 1))
         .max(1);
 
     tx.execute(
@@ -818,12 +867,46 @@ pub fn allocate_entry_id(
            updated_at    = excluded.updated_at",
         rusqlite::params![artifact_id, id_prefix, next as i64],
     )?;
+
+    // Persist the mark BEFORE committing, and fail the whole allocation if it cannot
+    // be written. The ordering is the durability argument:
+    //
+    // * write fails → `?` returns, the transaction rolls back, no id was handed out.
+    //   Refusing is right: an id whose committed mark did not advance is precisely
+    //   the reissue this exists to prevent, so a silent fallback would reintroduce it.
+    // * write succeeds, commit fails → frontmatter runs ahead of the database. Safe,
+    //   because `next` takes the max: the following call reads the higher mark and
+    //   simply skips an integer.
+    //
+    // Concurrency on one machine is handled by the enclosing IMMEDIATE transaction —
+    // a second session blocks on the write lock, so it cannot interleave here.
+    let updated =
+        crate::librarian::frontmatter::upsert_int_line(&doc, &hw_key, next).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!(
+                    "allocate_entry_id: `{abs_path}` has no frontmatter block to record \
+                     `{hw_key}` in"
+                ),
+                "A ledger's high-water mark is COMMITTED state, so the file needs a \
+                 frontmatter block to hold it. Add one — the same block already carries \
+                 the `entry_prefix` declaration that made this a ledger."
+                    .to_string(),
+            )
+        })?;
+    std::fs::write(&abs_path, &updated).map_err(|e| {
+        RecoverableError::new(format!(
+            "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e} — no \
+             id was allocated"
+        ))
+    })?;
+
     tx.commit()?;
 
     Ok(AllocateOutcome {
         id: format!("{id_prefix}-{next}"),
         body_max,
         reserved_max,
+        frontmatter_max,
     })
 }
 
@@ -2013,29 +2096,25 @@ mod tests {
         assert_eq!(second.reserved_max, Some(42));
     }
 
-    /// RED — pinned by
+    /// The regression guard for
     /// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
-    /// Run with `cargo test -- --ignored` to watch it fail.
     ///
-    /// The counterpart to the test above. There the body lags the reservation and
-    /// the reservation saves us. Here BOTH lag the ledger's real history, which is
-    /// the case this function's safety argument does not cover:
+    /// The counterpart to the test above. There the body lags the reservation and the
+    /// reservation saves us. Here BOTH lag the ledger's real history — the case the
+    /// old two-input derivation could not survive:
     ///
-    /// * compaction moves entries OUT of the live body into an archive companion —
-    ///   the ladder `get_guide("tracker-conventions")` mandates — so `body_max` is
-    ///   not monotonic;
-    /// * `graft_rows` omits `entry_reservation` from its re-point list and then
-    ///   cascade-deletes the source row, so `artifact(move)` drops the reservation.
-    ///   Archiving IS a move. A fresh clone, a second machine, or a worktree
-    ///   shadow's distinct `artifact_id` each have the same effect.
+    /// * compaction moves entries OUT of the live body into an archive companion (the
+    ///   ladder `get_guide("tracker-conventions")` mandates), so `body_max` is not
+    ///   monotonic;
+    /// * `graft_rows` cascade-deleted the reservation, so `artifact(move)` reset the
+    ///   counter — and archiving IS a move. A fresh clone or a second machine has the
+    ///   same effect.
     ///
-    /// With both understating, the `.max(1)` floor hands back `HY-1` — which the
-    /// archived companion still defines. That is worse than a plain collision:
-    /// `link_scan`'s resolver binds a token to its sole ACTIVE definer, so every
-    /// historical citation of `HY-1` silently re-points to the new, unrelated entry
-    /// while `dangling` and `ambiguous` both stay flat.
+    /// With both understating, the `.max(1)` floor handed back `HY-1`, which the
+    /// archived companion still defines. Worse than a plain collision: the resolver
+    /// binds a token to its sole ACTIVE definer, so every historical citation of
+    /// `HY-1` silently re-pointed while `dangling` and `ambiguous` both stayed flat.
     #[test]
-    #[ignore = "red until the high-water mark is committed — docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md"]
     fn allocate_entry_id_never_reissues_an_id_the_archive_still_defines() {
         let dir = tempfile::tempdir().unwrap();
         let live = dir.path().join("ledger.md");
@@ -2055,17 +2134,20 @@ mod tests {
         art.abs_path = live.clone();
         art_upsert(&cat, &art).unwrap();
 
-        assert_eq!(
-            allocate_entry_id(&mut cat, "live", "HY").unwrap().id,
-            "HY-11",
-            "precondition: this ledger's history runs to HY-10"
+        let first = allocate_entry_id(&mut cat, "live", "HY").unwrap();
+        assert_eq!(first.id, "HY-11", "precondition: history runs to HY-10");
+        assert_eq!(first.frontmatter_max, None, "no mark existed yet");
+
+        // The load-bearing new behaviour: the mark is COMMITTED state now, in the file.
+        let after = std::fs::read_to_string(&live).unwrap();
+        assert!(
+            after.contains("entry_high_water_HY: 11"),
+            "the allocation must record its mark in frontmatter, got:\n{after}"
         );
 
-        // Compaction. The entries keep their headings in the companion — reducing
-        // them to bare rows would destroy their definitions, which is a different
-        // defect. The archive artifact is seeded so the fixture states WHY a low id
-        // is wrong, and so candidate fix B (also scan the companion) has something
-        // to read; the allocator does not open this file today.
+        // Compaction. Entries keep their headings in the companion — reducing them to
+        // bare rows would destroy their definitions, which is a different defect. The
+        // archive artifact is seeded so the fixture states WHY a low id would be wrong.
         std::fs::write(
             &archive,
             format!(
@@ -2078,14 +2160,19 @@ mod tests {
         arch.status = "archived".to_string();
         art_upsert(&cat, &arch).unwrap();
 
-        std::fs::write(
-            &live,
-            "---\nkind: tracker\nentry_prefix: HY\n---\n\n# Ledger\n\nEntries archived.\n",
+        // Compact THROUGH `replace_body`, not by hand-writing the file. That is the
+        // fixture decision the whole test turns on: real compaction is a body edit, and
+        // a body edit preserves the frontmatter block byte for byte. Hand-writing the
+        // compacted file would erase the mark and quietly test nothing.
+        let compacted = crate::librarian::frontmatter::replace_body(
+            &after,
+            "\n# Ledger\n\nEntries archived.\n",
         )
-        .unwrap();
+        .expect("the ledger has a frontmatter block");
+        std::fs::write(&live, &compacted).unwrap();
 
-        // Counter loss — what the move's cascade, a fresh clone, or a worktree
-        // shadow's distinct artifact_id each produce.
+        // Counter loss — what the move's graft cascade, a fresh clone, or a second
+        // machine each produce. Only the committed mark is left to carry the history.
         cat.conn
             .execute(
                 "DELETE FROM entry_reservation WHERE artifact_id = 'live'",
@@ -2094,17 +2181,16 @@ mod tests {
             .unwrap();
 
         let out = allocate_entry_id(&mut cat, "live", "HY").unwrap();
-        let n: u64 = out
-            .id
-            .strip_prefix("HY-")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| panic!("unparseable id {}", out.id));
-        assert!(
-            n > 10,
-            "reissued {} — HY-1..HY-10 are still defined by the archived companion, \
-             and the resolver binds each token to its sole ACTIVE definer, so this \
-             re-points history silently instead of dangling",
-            out.id
+        assert_eq!(out.body_max, None, "the live body claims no id any more");
+        assert_eq!(out.reserved_max, None, "the reservation is gone");
+        assert_eq!(
+            out.frontmatter_max,
+            Some(11),
+            "the committed mark is the only surviving input"
+        );
+        assert_eq!(
+            out.id, "HY-12",
+            "must not reissue an id the archived companion still defines"
         );
     }
 

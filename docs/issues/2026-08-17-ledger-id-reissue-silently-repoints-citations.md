@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-17
-closed:
+closed: 2026-08-17
 severity: high
 owner: marius
 related: []
@@ -198,72 +198,112 @@ high-water mark — this session read it as the counter before checking.
 
 ## Fix
 
-Not implemented. Two candidates, and the first is strictly better:
+**Fix A, implemented 2026-08-17.** The high-water mark is now committed to the ledger's
+own frontmatter, one key per declared namespace:
 
-**A. Commit the high-water mark to frontmatter** (recommended). Store
-`entry_high_water: 100` beside the existing `entry_prefix` declaration, written
-by the allocator in the same transaction. Then
-`next = max(frontmatter_high_water, body_max, reserved_max) + 1`. This makes the
-counter survive clone, move, compaction and archival for the same reason
-`entry_prefix` does — it is committed, so it is a fact about the ledger rather
-than about one machine's database. `entry_reservation` degrades to what it is
-genuinely good at: an in-transaction race guard between concurrent sessions on
-one machine.
+```yaml
+entry_prefix: HY
+entry_high_water_HY: 11
+```
 
-**B. Also scan the archive companion.** Cheaper to write, worse: it needs a
-convention linking a ledger to its archive file, it re-reads a second file on
-every allocation, and it still fails for a ledger whose entries were archived
-into a differently-named file. Fixes the compaction trigger only, not the
-clone/move ones.
+`allocate_entry_id` takes `next` as the max of **three** inputs — the committed mark,
+the body maximum, and the machine-local reservation — so no single source can walk the
+counter backwards. Each is unreliable in a different way and none is ever wrong in the
+*high* direction, which is what makes the max safe.
 
-Either way, add `entry_reservation` to `repoint_history`'s table list so a move
-stops silently resetting the counter.
+Where the change lives:
 
+- `src/librarian/catalog/augmentation.rs` — `ENTRY_HIGH_WATER_PREFIX`,
+  `entry_high_water_key`, the third input folded into `next`, and the write-back.
+  `AllocateOutcome` gained `frontmatter_max` so a caller can see which input governed.
+- `src/librarian/frontmatter.rs` — `upsert_int_line`, a new surgical primitive.
+  `replace_scalar_line` *declines* on a missing key and
+  `rewrite_frontmatter_normalizing` reformats hand-authored blocks (30 changed lines,
+  BL-34); a caller that must persist committed state can accept neither. It inserts
+  above the closing `---` rather than after `entry_prefix`, because that key's value may
+  be a block sequence and a line spliced after it would land *inside* the sequence.
+- `src/librarian/catalog/graft.rs` — `repoint_history` folds `entry_reservation` rows
+  instead of letting the cascade drop them, merging per prefix with **`MAX`, not
+  last-writer-wins**: folding a lower mark over a higher one would reintroduce this very
+  bug through the move path.
+
+**Write ordering is the durability argument.** The frontmatter write happens *before*
+`tx.commit()`, and a failure to write fails the whole allocation:
+
+- write fails → the transaction rolls back, no id was handed out. Refusing is correct —
+  an id whose committed mark did not advance is precisely the reissue, so a silent
+  fallback would reintroduce it.
+- write succeeds, commit fails → frontmatter runs ahead of the database. Safe, because
+  `next` takes the max: the next call reads the higher mark and skips an integer.
+
+Concurrency on one machine is still handled by the enclosing `IMMEDIATE` transaction — a
+second session blocks on the write lock and cannot interleave with the file write.
+
+**Fix B (also scan the archive companion) was not taken.** It fixes only the compaction
+trigger, not the clone or move ones, needs a convention linking a ledger to its
+companion, and re-reads a second file on every allocation.
+
+**One contract changed deliberately.** A prose reservation is no longer a pure read: it
+writes exactly one frontmatter line. The tool's `next_step` hint and the test formerly
+named `…_writes_nothing` (now `…_writes_no_entry`) were both updated to say so. The
+intent that mattered is intact — the *entry* is still the caller's to write.
 ## Tests added
 
-`allocate_entry_id_never_reissues_an_id_the_archive_still_defines` —
-`src/librarian/catalog/augmentation.rs:2039`. **Red on purpose**, carrying
-`#[ignore = "red until the high-water mark is committed — …"]` so the default gate stays
-green; run it with `cargo test -- --ignored`. Delete the `#[ignore]` attribute when the
-fix lands — that is the whole ceremony.
+- `allocate_entry_id_never_reissues_an_id_the_archive_still_defines` —
+  `src/librarian/catalog/augmentation.rs`. Written red first (output in § Symptom), now
+  green; the `#[ignore]` is gone. It sits immediately after
+  `allocate_entry_id_does_not_reissue_when_the_body_has_not_caught_up`, its exact
+  counterpart: there the body lags the reservation and the reservation saves us, here
+  both lag the real history.
 
-It is placed immediately after
-`allocate_entry_id_does_not_reissue_when_the_body_has_not_caught_up`, which is its exact
-counterpart: there the body lags the reservation and the reservation saves us; here both
-lag the ledger's real history.
+  **One fixture decision the test turns on:** it compacts through
+  `frontmatter::replace_body`, not by hand-writing the compacted file. Real compaction
+  is a body edit and a body edit preserves the frontmatter block byte for byte;
+  hand-writing it would erase the mark and silently test nothing. The first draft did
+  exactly that and would have passed for the wrong reason.
 
-The fixture also seeds the archived companion artifact even though the allocator never
-opens it, for two reasons — it states in-place *why* a low id is wrong, and it gives
-candidate Fix B something to read without rewriting the test.
+- `graft_folds_entry_reservations_taking_the_higher_mark` and
+  `graft_folds_entry_reservations_when_the_source_is_ahead` —
+  `src/librarian/catalog/graft.rs`. The pair pins `MAX` rather than either extreme:
+  with the source ahead, `max` and a plain overwrite agree, so only the
+  source-behind direction discriminates. **Mutation-verified** — replacing
+  `MAX(entry_reservation.max_allocated, excluded.max_allocated)` with
+  `excluded.max_allocated` fails exactly the discriminating test (`Some(5)` vs
+  `Some(12)`) and leaves the other green.
 
-Still wanted, and not yet written: a resolver-side companion asserting that a live
-definer and an archived definer of the same token do not silently produce an `Edge` for
-a number the ledger has already retired. That one needs a policy decision first — the
-tie-break is correct for its stated purpose, so the assertion has to name a narrower
-condition than "two definers".
+- Six `upsert_int_line_*` tests — `src/librarian/frontmatter.rs`. The load-bearing two:
+  `…_renders_the_value_bare_not_quoted` (why this is not `replace_scalar_line`, whose
+  round-trip check would quote `11` and make it read back as a string) and
+  `…_does_not_insert_inside_a_block_sequence` (why the anchor is the closing delimiter
+  and not `entry_prefix`).
+
+- `omitting_entry_collection_reserves_an_id_and_writes_no_entry` —
+  `src/librarian/tools/append_entry.rs`, updated. Now asserts exact file equality
+  against the original plus the one spliced line, so any extra or reordered byte fails
+  — which is what would catch a normalizing rewrite creeping back in — and asserts the
+  second reservation *splices* the line rather than appending a second one.
+
+Still wanted, deliberately not written: a resolver-side test asserting that a live and
+an archived definer of the same token do not silently produce an `Edge`. That would
+contradict `archived_tie_break_resolves_to_sole_active_definer`, which is correct for
+its stated purpose, so the assertion needs a narrower condition than "two definers" —
+a policy decision, not a test-writing one.
 ## Workarounds
 
-- **Do not compact a ledger's entries out of its live body and archive the file
-  in the same sweep.** Either operation alone is safe while the reservation
-  survives; together on a machine that has lost the reservation they reissue.
-- Before the first `append_entry` on a ledger in a fresh clone or after a move,
-  check the returned `body_max` / `reserved_max` in the response against the
-  ledger's real maximum including its archive companion. Both fields are
-  returned by `AllocateOutcome` precisely so the caller can notice this.
-- Prefer citing entry ids in the qualified `<file-stem>:HY-1` form for entries
-  that have been archived: the qualifier pins the file, so a reissue in the live
-  ledger cannot capture a citation aimed at the archive.
+No longer needed. Historical, for anyone on a build before this fix:
 
+- do not compact a ledger's entries out of its live body and archive the file in the
+  same sweep — either alone was safe while the reservation survived;
+- check `body_max` / `reserved_max` in the `append_entry` response against the ledger's
+  real maximum *including* its archive companion before the first allocation in a fresh
+  clone or after a move.
+
+One piece of advice outlives the fix: prefer the qualified `<file-stem>:HY-1` citation
+form for entries that have been archived. The qualifier pins the file, so nothing in the
+live ledger can capture a citation aimed at the archive.
 ## Resume
 
-The red test exists and the premise is now measured, so the next action is the design
-call, not more investigation: **choose Fix A or Fix B** in § Fix. A is recommended —
-commit `entry_high_water` to frontmatter beside `entry_prefix`, making the counter a
-fact about the ledger rather than about one machine's database.
-
-Whichever is chosen, `entry_reservation` must also join `repoint_history`'s table list
-in `src/librarian/catalog/graft.rs`, or `artifact(move)` keeps silently resetting the
-counter — that part is independent of A-vs-B and can land first.
+N/A — fixed and verified on `experiments`.
 ## References
 
 - `src/librarian/catalog/augmentation.rs` — `allocate_entry_id`, `ENTRY_PREFIX_KEY`,

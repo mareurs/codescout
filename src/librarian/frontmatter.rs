@@ -265,6 +265,73 @@ pub fn replace_scalar_line(doc: &str, key: &str, value: &str) -> Option<String> 
     None
 }
 
+/// Set a top-level integer `<key>:` line — splicing it in place when the key is
+/// already present, inserting it just above the closing delimiter when it is not.
+///
+/// The insert half is why this is not simply [`replace_scalar_line`]. That function
+/// *declines* on a missing key, and its two callers either leave the file alone or
+/// fall back to the normalizing writer. Neither option is open to a caller that MUST
+/// persist a value into a hand-authored block: falling back reformats it (30 changed
+/// lines on a hand-authored corpus, BL-34), and leaving it alone silently drops the
+/// write — which for a committed high-water mark is the very regression it exists to
+/// prevent.
+///
+/// Inserting above the closing `---`, rather than adjacent to a sibling key, is
+/// deliberate. The natural anchor would be the ledger's `entry_prefix` line, but that
+/// key's value may be a BLOCK SEQUENCE — `entry_prefix:` followed by indented `- F`
+/// items — and a line spliced directly after it would land inside the sequence and
+/// change its meaning.
+///
+/// Integers need no quoting decision: YAML's core schema resolves a bare integer to a
+/// number. So this bypasses [`scalar_can_be_bare`], whose round-trip check would quote
+/// `33` on the correct-but-unhelpful grounds that it is not a string.
+///
+/// Returns `None` only when there is no frontmatter block to write into.
+pub fn upsert_int_line(doc: &str, key: &str, value: u64) -> Option<String> {
+    // Same delimiter scan `parse` and `replace_scalar_line` perform, so all three
+    // agree on where the frontmatter ends.
+    let after_open = if doc.starts_with("---\r\n") {
+        5
+    } else if doc.starts_with("---\n") {
+        4
+    } else {
+        return None;
+    };
+
+    let rendered = format!("{key}: {value}");
+    let prefix = format!("{key}:");
+    let rest = &doc[after_open..];
+    let mut idx = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed == "---" {
+            // Closing delimiter with no top-level `<key>:` above it — insert here,
+            // borrowing this line's own ending so a CRLF file stays CRLF.
+            let start = after_open + idx;
+            let eol = if line.ends_with("\r\n") { "\r\n" } else { "\n" };
+            let mut out = String::with_capacity(doc.len() + rendered.len() + eol.len());
+            out.push_str(&doc[..start]);
+            out.push_str(&rendered);
+            out.push_str(eol);
+            out.push_str(&doc[start..]);
+            return Some(out);
+        }
+        // `trimmed`, not `line`, and no trim_start: an indented `<key>:` belongs to a
+        // nested mapping or a sequence item, not to the artifact.
+        if trimmed.starts_with(&prefix) {
+            let start = after_open + idx;
+            let end = start + trimmed.len();
+            let mut out = String::with_capacity(doc.len() + rendered.len());
+            out.push_str(&doc[..start]);
+            out.push_str(&rendered);
+            out.push_str(&doc[end..]);
+            return Some(out);
+        }
+        idx += line.len();
+    }
+    None
+}
+
 /// Swap the document's body, leaving the frontmatter block byte-identical.
 ///
 /// The twin of [`replace_scalar_line`] for the other half of the file. A body
@@ -716,6 +783,82 @@ mod tests {
             replace_scalar_line("---\nid: abc\ntitle: old\n---\n", "title", "two\nlines").is_none(),
             "a newline cannot live on a spliced single line — decline so the caller re-serializes"
         );
+    }
+
+    #[test]
+    fn upsert_int_line_splices_an_existing_key_in_place() {
+        let doc = "---\nkind: tracker\nentry_prefix: HY\nentry_high_water_HY: 10\n---\n\n# Body\n";
+        let out = upsert_int_line(doc, "entry_high_water_HY", 11).unwrap();
+        assert_eq!(
+            out,
+            "---\nkind: tracker\nentry_prefix: HY\nentry_high_water_HY: 11\n---\n\n# Body\n"
+        );
+    }
+
+    #[test]
+    fn upsert_int_line_inserts_above_the_closing_delimiter_when_the_key_is_absent() {
+        let doc = "---\nkind: tracker\nentry_prefix: HY\n---\n\n# Body\n";
+        let out = upsert_int_line(doc, "entry_high_water_HY", 1).unwrap();
+        assert_eq!(
+            out,
+            "---\nkind: tracker\nentry_prefix: HY\nentry_high_water_HY: 1\n---\n\n# Body\n"
+        );
+    }
+
+    /// The reason this exists instead of reusing `replace_scalar_line`: that path
+    /// runs the value through `scalar_can_be_bare`, whose round-trip check quotes
+    /// `11` because `"11"` does not parse back as the STRING `"11"`. A quoted
+    /// integer reads back as a string, and the allocator compares numbers.
+    #[test]
+    fn upsert_int_line_renders_the_value_bare_not_quoted() {
+        let doc = "---\nkind: tracker\n---\n";
+        let out = upsert_int_line(doc, "entry_high_water_R", 41).unwrap();
+        assert!(
+            out.contains("entry_high_water_R: 41"),
+            "expected a bare integer, got: {out}"
+        );
+        assert!(!out.contains('\''), "must not quote an integer: {out}");
+    }
+
+    /// The insert must not land inside a block sequence. `entry_prefix` is the
+    /// natural anchor for this key and is exactly the one that can be a sequence —
+    /// a session log owns both F-N and W-N — so anchoring on the closing delimiter
+    /// is what keeps the write valid YAML.
+    #[test]
+    fn upsert_int_line_does_not_insert_inside_a_block_sequence() {
+        let doc = "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n# Log\n";
+        let out = upsert_int_line(doc, "entry_high_water_F", 33).unwrap();
+        assert_eq!(
+            out,
+            "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\nentry_high_water_F: 33\n---\n\n# Log\n"
+        );
+        // And it must still parse, with the sequence intact.
+        let (fm, _) = parse(&out).unwrap();
+        let fm = fm.unwrap();
+        assert_eq!(
+            fm.extra.get("entry_prefix"),
+            Some(&serde_json::json!(["F", "W"])),
+            "the sequence must survive the insert"
+        );
+        assert_eq!(
+            fm.extra.get("entry_high_water_F"),
+            Some(&serde_json::json!(33))
+        );
+    }
+
+    #[test]
+    fn upsert_int_line_preserves_crlf_line_endings_on_insert() {
+        let doc = "---\r\nkind: tracker\r\n---\r\n\r\n# Body\r\n";
+        let out = upsert_int_line(doc, "entry_high_water_HY", 7).unwrap();
+        assert_eq!(
+            out,
+            "---\r\nkind: tracker\r\nentry_high_water_HY: 7\r\n---\r\n\r\n# Body\r\n"
+        );
+    }
+
+    #[test]
+    fn upsert_int_line_declines_when_there_is_no_frontmatter() {
+        assert!(upsert_int_line("# Just a body\n", "entry_high_water_HY", 3).is_none());
     }
 
     /// `replace_body` is the mirror image of `replace_scalar_line`: the frontmatter

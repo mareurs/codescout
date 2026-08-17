@@ -27,6 +27,10 @@ pub struct GraftReport {
     pub event_edges_dropped: usize,
     pub entries_merged: usize,
     pub entries_renumbered: usize,
+    /// `entry_reservation` rows folded onto the destination, taking the MAX of the
+    /// two marks per prefix. Without this the graft's cascade-delete dropped them,
+    /// so `artifact(move)` reset a ledger's id counter.
+    pub entry_reservations_folded: usize,
     pub remap: BTreeMap<String, String>,
     pub suspicious: Vec<Value>,
 }
@@ -147,6 +151,27 @@ pub(crate) fn repoint_history(
         |r| r.get(0),
     )?;
 
+    // 5. Entry reservations — PK (artifact_id, prefix), and the value is a HIGH-WATER
+    //    MARK, so the merge rule is `max`, not last-writer-wins: folding a lower mark
+    //    over a higher one would hand the next allocation an id that already exists.
+    //    A plain `UPDATE ... SET artifact_id` cannot express that and would conflict
+    //    outright whenever the destination already tracks the same prefix.
+    //
+    //    Before this existed, `graft_rows`' cascade-delete of the source silently
+    //    dropped these rows, which is what let `artifact(move)` — i.e. archiving —
+    //    reset a ledger's counter
+    //    (docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md).
+    let entry_reservations_folded = tx.execute(
+        "INSERT INTO entry_reservation (artifact_id, prefix, max_allocated, updated_at)
+         SELECT ?1, prefix, max_allocated, updated_at
+           FROM entry_reservation WHERE artifact_id = ?2
+         ON CONFLICT(artifact_id, prefix) DO UPDATE SET
+           max_allocated = MAX(entry_reservation.max_allocated, excluded.max_allocated),
+           updated_at    = excluded.updated_at",
+        params![into_id, from_id],
+    )?;
+
+    report.entry_reservations_folded = entry_reservations_folded;
     report.events_repointed = events_repointed;
     report.observations_repointed = observations_repointed;
     report.links_repointed = u1 + u2;
@@ -367,6 +392,7 @@ mod tests {
     use crate::librarian::catalog::observations::{self, ObservationRow};
     use crate::librarian::catalog::Catalog;
     use crate::librarian::catalog::{event_edges, events, events::TestEventRowBuilder};
+    use rusqlite::OptionalExtension;
 
     fn art(cat: &Catalog, id: &str, path: &str) {
         let row = TestArtifactRowBuilder::new(id)
@@ -459,6 +485,81 @@ mod tests {
             })
             .unwrap();
         assert_eq!(src, 0);
+    }
+
+    fn reserve(cat: &Catalog, artifact_id: &str, prefix: &str, max_allocated: i64) {
+        cat.conn
+            .execute(
+                "INSERT INTO entry_reservation (artifact_id, prefix, max_allocated, updated_at)
+                 VALUES (?1, ?2, ?3, '2026-01-01T00:00:00.000Z')",
+                rusqlite::params![artifact_id, prefix, max_allocated],
+            )
+            .unwrap();
+    }
+
+    fn reserved(cat: &Catalog, artifact_id: &str, prefix: &str) -> Option<i64> {
+        cat.conn
+            .query_row(
+                "SELECT max_allocated FROM entry_reservation WHERE artifact_id=?1 AND prefix=?2",
+                rusqlite::params![artifact_id, prefix],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap()
+    }
+
+    /// A reservation is a HIGH-WATER MARK, so the fold rule is `max`, not
+    /// last-writer-wins. Folding the source's LOWER mark over the destination's higher
+    /// one would hand the next allocation an id that already exists — reintroducing
+    /// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` through
+    /// the move path, which is the path that caused it in the first place.
+    ///
+    /// Both directions are asserted, because only one of them can distinguish `max`
+    /// from a plain overwrite: with the source ahead, overwrite and max agree.
+    #[test]
+    fn graft_folds_entry_reservations_taking_the_higher_mark() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "src", "/r/a.md");
+        art(&cat, "dst", "/r/b.md");
+
+        // Source BEHIND destination — the discriminating direction.
+        reserve(&cat, "src", "HY", 5);
+        reserve(&cat, "dst", "HY", 12);
+        // A prefix only the source knows: must carry across, not be dropped.
+        reserve(&cat, "src", "R", 77);
+
+        let report = graft_rows(&mut cat, "src", "dst").unwrap();
+
+        assert_eq!(
+            reserved(&cat, "dst", "HY"),
+            Some(12),
+            "the higher mark must win; a plain overwrite would regress this to 5"
+        );
+        assert_eq!(
+            reserved(&cat, "dst", "R"),
+            Some(77),
+            "a prefix the destination did not track must still fold across"
+        );
+        assert_eq!(report.entry_reservations_folded, 2);
+        assert_eq!(
+            reserved(&cat, "src", "HY"),
+            None,
+            "the source row goes with the cascade-deleted artifact"
+        );
+    }
+
+    /// The other direction, so the pair pins `max` rather than either extreme.
+    #[test]
+    fn graft_folds_entry_reservations_when_the_source_is_ahead() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "src", "/r/a.md");
+        art(&cat, "dst", "/r/b.md");
+        reserve(&cat, "src", "HY", 20);
+        reserve(&cat, "dst", "HY", 12);
+
+        graft_rows(&mut cat, "src", "dst").unwrap();
+
+        assert_eq!(reserved(&cat, "dst", "HY"), Some(20));
     }
 
     #[test]

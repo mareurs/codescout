@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-17
-closed:
+closed: 2026-08-17
 severity: medium
 owner: marius
 related: []
@@ -176,74 +176,74 @@ equivalent, in either file.
 
 ## Fix
 
-Not implemented. Two candidates:
+**Fix A, implemented 2026-08-17.** The prose branch of
+`src/librarian/tools/append_entry.rs` refuses id allocation from a worktree session,
+mirroring the `cites` guard directly above it:
 
-**A. Refuse prose allocation from a worktree** (recommended, and cheap).
-Mirror the `cites` guard: in the prose branch, if
-`is_main_checkout_artifact(cp, &row.abs_path)` holds, refuse with a hint
-pointing at the main checkout — **before** `resolve_write_target` can fork.
-Rationale: an entry id is a ledger-wide fact, and a worktree is by definition
-not the ledger. This is a correctness-by-refusal move, consistent with the
-guard already there.
+```
+append_entry: id allocation is not supported from a worktree checkout
+hint: An entry id is ledger-wide state and must key to the main tracker. Reserve the id
+      from the main checkout, or record the entry in a worktree-local file and fold it
+      into the ledger after the merge.
+```
 
-**B. Snapshot body-claimed ids in the fork event and renumber prose at merge.**
-Add the fork event's missing counterpart — `base_body_ids: [1..10]` — and teach
-`merge_worktree` to renumber colliding `## PREFIX-N` headings in the merged
-file. Strictly more capable, and strictly more machinery: it needs a body
-rewrite at merge time, which the merge path does not do today for anything.
+The guard tests `is_main_checkout_artifact(cp, &row.abs_path)` and fires **before**
+`resolve_write_target`. That ordering is the non-obvious half and it is borrowed, not
+reasoned from scratch: the `cites` guard originally refused *after* the fork, so a
+refused call still left a shadow row, an augmentation, a fork event and a lineage link
+behind — contradicting its own "writes nothing" contract (the 2026-07-17 regression).
+Checking `is_main_checkout_artifact` rather than inspecting the resolved target is what
+makes the early refusal possible.
 
-Fix A first; B only if a real workflow needs to append to a ledger from a
-worktree. If **A** is taken, say so in
-`get_guide("tracker-conventions")` § *Entry ids* — a refusal nobody can predict
-is a papercut.
+**Fix B (snapshot body-claimed ids in the fork event and renumber prose at merge) was
+not taken.** It is strictly more capable and strictly more machinery: it needs a body
+rewrite at merge time, which the merge path does not do for anything today. Revisit only
+if a real workflow needs to append to a ledger from a worktree.
 
+Documented in `get_guide("tracker-conventions")` § *Entry ids* — a refusal nobody can
+predict is a papercut, so the guide now states the rule and the reason next to "let the
+server allocate".
 ## Tests added
 
-`prose_allocation_from_a_worktree_collides_with_the_main_checkout` —
-`src/librarian/tools/append_entry.rs:615`. **Red on purpose**, carrying
-`#[ignore = "red until prose allocation is refused from a worktree — …"]` so the default
-gate stays green; run it with `cargo test -- --ignored`.
+`prose_allocation_is_refused_from_a_worktree` —
+`src/librarian/tools/append_entry.rs`. Written red first under the previous name
+`prose_allocation_from_a_worktree_collides_with_the_main_checkout` (that name appears in
+the captured output in § Symptom, which is a historical record and deliberately not
+rewritten). Now green, `#[ignore]` removed.
 
-Placed immediately after `append_from_worktree_lands_on_shadow_not_main`, which is the
-protected params-branch twin — the pair reads as one story about what the prose branch
-did not inherit.
+It sits immediately after `append_from_worktree_lands_on_shadow_not_main`, the protected
+params-branch twin, so the pair reads as one story about what the prose branch did not
+inherit.
 
-Two fixture decisions worth keeping if the test is rewritten under Fix A:
+Four assertions, and the shape matters more than the count:
+
+- **the discriminating half** — the same ledger allocates `HY-11` fine from the main
+  checkout. Without it the test would also pass against a fixture that refuses
+  everything;
+- the worktree call returns a `RecoverableError` naming "worktree";
+- exactly **one** artifact row, **zero** `worktree_fork` events, **zero** `worktree_of`
+  links afterwards — the refusal must beat the fork, copied from
+  `append_with_cites_from_worktree_is_refused`.
+
+Two fixture decisions worth keeping:
 
 - **Its own fixture, not `wt_ctx` / `seed_main_tracker`.** Those seed
   `/repo/docs/trackers/t.md`, a path with no file behind it — fine for the params branch,
   which reads params from the DB, but `allocate_entry_id` reads the ledger body off disk
-  and hard-errors on a missing file. The fixture writes real files into a tempdir at both
-  the main and worktree paths, which is also what git actually gives a fresh worktree.
+  and hard-errors on a missing file. That asymmetry is itself the defect restated: the
+  two branches depend on different substrate, which is why one inherited the merge-time
+  protection and the other could not.
 - **The worktree root is nested inside the repo** (`repo/.worktrees/feat`), matching this
   project's own layout. `is_main_checkout_artifact` discriminates by
-  `under(main) && !under(worktree)`, so nesting resolves correctly — verified by the
-  discriminating assertion passing.
-
-Under Fix A the second call becomes a `RecoverableError`, and the assertions become: the
-refusal fires, and zero shadow artifacts / zero `worktree_fork` events / zero
-`worktree_of` links exist afterwards — copy those from
-`append_with_cites_from_worktree_is_refused`, which learned that ordering lesson the hard
-way in the 2026-07-17 regression.
+  `under(main) && !under(worktree)`, so the nesting resolves correctly.
 ## Workarounds
 
-**Append to prose ledgers from the main checkout only.** This is already the
-practical rule for `cites`; it just is not enforced or documented for ids. If a
-worktree session must record something, write it to a worktree-local file and
-fold it into the ledger from the main checkout after the merge.
-
+No longer a workaround — it is now the enforced rule: **append to prose ledgers from the
+main checkout only.** If a worktree session must record something, write it to a
+worktree-local file and fold it into the ledger from the main checkout after the merge.
 ## Resume
 
-The red test exists and the premise is measured, so the next action is implementation:
-**Fix A** — mirror the `cites` guard in the prose branch of
-`src/librarian/tools/append_entry.rs`, refusing when
-`is_main_checkout_artifact(cp, &row.abs_path)` holds, and refusing **before**
-`resolve_write_target` can fork. Then rewrite the test's assertions per § Tests added and
-drop its `#[ignore]`.
-
-Do not skip the documentation half: a refusal nobody can predict is a papercut. Add it to
-`get_guide("tracker-conventions")` § *Entry ids* next to the existing
-"let the server allocate" rule.
+N/A — fixed and verified on `experiments`.
 ## References
 - `src/librarian/tools/append_entry.rs:60-62` — the prose branch's fork + allocate
 - `src/librarian/tools/append_entry.rs:86-97` — the `cites` refusal to mirror

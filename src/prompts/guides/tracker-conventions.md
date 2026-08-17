@@ -179,9 +179,13 @@ Set it with `artifact(action="update", id=…, patch={extra: {"entry_prefix": "R
 
 **Frontmatter, because the catalog is machine-local and git-ignored.** A
 declaration stored in the augmentation is absent in a fresh clone, so every
-`append_entry` there fails. The reservation high-water mark *is* catalog-local, and
-that is safe only because it is re-derivable — the allocator re-reads the committed
-body each time. Identity has to travel with the repo; a counter does not.
+`append_entry` there fails. **The counter has to travel with the repo too** — see
+*Entry ids* below for `entry_high_water_<PREFIX>`. This guide previously argued the
+opposite, that a catalog-local mark was safe because the allocator re-reads the
+committed body each time. That was wrong in one specific way, and it cost a silent
+defect: the body's maximum is not monotonic, because compaction moves entries out to
+an archive companion. Identity *and* the counter travel; only the within-machine race
+guard stays local.
 
 A ledger is **declared, never inferred**. A design doc that quotes `## R-4` in
 prose is not a namespace, and inferring one from content would make every such doc
@@ -202,6 +206,31 @@ letters, a hyphen, digits, and **nothing else**.
   checkout can take the id between your scan and your write.
 - If you must hand-allocate, scan **every** entry format the file uses, and re-scan
   in the same breath as the write — a max-id is a fact about an instant.
+- **From the MAIN checkout only.** `append_entry` refuses id allocation from a
+  worktree session, on the same grounds it refuses `cites`: an entry id is
+  ledger-wide state and must key to the main tracker. Left unguarded, the worktree's
+  shadow row is a different `artifact_id`, so both trees issue the same number — and
+  nothing repairs it at merge, because the renumber only covers params rows. If a
+  worktree session must record something, write it to a worktree-local file and fold
+  it into the ledger from the main checkout after the merge.
+
+**Where the counter lives.** A ledger carries its own high-water mark in committed
+frontmatter, one key per namespace, written by the allocator:
+
+```yaml
+entry_prefix: HY
+entry_high_water_HY: 11
+```
+
+Do not hand-edit it downward, and do not delete it when compacting. It is the only
+one of the allocator's three inputs that survives a fresh clone, an
+`artifact(action="move")`, and compaction — the live body's maximum *drops* when
+entries move to an archive companion, and the machine-local reservation does not
+travel. Without the committed mark, a compacted-and-archived ledger reissues `HY-1`,
+and because the resolver binds a token to its sole **active** definer, every
+historical citation silently re-points to the new entry with no dangling or ambiguous
+count moving. Compaction is safe because a body edit preserves the frontmatter block
+byte for byte; a hand-rewritten file does not.
 
 ### Entry headings — the definition rule
 
