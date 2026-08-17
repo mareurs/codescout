@@ -464,9 +464,13 @@ conversation — the authoring session is structurally the one observer that can
 
 - `src/tools/read_file.rs:544-565` — the gate
 - `src/prompts/source.md:8-9` — the always-loaded IL1 text, missing the condition
-- `src/prompts/guides/iron-laws-detail.md:15-18` — the on-demand guide, which has it right
+- `src/prompts/guides/iron-laws-detail.md` § *Gate is overlap-based, not absolute* — the
+  on-demand guide, which has it right. Cited by section rather than by line: `90c5aea1`
+  rewrote that file's read-mode paragraph and shifted every line number below it
 - `src/usage/db.rs:216-218` — `normalize_err_family`, where the class is named
-- `docs/issues/2026-08-15-read-file-force-ignored-on-full-reads.md` (open) — sibling: the `force=true`
-  escape is discarded on whole-file reads; this bug relies on it working for line ranges, where it does
+- `docs/issues/archive/2026-08-15-read-file-force-ignored-on-full-reads.md` (fixed `2703410e`,
+  archived) — sibling: the `force=true` escape was discarded *in silence* on whole-file reads.
+  This bug relies on it working for line ranges, where it does and always did; the fix made the
+  discard legible rather than making `force` defeat the size budget
 - `docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md` (fixed `43fac6c8`, archived) — same
   family (IL surface vs gate), different law

@@ -61,7 +61,7 @@ deliberately avoided — the ledger is for defects we have seen, and B-4 is exac
 
 | ID | Finding | Surface | Status here | Task |
 |---|---|---|---|---|
-| B-1 | `force=true` is silently discarded on whole-file reads | `read_file` | **reproduced** | [`…-read-file-force-ignored-on-full-reads`](../../issues/2026-08-15-read-file-force-ignored-on-full-reads.md) |
+| B-1 | `force=true` is silently discarded on whole-file reads | `read_file` | **fixed** 2026-08-17 — the silence, not the budget | [`…-read-file-force-ignored-on-full-reads`](../../issues/archive/2026-08-15-read-file-force-ignored-on-full-reads.md) |
 | B-2 | Buffered full-read summary carries no incompleteness signal | `read_file` | **fixed** `16a6b561` | [`…-read-file-buffered-summary-has-no-incompleteness-signal`](../../issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md) |
 | B-3 | `truncate_compact` cuts from the tail — where the overflow line lives | core/types | **fixed** `bb2a9625` | [`…-truncate-compact-tail-cut-destroys-overflow-signal`](../../issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md) |
 | B-4 | `format_semantic_search` discards its own `truncated` flag | `semantic_search` | **already fixed** — no task | — |
@@ -101,6 +101,21 @@ effect is identical, and it is the effect that matters: an agent that passes
 **Next:** decide whether `force` should mean force on this path, or whether the
 schema should say plainly that it is range-only. Either resolves it; silence does not.
 
+**Closed 2026-08-17 (`2703410e`, experiments).** Reproduced on this host first —
+`read_file("src/librarian/classify.rs", force=true)`, 10,559 bytes, returned `showing 0 of
+378` with no mention of `force`. His observation was exact.
+
+His implied remedy was not taken, and the reason is worth recording: `force` was never a
+size-budget override. It bypasses the symbol-overlap refusal on a *line range*, which is
+what both the input schema and Iron Law 1 already said. Making it return an arbitrarily
+large source file inline would defeat progressive disclosure, which is the design
+principle the whole tool surface is built on.
+
+What was genuinely broken is that the parameter was accepted and dropped **without a
+word** — so a caller could not learn that what they asked for is not a thing this path
+does. The overflow hint now says so and names the call that works; the schema says it
+before the call is spent. Same fix shape as B-5's `Showing 400 of 400`: the tool's answer
+had to describe its own limits, not change.
 ## B-2 — the buffered full-read summary carries no incompleteness signal
 
 **Reported:** 2026-08-10, D2 in his design doc. He called this the defect that

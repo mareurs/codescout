@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- read_file
+- progressive-disclosure
+- external-report
+closed: 2026-08-17
 opened: 2026-08-15
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [read_file, progressive-disclosure, external-report]
-kind: bug
+severity: medium
 ---
 
 # BUG: `force=true` is silently discarded on whole-file `read_file` reads
@@ -62,6 +65,20 @@ the signature is `(path, text, resolved, input, source_tag, ctx)` and the early 
 precedes every `OutputGuard` construction. Read from source, not measured at runtime on
 this host; the external reporter measured it on his.*
 
+**Measured on this host 2026-08-17 at `021c130d`, before any edit.**
+`read_file("src/librarian/classify.rs", force=true)` — 10,559 bytes, just over the
+10,000-byte inline limit — returned:
+
+```
+… showing 0 of 378 — Outline only — no file content included.
+```
+
+Zero content lines, and no mention of `force` anywhere in the response. The
+read-from-source root cause was correct; it is now measured rather than inferred. The
+file chosen was the smallest source file over the threshold, so a *working* `force`
+would have cost 10 KB of context rather than 60 — the probe was sized to be safe under
+either outcome.
+
 ## Evidence
 
 ### Current signature and early return
@@ -90,22 +107,46 @@ not say the whole-file path is excluded.
 
 ## Fix
 
-Not yet implemented. Two coherent options; this is a decision, not a coding question:
+**Landed `2703410e` (experiments). Neither A nor B as filed — B was already true, and
+the live defect was a third thing.**
 
-- **A — make `force` mean force.** Thread `force` into `read_full_file` and skip
-  `exceeds_inline_limit` buffering when set. Honest with the parameter name, and the
-  escape hatch the guide implies actually exists.
-- **B — say it is range-only.** Amend the schema and Iron Law 1 to state that `force`
-  applies to line ranges and that the whole-file path always buffers. Cheaper, and
-  arguably the original intent.
+A is wrong on design grounds. Progressive disclosure is the project's stated principle
+(`docs/PROGRESSIVE_DISCOVERABILITY.md`), and `force` was never a budget override: it
+bypasses the *symbol-overlap refusal* on a line range. Letting it return an arbitrarily
+large source file inline would defeat the one guarantee the output budget exists to make.
 
-Either resolves the report. Doing neither leaves a documented escape hatch inert.
+B was already shipped, and that is the part this file got wrong. The input schema said
+"read the raw line **range**", and Iron Law 1 — as restored by `d2cf4449` — says
+`force=true` answers the range-overlap refusal. Both surfaces already scoped it.
 
+So the live defect was neither the budget nor the wording. It was the **silence**:
+`read_full_file` accepted `force` and dropped it with no signal, which is exactly
+`docs/issues/archive/2026-08-07-grep-zero-match-silent-about-hidden-skip.md` one tool
+over — fixed there by making the result self-describing rather than by changing what the
+tool searched.
+
+Two surfaces, because they reach the caller at different moments:
+
+- **Runtime.** `outline_hint()` extracted as a pure fn and given the flag. When `force`
+  was passed and dropped, the overflow hint now says so and names what does work
+  (`start_line`/`end_line` *together with* `force`).
+- **Schema.** `force` now reads "Line ranges only — an oversized whole-file read is
+  summarised either way." The runtime note only reaches a caller who has already spent
+  the call; the schema is what they read before spending it.
 ## Tests added
 
-None yet. Whichever option is chosen needs a test asserting the whole-file + `force`
-contract explicitly, since the current behaviour is untested in both directions.
+All three in `src/tools/read_file.rs`'s `tests` module, red observed before the fix,
+each failing on its own assertion:
 
+- `outline_hint_says_force_did_not_apply_when_forced` — a discarded `force=true` is named
+  in the hint, *and* the hint says what does work.
+- `outline_hint_stays_silent_about_force_when_not_forced` — the complement, over both
+  `is_source` arms. This is the half that keeps the note from becoming boilerplate, and
+  its passing while the first failed is what established the RED was not vacuous.
+- `force_schema_says_what_a_whole_file_read_does` — pins the schema half.
+
+`outline_hint` is pure on purpose, so the wording is testable without a `ToolContext` or
+a >10 KB fixture on disk — the same shape as `enforce_file_cap` in `audit_doc_refs`.
 ## Workarounds
 
 Read the buffer: the full content is stored server-side and is byte-exact. Use
@@ -114,12 +155,7 @@ Read the buffer: the full content is stored server-side and is byte-exact. Use
 
 ## Resume
 
-Decide A or B. If A: add a `force: bool` parameter to `read_full_file` in
-`src/tools/read_file.rs:643` and gate the `exceeds_inline_limit` branch on `!force`;
-add a test asserting a >10 KB source file returns `content` when forced. If B: edit the
-`force` description in the input schema and the Iron Law 1 section of
-`get_guide("iron-laws-detail")`, and close this as `wontfix` with the rationale.
-
+N/A — fixed and archived.
 ## References
 
 - `docs/trackers/bistriceanu/index.md` § B-1 — the external report and its provenance

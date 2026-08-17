@@ -1519,7 +1519,7 @@ mod tests {
     /// Measured 2026-08-17 at `021c130d` before the fix: `read_file("src/librarian/
     /// classify.rs", force=true)` on a 10,559-byte file returned `showing 0 of 378`
     /// with a hint that never mentioned `force`.
-    /// `docs/issues/2026-08-15-read-file-force-ignored-on-full-reads.md`.
+    /// `docs/issues/archive/2026-08-15-read-file-force-ignored-on-full-reads.md`.
     #[test]
     fn outline_hint_says_force_did_not_apply_when_forced() {
         let hint = super::outline_hint("@file_abc", true, true);

@@ -56,7 +56,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
 | BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | open | `1523556488a95de2` |
 | BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
-| BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | blocked | `ce1447504150b25b` |
+| BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | done | `1780acde047ffca2` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | done | `6902806f459fcf62` |
 | BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | blocked | `403e3fad0356f171` |
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | **done** — measured 0; its own bug file is gone | — |
