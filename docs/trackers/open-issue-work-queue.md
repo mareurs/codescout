@@ -66,7 +66,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-21 | 1 | edit_file's replace_all + batch paths write librarian-managed artifacts with no guard | **done, archived** | `e52abced30ff1dbc` |
 | BL-22 | 1 | `move` broke the `id == hash(abs_path)` invariant, so the next reindex cascade-deleted the history | **done, archived** | `18a637f59289192c` |
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | **done, archived** | `61e2360408cb206b` |
-| BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | open | `a68a76301714137f` |
+| BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | **done, archived** | `0cd1fe818951b232` |
 | BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | open | `cfcbee6f7d047a55` |
 | BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | **done, archived** | `5d8584d109d876ea` |
 | BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | **done, archived** | `d082f963f57bd76b` |

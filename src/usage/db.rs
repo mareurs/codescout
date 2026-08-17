@@ -92,10 +92,25 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     if !has_friction_target {
         conn.execute_batch(
             "ALTER TABLE tool_calls ADD COLUMN friction_target TEXT;
-             ALTER TABLE tool_calls ADD COLUMN overflow_tokens INTEGER;
-             ALTER TABLE tool_calls ADD COLUMN err_family TEXT;
-             ALTER TABLE tool_calls ADD COLUMN project_root TEXT;",
+                 ALTER TABLE tool_calls ADD COLUMN overflow_tokens INTEGER;
+                 ALTER TABLE tool_calls ADD COLUMN err_family TEXT;
+                 ALTER TABLE tool_calls ADD COLUMN project_root TEXT;",
         )?;
+    }
+
+    // Migration: the build's dirty bit (BL-24). `codescout_sha` alone is not an
+    // identity — a dirty build of commit X contains arbitrary uncommitted work while
+    // claiming to be X, and that misread a live fix as absent during a real
+    // acceptance measurement. `build.rs` already computed this flag and exported it;
+    // it reached exactly one consumer (`codescout version`) and stopped one call short
+    // of the table that needed it. Additive + nullable, so every pre-existing row and
+    // the unchanged SELECTs stay correct; NULL reads as "recorded before the column
+    // existed", which is honestly different from "recorded clean".
+    let has_dirty: bool = conn
+        .prepare("SELECT codescout_dirty FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_dirty {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN codescout_dirty INTEGER;")?;
     }
 
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
@@ -103,15 +118,62 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// The build's identity: which commit, and whether the tree was clean.
+///
+/// A sha on its own is **not** an identity. A dirty build of commit X contains
+/// arbitrary uncommitted work while claiming to be X, and `codescout_sha` is the column
+/// an acceptance measurement is supposed to rank on — so the missing flag turned a
+/// live fix into "the fix is not in this build" and cost a behavioural re-check to
+/// disprove. BL-24.
+///
+/// The two travel as one value so a caller cannot record the sha and drop the flag,
+/// which is exactly what happened: `build.rs` computed all three values, and
+/// `CODESCOUT_GIT_DIRTY` reached one consumer (`codescout version`) while the recorder
+/// passed only `env!("CODESCOUT_GIT_SHA")`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildProvenance<'a> {
+    pub sha: &'a str,
+    pub dirty: bool,
+}
+
+impl BuildProvenance<'static> {
+    /// This binary's own provenance, baked by `build.rs`.
+    ///
+    /// Note what this does **not** promise: `build.rs` declares `rerun-if-changed` on
+    /// `.git/HEAD`, `.git/index` and `.git/refs/heads/` only, so editing a source file
+    /// without staging it and rebuilding recompiles the crate *without* re-running
+    /// `build.rs` — both values keep their previous contents. That narrowing is a
+    /// deliberate trade (three `git` invocations per build otherwise); the honest label
+    /// is the cheaper cure, and `dirty` is what makes the staleness visible.
+    pub fn current() -> Self {
+        Self {
+            sha: env!("CODESCOUT_GIT_SHA"),
+            dirty: env!("CODESCOUT_GIT_DIRTY") == "1",
+        }
+    }
+}
+
+impl<'a> From<&'a str> for BuildProvenance<'a> {
+    /// Fixture convenience: a bare sha, assumed clean.
+    ///
+    /// Deliberately **not** how production records. `UsageRecorder` passes
+    /// [`BuildProvenance::current`], and `the_recorder_never_assumes_a_clean_build` pins
+    /// that — because this impl re-opens, for fixtures, the exact affordance that caused
+    /// BL-24: a sha travelling without a measured flag.
+    fn from(sha: &'a str) -> Self {
+        Self { sha, dirty: false }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub fn write_record(
+pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     conn: &Connection,
     tool_name: &str,
     latency_ms: i64,
     outcome: &str,
     overflowed: bool,
     error_msg: Option<&str>,
-    codescout_sha: &str,
+    build: B,
     project_sha: Option<&str>,
     session_id: &str,
     input_json: Option<&str>,
@@ -122,16 +184,20 @@ pub fn write_record(
     err_family: Option<&str>,
     project_root: Option<&str>,
 ) -> Result<()> {
+    // Taken by value so the sha and its dirty bit cannot be separated at the call site.
+    // They were separable before BL-24, and the flag was the half that got dropped.
+    let build = build.into();
     conn.execute(
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root)
-         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root)
+         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             tool_name,
             latency_ms,
             outcome,
             overflowed as i64,
             error_msg,
-            codescout_sha,
+            build.sha,
+            build.dirty as i64,
             project_sha,
             session_id,
             input_json,
@@ -1567,6 +1633,76 @@ mod tests {
         assert_eq!(tok, Some(1045));
         assert_eq!(ef, None);
         assert_eq!(pr.as_deref(), Some("/repo"));
+    }
+
+    /// BL-24. `codescout_sha` is the column an acceptance measurement ranks on, and a
+    /// sha without a dirty bit is not an identity: a dirty build of commit X contains
+    /// arbitrary uncommitted work while claiming to be X. That misread a live fix as
+    /// absent and took a behavioural re-check to disprove.
+    #[test]
+    fn write_record_records_the_builds_dirty_bit() {
+        for (dirty, expected) in [(true, 1i64), (false, 0i64)] {
+            let (_dir, conn) = tmp();
+            write_record(
+                &conn,
+                "symbols",
+                1,
+                "success",
+                false,
+                None,
+                BuildProvenance {
+                    sha: "8ad83c42",
+                    dirty,
+                },
+                None,
+                "sess",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let (sha, got): (String, Option<i64>) = conn
+                .query_row(
+                    "SELECT codescout_sha, codescout_dirty FROM tool_calls",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(sha, "8ad83c42");
+            assert_eq!(
+                got,
+                Some(expected),
+                "a dirty={dirty} build must record it — the flag existing in the binary \
+                 and not in the row is the whole defect"
+            );
+        }
+    }
+
+    /// The hole the `From<&str>` fixture convenience re-opens, closed where it matters.
+    ///
+    /// `write_record` accepts a bare `&str` so ~16 fixtures can keep passing a literal,
+    /// and that path assumes `dirty: false`. Production must never take it — passing
+    /// `env!("CODESCOUT_GIT_SHA")` there is *precisely* BL-24, and it would compile
+    /// silently. Asserted against the recorder's own source, because no runtime
+    /// assertion can distinguish "recorded clean" from "assumed clean".
+    #[test]
+    fn the_recorder_never_assumes_a_clean_build() {
+        const RECORDER_SRC: &str = include_str!("mod.rs");
+
+        assert!(
+            RECORDER_SRC.contains("BuildProvenance::current()"),
+            "the production recorder must pass measured provenance, not a bare sha"
+        );
+        let bare_sha = concat!("env!(\"CODESCOUT_", "GIT_SHA\")");
+        assert!(
+            !RECORDER_SRC.contains(bare_sha),
+            "a bare sha routes through `From<&str>` and is recorded as CLEAN whatever the \
+             tree actually was — that is BL-24 exactly, and it compiles without complaint"
+        );
     }
 
     #[test]

@@ -119,7 +119,12 @@ impl UsageRecorder {
             outcome,
             overflowed,
             error_msg.as_deref(),
-            env!("CODESCOUT_GIT_SHA"),
+            // The sha AND its dirty bit, as one value. Passing the bare sha env var here
+            // is what BL-24 was: a lone sha is not an identity, and a `&str` routes
+            // through `From<&str>`, which assumes the tree was clean. Pinned by
+            // `db::tests::the_recorder_never_assumes_a_clean_build`, which scans this
+            // file — so do not name that env var here, even in a comment.
+            db::BuildProvenance::current(),
             head_sha.as_deref(),
             &self.session_id,
             input_json.as_deref(),

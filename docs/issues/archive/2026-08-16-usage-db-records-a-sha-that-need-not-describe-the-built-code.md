@@ -1,18 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- usage-db
+- measurement
+- build
+- misleading-signal
+closed: 2026-08-16
 opened: 2026-08-16
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
-  - docs/trackers/open-issue-work-queue.md
-tags:
-  - usage-db
-  - measurement
-  - build
-  - misleading-signal
-kind: bug
+- docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md
+- docs/trackers/open-issue-work-queue.md
+severity: medium
 ---
 
 # BUG: usage.db records a git SHA that need not describe the built code, and drops the dirty bit that would say so
@@ -145,50 +145,85 @@ first place.
 
 ## Fix
 
-Not yet implemented. In order:
+Fixed on `experiments`. Step 1 as filed; step 2 deliberately **rejected**; step 3 left alone
+as the filing recommended.
 
-1. **Record the dirty bit.** Add a `codescout_dirty INTEGER` column to
-   `tool_calls` (same `ALTER TABLE` migration shape as the existing traceability
-   columns in `src/usage/db.rs`) and pass `env!("CODESCOUT_GIT_DIRTY")` alongside
-   the sha. Cheap, and it makes every future acceptance measurement honest:
-   `GROUP BY codescout_sha, codescout_dirty`.
+### 1. Record the dirty bit — done, and made structurally unforgettable
 
-2. **Consider making the sha self-describing** — `536b9581-dirty` — so a row read
-   in isolation, or pasted into a bug file, carries the caveat with it. This is
-   the standard `git describe --dirty` convention and needs no new column.
+`tool_calls` gains `codescout_dirty INTEGER`, migrated with the same column-probe +
+`ALTER TABLE` shape as the traceability columns directly above it. Additive and nullable, so
+every pre-existing row and every unchanged `SELECT` stays correct — and `NULL` reads as
+*"recorded before the column existed"*, which is honestly different from *"recorded clean"*.
 
-3. **Leave the `rerun-if-changed` narrowing alone** unless (1) and (2) prove
-   insufficient. Re-running `build.rs` on every source edit costs three `git`
-   invocations per build; the honest label is the cheaper cure.
+The plumbing could have been a 17th positional parameter on a function that already carries
+`#[allow(clippy::too_many_arguments)]`. That would have re-created the exact affordance the
+bug is about: a sha and a flag that a caller can pass separately, and therefore drop one of.
+Instead the two became one value:
 
+```rust
+pub struct BuildProvenance<'a> { pub sha: &'a str, pub dirty: bool }
+impl BuildProvenance<'static> { pub fn current() -> Self { /* both env vars */ } }
+```
+
+`write_record` takes `B: Into<BuildProvenance<'a>>`. A `From<&str>` keeps ~16 fixtures
+compiling untouched — at the cost of re-opening the hole for them, which is closed where it
+matters by a test (below).
+
+### 2. Self-describing sha (`536b9581-dirty`) — rejected
+
+It would break `GROUP BY codescout_sha` across the boundary: rows written before and after
+would no longer group together, and grouping on that column is the entire reason it exists
+(see the archived jsonpath bug, which now carries an addendum). A structured column composes
+— `GROUP BY codescout_sha, codescout_dirty` — where a string suffix fragments.
+
+The filing's argument for the suffix was that *a row read in isolation carries the caveat*.
+That is real, and the answer is to fix the **advice** rather than the data: the archived bug
+that recommended ranking on `codescout_sha` now says to select both columns.
+
+### 3. `rerun-if-changed` narrowing — left alone
+
+As filed. The staleness it permits is now *visible* rather than removed, which was the
+cheaper cure. Recorded in `BuildProvenance::current`'s doc comment so the next reader does
+not mistake `sha` for a guarantee about the compiled code.
 ## Tests added
 
-None yet — bug is `open`. A regression test can assert that a row written under a
-known `CODESCOUT_GIT_DIRTY` records it, mirroring the existing
-`codescout_sha should be set` assertions in `src/usage/mod.rs`.
+**`write_record_records_the_builds_dirty_bit`** — both polarities, asserting the column is
+`1` for a dirty build and `0` for a clean one, with the sha unchanged. The flag existing in
+the binary and not in the row is the whole defect, so this asserts on the row.
 
+**`the_recorder_never_assumes_a_clean_build`** — the one that matters. The `From<&str>`
+convenience means production could pass a bare sha, be silently recorded as clean, and
+compile without complaint — BL-24 exactly. No runtime assertion can distinguish *"recorded
+clean"* from *"assumed clean"*, so this scans `src/usage/mod.rs`'s own source: it must
+contain `BuildProvenance::current()` and must **not** name the bare sha env var.
+
+That guard caught something on its first run — a comment I had just written in the recorder
+quoted the env var to explain the bug, and the scan matched the prose. A source-text
+invariant cannot tell code from commentary. Reworded rather than loosened, with a note in
+that comment telling the next editor why the token must not appear there.
+
+Gate: **3982 tests**, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`.
 ## Workarounds
 
-**Do not trust `codescout_sha` alone when the build may have been dirty.** For an
-acceptance measurement, confirm the behaviour directly — call the fixed tool and
-read the response — and use the column to *separate cohorts* rather than to prove
-a given cohort contains the fix.
+Obsolete for rows written from here on — `GROUP BY codescout_sha, codescout_dirty` answers it
+directly.
 
-`codescout version` reports the dirty flag for the on-disk binary. It does **not**
-describe a long-running server process, which keeps whatever image it exec'd.
+Still true for the historical corpus, where the column is `NULL`: **do not trust
+`codescout_sha` alone on a row that predates this fix.** Confirm behaviour directly and use
+the column to separate cohorts rather than to prove one contains the fix.
 
+Also still true and unrelated to the column: `codescout version` describes the **on-disk
+binary**, not a long-running server process, which keeps whatever image it exec'd.
 ## Resume
 
-Start at `src/usage/db.rs` (schema migration + `write_record` signature) and
-`src/usage/mod.rs` (the `write_record` call site that already passes
-`env!("CODESCOUT_GIT_SHA")`). Add the column and thread the flag; the existing
-traceability-column migration directly above is the template.
+None. Column added and migrated, provenance made inseparable at the type level, production
+pinned by a source-scan guard, and the archived jsonpath bug's ranking advice has gained its
+caveat as a dated addendum.
 
-Then re-read the § Evidence note in
-`docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`
-— it recommends ranking on `codescout_sha` and should gain the caveat once this
-lands.
-
+One judgement worth re-opening only with evidence: the `From<&str>` fixture convenience.
+It exists so ~16 call sites did not have to change, and it is the single place a sha can
+still travel without a measured flag. If a second production recorder ever appears, delete
+the impl and take the churn.
 ## References
 
 - `build.rs:25-58` — `bake_git_sha`, which computes all three values

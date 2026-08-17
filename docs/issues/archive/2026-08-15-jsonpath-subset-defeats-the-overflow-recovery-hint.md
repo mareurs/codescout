@@ -272,6 +272,20 @@ values were writing rows in the same one-hour window**. The naive date-bounded c
 Rank an acceptance measurement on `codescout_sha`, not on `called_at`. The column exists
 precisely for this and answers it in one `GROUP BY`.
 
+> **Addendum 2026-08-16 (BL-24).** That advice is right and was incomplete. `codescout_sha`
+> names the commit HEAD pointed at **when `build.rs` last ran**, not the code that was
+> compiled — so a dirty build of commit X carries arbitrary uncommitted work while stamping
+> X. `build.rs` computed the dirty flag all along and it reached exactly one consumer
+> (`codescout version`), never the table. The consequence was measured the same week: a
+> session's rows read `536b9581`, a commit *before* the fix under test, and it took a
+> behavioural check to establish the fix was in fact live.
+>
+> Fixed — `tool_calls` now carries `codescout_dirty`, and the sha travels with its flag as
+> one value so a caller cannot record one and drop the other. **Group on
+> `codescout_sha, codescout_dirty`**; a `NULL` in that column means the row predates it,
+> which is honestly different from `0`. See
+> `docs/issues/archive/2026-08-16-usage-db-records-a-sha-that-need-not-describe-the-built-code.md`.
+
 ### Not verified live: `336d3b04`
 
 **Now verified live too**, after the 2026-08-16 11:56 rebuild — running build `a9a397a9`,
