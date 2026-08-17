@@ -147,7 +147,7 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
 /// positional, which is correct: `..` names a location relative to a base this resolver
 /// does not have.
 ///
-/// See `docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
+/// See `docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
 fn basename_candidate(raw_ref: &str) -> Option<&str> {
     let stripped = raw_ref.strip_prefix("./").unwrap_or(raw_ref);
     if stripped.is_empty() || stripped.contains('/') {
@@ -1866,7 +1866,7 @@ mod tests {
     ///
     /// Two `render_template.j2` exist in this repo, so the honest verdict is
     /// `AmbiguousBasename` at Med — informative, and below `--fail-on high`.
-    /// docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md
+    /// docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md
     #[test]
     fn resolver_dot_slash_ref_reaches_the_basename_fallback() {
         let tmp = TempDir::new().unwrap();

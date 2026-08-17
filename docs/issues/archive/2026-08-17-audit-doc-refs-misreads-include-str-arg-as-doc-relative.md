@@ -1,5 +1,5 @@
 ---
-id: e55b9263451c6647
+id: 37957544cae3b47a
 kind: bug
 status: fixed
 title: 'BUG: audit_doc_refs resolves an `include_str!` argument against the markdown file, failing the CI gate on a correct doc'
@@ -139,8 +139,15 @@ src/librarian/tools/legibility_scan/render_template.j2
 ```
 
 Note the audit tool has one of its own — so the basename is **ambiguous**, not missing. The
-`Verdict` enum already carries `AmbiguousBasename`, which buckets as `unknown` rather than
-`broken` and would not have gated.
+`Verdict` enum already carries `AmbiguousBasename`, and it would not have gated.
+
+**Correction (2026-08-17, measured):** `AmbiguousBasename` buckets as **`broken`**, not
+`unknown`. Adding one such ref moved `n_refs_broken` 10433 → 10434 with `n_refs_unknown`
+unchanged at 18875, and `mod.rs`'s own
+`ambiguous_basename_still_counts_against_the_gate` asserts `n_refs_broken == 1` with the
+comment *"and it belongs in the broken bucket"*. The conclusion survives for a different
+reason than the one given: `--fail-on high` gates on **severity**, and
+`AmbiguousBasename` carries Med. So it does not gate despite counting as broken.
 
 ### The gate is real
 
@@ -249,20 +256,29 @@ satisfying it.
 
 ## Resume
 
-The two code paths this file previously flagged as **inferred** have been read, and
-one of them said something different from what was inferred — see the correction at
-the top of § Root cause. The mechanism is now cited to lines.
+N/A — fixed, mutation-verified, and confirmed on the wire after `cargo rb` + `/mcp`.
 
-Remaining: confirm on the wire after `cargo rb` + `/mcp` by running the CI command
-itself,
+The corpus check ran the CI command verbatim and exited 0 with **zero** `high`
+findings across 1445 files / 47018 refs.
 
+And a **true replay**, not only a corpus check: a temporary doc carrying the original
+table row — `include_str!("./render_template.j2")` byte-for-byte — was scanned and then
+deleted. The ref that failed CI at `a1540c8c` now reports
+
+```json
+{
+  "raw_ref": "./render_template.j2",
+  "ref_kind": "file_path",
+  "verdict": "ambiguous_basename",
+  "severity": "med",
+  "severity_reason": "basename_ambiguous",
+  "notes": "basename matches 2 files: src/librarian/tools/audit_doc_refs/render_template.j2, src/librarian/tools/legibility_scan/render_template.j2"
+}
 ```
-./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high --json --project .
-```
 
-and checking `exit_code=0`. Note this no longer reproduces the *original* finding — the
-doc was rewritten before the tool fix — so the wire check is a regression check on the
-corpus, not a replay. The replay lives in the unit tests.
+with `exit_code: 0`, where it previously reported `missing` / `high` and exited 1. The
+`ref_kind: file_path` in that output also confirms which of the two resolvers fires for a
+code-span ref — the point § Root cause corrects.
 ## References
 
 - `.github/workflows/ci.yml:345-370` — the `audit-doc-refs` job.

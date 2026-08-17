@@ -2906,10 +2906,18 @@ line 370 actually passes — returned `exit_code=1`.
 **Counterfactual:** The promotion would have been recommended, and taken, on a tip commit
 whose `Audit Doc Refs` job fails. The finding came from a docs commit landed the same day
 (`a1540c8c`): `docs/architecture/augmented-artifacts.md` line 232 quoted a dot-slash-prefixed
-`include_str!` argument verbatim, and the auditor resolved it against the markdown file's
-directory instead of the Rust source's. One `high` among 46,692 refs was enough to fail the
-build. Fixed in `674bf885`; the tool-side false positive is filed at
-`docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
+`include_str!` argument verbatim. One `high` among 46,692 refs was enough to fail the
+build. Fixed in `674bf885`; the tool-side false positive is fixed too, and archived at
+`docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`.
+
+**Mechanism correction (2026-08-17, measured after reading the resolver):** the clause
+"resolved it against the markdown file's directory instead of the Rust source's" — as
+originally written here and in the bug file — is wrong. `resolve_file_path` joins
+`repo_root` and never consults `md_file` for resolution. The doc-relative base exists only
+in `resolve_link`, and the finding carried `ref_kind: file_path`. The real cause was a dead
+zone: a leading `./` bought nothing against `repo_root`, and the slash *inside* that `./`
+disqualified the ref from the basename fallback built for exactly this case. This does not
+weaken W-27 — the win here is about the gate's default threshold, which stands untouched.
 
 **Confirming data points:**
 
