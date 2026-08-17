@@ -105,7 +105,7 @@ invoked** and no detector ran — hence an HY entry rather than a `## Sweep` ent
 **What ran.** CLAUDE.md's verify-open cadence — *"Before any 'what's open?' report or
 backlog triage, run a verify-open pass on session-log entries with `Status: open` older
 than 14 days"* — applied to the bug ledger, plus `librarian(action="audit_doc_refs")`,
-a `docs/FEATURES.md` retirement audit, and a `docs/RELEASE-TODO.md` triage.
+a docs/FEATURES.md retirement audit (named bare, not code-spanned: the file was retired, and code-spanning an absent path makes `audit_doc_refs` read the record of its retirement as a citation of it), and a `docs/RELEASE-TODO.md` triage.
 
 **Result: 0 of 2 eligible entries were zombie-open.**
 
@@ -136,7 +136,7 @@ table above treats a no-finding sweep as neutral, which is right, but the *reaso
 captured anywhere.
 
 **Also worth noting for D2 (terminal-not-archived):** this pass deliberately did **not**
-archive `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` even though its
+archive `docs/issues/archive/2026-07-27-ast-chunker-no-minimum-chunk-size.md` even though its
 fix landed (`ca442498`) with a green gate. The file names its own landing precondition —
 validation against the retrieval benchmark, *"must be measured, not assumed"* — and that
 measurement was not run. A D2 detector keying on "fix SHA present + gate green" would
@@ -166,7 +166,7 @@ count tripping the skill's ~25 stop condition. Live tracker count went 62 → 38
 
 **D1 (0 findings).** All 11 prefix rows in `docs/TAXONOMY.md` § Main taxonomy resolve on
 disk, including `docs/templates/session-log.md` and `docs/issues/_TEMPLATE.md`. Note there
-is **no whole-corpus tracker index** — no `docs/trackers/README.md` exists — so D1's reach
+is **no whole-corpus tracker index** — no docs/trackers/README.md exists (bare on purpose; see HY-2) — so D1's reach
 is limited to the 11 prefix-owning files. 62 live trackers had no index to drift against.
 See HY-5.
 
@@ -264,7 +264,7 @@ ambiguous 393, cross_repo 1** (measured pre-move).
 **Doc-ref repair (not in the skill — see HY-5).** The 24 moves broke **8 markdown citations
 in 7 live surfaces**; `link_scan` heals catalog edges but not prose. Repointed at the
 `archive/` path: `docs/TAXONOMY.md:40`, `src/prompts/README.md:22` and `:45`,
-`contrib/pi/README.md:7`, `docs/issues/2026-08-15-server-instructions-truncated-before-reaching-the-model.md:142`,
+`contrib/pi/README.md:7`, `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md:142`,
 `docs/plans/2026-07-17-tracker-lifecycle-stage1-plan.md`, `docs/trackers/windows-platform-support.md`,
 `docs/trackers/2026-05-07-legacy-retrieval-removal.md`. Verified by a non-degraded
 `audit_doc_refs` over those files: **0 high findings remain**, 37 med all pre-existing
@@ -357,7 +357,7 @@ moves, grep the moved basenames across live surfaces and repoint, then verify wi
 `audit_doc_refs` (0 high findings as the gate). This sweep did it manually; it should not
 depend on the operator thinking of it.
 
-**2. There is no whole-corpus tracker index.** `docs/trackers/README.md` does not exist, so
+**2. There is no whole-corpus tracker index.** docs/trackers/README.md does not exist — named bare rather than code-spanned, so the audit does not read this statement of absence as a citation (the precedent is CLAUDE.md's note on the deliberately-deleted docs/ARCHITECTURE.md) — so
 D1 can only diff `docs/TAXONOMY.md`'s 11 prefix-owning rows against disk — 11 of 62 live
 trackers, 18% coverage. D1 reported 0 findings, which is true and nearly meaningless. The
 remaining 51 files were discoverable only via `git ls-files` and the catalog. **Proposal:**
