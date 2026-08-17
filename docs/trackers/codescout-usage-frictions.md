@@ -1759,4 +1759,16 @@ follows the response boilerplate writes a heading inconsistent with every siblin
 generic hint should defer to the ledger's own convention, or say "match the surrounding
 entries".
 
-**Status:** open — friction recorded, no fix shipped.
+**The heading half is fixed — `bf485a00` (experiments).** `allocate_entry_id` now returns
+the level the ledger's own entries use — the *mode* of `^#{1,6} PREFIX-N` over the body it
+already scans for `body_max`, so a stray heading at another depth cannot decide the level
+for every future entry — and `append_entry` phrases the hint with it. Where the body heads
+nothing there is no level to observe, and the hint now says its suggestion is a DEFAULT
+instead of sounding certain. Promoted to a standing rule the same day: Anti-Pattern 5,
+*Asserting a Convention the Tool Never Read*, in `docs/PROGRESSIVE_DISCOVERABILITY.md` —
+the file `CLAUDE.md` requires reading before adding or modifying any tool.
+
+**Status:** open — the heading half is fixed; the `no_close` half, which is the primary
+friction above, is not. `edit_markdown` still reports a malformed needle and a moved
+haystack in identical words, and `scoped_miss_tier` remains the undocumented field that
+separates them.
