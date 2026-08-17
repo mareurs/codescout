@@ -59,7 +59,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | blocked | `ce1447504150b25b` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | blocked | `30365fe50974fa6b` |
 | BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | blocked | `403e3fad0356f171` |
-| BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | open | `897fb0fbd6eb2546` |
+| BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | **done** — measured 0; its own bug file is gone | — |
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | **done, archived** | `3d733b00b134634c` |
 | BL-20 | 1 | params merge-patch wipes entry arrays wholesale — gave entries an update path (`update_entry`) + always-on counts | **done, archived** | `36eda0c2634dbea9` |
@@ -442,7 +442,24 @@ output).
 - **Check the snapshot against live params before trusting a row** (BL-29). Three rows
   had drifted here, all from catalog-only writes.
 - **A concurrent session shares this working tree, index, and formatter.** Commit by
-  pathspec; prefer `cargo fmt -- <file>`.
+  pathspec; prefer `cargo fmt -- <file>`. It also shares the **git index**: a peer's
+  `git commit` swept a file this session had `git add`-ed into their commit (observed
+  2026-08-16, `2f94ce40`). Stage immediately before committing, not early.
+- **Bug-file location vs status — the standing check** (BL-17). The invariant is that no
+  *archived* bug carries a non-terminal status:
+
+  ```
+  artifact(action="find", kind="bug", filter={"and": [
+    {"abs_path": {"contains": "issues/archive/"}},
+    {"status":   {"in": ["open", "investigating"]}}]})
+  ```
+
+  It must return **0** — measured 0 on 2026-08-16. The *inverse* (terminal status, still
+  in `docs/issues/`) is **not** a defect and should not be swept: every such file states
+  its residual work in `## Resume` — a fixed *damage* with an unfixed *trigger*, a
+  mitigation with a root cause still open, a deliberate `open` on an unreproduced
+  flake. Archiving those would hide real work to satisfy a tidiness rule. Check the
+  Resume before moving anything.
 - **Before writing into a foreign repo, run the read-only precondition check first.** The
   dry-run says *which* files; a `grep` on the shape says *which code path* they will take.
   Both are free, and together they make the apply reviewable in advance (BL-34).
