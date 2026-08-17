@@ -151,6 +151,107 @@ If you must also move the file on disk, use `artifact(action="move",
 id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
 `git mv`, which orphans the catalog record.
 
+## Entry-level standard — the shape INSIDE a tracker
+
+The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
+`R-91`, `T-17`, `BUG-40`). They are not style preferences: the first three are
+enforced by the citation resolver, and violating them silently breaks the link
+graph. Every figure below was measured on this repo on 2026-08-17.
+
+### Entry ids
+
+The resolver's token grammar is `\b[A-Z]{1,3}-\d+\b` — one to three uppercase
+letters, a hyphen, digits, and **nothing else**.
+
+- **Never suffix an id.** `R-72b`, `F-6a` are not valid tokens at all: digit→letter
+  is not a word boundary, so a suffixed id can never be defined *or* cited. A
+  collision-resolution scheme built on `a`/`b` suffixes produces ids the graph
+  cannot represent. If two entries share a number, give the later one a **fresh**
+  id.
+- **Let the server allocate.** `artifact(action="append_entry", id_prefix="R", …)`
+  assigns the next id atomically. Hand-allocation races: a peer session in the same
+  checkout can take the id between your scan and your write.
+- If you must hand-allocate, scan **every** entry format the file uses, and re-scan
+  in the same breath as the write — a max-id is a fact about an instant.
+
+### Entry headings — the definition rule
+
+An entry is defined by a heading of exactly this shape:
+
+```
+## <ID> — <title>          token, whitespace, dash (— – -), whitespace, text
+```
+
+Anything else defines nothing:
+
+| Heading | Defines? |
+|---|---|
+| `## R-91 — the scout ran too late` | yes |
+| `## R-91` (no title) | **no** |
+| `### A-9 Addendum` (no dash) | **no** — a section *about* A-9 |
+| ``### `A-9` — title`` (code-first) | **no** |
+| `\| R-91 \| … \|` (table row) | **no** — rows never define |
+
+An undefined-but-cited id becomes a **dangling** citation. A ledger carrying 48
+row-only entries produced ~30 of this project's 39 sampled dangling entry tokens;
+a sibling ledger keeping headings for all its entries produced zero.
+
+### One entry format, never two
+
+Do not hand-maintain an index table *alongside* body sections. Two formats for one
+entry is the defect that generates the rest: the index falls behind (13 orphaned
+bodies), and ids allocated by scanning one format collide with the other (9 twice-
+allocated ids). Pick one:
+
+- the **headings are the index** — nothing else to maintain; or
+- the index is **rendered from `params`** via `render_template`, and entries are
+  written with `append_entry` / `update_entry`.
+
+A hand-written index is never the answer.
+
+### Required fields
+
+- **`**Status:**` is not optional.** It is the disposition field, and the only thing
+  that makes a fired `Promote-when` harvestable. Without it, criteria go unharvested
+  indefinitely — 39 of 57 entries in one ledger, over three months.
+- **When a criterion fires, update the Status line.** Recording the firing only in
+  prose leaves it invisible to every field-presence sweep; three fully-adjudicated
+  entries sat uncounted for exactly this reason.
+- Give the tracker a `params_schema` with `required` and `enum` where the shape has
+  settled. A schema is what stops each author inventing their own entry shape.
+
+### Detecting these fields
+
+Anchor detection on **structure** — line-start, a key prefix — never on a keyword.
+Prose and field share a vocabulary by construction, so `grep -c 'Status:'` also
+counts sentences *about* Status, and a `/fired/` probe matches "the tell that should
+have fired". Both mistakes were made, in the same pass, by the same agent.
+
+### Compaction and archival
+
+The ladder is **live body → archived section (heading kept) → nothing further.**
+
+- **Never reduce an entry to a bare row to "compact" it.** That destroys its
+  definition and dangles every citation of it. Row-reduction is what created the
+  dangling population described above.
+- **Archival is safe for citations.** A unique definer resolves even when its
+  artifact is `archived` — archived is not nonexistent. Where two artifacts define
+  one token, the sole *active* one wins.
+- **Archive into the ledger's existing archive artifact.** Check first —
+  `artifact(action="find", filter={"rel_path": {"contains": "archive/<ledger>"}},
+  include_archived=true)`. Forking a second archive for one ledger splits the
+  definitions and creates ambiguous tokens.
+
+### Make the tracker guarded
+
+Stamp the catalog id into the file's frontmatter as `id: <16-hex>`. The guard that
+routes writers through the artifact tools reads the file's **own text** for an `id:`
+line; the catalog derives ids from the path and does not need one. So a fully
+registered tracker with no `id:` line is completely unguarded — and an unguarded
+ledger accumulates hand-edits in arbitrary shapes, because no surface imposes one.
+The most structurally damaged tracker in this repo was precisely the one with no
+`id:` line.
+
 ## Querying with the librarian
 
 The canonical "what's live right now" query — archived rows are hidden
