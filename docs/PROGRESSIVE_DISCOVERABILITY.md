@@ -193,7 +193,11 @@ register loses its weight. Aim for <10% of recoverable-error responses.
 
 **Rust API:** `RecoverableError::with_must_follow(message, text)`. Attach
 structured context with `.with_extra("file_id", json!(...))`; extras are
-spliced into the response body at the top level.### Pattern 6: Never Exceed MCP Output Limits
+spliced into the response body at the top level.
+
+---
+
+### Pattern 6: Never Exceed MCP Output Limits
 
 Claude Code warns at 10,000 tokens and hard-caps at 25,000 tokens (configurable via
 `MAX_MCP_OUTPUT_TOKENS`). A tool that regularly exceeds this is broken, even if the data is valid.
@@ -208,6 +212,61 @@ If a tool can produce unbounded output, it **must** use `OutputGuard`. No except
 
 ---
 
+### Pattern 7: A Vocabulary Field Carries Its Own Domain
+
+A response field whose value comes from a fixed set is a **vocabulary**, and an agent cannot
+query what it cannot enumerate. Two obligations follow; the second is the one that gets
+skipped.
+
+**1. Give it a type, not a string.** `audit_doc_refs`' `severity_reason` was a bare
+`&'static str` set from thirteen literals scattered across two files, while `Verdict` and
+`Severity` beside it were serde enums. The measured cost, twice in one session: a filter
+written against a guessed `"ok"` printed **resolved** refs as problems, and a `med` cap was
+attributed to `issues_drop` when `inferred_path` was doing the work.
+
+Make it an enum with `rename_all = "snake_case"` so the wire format is unchanged, and give it
+`as_str()` and `explain()` as **exhaustive matches** — then adding a variant without
+describing it is a compile error. A `const ALL` array cannot give you that; the exhaustive
+match is what keeps `ALL` honest.
+
+The same argument retires `format!("{:?}", x)` as a serialization mechanism. `Debug` carries no
+stability promise, so a variant rename silently changes the API and a consumer's filter
+quietly matches nothing. `link_scan`'s `kind` was rendered that way; `CitationKind::as_str()`
+now spells the values explicitly, with a test asserting they equal what `Debug` emitted, which
+makes the swap provably behaviour-preserving.
+
+**2. Explain it in the payload, scoped to the run.** A reason *name* says which branch fired;
+it does not say whether the finding is the reader's problem. `audit_doc_refs` now returns a
+legend for the reasons **present in the shown findings**:
+
+```json
+"severity_legend": {
+  "historical_drop": "the citing document is a dated record (plans, research, reviews)",
+  "basename_ambiguous": "the basename matches several files — ambiguous, not broken; name the path"
+}
+```
+
+Four entries on a real run, not the thirteen in the enum. **That scoping is the pattern, not a
+detail** — a legend listing every variant is documentation the reader must filter, and it
+passes any naive "is there a legend?" test. The assertion that catches it checks that a reason
+the fixture did *not* produce is **absent**.
+
+**One shape per family, built in one place.** `link_scan` called the cited text `token` in
+`ambiguous[]` and `raw` in `dangling[]` and `cross_repo[]` — the identical value, three
+adjacent `json!` literals, no shared owner, and no tests on the module. A grep for one name
+across a whole report answers half and looks successful. The fix was a constructor rather than
+a rename, because a rename leaves the literals free to diverge again.
+
+**The test:** can an agent enumerate the field's possible values, and tell what each one
+means, **from one response**, without reading the producer? If not, the field is a private
+implementation detail wearing an API's clothes. Sibling of Anti-Pattern 5 — there the tool
+asserted a convention it never read; here it names a value it never defines.
+
+See `SeverityReason` in `src/librarian/tools/audit_doc_refs/mod.rs`, `finding` in
+`src/librarian/tools/link_scan/mod.rs`, and `R-104` in
+`docs/trackers/reconnaissance-patterns.md` for the reader's side of the same coin.
+
+---
 ## Anti-Patterns
 
 ### Anti-Pattern 1: Early Exit Without Metadata

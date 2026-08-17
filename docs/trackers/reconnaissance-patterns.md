@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 103
+entry_high_water_R: 104
 entry_prefix: R
 ---
 
@@ -3009,6 +3009,53 @@ carefully.
 blast-radius audit is found to have missed an independent defect in a site it visited — then
 promote to the reconnaissance SKILL.md Phase 1 as an explicit two-pass step, since Phase 1
 currently says "read callers if shape changes" and that phrasing asks only question 1.
+## R-104 — A zero from a report is a claim about your query, not about the world — and it lies in three independent ways
+
+**Observed:** 2026-08-17, across one session of `audit_doc_refs` and `link_scan` work. Five
+wrong conclusions, all the same shape: a query returned nothing, or returned a number, and
+I read it as a fact about the corpus.
+
+**Pattern:** a findings-array query can answer confidently and wrongly for three reasons
+that look identical from the outside. Each was hit at least once:
+
+| Failure | Instance |
+|---|---|
+| **wrong key name** | `grep '"token":"HY-…"'` returned nothing and read as *"no HY token is broken"* — the `dangling` array called the same field `raw`. Half the population was never searched. |
+| **wrong value vocabulary** | filtered findings on `verdict != "ok"`; the domain is `resolved \| missing \| resolved_basename \| file_missing \| unknown`. Printed **resolved** refs as problems. |
+| **cap truncation** | looked for a ref in `findings[]`, did not find it, nearly concluded it resolved. `n_refs_found` was 64 against a 50-entry window — the ref could simply have been outside it. |
+
+Two more of the five were the same disease outside tool output: `grep -c 'Status:'` counted
+prose *about* Status, and `status: mitigated` in a "what's open" query returned 25 rows of
+which 10 were already archived — a 2.5× inflated answer that looked authoritative.
+
+**Why it survives care.** Every one of these queries was *structurally* anchored, which is
+the rule `get_guide("tracker-conventions")` § *Detecting these fields* already teaches. The
+technique was right; the **domain** was guessed. Anchoring on `"token":` instead of the word
+"token" protects against prose contamination and not at all against the field being called
+something else. So the existing rule is necessary and insufficient, and this entry is the
+missing half.
+
+**The check, in one line before believing any zero or count:** *did I read the key name, the
+value domain, and the cap from the actual payload — or did I supply any of the three from
+memory?* One `read_file("@tool_x", json_path="$.findings[0]")` answers all three, and it is
+how each of the five was eventually caught.
+
+**What made the difference in practice** was never re-reading the same query more carefully.
+It was printing one whole record and looking at its keys, or shrinking the input until the
+window could not truncate — the four-line fixture in
+`docs/issues/archive/2026-08-17-audit-doc-refs-claims-file-missing-for-an-ambiguous-basename.md`
+exists for exactly that reason. Kin to R-101: there the measurement was in hand and scored
+against one hypothesis; here the measurement was never of the thing being claimed.
+
+**Status:** open
+
+**Promote-when:** a sixth instance, OR the first time a *report* carries its own key/value
+legend and the reader still guesses. The substrate is already moving that way — `f908e883`
+added `severity_legend` to `audit_doc_refs` and `7c218338` unified `link_scan`'s field names
+— so the honest test of this entry is whether self-describing output retires it. If it does,
+promote as a note on `docs/PROGRESSIVE_DISCOVERABILITY.md`'s legend pattern rather than as a
+discipline agents must remember.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.

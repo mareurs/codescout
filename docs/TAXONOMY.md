@@ -149,7 +149,9 @@ Closed entries graduate to `docs/trackers/archive/<tracker>-<YYYY>-q<n>.md`:
 - **Archive file**: per-tracker, time-partitioned. Frontmatter `kind: tracker, status: archived`.
 - **Recovery**: `artifact(action="find", kind="tracker", include_archived=true)`.
 
-Full policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md).## Status vocabularies (per prefix)
+Full policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md).
+
+## Status vocabularies (per prefix)
 
 Different prefixes use slightly different status enums:
 

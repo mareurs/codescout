@@ -103,7 +103,9 @@ still registered; new code should prefer the action-dispatched form.
 ## `register_library`
 
 Backward-compatible alias for `library(action="register")`. The dedicated tool
-is still registered; new code should prefer the action-dispatched form.## Indexing a Library for Semantic Search
+is still registered; new code should prefer the action-dispatched form.
+
+## Indexing a Library for Semantic Search
 
 Once a library is registered (via `library(action: list)` or auto-discovery), build its
 semantic index by pointing `index(action: build)` at its root:

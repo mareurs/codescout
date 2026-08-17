@@ -107,7 +107,9 @@ No new status enum values. `fixed-shipped` is retained as the closure label; pre
 
 ### Status of this proposal
 
-Active. Implementation begins with the pilot pass today. Promote-when criterion (one option per surface + a first pass executed) is satisfied on commit.## Design surfaces (open)
+Active. Implementation begins with the pilot pass today. Promote-when criterion (one option per surface + a first pass executed) is satisfied on commit.
+
+## Design surfaces (open)
 
 ### 1. Status vocabulary — qualifying "shipped"
 

@@ -230,7 +230,9 @@ if val.get("subagent_prompt").is_some() {
 
 This works for all three subagent paths (full onboarding, auto version refresh,
 explicit `refresh_prompt=true`) — they all set `subagent_prompt`. Only the fast
-path omits it.### Response for Successful Fast Path (Version OK)
+path omits it.
+
+### Response for Successful Fast Path (Version OK)
 
 Unchanged from current behavior — `{"onboarded": true, "message": "..."}`. No
 new fields needed when version is current.
