@@ -1002,7 +1002,8 @@ pub(crate) fn classify_whitespace_diff(want: &str, have: &str) -> Option<String>
 }
 
 /// True iff `line_idx` (0-based into section.split('\n')) is inside a fenced
-/// ``` or ~~~ block or is an indented (≥4 leading spaces / a tab) code line.
+/// `` ``` `` or `~~~` block or is an indented (≥4 leading spaces / a tab) code
+/// line.
 /// Whitespace there is significant — the caller warns the agent not to
 /// normalize it.
 pub(crate) fn line_in_code_block(section: &str, line_idx: usize) -> bool {
