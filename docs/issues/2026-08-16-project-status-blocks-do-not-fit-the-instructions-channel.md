@@ -72,16 +72,25 @@ Arithmetic, not a defect in any one function:
 client limit                     2048 chars   (measured 2026-08-16)
 − safety margin                    48
 = usable                         2000
-− static slice                  ~1880
-= dynamic budget                 ~120 chars
+− static slice                   1711         (measured 2026-08-17, `wc -m` on the fixture)
+= dynamic budget                  289 chars
 ```
 
-A minimal status block (active project + languages + memories + index) is ~180 chars and is
-itself already trimmed. `KOTLIN_KNOWN_ISSUES` alone is several hundred.
+A minimal status block (active project + languages + memories + index) is ~180 chars.
+`KOTLIN_KNOWN_ISSUES` alone is several hundred.
 
-There is no ordering that fixes this, which is what separates it from BL-8 and BL-19 — those
-were tail-cut problems where putting the important content first was the cheap fix. Here the
-content does not fit at any position.
+**The `~1880` above was wrong when written, and the conclusion drawn from it is wrong for
+the common case.** `d2cf4449` sold a quickref row to buy Iron Law 1's overlap condition and
+left the slice at **1711**, so the dynamic budget is **289**, not ~120 — and a ~180-char
+minimal status fits inside it. Measured 2026-08-17.
+
+The *unqualified* claim "there is no ordering that fixes this" is therefore false. It holds
+only for the two genuinely oversized blocks: `KOTLIN_KNOWN_ISSUES` and an unbounded custom
+prompt cannot fit at any position, and that is still what separates this from BL-8 and
+BL-19. For everything else, ordering fixes it — measured directly in `30f3df81`'s red run:
+the memories line (~137 chars) did not fit the ~225 of remaining room, while the
+custom-instructions line (~70) would have. Ordering was not choosing the loss better; it
+was recovering content that was being dropped.
 
 ## Evidence
 
@@ -94,46 +103,66 @@ hundreds of characters they need.
 
 ## Fix
 
-Not implemented — deliberately deferred. The decision taken on 2026-08-16 was to ship BL-9's
-guarantee (static slice always intact, dynamic loss announced) and file this separately,
-rather than expand BL-9 into a channel redesign.
+**Interim fix landed `30f3df81` (experiments). The carrier decision is NOT taken — this
+bug stays open on it.**
 
-**Proposed:** move `## Project Status` off the `instructions` channel entirely.
+The alternative this file listed as *"Cheap, and a strict improvement over tail order. Does
+not make anything fit; it only chooses better what to lose"* — priority-ordered trimming —
+is shipped, and the parenthetical turned out to understate it. At the corrected 289-char
+budget it does make things fit.
 
-**Decision:** deliver project status through a channel with no 2 KB cap — the first tool
-response, or an explicit `workspace` call — and let `instructions` carry only the static
-slice.
+`fit_dynamic_block` now drops whole **segments** by priority instead of cutting lines from
+the tail. The tiers come from this file's own § Workarounds rather than from taste — a
+segment another surface reproduces is cheap to lose, one only this channel delivers is not:
 
-**Context:** `instructions` is a fixed, small, session-start-only budget. Project status is
-dynamic, unbounded, and cheap to deliver on demand. Putting unbounded content in a fixed
-channel is the actual design error.
+| Tier | Segments | Why |
+|---|---|---|
+| `Substitutable` | languages, memories, index, workspace table, Kotlin issues | `memory(action="list")`, `get_guide("workspace-state")`, `index(action="status")`, memory `gotchas` |
+| `UserAuthored` | custom instructions | the user wrote it; nothing else surfaces it |
+| `Anchor` | header, active project, worktree banner | never dropped |
 
-**Alternatives considered:**
+`Anchor` is not "most useful" but "cannot be re-derived, and its absence causes a wrong
+**write**" — an agent that assumes the activated root is the canonical checkout commits to
+the wrong branch. Within a tier the later segment still goes first, so the change only ever
+reorders *across* tiers and reproduces the old behaviour inside one. A useful side effect:
+the Kotlin block, the largest substitutable segment and unable to fit at any position, is
+now dropped first rather than last.
 
-- *Keep trimming.* Status quo after BL-9. Honest, but Custom Instructions — content the user
-  wrote — is the thing most likely to be dropped, which is the worst possible priority.
-- *Priority-order the trim* (drop memories and languages before Kotlin/custom). Cheap, and a
-  strict improvement over tail order. Does not make anything fit; it only chooses better
-  what to lose. Worth doing as an interim step.
-- *Cut the static slice further.* Measured as insufficient — see § Evidence.
+The note names what went, capped at three plus a count. An agent told *which* segment was
+dropped can take that segment's own route; "something was trimmed" only tells it to
+distrust the whole block.
 
-**Consequences:** now easier — nothing is silently lost, and the static slice stops competing
-with unbounded content. Now harder — status arrives one call later than at session start, and
-something must decide when to emit it.
+**BL-9's hard guarantee is preserved deliberately.** Anchors are never dropped, so anchors
+alone could in principle overflow (a pathological project path, or a static slice grown to
+its cap). `fit_dynamic_block` falls back to the pre-BL-37 line cut in exactly that branch,
+because *the total never exceeds the channel* outranks segment integrity.
 
-**Change scenarios absorbed:** a user adds a long custom prompt; a workspace grows past a few
-projects; a new per-language warning block is added.
-
-**Confidence:** high on the diagnosis (arithmetic from a measured limit); medium on the fix
-shape, since "first tool response" needs a concrete carrier and there may be a better one.
-
+**Still proposed, still the maintainer's call:** move `## Project Status` off the
+`instructions` channel entirely. Nothing above makes `KOTLIN_KNOWN_ISSUES` or an unbounded
+custom prompt fit, and putting unbounded content in a fixed channel remains the design
+error.
 ## Tests added
 
-None — not fixed. The three retargeted tests named in § Reproduction already document the
-gap: each asserts the renderer produces the block, and none asserts it survives the channel.
-When this is fixed, the assertion to add is that a Kotlin project's *delivered* surface
-contains `kotlin-lsp` again.
+In `src/prompts/mod.rs`, red observed before the fix:
 
+- `an_overflowing_status_keeps_the_user_s_own_text_over_a_substitutable_list` — the failing
+  case. Its first assertion is a control: without it a fixture that happened to fit would
+  pass while exercising none of the trimming path.
+- `an_overflowing_status_keeps_the_worktree_banner` — the Anchor tier's load-bearing member.
+  Passed *before* the fix too, because the banner sits early enough that tail-cutting spared
+  it; it is here to stop a future reordering from losing it silently.
+- `a_trim_names_what_it_dropped` and `the_trim_note_caps_the_names_it_lists` — both passed on
+  first run, so `trim_note` was **mutated** back to the old generic note and both went red.
+  Load-bearing, not decorative.
+
+Unchanged and still passing: `production_render_fits_the_client_channel`, which already
+carries the hostile fixture (30 memories, a 20×-repeated custom prompt, Kotlin) and is the
+invariant the fallback branch exists to keep true; and
+`a_status_block_that_fits_is_left_alone`.
+
+The three retargeted renderer tests named in § Reproduction still assert on
+`build_project_status_block`, which is now `#[cfg(test)]` — production renders from
+segments. They remain this bug's standing reproduction for the part that is still open.
 ## Workarounds
 
 - Kotlin known issues are also in codescout memory `gotchas` (LSP section) — read it directly.
@@ -143,16 +172,22 @@ contains `kotlin-lsp` again.
 
 ## Resume
 
-Pick the carrier for project status. Then move `build_project_status_block`'s output to it,
-leave `build_server_instructions` static-only, and drop `fit_dynamic_block` — it exists only
-because the two share a channel.
+**Pick the carrier for project status.** That is the whole remaining decision, and it is the
+maintainer's: the interim fix is in, so nothing is silently lost and the common case now
+fits, but `KOTLIN_KNOWN_ISSUES` and an unbounded custom prompt still cannot arrive at any
+position.
 
-Interim if that is not taken soon: make `fit_dynamic_block` drop by **priority** rather than
-tail order, so Custom Instructions and the worktree banner outlive the memories list.
+When a carrier is chosen: move `build_project_status_segments`' output to it, leave
+`build_server_instructions` static-only, and delete `fit_dynamic_block` and the
+`StatusPriority` tiers — they exist only because the two share a channel. The assertion to
+add then is that a Kotlin project's *delivered* surface contains `kotlin-lsp` again.
 
+One measurement worth repeating first, because it decayed once already and silently: the
+289-char budget is `2048 − 48 − len(static slice)`, and the static slice moves whenever
+`src/prompts/source.md` is edited. `source_md_under_cap` pins the slice at ≤1900, not at
+1711, so a future edit can shrink the dynamic budget by ~190 chars without failing anything.
 ## References
 
 - `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md` — BL-9, where the 2048-char limit was measured
 - `docs/architecture/mcp-channel-caps.md` § *Exact limit* — the measurement
 - `src/prompts/mod.rs` — `build_project_status_block`, `fit_dynamic_block`
-

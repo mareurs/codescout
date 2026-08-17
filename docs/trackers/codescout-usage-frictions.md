@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 40
+entry_high_water_U: 41
 entry_prefix: U
 ---
 
@@ -1772,3 +1772,49 @@ the file `CLAUDE.md` requires reading before adding or modifying any tool.
 friction above, is not. `edit_markdown` still reports a malformed needle and a moved
 haystack in identical words, and `scoped_miss_tier` remains the undocumented field that
 separates them.
+
+### U-41 — `snapshot_stale` asserts the row "still shows the PREVIOUS field values" without knowing which fields the row renders
+
+**Observed:** 2026-08-17, updating `BL-37`'s `next` field in the open-issue work queue via
+`artifact(action="update_entry")`.
+
+**Got:**
+
+```
+snapshot_stale: This tracker renders a snapshot in its body, and its `BL-37` row still
+shows the PREVIOUS field values — params changed, the file did not.
+```
+
+The body's snapshot table renders `id | phase | task | status | bug`. `next` is not one of
+them, so the row showed nothing stale at all. Acting on the advice would have meant editing
+a row that was already correct.
+
+**Mechanism — read, not inferred.** `snapshot_stale_note`
+(`src/librarian/catalog/augmentation.rs`) takes `artifact_id`, `entry_id` and the set of
+claimed indices. It does **not** take `changed_fields`, so it cannot know whether any
+changed field appears in the rendered row. What it establishes is "the body keeps a
+snapshot, and this row is in it"; what it says is "the row still shows the PREVIOUS field
+values". The gap between those two sentences is the whole friction.
+
+The function's own doc comment is honest about the limit — *"no id comparison can see
+that, so the signal is 'you changed fields the body still renders the old way'"* — which
+makes this a **wording** defect rather than a logic one. The check is deliberately
+imprecise and documented as such; the message is not.
+
+**Why it matters more than a cosmetic quibble.** It is the same shape as Anti-Pattern 5 in
+`docs/PROGRESSIVE_DISCOVERABILITY.md`, added earlier the same day: a tool stating something
+specific it never verified. An advisory that cries wolf on every field change trains the
+reader to skip it — and the case it exists for (a *rendered* column going stale, which no
+id comparison can catch) is genuinely valuable and genuinely invisible otherwise.
+
+**Fix idea.** Either pass `changed_fields` through and fire only when one of them appears
+in the rendered row, or soften the message to what was actually checked: *"you changed
+fields on a row this body renders — check whether the rendered columns are affected."* The
+first is better and costs one parameter; the second costs nothing and is honest today.
+
+**Not filed as a bug** deliberately: nothing is wrong, corrupt, or lost, and the advisory
+is load-bearing in its true case. This is friction with the wording of a correct-but-broad
+check. Same reasoning that kept U-40 out of `docs/issues/` once the probe showed the tool
+had behaved correctly.
+
+**Status:** open — friction recorded, no fix shipped.

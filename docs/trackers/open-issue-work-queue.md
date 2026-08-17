@@ -50,7 +50,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-7 | 1 | Write-scope denial should name `approve_write` | open | `0a15c81150c4cce7` |
 | BL-8 | 2 | `truncate_compact` cuts from the tail, destroying the overflow signal | open | `c320b6564d1cb003` |
 | BL-9 | 2 | `server_instructions` arrives truncated mid-word, dropping the guide pointers | **done, archived** | `be057e5e9d7c4c16` |
-| BL-37 | 2 | Kotlin warnings / workspace table / Custom Instructions cannot fit the 2048-char instructions channel at any ordering | open | `fd54f2ae3cc7bdc8` |
+| BL-37 | 2 | Kotlin warnings / workspace table / Custom Instructions cannot fit the 2048-char instructions channel — ordering fixes the common case (shipped `30f3df81`); the two oversized blocks need a new carrier | open | `fd54f2ae3cc7bdc8` |
 | BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | open | `772fff5739620581` |
 | BL-11 | 2 | `context`/`workspace_state_at`/`link_scan` never dedup the worktree overlay | done | `d31233700ca979c2` |
 | BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
