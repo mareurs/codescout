@@ -39,6 +39,7 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-3 | 2026-08-15 | research | medium | Background / async tool execution — surface what already works, then decide on MCP `ext-tasks` |
 | CAP-4 | 2026-08-16 | proposed | — | Cross-session collision hint — tell a session when another one just touched this file |
 | CAP-5 | 2026-08-17 | proposed | medium | Server-assigned entry ids for prose trackers — make allocation atomic instead of advisory |
+| CAP-6 | 2026-08-17 | proposed | small–medium | Derive TAXONOMY's append-recipe column from `entry_prefix` declarations — it drifted twice in one day |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -486,6 +487,72 @@ fires only when the author remembers to consult it is not yet a rule.
 **Kin:** R-98 (the race, measured), R-99 (the entry template as root cause), HY-9 / proposed
 detector D12 (headings are what define tokens), and the entry-level standard now in
 `get_guide("tracker-conventions")`.
+
+## CAP-6 — Derive the TAXONOMY table from `entry_prefix` declarations
+
+**Status:** proposed · **Opened:** 2026-08-17
+
+**The ask.** `docs/TAXONOMY.md` is the one-page index CLAUDE.md tells every agent to
+start from when deciding where an observation belongs. It is hand-maintained, and it
+drifted **twice on 2026-08-17 alone**:
+
+- its T-N and WIN-N rows prescribed `artifact_augment(merge=true, params={…})` — the
+  call CLAUDE.md documents as having taken the T-N queue from 19 entries to 1
+  (`9943164e`);
+- its R-N, U-N and H-N rows prescribed `edit_markdown`, which those ledgers now
+  refuse (`fddb7408`, `87f55156`).
+
+Both rows were true when written. Both became false when the substrate moved, and
+nothing connected the two. The drifting column is always the same one: the append
+recipe — the only column that is a *fact about the tool*.
+
+**Substrate check (verified 2026-08-17, by reading the code).**
+
+- `entry_prefix` now lives in each ledger's **frontmatter** (`ffd3b432`), so the
+  prefix→file mapping is machine-readable straight from the repo. Five ledgers
+  declare today: R, U, H, HY, CAP.
+- `frontmatter::parse` already surfaces it via `Frontmatter.extra`, and
+  `allocate_entry_id` already reads it on every call — so nothing new is needed to
+  *read* a declaration.
+- **But it is not catalog-indexed.** `extra` is documented as "written verbatim to
+  YAML and round-trip-safe … NOT catalog-indexed — NOT filterable via find". So
+  generating the table today means walking files, not querying. That is the one
+  genuinely missing piece.
+- `augmentation.entry_collection` already distinguishes params-backed ledgers (T,
+  WIN, PV, A) from prose ones, which is what decides the recipe.
+
+**What is and is not derivable.** Derivable: prefix, file, artifact id, storage kind,
+and therefore the correct append recipe — exactly the column that drifted. Not
+derivable: "Captures" and "Promotes to", which are editorial judgement. So the right
+shape is a **generated block inside a hand-written page**, never a generated page.
+
+**Proposal, cheapest-first.**
+
+1. **A cross-check test.** Walk `docs/trackers/*.md` for `entry_prefix` and fail when
+   a declared prefix has no TAXONOMY row, or a TAXONOMY row names a prefix nothing
+   declares. No new tool, no schema change — and it would have caught both of
+   today's drifts.
+2. **Index `entry_prefix`** in the catalog (a column, or a filterable projection of
+   `extra`) so the mapping is queryable rather than requiring a file walk.
+3. **Render the block** — `librarian(action="taxonomy")` or a `doctor` check emitting
+   prefix / file / id / storage / recipe.
+
+(2) and (3) only earn their cost if something besides the doc needs to query the
+mapping. (1) closes the drift class on its own.
+
+**Open questions.**
+
+- Does the generated block belong *in* TAXONOMY.md, or should TAXONOMY link to the
+  rendered output and stop restating it? Restating is what drifts.
+- Should a TAXONOMY row with no declaration be an error or a warning? **F/W are
+  deliberately undeclared** pending HY-10's namespace decision, so at least one
+  legitimate row has no declaration — the check needs an explicit exemption or it
+  fires on a state we chose on purpose. A check that flags a deliberate decision is
+  how gates lose their authority.
+
+**Kin:** HY-10 (the 3:27 ledger/tracker ratio, and the F/W blocker), CAP-5 (the
+allocator this builds on), R-99 (a convention documented anywhere other than where
+authors look is not a convention).
 
 ## Anti-goals
 
