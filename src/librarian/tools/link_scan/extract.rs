@@ -30,6 +30,28 @@ pub enum CitationKind {
     CrossRepoToken,
 }
 
+impl CitationKind {
+    /// The wire value for `kind` in `link_scan`'s finding arrays.
+    ///
+    /// Was `format!("{:?}", kind)`. `Debug` is a developer-facing rendering with no
+    /// stability promise, so using it as an API meant a variant rename silently changed
+    /// the output — the failure mode is a consumer's filter quietly matching nothing,
+    /// which is the same shape as the `raw`/`token` split this accompanies
+    /// (`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`).
+    ///
+    /// The strings are deliberately IDENTICAL to what `Debug` produced, so this is a
+    /// fragility fix and not an output change — pinned by
+    /// `citation_kind_wire_values_match_what_debug_emitted`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CitationKind::EntryToken => "EntryToken",
+            CitationKind::ArtifactId => "ArtifactId",
+            CitationKind::RelPathLink => "RelPathLink",
+            CitationKind::CrossRepoToken => "CrossRepoToken",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Citation {
     pub raw: String,
@@ -413,6 +435,29 @@ mod tests {
         let text = "see F-6a for the follow-up\n";
         let ex = extract(text);
         assert!(tokens(&ex, CitationKind::EntryToken).is_empty());
+    }
+
+    /// `as_str` replaced `format!("{:?}", kind)` as the wire rendering of `kind`. This
+    /// asserts the swap changed nothing observable, for every variant — which is what
+    /// makes it a fragility fix rather than a breaking output change.
+    ///
+    /// It also fails if a variant is renamed without updating `as_str`, which is exactly
+    /// the silent-API-change that using `Debug` invited: the rename would flow straight
+    /// into the JSON and a consumer's filter would quietly match nothing.
+    #[test]
+    fn citation_kind_wire_values_match_what_debug_emitted() {
+        for kind in [
+            CitationKind::EntryToken,
+            CitationKind::ArtifactId,
+            CitationKind::RelPathLink,
+            CitationKind::CrossRepoToken,
+        ] {
+            assert_eq!(
+                kind.as_str(),
+                format!("{kind:?}"),
+                "wire value drifted from the Debug rendering it replaced"
+            );
+        }
     }
 
     #[test]

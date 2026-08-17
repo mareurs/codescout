@@ -47,6 +47,38 @@ struct Args {
     limit: Option<usize>,
 }
 
+/// One shape for every finding array: `src_id`, `raw`, `kind`, `line`, plus whatever the
+/// arm adds on top.
+///
+/// This exists because the three arms used to build their own `json!` literal inline, and
+/// they diverged. `ambiguous` called the cited text `token` while `dangling` and
+/// `cross_repo` called the **identical** `c.raw` value `raw`, and only `dangling` carried
+/// `kind` — even though `c.kind` was in scope for all three. No deliberate distinction,
+/// just three literals with no shared owner.
+///
+/// The cost is a query that succeeds while answering half. A grep for `"token":"HY-…"`
+/// across a whole report returns nothing from `dangling` and reads as "no HY token is
+/// broken" — a zero that describes what was searched, not what is true. That mistake was
+/// made on the way to filing the bug this fixes.
+///
+/// So the fix is a constructor rather than a rename: a rename leaves three literals free
+/// to diverge again, and the module had no tests to notice
+/// (`docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md`).
+fn finding(src_id: &str, c: &extract::Citation, extra: Value) -> Value {
+    let mut out = json!({
+        "src_id": src_id,
+        "raw": c.raw,
+        "kind": c.kind.as_str(),
+        "line": c.line,
+    });
+    if let (Some(base), Some(add)) = (out.as_object_mut(), extra.as_object()) {
+        for (k, v) in add {
+            base.insert(k.clone(), v.clone());
+        }
+    }
+    out
+}
+
 /// Push into a findings array unless it is already at [`FINDINGS_CAP`].
 /// Totals are counted separately so capped arrays never hide the true
 /// distribution (the report-the-verdict-not-the-distribution trap).
@@ -175,31 +207,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     ambiguous_total += 1;
                     push_capped(
                         &mut ambiguous,
-                        json!({
-                            "src_id": row.id, "token": c.raw,
-                            "line": c.line, "candidates": candidates,
-                            "candidates_total": total,
-                        }),
+                        finding(
+                            &row.id,
+                            c,
+                            json!({"candidates": candidates, "candidates_total": total}),
+                        ),
                     );
                 }
                 Some(resolve::Outcome::Dangling) => {
                     dangling_total += 1;
-                    push_capped(
-                        &mut dangling,
-                        json!({
-                            "src_id": row.id, "raw": c.raw,
-                            "kind": format!("{:?}", c.kind), "line": c.line,
-                        }),
-                    );
+                    push_capped(&mut dangling, finding(&row.id, c, json!({})));
                 }
                 Some(resolve::Outcome::CrossRepo) => {
                     cross_repo_total += 1;
-                    push_capped(
-                        &mut cross_repo,
-                        json!({
-                            "src_id": row.id, "raw": c.raw, "line": c.line,
-                        }),
-                    );
+                    push_capped(&mut cross_repo, finding(&row.id, c, json!({})));
                 }
                 None => {} // suppressed noise / foreign-jurisdiction links
             }
@@ -274,4 +295,77 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "report only — pass write=true to materialize/prune the cites edges above."
         },
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::librarian::tools::link_scan::extract::{Citation, CitationKind};
+
+    fn cite(raw: &str) -> Citation {
+        Citation {
+            raw: raw.to_string(),
+            kind: CitationKind::EntryToken,
+            line: 7,
+        }
+    }
+
+    /// One shape for every finding array. `ambiguous` used to call the cited text
+    /// `token` while `dangling` and `cross_repo` called the identical value `raw` —
+    /// three adjacent `json!` literals, no shared owner, so they drifted.
+    ///
+    /// The cost is a query that succeeds while answering half: a grep for
+    /// `"token":"HY-…"` over a whole report returns nothing from `dangling` and reads
+    /// as "no HY token is broken". That mistake was made on the way to filing this,
+    /// which is why the fix is a single constructor rather than a rename — a rename
+    /// leaves three literals free to diverge again.
+    ///
+    /// docs/issues/2026-08-17-link-scan-names-the-same-field-raw-in-dangling-and-token-in-ambiguous.md
+    #[test]
+    fn every_finding_array_names_the_cited_text_the_same_way() {
+        let c = cite("F-3");
+        let shapes = [
+            (
+                "ambiguous",
+                finding(
+                    "src-1",
+                    &c,
+                    json!({"candidates": [], "candidates_total": 2}),
+                ),
+            ),
+            ("dangling", finding("src-1", &c, json!({}))),
+            ("cross_repo", finding("src-1", &c, json!({}))),
+        ];
+
+        for (array, f) in &shapes {
+            assert_eq!(
+                f["raw"], "F-3",
+                "{array} must carry the cited text as `raw`"
+            );
+            assert_eq!(
+                f["kind"], "EntryToken",
+                "{array} must carry the citation kind — it was present in one arm of three"
+            );
+            assert_eq!(f["src_id"], "src-1", "{array}");
+            assert_eq!(f["line"], 7, "{array}");
+            assert!(
+                f.get("token").is_none(),
+                "`token` is the name that split the vocabulary; {array} must not reintroduce it"
+            );
+        }
+    }
+
+    /// Arm-specific fields still ride along, so unifying the shared shape does not
+    /// flatten what makes `ambiguous` useful.
+    #[test]
+    fn finding_carries_arm_specific_fields_alongside_the_shared_shape() {
+        let f = finding(
+            "src-1",
+            &cite("B-1"),
+            json!({"candidates": ["a", "b"], "candidates_total": 2}),
+        );
+        assert_eq!(f["candidates_total"], 2);
+        assert_eq!(f["candidates"].as_array().unwrap().len(), 2);
+        assert_eq!(f["raw"], "B-1", "the shared shape survives the merge");
+    }
 }
