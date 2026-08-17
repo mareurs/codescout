@@ -151,6 +151,52 @@ extension and the directory.
 Every clause applies to the `cd`-then-relative case unchanged. The fix closed the
 absolute-path population and left this one open.
 
+### A second trigger: no `cd`, an absolute out-of-project root, and a glob
+
+2026-08-17, second session, hit while sweeping a sibling repo for references before
+deleting a hook:
+
+```
+run_command("grep -rn 'il3-warn' /home/marius/work/claude/claude-plugins \
+             --include='*.json' --include='*.mjs' --include='*.sh' --include='*.md'")
+
+→ shell access to source files is blocked
+  hint: use grep(pattern, path) codescout tool instead.
+```
+
+This matters because **the title of this bug under-scopes it**. There is no `cd` here.
+The search root is *absolute* and unambiguously outside the project. The only relative
+token in the command is the glob `--include=*.mjs`, which is not a path at all — it is a
+filter pattern naming an extension. `ext_re` matches it, `path_is_within_project` sees a
+relative token and returns `true` by construction, and the segment is refused.
+
+So the failing condition is not "a `cd` moved the cwd". It is: **any token in the segment
+that contains a source extension and is not an absolute path forces the in-project
+verdict**, regardless of every other path in the command. A single glob argument is
+enough.
+
+Discriminating probes run the same minute, same directory, same command shape:
+
+| Command | Verdict |
+|---|---|
+| `grep -rn 'il3-warn' <abs-sibling-repo> --include='*.mjs'` | **refused** |
+| `grep -rn 'il3-warn' <abs-sibling-repo> --include='*.json'` | allowed |
+| `grep -rln 'il3-warn' <abs-sibling-repo>` (no `--include`) | allowed |
+
+The only variable is whether a glob names a source extension. That isolates the cause to
+the token scan, independent of the `cd` path in the original report — and rules out the
+reading that the absolute search root was somehow mis-resolved.
+
+The hint is unfollowable here for the same reason as the original case, but one step
+worse: `grep(pattern, path)` resolves against the **active project**, so it cannot search
+a sibling repo at all. The suggested remedy has no correct invocation, not merely an
+inconvenient one.
+
+**Consequence for the fix.** Filtering on "tokens that look like paths" is not enough —
+`--include=*.mjs` would still qualify under most such tests. A token carrying an `=`
+prefix, or consisting of a bare glob with no directory separator, is an option argument
+rather than a file operand, and treating it as a path is what produces this instance.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the gate decides on file extension alone and ignores project
