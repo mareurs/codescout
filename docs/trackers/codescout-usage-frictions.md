@@ -1927,7 +1927,7 @@ So the false-positive surface is not one command — it is every bounded-LHS pip
 
 **Version-bump trap for whoever fixes this:** each of the three profiles resolves plugins from its own version-keyed cache, so editing `il3-warn-hook.mjs` in the source repo changes behavior in **no** profile until `.claude-plugin/plugin.json` `version` is bumped (currently `1.16.8`) and the install records are refreshed in all three of `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`. A content-only edit verifies as "no change" and reads as a failed fix.
 
-**Filed:** `docs/issues/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md`.
+**Filed:** `docs/issues/archive/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md` — **FIXED 2026-08-17**, `claude-plugins:a989d73` (shipped in companion `1.16.9`). The hook was deleted rather than corrected: it is `contextPreToolUse` and can never block, so it was redundant when the server refused and wrong when the server allowed, and correcting the regex would have rebuilt the duplicated predicate behind this and U-22. `path_security.rs` is now the sole implementation. Its own test suite asserted the false positives as intended behaviour and was deleted with it.
 
 **Status:** open.
 

@@ -1,7 +1,7 @@
 ---
-id: '87879219a6504b33'
+id: 19e7142a206fa95a
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the IL3 warn-hook''s unbounded-LHS regex lists ls/cat/find/grep/git — the commands its own warning text calls bounded — so it fires on every legal bounded pipe and contradicts itself in one message'
 tags:
 - iron-law
@@ -10,6 +10,7 @@ tags:
 - hooks
 - false-positive
 - cross-repo
+closed: 2026-08-17
 fix_repo: claude-plugins
 opened: 2026-08-17
 owner: marius
@@ -172,48 +173,72 @@ echo, because the source is already correct and already speaks.
 
 ## Fix
 
-Not yet implemented. In `claude-plugins/codescout-companion/hooks/il3-warn-hook.mjs`:
+**Shipped 2026-08-17 as option 3 — the predicate is deleted, not corrected.**
+User chose this over §1+§2 when the two cases were laid out.
 
-1. **Split the list.** `UNBOUNDED = (cargo|npm|pnpm|yarn|python|pytest|go|mvn|gradle|rg|fd)`,
-   plus `grep` only with `-r`/`-R`, plus `find` only without `-maxdepth`. Everything else
-   is bounded and must not warn.
-2. **Add the git limiter carve-out.** Bounded when the command carries `-N`, `-n`,
-   `--max-count`, `--porcelain`, `--short`, or `--stat`; unbounded otherwise. `--oneline`
-   is explicitly *not* a limiter.
-3. **Preferred over 1 and 2: delete the predicate.** The hook's own text says the server
-   is the enforcer and already refuses the real violations with a better message —
-   including the `@cmd_*` recovery path. A duplicated predicate is what produced this bug
-   and U-22. If the advisory has value it is as an *echo of the server's verdict*, not as
-   an independent guess made before the server has spoken.
+- `claude-plugins:a989d73` — `hooks/il3-warn-hook.mjs` deleted; the
+  `mcp__.*__run_command` matcher removed from `hooks/hooks.json`;
+  `tests/test-il3-warn-hook.sh` deleted; `il3-warn-hook.mjs` dropped from the
+  preserved-hooks list in `tests/test-hooks-json-registration.sh`.
+- `claude-plugins:c6fdd64` — version 1.16.8 → 1.16.9 via `scripts/release.sh`
+  (canonical + README + `check-versions.sh` gate + cache seeding + install-record
+  repoint across all three profiles).
+- `claude-plugins:478bc7d` — version-bump-checklist refreshed.
 
-**Version-bump trap — read before verifying any fix.** Each of the three profiles resolves
-plugins from its own version-keyed cache, so editing the hook in the source repo changes
-behavior in **none** of them until `.claude-plugin/plugin.json` `version` is bumped (now
-`1.16.8`) *and* the install records are refreshed in all three of `~/.claude`,
-`~/.claude-sdd`, `~/.claude-kat` (per the global CLAUDE.md rule). A content-only edit
-verifies as "no change" and reads as a failed fix. The existing
-`claude-plugins/docs/trackers/version-bump-checklist.md` covers this.
+Branch `main`, **local only** (`NO_PUSH=1`), per this file's own Resume note that
+codescout sessions do not own that branch.
 
+The argument that settled it: the hook is `contextPreToolUse`, so it can never
+block. On a real violation the server already refuses with a better message
+carrying the `@cmd_*` recovery path — the hook adds nothing. On a legal pipe the
+server is silent and the hook is simply wrong. There is no case where it helps.
+Correcting the regex would have rebuilt the duplicated predicate that produced
+this bug and U-22; `path_security.rs` is now the sole implementation.
+
+`il3-deny-hook.sh` and its 33-case suite are untouched and still unwired, as they
+have been since the 2026-07 downgrade to warn-only. The `mcp__.*__run_command`
+matcher now carries no companion hook at all.
+
+Verified at the bytes in all three seeded caches: warn hook absent, deny hook
+present, zero `run_command` matchers in `hooks.json`. `run-all.sh` green before
+and after.
 ## Tests added
 
-None yet. `hooks/il3-deny-hook.test.sh` already exists in that repo and is the natural
-home; the warn hook has no test.
+None — and one **deleted**, which is the finding worth keeping.
 
-Planned, each stated as the pipe and the expected verdict:
+This section previously said *"the warn hook has no test"*. That was wrong:
+`tests/test-il3-warn-hook.sh` existed, 134 lines, and ran green in every suite
+pass. It could not have caught this defect because it **asserted the false
+positives as intended behaviour**:
 
-- `ls docs | head -2` → no warning. RED today.
-- `cat Cargo.toml | grep name` → no warning. RED today.
-- `git log -3 | tail -1` → no warning. RED today.
-- `git log --oneline | tail -1` → **warns**. Guards the `--oneline`-is-not-a-limiter rule;
-  a careless "just allow git" fix breaks this one.
-- `cargo test 2>&1 | grep FAILED` → warns. Must stay green throughout — it is the only
-  true positive in the set, and the one the hook exists for.
-- `find . -name '*.rs' | head` → warns; `find . -maxdepth 1 -name '*.rs' | head` → no
-  warning.
+```bash
+# New: ls, grep, cat, diff, du
+for cmd in "ls -la | head" "grep -r foo src/ | head -50" \
+           "cat file.log | tail -20" "diff a b | head" "du -sh */ | sort"; do
+  ... pass "fires on: $cmd"
+```
 
-Mutation check: restore the flat `LHS` alternation and confirm the first three go red while
-the `cargo` case stays green.
+Every one of those is bounded under the server's rule and allowed. Same for
+`git status --short | grep M` — `--short` *is* an output limiter. The suite was
+written from the hook's regex rather than from the server's predicate, so it
+locked the divergence in place and made the hook look tested.
 
+That is why the planned six-case matrix below was never written against it: the
+file it would have gone in already claimed the opposite. **A test derived from
+the implementation it guards cannot detect that the implementation disagrees
+with its source of truth.** Nothing was inverted — with the predicate gone there
+is no behaviour left to assert, so the suite was deleted with it.
+
+The planned matrix is preserved here as the specification anyone re-promoting
+`il3-deny-hook.sh` must satisfy:
+
+- `ls docs | head -2` → no warning
+- `cat Cargo.toml | grep name` → no warning
+- `git log -3 | tail -1` → no warning
+- `git log --oneline | tail -1` → **warns** (guards `--oneline`-is-not-a-limiter)
+- `cargo test 2>&1 | grep FAILED` → warns (the only true positive in the set)
+- `find . -name '*.rs' | head` → warns; `find . -maxdepth 1 -name '*.rs' | head`
+  → no warning
 ## Workarounds
 
 Ignore the warning when the LHS is bounded — but read the command first, because the
@@ -226,15 +251,13 @@ the advisory; that is two round-trips spent on a false positive.
 
 ## Resume
 
-Work in `claude-plugins` (branch `main` — confirm with the user before committing there;
-this repo's sessions do not own that branch). Implement *Fix* §3 if the user agrees the
-advisory should defer to the server, otherwise §1 + §2. Write the six cases above into
-`hooks/il3-deny-hook.test.sh` (or a sibling `il3-warn-hook.test.sh`) and watch the first
-three fail against the current regex before touching line 23.
+One step remains and it is not scriptable: **cold-restart all three Claude Code
+instances** (or `/reload-plugins` per instance). Hooks resolve `installPath` at
+launch, so a resume is not enough — until then a running session still loads the
+1.16.8 cache and will keep emitting the warning.
 
-Then bump `.claude-plugin/plugin.json` and refresh install records in all three profiles —
-without that, a verification pass will show the old behavior and read as a failed fix.
-
+The three `claude-plugins` commits are **local on `main`, not pushed**
+(`NO_PUSH=1`). Push is the maintainer's call.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-44 (this friction), U-22 (the same
