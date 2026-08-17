@@ -74,8 +74,27 @@ pub fn content_hash(text: &str) -> String {
 /// platform-dependent, so the `local_ids` / `server_ids` delete-set diff cannot be
 /// compared across hosts. See
 /// `docs/issues/archive/2026-07-07-display-audit-scope-gap-non-to-string-sites.md`.
-pub fn chunk_id(project_id: &str, rel_path: &Path, content_hash: &str) -> String {
-    format!("{project_id}:{}:{content_hash}", to_forward_slash(rel_path))
+///
+/// `start_line` disambiguates two chunks in the same file with byte-identical
+/// content — without it the id was `(project, path, content_hash)` alone, so
+/// duplicate-content chunks collided on the same Qdrant point id and the second
+/// silently overwrote the first (measured 2026-08-16: 10.97% of a fresh index's
+/// chunks lost this way, with both the writer and the drift check agreeing nothing
+/// was wrong). See
+/// `docs/issues/archive/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md`.
+/// `dirty_paths` (`drift.rs`) is unaffected by this: it keys on the separate
+/// `(file_path, content_hash)` fields on `ChunkRef`/`LocalChunk`, never on the
+/// `chunk_id` string's internal shape.
+pub fn chunk_id(
+    project_id: &str,
+    rel_path: &Path,
+    start_line: usize,
+    content_hash: &str,
+) -> String {
+    format!(
+        "{project_id}:{}:{start_line}:{content_hash}",
+        to_forward_slash(rel_path)
+    )
 }
 
 /// Project id for a worktree's delta index: the changed files only.
@@ -353,7 +372,7 @@ async fn stream_index(
                 continue;
             }
             let hash = content_hash(&c.content);
-            let chunk_id = chunk_id(project_id, Path::new(&rel_display), &hash);
+            let chunk_id = chunk_id(project_id, Path::new(&rel_display), c.start_line, &hash);
             // Every local chunk id participates in the delete-set diff, even when
             // it is already indexed and skipped for re-embedding.
             local_ids.insert(chunk_id.clone());
@@ -614,7 +633,7 @@ pub async fn sync_worktree(
                 continue;
             }
             let hash = content_hash(&c.content);
-            let did = chunk_id(&delta_id, Path::new(rel_display), &hash);
+            let did = chunk_id(&delta_id, Path::new(rel_display), c.start_line, &hash);
             // Every dirty local chunk id participates in the delta's own
             // delete-set diff below, even when it's already indexed and
             // skipped for re-embedding.
@@ -854,16 +873,31 @@ mod tests {
         // same technique util/fs.rs's own tests use.
         let windows_shaped = std::path::PathBuf::from("src\\retrieval\\sync.rs");
         assert_eq!(
-            chunk_id("proj", &windows_shaped, "deadbeef"),
-            "proj:src/retrieval/sync.rs:deadbeef",
+            chunk_id("proj", &windows_shaped, 12, "deadbeef"),
+            "proj:src/retrieval/sync.rs:12:deadbeef",
             "the path component of a chunk id must be forward-slash normalized"
         );
 
         // Already-forward-slash input is untouched (the Linux/macOS path).
         let posix = std::path::PathBuf::from("src/retrieval/sync.rs");
         assert_eq!(
-            chunk_id("proj", &posix, "deadbeef"),
-            "proj:src/retrieval/sync.rs:deadbeef"
+            chunk_id("proj", &posix, 12, "deadbeef"),
+            "proj:src/retrieval/sync.rs:12:deadbeef"
+        );
+    }
+
+    /// docs/issues/archive/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md
+    ///
+    /// Two chunks in the same file with byte-identical content must not collide —
+    /// this is the load-bearing regression test: it fails on the pre-fix 3-tuple id.
+    #[test]
+    fn chunk_id_disambiguates_duplicate_content_in_the_same_file() {
+        let path = std::path::PathBuf::from("src/lib.rs");
+        let first = chunk_id("proj", &path, 10, "deadbeef");
+        let second = chunk_id("proj", &path, 40, "deadbeef");
+        assert_ne!(
+            first, second,
+            "same file, same content hash, different position — must not collide"
         );
     }
 
@@ -1154,7 +1188,7 @@ mod tests {
                     seeded.push((
                         project.to_string(),
                         ChunkRef {
-                            chunk_id: chunk_id(project, Path::new(path), &hash),
+                            chunk_id: chunk_id(project, Path::new(path), c.start_line, &hash),
                             content_hash: hash,
                             file_path: path.to_string(),
                         },
@@ -1534,6 +1568,68 @@ mod tests {
         assert!(
             added2 > added,
             "empty patterns must index everything: {added2} vs {added}"
+        );
+    }
+
+    /// docs/issues/archive/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md
+    ///
+    /// Two chunks in the same file with byte-identical content must get distinct
+    /// ids — the load-bearing regression test; it fails on the pre-fix 3-tuple id.
+    ///
+    /// `.toml` has no tree-sitter grammar (`get_ts_language("toml")` is `None`),
+    /// so `split_file` falls through to the plain-text line-based splitter, which
+    /// is size-driven and therefore fully controllable: a block repeated
+    /// back-to-back, with `chunk_target` set to exactly that block's packed size,
+    /// deterministically produces two chunks whose content is byte-identical.
+    #[tokio::test]
+    async fn stream_index_disambiguates_duplicate_content_chunks_in_one_file() {
+        let block = "value_one = 111\nvalue_two = 222\nvalue_three = 333";
+        let block_cost: usize = block.lines().map(|l| l.len() + 1).sum();
+        let source = format!("{block}\n{block}");
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("dup.toml"), &source).unwrap();
+
+        let store = RecordingStore::default();
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+
+        let (added, _) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            block_cost,
+            256,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            added, 2,
+            "the doubled block must produce exactly two chunks"
+        );
+
+        let upserted = store.upserted.lock().unwrap();
+        assert_eq!(upserted.len(), 2);
+        assert_eq!(
+            upserted[0].content_hash, upserted[1].content_hash,
+            "the fixture's premise: both chunks must be byte-identical"
+        );
+        let ids: std::collections::HashSet<&str> =
+            upserted.iter().map(|r| r.chunk_id.as_str()).collect();
+        assert_eq!(
+            ids.len(),
+            2,
+            "same file, same content hash, different position — chunk ids must not \
+         collide, or a real store's last-wins upsert silently drops one: {:?}",
+            upserted.iter().map(|r| &r.chunk_id).collect::<Vec<_>>()
         );
     }
 

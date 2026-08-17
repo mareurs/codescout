@@ -231,7 +231,7 @@ points against 19,216 chunks reported added. `chunk_id` is `{project}:{path}:{co
 with no ordinal (`src/retrieval/sync.rs:77`) and the point id derives from it, so two
 identical chunks in one file are the same point and the second overwrites the first. Both
 ends report success — the writer says `+19216`, and a no-op re-sync says `+0 -0 ~0`. Filed
-as `docs/issues/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md`. The 64-bit
+as `docs/issues/archive/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md` (fixed). The 64-bit
 truncation in `chunk_id_to_point_id` (`src/retrieval/qdrant.rs:28`) is NOT the cause — at
 19k items its expected collision count is ~1e-11 — and ruling that out is what located the
 real one. **Any future score on this collection has an unknown recall ceiling below 100%.**
