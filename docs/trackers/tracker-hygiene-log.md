@@ -678,6 +678,101 @@ rewrite that got the stem right and the number wrong announces itself.
 **Kin:** HY-9 (D12, and the ambiguous half of the same scan), R-98 (the allocation
 race), R-100, CAP-5.
 
+## HY-11 — Proposal: promotion pointers decay, and the convention mandates a pointer the template gives no field for
+
+**Kind:** proposal · **Sweep:** 2026-08-17 (out-of-cadence, user-raised) · **Status:** open
+
+The decay/distill pattern has a direction no detector looks in. D1 checks index → file.
+HY-5 §1 proposes basename → live surface after a move. `audit_doc_refs` checks doc → code.
+All three run from the tracker outward to a *path*. Nothing checks **entry → the permanent
+surface its lesson was promoted into**, and that is the pointer distillation invalidates —
+in bulk, because distillation does not move rules one at a time, it merges many into one.
+
+**Evidence pair — declared vs. observed.** `docs/templates/session-log.md` states the
+convention twice, and both times as a requirement:
+
+> `promoted-to-permanent-docs` | Moved into CLAUDE.md, an ADR, a skill, or another
+> permanent surface. **Session log keeps the pointer.** *(line 136)*
+
+> `promoted-to-bug-tracker` | … **The session log keeps the pointer**; the formal tracker
+> owns the lifecycle. *(line 128)*
+
+Observed, *measured 2026-08-17 over `docs/trackers/*.md` (live only, `archive/` excluded)*:
+
+| Probe | Count |
+|---|---|
+| entries marked `promoted-to-permanent-docs` | **14** across 6 files |
+| line-start `**Promote-when:**` fields | **137** across 11 files |
+| line-start `**Promoted-to:**` fields | **0** |
+
+The wins block of the template (lines 105–109) is `Impact` / `Promote-when` / `Status` —
+**there is no destination field.** The frictions block has one (`**Fix idea / Pointer:**`,
+line 83); the wins block, which is the side that promotes into permanent docs, does not. So
+the convention requires a pointer, the template omits the field, and 0 of 14 completed
+promotions record where they went. This is the same defect shape as HY-10's root cause —
+the entry template naming one field of four — one level up.
+
+**The prerequisite is a field, not a detector.** A detector cannot check a pointer that was
+never written. Order of work:
+
+1. Add `**Promoted-to:** <surface + section>` to the wins block of
+   `docs/templates/session-log.md`, beside `Promote-when`.
+2. Backfill the 14. Their destinations are recoverable from prose today and will not be in
+   six months — this is the cheapest it will ever be.
+3. Then D11 below becomes a mechanical check.
+
+### D11 promotion-pointer drift (proposed)
+
+| Field | Value |
+|---|---|
+| **Fires when** | An **active** entry with `Status: promoted-to-permanent-docs` names a destination whose heading is absent, or whose current text no longer carries the promoted claim |
+| **Evidence pair** | *declared* `Promoted-to: CLAUDE.md § Iron Rules / Conclude Last`; *observed* heading absent, or heading present with the claim gone |
+| **Proposed fix** | One of three verdicts, never a blanket relink — see below |
+| **Confidence** | high for "heading absent" (syntactic); **low by design** for the other two — they compare meaning |
+| **Cost** | one read per distinct destination, memoized; destinations cluster hard (CLAUDE.md, `src/prompts/source.md`, a handful of guides) |
+
+**Three verdicts, because "fix the link" gets two of them wrong.**
+
+- **repoint** — the rule survived the refactor at a new location. Rewrite the pointer.
+- **absorbed** — the rule was generalized into a broader one. The pointer becomes a pointer
+  to the general rule *plus* a note that this entry was one of its inputs. This is the
+  verdict distillation actually produces, and the one a naive link-fixer silently converts
+  into `repoint`, losing the fact that a specific lesson became a general rule.
+- **retire** — the rule was dropped because it no longer applies. The entry's promotion is
+  void, and recording *that* is the fix: it is a fact about the lesson's lifetime, not an
+  error to erase.
+
+**Two conditions this ledger requires of every proposal.**
+
+- **Scope the population to ACTIVE entries.** A stale promotion pointer inside
+  `docs/trackers/archive/**` is not drift, it is the historical record — exactly parallel to
+  `audit_doc_refs`' `archive_drop` and to `get_guide("tracker-conventions")`' rule to leave
+  archived surfaces alone. Rewriting one would falsify the record to satisfy a linter that is
+  already meant to ignore it. Note the counts above deliberately exclude `archive/`.
+- **A finding is not a fix.** `retire` and `absorbed` are judgment calls on meaning; only
+  "heading absent" is mechanical. D11 should ship at `individual` gating and stay there until
+  the verdict split stops surprising the operator.
+
+### Why the graph route is not available yet (checked, not assumed)
+
+`promoted-to` already exists as a manual rel (`get_guide("tracker-conventions")` §
+Cross-linking), and *measured 2026-08-17*, every promotion destination is a catalogued
+artifact — `CLAUDE.md` is `0b9c1365555fc686` (`kind: memory`), `src/prompts/source.md` is
+`6ab331f88a62057c`, `src/prompts/guides/tracker-conventions.md` is `e0802ffca04e9bf7`. So a
+graph query looks available.
+
+It is not, for one reason: **edges are artifact-grain and promotions are entry-grain.** An
+edge from the ledger to CLAUDE.md cannot say *which* W-N was promoted, and a ledger with
+fourteen promotions needs fourteen distinguishable ones. `entry_cite` is entry-grain but is
+minted only by `append_entry(cites=…)` at write time, for citations. An entry-grain
+`promoted-to` does not exist. Until it does, D11 reads the `**Promoted-to:**` prose field —
+which is a reason to add the field now and keep it machine-parseable (line-start, one
+surface per line), not a reason to wait for substrate.
+
+**Related:** HY-5 §1 (path drift after archive moves — the sibling direction, still open),
+HY-10 (ledger vs. tracker; same one-field-of-four root cause), `archive-cadence-policy` §3
+(where archived entries land, which decides what "active" scopes to).
+
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line via:

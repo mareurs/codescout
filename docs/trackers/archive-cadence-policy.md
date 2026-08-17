@@ -139,6 +139,67 @@ The current `fixed-shipped` / `partially-shipped` / `wontfix` / `open` / `closed
   `docs/archive/trackers/codescout-usage-frictions-<timestamp>.md`. Consistent with existing `docs/issues/archive/` pattern. Lean.
 - **Lean: a or c, picking one.** Both are reasonable; pick the one that matches the existing archive convention. Currently `docs/trackers/archive/` is the active convention.
 
+
+#### Proposed amendment — 2026-08-17: surface 3 conflates two different operations (awaiting ratification)
+
+Ratified surface 3 is **(a)** — `docs/trackers/archive/`, one file per source tracker, no
+timestamp. That is correct for the operation it was written about and wrong for a second
+operation it does not distinguish. The two:
+
+| Operation | What moves | Ratified (a) verdict |
+|---|---|---|
+| **Entry-level archival** | individual `U-7` / `R-91` entries move out of a live ledger into its archive **companion**, which is appended to again and again | **(a) is right — keep it, no timestamp** |
+| **Whole-file archival** | the tracker itself wraps (the hygiene skill's D10 distill-then-archive) and the whole file leaves the live dir once | **(a) is wrong — a timestamp belongs here** |
+
+**Why (a) must stay for entry-level archival.** The companion is a *destination*, not a
+snapshot — `docs/trackers/archive/reconnaissance-patterns-archived-entries.md` is written to
+repeatedly. Timestamping it would mint a new file per sweep, and forking a ledger's archive
+splits one namespace across two files, so each shared token gains a second definer and
+becomes ambiguous. That is not hypothetical: it happened on 2026-08-17, and
+`get_guide("tracker-conventions")` § *Compaction and archival* now carries the rule — *check
+for an existing archive artifact before creating one*. A timestamp convention here would
+make that mistake the default.
+
+**Why a timestamp belongs on whole-file archival.** Three reasons, in ascending order of
+how hard they are to work around:
+
+1. **The name is the only surviving record of when the stream wrapped.** Once the file is
+   out of the live dir, nothing else on disk says it; frontmatter `status: archived` carries
+   no date, and the catalog's `updated_at` is machine-local and gitignored.
+2. **The corpus already disagrees with itself.** *Measured 2026-08-17* over the 48 files in
+   `docs/trackers/archive/`: **11 carry a date token in three different shapes** — date-prefix
+   (`2026-06-09-index-freshness-signal-for-consumers.md`), date-suffix
+   (`lancedb-upgrade-2026-05.md`), quarter-suffix (`codescout-usage-frictions-2026-q2.md`) —
+   and **37 carry none**. Surface 3(a) as ratified does not pick between those three shapes
+   because it never contemplated them.
+3. **Without a timestamp, the second archival of a name is impossible.**
+   `artifact(action="move")` *fails if the destination already exists*. A work stream that
+   wraps, gets archived as `archive/foo-session-log.md`, and is later restarted at the live
+   path `foo-session-log.md` cannot be archived again — the move errors, and the operator's
+   only outs are a hand-invented name or a bare `git mv`, which orphans the catalog row. A
+   timestamp makes the destination unique by construction.
+
+**Proposed form.** `docs/trackers/archive/<name>-<YYYY-MM-DD>.md`, the date being the day the
+stream was declared wrapped (D10 step 3's confirmation), suffix rather than prefix so the
+family sorts together and the stem stays recognizable. Suffix also keeps the file **stem**
+stable-ish, which now matters: the resolver's qualified-citation form is `<file-stem>:F-33`,
+so a prefix would move the qualifier to a leading date and make every qualified citation
+unreadable.
+
+**And the rename is not the whole operation.** A whole-file archival changes the path, which
+changes `id = sha256(abs_path)`, which breaks every prose citation of both. HY-5 §1 already
+proposes the repair step and measured its cost — 24 moves broke 8 path references in 7 live
+surfaces, none caught by `link_scan`. The hygiene skill's D10 step 5 is currently
+`update(status)` + `move(…)` and **stops there**, omitting the repoint that
+`get_guide("tracker-conventions")` mandates for the identical operation on bug files. If this
+amendment is ratified, D10 step 5 becomes three sub-steps, not two: patch status, move to the
+timestamped name, then repoint citations of the old path *and* the old 16-hex id in the same
+commit, verified by a scoped `audit_doc_refs`.
+
+**Open question for the ratifier.** This amendment does not overturn (a); it narrows (a) to
+entry-level archival and adds a rule for the case (a) is silent about. If instead you want one
+rule for both, say which — but note that a single rule has to lose one of the two properties
+above, and losing destination-uniqueness is the one that hard-errors.
 ### 4. Recovery — how do archived entries get found?
 
 The librarian indexes archived trackers but hides them by default (`status: archived`). `artifact(action="find", kind="tracker", include_archived=true)` should surface them. Cross-references in active entries that point at archived ones need to keep working — either via the artifact graph or by leaving forwarding stubs.
