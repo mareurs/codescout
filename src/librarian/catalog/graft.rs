@@ -160,7 +160,7 @@ pub(crate) fn repoint_history(
     //    Before this existed, `graft_rows`' cascade-delete of the source silently
     //    dropped these rows, which is what let `artifact(move)` — i.e. archiving —
     //    reset a ledger's counter
-    //    (docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md).
+    //    (docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md).
     let entry_reservations_folded = tx.execute(
         "INSERT INTO entry_reservation (artifact_id, prefix, max_allocated, updated_at)
          SELECT ?1, prefix, max_allocated, updated_at
@@ -511,7 +511,7 @@ mod tests {
     /// A reservation is a HIGH-WATER MARK, so the fold rule is `max`, not
     /// last-writer-wins. Folding the source's LOWER mark over the destination's higher
     /// one would hand the next allocation an id that already exists — reintroducing
-    /// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` through
+    /// `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` through
     /// the move path, which is the path that caused it in the first place.
     ///
     /// Both directions are asserted, because only one of them can distinguish `max`

@@ -64,7 +64,7 @@ live in a running MCP session until `cargo rb` + `/mcp`.
    - `artifact(action="move", …)` on the ledger — see Root cause;
    - a fresh clone, or any second machine (the table is machine-local);
    - a worktree session (a shadow row is a different `artifact_id`; see the
-     sibling bug `docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md`).
+     sibling bug `docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md`).
 4. Now compact the remaining HY-9/HY-10 out too, or archive the whole file and
    start a successor at the same path. `body_max` is `None`.
 5. `append_entry(id_prefix="HY")` returns **HY-1**.
@@ -198,7 +198,12 @@ high-water mark — this session read it as the counter before checking.
 
 ## Fix
 
-**Fix A, implemented 2026-08-17.** The high-water mark is now committed to the ledger's
+**Fix A, implemented 2026-08-17 in `0364c23a` (`experiments`).** Promotion to `master` is
+a fast-forward — `git rev-list --left-right --count master...experiments` reported `0` on
+the left — so this SHA *is* the master SHA once promoted, and there is no second one to
+record later.
+
+The high-water mark is now committed to the ledger's
 own frontmatter, one key per declared namespace:
 
 ```yaml
@@ -313,7 +318,7 @@ N/A — fixed and verified on `experiments`.
 - `src/librarian/catalog/mod.rs` — `entry_reservation` DDL
 - `src/librarian/tools/link_scan/resolve.rs:17-21,37,200-206,316` — the
   archived-definer tie-break
-- `docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md` — sibling defect,
+- `docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md` — sibling defect,
   same counter, different trigger
 - `docs/trackers/tracker-hygiene-log.md` — HY-10 (ledger vs tracker), HY-11
 - `docs/trackers/archive-cadence-policy.md` — surface 2 (promote-or-die) and

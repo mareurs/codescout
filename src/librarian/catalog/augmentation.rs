@@ -738,7 +738,7 @@ pub fn entry_high_water_key(id_prefix: &str) -> String {
 /// reissued `HY-1`, and because the resolver binds a token to its sole ACTIVE definer,
 /// every historical citation silently re-pointed with no dangling or ambiguous count
 /// moving. Measured 2026-08-17;
-/// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
+/// `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
 ///
 /// **Why this is race-free without writing the entry.** The reservation is
 /// recorded inside the same `IMMEDIATE` transaction that reads the maximum, so a
@@ -2097,7 +2097,7 @@ mod tests {
     }
 
     /// The regression guard for
-    /// `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
+    /// `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
     ///
     /// The counterpart to the test above. There the body lags the reservation and the
     /// reservation saves us. Here BOTH lag the ledger's real history — the case the

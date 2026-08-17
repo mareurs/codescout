@@ -72,7 +72,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // leaves behind a shadow row, augmentation, fork event and lineage link (the
         // 2026-07-17 regression). Hence `is_main_checkout_artifact` here rather than
         // inspecting the resolved target.
-        // docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md
+        // docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md
         if let Some(cp) = ctx.current_project.as_deref() {
             if let Some(row) = artifact::get(&cat, &a.id)? {
                 if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
@@ -631,7 +631,7 @@ mod tests {
     }
 
     /// The regression guard for
-    /// `docs/issues/2026-08-17-prose-ledger-worktree-id-collision.md`.
+    /// `docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md`.
     ///
     /// The params branch is protected, and `append_from_worktree_lands_on_shadow_not_main`
     /// above is the proof: it lands on the shadow, and `merge_worktree` renumbers the

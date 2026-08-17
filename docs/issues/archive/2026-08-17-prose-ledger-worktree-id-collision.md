@@ -176,7 +176,11 @@ equivalent, in either file.
 
 ## Fix
 
-**Fix A, implemented 2026-08-17.** The prose branch of
+**Fix A, implemented 2026-08-17 in `0364c23a` (`experiments`).** Promotion to `master` is
+a fast-forward (`git rev-list --left-right --count master...experiments` → `0` on the
+left), so this SHA *is* the master SHA once promoted — no second SHA to record later.
+
+The prose branch of
 `src/librarian/tools/append_entry.rs` refuses id allocation from a worktree session,
 mirroring the `cites` guard directly above it:
 
@@ -250,7 +254,7 @@ N/A — fixed and verified on `experiments`.
 - `src/librarian/tools/worktree.rs:75-158` — `resolve_write_target`, what the fork seeds
 - `src/librarian/tools/merge_worktree.rs:282-306` — the params-only renumber
 - `src/librarian/tools/link_scan/resolve.rs:37-45,200-206,339` — two active definers → Ambiguous
-- `docs/issues/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` — sibling
+- `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` — sibling
   defect, same counter, different trigger
 - codescout memory `worktree-merge-catalog-reconciliation` — the overlay flow; its
   "renumbers colliding entry ids" line needs the params-only qualifier
