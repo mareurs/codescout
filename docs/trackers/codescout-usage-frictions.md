@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 46
+entry_high_water_U: 47
 entry_prefix: U
 ---
 
@@ -2028,3 +2028,78 @@ It would gate for anyone running `--fail-on med`, which is the setting a team ti
 **Not filed as a bug** — same reasoning as U-40 and U-41. Nothing is wrong, lost, or gated; the classifier's recall-first bias is a deliberate design stance and the capping layer is already absorbing the consequence. This is friction with the precision of a correct-by-design check, and it belongs with U-15 and U-17 as evidence for a future precision pass rather than as a fifth open bug.
 
 **Status:** open — friction recorded, no fix shipped.
+
+---
+
+### U-47 — Between `EnterWorktree` and `workspace(activate)`, writes are blocked but reads are not — so git reconnaissance answers about the wrong checkout
+
+**Observed:** 2026-08-17, twice in one session, opening a worktree to fix the newline gap.
+
+**Got:** `EnterWorktree` moves the *session* cwd into the worktree, and its post-hook says:
+
+```
+WORKTREE DETECTED: codescout must switch to the worktree.
+MCP write tools (edit_code, edit_file, edit_markdown, create_file) are BLOCKED
+until workspace is called — they would otherwise silently write to the wrong repo.
+```
+
+Writes are blocked. **Reads are not.** In that window `run_command` still resolves against
+the previously-active project, so this — run from inside the worktree — described the main
+checkout:
+
+```
+run_command("git log -1 --format='%h %s'; git rev-list --left-right --count experiments...HEAD")
+→ 3ecb8730 docs(prompts): correct the … claim
+  0   0
+```
+
+I read that as "the worktree is based on `experiments`, no reset needed" and moved on. The
+worktree was actually at `eca9902e` — **origin/master, 1091 commits behind** — because
+`worktree.baseRef: fresh` branches from the default branch. The real state only surfaced
+when `edit_code` said `symbol not found` and `wc -l` gave 2199 lines against the 3403 the
+file actually has.
+
+**The tool did warn me, in that same response.** The `_workspace_notice` field said it
+exactly:
+
+> *Reads are resolving against "/home/marius/work/claude/codescout". This repo also has
+> linked git worktrees […] and no project has been explicitly activated, so results
+> describe the main checkout even if you are working in a worktree.*
+
+So this is not a missing signal. It is a **correct signal in a sibling field, next to a
+confident-looking answer** — and the answer wins attention. The asymmetry is what makes it
+dangerous: a blocked write fails loudly and is unmissable; a read that quietly answers
+about another tree looks like a finished reconnaissance step.
+
+**Second, smaller defect in the same hook:** it names the wrong path. It says to call
+`workspace(action="activate", path="<MAIN root>")` when the session has just moved *into* a
+worktree — activating main would leave every subsequent path resolving to the checkout you
+deliberately left. The right call is the worktree root, plus `read_only=false`, since a
+foreign activation defaults to read-only (`get_guide("workspace-state")` § home/foreign).
+I overrode the hook both times and it was right to.
+
+**Cost:** two wrong conclusions about which tree I was on. The first time (earlier session)
+I caught it from a suspicious line count; the second time only from a failed `edit_code`.
+Either could have ended with tests written against a 1091-commit-old file and a "why does
+this symbol not exist" investigation.
+
+**Fix idea, in order of preference:**
+
+1. **Have `EnterWorktree` activate the worktree itself.** It knows the path — it just
+   created it. The manual step exists only to open this window.
+2. **Block reads too, not just writes,** until a project is chosen when linked worktrees are
+   present. The precedent is `guard_worktree_write`, which already refuses *writes* on
+   exactly this ambiguity; the same argument applies to a read whose answer names a tree.
+   The bug that armed that guard
+   (`docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md`) made
+   this same case and was closed on the write half only.
+3. **At minimum, promote the notice from a sibling field into the answer** — prefix the
+   `stdout` rather than adding a key beside it, so it cannot be read past.
+
+**Verify-first rule this yields, cheap and general:** the first command after entering a
+worktree should be `pwd`, and its output compared to where you think you are. One token of
+output, and it is the only thing in the response that cannot be about the wrong tree.
+
+**Filed:** `docs/issues/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
+
+**Status:** open.
