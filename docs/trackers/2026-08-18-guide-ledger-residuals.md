@@ -93,7 +93,14 @@ plan's own expectation was ~400 lines total.
 
 ## Doc drift found in passing
 
-### S-08 — The plan doc names a renamed test in a runnable command
+### S-08 — The plan doc names a renamed test in a runnable command ✅ DONE 2026-08-18 (`98fd36aa`)
+
+Resolved by adding a note at the step carrying the current name
+(`guide_ledger_lives_in_the_injected_dir_not_under_the_project_root`,
+`src/server.rs:4443`), **not** by rewriting the step — the plan is a record of what was
+planned, not of what shipped. Same call as
+`docs/trackers/archive/2026-05-07-retrieval-session-residuals.md` § S-08 made for the
+identical situation. Original note follows.
 
 `docs/superpowers/plans/2026-08-18-guide-ledger-phase-a-storage.md:812` and `:831`. Line
 831 is a copy-pasteable `cargo test --lib guide_hint_tests::guide_ledger_does_not_live_under_the_project_root`,
@@ -109,7 +116,18 @@ moved: `:1686`→1742, `:3713`→3859, `:4084`→4383, `:1510`→1562, `:1571`�
 *claim* is still accurate — `from_parts_with_env` really does have three test-helper
 callers — only the coordinates are stale. Outside this plan's five files, so left alone.
 
-### S-10 — `get_guide("tracker-conventions")` prescribes the master-SHA Resume line unconditionally
+### S-10 — `get_guide("tracker-conventions")` prescribes the master-SHA Resume line unconditionally ✅ DONE 2026-08-18 (`98fd36aa`)
+
+Fixed directly rather than routed to the peer session: the change is in a different
+section of the guide (the archive trigger, not the id-stamping advice they corrected), so
+there was no overlap to collide with. `src/prompts/guides/tracker-conventions.md` now
+carries the same two-path table as `CLAUDE.md` and `docs/issues/_TEMPLATE.md`, plus the
+`git rev-list --left-right --count master...experiments` check that decides which path
+applies, and a note that the 24 existing archived files carrying the old form are stale
+instructions rather than open debt. Verified against the three invariants that iterate
+every guide body, since the file is `include_str!`'d at `src/prompts/mod.rs:442`; no size
+cap exists and no prompt surface changed, so no `ONBOARDING_VERSION` bump. Original note
+follows.
 
 It says an experiments-only archived bug MUST carry a `## Resume` line stating the
 master-side SHA is still owed. `CLAUDE.md` and `docs/issues/_TEMPLATE.md` both correct this
