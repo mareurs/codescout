@@ -107,6 +107,136 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 
 Next actions per row live in each bug's `## Resume`, and in the live params — not duplicated here,
 because a snapshot that carries instructions goes stale in the way that matters most.
+
+## Per-entry detail
+
+One section per BL-N, and its only job is to **define the token**. `link_scan` derives a citable
+definition from a `## <ID> — <title>` heading and from nothing else, so until 2026-08-18 this
+ledger — which defines the queue everything else cites — could not be cited at all: 117 BL-N
+references from 37 other files resolved to nothing, and the table above defined none of them.
+Deliberately terse; the table holds status, phase and bug id, and `next` (catalog-side) holds the
+working notes.
+
+**When you add a BL-N, add its section here too.** Not optional and not the table — confirm with
+`librarian(action="doctor")`, which reports `ledger_defines_nothing` / `entry_without_definition`.
+See `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+
+### BL-1 — json_path: add a Segment::Wildcard arm so the overflow hint's own recovery works
+**done**
+
+### BL-2 — grep: stop printing a self-refuting "Showing N of N" when collection hit the cap
+**done**
+
+### BL-3 — Tool schemas: stop advertising conditionally-required params as optional
+**done**
+
+### BL-4 — usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer
+**done**
+
+### BL-5 — librarian: split tracker_design so its guidance arrives inline
+**done**
+
+### BL-6 — read_file: give the buffered full-read summary an incompleteness signal
+**done**
+
+### BL-7 — Write-scope denial should name approve_write
+**done**
+
+### BL-8 — truncate_compact cuts from the tail, destroying the overflow signal
+**done**
+
+### BL-9 — server_instructions arrives truncated mid-word, dropping the guide pointers
+**done**
+
+### BL-10 — audit_doc_refs reads bare comment markers as file paths
+**done**
+
+### BL-11 — context and workspace_state_at never dedup the worktree overlay
+**done**
+
+### BL-12 — worktree divergence guard covers writes but not reads
+**done**
+
+### BL-13 — IL1: run subtract-and-measure on the step-3 wording
+**done** — ran as prompt-hamsa A-25 and the clause LOST; reverted behind an inverted guard.
+
+### BL-14 — read_file: force=true silently discarded on whole-file reads
+**done**
+
+### BL-15 — read-only metadata commands blocked on source paths
+**done**
+
+### BL-16 — worktree activation diverges memory set and sub-project topology
+**open** — option 2 shipped; the 1-vs-3 choice is still open.
+
+### BL-17 — reconcile a bug that sits in archive/ while still marked status: open
+**done** — measured 0 instances; the bug file it was filed against is itself gone.
+
+### BL-18 — artifact(create): augment silently discarded five of its seven fields
+**done**
+
+### BL-19 — overflow envelopes with no compact summary waste a whole call
+**done**
+
+### BL-20 — params merge-patch wipes entry arrays wholesale
+**done** — gave entries an update path (`update_entry`) plus always-on counts.
+
+### BL-21 — edit_file's replace_all and batch paths write managed artifacts unguarded
+**done**
+
+### BL-22 — reindex re-keys moved artifacts and cascade-deletes their events
+**done** — one reindex destroyed 11 events while reporting `removed: 0`.
+
+### BL-23 — a moved artifact's frontmatter still asserts its pre-move id
+**done**
+
+### BL-24 — usage.db records a sha that need not describe the built code
+**done**
+
+### BL-25 — the byte cap evicts rules into get_guide topics nothing triggers
+**done** — 7 of 10 guides (~46 KB) had no trigger at all.
+
+### BL-26 — get_guide("librarian-runtime") said a move preserves the id
+**done** — one fact in four files; an earlier pass repaired three and missed this one.
+
+### BL-27 — update_entry's entry-param guard only fires when fields is absent
+**done**
+
+### BL-28 — a directory named `--help` sits untracked in the repo root
+**done**
+
+### BL-29 — append_entry writes catalog-only state, so the committed snapshot drifts
+**open** — partial: drift is now reported at write time and by `doctor`, and 0 trackers are adrift; the gate still needs majority coverage.
+
+### BL-30 — FRICTION: adding one tracker entry costs four bookkeeping sub-tasks
+**open** — the hand-allocation root cause behind BL-32.
+
+### BL-31 — grep: cap_grouped's file-diversity round-robin is unreachable
+**done** — overflow hints named walk-order files rather than hot ones.
+
+### BL-32 — reconnaissance-patterns.md reused nine ids for unrelated lessons
+**open** — split by suffix already; the hand-allocation cause is BL-30.
+
+### BL-33 — the librarian guard keys on YAML quoting, leaving trackers unprotected
+**done** — 15 of 27 trackers, this queue included.
+
+### BL-34 — repairing a frontmatter id re-serializes the whole block
+**done**
+
+### BL-35 — guard_worktree_write is dead code in production
+**done** — the startup-cwd fallback sets the very flag it gates on.
+
+### BL-36 — artifact(update) re-serializes the whole frontmatter block on a single-field patch
+**done** — BL-34's mechanism, firing at the mandated archive step.
+
+### BL-37 — Kotlin warnings, workspace table and Custom Instructions cannot fit the channel
+**open** — ordering fixed the common case; the two oversized blocks need a new carrier.
+
+### BL-38 — the librarian guard is blind to any artifact whose frontmatter omits `id:`
+**done** — fixed by teaching it the `entry_prefix` ledger declaration. Its "26 of 66 unprotected" framing was later retracted, and the `id:`-stamping remedy it suggested was reverted in `bb9a94d7`.
+
+### BL-39 — the two sanctioned entry formats are not equivalent
+**in-progress** — a params-rendered index defines no citable token. Steps 0-3 and 5 done; step 4 (this backfill) is what gave the section you are reading its heading.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
