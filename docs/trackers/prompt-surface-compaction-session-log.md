@@ -11,7 +11,7 @@ topic: prompt-surfaces
 entry_prefix:
 - F
 - W
-entry_high_water_F: 3
+entry_high_water_F: 4
 entry_high_water_W: 1
 ---
 
@@ -35,6 +35,7 @@ entry_high_water_W: 1
 | F-1 | 2026-08-18 | high | prompt-surface | fixed-verified | `append_entry`'s `anchor_heading` is implemented but not advertised in the `artifact` schema |
 | F-2 | 2026-08-18 | med | self-friction | fixed-verified | Read wire duplication as source duplication — the `workspace` param is injected once, not authored 24× |
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
+| F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -238,6 +239,49 @@ Run it against each of the four DBs; `codescout_sha` is available if the window 
 **The asymmetry is the honest reading, and it is pre-committed:** a positive result is strong (something changed when only routing changed); a null result is weak. **A null must never on its own authorise removing a tool** — the same law as `reconnaissance-patterns` R-3 → R-79, this ledger's most-repeated: a search that finds nothing is evidence about the search, and a negative result does not authorise a deletion. Removal needs a positive finding, measured, and preferably a second independent signal.
 
 **Fix idea / Pointer:** Re-run the query on or after 2026-09-02 and record the outcome against the table above. Spec: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md` § Revisit-when. Intervention commit `ba16b16a`; gate `598b92f2`.
+
+## F-4 — `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path
+
+**Observed:** 2026-08-18, pre-registering A-27 into
+`docs/trackers/prompt-hamsa-audit-log.md` — the same ledger A-26 went into, using the
+`title` + `body` + `anchor_heading` path shipped in `01194e21` (the F-1 fix).
+
+**Expected:** the server writes the `## A-27 — <title>` section itself, which is the
+whole point of that path — a hand-written heading missing its dash-and-title defines
+no token under `link_scan`, so every citation of the entry dangles.
+
+**Got:** no usable anchor. `anchor_heading` inserts the new section **before** the named
+heading (`append_entry.rs:23`), and `## A-26 — …` is the *last* heading in the file
+(line 594 of 701; `awk 'NR>594 && /^#{1,4} /'` returns nothing). An append-only ledger
+with no trailing section has nothing after the insertion point to name.
+
+**Probable cause:** not a defect in the safety reasoning — `append_entry.rs:106-110`
+refuses to infer placement on purpose, citing
+`docs/adrs/2026-07-10-repair-and-continue-input-handling.md` ("a write accepts an
+explicit target and never infers one"). The gap is that *append at end* is an
+**explicit** target too, and the API has no way to say it. The trio-or-nothing guard
+then makes the path all-or-nothing rather than degrading.
+
+**Workaround:** the two-step path — `append_entry` with `entry_collection` only (row +
+id + high-water mark), then `artifact(action="update", patch={body_edits: [{heading:
+"## A-26 — …", action: "insert_after", content: "## A-27 — …"}]})`. This is what A-26
+itself used, and what A-27 used. It works, but it hand-writes the heading, which is
+exactly the failure mode F-1's fix existed to remove.
+
+**Severity:** med — the safe path is unavailable on precisely the ledger shape that
+needs it most (append-only, no trailing template). `prompt-hamsa-audit-log.md` has 26
+entries and no trailing section; `prompt-surface-compaction-session-log.md` has
+`## Template for new entries` and is therefore fine, which is why F-1's fix verified
+green against one ledger and not the other.
+
+**Status:** open
+
+**Fix idea / Pointer:** accept an explicit end-of-body sentinel rather than inferring —
+e.g. `anchor_heading: "$end"`, or a sibling `anchor_position: "end"` — so placement
+stays caller-stated and the ADR's law is honoured. Cheaper alternative with no schema
+cost: none, since the trio guard is what forces the anchor. Note the schema line
+already spends 466 characters on this field, so a sentinel is documentable in ~40 more.
+Contrast [[F-1]], which shipped this path.
 
 ## Template for new entries
 
