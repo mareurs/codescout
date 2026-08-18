@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 5
-entry_high_water_W: 2
+entry_high_water_W: 3
 ---
 
 > **Work stream:** auditing codescout's four prompt surfaces (`tools/list`,
@@ -43,6 +43,7 @@ entry_high_water_W: 2
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-18 | med | Scout the generator before editing a generated surface | Would have shipped a "free mechanical dedup" with no valid implementation | validated |
 | W-2 | 2026-08-18 | high | Do the cache arithmetic before scoping byte-shaving: a 100% cache_read surface costs its cache_read price, not its byte count | Would have sunk dozens of evals into `artifact`'s 51-param long tail to recover ~$0.0002/request, while the axis that might move (does the prose change behaviour?) went unmeasured | validated |
+| W-3 | 2026-08-19 | high | Name the substrate before quoting a verdict — which tree, which binary, which index actually produced the number | Would have published 4222/1 as a gate result without knowing whether it described `HEAD` or a concurrent session's uncommitted mutant | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -411,6 +412,56 @@ naming the leaked marker.
    between them. Related: [[W-2]] on measuring the wrong axis, and the same lesson at
    harness level as `prompt-engineering:OP-5`, where a checker missing its exec bit
    reports a clean `0/N` that is character-identical to a genuine floor.
+
+## W-3 — Name the substrate before quoting the verdict — which tree did the gate actually run against?
+
+**Observed:** 2026-08-19, discharging the archived truncation bug's gate-1 condition
+(full `cargo test` green on `experiments`).
+
+**Pattern:** Before quoting a test result, a tool report, or a diagnostic count as
+*verification*, establish which **substrate** produced it — which tree, which binary,
+which index. Check it before *and* after, and read the run's own build lines rather than
+assuming continuity across two commands.
+
+**Counterfactual:** A concurrent session held an uncommitted mutation in
+`src/tools/config/mod.rs` (hoisting `Agent::activate` above the `switched` computation,
+which would pin `switched` false forever). It was present when `cargo test link_scan`
+compiled, and reverted before `cargo test --no-fail-fast` ran. Both runs returned
+clean-looking numbers and neither mentioned the other's existence. Without the
+before/after `git status` plus reading `Compiling …; Finished in 1.42s` out of the run's
+own buffer, I would have published **4222 passed / 1 failed** as a gate result while not
+knowing whether it described `HEAD` or a mutant.
+
+Note that the two most natural wrong claims were both *available* and both *plausible*:
+
+- *"gate green on my fix"* — right number, unverified tree;
+- *"M8 survived the whole suite"* — a coverage claim about someone else's work, drawn
+  from a run that never contained their mutation.
+
+The second is the more dangerous, because it is generous-sounding, concerns a colleague's
+code, and would have been offered as a favour.
+
+**Confirming data points:**
+
+1. This session — the mutation was present at run 1's compile and absent at run 2's; only
+   the recompile line distinguishes them, and nothing surfaces it unprompted.
+2. The archived truncation bug's own gate-2 condition exists for exactly this reason:
+   `link_scan` executes *inside* the MCP server, so which binary answered had to be
+   established before its output could count as evidence in either direction. The bug file
+   warns in as many words against reading a stale row as a failed fix.
+
+**Impact:** high — the failure mode emits a **number, never an error**, and the number is
+perfectly correct about a tree nobody has. Nothing downstream can detect it, because
+there is no defect in the artifact to find.
+
+**Promote-when:** a third instance where a verification's substrate (tree, binary,
+database, index) turns out to differ from the one assumed. At 3 datapoints, promote to
+`CLAUDE.md` alongside the mutation-apply discipline, as: *name the substrate before
+quoting the verdict.* The two rules are the same rule seen from opposite ends — one says
+a green bar proves nothing until you mutate it, the other says a measurement proves
+nothing until you know what it measured.
+
+**Status:** validated — two datapoints, both in this work stream.
 
 ## Template for new entries
 
