@@ -4480,10 +4480,15 @@ mod guide_hint_tests {
             .call_tool_by_name("tree", json!({"path": "."}))
             .await
             .expect("dispatch ok");
-        let text = all_text(&ok);
+        // `content_carries_guide_body`, not a bare substring match on the topic
+        // string: `SESSION_OPENING_GUIDE` ("project-activation-bootstrap") also
+        // appears inside the `_guide_hint` prose, so a substring check on
+        // `all_text` would pass on the hint alone, without the guide body ever
+        // riding out — a green result that does not prove the opener fired.
         assert!(
-            text.contains(crate::prompts::SESSION_OPENING_GUIDE),
-            "a prior refusal must not consume the session-opening slot: {text}"
+            content_carries_guide_body(&ok.content, crate::prompts::SESSION_OPENING_GUIDE),
+            "a prior refusal must not consume the session-opening slot: {}",
+            all_text(&ok)
         );
     }
 
@@ -4904,31 +4909,206 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    async fn activate_project_resets_hints() {
+    /// Re-activating the SAME project must leave the ledger alone. This is the
+    /// saving: today every activate wipes ~10 guide bodies out of the ledger and
+    /// they all re-inject on the next call.
+    ///
+    /// Checks BOTH a non-project-scoped topic (`librarian`) and the
+    /// project-scoped one (`SESSION_OPENING_GUIDE`) via `content_carries_guide_body`
+    /// on the activate response itself — not a post-call `ledger.contains` check,
+    /// which an inverted `switched` would pass anyway: if the bug wrongly re-armed
+    /// the bootstrap topic, the opener would fire on THIS response and immediately
+    /// re-insert it, making a post-call `contains` check blind to the mutation.
+    async fn activate_same_project_keeps_hints() {
         let (dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
-        let artifact = tool_by_name(&server, "artifact");
+        ctx.guide_hints_emitted.lock().set_rendezvous_active(true);
+        ctx.guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+        ctx.guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+
         let workspace = tool_by_name(&server, "workspace");
-        let _ = artifact
-            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
-            .await
-            .unwrap();
-        let _ = workspace
+        let result = workspace
             .call_content(
                 json!({"action": "activate", "path": dir.path().to_str().unwrap()}),
                 &ctx,
             )
             .await
             .unwrap();
-        let result = artifact
-            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+
+        assert!(
+            ctx.guide_hints_emitted.lock().contains("librarian"),
+            "re-activating the SAME project must not clear the ledger"
+        );
+        assert!(
+            !content_carries_guide_body(&result, crate::prompts::SESSION_OPENING_GUIDE),
+            "re-activating the SAME project must not re-arm the project-scoped topic \
+             either — a same-project activation is not a switch"
+        );
+    }
+
+    #[tokio::test]
+    /// A genuine project switch re-arms the project-scoped topic and NOTHING
+    /// else — the tool-contract guides the model already holds must survive.
+    /// The bootstrap re-arm and the session-opener check both run inside this
+    /// one `call_content` invocation, so the opener's guide body must ride out
+    /// on THIS activate response — asserted directly via
+    /// `content_carries_guide_body`, not the `_guide_hint` field (which never
+    /// reaches the wire for a text-form tool, and `workspace` renders text via
+    /// `format_compact`).
+    async fn activate_different_project_rearms_bootstrap_only() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        ctx.guide_hints_emitted.lock().set_rendezvous_active(true);
+        ctx.guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+        ctx.guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        let other = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(other.path().join(".codescout")).unwrap();
+
+        let workspace = tool_by_name(&server, "workspace");
+        let result = workspace
+            .call_content(
+                json!({"action": "activate", "path": other.path().to_str().unwrap()}),
+                &ctx,
+            )
             .await
             .unwrap();
+
         assert!(
-            extract_hint(&result)
-                .unwrap_or_default()
-                .contains("librarian"),
-            "activate should reset emitted set; first post-activate call should re-emit"
+            content_carries_guide_body(&result, crate::prompts::SESSION_OPENING_GUIDE),
+            "a genuine project switch must re-arm the project-scoped bootstrap topic, \
+             and the opener must fire on this very activate response"
+        );
+        assert!(
+            ctx.guide_hints_emitted.lock().contains("librarian"),
+            "a project switch must not touch tool-contract topics the model already holds"
+        );
+    }
+
+    #[tokio::test]
+    /// The bare-project-id focus switch returns early via
+    /// `activate_within_workspace` and must not touch the ledger at all.
+    async fn subproject_focus_switch_does_not_rearm() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let sub = dir.path().join("packages").join("api");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join("package.json"),
+            r#"{"name":"api","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        let ws_path = dir.path().join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some(uuid::Uuid::new_v4().to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        let ctx = shared_ctx(&server);
+        ctx.guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        let workspace = tool_by_name(&server, "workspace");
+        let _ = workspace
+            .call_content(json!({"action": "activate", "path": "api"}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            ctx.guide_hints_emitted.lock().contains("librarian"),
+            "a bare-project-id focus switch must not touch the ledger at all"
+        );
+    }
+
+    #[tokio::test]
+    /// A missing or malformed `path` must not wipe the ledger. Today it does,
+    /// because the clear is the function's first statement and the param check
+    /// is two lines later.
+    async fn malformed_activate_leaves_ledger_intact() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        ctx.guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        let workspace = tool_by_name(&server, "workspace");
+        let result = workspace
+            .call_content(json!({"action": "activate"}), &ctx)
+            .await;
+        assert!(result.is_err(), "a missing path must still error");
+
+        assert!(
+            ctx.guide_hints_emitted.lock().contains("librarian"),
+            "a malformed activate call must not wipe the ledger"
+        );
+    }
+
+    #[tokio::test]
+    /// Without a rendezvous a `/clear` is invisible, so the precise path would
+    /// starve the new conversation. The gate must fall back to the blunt clear.
+    async fn without_a_rendezvous_activate_still_clears_everything() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        // Rendezvous gate left at its default (inactive) — no companion hook has
+        // ever stamped this server's slot.
+        //
+        // Deliberately NOT `SESSION_OPENING_GUIDE`: `call_content`'s opener check
+        // (`!emitted.contains(SESSION_OPENING_GUIDE)`) re-inserts that exact topic
+        // on every response where it's absent, including this one — so it would
+        // read back as present after the call REGARDLESS of clear vs. re-arm, and
+        // could not distinguish the two paths. `librarian` and
+        // `progressive-disclosure` are ordinary tool-contract topics `workspace`
+        // never touches on its own, so their presence/absence isolates what the
+        // re-arm predicate itself did.
+        ctx.guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+        ctx.guide_hints_emitted
+            .lock()
+            .insert("progressive-disclosure".to_string());
+
+        let other = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(other.path().join(".codescout")).unwrap();
+
+        let workspace = tool_by_name(&server, "workspace");
+        let _ = workspace
+            .call_content(
+                json!({"action": "activate", "path": other.path().to_str().unwrap()}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let ledger = ctx.guide_hints_emitted.lock();
+        assert!(
+            !ledger.contains("librarian"),
+            "without a rendezvous, activate must fall back to the blunt clear — \
+             including tool-contract topics"
+        );
+        assert!(
+            !ledger.contains("progressive-disclosure"),
+            "the blunt clear must be total, not the project-scoped-only re-arm"
         );
     }
 

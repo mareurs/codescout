@@ -114,6 +114,11 @@ impl ActivateProject {
     pub const NAME: &'static str = "activate_project";
 }
 
+/// Topics forgotten on a genuine project switch. Deliberately just the one:
+/// the tool-contract guides the model already holds stay valid across a switch,
+/// and re-sending them is the waste this phase exists to remove.
+const PROJECT_SCOPED: &[&str] = &["project-activation-bootstrap"];
+
 pub struct ProjectStatus;
 
 #[async_trait::async_trait]
@@ -138,7 +143,6 @@ impl Tool for ActivateProject {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        ctx.guide_hints_emitted.lock().clear();
         // Not the shared `path` hint: this one is a project root, not a file. BL-3 Class B.
         let path = super::require_str_param_or_hint(
             &input,
@@ -150,7 +154,8 @@ impl Tool for ActivateProject {
         )?;
         let read_only = optional_bool_param(&input, "read_only");
 
-        // Focus-switch path: bare project ID (no path separator)
+        // Focus-switch path: bare project ID (no path separator). Returns early —
+        // never reaches root resolution below, so the guide ledger stays untouched.
         if !path.contains('/') && !path.contains('\\') {
             let is_project_id = {
                 let inner = ctx.agent.inner.read().await;
@@ -198,6 +203,34 @@ impl Tool for ActivateProject {
             .into());
         }
         let root = root.canonicalize().unwrap_or(root);
+
+        // Re-arm the guide ledger BEFORE `Agent::activate` below mutates
+        // `default_workspace_root`, or this comparison always reads "same
+        // project" and the whole feature is inert. Both sides are already
+        // canonical (see `Agent::activate`'s doc comment) — no redundant
+        // `canonicalize()` here.
+        let switched = {
+            let inner = ctx.agent.inner.read().await;
+            inner.default_workspace_root.as_deref() != Some(root.as_path())
+        };
+        {
+            let mut led = ctx.guide_hints_emitted.lock();
+            if led.rendezvous_active() {
+                // A companion hook is reporting in, so a `/clear` is visible to us
+                // via the rendezvous poll elsewhere — safe to re-arm only the
+                // project-scoped topic on a genuine switch, leaving the
+                // tool-contract guides the model already holds untouched.
+                if switched {
+                    led.re_arm(PROJECT_SCOPED);
+                }
+            } else {
+                // No rendezvous ⇒ a `/clear` is invisible to this server ⇒ surgical
+                // re-arming could starve a new conversation that kept the old
+                // session key. Keep the blunt, always-safe behaviour.
+                led.clear();
+            }
+        }
+
         let had_home = ctx.agent.home_root().await.is_some();
         let mut timer = crate::perf::PhaseTimer::start("activate_project");
 
