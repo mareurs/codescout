@@ -82,7 +82,7 @@ measurement existed, and the call is the user's.
 
 > **Added 2026-08-18, headings only.** This audit's augmentation prompt tells readers to "read its body section" for a GF-N row, and told maintainers not to rewrite body sections. Both were right and they could not both be satisfied: no `GF-N` heading existed anywhere in this body, so `link_scan` bound none of the eight tokens and every citation of them resolved to nothing. These anchors add the missing definitions and nothing else — no number is re-run, no existing section is touched. Each entry's evidence stays where the audit put it, named below.
 >
-> Mechanism: `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`. A table row defines no token, which is why the index above could be complete and the entries still uncitable.
+> Mechanism: `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`. A table row defines no token, which is why the index above could be complete and the entries still uncitable.
 
 ### GF-1 — `git` is unconditionally unbounded, so half its IL-3 refusals are self-bounded
 

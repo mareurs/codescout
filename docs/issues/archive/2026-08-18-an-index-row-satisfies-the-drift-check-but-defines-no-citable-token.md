@@ -1,5 +1,5 @@
 ---
-id: d34dfcd2cc718bd8
+id: 9dc28c0860b214d9
 kind: bug
 status: fixed
 title: 'BUG: an index-table row satisfies the snapshot-drift check but defines no citable token, so an entry can be written "successfully" and be permanently unreachable by citation'

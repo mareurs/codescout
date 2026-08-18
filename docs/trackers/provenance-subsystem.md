@@ -1031,7 +1031,7 @@ left — mass-promotion would contradict this tracker's own "narrative only when
 insufficient" rule, and it is **safe** to leave them precisely because prefix `PV` is now defined:
 `link_scan` reports a citation of an undefined `PV-N` as *dangling*, so future breakage is visible
 rather than silent. That guarantee is what does not hold for a ledger defining nothing at all — see
-`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+`docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
 
 Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e0060ed9b8", entry_filter={"id": {"eq": "PV-53"}})`.
 

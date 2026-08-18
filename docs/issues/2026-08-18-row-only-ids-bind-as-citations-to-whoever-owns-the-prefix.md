@@ -138,7 +138,6 @@ re-verify before allocating, since this session also minted `FT`.
 ## References
 
 - `docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md` — the `T` collision whose investigation surfaced this
-- `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` (BL-39) — the row-defines-nothing rule; this is its undeclared-ledger blind spot
+- `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` (BL-39) — the row-defines-nothing rule; this is its undeclared-ledger blind spot
 - `get_guide("tracker-conventions")` § *One entry format, never two*
 - `src/librarian/tools/link_scan/resolve.rs` — `prefix_conflicts` and why it stays silent here
-

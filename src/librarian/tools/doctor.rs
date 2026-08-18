@@ -1441,7 +1441,7 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 /// whether anything can *cite* the entry, which an index row does not satisfy at all:
 /// `link_scan` binds a token to a `## <ID> — <title>` heading, so a row-only entry is
 /// unreachable however visible it is in the rendered table.
-/// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+/// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
 ///
 /// **Why this scan has to exist at all, rather than just the write-path advisory.**
 /// `append_entry`/`update_entry` now report `undefined_in_body`, but only for the entry
@@ -2655,7 +2655,7 @@ mod tests {
         .unwrap();
     }
 
-    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    /// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
     ///
     /// The whole-ledger case, and the larger half of that bug: no `BL-N` heading
     /// exists anywhere, so every entry is uncitable and nothing done to one row

@@ -997,7 +997,7 @@ mod tests {
         }
     }
 
-    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    /// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
     ///
     /// An archetype that keeps id-bearing entries in `params` is teaching a LEDGER,
     /// and a ledger's entries are citable only through `## <ID> — <title>`:

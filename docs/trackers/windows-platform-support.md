@@ -106,7 +106,7 @@ to master — the tracker outlives them.
 One section per WIN-N, and its only job is to **define the token**: `link_scan` derives a
 citable definition from a `## <ID> — <title>` heading and from nothing else, so before this
 section existed all 129 external citations of WIN-N resolved to nothing (measured 2026-08-18,
-`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
+`docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
 Kept deliberately terse — the table above holds the full account; these are the landing spots a
 citation needs. Written from the **table**, not from `params`, because the two had diverged: see
 § History 2026-08-18.
@@ -362,7 +362,7 @@ suppressed as if `WIN-24` were an ordinary uppercase-hyphen-number string in pro
 dangling total sat at 621 before this backfill and 621 after it, unchanged, because those
 citations were never in it. The only surface that ever saw this was `doctor`'s
 `ledger_defines_nothing`
-(`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
+(`docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
 
 ### 2026-08-07 — WIN-30 half fixed, half mitigated; one of WIN-27's twelve unknown wine failures explained
 

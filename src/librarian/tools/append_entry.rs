@@ -444,7 +444,7 @@ mod tests {
         assert!(result["snapshot_hint"].as_str().unwrap().contains("git"));
     }
 
-    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    /// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
     ///
     /// `append_entry` emits `undefined_in_body` from its own call site, so it needs
     /// its own test — the update_entry tests cover the classification but not this

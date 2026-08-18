@@ -495,7 +495,7 @@ fn snapshot_stale_note(
 /// anything can *cite* the entry, which an index row does not satisfy at all —
 /// `link_scan`'s resolver binds a token to a defining heading. An entry can therefore
 /// pass every existing check and be permanently unreachable, which is exactly the bug
-/// this closes (`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
+/// this closes (`docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
 ///
 /// **Deliberately NOT gated on [`body_keeps_snapshot`].** That gate exists so a
 /// params-canonical tracker is not nagged about rows it never intended to keep, and it
@@ -535,7 +535,7 @@ fn undefined_in_body_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> O
              every other entry in it are uncitable — `link_scan` binds a token to a \
              `## {prefix}-N — <title>` heading, and index rows define nothing. This is a \
              whole-ledger format issue, not something one row can fix: see \
-             docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md."
+             docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md."
         )),
     }
 }
@@ -1230,7 +1230,7 @@ pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collecti
 /// reference to it resolves to nothing, forever, with nothing reporting it.
 /// Measured 2026-08-18: ten row-only `A-N` entries with 25 dead cross-file citations,
 /// and a params-rendered ledger with **zero** `BL-N` definitions against 117.
-/// See `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+/// See `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
 ///
 /// **Delegates to `link_scan::extract` on purpose — do not inline a regex here.**
 /// One definition rule in the codebase is the whole point. A second hand-copied

@@ -55,7 +55,7 @@ How the Claude **Fable** model (`claude-fable-5`) behaved when it "ran great" (J
 
 > **Added 2026-08-18.** No `FND-N` heading existed anywhere in this body, so `link_scan` bound none of the eighteen tokens and every citation of them — including the cross-file ones from `prompt-hamsa-audit-log` — resolved to nothing. The grouped sections above carry the narrative for FND-1..13 and FND-17; **FND-14, 15, 16 and 18 had no body section at all**, so their claims existed only in the machine-local catalog. Each anchor below carries the entry's claim, so the record travels with the repo.
 >
-> Mechanism: `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+> Mechanism: `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
 
 ### FND-1 — "The 1st Fable that ran great" is the 2026-06-09 GA launch window
 

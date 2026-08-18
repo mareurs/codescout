@@ -74,7 +74,7 @@ those areas must state which lane actually built its tests.
 
 One `### SD-N — <title>` section per entry, below. **The heading is what makes the entry citable** — `link_scan` binds a token to a `## <ID> — <title>` heading and to nothing else, so an entry that lives only in a params row can never be cited, however complete the row is.
 
-**There is no rendered table in this file.** An earlier version of this note said the live table was "rendered from params at the top of the file". That was false in two ways: nothing writes `render_template` output to disk (it is projected into `librarian(action="context")` only), and this body carried no `### SD-N` sections either — so all 11 entries were uncitable while the note claimed both surfaces existed. Corrected 2026-08-18; mechanism in `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+**There is no rendered table in this file.** An earlier version of this note said the live table was "rendered from params at the top of the file". That was false in two ways: nothing writes `render_template` output to disk (it is projected into `librarian(action="context")` only), and this body carried no `### SD-N` sections either — so all 11 entries were uncitable while the note claimed both surfaces existed. Corrected 2026-08-18; mechanism in `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
 
 Each section carries the entry's disposition and its load-bearing measurement. The full `evidence` / `fix` / `notes` bodies live in `params`, which is machine-local and git-ignored — that gap is SD-11's own subject, and BL-29's. Read one with `artifact(action="get", id="38a17e4acf1f1fa1", entry_filter={"id": {"eq": "SD-10"}})`.
 
