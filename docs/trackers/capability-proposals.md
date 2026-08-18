@@ -380,7 +380,7 @@ build/test/clippy. Those are genuine long work, not hand-rolled waiting — but 
 *consumer* of an await primitive, since they are what a caller would background first.
 ## CAP-5 — Server-assigned entry ids for prose trackers
 
-**Status:** proposed · **Opened:** 2026-08-17
+**Status:** partially shipped · **Opened:** 2026-08-17 · **Updated:** 2026-08-18
 
 **The problem.** Entry ids in prose ledgers are allocated by the agent: scan the file for
 the max `PREFIX-N`, add one, write the entry. That read-then-write is not atomic, and it is
@@ -473,6 +473,62 @@ written instruction telling authors to keep the index in sync, and each violates
 13 bodies had no row; `tool-usage-patterns.md` avoids the problem only by having no index at
 all; and **this file has 5 CAP sections and, until this entry, 3 index rows.** A rule that
 fires only when the author remembers to consult it is not yet a rule.
+
+**Shipped, 2026-08-18 — the dependency inversion is done; the body writer is not.**
+
+The substrate check above is now **out of date in its central claim**, and this note is the
+correction. Read it before acting on anything above it.
+
+> ❌ *"It is **unavailable to every tracker that broke.** `append_entry` requires an
+> augmentation with a declared `entry_collection` … the allocator is unreachable and hand
+> allocation is the only option the tool surface offers."*
+
+That was true when written and is false now. `augmentation::allocate_entry_id` was added in
+`540c29c3` and **is wired to the MCP surface** at `src/librarian/tools/append_entry.rs:91`:
+`append_entry` takes a prose path precisely when `entry_collection` is *omitted*, reserving
+the id under the same `IMMEDIATE` transaction and handing it back. It reaches exactly the
+three files this entry named as unreachable — `reconnaissance-patterns.md` (now
+`entry_prefix: R`, `entry_high_water_R: 104`), `tracker-hygiene-log.md`, and this file.
+
+So **this entry's own "Revised proposal" — *invert the dependency, do not add a sibling
+action* — shipped.** Three of its four defect classes are closed:
+
+1. **collisions and the stale-max race** — closed. Allocation is transactional, and the
+   counter is the max of three inputs (body, machine-local reservation, and the committed
+   `entry_high_water_<PREFIX>` frontmatter mark), so no single input can walk it backwards.
+3. **orphaned index rows** — closed for the params case by `update_entry`'s `snapshot_stale`
+   report; still hand-work where a tracker keeps a body index.
+4. **suffixed ids** — closed. The server owns the format of the id itself.
+
+**Defect class 2 is still open, and it is the remaining work.** `allocate_entry_id`
+*reserves* an id and returns a hint saying "then write the section yourself with the id it
+returns" — the agent writes the heading, and nothing validates what it wrote. `link_scan`'s
+`def_re` is `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so an agent that writes `## R-105` without
+` — title` creates an entry that **defines no token**, and every citation of it dangles.
+That is the mechanism `get_guide("tracker-conventions")` records as having produced ~30 of
+39 sampled dangling tokens in this repo. Discipline is currently the only thing preventing
+it, and this entry's own *"Evidence that discipline alone does not hold"* section argues why
+that is not enough.
+
+The remaining scope is therefore narrower than the table above: not a new allocator, but a
+**server-side body writer** on top of the one that exists — format `## <ID> — <title>`,
+insert at an anchor, in the same call that assigns the id. This entry already argues the
+right shape for it (extend `append_entry` rather than add `append_section`, so a *storage*
+distinction is not encoded as an *API* one), and that argument is unaffected by what shipped.
+
+One open question above is **answered** by the shipped code: *"Concurrency: … worth
+confirming whether that is process-level or file-level."* It is file-level — a single
+SQLite `IMMEDIATE` transaction paired with `busy_timeout`, which is the guarantee the
+two-OS-processes-one-checkout case needs. A two-thread test against a ledger with no params
+collection ships alongside it.
+
+Why this note exists rather than a rewrite: the analysis above is what produced the shipped
+design, and deleting it would erase the reasoning while keeping the conclusion. Third stale
+artifact found on 2026-08-18 by the same mechanism — a fix landed and nothing re-read the
+document that asked for it. The other two:
+`docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
+(said "NOT yet called from any MCP tool" of code already wired) and
+`docs/issues/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`.
 
 **Open questions.**
 

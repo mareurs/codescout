@@ -123,6 +123,10 @@ the one that is correct.
 
 ## Fix
 
+**Re-assessed 2026-08-18. Option (1) has SHIPPED; (2) and (3) have not.** Read the
+status block at the end of this section before acting on the sketch below — the sketch is
+what was proposed, not what remains.
+
 Sketch, smallest first — this needs a design decision, not just an implementation:
 
 1. **Allocate prose ids server-side.** An action that, given a tracker and a
@@ -134,6 +138,53 @@ Sketch, smallest first — this needs a design decision, not just an implementat
 3. **Regenerate the rendered section from `render_template` on entry write.**
    Also fixes the sibling staleness bug; the two should probably be done
    together.
+
+### Status of each option, verified 2026-08-18
+
+**(1) Allocate prose ids server-side — SHIPPED.** `augmentation::allocate_entry_id`
+(added `540c29c3`) is wired at `src/librarian/tools/append_entry.rs:91`: `append_entry`
+takes a prose path precisely when `entry_collection` is *omitted*, reserves the id under one
+`IMMEDIATE` transaction, and returns it. The counter is the max of three inputs — the live
+body, the machine-local reservation table, and the committed `entry_high_water_<PREFIX>`
+frontmatter mark — so no single input can walk it backwards, which is the defect
+`docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` closed.
+Hardened since by three follow-ups: worktree refusal, ledger-shaped heading-level reporting,
+and `frontmatter_max` diagnostics at the MCP boundary. The `## Resume` note below saying
+"(1) is worth building" was written before it was built.
+
+**(2) Surface the archetype in `find` — NOT DONE.** `src/librarian/tools/find.rs` mentions
+`entry_collection` only in two test fixtures (both `None`), never in result-row
+construction. `find` can already *filter* on augmented-ness (`augmented_true_returns_only_augmented`)
+but does not *report* which workflow a row needs, so a caller still probes with
+`artifact(get)` to find out.
+
+**(3) Regenerate the rendered snapshot — NOT DONE; MITIGATED ONLY.** The sibling bug
+`docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md`
+is `status: mitigated`: `update_entry` now *reports* `snapshot_stale` naming the row whose
+rendered values are behind, which removes the silence but not the hand-work. Confirmed
+first-hand 2026-08-18 while closing BL-38 in `docs/trackers/open-issue-work-queue.md` —
+`update_entry` for the params row, then a separate `artifact(update, patch={body_edits})`
+for the rendered table, with the tool's own warning as the only thing preventing a half-write.
+
+**A design obstacle (3) does not yet name.** `open-issue-work-queue.md` *does* carry a
+`render_template`, so the tool holds both the template and the params and could render the
+row itself. But the template emits `## Phases` and `## Queue`, while the file's actual
+heading is `## Queue — rendered snapshot (2026-08-18)`. **The template's headings have
+already drifted from the file's**, so regeneration cannot render-and-splice by heading match
+— something must declare where the rendered region begins and ends (an explicit target
+heading on the augmentation, or marker comments in the body). That decision is unmade, and
+CAP-5 does **not** settle it: CAP-5 is about *writing new entries*, not re-rendering an
+existing params-driven snapshot.
+
+**What actually remains, in recommended order.** CAP-5's own defect class 2 is the live one:
+`allocate_entry_id` reserves an id and hands back a hint saying "then write the section
+yourself", and **nothing validates the heading the agent then writes**. `link_scan`'s
+`def_re` is `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so `## R-105` without ` — title` defines no
+token and every citation of it dangles — the mechanism that produced ~30 of 39 sampled
+dangling tokens in this repo. So: **a server-side body writer** (extend `append_entry`
+rather than add `append_section`, per CAP-5's storage-vs-API argument) closes that class,
+and is the next piece of work. (2) is small and independent. (3) needs its own design pass
+for the anchoring question above.
 
 ## Tests added
 
@@ -153,6 +204,20 @@ grep -rn "R-<next>" docs/trackers/          # collision check, do not skip
 Do not trust a commit message's claim that an id exists.
 
 ## Resume
+
+**Current next action, 2026-08-18:** build the server-side body writer — extend
+`append_entry` so the call that assigns an id also writes `## <ID> — <title>`, per CAP-5's
+argument that a second `append_section` action would encode a storage distinction as an API
+one. That closes CAP-5 defect class 2, which is the only one of its four still live:
+`allocate_entry_id` hands back an id and trusts the agent to format the heading, so an entry
+can still be born undefined and dangling. See § *Status of each option, verified 2026-08-18*
+in the Fix section for what shipped and what did not; option (2) is small and independent,
+option (3) needs its own design pass for the render-region anchoring question.
+
+The original next action is kept below because its reasoning is still sound and only its
+conclusion aged.
+
+---
 
 Decide between fixes 1-3 with the user before implementing — this is an
 ergonomics change to a surface many trackers depend on, and (3) overlaps the
