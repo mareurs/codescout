@@ -232,6 +232,12 @@ the legacy path is detected.
 
 ### Not part of I-10 — `<project>/.codescout/guide_hints/`
 
+<!-- audit-doc-refs:ignore — this section documents a directory whose whole point is that
+     it should NOT exist. Every `.codescout/guide_hints/` ref under this heading is
+     dangling by construction once the cleanup below has been run, which is the section
+     being accurate rather than drift — the same rationale as CHANGELOG's `### Removed`
+     marker. Scope is this subsection only. -->
+
 Orphaned data, not a fallback. The per-session guide-hint ledger used to live here; as of
 `17119957` it is written to `<per-user-state>/codescout/guide_hints/` instead
 (`per_user_state_dir()`, i.e. `$XDG_STATE_HOME` or `~/.local/state`).
@@ -251,14 +257,35 @@ Two consequences worth stating, because neither is visible from the code that mo
 - This is per-repo residue: *every* project that ran codescout before `17119957` has one,
   each holding one JSON file per session ever opened there.
 
-Safe to delete at any time, with no migration step, because the data is unreachable:
+**Whether it is gitignored is per-repo, and you must check before deleting.** codescout
+gitignores `.codescout/`; not every project does. Measured 2026-08-18 across 13 checkouts
+on one machine: 12 untracked, and **one — `mirela/backend-kotlin` — had 75 of these files
+committed**, so a blanket `rm -rf` sweep deleted tracked content there. It was fully
+recoverable (`git checkout -- .codescout/guide_hints`, all 75 restored from HEAD), but
+only because git had them; in a repo that tracks them, this is a real deletion.
+
+This paragraph exists because an earlier revision of this very section asserted the
+directory was gitignored, generalising from codescout to every project without checking
+one — and the sweep that followed was the first test of the claim.
+
+Unreachable-by-code and untracked-by-git are independent properties. The first is
+established above and holds everywhere; the second must be established per repo:
 
 ```
+# check FIRST — non-empty output means these files are committed here
+git -C <project_root> ls-files .codescout/guide_hints/
+
+# only then
 rm -rf <project_root>/.codescout/guide_hints/
+
+# and confirm nothing tracked went with it
+git -C <project_root> status --porcelain | grep guide_hints
 ```
 
-Recorded here rather than filed as a bug: the directory is gitignored, so this is local
-clutter with no correctness impact and nothing to regress.
+Recorded here rather than filed as a bug: the data is unreachable by any code path, so
+there is no correctness impact and nothing to regress. In a repo that *tracks* it, the
+better fix is `.gitignore` plus `git rm --cached` — the per-session cache should not have
+been in history in the first place, and after `17119957` it is permanently orphaned there.
 
 ## Known gaps in the contract (open work)
 

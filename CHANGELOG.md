@@ -229,8 +229,11 @@ All notable changes to codescout are documented here.
   days are garbage-collected on load. **Nothing reads the old location**, and nothing will
   ever clean it: the GC only walks the directory it is handed, which is now the per-user
   one, so every project that ran codescout before this carries an orphaned
-  `.codescout/guide_hints/` holding one JSON file per session ever opened there. It is
-  unreachable data, gitignored, and safe to `rm -rf` with no migration step. The
+  `<project>/.codescout/guide_hints/` holding one JSON file per session ever opened there.
+  It is unreachable data and safe to delete with no migration step — but **check whether
+  your repo tracks it first** (`git ls-files` under that path): codescout gitignores
+  `.codescout/` and most projects do, but not all, and a blanket sweep will delete
+  committed files in one that doesn't. The
   `LedgerFile::Legacy` arm that survives handles the legacy *shape* (an unstamped
   `Vec<String>`), not the legacy *location*. See `docs/state-protocol.md` §
   *Backwards-compat fossils*.
