@@ -78,7 +78,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
-| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | open | `d34dfcd2cc718bd8` |
+| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **blocked** — step 1 done (`de4df2cd`: `body_defined_indices`, delegating to `link_scan::extract`); steps 2-4 wait on the step-0 design fork, which is a decision not a patch | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The

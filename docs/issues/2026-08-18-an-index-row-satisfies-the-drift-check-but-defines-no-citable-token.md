@@ -262,11 +262,22 @@ is visible in the diff, where a second resolver rule's failure mode is invisible
 
 Then, whichever branch:
 
-1. **One source of truth for "defines a citable token."** Lift `def_re`'s heading rule out of
-   `link_scan` into a shared helper and add `body_defined_indices(body, id_prefix)` beside
-   `body_claimed_indices` in `src/librarian/catalog/augmentation.rs`. Both the resolver and
-   the write path then read the *same* rule, so the two cannot drift again — the drift is
-   this bug. This step is identical under (a) and (b) and can land first, alone.
+1. **One source of truth for "defines a citable token." — DONE, `de4df2cd`.**
+   `body_defined_indices(body, id_prefix)` now sits beside `body_claimed_indices` in
+   `src/librarian/catalog/augmentation.rs`. **Implemented differently from the plan above,
+   and better:** rather than *lifting* `def_re` into a shared helper, it **calls
+   `link_scan::extract` outright** and filters `definitions` by prefix. Same intent — one
+   rule — achieved with zero new predicate rather than one new shared one, which is
+   stricter about the thing this bug is about. It also inherits the cmark-accurate cases a
+   line regex gets wrong: fenced blocks, code-first headings, setext headings, frontmatter.
+   No new layering — `augmentation.rs:2` already imports from `librarian::tools`.
+
+   Marked `#[cfg_attr(not(test), expect(dead_code))]` until its consumer lands. `expect`
+   rather than `allow` so the marker fails the build and deletes itself the moment a
+   production caller appears, instead of rotting as a permanent exemption; scoped to
+   `not(test)` because "unused" is configuration-dependent here — the tests do call it, so a
+   bare `expect` is itself an `unfulfilled_lint_expectations` error under `-D warnings`
+   with `--all-targets`.
 
 2. **A distinct advisory, because the remedy is distinct.** Add `undefined_in_body` to
    `AppendOutcome` and `UpdateEntryOutcome`, populated from the new predicate: the entry has a
@@ -303,20 +314,47 @@ tracker, tracked as BL-30 / `63d36f5da3b200a7`, and it does not need to be settl
 predicate is fixed.
 ## Tests added
 
-None yet — nothing is implemented. What the fix must pin:
+Three, all in `src/librarian/catalog/augmentation.rs` tests, landed with `de4df2cd`.
 
-- `an_index_row_without_a_heading_is_claimed_but_not_defined` — the two predicates give
-  different answers for `| A-26 | … |`, which is the whole bug. Mutation check: make
-  `body_defined_indices` accept rows and this test must go red while
-  `body_claimed_indices_reads_headings_and_index_rows` stays green.
-- `append_entry_reports_undefined_in_body_for_a_row_only_entry`, and its negative twin
-  `…_stays_silent_for_a_prose_only_tracker` — an artifact whose body claims **no** ids is a
-  legitimate params-canonical design (5 of 28 augmented trackers here, per
-  `body_claimed_indices`' doc comment) and must not be told it is broken on every write.
-- `shared_definition_rule_matches_link_scan` — assert the shared helper and `def_re` agree on
-  a table of headings (`## A-9 Addendum` → no, backtick-first → no, `## A-9 — t` → yes). This
-  is the regression guard against the two rules drifting apart again.
+**The RED was against the real defect, not against absence.** All three were first run with
+a deliberately-wrong stub whose body was `body_claimed_indices(body, id_prefix)` — i.e.
+literally this bug — and all three failed while all four existing `body_claimed_indices`
+tests stayed green:
 
+```
+an_index_row_without_a_heading_is_claimed_but_not_defined   left: {3,4,5,7}   right: {3}
+defined_indices_delegate_to_link_scans_own_definition_rule  left: {1,2,3,4,5} right: {1}
+body_defined_indices_is_empty_when_the_body_defines_nothing assertion failed: is_empty()
+```
+
+That run **is** the mutation check the test comments promise — it was performed before the
+real implementation existed, so the tests are known to detect the defect rather than merely
+to describe the fix.
+
+- `an_index_row_without_a_heading_is_claimed_but_not_defined` — asserts **both** predicates
+  on the *exact fixture* `body_claimed_indices_reads_headings_and_index_rows` already pins,
+  so the disagreement is visible on identical input. Four ids claimed, one defined: `F-7`
+  and `F-4` are table rows, and `F-5` is `###### **F-5** z`, a heading with no ` — title`,
+  which the resolver reads as a section *about* F-5.
+- `defined_indices_delegate_to_link_scans_own_definition_rule` — dashless heading,
+  code-first heading, heading inside a fence, table row. Every case is already pinned by
+  `link_scan`'s own tests; this one exists so a later "optimisation" that swaps the
+  delegation for a local regex has to reproduce all of them. Re-approximating the rule in a
+  second place is how the two predicates drifted apart to begin with.
+- `body_defined_indices_is_empty_when_the_body_defines_nothing` — encodes the 117-`BL-N`
+  measurement as a regression guard: a params-rendered index defines **zero** tokens, which
+  is a legitimate whole-ledger shape, so the advisory in step 2 must not read it as
+  per-entry breakage.
+
+**Still unwritten**, because they belong to steps 2-3 and their expected behaviour depends
+on the step-0 fork:
+
+- `append_entry_reports_undefined_in_body_for_a_row_only_entry` and its negative twin
+  `…_stays_silent_for_a_prose_only_tracker`.
+- `shared_definition_rule_matches_link_scan` — now partly redundant: with the
+  implementation delegating rather than duplicating, agreement is structural rather than
+  asserted. `defined_indices_delegate_to_link_scans_own_definition_rule` is what keeps it
+  that way.
 ## Workarounds
 
 Write the `## <ID> — <title>` heading for every entry, and do not trust the write path's
@@ -332,20 +370,31 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 
 ## Resume
 
-Decide **step 0** before writing any code — (a) rendered ledgers must emit a definition, or (b) the
-resolver accepts a generated row as one. Everything else reads differently depending on the answer,
-and an implementer who picks it silently mid-patch will pick whichever is convenient at that line.
-Recommendation and the cost of each side are in § Fix.
+**Step 1 is done (`de4df2cd`) — the predicate exists, is tested, and is mutation-verified.**
+What is left is blocked on a decision, not on code.
 
-Step 1 can land first and alone regardless: add `body_defined_indices` next to
-`body_claimed_indices` in `src/librarian/catalog/augmentation.rs`, sharing `link_scan`'s heading
-rule (`src/librarian/tools/link_scan/extract.rs:94-97`), with
-`an_index_row_without_a_heading_is_claimed_but_not_defined` written first and watched fail. That
-single predicate is what every later step consumes, and it is verifiable on its own.
+Decide **step 0**: (a) rendered ledgers must emit a definition, or (b) the resolver accepts a
+generated row as one. Everything remaining reads differently depending on the answer — under
+(b) a row-only entry is citable, so the step-2 advisory would be *wrong* to fire. Do not let
+an implementer pick this silently mid-patch; whichever is convenient at that line is not the
+same as whichever is right. Recommendation and the cost of each side are in § Fix. My read is
+(a): one definition rule in the codebase, and a wrong template fails visibly in a diff where
+a second resolver rule's failure mode is invisible.
 
-Do **not** start with the backfill (step 4). It is the visible half and the tempting one, and doing
-it first removes the evidence that the check is missing while leaving the next row-only entry just
-as silent.
+Once that is settled, steps 2-3 in order — the `undefined_in_body` advisory, then the
+`doctor` sweep. **Step 3 is the only one that surfaces the entries already broken**; a
+per-write advisory never will, because those 25 `A-N` and 117 `BL-N` citations were written
+weeks ago.
+
+Do **not** start with the backfill (step 4). It is the visible half and the tempting one, and
+doing it first removes the evidence that the check is missing while leaving the next row-only
+entry just as silent.
+
+One loose thread worth knowing before step 2: the RED run showed `body_claimed_indices` also
+counts a heading inside a fenced block and a code-first `` `A-3` `` heading (`{1,2,3,4,5}` on
+the delegation fixture). Harmless for id allocation — over-claiming is safe, by that
+function's own documented argument — but it means the *claimed* set is not merely "defined
+plus rows", and any step-2 wording contrasting the two should not imply that it is.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.
