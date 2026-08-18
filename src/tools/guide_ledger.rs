@@ -139,6 +139,45 @@ impl GuideLedger {
         }
     }
 
+    /// Forget the named topics so they inject again, leaving every other topic
+    /// in place. This is the surgical twin of [`clear`](Self::clear): a project
+    /// switch re-teaches only the project-scoped guide, not the nine
+    /// tool-contract guides the model already holds.
+    ///
+    /// Persists only when something was actually removed.
+    pub fn re_arm(&mut self, topics: &[&str]) {
+        let mut changed = false;
+        for topic in topics {
+            if self.emitted.remove(*topic).is_some() {
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist();
+        }
+    }
+
+    /// Re-arm every topic delivered longer ago than `ttl`. Returns how many.
+    ///
+    /// This is the only mechanism available to clients that expose no
+    /// conversation identity at all — where one MCP process serves many
+    /// conversations, an unbounded ledger starves every conversation after the
+    /// first. Re-sending a guide the model still holds costs tokens once;
+    /// withholding one it never received is silent. Persists only on a change.
+    pub fn expire_idle(&mut self, ttl: std::time::Duration) -> usize {
+        let Ok(ttl) = chrono::Duration::from_std(ttl) else {
+            return 0;
+        };
+        let cutoff = Utc::now() - ttl;
+        let before = self.emitted.len();
+        self.emitted.retain(|_topic, at| *at > cutoff);
+        let removed = before - self.emitted.len();
+        if removed > 0 {
+            self.persist();
+        }
+        removed
+    }
+
     /// Record a one-shot session notice. Returns `true` the FIRST time this
     /// key is seen and `false` forever after (until [`clear`](Self::clear)),
     /// so the caller can write `if ledger.notice_once(K) { emit }`.
@@ -420,5 +459,90 @@ mod tests {
             l.is_empty(),
             "an unreadable ledger degrades to re-sending, never to suppressing"
         );
+    }
+
+    #[test]
+    fn re_arm_removes_only_the_named_topics_and_persists() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+
+        let mut l = GuideLedger::load("sess-rearm", Some(hints.clone()));
+        l.insert("project-activation-bootstrap".to_string());
+        l.insert("librarian".to_string());
+        l.insert("symbol-navigation".to_string());
+
+        l.re_arm(&["project-activation-bootstrap"]);
+
+        assert!(
+            !l.contains("project-activation-bootstrap"),
+            "named topic re-arms"
+        );
+        assert!(l.contains("librarian"), "unnamed topics are untouched");
+        assert!(l.contains("symbol-navigation"));
+        drop(l);
+
+        // The removal must survive a reload, or an /mcp reconnect resurrects it.
+        let l2 = GuideLedger::load("sess-rearm", Some(hints));
+        assert!(
+            !l2.contains("project-activation-bootstrap"),
+            "re_arm must persist"
+        );
+        assert!(l2.contains("librarian"));
+    }
+
+    #[test]
+    fn re_arm_of_an_absent_topic_is_a_no_op() {
+        let mut l = GuideLedger::default();
+        l.insert("librarian".to_string());
+        l.re_arm(&["never-emitted"]);
+        assert!(l.contains("librarian"));
+    }
+
+    #[test]
+    fn expire_idle_rearms_only_topics_older_than_the_ttl() {
+        use std::time::Duration;
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        // Hand-build a file with one stale topic and one fresh one, so the test
+        // does not have to sleep.
+        let stale = chrono::Utc::now() - chrono::Duration::hours(6);
+        let fresh = chrono::Utc::now();
+        let body = serde_json::json!({
+            "librarian": stale.to_rfc3339(),
+            "symbol-navigation": fresh.to_rfc3339(),
+        });
+        std::fs::write(hints.join("sess-ttl.json"), body.to_string()).unwrap();
+
+        let mut l = GuideLedger::load("sess-ttl", Some(hints));
+        let rearmed = l.expire_idle(Duration::from_secs(2 * 60 * 60)); // 2h
+
+        assert_eq!(rearmed, 1);
+        assert!(!l.contains("librarian"), "6h-old topic is past a 2h TTL");
+        assert!(l.contains("symbol-navigation"), "fresh topic survives");
+    }
+
+    #[test]
+    fn expire_idle_that_changes_nothing_does_not_touch_the_file() {
+        use std::time::Duration;
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+
+        let mut l = GuideLedger::load("sess-noop", Some(hints.clone()));
+        l.insert("librarian".to_string());
+        let before = std::fs::metadata(hints.join("sess-noop.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        let rearmed = l.expire_idle(Duration::from_secs(86_400)); // 24h — nothing is that old
+        assert_eq!(rearmed, 0);
+
+        let after = std::fs::metadata(hints.join("sess-noop.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(before, after, "a no-op expiry must not rewrite the file");
     }
 }
