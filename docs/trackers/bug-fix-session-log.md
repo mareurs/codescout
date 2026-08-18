@@ -102,6 +102,7 @@ time_scope: open-ended
 
 | F-54 | 2026-08-18 | med | process | mitigated | A dispatched subagent's full-suite run read a *concurrent* session's mid-edit working tree, saw a prompt-surface snapshot test fail, and reported it as a live failure — the shared-checkout analogue of the `src/prompts/README.md` shared-branch verify hazard |
 | F-55 | 2026-08-18 | med | codescout-tool | promoted-to-bug-tracker | `grep(glob=<abs path outside the project>)` returns `0 matches` instead of an error, and the warning blames hidden-path pruning — a cause it never checked, whose suggested fix cannot help. `path=` on the same file matches fine |
+| F-56 | 2026-08-18 | med | process | wontfix-false-alarm | Ran the pre-promotion gate from a clone under `/tmp` and got a **false red** — three librarian temp-write-guard tests invert there, and cargo's fail-fast then skipped 21 other test binaries, so the run was simultaneously falsely negative and silently incomplete |
 
 ## Wins Index
 
@@ -4035,6 +4036,52 @@ against it.*
 
 **Status:** validated — measurement taken this session, findings feed the Phase B
 plan directly.
+
+## F-56 — Gating inside the OS temp dir reds three tests by breaking a precondition they state in their own comments
+
+**Observed:** 2026-08-18, re-running the pre-promotion code gate for the 1043-commit
+`experiments` cohort.
+
+**When:** The main checkout carried a peer session's uncommitted `server.rs` /
+`guide_ledger.rs` edits, so the gate was correctly moved to an isolated clean clone. The
+session scratchpad was the obvious home for it, and the scratchpad lives under `/tmp`.
+
+**Expected:** A gate result that describes the branch.
+
+**Got:** `cargo test --workspace` red — 3 failures out of 4005 — and, because cargo stops
+at the first failing target, the integration tests never ran at all. The three were
+`create_refuses_temp_workspace_into_real_catalog`,
+`reindex_refuses_temp_root_into_real_catalog`, and
+`wrapper_refuses_temp_workspace_into_real_outside_temp_catalog`.
+
+**Probable cause:** Not probable — *stated*. All three construct their "real" catalog with
+`tempfile::TempDir::new_in(std::env::current_dir())`, and each carries the comment
+*"(Assumes the repo checkout is not itself under the OS temp dir, which holds here.)"* A
+checkout under `/tmp` collapses the temp-workspace-vs-real-catalog distinction the guard
+discriminates on, so the guard correctly does not fire and the refusal the test asserts
+never happens. Re-run from a `git worktree` under `/home`, all three pass — verified as
+`... ok` lines, not as an absence of failures, so they demonstrably ran rather than being
+filtered out.
+
+**Workaround:** Gate from a checkout outside the OS temp dir. `git worktree add --detach`
+under the repo is cheapest and satisfies the precondition by construction.
+
+**Severity:** med — the failure mode is a **false red**, which is more dangerous than it
+first appears. A red reads as the *safe* error, so the natural response is to report "the
+tip is red, promotion blocked" and stop; that manufactures a blocker out of the harness and
+spends a session hunting a defect that does not exist. It also masks: fail-fast meant 21
+other test binaries never ran, so the same result was falsely negative **and** silently
+incomplete. `--no-fail-fast` fixes only the second half.
+
+**Status:** wontfix-false-alarm — the tests are correct, their precondition is documented,
+and the defect was in the choice of gate location.
+
+**Fix idea / Pointer:** Nothing to fix in code. Worth one line in `docs/RELEASE.md`'s gate
+section: run the pre-promotion gate from a checkout **outside** the OS temp dir, because
+three librarian temp-write-guard tests silently invert there. Sibling of
+`bug-fix-session-log:F-55` and of `bug-fix-session-log:F-54` — all three are results that
+describe the *harness* while reading as facts about the *branch*, which is the recurring
+shape in this stream.
 
 ## Template for new entries
 
