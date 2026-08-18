@@ -124,7 +124,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let cat = ctx.catalog.lock();
         let row = match artifact::get(&cat, &a.id)? {
             Some(r) => r,
-            None => return Ok(Value::Null),
+            None => {
+                return Err(RecoverableError::new(format!(
+                    "unknown artifact id '{}'. If this id came from an earlier call, an \
+                     artifact(action=\"move\") since then will have re-keyed it (id = \
+                     sha256(abs_path)); find it by path with artifact(action=\"find\", \
+                     filter={{\"rel_path\": {{\"contains\": …}}}}, include_archived=true). If \
+                     it was never seen before, run librarian(action=\"reindex\").",
+                    a.id
+                )));
+            }
         };
 
         let observations_json = if want_observations {
@@ -639,8 +648,40 @@ mod tests {
     async fn get_missing_returns_null() {
         let cat = Catalog::open_in_memory().unwrap();
         let ctx = mk_ctx(cat);
-        let v = call(&ctx, json!({"id": "nonexistent"})).await.unwrap();
-        assert!(v.is_null());
+        let err = call(&ctx, json!({"id": "nonexistent"}))
+            .await
+            .expect_err("unknown id must error, not return null");
+        assert!(
+            err.downcast_ref::<crate::librarian::tools::RecoverableError>()
+                .is_some(),
+            "unknown-id error must be recoverable (isError:false), not a fatal bail"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "error must name the id verbatim: {msg}"
+        );
+        assert!(
+            msg.contains("reindex"),
+            "error must point at the never-indexed recovery path: {msg}"
+        );
+        assert!(
+            msg.contains("move") && msg.contains("find"),
+            "error must point at the moved/re-keyed recovery path: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_existing_artifact_with_empty_body_is_distinguishable_from_unknown_id() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert!(
+            v.is_object(),
+            "an artifact that exists must return an object, never null — \
+             otherwise a fix that errors on both cases would still pass: {v}"
+        );
     }
 
     #[tokio::test]

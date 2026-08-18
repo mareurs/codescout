@@ -1,7 +1,7 @@
 ---
-id: be15087051e40e3d
+id: d19599743fc8fd7d
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(get) returns bare `null` for an unknown or moved id — an Ok result that cannot be told from "exists but empty", while the guide promises `unknown id`'
 tags:
 - librarian
@@ -121,18 +121,26 @@ should sit at the same point and cover all of them at once.
 
 ## Tests added
 
-None yet. Wanted, and each must fail against `return Ok(Value::Null)`:
+Both in `src/librarian/tools/get.rs`, fixed 2026-08-18:
 
-- `get` with a never-seen id → `RecoverableError`, message contains the id verbatim.
-- `get` with an id that was valid, then `move`d → error names the move/re-key path,
-  not just "unknown". This is the case that actually bit; an error that says only
-  "unknown id" still sends the reader to `reindex`, which will not help.
-- The error mentions **both** `reindex` and the `find`-by-rel_path recovery — a
-  single-branch hint is the failure mode being fixed, not a smaller version of it.
-- An artifact that genuinely exists with an empty body still returns an object, and
-  is therefore distinguishable from the unknown-id case. This is the discriminating
-  assertion: without it the suite passes for a fix that errors on *both*.
+- `get_missing_returns_null` (kept name, rewritten body) — `get` with a never-seen
+  id now returns a `RecoverableError`, not `Ok(Value::Null)`. Asserts the message
+  names the id verbatim and mentions both recovery paths (`reindex` for
+  never-indexed, `move`+`find` for re-keyed).
+- `get_existing_artifact_with_empty_body_is_distinguishable_from_unknown_id` — an
+  artifact that genuinely exists still returns an object, proving the fix
+  discriminates rather than erroring on both cases (which would still have passed
+  the first test alone).
 
+Mutation-tested: reverted the fix, ran `get_missing_returns_null`, confirmed it
+failed with the exact predicted pre-fix signature (`unknown id must error, not
+return null: Null`), then restored the fix.
+
+Deliberately not added: a test simulating an id that was valid then `move`d. The
+fix cannot distinguish that case from never-seen at the code level — both hit the
+same `None` arm and get the same message naming both recovery paths — so a
+separate test would exercise the identical code path as the never-seen-id test
+and assert nothing new.
 ## Workarounds
 
 Treat `null` as "unknown, cause undetermined" and disambiguate by hand:
@@ -165,4 +173,3 @@ tracker read, and something may already depend on the soft failure.
   response describe its own limits rather than by making the tool do more.
 - `docs/issues/archive/2026-08-07-grep-zero-match-silent-about-hidden-skip.md` —
   the same class again, on `grep`.
-
