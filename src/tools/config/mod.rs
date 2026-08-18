@@ -571,25 +571,33 @@ fn pin_notice_enabled_from(raw: Option<&str>) -> bool {
     matches!(raw, Some("1") | Some("true"))
 }
 
-/// The contrast appended to a switch-away hint when the notice is enabled.
+/// The switch-away hint, rebuilt to teach the per-call pin. hamsa A-29.
 ///
-/// **Contrastive by design, not descriptive.** hamsa A-26 measured that NAMING a tool in
-/// a routing line does not displace a strong competing prior; what moved the number was
-/// explicitly contrasting the two and naming the wrong one. And the prior here is not
-/// hypothetical — it is the sentence this text is appended to, which tells the agent to
-/// activate back when done and so normalises activate-then-restore as *the* pattern.
+/// **Conditions both instructions instead of appending one after the other.** The first
+/// version appended the pin advice to the existing hint, producing adjacent sentences
+/// that read "remember to `workspace(action='activate', …)` when done" and then "do not
+/// activate" — a flat contradiction, caught by reading the real composed string out of a
+/// failing test rather than by reading the source. Since A-26's finding is that competing
+/// instructions are exactly what decides whether guidance lands, shipping that into an
+/// arm would have measured a muddled instruction rather than the intended one. Each
+/// clause now carries the condition under which it applies.
+///
+/// **Contrastive by design, not descriptive.** A-26 measured that naming a tool in a
+/// routing line does not displace a strong competing prior; what moved its number was
+/// explicitly contrasting the two and naming the wrong one. The prior here is the restore
+/// instruction this text replaces, which normalises activate-then-restore as *the*
+/// pattern.
 ///
 /// The scope claim is the load-bearing half: `Agent::activate` mutates a single shared
 /// project (`activate_replaces_previous_project`), so an agent that does not know
 /// activation is server-global has no way to infer that it just clobbered a peer.
-///
-/// hamsa A-29. See `docs/trackers/prompt-hamsa-audit-log.md`.
-fn workspace_pin_contrast(project_root: &str) -> String {
+fn workspace_pin_contrast(prefix: &str, project_root: &str, home: &str) -> String {
     format!(
-        " Note: activating is server-global — it replaced the active project for every \
-         session on this server, not just yours. If you are one of several agents working \
-         concurrently, do not activate: pass workspace=\"{project_root}\" on each call \
-         instead, which scopes only your own calls."
+        "{prefix} — activating is server-global: it replaced the active project for \
+         every session on this server, not just yours. If other agents are working \
+         concurrently, do not activate — pass workspace=\"{project_root}\" on each call \
+         instead, which scopes only your own calls. If you are the only agent here, \
+         remember to workspace(action='activate', path=\"{home}\") when done."
     )
 }
 
@@ -813,28 +821,36 @@ async fn build_activation_response(
                 .as_ref()
                 .map(|p| to_forward_slash(p))
                 .unwrap_or_default();
-            let mut h = format!(
-                "Browsing {} (read-only). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
-                project_name, project_root_str, home_str,
-            );
             if workspace_pin_notice_enabled() {
-                h.push_str(&workspace_pin_contrast(&project_root_str));
+                workspace_pin_contrast(
+                    &format!("Browsing {} (read-only). CWD: {}", project_name, project_root_str),
+                    &project_root_str,
+                    &home_str,
+                )
+            } else {
+                format!(
+                    "Browsing {} (read-only). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
+                    project_name, project_root_str, home_str,
+                )
             }
-            h
         }
         HintScenario::SwitchAway => {
             let home_str = home_root
                 .as_ref()
                 .map(|p| to_forward_slash(p))
                 .unwrap_or_default();
-            let mut h = format!(
-                "Switched project (read-write). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
-                project_root_str, home_str,
-            );
             if workspace_pin_notice_enabled() {
-                h.push_str(&workspace_pin_contrast(&project_root_str));
+                workspace_pin_contrast(
+                    &format!("Switched project (read-write). CWD: {}", project_root_str),
+                    &project_root_str,
+                    &home_str,
+                )
+            } else {
+                format!(
+                    "Switched project (read-write). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
+                    project_root_str, home_str,
+                )
             }
-            h
         }
     };
 

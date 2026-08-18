@@ -682,17 +682,25 @@ fn pin_notice_gate_is_closed_unless_explicitly_opened() {
     }
 }
 
-/// hamsa A-29 — the notice CONTRASTS; it does not merely mention.
+/// hamsa A-29 — the notice CONTRASTS, and does not CONTRADICT.
 ///
 /// A-26 measured that naming a tool in a routing line does not displace a strong
-/// competing prior — what moved its number was explicitly contrasting the two and
-/// naming the wrong one. The prior here is not hypothetical: this text is appended to
-/// a sentence telling the agent to activate back when done, which normalises
-/// activate-then-restore as *the* pattern. So each of these three parts is
-/// load-bearing, and a rewrite that drops one is a different intervention.
+/// competing prior — what moved its number was explicitly contrasting the two and naming
+/// the wrong one. The prior here is the restore instruction this text replaces.
+///
+/// The no-contradiction assertion is the one that earned its place. The first version
+/// APPENDED to the existing hint, yielding adjacent sentences reading "remember to
+/// workspace(action='activate', …) when done" and then "do not activate". That was found
+/// by reading the real composed string out of a failing test, not from the source, and it
+/// would have shipped into A-29's arms — measuring a muddled instruction instead of the
+/// intended one. Both instructions are now CONDITIONED, so each says when it applies.
 #[test]
 fn pin_notice_contrasts_the_competing_prior_rather_than_naming_the_pin() {
-    let text = super::workspace_pin_contrast("/home/me/work/other-repo");
+    let text = super::workspace_pin_contrast(
+        "Switched project (read-write). CWD: /home/me/work/other-repo",
+        "/home/me/work/other-repo",
+        "/home/me/work/home-repo",
+    );
 
     assert!(
         text.contains("server-global"),
@@ -708,30 +716,82 @@ fn pin_notice_contrasts_the_competing_prior_rather_than_naming_the_pin() {
         "must give the pin already filled in with the path the agent just used, so the \
          remedy is copyable rather than derivable. Got: {text:?}"
     );
+
+    // Both instructions must be CONDITIONED. Without their conditions the hint tells the
+    // agent to activate and not to activate, in adjacent sentences.
+    let dont = text.find("do not activate").expect("checked above");
+    let restore = text
+        .find("remember to workspace")
+        .expect("restore clause must survive");
+    assert!(
+        restore > dont,
+        "the restore clause must come AFTER the do-not-activate clause, so the reader \
+         meets the general rule before its exception. Got: {text:?}"
+    );
+    for condition in [
+        "If other agents are working concurrently",
+        "If you are the only agent here",
+    ] {
+        assert!(
+            text.contains(condition),
+            "each instruction needs its condition or the two contradict — missing \
+             {condition:?}. Got: {text:?}"
+        );
+    }
 }
 
-/// hamsa A-29 — DEFAULT OFF is the shipped behaviour, and stays that way until an arm
-/// says otherwise.
+/// hamsa A-29 — DEFAULT OFF is the shipped behaviour, asserted on the REAL composed hint.
 ///
-/// This is the same discipline as the inverted guards on A-25/A-26/A-27: an
-/// intervention that has not been measured must not reach production by drift. Arms A
-/// and B of A-29 are *today's* behaviour, so if this test ever fails the arms stopped
-/// measuring what they claim to.
-#[test]
-fn switch_away_hint_carries_no_pin_notice_while_the_gate_is_shut() {
+/// The first version of this test checked the gate parser and that the suffix string was
+/// non-empty, and called that coverage. It was a green bar: forcing
+/// `workspace_pin_notice_enabled()` to return `true` unconditionally left all 62 tests in
+/// this module passing, so an unmeasured intervention could have shipped and nothing
+/// would have failed. `activate_hint_shows_switched_when_away_from_home` cannot catch it
+/// either — it asserts `contains`, which an appended suffix does not disturb.
+///
+/// So this drives a real activation and asserts on the hint the caller actually receives.
+/// Same discipline as the inverted guards on A-25/A-26/A-27: an intervention that has not
+/// been measured must not reach production by drift.
+#[tokio::test]
+async fn switch_away_hint_carries_no_pin_notice_while_the_gate_is_shut() {
+    let dir1 = tempdir().unwrap();
+    let dir2 = tempdir().unwrap();
+    std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
+    let root1 = std::fs::canonicalize(dir1.path()).unwrap();
+    let root2 = std::fs::canonicalize(dir2.path()).unwrap();
+    let agent = Agent::new(Some(root1.clone())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    let input = json!({ "path": root2.to_str().unwrap() });
+    let result = ActivateProject.call(input, &ctx).await.unwrap();
+    let hint = result["hint"].as_str().unwrap();
+
+    // Sanity: this really is the switch-away branch, so the assertion below is not
+    // vacuously true on some other hint.
     assert!(
-        !super::pin_notice_enabled_from(None),
-        "with no env set the gate is shut"
+        hint.contains("remember to workspace"),
+        "expected the switch-away hint, got: {hint}"
     );
-    // The composed hint is only reachable through an activation; what is pinned here is
-    // the contract the composition relies on — the suffix is appended IFF the gate is
-    // open, so a shut gate is byte-identical to the pre-A-29 hint.
-    let suffix = super::workspace_pin_contrast("/tmp/x");
-    assert!(
-        !suffix.is_empty(),
-        "the suffix must be non-empty, or 'gate open' and 'gate shut' would be \
-         indistinguishable and arm C would silently equal arm B"
-    );
+
+    for marker in ["server-global", "do not activate", "workspace=\""] {
+        assert!(
+            !hint.contains(marker),
+            "the A-29 pin notice reached a shipped hint with the gate shut \
+             (marker {marker:?}). It is UNMEASURED — A-29 has not run. Enable it only \
+             via CODESCOUT_WORKSPACE_PIN_NOTICE. Hint was: {hint}"
+        );
+    }
 }
 
 #[tokio::test]
