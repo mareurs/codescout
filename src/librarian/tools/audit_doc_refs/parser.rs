@@ -456,13 +456,25 @@ fn trim_token_edges(s: &str) -> &str {
         .trim_end_matches('.')
 }
 
+/// U-46: `is_module_path`'s character class — lowercase, digits, dots,
+/// underscores — is also the shape of a version number (`1.16.8`) and of
+/// common Latin abbreviations (`e.g`, `i.e`). Both were reaching prose as
+/// `ModulePath` false positives. Rejected here rather than as a later
+/// severity cap, because neither is a plausible qualified name at all — a
+/// real one has at least one alphabetic segment, and neither abbreviation
+/// names anything.
 fn is_module_path(s: &str) -> bool {
+    const KNOWN_ABBREVIATIONS: &[&str] = &["e.g", "i.e"];
+
     s.contains('.')
         && !s.contains('/')
         && !s.contains(char::is_whitespace)
         && s.chars()
             .all(|c| c.is_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
         && s.split('.').all(|part| !part.is_empty())
+        && s.split('.')
+            .any(|part| part.chars().any(|c| c.is_alphabetic()))
+        && !KNOWN_ABBREVIATIONS.contains(&s)
 }
 
 #[cfg(test)]
@@ -570,6 +582,60 @@ mod path_syntax_tests {
             PathSyntax::for_language(Some("some-future-grammar")),
             PathSyntax::DottedModules,
             "an unvendored language must arrive with today's behaviour, not a silent loss"
+        );
+    }
+
+    #[test]
+    fn a_bare_version_number_is_not_a_module_path() {
+        // U-46: `1.16.8` (a plugin version in prose) satisfies `is_module_path`'s
+        // character class — digits and dots only — and was classified ModulePath.
+        // A real qualified name always has at least one alphabetic segment; a
+        // token where every dot-separated segment is pure digits is a version
+        // string, never a name.
+        assert_eq!(
+            classify("1.16.8", true, PathSyntax::DottedModules),
+            None,
+            "an all-numeric dotted token is a version number, not a qualified name"
+        );
+        assert_eq!(
+            classify("1.0", true, PathSyntax::DottedModules),
+            None,
+            "two-segment version numbers must be rejected too"
+        );
+    }
+
+    #[test]
+    fn common_latin_abbreviations_are_not_module_paths() {
+        // U-46: `e.g` and `i.e` satisfy the same character class as `os.path` —
+        // dotted, lowercase, no slash — and were classified ModulePath in prose
+        // that was never talking about a module at all.
+        assert_eq!(
+            classify("e.g", true, PathSyntax::DottedModules),
+            None,
+            "e.g is prose punctuation, not a qualified name"
+        );
+        assert_eq!(
+            classify("i.e", true, PathSyntax::DottedModules),
+            None,
+            "i.e is prose punctuation, not a qualified name"
+        );
+    }
+
+    #[test]
+    fn the_new_filters_do_not_touch_real_module_paths() {
+        // Positive control: a short real module path must still classify. Without
+        // this, a rule broad enough to reject "e.g" could just as easily reject
+        // "os.path" — both are two single-word-ish segments — and the two filters
+        // above would be passing for the wrong reason.
+        assert_eq!(
+            classify("os.path", true, PathSyntax::DottedModules),
+            Some(RefKind::ModulePath),
+            "a real short module path must still classify"
+        );
+        assert_eq!(
+            classify("commits.git_root", true, PathSyntax::DottedModules),
+            Some(RefKind::ModulePath),
+            "a real field/column reference with a numeric-free segment must still classify"
         );
     }
 }
