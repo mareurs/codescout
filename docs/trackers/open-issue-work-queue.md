@@ -78,9 +78,10 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
-| BL-40 | 1 | every drift check asks whether the body kept up with params — nothing detects params falling behind a body that ran ahead | open | `bde782f4cc52ac22` |
-| BL-41 | 1 | link_scan's dangling count is prefix-gated, so a namespace with zero definitions reports as healthy | open | `52269554ea4f51a4` |
-| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Only step 4 left: backfill 13 ledgers across 5 repos (largest 64 of 68), sequenced by citation damage, content work not a sweep | `d34dfcd2cc718bd8` |
+| BL-40 | 1 | every drift check asks whether the body kept up with params — nothing detects params falling behind a body that ran ahead | **done** `87f3b936` — fired twice on its first live run, incl. a second repo nobody had looked at; data repair split to BL-42 | `bde782f4cc52ac22` |
+| BL-41 | 1 | link_scan's dangling count is prefix-gated, so a namespace with zero definitions reports as healthy | **done** `ff088630` — code gated; the predicted dangling RISE is **not yet measured** (needs `/mcp`) | `52269554ea4f51a4` |
+| BL-42 | 2 | DATA REPAIR: 16 entry rows exist in a tracker body and in no params row, so their ids were never allocated and a later `append_entry` can reissue them | open | `bde782f4cc52ac22` |
+| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Step 4 substantially done — `doctor` `ledger_defines_nothing` **10 → 2**, `entry_without_definition` **3 → 1**. Backfilled: WIN `f04e4c17`, BL `0d101eb8`, PV `f5f602e6`, A `9703102c`, SD+GF+FND+T `c7bdfd22`, plus mirela G-6 and OTK-35 (uncommitted — user's checkout). Remaining: researcher `T`×2 and stefanini `CR`×8, both **outside this session's working dirs**; and `provenance-subsystem`'s 42 uncited PV, left undefined on purpose | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
@@ -241,10 +242,18 @@ See `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-n
 **in-progress** — a params-rendered index defines no citable token. Steps 0-3 and 5 done; step 4 (this backfill) is what gave the section you are reading its heading.
 
 ### BL-40 — every drift check asks whether the body kept up with params, never the reverse
-**open** — found by nearly publishing from the stale side: `windows-platform-support.md` had 29 params rows against 35 in the body, with two statuses stale. `append_entry`'s `warning` is the only surface that sees this direction, and only during an append.
+**done** `87f3b936` — `params_behind_body` in `doctor`, same two sets subtracted the other way. Ids only; the message names `append_entry` and says explicitly not to re-render from params, because that is `snapshot_drift`'s remedy and here it would delete the newer record. Deliberately **not** gated on `body_keeps_snapshot` — that gate is right for the row question and would silence a body id the catalog has never seen, which is the whole finding. Also extracted `params_backed_ledgers`, since this would have been the third hand-rolled copy of a 45-line preamble shared by three checks that must agree on what a ledger is.
 
+Found by nearly publishing from the stale side: `windows-platform-support.md` had 29 params rows against 35 in the body, with two statuses stale, and `append_entry`'s `warning` was the only surface that could see this direction — only during an append, which that ledger had not had since the divergence. On its first live run the check fired **twice**: the WIN case, and `mirela/…/solver-invariants.md` at 10 of 68, a different repo no surface had ever reported. Data repair for both → **BL-42**.
 ### BL-41 — link_scan's dangling count is prefix-gated, so a whole namespace can read as healthy
-**open** — 129 dead `WIN-N` citations moved the project total by zero. The gate is right in intent (it suppresses `CI-2`-shaped prose) and wrong in discriminator: it cannot tell "not a namespace" from "a namespace that is wholly broken".
+**done** `ff088630` — 129 dead `WIN-N` citations moved the project total by zero. The gate is right in intent (it suppresses `CI-2`-shaped prose) and wrong in discriminator: it cannot tell "not a namespace" from "a namespace that is wholly broken". Fixed by gating on the `entry_prefix` **declaration** as well as on observed definitions.
+
+The wiring is the load-bearing choice and it is not the one the bug file proposed: the declaration rides on `DocExtract.declared_prefixes`, populated inside `extract()`, which already holds the whole file text including frontmatter — so **there is no wire for a caller to forget**. Threading it through `DefinitionIndex::build` would have made an omission a silent no-op and touched 11 test call sites. Pinned by an end-to-end test that runs a real row-only body through the real extractor into the real index, the only one of five that fails if either half drops its end.
+
+**Still open on this entry:** the predicted dangling RISE is unmeasured. `link_scan` runs in the MCP server and has no CLI, so it needs `cargo rb` + `/mcp` first. Pre-fix baseline, taken on the old binary right before the rebuild: dangling **548**, ambiguous 410, 3,649 citations, 1,055 artifacts, `edges_added` 0.
+
+### BL-42 — DATA REPAIR: 16 rows live in a body and in no params row, so their ids can be reissued
+**open** — surfaced by BL-40's new check on its first live run, so this is the fix proving itself rather than fresh breakage. `windows-platform-support.md` WIN-30, WIN-32..WIN-36 (6 of 35), left stale on purpose at the last session close so the check had something true to find; and `mirela/backend-kotlin/docs/trackers/solver-invariants.md` SI-59..SI-68 (10 of 68), **new and the more urgent**, because an unallocated id is silent corruption rather than a stale display. Remedy is `append_entry` / `update_entry` — **not** re-rendering the body, which would delete the newer record.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
@@ -307,6 +316,76 @@ there.
 
 ## History
 
+### 2026-08-18 (later) — BL-40 and BL-41 shipped, step 4 taken from 10 open ledgers to 2
+
+Worked the order the previous entry designated, and it was the right order for the reason it
+gave: BL-41 changes what the dangling number means, so measuring the backfills first would
+have scored them against a baseline about to move.
+
+**BL-40 — `params_behind_body` (`87f3b936`).** The inverse of `snapshot_drift`: same two sets,
+subtracted the other way. Two decisions each pinned by a test rather than a comment — not
+gated on `body_keeps_snapshot` (that gate would silence a body id the catalog has never seen,
+which is the entire finding), and the message names `append_entry` while explicitly forbidding
+a body re-render, because inheriting `snapshot_drift`'s remedy here is data loss rather than
+noise. Six tests, five watched fail on their assertions; the sixth passes on a stub **by
+design**, since it asserts the check stays silent on a lagging body and only discriminates once
+the code can subtract backwards. Refactored the 45-line preamble the three entry-drift scans
+share into `params_backed_ledgers` — this would have been the third copy, and three checks that
+must agree on what a ledger *is* drifting apart is the failure mode this whole family is about.
+
+**It paid off on first contact with the real catalog**, which is the step distinct from the
+gate: fired twice, neither vacuous. The WIN near-miss it was filed for, and
+`mirela/…/solver-invariants.md` at 10 of 68 — a different repo, never reported by any surface,
+with ten ids that were never allocated. Split to **BL-42**.
+
+**BL-41 — declared prefixes widen the gate (`ff088630`).** The wiring differs from what the bug
+file proposed, and deliberately: the declaration rides on `DocExtract.declared_prefixes`,
+populated inside `extract()`, which already holds the whole file text. There is therefore **no
+wire for a caller to forget**; threading it through `DefinitionIndex::build` would have made an
+omission a silent no-op across 11 call sites. Its known cost is inherent — once a prefix is
+known, prose that merely looks like a token is reported too, and there is a measured instance
+(`bug-fix-session-log.md:467` says "a parallel session's T-13 commit", an old plan's task
+numbering). Right trade: a false positive costs one glance, the false negative cost 129
+silently-dead citations.
+
+**Step 4 (`c7bdfd22`) — 49 entries made citable across four codescout-local ledgers**, each
+shaped to what its ledger needed rather than one template. `SD` had no table and no sections,
+so its whole substantive record lived only in the git-ignored catalog. `GF` is a dated snapshot
+whose prompt forbids rewriting sections while telling readers to read a section that did not
+exist — anchors only, pointing at where its evidence already sits. `FND` had nothing at all for
+four of its eighteen claims. Plus mirela's `G`×6 and `OTK-35`, left **uncommitted** — that is
+the user's own checkout, with 9 modified files from a concurrent session on
+`feat/year-scoped-catalog`.
+
+**Two beliefs from the previous close turned out wrong when checked.**
+
+1. *"Backfilling `fable-tuning-tasks` would make its `T` tokens ambiguous."* False.
+   `tool-usage-patterns` spells its first thirteen entries zero-padded (`T-001`..`T-013`) and
+   its later ones `T-14`..`T-24`, and the resolver matches **token strings**, so the spaces are
+   disjoint and `T-1`..`T-12` were always safe. The wrong version of this belief nearly blocked
+   correct work; filed the real hazard as
+   `docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`,
+   because the disjointness is a formatting accident that nothing records or enforces, and two
+   ordinary edits would break it.
+2. The closing report's `dangling` 547 and `ledger_defines_nothing` 8 both read one lower when
+   re-measured. A peer session shares this machine-local catalog. Recorded as measured, not
+   attributed — the point being that a catalog number is a fact about an instant.
+
+**Next, in this order.**
+
+1. **`/mcp`, then `librarian(action="link_scan")`.** BL-41's central claim is still unverified.
+   Report the two effects separately: BL-41 pushes dangling **up**, `c7bdfd22`'s 49 headings
+   push it **down**, so a flat total would be two real effects cancelling rather than a no-op.
+   `edges_added` is the clean read on the backfill half. Do not archive BL-41 before this.
+2. **BL-42**, `solver-invariants` first — id reissue is silent corruption, and it needs a
+   confirm because that checkout has concurrent work.
+3. **researcher `T`×2 and stefanini `CR`×8** — the last two `ledger_defines_nothing`. Both are
+   **outside this session's working dirs**, so they need the user's go-ahead, not just a
+   decision. Read the prefix-`T` bug file before touching researcher's: giving its `T-1`/`T-2`
+   headings is precisely what makes `prompt-hamsa-audit-log`'s bare citations ambiguous, and
+   the fix then is to qualify them as `fable-tuning-tasks:T-N` in the same commit.
+4. `provenance-subsystem`'s 42 uncited `PV` stay undefined on purpose — only 22 of 64 entries
+   are cited, and the ledger's own convention is narrative only where a row is insufficient.
 ### 2026-08-18 (session close) — the citability chain, and what a later session should pick up
 
 One long session. Written here rather than in any `next` field because **`next` lives only in the

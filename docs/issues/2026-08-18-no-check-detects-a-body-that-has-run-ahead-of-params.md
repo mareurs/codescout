@@ -1,7 +1,7 @@
 ---
 id: bde782f4cc52ac22
 kind: bug
-status: open
+status: fixed
 title: 'BUG: every drift check asks whether the body kept up with params — nothing detects params falling behind a body that ran ahead'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - doctor
 - entry-identity
 topic: tracker-entry-identity
-closed: ''
+closed: 2026-08-18
 opened: 2026-08-18
 related:
 - docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
@@ -114,32 +114,55 @@ six-row divergence, so the one surface that could have reported it never ran.
 
 ## Fix
 
-Not implemented. The predicate already exists; it needs a second caller and a name.
+**SHIPPED `87f3b936` (`experiments`).** All three points as filed.
 
-1. **Add the inverse to `doctor`** beside `snapshot_drift`: a `params_behind_body` check computing
-   `in_body.difference(&claimed)` from the same two sets `scan_snapshot_drift` already builds. Cheap
-   — one more difference over data already in hand.
-2. **Report ids only, not statuses.** A status mismatch between a params row and a table cell needs
-   a text comparison against a rendered column, which is fragile and belongs to a separate decision.
-   The id-set difference is exact and is what caught the WIN case.
-3. **Name the remedy in the message.** The fix is `append_entry` / `update_entry` for the missing
-   rows, *not* editing the body — the opposite of `snapshot_drift`'s advice, and getting that
-   backwards would delete the newer record.
+1. `scan_params_behind_body` runs in `doctor` beside `scan_snapshot_drift`, computing
+   `in_body.difference(&claimed)` — the same two sets, subtracted the other way.
+2. **Ids only.** No status comparison; the id-set difference is exact and is what caught the
+   WIN case.
+3. **The message names `append_entry` / `update_entry`** and says explicitly *"do NOT rewrite
+   the body from `params`, which would delete the newer record"*, because getting that
+   backwards is data loss rather than noise.
 
-Deliberately out of scope: reconciling the WIN ledger's own six rows. That is data repair, tracked
-separately, and folding it in would hide whether the check works.
+Two design decisions, each pinned by a test rather than a comment:
 
+- **Not gated on `body_keeps_snapshot`.** That gate is correct for the row question and wrong
+   here — it would silence a body id the catalog has never seen, which is the entire finding.
+   Same argument as `scan_undefined_entries`.
+- **Extracted `params_backed_ledgers` → `ParamsBackedLedger`.** The three entry-drift scans
+   shared a 45-line preamble and this would have been the third copy. Three checks that must
+   agree on what a ledger *is* drifting apart is the failure mode this whole family of bugs is
+   about. The original bail conditions are preserved exactly, including that an id with no `-`
+   aborts the whole collection.
+
+Also stopped enumerating check names on `Violation::check` — that list named eight and had gone
+stale by three, because nothing gates a doc comment against the `scan_*` call sites.
+
+Deliberately still out of scope: reconciling the WIN ledger's own six rows. That is data
+repair, and leaving it is what let the new check prove itself on real data — see § Resume.
 ## Tests added
 
-None yet. What the fix must pin:
+Six, in `src/librarian/tools/doctor.rs`, all written and watched fail before the
+implementation existed (5 failed on their assertions; the 6th passes on a stub **by design** —
+it asserts the new check stays *silent* on a lagging body, so its discriminating power only
+exists once the code can subtract in the wrong order).
 
-- `params_behind_body_reports_ids_the_body_has_and_params_lacks` — the WIN shape, minimally: body
-  anchors WIN-1..WIN-4, params carries WIN-1..WIN-2.
-- `params_behind_body_is_silent_when_params_is_the_superset` — the ordinary `snapshot_drift` case
-  must not fire here, so the two checks are provably about different directions.
-- `params_behind_body_is_silent_for_a_prose_only_tracker` — a body anchoring no ids at all yields no
-  finding, matching `body_claimed_indices`' documented empty-set contract.
+| Test | What it kills |
+|---|---|
+| `params_behind_body_reports_a_body_id_with_no_params_row` | the check existing at all |
+| `a_lagging_body_is_snapshot_drift_and_never_params_behind_body` | reversing the subtraction |
+| `params_behind_body_fires_where_snapshot_drift_sees_a_complete_snapshot` | folding this into `snapshot_drift` as more samples |
+| `params_behind_body_is_not_gated_on_body_keeps_snapshot` | copying the sibling's gate |
+| `params_behind_body_names_append_entry_as_the_remedy` | inheriting `snapshot_drift`'s remedy text |
+| `params_behind_body_caps_its_sample_and_counts_the_remainder` | a fixture that never reaches the truncation branch |
 
+The cap fixture carries 13 body ids against 1 params row so `if more > 0` actually executes —
+memory `test-design-discipline` records that exact hole shipping in `grep`'s
+`completeness_warning` with seven green tests.
+
+Gate: `cargo fmt` 0, `cargo clippy --all-targets -- -D warnings` 0, **4137 passed / 0 failed**
+(4131 before). All 12 pre-existing `snapshot_drift` / `undefined_entries` tests pass unchanged
+across the refactor.
 ## Workarounds
 
 Before generating anything from `params`, compare the id sets by hand:
@@ -154,12 +177,27 @@ A mismatch means params is not a safe source. This is now stated in
 
 ## Resume
 
-Add `params_behind_body` to `src/librarian/tools/doctor.rs`, next to `scan_snapshot_drift`, reusing
-the `claimed` and `in_body` sets it already computes — the whole change is the opposite difference
-plus a message whose remedy points at `append_entry`, not at a body edit. Write
-`params_behind_body_is_silent_when_params_is_the_superset` first: it is the test that proves the two
-checks are not the same check twice.
+Nothing outstanding on the check. **Verified live** against the real catalog
+(`codescout doctor --json`), which is the step distinct from the gate — it fired **twice**,
+neither instance vacuous:
 
+- `docs/trackers/windows-platform-support.md` — `WIN-30, WIN-32..WIN-36`, 6 of 35. The
+  near-miss this bug was filed for, now reported mechanically instead of being caught by
+  luck.
+- `mirela/backend-kotlin/docs/trackers/solver-invariants.md` — `SI-59..SI-68`, 10 of 68. **A
+  different repo, never reported by any surface.** Ten entries whose ids were never allocated,
+  so per this check's own message a later `append_entry` there can reissue `SI-59`. The sample
+  cap fired on real data here (`… (+2 more)`).
+
+Two pieces of **data repair** are now visible and remain open, deliberately:
+
+- the WIN ledger's 6 rows (left stale on purpose so the check had something true to find);
+- `solver-invariants`' 10 — new, and the more urgent of the two, because id reissue is a
+  silent corruption rather than a stale display. It is in another repo.
+
+Fix SHA: `87f3b936`, **`experiments`**. `master...experiments` was `0 1017` before this
+commit, so promotion is a fast-forward and this SHA is already the master-side SHA — there is
+no second SHA to record.
 ## References
 
 - `src/librarian/tools/doctor.rs` — `scan_snapshot_drift`, the directional check.
@@ -168,4 +206,3 @@ checks are not the same check twice.
 - `docs/trackers/windows-platform-support.md` § History 2026-08-18 — the measured divergence.
 - `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` —
   the sibling that found it, and whose step 4 nearly published from the stale side.
-

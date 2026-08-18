@@ -1,7 +1,7 @@
 ---
 id: '52269554ea4f51a4'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: link_scan''s dangling count is prefix-gated, so a namespace with zero definitions reports as healthy while every citation of it resolves to nothing'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - entry-identity
 - false-negative
 topic: tracker-entry-identity
-closed: ''
+closed: 2026-08-18
 opened: 2026-08-18
 related:
 - docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
@@ -122,34 +122,58 @@ first run.
 
 ## Fix
 
-Not implemented. Two candidates; the first is preferred.
+**SHIPPED `ff088630` (`experiments`)** — option 1, gate on the declaration rather than on the
+definitions. `entry_prefix` declarations now feed `DefinitionIndex.known_prefixes` alongside
+prefixes learned from definitions, so a declared namespace is always reportable while an
+undeclared `CI-2` in prose stays suppressed.
 
-1. **Gate on the declaration, not on the definitions.** Add `entry_prefix` frontmatter declarations
-   to `DefinitionIndex.known_prefixes` alongside prefixes learned from definitions. A declared
-   namespace is then always reportable, so a wholly-undefined ledger's citations dangle loudly, while
-   an undeclared `CI-2` in prose stays suppressed. `declared_entry_prefixes` already parses every
-   YAML form and is already called elsewhere, so this is a wiring change rather than new logic.
-   Caveat to check: not every ledger declares `entry_prefix` yet, so this improves coverage without
-   completing it — which is honest, and pairs with the guide's push to declare.
-2. **Report suppressed prefixes as their own bucket.** Emit `suppressed_prefixes: {"WIN": 129}` so
-   the number is visible without being asserted as breakage. Weaker — it puts the burden on a reader
-   noticing a second array — but it needs no declaration and cannot regress.
+**The wiring choice is the load-bearing part, and it is not the one the filed fix implied.**
+Rather than threading declarations through `DefinitionIndex::build`'s arguments, the
+declaration rides on `DocExtract.declared_prefixes`, populated inside `extract()`. `extract`
+already receives the whole file text, frontmatter included — so the wire cannot be forgotten.
+Threading it through `build` would have made a forgotten wire a silent no-op and touched 11
+test call sites; this way there is nothing for a caller to remember.
 
-Whichever ships, **do not change what `edges_added` measures.** It was the only working progress
-metric for these four backfills and its behaviour is now documented.
+Read with `librarian_guard::declared_entry_prefixes`, the guard's own parser, rather than a
+second one: it compiles under `--no-default-features` where `librarian::frontmatter` does not
+exist (verified: `cargo check --no-default-features` exit 0), and the two readers' agreement on
+every YAML form is already pinned by `both_entry_prefix_readers_agree_on_every_yaml_form`.
 
+Declarations count **regardless of `active`** — an archived ledger's namespace is still a
+namespace, and archived definers already resolve.
+
+`edges_added` is unchanged, as required. Option 2 (`suppressed_prefixes` bucket) was not
+needed.
+
+**Known limit, and it is inherent rather than an oversight.** The gate still cannot separate
+prose that merely looks like a token from real breakage once a prefix is known — measured
+instance: `bug-fix-session-log.md:467` says "a parallel session's T-13 commit", meaning an old
+plan's task numbering, and `T` is a known prefix, so it is reported as dangling. Widening the
+gate widens that. The filed fix said as much ("improves coverage without completing it"), and
+it is the right trade: a false positive costs a reader one glance, a false negative cost this
+project 129 silently-dead citations.
 ## Tests added
 
-None yet. What the fix must pin:
+Five, across `extract.rs` and `resolve.rs`, written and watched fail first — 3 failed on their
+assertions, and the 2 negative controls passed pre-fix, which is exactly right: they assert
+behaviour that must NOT change.
 
-- `a_declared_prefix_with_no_definitions_still_dangles` — the whole bug: an artifact declaring
-  `entry_prefix: ZZ` and defining nothing, cited as `ZZ-7`, must report dangling.
-- `an_undeclared_prefix_with_no_definitions_stays_suppressed` — the flood guard, and the reason
-  `dangling_is_prefix_gated` exists. Both must be green simultaneously, which is what proves the
-  discriminator changed rather than loosened.
-- `dangling_is_prefix_gated` must keep passing unchanged — it pins the behaviour for prefixes that
-  *are* defined somewhere.
+| Test | What it kills |
+|---|---|
+| `frontmatter_entry_prefix_is_read_as_a_declaration` | `extract` not populating the field |
+| `frontmatter_declares_nothing_without_an_entry_prefix_key` | over-reading — a `tags: [A-11, F-3]` list must not declare |
+| `a_declared_prefix_dangles_even_though_nothing_defines_it` | `build` not reading the field |
+| `declaring_one_prefix_does_not_un_suppress_the_others` | widening the gate globally instead of per-prefix |
+| `a_row_only_declared_ledger_is_reportable_end_to_end` | **either half silently dropping the wire** |
 
+The last one is the only test of the five that a unit test on either half cannot replace: it
+runs a real row-only body through the real `extract()` into the real `DefinitionIndex`, and
+asserts as a precondition that `definitions` is empty, so the declaration is provably the only
+thing making the citation reportable.
+
+Gate: `cargo fmt` 0, `cargo clippy --all-targets -- -D warnings` 0, **4142 passed / 0 failed**,
+`cargo check --no-default-features` 0. `dangling_is_prefix_gated` — the test that pinned the old
+behaviour — still passes, because suppression of undeclared prefixes is unchanged.
 ## Workarounds
 
 Do not read `counts.dangling` as a measure of citation health for a namespace you have not confirmed
@@ -159,13 +183,38 @@ which enumerates exactly which files recovered a link. That pairing is what the 
 
 ## Resume
 
-Wire `declared_entry_prefixes` into `DefinitionIndex::build` so a declared `entry_prefix` marks the
-prefix known even with zero definitions, then write `a_declared_prefix_with_no_definitions_still_dangles`
-and `an_undeclared_prefix_with_no_definitions_stays_suppressed` and confirm `dangling_is_prefix_gated`
-still passes. Expect the project dangling total to **rise** when this lands — that is the fix
-working, not a regression, and it will surface the remaining `ledger_defines_nothing` ledgers' dead
-citations for the first time.
+**Code is done and gated; the predicted measurement is NOT yet taken.** This bug file claims
+the project dangling total will RISE, and that claim is currently unverified — `link_scan` runs
+in the MCP server, there is no CLI subcommand for it, and the running server must be
+reconnected (`/mcp`) after `cargo rb` before the new gate is on the wire.
 
+Pre-fix baseline, measured on the old binary immediately before the rebuild so the comparison
+is clean:
+
+| metric | pre-BL-41 |
+|---|---|
+| `dangling` | **548** |
+| `ambiguous` | 410 |
+| `citations` | 3,649 |
+| `edges_added` | 0 |
+| `artifacts_scanned` | 1,055 |
+
+Note 548, not the 547 recorded at the previous session close; a peer session shares this
+machine-local catalog and one row moved between measurements. Not attributed — recorded as
+measured.
+
+**Next action:** `/mcp`, then `librarian(action="link_scan")`, and compare. Two effects are
+confounded in that single number and should be reported separately:
+
+- BL-41 makes previously-suppressed namespaces reportable — pushes dangling **up**;
+- `c7bdfd22` gave 49 entries defining headings across four ledgers — pushes it **down**.
+
+So a flat total would be two real effects cancelling, not a no-op. `edges_added` is the clean
+read on the backfill half.
+
+Do not archive this file until that measurement is recorded.
+
+Fix SHA: `ff088630`, **`experiments`** — fast-forward path, so it is already the master-side SHA.
 ## References
 
 - `src/librarian/tools/link_scan/resolve.rs` — `DefinitionIndex::build`, `known_prefixes`,
@@ -174,4 +223,3 @@ citations for the first time.
 - `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`
   § Evidence *CORRECTION* — the four-ledger measurement table, and where this was first mistaken for
   a dangling population.
-
