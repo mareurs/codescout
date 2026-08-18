@@ -124,7 +124,7 @@ impl ActivateProject {
 /// Tied to `SESSION_OPENING_GUIDE` by construction rather than a second copy
 /// of the literal: that's the exact topic the opener trigger in
 /// `Tool::call_content` keys on, so the two must never drift apart.
-const PROJECT_SCOPED: &[&str] = &[crate::prompts::SESSION_OPENING_GUIDE];
+pub(crate) const PROJECT_SCOPED: &[&str] = &[crate::prompts::SESSION_OPENING_GUIDE];
 
 pub struct ProjectStatus;
 

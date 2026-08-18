@@ -21,7 +21,7 @@ use serde_json::Value;
 use crate::agent::Agent;
 use crate::tools::{
     approve_write::ApproveWrite,
-    config::Workspace,
+    config::{Workspace, PROJECT_SCOPED},
     create_file::CreateFile,
     edit_file::EditFile,
     grep::Grep,
@@ -395,6 +395,23 @@ impl CodeScoutServer {
                 (!idle_ttl.is_zero()).then_some(idle_ttl),
             ),
         }));
+        // A non-empty ledger at construction means a prior server already served
+        // this conversation. Either this is a reconnect against the same project
+        // (re-arming the bootstrap costs one re-send) or against a different one
+        // (re-arming is exactly right, and closes the suppression Phase A
+        // knowingly created when it dropped the project from the ledger key —
+        // see the guide-ledger-phase-c-rearm plan, Task 4).
+        //
+        // Deliberately NOT a root comparison: nothing persists the root a session
+        // was last seen with (`GuideLedger::persist` serializes only `emitted`),
+        // and adding one means a third on-disk shape plus migration from two
+        // predecessors. See the plan's Ruling 2.
+        {
+            let mut led = guide_hints_emitted.lock();
+            if !led.is_empty() {
+                led.re_arm(PROJECT_SCOPED);
+            }
+        }
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
@@ -5252,6 +5269,156 @@ mod guide_hint_tests {
         assert!(
             !server3.guide_hints_emitted.lock().contains("librarian"),
             "a different session must not inherit another session's ledger"
+        );
+    }
+    #[tokio::test]
+    /// The Phase A debt, recorded rather than patched by Phase A's whole-branch
+    /// review: one conversation, MCP server restarts against a DIFFERENT
+    /// `--project`. Before this task the session-keyed ledger carried the first
+    /// project's topics into the second server's construction, so the reloaded
+    /// ledger already `contains(SESSION_OPENING_GUIDE)` and
+    /// `project-activation-bootstrap` is suppressed for a project that never
+    /// received it.
+    async fn a_restart_against_a_different_project_reopens_the_session() {
+        let ledger_dir = tempfile::tempdir().unwrap();
+        let dir_a = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+
+        // Same session id, same ledger dir for both constructions — only the
+        // project root differs between the two server incarnations.
+        let session_id = "different-project-reopen-session";
+        let env_for = |project_dir: &std::path::Path| {
+            let ws_path = project_dir.join("librarian-workspace.toml");
+            std::fs::write(&ws_path, "").unwrap();
+            ServerEnv {
+                session_id_explicit: Some(session_id.to_string()),
+                guide_hints_dir: Some(ledger_dir.path().to_path_buf()),
+                servers_dir: Some(ledger_dir.path().join("servers")),
+                librarian: crate::librarian::LibrarianEnv {
+                    workspace: Some(ws_path),
+                    db: Some(project_dir.join("librarian.db")),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        };
+        let build = |project_dir: std::path::PathBuf, env: ServerEnv| async move {
+            let agent = crate::agent::Agent::new(Some(project_dir)).await.unwrap();
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await
+        };
+
+        // 1. Build against dir_a, drive a call, confirm the opener fired.
+        {
+            let server = build(dir_a.path().to_path_buf(), env_for(dir_a.path())).await;
+            let result = server
+                .call_tool_by_name("tree", json!({"path": "."}))
+                .await
+                .expect("dispatch ok");
+            assert!(
+                content_carries_guide_body(&result.content, crate::prompts::SESSION_OPENING_GUIDE),
+                "precondition: the first call in a fresh session must fire the opener"
+            );
+        } // dropped — simulates the MCP server restarting against a different --project.
+
+        // 2. Build against dir_b, the SAME session id: reloads the session-keyed
+        // ledger built up under dir_a.
+        let server2 = build(dir_b.path().to_path_buf(), env_for(dir_b.path())).await;
+
+        // 3. Before any call on server2: the reloaded ledger must NOT carry the
+        // bootstrap topic forward from dir_a — that suppression is what this
+        // task closes. Safe to assert on ledger state here specifically because
+        // no opener has fired yet on this server.
+        assert!(
+            !server2
+                .guide_hints_emitted
+                .lock()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "a restart against a different project must re-open the session for \
+             the bootstrap topic, not inherit the previous project's ledger state"
+        );
+
+        // And a call against the new server must re-emit the guide body.
+        // Asserted on the RESPONSE, not ledger state: `Tool::call_content`
+        // re-inserts the bootstrap topic as part of firing it, so a post-call
+        // ledger check would pass whether or not a re-arm actually happened.
+        let result2 = server2
+            .call_tool_by_name("tree", json!({"path": "."}))
+            .await
+            .expect("dispatch ok");
+        assert!(
+            content_carries_guide_body(&result2.content, crate::prompts::SESSION_OPENING_GUIDE),
+            "the new project's server must re-send the bootstrap guide on its first call"
+        );
+    }
+
+    #[tokio::test]
+    /// The accepted cost of Ruling 2, pinned so it is a decision and not a
+    /// surprise: a SAME-project reconnect also re-arms the bootstrap — one
+    /// guide body re-sent per `/mcp` reconnect, deliberately, rather than
+    /// persisting a project root and a third on-disk ledger shape. The second
+    /// assertion is what keeps this honest: if the startup path used `clear()`
+    /// instead of `re_arm()`, the first assertion alone would not notice —
+    /// only the survival of a tool-contract topic tells the two apart.
+    async fn a_same_project_restart_also_rearms_the_bootstrap() {
+        let ledger_dir = tempfile::tempdir().unwrap();
+        let dir_a = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        let ws_path = dir_a.path().join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+
+        let session_id = "same-project-rearm-session";
+        let env = ServerEnv {
+            session_id_explicit: Some(session_id.to_string()),
+            guide_hints_dir: Some(ledger_dir.path().to_path_buf()),
+            servers_dir: Some(ledger_dir.path().join("servers")),
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(dir_a.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let build = || {
+            let project_dir = dir_a.path().to_path_buf();
+            let env = env.clone();
+            async move {
+                let agent = crate::agent::Agent::new(Some(project_dir)).await.unwrap();
+                CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await
+            }
+        };
+
+        // First server: fire the opener, then record a tool-contract topic the
+        // model already holds — this must survive the reconnect below.
+        {
+            let server = build().await;
+            server
+                .call_tool_by_name("tree", json!({"path": "."}))
+                .await
+                .expect("dispatch ok");
+            server
+                .guide_hints_emitted
+                .lock()
+                .insert("librarian".to_string());
+        } // dropped — simulates an /mcp reconnect against the SAME project.
+
+        let server2 = build().await;
+
+        // Bootstrap absent before any call — the reconnect re-opened the session.
+        assert!(
+            !server2
+                .guide_hints_emitted
+                .lock()
+                .contains(crate::prompts::SESSION_OPENING_GUIDE),
+            "a same-project reconnect must also re-arm the bootstrap topic"
+        );
+        // The tool-contract topic must survive: this is what distinguishes a
+        // surgical re-arm from a blunt clear().
+        assert!(
+            server2.guide_hints_emitted.lock().contains("librarian"),
+            "a re-arm must not touch tool-contract topics the model already holds \
+             — if this fails, the startup path used clear() instead of re_arm()"
         );
     }
 
