@@ -9,9 +9,11 @@ call — including across subagents that share the parent's MCP server.
 A single call to `activate_project(path=...)` flips the server's active
 project to the given root. The call has these side effects, in order:
 
-1. **Clears `guide_hints_emitted`** — the per-session set tracking
-   which `get_guide(topic)` topics the model has been hinted about. A
-   fresh activation re-triggers first-call hints for the new project.
+1. **Re-arms `guide_hints_emitted`** — the per-session set tracking
+   which `get_guide(topic)` topics the model has been hinted about. How
+   much depends on the predicate in § Per-session state reset:
+   same-project keeps it, a genuine switch re-arms one topic, no
+   rendezvous clears it outright.
 2. **Resolves the path.** Bare project IDs (no `/`) inside a workspace
    are focus-switches; absolute paths trigger full activation. Path
    must be an existing directory or you get a `RecoverableError`
@@ -44,7 +46,7 @@ explicitly restore home or end the session.
 
 ## Per-session state reset
 
-Activation clears these per-session sets:
+Activation's effect on these per-session sets:
 
 | State | Behavior |
 |---|---|
@@ -59,7 +61,7 @@ Activation clears these per-session sets:
 - **Keyed tier** — when a conversation id is obtainable (Claude Code's `CLAUDE_CODE_SESSION_ID`, today), the ledger persists to disk under that id and survives `/mcp` reconnects within the same conversation.
 - **Anonymous tier** — when no identity is obtainable (every other client, or Claude Code before the companion hook has run), the ledger lives in-process only, is never persisted, and re-arms automatically after an idle interval — so a second conversation in a long-lived process isn't starved of guides forever.
 
-A companion hook (Claude Code only) can refresh the keyed tier's id mid-process through a pid-keyed rendezvous slot the server publishes at construction. That is how the server detects `/clear`, which mints a new conversation id without restarting the MCP subprocess. The server stays fully correct without the hook: absent it, the ledger degrades to the anonymous tier's idle-TTL behavior rather than silently suppressing guides the new conversation has never seen.
+A companion hook (Claude Code only) can refresh the keyed tier's id mid-process through a pid-keyed rendezvous slot the server publishes at construction. That is how the server detects `/clear`, which mints a new conversation id without restarting the MCP subprocess. The server stays fully correct without the hook: absent it, the ledger degrades to the anonymous tier's idle-TTL behavior rather than silently suppressing guides the new conversation has never seen. This is the same flag the table above checks — a keyed conversation id on its own is not enough for the surgical re-arm; the hook must actually have stamped the slot at least once.
 
 ## Path-relative annotation
 
@@ -138,10 +140,11 @@ instead of activating: pass `workspace=<absolute path>` on each tool call.
 - **Switching workspaces inside a subagent without restoration.**
   Parent's next tool call lands in the subagent's workspace. Caller
   has no way to detect this without an extra `workspace(status)` call.
-- **Relying on `guide_hints_emitted` to survive activation or compaction.** (On the keyed tier it *does* survive `/mcp` restarts — persisted per conversation identity, not per project; see the identity note under "Per-session state reset" above.) Every
-  `activate_project` resets it. If a hint was useful, capture the
-  guide content in the parent's prompt or call `get_guide(topic)`
-  again after activation.
+- **Relying on `guide_hints_emitted` to survive activation or compaction.** (On the keyed tier it *does* survive `/mcp` restarts — persisted per conversation identity, not per project; see the identity note under "Per-session state reset" above.) Whether
+  `activate_project` clears it, re-arms one topic, or leaves it untouched
+  depends on the predicate in § Per-session state reset — don't assume it
+  survives. If a hint was useful, capture the guide content in the
+  parent's prompt or call `get_guide(topic)` again after activation.
 - **Treating `read_only=true` as a no-op.** It blocks mutations at
   the agent layer; tools that try to write will fail with
   `RecoverableError`. Use it deliberately for scout-only work.
