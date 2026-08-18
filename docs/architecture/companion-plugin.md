@@ -14,23 +14,57 @@ hook inventory lives here. Source of truth is the plugin's own `hooks/hooks.json
 
 ## Full hook inventory (per `hooks/hooks.json`)
 
+Re-derived from the installed `hooks/hooks.json` on 2026-08-18 at companion **1.16.9**, because
+every row of the previous version of this table was wrong: it named all twelve hooks with `.sh`
+extensions the 1.14.0 cross-platform port had replaced with `.mjs`, it gave `pre-task-hint`'s
+matcher as `Task` where it is `Agent`, and it omitted five hooks and two whole events. Re-derive it
+rather than trusting it:
+
+```
+python3 -c "
+import json,re
+d=json.load(open('<profile>/plugins/cache/sdd-misc-plugins/codescout-companion/<ver>/hooks/hooks.json'))
+for ev,es in (d.get('hooks') or d).items():
+    print('==',ev)
+    for e in es:
+        for h in e.get('hooks',[]):
+            print('  ',e.get('matcher','-'),'->',','.join(re.findall(r'hooks/([\w.-]+)',json.dumps(h))))
+"
+```
+
+**SessionStart:**
+- `session-start.mjs` — injects tool guidance + memory hints into every session; also emits a tracker-hygiene overdue nudge (reads `next-sweep-due` from `docs/trackers/tracker-hygiene-log.md`).
+
+**SubagentStart:**
+- `subagent-guidance.mjs` — the same guidance for every subagent.
+
+**UserPromptSubmit:**
+- `constitution-brief.mjs` — buddy-constitution surface. Also the hook that resolves `/buddy:summon` before the slash command runs, spilling an oversized persona payload to a guard-exempt file under `.buddy/<sid>/` and injecting a pointer.
+
+**PreCompact:**
+- `constitution-epoch-bump.mjs` — bumps the constitution epoch across a compaction; observed firing in this session's `/compact`.
+
 **PreToolUse (guards — hard `permissionDecision: deny`):**
-- `mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)` → `worktree-write-guard.sh` — blocks codescout write tools when in a git worktree until `workspace(activate)` has run (clears the `.cs-worktree-pending` marker).
-- `Bash` → `git-worktree-guard.sh` — denies worktree-ambiguous destructive git verbs from Bash; requires `git -C <path>` (single-worktree repos carved out).
-- `mcp__.*__read_file` → `il4-deny-hook.sh` — IL4: hard-denies `read_file` on `.md` paths, redirecting to `read_markdown`.
+- `mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)` → `worktree-write-guard.mjs` — blocks codescout write tools when in a git worktree until `workspace(activate)` has run (clears the `.cs-worktree-pending` marker).
+- `Edit|Write|mcp__codescout__(edit_code|edit_file|create_file)` → `constitution-guard.mjs` — buddy-constitution write guard. Note the matcher is **not** the same set as `worktree-write-guard`'s: it adds native `Edit`/`Write` and omits `edit_markdown`.
+- `Grep|Glob|Read|Bash|Edit|Write` → `pre-tool-guard.mjs` — **hard-denies native Read/Grep/Glob/Edit/Write on source files and all native Bash**, redirecting to codescout MCP tools.
+- `Bash` → `git-worktree-guard.mjs` — denies worktree-ambiguous destructive git verbs from Bash; requires `git -C <path>` (single-worktree repos carved out).
+- `mcp__.*__read_file` → `il4-deny-hook.mjs` — IL4: hard-denies `read_file` on `.md` paths, redirecting to `read_markdown`.
 
 **PreToolUse (advisory — `exit 0` + injected hint):**
-- `mcp__.*__run_command` → `il3-warn-hook.sh` — IL3: warns (does not block) when piping unbounded `run_command` output to a log-trimmer; points at the `@cmd_*` buffer. (`il3-deny-hook.sh` exists on disk but is **not** registered — IL3 is warn-only.)
-- `Task` → `pre-task-hint.sh` — on the first subagent dispatch of a session, points at the `reconnaissance` skill.
-- `mcp__codescout__edit_code` → `pre-edit-hint.sh` — on the first shape-changing edit of a session, points at recon-for-shape-changes.
+- `Agent` → `pre-task-hint.mjs` — on the first subagent dispatch of a session, points at the `reconnaissance` skill. **The matcher is `Agent`, not `Task`** — this doc claimed `Task` for months, which is the tool name that no longer exists.
+- `Agent` → `explore-inject.mjs` — second hook on the same matcher; ships with `explore-inject.fixtures.jsonl`.
+- `mcp__codescout__edit_code` → `pre-edit-hint.mjs` — on the first shape-changing edit of a session, points at recon-for-shape-changes.
+- `mcp__.*__run_command` → **no hook, since companion 1.16.9.** IL3 is enforced entirely server-side by codescout's `src/util/path_security.rs`, which *blocks* an unbounded-LHS pipe and emits the `@cmd_*` recovery path. The advisory `il3-warn-hook.mjs` was deleted in `claude-plugins:a989d73`, not corrected: as a `contextPreToolUse` hook it could never block, so it was redundant whenever the server refused and simply wrong whenever the server allowed — and its hand-copied regex listed `ls`/`cat`/`find`/`grep`/`git` as unbounded, the commands its own warning text called bounded, so it fired on every legal bounded pipe (U-44, `docs/issues/archive/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md`). `il3-deny-hook.sh` and its 33-case suite remain on disk and unwired, kept for possible re-promotion; the matcher itself now carries nothing. **Do not "restore" an advisory mirror of a server-side predicate** — that duplication is what produced U-22 and U-44.
 
 **PostToolUse (state sync):**
-- `EnterWorktree` → `worktree-activate.sh` — injects workspace guidance, drops the `.cs-worktree-pending` write-block marker, symlinks `.codescout/` into the worktree.
-- `mcp__.*__workspace` → `cs-activate-project.sh` — records the declared workspace (statusline) and removes `.cs-worktree-pending` (unblocks write tools).
+- `EnterWorktree` → `worktree-activate.mjs` — injects workspace guidance, drops the `.cs-worktree-pending` write-block marker, symlinks `.codescout/` into the worktree.
+- `mcp__.*__workspace` → `cs-activate-project.mjs` — records the declared workspace (statusline) and removes `.cs-worktree-pending` (unblocks write tools).
 
 **Stop:**
-- `goal-stop-hook.sh` — queries codescout goal-tracker artifacts at turn end and surfaces refresh-staleness in the stop reason; fail-open; disable via `.claude/codescout-companion.json {"goal_stop_hook": false}`.
+- `goal-stop-hook.mjs` — queries codescout goal-tracker artifacts at turn end and surfaces refresh-staleness in the stop reason; fail-open; disable via `.claude/codescout-companion.json {"goal_stop_hook": false}`.
 
+**Not hooks, despite living in `hooks/`:** `detect-tools.sh` and `detect.mjs` are sourced/imported libraries, `lib.mjs` is shared code, and every `*.test.sh` / `*.fixtures.jsonl` is a test. `hooks.json` is the only authority for what is wired.
 ## Critical implication for working on this codebase
 
 The `PreToolUse` hook will **block** any attempt to use native `Read`, `Grep`, or `Glob` on source files (`.rs`, `.ts`, `.py`, etc) and **all native `Bash`**. You will see a `PreToolUse` hook deny. **Use codescout's MCP tools instead:**

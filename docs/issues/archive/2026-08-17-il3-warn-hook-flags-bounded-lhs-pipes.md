@@ -266,14 +266,41 @@ simply disabled IL3; the second proves the server's enforcement is untouched and
 still emits the better message the deletion argument rested on. The first probe is
 the same command shape that produced the false positive quoted in *Symptom*.
 
-Remaining, and both the maintainer's call:
+**Both of the "remaining" items below are now settled — re-measured 2026-08-18.** Corrected in
+place, even though this file is archived, because a Resume is the one section a later session
+reads to learn whether anything is left, and this one was telling it to push commits that are
+already on the remote.
 
-- The three `claude-plugins` commits are **local on `main`, not pushed**
-  (`NO_PUSH=1`).
-- The other two Claude Code instances (`~/.claude`, `~/.claude-kat`) still need
-  `/reload-plugins` or a cold restart. Their install records and caches are already
-  at 1.16.9 — only the running processes are stale, and each binds `installPath` at
-  launch.
+- ~~The three `claude-plugins` commits are local on `main`, not pushed (`NO_PUSH=1`).~~
+  **Pushed.** `git ls-remote origin refs/heads/main` returns `478bc7d`, matching local `main`;
+  `git log origin/main..main` is empty. Someone pushed after this line was written. Note the
+  check has to be `ls-remote`, not the tracking ref — `origin/main` only moves on fetch/push,
+  so it can agree with a stale local view.
+- ~~The other two instances still need `/reload-plugins` or a cold restart.~~ **Self-resolving,
+  and verified.** All three profiles carry the 1.16.9 cache with `il3-warn-hook.mjs` absent,
+  `il3-deny-hook.sh` present-and-unwired, and zero `run_command` matchers in `hooks.json`;
+  all three install records read 1.16.9 with each `installPath` under its own profile root.
+  Since `installPath` binds at launch, any session started after the bump gets 1.16.9 with no
+  action. The live discriminating pair was re-run independently in `~/.claude-kat` and both
+  halves held: `ls docs/issues | head -3` ran silent, `cargo clippy … | tail -5` was refused by
+  the server with the full `@cmd_*` text.
+
+**What the fix did leave undone, found while closing U-44 — the surfaces that still announce the
+deleted hook.** Deleting a hook does not delete its call sites:
+
+- `codescout:docs/architecture/companion-plugin.md` — the inventory CLAUDE.md names as
+  authoritative — still listed this matcher as carrying `il3-warn-hook.sh` and IL3 as
+  "warn-only". **Fixed.** Re-deriving it from the installed `hooks.json` showed the rot was not
+  limited to this row: all twelve hooks were named `.sh` after the 1.14.0 `.mjs` port,
+  `pre-task-hint`'s matcher was given as `Task` rather than `Agent`, and five hooks plus the
+  `UserPromptSubmit` and `PreCompact` events were missing outright.
+- `claude-plugins:.codescout/memories/architecture.md`, `…/memories/gotchas.md`, and
+  `…/system-prompt.md` all still describe the warn hook as active; the last is injected verbatim
+  into every subagent in that repo. All three are **gitignored** (`claude-plugins/.gitignore:8`),
+  so they are per-machine state no commit can repair. Memories fixed via `memory()`;
+  `system-prompt.md` left open — its staleness predates this fix (it still lists pre-1.14.0 `.sh`
+  hook names) and `claude-plugins/docs/trackers/version-bump-checklist.md:118` already scoped it
+  out of a release. Fix is `onboarding(action="refresh_prompt")` from that project.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-44 (this friction), U-22 (the same
