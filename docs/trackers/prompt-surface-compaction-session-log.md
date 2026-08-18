@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 4
-entry_high_water_W: 1
+entry_high_water_W: 2
 ---
 
 > **Work stream:** auditing codescout's four prompt surfaces (`tools/list`,
@@ -41,6 +41,7 @@ entry_high_water_W: 1
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-08-18 | med | Scout the generator before editing a generated surface | Would have shipped a "free mechanical dedup" with no valid implementation | validated |
+| W-2 | 2026-08-18 | high | Do the cache arithmetic before scoping byte-shaving: a 100% cache_read surface costs its cache_read price, not its byte count | Would have sunk dozens of evals into `artifact`'s 51-param long tail to recover ~$0.0002/request, while the axis that might move (does the prose change behaviour?) went unmeasured | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -52,7 +53,7 @@ passes have a comparable baseline.
 
 | Surface | Size | Frequency | Size gate |
 |---|---|---|---|
-| `tools/list` (27 tools) | 58,882 chars (62.5 KB JSON) | every request | descriptions only (14%) |
+| `tools/list` (27 tools) | 58,882 chars — **over-counted, see correction below** | every request | descriptions only (14%) |
 | `server_instructions` | 1,827 chars live | once per conversation | `source_md_under_cap` = 1900 ✅ |
 | `get_guide` corpus (10 topics) | 90,485 B; 62,451 B auto-triggered | once per topic per session | **none** |
 | `onboarding_prompt` + draft | 19,122 B + 2,128 B | once per project | none needed |
@@ -69,6 +70,26 @@ Guide corpus growth, measured with `git cat-file -s` per commit:
 byte-budget reasoning in `src/librarian/adapter.rs:197` and
 `src/prompts/mod.rs:386` still cites the 10.4 KB figure, which was correct the day
 it was written.
+
+**Correction (same day) — take the tool-surface number from the harness, never from a
+scratch probe.** The 58,882 above came from a Python probe that re-serialised the payload
+with `json.dumps` at its default `ensure_ascii=True`, which expands every em-dash into a
+six-character ASCII escape. The over-count therefore tracked prose density, and every
+per-tool delta came out a multiple of 5. The authoritative figure comes from
+`tool_surface_report_lengths` in `src/server.rs`, which reads the same `serde_json` bytes
+the wire carries: **58,572** at the time of this baseline. The per-family splits in the
+paragraph above inherit the same inflation and should be re-read from the harness rather
+than trusted here.
+
+The surface has moved twice since, both times deliberately and both times with the budget
+constant ratcheted to the new total rather than left slack: 58,572 → 57,148 (declaring
+`anchor_heading`, +808; compressing the injected `workspace` description, −2,232), then
+57,148 → **56,266** (hamsa A-27's cut of five per-field restatements, −882). Run the
+harness for the current number.
+
+See [[W-2]] for why the byte total is the *wrong axis* to scope compaction on in the
+first place — the surface is 100% `cache_read`, so all 56,266 characters cost ~$0.0043
+per request.
 
 Both auto-injects were observed first-hand this session: `tracker-conventions`
 (23.2 KB) fired on an `artifact(action="find")` whose results named `docs/trackers/`
@@ -282,6 +303,58 @@ stays caller-stated and the ADR's law is honoured. Cheaper alternative with no s
 cost: none, since the trio guard is what forces the anchor. Note the schema line
 already spends 466 characters on this field, so a sentinel is documentable in ~40 more.
 Contrast [[F-1]], which shipped this path.
+
+## W-2 — Compression cannot be justified on cost — the surface is 100% cache_read, so the case is legibility and must be measured like one
+
+**Observed:** 2026-08-18, deciding what to compact after the budget gate shipped. The
+obvious next move was "the surface is 57,148 characters, cut the biggest tools" — and the
+cost arithmetic says that is close to pointless.
+
+**Pattern.** Before scoping any byte-shaving work on a cached surface, do the cost
+arithmetic first and state it out loud:
+
+| quantity | value |
+|---|---|
+| whole tool surface | 57,148 chars ≈ 14,300 tokens |
+| observed cache hit rate | **100.0%** across 4 sessions / 3 models |
+| cache_read price | $0.30/M |
+| **cost of the entire surface** | **~$0.0043 per request** |
+| cost of the 882 chars A-27 cut | **~$0.00006 per request** |
+
+The same measurement that refuted *relocation* (moving schema prose into a `get_guide`
+topic — break-even K ≈ 12.5 turns, so a cached surface always wins) also undercuts
+*compression for cost*. A 100%-cache_read surface is the cheapest place bytes can live.
+
+So the case for cutting is **legibility**, not economics — and legibility is a claim
+about how a reader behaves, which is exactly the class of claim that needs an eval rather
+than an assertion. That reframing is what made A-27 worth running: not to save 882 bytes,
+but to answer a question that generalizes to every schema in the repo — *does per-field
+restatement of a global rule improve parameter selection, or is it cargo cult?*
+
+**Counterfactual.** Without this arithmetic the natural plan was a long-tail sweep of
+`artifact`'s 51 parameters (12,727 chars, no single fat target), each cut needing its own
+arm under P-4's inverted burden. That is dozens of evals to recover a few thousand
+characters worth ~$0.0002 per request — effort spent on the axis that does not move,
+while the one that might (does the prose change behaviour?) goes unmeasured. A-27 got a
+transferable answer out of one tool instead.
+
+**Confirming data points:**
+1. A-27 (2026-08-18) — 882 chars cut; the byte win is explicitly disclaimed in the
+   pre-registration, and the finding that shipped was the mechanism, not the bytes.
+2. The refuted relocation proposal, same session — same cache measurement, opposite
+   intervention, same conclusion.
+
+**Impact:** high — it redirects the whole work stream from byte-shaving to
+behaviour-measuring, and it is the reason [[F-3]]'s remaining 19.2% question should not
+be answered by deletion.
+
+**Promote-when:** a third compaction decision is scoped by this arithmetic rather than by
+byte count. At that point promote to `docs/PROGRESSIVE_DISCOVERABILITY.md` as a sizing
+rule: *a cached surface's cost is its cache_read price, not its byte count — justify cuts
+on legibility and measure them.*
+
+**Status:** validated — two datapoints, both this session, both pointing the same way.
+Awaiting the promotion criterion.
 
 ## Template for new entries
 
