@@ -491,6 +491,7 @@ mod tests {
     fn test_env(dir: &std::path::Path) -> ServerEnv {
         ServerEnv {
             guide_hints_dir: Some(dir.join("guide_hints")),
+            servers_dir: Some(dir.join("servers")),
             ..Default::default()
         }
     }

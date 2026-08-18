@@ -40,3 +40,4 @@ pub mod guide;
 pub mod guide_ledger;
 #[cfg(unix)]
 pub mod peer;
+pub mod rendezvous;

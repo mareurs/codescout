@@ -73,6 +73,12 @@ pub struct ServerEnv {
     /// `CODESCOUT_GUIDE_TTL_SECS` — anonymous-tier idle window. `None` ⇒ the
     /// default; `Some(0)` ⇒ no expiry at all, an explicit opt-out.
     pub guide_idle_ttl: Option<std::time::Duration>,
+    /// Overrides the per-user rendezvous directory — pid-keyed slots a companion
+    /// hook stamps with a fresh conversation id. `None` ⇒ derive it from
+    /// `per_user_state_dir()`. Tests set this to a tempdir, same rationale as
+    /// `guide_hints_dir`: no test may read, write, or garbage-collect the
+    /// developer's real state directory.
+    pub servers_dir: Option<PathBuf>,
     /// Inputs for the librarian runtime (workspace/db/embed/cwd).
     #[cfg(feature = "librarian")]
     pub librarian: crate::librarian::LibrarianEnv,
@@ -125,6 +131,7 @@ impl ServerEnv {
             guide_idle_ttl: std::env::var("CODESCOUT_GUIDE_TTL_SECS")
                 .ok()
                 .and_then(|v| parse_guide_idle_ttl(&v)),
+            servers_dir: None,
             #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
         }
@@ -172,6 +179,10 @@ pub struct CodeScoutServer {
         reason = "read by tasks 2/4/5 of guide-ledger-phase-b-identity"
     )]
     session_key: crate::tools::session_key::SessionKey,
+    /// Pid-keyed rendezvous slot published at construction so a companion hook
+    /// can stamp a fresh conversation id into an already-running server.
+    #[expect(dead_code, reason = "read by task 5 of guide-ledger-phase-b-identity")]
+    rendezvous: crate::tools::rendezvous::Rendezvous,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
@@ -363,6 +374,14 @@ impl CodeScoutServer {
         let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
         });
+        // Published ONLY here — see `src/tools/rendezvous.rs` module doc for why
+        // this must not move into any shared init path that `codescout mux` also
+        // runs (W-47, docs/trackers/bug-fix-session-log.md).
+        let servers_dir = env.servers_dir.clone().or_else(|| {
+            crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("servers"))
+        });
+        let rendezvous =
+            crate::tools::rendezvous::Rendezvous::publish(servers_dir, session_key.id());
         let idle_ttl = env.guide_idle_ttl.unwrap_or(std::time::Duration::from_secs(
             crate::tools::guide_ledger::DEFAULT_IDLE_TTL_SECS,
         ));
@@ -397,6 +416,7 @@ impl CodeScoutServer {
             session_id: uuid::Uuid::new_v4().to_string(),
             cc_session_id,
             session_key,
+            rendezvous,
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
@@ -1802,6 +1822,7 @@ mod tests {
     fn test_env(dir: &std::path::Path) -> ServerEnv {
         ServerEnv {
             guide_hints_dir: Some(dir.join("guide_hints")),
+            servers_dir: Some(dir.join("servers")),
             ..Default::default()
         }
     }
@@ -4110,6 +4131,7 @@ mod guide_hint_tests {
     fn test_env(dir: &std::path::Path) -> ServerEnv {
         ServerEnv {
             guide_hints_dir: Some(dir.join("guide_hints")),
+            servers_dir: Some(dir.join("servers")),
             ..Default::default()
         }
     }
