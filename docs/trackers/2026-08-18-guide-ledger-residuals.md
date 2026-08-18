@@ -56,7 +56,19 @@ measurement is picking up something other than what we think.
 
 ## Code residuals — small, deferred with reasons
 
-### S-03 — `re_arm` returns `()` where `expire_idle` returns `usize`
+### S-03 — `re_arm` returns `()` where `expire_idle` returns `usize` ✅ DECIDED 2026-08-19
+
+Phase C's `ActivateProject::call` is the first real caller this entry was waiting on: it
+calls `led.re_arm(PROJECT_SCOPED)` only when `led.rendezvous_active()` and the project
+actually switched, and discards the return value — no logging. The caller already knows
+exactly which topic it named, so a removal count would carry no information;
+`expire_idle`'s caller (the idle-TTL sweep) doesn't know in advance what it will find,
+which is why that one needs a count. The design spec's own `GuideLedger` API sketch (§3
+`GuideLedger` API, `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`)
+never gave `re_arm` a return value either, so the asymmetry was deliberate from the design,
+not an oversight waiting on a caller to decide it. Left as `()`; no harmonization needed.
+
+Original note follows.
 
 `src/tools/guide_ledger.rs:160` vs `:179`. Both are removal APIs and both land in Phase B
 / C call sites that will plausibly want to log what they re-armed. Decide the shape when
