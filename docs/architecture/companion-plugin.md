@@ -8,9 +8,9 @@ hook inventory lives here. Source of truth is the plugin's own `hooks/hooks.json
 
 ## What it does (headline hooks)
 
-- `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session; also emits a tracker-hygiene overdue nudge (reads `next-sweep-due` from `docs/trackers/tracker-hygiene-log.md`)
-- `SubagentStart` hook (`hooks/subagent-guidance.sh`) — same for all subagents
-- `PreToolUse` hook on `Grep|Glob|Read|Bash|Edit|Write` (`hooks/pre-tool-guard.sh`) — **hard-denies (`permissionDecision: deny`) native Read/Grep/Glob/Edit/Write on source files and native Bash**, redirecting to codescout MCP tools
+- `SessionStart` hook (`hooks/session-start.mjs`) — injects tool guidance + memory hints into every session; also emits a tracker-hygiene overdue nudge (reads `next-sweep-due` from `docs/trackers/tracker-hygiene-log.md`)
+- `SubagentStart` hook (`hooks/subagent-guidance.mjs`) — same for all subagents
+- `PreToolUse` hook on `Grep|Glob|Read|Bash|Edit|Write` (`hooks/pre-tool-guard.mjs`) — **hard-denies (`permissionDecision: deny`) native Read/Grep/Glob/Edit/Write on source files and native Bash**, redirecting to codescout MCP tools
 
 ## Full hook inventory (per `hooks/hooks.json`)
 
@@ -78,7 +78,7 @@ The `PreToolUse` hook will **block** any attempt to use native `Read`, `Grep`, o
 
 ## Cross-repo work (companion: hardened 2026-05-21)
 
-The Bash branch of `pre-tool-guard.sh` no longer allows a `cd`-escape. **All native `Bash` is hard-denied and redirected to `run_command`**, whose cwd is sandboxed to the active project. For a sibling repo's git, run from the project root via `run_command(command="git -C /abs/path <subcommand>")` — no `cd` needed. For non-git work in a sibling (or out-of-shape commands like `pushd` / `bash -c '...'`), switch the codescout workspace explicitly:
+The Bash branch of `pre-tool-guard.mjs` no longer allows a `cd`-escape. **All native `Bash` is hard-denied and redirected to `run_command`**, whose cwd is sandboxed to the active project. For a sibling repo's git, run from the project root via `run_command(command="git -C /abs/path <subcommand>")` — no `cd` needed. For non-git work in a sibling (or out-of-shape commands like `pushd` / `bash -c '...'`), switch the codescout workspace explicitly:
 
 ```
 workspace(action="activate", path="/path/to/sibling", read_only=false)
