@@ -117,8 +117,21 @@ async fn write_lock_contention_produces_recoverable_error() {
         .expect("test process should acquire the lock uncontested");
 
     // Spawn the binary against the same project directory.
+    //
+    // Without env overrides, the spawned binary's `ServerEnv::from_env()` sets
+    // `guide_hints_dir: None`, which falls back to the developer's REAL
+    // `per_user_state_dir()` — the guide-hint ledger's 35-day file-deleting GC
+    // would then run over `~/.local/state/codescout/guide_hints/`, and the
+    // child inherits `CLAUDE_CODE_SESSION_ID` too, so it could write into the
+    // developer's live session ledger. Redirect both into scratch. `state_dir`
+    // is bound to a named local (not a temporary) so the tempdir isn't deleted
+    // before the child process is done reading/writing it. See
+    // docs/issues/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md.
+    let state_dir = tempfile::tempdir().unwrap();
     let mut child = Command::new(&bin)
         .args(["start", "--project", project.to_str().unwrap()])
+        .env("XDG_STATE_HOME", state_dir.path())
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

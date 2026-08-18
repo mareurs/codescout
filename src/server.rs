@@ -281,7 +281,12 @@ impl CodeScoutServer {
         // untested: every test constructs its server with an injected
         // `guide_hints_dir`, so no test reads, writes, or garbage-collects the real
         // per-user state directory — exercising this branch directly would mean
-        // doing exactly that.
+        // doing exactly that. The one test that spawns the real binary as a child
+        // process (`tests/cross_process_write_lock.rs`) can't reach `ServerEnv`
+        // injection at all — it gets there by overriding `XDG_STATE_HOME` on the
+        // child's environment instead, which the fallback above reads through
+        // `per_user_state_dir()`. See
+        // docs/issues/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md.
         let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
         });
