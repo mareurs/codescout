@@ -175,6 +175,41 @@ grep -c '^| <PREFIX>-[0-9]* |' <the tracker>                                    
 A mismatch means params is not a safe source. This is now stated in
 `get_guide("tracker-conventions")`-adjacent form in the WIN ledger's own § History.
 
+## Correction (2026-08-18) — the shipped message named a remedy that cannot repair it
+
+Found while trying to execute the repair the check recommends. The first-ship message was
+wrong on two counts, and both were mine.
+
+**1. Neither named remedy can do it.** The message said *"Add the missing rows with
+`append_entry` / `update_entry`"*. `append_entry` ends with `obj.insert("id", new_id)` — it
+overwrites whatever id the caller passes — and allocates `params_next.max(body_max + 1)`,
+folding in the very body ids this check is reporting. On the WIN ledger it would mint `WIN-37`,
+not the missing `WIN-30`. `update_entry` patches a row that already exists and is pinned never
+to change the row count, so it cannot create one either. The only surface that can create a row
+at a GIVEN id is the wholesale params write, which also carries a hazard the message therefore
+has to state: a params patch **replaces** the array, so a partial one drops the rest.
+
+**2. The reissue claim was overstated.** The message said *"no id was allocated for them, so a
+later `append_entry` can reissue the same number"*. The `body_max` fold makes reissue
+**impossible** while the body still claims the id — `append_entry`'s own comment says so
+(*"Folding the body's max in makes the reissue impossible instead of silent"*). Reissue becomes
+possible only after a compaction moves those rows to an archive companion, and then only for a
+ledger carrying no committed `entry_high_water_<PREFIX>`. Narrower, and conditional.
+
+That second error mattered beyond wording: it inflated the finding from "params-based queries
+miss these entries" to "silent corruption", which is the wrong urgency and the wrong remedy
+shape.
+
+**Why no test caught it.** The test guarding the message asserted
+`detail.contains("append_entry")` — which passes whether `append_entry` is named as the fix or
+as the thing that cannot fix it. A non-discriminating assertion on the one clause whose
+correctness was load-bearing. Replaced by
+`params_behind_body_names_a_remedy_that_can_actually_repair_it`, which asserts the name of the
+tool that CAN do it (`artifact_augment`) — an assertion the old message fails.
+
+This is the same defect class BL-40 exists to catch — a confidently-worded remedy that is wrong
+in its direction — occurring inside BL-40's own output. Worth keeping for that reason.
+
 ## Resume
 
 Nothing outstanding on the check. **Verified live** against the real catalog

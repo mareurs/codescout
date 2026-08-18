@@ -1533,6 +1533,23 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
 /// here would silence a body id the catalog has never seen, which is the entire finding.
 /// Pinned by `params_behind_body_is_not_gated_on_body_keeps_snapshot`.
 ///
+/// **Neither `append_entry` nor `update_entry` can perform this repair, and the message
+/// must not name them.** It did, on first ship, and the claim was false twice over.
+/// `append_entry` ends with `obj.insert("id", new_id)` — it overwrites whatever id the
+/// caller passed — and allocates `params_next.max(body_max + 1)`, folding in the very body
+/// ids this check is reporting; on the WIN ledger it would mint `WIN-37`, not the missing
+/// `WIN-30`. `update_entry` patches a row that already exists and is pinned never to change
+/// the row count. The only surface that can create a row at a GIVEN id is the wholesale
+/// params write, which is why the message names that and warns that a partial array
+/// replaces rather than merges.
+///
+/// The same first-ship message also claimed an unallocated id "can be reissued". Also
+/// false, for the same reason: the `body_max` fold makes reissue impossible while the body
+/// still claims the id. It becomes possible only after a compaction moves those rows to an
+/// archive companion, and then only for a ledger with no committed
+/// `entry_high_water_<PREFIX>` — which is a narrower and conditional claim than the
+/// message asserted.
+///
 /// Reports only; there is no `fix=`. The missing rows carry a status and dates that no
 /// scan can infer from an id.
 fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
@@ -1563,17 +1580,23 @@ fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>
             Some(ledger.id),
             ledger.abs_path,
             format!(
-                "{} of {} `{}` ids are anchored in the body but have no row in `params`: {}{}. \
-                 The body ran ahead of the catalog, so these entries exist in git and in no \
-                 `entry_filter` query — and no id was allocated for them, so a later \
-                 `append_entry` can reissue the same number. Add the missing rows with \
-                 `append_entry` / `update_entry`. This is the inverse of `snapshot_drift`: do \
-                 NOT rewrite the body from `params`, which would delete the newer record.",
-                unrowed.len(),
-                in_body.len(),
-                ledger.collection,
-                shown.join(", "),
-                suffix
+                "{n} of {total} `{coll}` ids are anchored in the body but have no row in \
+                     `params`: {shown}{suffix}. The body ran ahead of the catalog, so these \
+                     entries are absent from `entry_filter` and every params-based query, and \
+                     the committed body is their only record. Neither `append_entry` nor \
+                     `update_entry` can repair it: the first always allocates the next free id \
+                     (folding the body's max in), so it mints a NEW row rather than the missing \
+                     ones, and the second only patches a row that already exists. Write the \
+                     whole collection instead — `artifact_augment(id=…, merge=true, \
+                     params={{\"{coll}\": [ …every row… ]}})`, or the CLI's `--params @<file>` \
+                     past the inline budget — and note a params patch REPLACES the array, so a \
+                     partial one drops the rest. Do NOT re-render the body from `params`: that \
+                     is `snapshot_drift`'s remedy and here it would delete the newer record.",
+                n = unrowed.len(),
+                total = in_body.len(),
+                coll = ledger.collection,
+                shown = shown.join(", "),
+                suffix = suffix
             ),
         ));
     }
@@ -2677,12 +2700,22 @@ mod tests {
         assert!(v[0].detail.contains("BL-7"), "{}", v[0].detail);
     }
 
-    /// The remedy is `append_entry`, NOT a body edit — the opposite of
-    /// `snapshot_drift`'s advice. Re-rendering the snapshot from params here would
-    /// delete the six rows that are the newer record, so the message getting this
-    /// backwards is data loss rather than noise.
+    /// The named remedy must be one that can actually perform the repair, and the two
+    /// obvious candidates cannot.
+    ///
+    /// `append_entry` unconditionally overwrites `entry["id"]` with the id it allocates,
+    /// and allocates `params_next.max(body_max + 1)` — so on this fixture it would mint
+    /// `BL-3`, and on the real WIN ledger `WIN-37`, rather than the missing rows.
+    /// `update_entry` patches a row that already exists and is pinned never to change the
+    /// row count. Naming either is worse than naming nothing: it sends the reader to a
+    /// tool that reports success and repairs nothing.
+    ///
+    /// **This replaces a test that asserted `detail.contains("append_entry")`.** That
+    /// assertion could not tell "append_entry is the fix" from "append_entry cannot fix
+    /// this" — it passes under both readings, and the wrong one shipped. The
+    /// discriminating assertion is the name of the tool that CAN do it.
     #[test]
-    fn params_behind_body_names_append_entry_as_the_remedy() {
+    fn params_behind_body_names_a_remedy_that_can_actually_repair_it() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         seed_tracker(
@@ -2695,7 +2728,11 @@ mod tests {
 
         let v = scan_params_behind_body(&cat.conn).unwrap();
         let detail = &v[0].detail;
-        assert!(detail.contains("append_entry"), "{detail}");
+        assert!(
+            detail.contains("artifact_augment"),
+            "must name the wholesale params write — the only surface that can create a row \
+                 at a GIVEN id: {detail}"
+        );
         assert!(
             !detail.contains("re-render the snapshot section from params"),
             "that is `snapshot_drift`'s remedy and it destroys the newer record: {detail}"
