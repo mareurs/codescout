@@ -18,6 +18,12 @@ use chrono::{DateTime, TimeZone, Utc};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+/// Prune a ledger once it has been idle this long. Measured 2026-08-18 across
+/// 258 sessions: 0.0% of live sessions would be pruned at 30 days (observed
+/// maxima: 28.9-day lifespan, 27.0-day idle gap), so 35 gives headroom for ~60
+/// bytes per file. See the spec's §8.
+const GC_MAX_IDLE_DAYS: i64 = 35;
+
 /// Topics emitted this session, each stamped with when it was delivered,
 /// optionally backed by a per-session JSON file. Reads go through the in-memory
 /// map; mutations write through.
@@ -65,7 +71,12 @@ impl GuideLedger {
     /// missing, unreadable or malformed file yields an empty set — degrading to
     /// re-sending a guide, never to suppressing one. `dir = None` ⇒ ephemeral.
     pub fn load(session_id: &str, dir: Option<PathBuf>) -> Self {
-        let path = dir.map(|d| d.join(format!("{}.json", sanitize(session_id))));
+        let path = dir
+            .as_ref()
+            .map(|d| d.join(format!("{}.json", sanitize(session_id))));
+        if let (Some(d), Some(p)) = (dir.as_deref(), path.as_deref()) {
+            gc(d, p);
+        }
         let emitted = path.as_deref().map(read_entries).unwrap_or_default();
         Self {
             path,
@@ -212,6 +223,40 @@ impl GuideLedger {
                 }
             }
             Err(e) => tracing::debug!("guide ledger serialize failed: {e}"),
+        }
+    }
+}
+
+/// Delete ledgers whose newest stamp is older than [`GC_MAX_IDLE_DAYS`].
+///
+/// Keyed on the NEWEST stamp, deliberately: a long-running session keeps writing,
+/// so idle age is what distinguishes a dead ledger from a quiet one. A file whose
+/// oldest topic is ancient but whose newest is fresh belongs to a live session.
+///
+/// `skip` is the caller's own file, which is never pruned — loading a stale
+/// ledger must return its contents, not delete them out from under the caller.
+///
+/// This `read_dir` is CLEANUP, not discovery: nothing locates a ledger by
+/// scanning, so the directory can be relocated without auditing this call.
+/// (Same note as `src/lsp/mux/mod.rs:68-72`; recon ledger R-45.)
+fn gc(dir: &Path, skip: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let cutoff = Utc::now() - chrono::Duration::days(GC_MAX_IDLE_DAYS);
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path == skip || path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let newest = read_entries(&path).into_values().max();
+        // An unparseable or empty ledger carries no evidence of life; fall back
+        // to the file's own mtime rather than deleting it on the spot.
+        let idle_since = newest.or_else(|| file_mtime(&path));
+        if let Some(at) = idle_since {
+            if at < cutoff {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
 }
@@ -580,5 +625,107 @@ mod tests {
         l.insert("librarian".to_string());
         assert_eq!(l.expire_idle(std::time::Duration::MAX), 0);
         assert!(l.contains("librarian"));
+    }
+
+    #[test]
+    fn gc_drops_ledgers_idle_past_the_window_and_keeps_the_rest() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        let ancient = chrono::Utc::now() - chrono::Duration::days(40);
+        let recent = chrono::Utc::now() - chrono::Duration::days(3);
+        std::fs::write(
+            hints.join("dead.json"),
+            serde_json::json!({ "librarian": ancient.to_rfc3339() }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            hints.join("alive.json"),
+            serde_json::json!({ "librarian": recent.to_rfc3339() }).to_string(),
+        )
+        .unwrap();
+
+        // GC runs as a side effect of loading any ledger in that directory.
+        let _ = GuideLedger::load("some-other-session", Some(hints.clone()));
+
+        assert!(
+            !hints.join("dead.json").exists(),
+            "40-day-idle ledger must be pruned"
+        );
+        assert!(
+            hints.join("alive.json").exists(),
+            "3-day-idle ledger must survive"
+        );
+    }
+
+    #[test]
+    fn gc_keeps_a_ledger_whose_newest_stamp_is_fresh_even_if_its_oldest_is_not() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        // A long-running session: first guide delivered 40 days ago, still active.
+        let old = chrono::Utc::now() - chrono::Duration::days(40);
+        let now = chrono::Utc::now();
+        std::fs::write(
+            hints.join("long-runner.json"),
+            serde_json::json!({
+                "project-activation-bootstrap": old.to_rfc3339(),
+                "librarian": now.to_rfc3339(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let _ = GuideLedger::load("some-other-session", Some(hints.clone()));
+
+        assert!(
+            hints.join("long-runner.json").exists(),
+            "idle age is the NEWEST stamp; a 28.9-day session was observed in the wild"
+        );
+    }
+
+    #[test]
+    fn gc_never_prunes_the_ledger_being_loaded() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+        let ancient = chrono::Utc::now() - chrono::Duration::days(40);
+        std::fs::write(
+            hints.join("mine.json"),
+            serde_json::json!({ "librarian": ancient.to_rfc3339() }).to_string(),
+        )
+        .unwrap();
+
+        // Loading my own stale ledger must return its contents, not delete them
+        // mid-call and hand me an empty set.
+        let l = GuideLedger::load("mine", Some(hints.clone()));
+        assert!(l.contains("librarian"));
+    }
+
+    #[test]
+    fn gc_ignores_non_json_files_even_when_ancient() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        // A stray non-ledger file with an ancient mtime must survive: gc's
+        // directory walk is scoped to files it recognizes as ledgers (`.json`),
+        // never to "anything old in this directory". After Task 6 this
+        // directory lives under the user's $XDG_STATE_HOME.
+        let stray = hints.join("notes.txt");
+        std::fs::write(&stray, "not a ledger").unwrap();
+        let ancient_mtime =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 24 * 60 * 60);
+        filetime::set_file_mtime(&stray, filetime::FileTime::from_system_time(ancient_mtime))
+            .unwrap();
+
+        let _ = GuideLedger::load("some-other-session", Some(hints.clone()));
+
+        assert!(
+            stray.exists(),
+            "gc must never delete a file without a .json extension"
+        );
     }
 }
