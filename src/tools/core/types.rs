@@ -690,6 +690,11 @@ pub trait Tool: Send + Sync {
         // Compute potential hint topic + whether it should fire on this call.
         let hint_topic: Option<String> = {
             let mut emitted = ctx.guide_hints_emitted.lock();
+            // Anonymous tier only (a no-op when no TTL is configured): re-arm
+            // topics the model plausibly no longer holds. Must run BEFORE
+            // is_empty(), or an expiry that empties the ledger goes unseen until
+            // the next call.
+            emitted.tick();
             if emitted.is_empty() {
                 // Session opener. An empty ledger means this is the session's
                 // first guide-eligible call — or the first since an `activate`

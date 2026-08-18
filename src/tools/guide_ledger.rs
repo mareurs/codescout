@@ -27,6 +27,12 @@ use std::path::{Path, PathBuf};
 /// `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § 8.
 const GC_MAX_IDLE_DAYS: i64 = 35;
 
+/// Idle window after which an anonymous-tier topic re-arms. Two hours: measured
+/// over 258 sessions this fires spuriously on 34.5% of live conversations, but
+/// the alternative for a client with no conversation identity is permanent
+/// starvation of every conversation after the first. Spec §7.
+pub const DEFAULT_IDLE_TTL_SECS: u64 = 7200;
+
 /// Topics emitted this session, each stamped with when it was delivered,
 /// optionally backed by a per-session JSON file. Reads go through the in-memory
 /// map; mutations write through.
@@ -58,6 +64,8 @@ pub struct GuideLedger {
     /// Ephemeral by design: a notice describes this process's view of the
     /// tree, not something the model has been taught.
     notices: HashSet<String>,
+    /// Anonymous tier only. `None` ⇒ never expire by time.
+    idle_ttl: Option<std::time::Duration>,
 }
 
 /// Accepts both on-disk shapes. `untagged` is unambiguous here because a JSON
@@ -85,6 +93,18 @@ impl GuideLedger {
             path,
             emitted,
             notices: HashSet::new(),
+            idle_ttl: None,
+        }
+    }
+
+    /// A ledger for a client exposing no conversation identity: in-process only,
+    /// bounded by `idle_ttl` rather than keyed by a session.
+    pub fn anonymous(idle_ttl: Option<std::time::Duration>) -> Self {
+        Self {
+            path: None,
+            emitted: Default::default(),
+            notices: HashSet::new(),
+            idle_ttl,
         }
     }
 
@@ -92,6 +112,20 @@ impl GuideLedger {
     #[cfg(test)]
     pub fn stamps_for_test(&self) -> Vec<(String, DateTime<Utc>)> {
         self.emitted.iter().map(|(k, v)| (k.clone(), *v)).collect()
+    }
+
+    /// The backing path, for tests asserting a ledger is ephemeral.
+    #[cfg(test)]
+    pub fn path_for_test(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    /// Push a topic's stamp back in time, so expiry is testable without sleeping.
+    #[cfg(test)]
+    pub fn backdate_for_test(&mut self, topic: &str, by: chrono::Duration) {
+        if let Some(at) = self.emitted.get_mut(topic) {
+            *at -= by;
+        }
     }
 
     /// Has this topic already been surfaced this session?
@@ -190,6 +224,16 @@ impl GuideLedger {
             self.persist();
         }
         removed
+    }
+
+    /// Apply the configured idle TTL, if any. Returns how many topics re-armed.
+    /// Cheap enough for every guide-eligible request: a `BTreeMap::retain` over a
+    /// handful of entries, persisting only on an actual change.
+    pub fn tick(&mut self) -> usize {
+        match self.idle_ttl {
+            Some(ttl) => self.expire_idle(ttl),
+            None => 0,
+        }
     }
 
     /// Record a one-shot session notice. Returns `true` the FIRST time this
@@ -821,5 +865,52 @@ mod tests {
             garbage.exists(),
             "a file with neither a parseable stamp nor a usable mtime must never be pruned"
         );
+    }
+
+    #[test]
+    fn an_anonymous_ledger_never_persists_even_with_a_ttl() {
+        // Tier 2's whole contract: in-process only. A path here would mint files
+        // under a key nothing can ever match.
+        use std::time::Duration;
+        let mut l = GuideLedger::anonymous(Some(Duration::from_secs(7200)));
+        l.insert("librarian".to_string());
+        assert!(l.contains("librarian"));
+        assert!(
+            l.path_for_test().is_none(),
+            "anonymous ledger must have no path"
+        );
+    }
+
+    #[test]
+    fn tick_expires_topics_older_than_the_ttl_and_leaves_fresh_ones() {
+        use std::time::Duration;
+        let mut l = GuideLedger::anonymous(Some(Duration::from_secs(3600)));
+        l.insert("stale".to_string());
+        l.insert("fresh".to_string());
+        l.backdate_for_test("stale", chrono::Duration::hours(2));
+        assert_eq!(l.tick(), 1);
+        assert!(!l.contains("stale"));
+        assert!(l.contains("fresh"));
+    }
+
+    #[test]
+    fn tick_on_a_ledger_with_no_ttl_expires_nothing_however_old() {
+        // Tier 1 must never expire by time — the rendezvous is its mechanism.
+        // Kills a mutation applying DEFAULT_IDLE_TTL_SECS unconditionally.
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("ancient".to_string());
+        l.backdate_for_test("ancient", chrono::Duration::days(30));
+        assert_eq!(l.tick(), 0);
+        assert!(l.contains("ancient"));
+    }
+
+    #[test]
+    fn a_keyed_ledger_loaded_from_disk_has_no_ttl_by_default() {
+        // Kills a mutation giving every ledger the anonymous TTL.
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = GuideLedger::load("s1", Some(dir.path().to_path_buf()));
+        l.insert("librarian".to_string());
+        l.backdate_for_test("librarian", chrono::Duration::days(30));
+        assert_eq!(l.tick(), 0, "tier 1 must not expire by time");
     }
 }

@@ -70,6 +70,9 @@ pub struct ServerEnv {
     /// `per_user_state_dir()`. Tests set this to a tempdir so they never touch — or
     /// depend on — the developer's real state directory.
     pub guide_hints_dir: Option<PathBuf>,
+    /// `CODESCOUT_GUIDE_TTL_SECS` — anonymous-tier idle window. `None` ⇒ the
+    /// default; `Some(0)` ⇒ no expiry at all, an explicit opt-out.
+    pub guide_idle_ttl: Option<std::time::Duration>,
     /// Inputs for the librarian runtime (workspace/db/embed/cwd).
     #[cfg(feature = "librarian")]
     pub librarian: crate::librarian::LibrarianEnv,
@@ -93,6 +96,10 @@ impl ServerEnv {
                 .filter_map(|name| std::env::var(name).ok().map(|v| (*name, v)))
                 .collect(),
             guide_hints_dir: None,
+            guide_idle_ttl: std::env::var("CODESCOUT_GUIDE_TTL_SECS")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .map(std::time::Duration::from_secs),
             #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
         }
@@ -331,9 +338,15 @@ impl CodeScoutServer {
         let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
         });
+        let idle_ttl = env.guide_idle_ttl.unwrap_or(std::time::Duration::from_secs(
+            crate::tools::guide_ledger::DEFAULT_IDLE_TTL_SECS,
+        ));
         let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(match session_key.id() {
             Some(id) => crate::tools::guide_ledger::GuideLedger::load(id, guide_hints_dir),
-            None => crate::tools::guide_ledger::GuideLedger::load("", None),
+            // Zero is an explicit operator opt-out, accepting starvation.
+            None => crate::tools::guide_ledger::GuideLedger::anonymous(
+                (!idle_ttl.is_zero()).then_some(idle_ttl),
+            ),
         }));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
