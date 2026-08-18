@@ -1,7 +1,7 @@
 ---
 id: ab0b30dc9053aa6c
 kind: bug
-status: open
+status: fixed
 title: 'BUG: Iron Law 1''s always-loaded text grants line-range reads without the overlap condition — 416 refusals, 4.7 per session, the largest error class in the corpus'
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - agent-guidance
 - usage-db-evidence
 topic: prompt-surface-consistency
+closed: 2026-08-18
 ---
 
 ## Summary
@@ -299,6 +300,48 @@ leaves the dynamic block 289 — more room than it had before this change.
 
 ## Fix
 
+> **VERDICT 2026-08-18 — the gate ran and step 3 LOST. Steps 1-2 are the fix; the wording is
+> reverted.** `32b34efa`.
+>
+> The subtract-and-measure protocol was the only thing this bug stayed open on. It ran as
+> hamsa **A-25**, 10 runs per arm, sonnet pinned, ship rule pre-registered at `e2fbefe2`
+> **before either arm ran**. Result:
+>
+> | Arm | Planned the refused shape |
+> |---|---|
+> | A — base, no clause | **10/10** |
+> | B — with the clause | **8/10** |
+>
+> The rule needed arm A ≥ 3/10 (met, overwhelmingly — the deficit is **confirmed**) **and**
+> arm B ≤ 1/10 (missed by a mile). 0/10 → 2/10 passing is Fisher p≈0.47, noise.
+>
+> **Why it failed, and this is the part worth carrying forward:** the clause is
+> *informational*, not *directive*. It states the gate's condition but supplies no
+> procedure — and an agent asked for lines 40-55 cannot know whether they overlap a symbol
+> without checking, so the clause adds a fact it cannot act on. The single passing arm-B run
+> is the tell: it called `symbol_at` to resolve exactly that unknown. Arm A corroborates
+> from the other side — its ten answers disagreed on the *signature* (`lines=`, `start/end`,
+> `start_line/end_line`, `line_range=[..]`) while agreeing completely on the *permission*.
+> The always-loaded text leaves an agent unsure only about parameter spelling.
+>
+> Both pre-registered validity caveats predicted a **false ceiling** and neither
+> materialised, which strengthens the deficit finding rather than weakening it: the
+> deliberative elicitation did not rescue arm A, and not one of the twenty runs inspected
+> `report.rs` to check for overlap.
+>
+> **So this bug closes `fixed` on steps 1-2, not on step 3.** The head-read exemption
+> (`start == 1 && end <= 60`) and the extent-ordered hint are code, carry their own tests,
+> were never subject to the prompt-eval gate, and already exempt 102 of 103 `start == 1`
+> refusals. Reverting the wording leaves that population handled.
+>
+> The guard test is **inverted, not deleted** — `il1_does_not_carry_the_refuted_overlap_clause`
+> fails if the clause returns, because step 3 below otherwise reads as a standing invitation
+> to re-add 57 characters now known not to work. Mutation-verified.
+>
+> **Everything below this banner is the pre-eval plan, kept as history.** Step 3's wording,
+> its budget arithmetic, and its "authored but not eval-validated" caveat are all superseded
+> by the result above. Do not implement step 3.
+
 Not implemented. Revised 2026-08-15 after reading the refused arguments — the wording change alone
 is no longer the first move.
 
@@ -417,49 +460,34 @@ cost rather than asserting a preference.
 
 ## Resume
 
-Step 3's wording is restored and now **guarded**, which is the change of state
-since 2026-08-16. `prompts::redesign_invariants::il1_states_the_overlap_condition_not_just_the_permission`
-asserts IL1 names both the overlap condition and `force=true`, and it is
-mutation-verified: reinstating `391fdcdc`'s wording turns it red and prints the
-offending text. That test is the reason a third deletion cannot pass silently.
+N/A — closed `fixed` 2026-08-18 at `32b34efa` on `experiments`, promoted by fast-forward, so
+that is also the master-side SHA and there is no second one to record.
 
-**One gate still stands, unchanged:**
+What shipped: steps 1-2 (code, with tests). What did not: step 3's wording, measured and
+refuted as hamsa A-25 and reverted in the same commit that closes this.
 
-1. **Run the subtract-and-measure protocol on the wording** —
-   `artifact(action="get", id="59ebeebb6ed05c89", heading="Protocol — subtract-and-measure
-   (P-1..P-8)")`, harness `../prompt-engineering/`. Base arm first; if it is already at
-   ceiling, revert rather than ship. Steps 1-2 are code with tests and are not subject
-   to this gate; only the prompt edit is. Until this run exists the wording is a
-   candidate, and the bug stays `open` on that alone — not on anything unimplemented.
+**The live successor is a different intervention, not a re-reading of A-25.** A *directive*
+wording — something of the shape "on a mid-file range, pass `force=true` or fetch the symbol
+by name" — addresses what A-25 found lacking, because it supplies a procedure rather than a
+fact. It needs its own base arm and its own pre-registered A-N row. The scenario to fork is
+`prompt-engineering/scenarios/il1-overlap-condition/` (`prompt-engineering:f2f7958`); the
+base arm is already measured at 10/10, so a successor only needs its own treatment arm
+against that same base.
 
-2. **Then re-measure the refusal population.** Acceptance number in § Evidence: 244
-   refused reads carrying arguments, 103 matching `start == 1 && end <= 60`. If the fix
-   works that sub-population goes to zero and total IL1 refusals drop ~40%. Re-run the
-   § Method query from `docs/trackers/2026-08-15-tool-usage-investigation.md` on a single
-   project — month-over-month across projects is confounded. Date-bound to after the
-   `cargo rb` that carried the head-read exemption.
+**Two things a later session should not redo.** The `docs/trackers` quickref row cut to pay
+for the clause stays cut — restoring it is a fresh addition needing its own base arm, and
+the P-4 argument for the cut was independently confirmed on 2026-08-18: `get_guide(
+"librarian")` auto-injects on the first `artifact` call of a session, unprompted, every
+time. And the § Fix cap table remains retired; the character accounting in § Evidence
+*Regression* is the live one.
 
-Do not re-derive the character budget from § Fix's table — see § Evidence,
-*Regression*, for the live numbers and why that table is retired.
-
-**And do not try to eyeball the restored clause in a running session.** `d2cf4449`'s
-commit message says *"Needs cargo rb + /mcp before a live session sees the restored
-clause"* — that is wrong for this surface, and the error is mine. A `/mcp` reconnect
-refreshes tool schemas and behaviour, **not** `server_instructions`
-(`docs/issues/archive/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`, fixed).
-Measured from this session: after four rebuilds and four reconnects the live block
-still carried a `## Workspace gate` section that `391fdcdc` deleted the previous day,
-so it had not been rebuilt from any of today's binaries.
-
-The authoritative check is the fixture, and it passes:
-
-```
-$ grep -c 'overlaps a symbol' tests/fixtures/prompt_surfaces/server_instructions.md
-1
-```
-
-plus `cargo test --lib prompt_surfaces`. To see the text injected for real, open a NEW
-conversation — the authoring session is structurally the one observer that cannot.
+**Apparatus note, because it nearly produced a fabricated no-ship.** The first base-arm
+attempt ran all 10 generations and then failed every assertion with `Permission denied` —
+the checker lacked the exec bit — and summarised as `0/1 passed`. That is
+character-identical to a genuine ceiling, which was precisely the outcome that would have
+triggered this revert on no evidence at all. P-6 mutation-tests the checker's *logic* and
+cannot catch it, because the fault sits one layer below: whether the checker can execute.
+Worth a harness-backlog entry.
 ## References
 
 - `src/tools/read_file.rs:544-565` — the gate
