@@ -1,12 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- xdg
+- config
+- path-resolution
+closed: 2026-08-18
 opened: 2026-08-18
-closed:
-severity: low
 owner: marius
 related: []
-tags: [xdg, config, path-resolution]
-kind: bug
+severity: low
 ---
 
 # BUG: `global_config_dir_from` accepts a relative `XDG_CONFIG_HOME`, contrary to the XDG basedir spec
@@ -92,8 +95,7 @@ should consider the path invalid and ignore it."*
 
 ## Fix
 
-Not planned for the guide-ledger Phase A work — explicitly ruled out of scope for that
-plan's Task 1 (Ruling 6). The one-line fix mirrors `state_dir_from`:
+Shipped as `b17987b8` on `experiments` — the one-line gate that mirrors `state_dir_from`:
 
 ```rust
 let base = xdg_config_home
@@ -102,16 +104,32 @@ let base = xdg_config_home
     .or_else(|| home.map(|h| PathBuf::from(h).join(".config")))?;
 ```
 
-Before shipping it, check callers for anyone relying on the current relative behaviour —
-`references(symbol="global_config_dir_from")`. Note the two helpers also drift in
-signature (`Option<&OsStr>, Option<&OsStr>` here vs `Option<OsString>, Option<PathBuf>`
-in `state_dir_from`); harmonising them is optional and separate.
+The Resume's prerequisite was carried out first: `references(symbol="global_config_dir_from")`
+returns one non-test caller (`global_config_dir`, same file, line 62) and five test call
+sites, every one of them passing an absolute path. Nothing depended on CWD-relative
+resolution, so the change is behaviour-preserving for every existing caller.
 
+The two helpers' signatures still drift (`Option<&OsStr>` here vs `Option<OsString>` /
+`Option<PathBuf>` in `state_dir_from`). Harmonising them remains optional and separate, as
+filed — it was not done here.
 ## Tests added
 
-None yet — bug is open, not fixed. A fix must add the relative-value assertion shown
-under Reproduction to `src/config/global.rs`'s `mod tests`.
+Two, in `src/config/global.rs`'s `mod tests`. Each was watched fail before the fix, and
+each guards a **distinct** mutation — measured, not assumed:
 
+| Test | Mutation it is the sole guard against |
+|---|---|
+| `config_dir_ignores_relative_xdg_and_falls_back_to_home` | Deleting the `.filter` (i.e. the pre-fix code). Red with `left: "relative/state/codescout"`, `right: "/tmp/fake-home/.config/codescout"`. |
+| `config_dir_none_when_xdg_is_relative_and_home_unset` | Keeping the relative value as a *last-resort* fallback (`.or_else(|| xdg_config_home.map(PathBuf::from))` appended). Leaves the first test **green** and reds only this one. |
+
+The second test exists precisely because the first cannot distinguish "ignored" from
+"deprioritised" — a fix that merely reordered the branches would pass it. The mutation run
+above confirms it is not redundant.
+
+Full gate on `c86c5a68` + this change, run in a clean worktree so a peer's in-flight edits
+to `server.rs` / `guide_ledger.rs` could not colour the result: `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` clean, `cargo test --workspace --no-fail-fast`
+at **4191 passed / 0 failed / 50 ignored**.
 ## Workarounds
 
 Set `XDG_CONFIG_HOME` to an absolute path, or leave it unset and let `$HOME/.config`
@@ -119,12 +137,16 @@ apply. Both are what conforming systems already do; a relative value is unusual.
 
 ## Resume
 
-Run `references(symbol="global_config_dir_from")` to enumerate callers and confirm none
-depends on CWD-relative resolution. Then apply the `.filter(|p| p.is_absolute())` shown
-under Fix, add the assertion from Reproduction to `src/config/global.rs`'s `mod tests`,
-and run `cargo test --lib config::global`. Decide separately whether to harmonise the
-two helpers' signatures.
+Nothing outstanding. Fixed and verified on `experiments` as `b17987b8`; archived on
+2026-08-18.
 
+Promotion to `master` is a **fast-forward** (`git rev-list --left-right --count
+master...experiments` → `0 1043`), so the `experiments` SHA above already *is* the master
+SHA — there is no second SHA to record, and deliberately no pending-master-SHA line here.
+
+The one deliberately-unclosed thread, carried over from Fix rather than left implicit: the
+two XDG helpers still disagree in signature shape. That is a tidiness item, not a defect,
+and was out of scope by the original filing.
 ## References
 
 - `src/config/global.rs:49-57` — the defective resolver

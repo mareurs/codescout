@@ -22,8 +22,9 @@ Open follow-ups from the guide-ledger Phase A work stream (12 commits,
 - `docs/issues/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md` —
   fixed but deliberately unarchived; its `## Resume` owns the missing regression test.
 - `docs/issues/2026-08-18-clear-leaves-mcp-session-id-stale.md` — open; Phase B closes it.
-- `docs/issues/2026-08-18-global-config-dir-accepts-relative-xdg-config-home.md` — open,
-  deliberately out of scope.
+- `docs/issues/archive/2026-08-18-global-config-dir-accepts-relative-xdg-config-home.md`
+  — was out of scope for this stream; fixed and archived 2026-08-18 as `b17987b8`
+  (`experiments`), independently of the guide-ledger work.
 - `docs/trackers/bug-fix-session-log.md` — `F-54` and `W-46` from this stream.
 
 Each item is a single-paragraph note, not a design doc. Several are explicitly
