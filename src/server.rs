@@ -1002,9 +1002,14 @@ impl CodeScoutServer {
                     family
                         .and_then(crate::prompts::refusal_predicate)
                         .filter(|_| {
-                            // `notice_once`, not `insert`: a key in `emitted` would
-                            // make `is_empty()` false and suppress the session
-                            // opener — see `GuideLedger::notices`.
+                            // `notice_once`, not `insert`: under the opener's
+                            // trigger (`!emitted.contains(SESSION_OPENING_GUIDE)`,
+                            // src/tools/core/types.rs:703) a key in `emitted`
+                            // only risks suppressing the opener if it collides
+                            // with that literal topic string — which this
+                            // refusal key does not. `notice_once` still keeps
+                            // it in the separate `notices` set regardless; see
+                            // `GuideLedger::notices`.
                             ctx.guide_hints_emitted
                                 .lock()
                                 .notice_once(&format!("refusal-predicate:{}", family.unwrap_or("")))
@@ -2761,11 +2766,13 @@ mod tests {
             serde_json::json!({"abs_path": "src/main.rs"}),
         ];
         // There are TWO delivery paths, and scanning tool impls only sees one. The
-        // session opener fires from `call_content`'s empty-ledger branch on the first
-        // guide-eligible call of any session, whatever tool made it — so it is triggered
-        // by construction and no `relevant_guide_topic()` needs to name it. Omitting this
-        // made the gate fail a guide that is in fact delivered, which would have been
-        // "fixed" by re-adding a redundant trigger.
+        // session opener fires from `call_content`'s opener check
+        // (`!emitted.contains(SESSION_OPENING_GUIDE)`, src/tools/core/types.rs:703)
+        // on the first guide-eligible call of any session, whatever tool made
+        // it — so it is triggered by construction and no `relevant_guide_topic()`
+        // needs to name it. Omitting this made the gate fail a guide that is in
+        // fact delivered, which would have been "fixed" by re-adding a
+        // redundant trigger.
         let mut triggered: std::collections::BTreeSet<&str> =
             [crate::prompts::SESSION_OPENING_GUIDE]
                 .into_iter()
@@ -5096,9 +5103,11 @@ mod guide_hint_tests {
         // polling before `tool.call_content` and polling after it leave the same
         // end state, which is why moving `self.poll_rendezvous()` below the tool
         // call left all 4050 lib tests green. This assertion reads THIS
-        // response instead. A re-armed ledger is empty, `is_empty()` is what
-        // fires the session opener inside `call_content`, so the opener can only
-        // ride this very response if the rekey landed first.
+        // response instead. A re-armed ledger is empty, and an empty ledger
+        // always lacks `SESSION_OPENING_GUIDE` — the opener's trigger
+        // (`!emitted.contains(SESSION_OPENING_GUIDE)`, `call_content`,
+        // src/tools/core/types.rs:703) — so the opener can only ride this
+        // very response if the rekey landed first.
         //
         // The off-by-one is not cosmetic: with the poll after the tool ran, the
         // first call following a `/clear` answers from the STALE conv-A ledger
