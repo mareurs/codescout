@@ -1,7 +1,7 @@
 ---
 id: d34dfcd2cc718bd8
 kind: bug
-status: open
+status: fixed
 title: 'BUG: an index-table row satisfies the snapshot-drift check but defines no citable token, so an entry can be written "successfully" and be permanently unreachable by citation'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - augmentation
 - dangling-citations
 topic: tracker-entry-identity
-closed: ''
+closed: 2026-08-18
 opened: 2026-08-18
 related:
 - docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
@@ -579,63 +579,91 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 
 ## Resume
 
-**Steps 0, 1, 2, 3 and 5 are done. Step 4 is underway: 2 of 13 ledgers backfilled.**
+**All steps done. Fixed 2026-08-18 — and deliberately NOT yet archived; see the last section.**
 
-| step | what | SHA |
+| step | what | SHA (`experiments`) |
 |---|---|---|
 | 0 | branch (a); template validation dropped after measuring that no template writes a body | — |
 | 1 | `body_defined_indices` | `de4df2cd` |
 | 2 | `undefined_in_body` on both entry-writing tools | `f19d5296` |
 | 3 | `doctor` — `entry_without_definition` / `ledger_defines_nothing` | `758b37dc` |
 | 5 | guide, `librarian.md`, and the `tracker_design` archetype defaults | `d3c1e6ed` |
-| 4a | `windows-platform-support.md` — 35 sections, 22 edges recovered | `f04e4c17` |
-| 4b | `open-issue-work-queue.md` — 39 sections, 33 edges recovered | `0d101eb8` |
+| 4a | `windows-platform-support.md` — 35 sections, 22 edges | `f04e4c17` |
+| 4b | `open-issue-work-queue.md` — 39 sections, 33 edges | `0d101eb8` |
 | 4c | `provenance-subsystem.md` — the 22 cited entries, −48 dangling | `f5f602e6` |
 | 4d | `prompt-hamsa-audit-log.md` — A-15…A-24, −27 dangling, 8 edges | `9703102c` |
+| 4e | SD (11) + GF (8) + FND (18) + T (12) — 49 entries in one pass | `c7bdfd22` |
 
-**Running totals after 4 of 13 ledgers:** `ledger_defines_nothing` down from **10 violations to 8**;
-`entry_without_definition` down from **3 to 2**, and one of those two is the 42 deliberately left in
-4c. Project dangling **621 → 547**, and **67 edges** materialised — every one a reference that
-previously resolved to nothing.
+**Final measurement, on the wire after `cargo rb` + `/mcp`:** `doctor`
+`ledger_defines_nothing` **10 → 2**, `entry_without_definition` **3 → 1**. Project dangling
+**548 → 471**; `edges_added` **44** with `write=true`, and a re-scan then reported
+`edges_missing 0` / `edges_stale 0` / `edges_unchanged 895` — the graph converged and the scan is
+idempotent.
 
-Codescout-local work remaining: SD + GF (~36 external cites), `fable-tuning-findings.md` (FND, 19),
-and `fable-tuning-tasks.md` — a prefix decision rather than a backfill, see below. The four ledgers
-in `researcher` / `mirela` / `stefanini` need their own workspaces activated and are a separate call.
+**Both remaining `doctor` rows are outside codescout.** The two `ledger_defines_nothing` are
+`researcher`'s `T`×2 and `stefanini`'s `CR`×8; the one `entry_without_definition` is
+`provenance-subsystem`'s 42 uncited `PV`, left undefined on purpose because only 22 of 64 entries
+are cited and that ledger's own convention is narrative only where a row is insufficient. The
+cross-repo remainder was **handed off** 2026-08-18 by explicit decision, not left pending here.
 
-### Remaining, ranked by the metric that actually works
+### The `fable-tuning-tasks.md` prefix claim in the previous Resume was WRONG
 
-Do **not** rank by `dangling` — § Evidence *CORRECTION* explains why it cannot see this. Rank by
-external citation count (`grep '\bPREFIX-[0-9]\+\b'` minus the owner's own), and confirm each
-ledger with `doctor` plus `link_scan`'s `edges_added`.
+It said: *"Adding `## T-N` headings there would create a second active definer and turn those
+tokens **ambiguous** rather than resolved … the fix is probably a fresh prefix, which is a rename,
+not a heading."* Checked rather than re-reasoned, and it is false.
 
-| ledger | prefix | undefined | external cites |
-|---|---|---|---|
-| `provenance-subsystem.md` | PV | 64 of 68 | 35 |
-| SD + GF (`structural-debt-refactor`, `2026-08-16-iron-law-gate-firing-audit`) | SD, GF | 19 | ~36 combined |
-| `prompt-hamsa-audit-log.md` | A-15…A-24 | 10 | 25 |
-| `fable-tuning-findings.md` | FND | 18 | 19 |
-| `fable-tuning-tasks.md` | T | 12 | shares the `T` prefix — see below |
-| 4 ledgers in `researcher` / `mirela` / `stefanini` | LL, CR, G, T, OTK | 25 | not measured (other repos) |
+`tool-usage-patterns.md` spells its first thirteen entries **zero-padded** (`T-001`…`T-013`) and
+its later ones unpadded (`T-14`…`T-24`). The resolver matches **token strings**, and `T-001` is
+not `T-1`. So `fable-tuning-tasks.md`'s `T-1`…`T-12` occupy a disjoint space, the backfill was
+safe, and it resolved four live `prompt-hamsa-audit-log` citations that had been dangling — the
+prose already read "fable-tuning T-7", so the bare tokens now bind to their sole definer.
 
-**`fable-tuning-tasks.md` needs a decision, not just a backfill.** Its prefix is `T`, which
-`tool-usage-patterns.md` already defines (T-001…T-24) and `researcher`'s
-`langfuse-tracing-roadmap.md` also uses. Adding `## T-N` headings there would create a second
-active definer and turn those tokens **ambiguous** rather than resolved — a different outcome from
-every other ledger here. Read § *Citing an entry* in `get_guide("tracker-conventions")` first; the
-fix is probably a fresh prefix, which is a rename, not a heading.
+The wrong version of this belief nearly blocked correct work for a second session. The real
+hazard — that the disjointness is a formatting accident nothing records or enforces, and that two
+ordinary edits would break it — is filed as
+`docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`.
 
-### Two things learned doing 4a and 4b, worth carrying
+### What this bug spawned
 
-- **Check params against the committed table before generating anything.** In
+| follow-up | state |
+|---|---|
+| `docs/issues/archive/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md` (BL-40) | fixed `87f3b936`, corrected `8084f0ea`, archived — id `0808a5251625e6db` |
+| `docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md` (BL-41) | fixed `ff088630`, archived — id `e891b7c6a5b1dbe7` |
+| BL-42 — the 6 WIN rows `params` never saw | open, codescout half only |
+| the prefix-`T` hazard | open, `51c76e8c6289350b` |
+
+### Two things learned in step 4, worth carrying
+
+- **Check `params` against the committed table before generating anything.** In
   `windows-platform-support.md` params lagged the body by six entries and two statuses, so
   generating from params would have published `WIN-28`/`WIN-29` as `open` when both are fixed and
-  silently dropped `WIN-30`, `32`, `33`, `34`, `35`, `36`. The tooling only watches the other
-  direction — `snapshot_stale` and `snapshot_drift` both ask whether the *body* kept up.
+  emitted nothing at all for `WIN-30`, `32`–`36`. Nothing watched that direction — which is what
+  BL-40 now fixes, and its first live run found a second instance in another repo.
 - **A backfill can raise `dangling`, and that is correct.** Opening a prefix gate exposes
-  citations that were suppressed while the prefix had no definer at all. 4b moved it 621 → 622.
+  citations that were suppressed while the prefix had no definer at all; 4b moved it 621 → 622.
+  The clean progress metric is `edges_added` — and `edges_missing` is its dry-run twin, since
+  `write=false` leaves `edges_added` at 0, which is easy to misread as "nothing happened".
 
 One caveat still standing: `body_claimed_indices` also counts a heading inside a fenced block and
 a code-first `` `A-3` `` heading, so the *claimed* set is not merely "defined plus rows".
+
+### Why this file is `fixed` but NOT archived
+
+The archive move re-keys the artifact and requires every citation — path **and** 16-hex id — to be
+re-pointed in the same commit. This file is cited **39 times across 19 files**, and one of them is
+`docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`: a concurrent
+session's **untracked, in-flight** bug file, which cites this path twice.
+
+Re-pointing it would mean editing another session's uncommitted work; not re-pointing it would
+knowingly break their document. Neither is acceptable, so the move waits until that file lands.
+BL-40 and BL-41 were archived in the same pass precisely because they carry no such citation.
+
+**To finish:** once that file is committed, `artifact(action="move", id="d34dfcd2cc718bd8",
+new_rel_path="docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md")`,
+then sweep all 39 citations in the move's own commit — 8 of them are Rust doc comments, in
+`doctor.rs`, `augmentation.rs`, `append_entry.rs`, `update_entry.rs` and `tracker_design.rs`.
+`master...experiments` is `0 1040`, so promotion is fast-forward: label each SHA `experiments` and
+write **no** pending-master-SHA line.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.

@@ -56,7 +56,7 @@ impl DefinitionIndex {
             //
             // Regardless of `active`: an archived ledger's namespace is still a namespace,
             // and archived definers already resolve (`single_archived_definer_still_resolves`).
-            // docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
+            // docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
             idx.known_prefixes
                 .extend(ex.declared_prefixes.iter().cloned());
         }
@@ -425,7 +425,7 @@ mod tests {
     /// only from definitions, so a wholly-undefined namespace was indistinguishable
     /// from `UTF-8` in prose and every citation of it was suppressed — 129 live `WIN-N`
     /// citations reporting as zero dangling, on a ledger where none of them resolved.
-    /// docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
+    /// docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
     #[test]
     fn a_declared_prefix_dangles_even_though_nothing_defines_it() {
         let ledger = DocExtract {

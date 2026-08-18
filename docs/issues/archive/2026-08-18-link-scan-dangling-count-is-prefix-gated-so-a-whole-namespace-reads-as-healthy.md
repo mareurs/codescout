@@ -1,5 +1,5 @@
 ---
-id: '52269554ea4f51a4'
+id: e891b7c6a5b1dbe7
 kind: bug
 status: fixed
 title: 'BUG: link_scan''s dangling count is prefix-gated, so a namespace with zero definitions reports as healthy while every citation of it resolves to nothing'

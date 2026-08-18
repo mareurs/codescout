@@ -71,7 +71,7 @@ pub struct DocExtract {
     /// [`super::resolve::DefinitionIndex::build`]'s arguments precisely so no caller has
     /// to remember to pass it: `extract` already holds the whole file text, frontmatter
     /// included, so the wire cannot be forgotten.
-    /// docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
+    /// docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
     pub declared_prefixes: Vec<String>,
 }
 

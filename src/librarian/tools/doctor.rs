@@ -1512,7 +1512,7 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
 /// `claimed.difference(&in_body)`. Nothing computed the reverse, so a body that had run
 /// **ahead** — rows written into the file by hand, or written before their params row was
 /// ever appended — read as perfectly healthy on every surface.
-/// docs/issues/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md
+/// docs/issues/archive/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md
 ///
 /// **The remedy is the opposite of `snapshot_drift`'s, which is why this is a separate
 /// check rather than more samples in that one.** There the body is stale and re-rendering
@@ -2595,7 +2595,7 @@ mod tests {
 
     /// The core positive. The body's index table carries ids that `params` has no
     /// row for — the shape measured on the WIN ledger in
-    /// `docs/issues/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md`,
+    /// `docs/issues/archive/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md`,
     /// where six rows lived in git and in no query.
     #[test]
     fn params_behind_body_reports_a_body_id_with_no_params_row() {
