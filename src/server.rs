@@ -57,6 +57,10 @@ pub struct ServerEnv {
     pub probe: bool,
     /// `CLAUDE_CODE_SESSION_ID` — keys the persisted guide-hint ledger.
     pub cc_session_id: Option<String>,
+    /// Overrides the per-user guide-hint ledger directory. `None` ⇒ derive it from
+    /// `per_user_state_dir()`. Tests set this to a tempdir so they never touch — or
+    /// depend on — the developer's real state directory.
+    pub guide_hints_dir: Option<PathBuf>,
     /// Inputs for the librarian runtime (workspace/db/embed/cwd).
     #[cfg(feature = "librarian")]
     pub librarian: crate::librarian::LibrarianEnv,
@@ -74,6 +78,7 @@ impl ServerEnv {
                 .ok()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
+            guide_hints_dir: None,
             #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
         }
@@ -259,9 +264,14 @@ impl CodeScoutServer {
                     .filter(|s| !s.is_empty())
             })
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let guide_hints_dir = guide_project_root
-            .as_ref()
-            .map(|r| r.join(".codescout").join("guide_hints"));
+        // Per-USER state, not per-project: the ledger follows the conversation,
+        // and one conversation can span worktrees, sub-projects and repos. Keeping
+        // it under a project root made it depend on the companion plugin's
+        // worktree symlink and made it silently ephemeral whenever the cwd was not
+        // a project. See docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md §2.
+        let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
+            crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
+        });
         let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(
             crate::tools::guide_ledger::GuideLedger::load(&cc_session_id, guide_hints_dir),
         ));
@@ -1700,6 +1710,7 @@ mod tests {
         // `--no-default-features` / `--features local-embed`.
         #[cfg(feature = "librarian")]
         let env = ServerEnv {
+            guide_hints_dir: Some(dir.path().join("guide_hints")),
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
                 db: Some(codescout_dir.join("librarian.db")),
@@ -1708,7 +1719,10 @@ mod tests {
             ..Default::default()
         };
         #[cfg(not(feature = "librarian"))]
-        let env = ServerEnv::default();
+        let env = ServerEnv {
+            guide_hints_dir: Some(dir.path().join("guide_hints")),
+            ..Default::default()
+        };
 
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let lsp = LspManager::new_arc();
@@ -3810,6 +3824,7 @@ mod guide_hint_tests {
         std::fs::write(&ws_path, "").unwrap();
 
         let env = ServerEnv {
+            guide_hints_dir: Some(dir.path().join("guide_hints")),
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
                 db: Some(dir.path().join("librarian.db")),
@@ -4334,6 +4349,7 @@ mod guide_hint_tests {
         // non-deterministic).
         let env_for = |session: &str| ServerEnv {
             cc_session_id: Some(session.to_string()),
+            guide_hints_dir: Some(dir.path().join("guide_hints")),
             librarian: crate::librarian::LibrarianEnv {
                 db: Some(dir.path().join("librarian.db")),
                 ..Default::default()
@@ -4376,6 +4392,27 @@ mod guide_hint_tests {
         assert!(
             !server3.guide_hints_emitted.lock().contains("librarian"),
             "a different session must not inherit another session's ledger"
+        );
+    }
+
+    /// The ledger must NOT live under the project root any more: a git worktree,
+    /// a cross-project session, and a cwd that is not a project all resolve to
+    /// different roots for the same conversation, and the ledger has to follow
+    /// the conversation. See the spec's §2.
+    #[tokio::test]
+    async fn guide_ledger_does_not_live_under_the_project_root() {
+        let (dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let _ = tool
+            .call_content(json!({"command": "echo hi"}), &ctx)
+            .await
+            .unwrap();
+
+        let in_project = dir.path().join(".codescout").join("guide_hints");
+        assert!(
+            !in_project.exists(),
+            "guide_hints must no longer be written under the project root"
         );
     }
 
