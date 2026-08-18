@@ -24,7 +24,7 @@ tags: [prompt-surfaces, budget, tools-list, gate, schema]
 
 **Author:** architecture-snow-lion, 2026-08-18
 **Evidence:** `docs/trackers/prompt-surface-compaction-session-log.md` (F-1, F-2, W-1),
-`docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`,
+`docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`,
 `docs/trackers/reconnaissance-patterns.md` R-106.
 
 ## Problem
@@ -222,12 +222,16 @@ commit body should record that the addition was paid for rather than absorbed.
 
 ## Documentation
 
-- `src/prompts/README.md` — add the tool-surface budget beside the existing
-  1900-character slice rule. Same section, same instruction shape.
-- `docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md` —
-  its `## Fix` currently proposes paying for `anchor_heading` out of guide-duplicated
-  prose. The cache arithmetic refutes that; update it to cite component 5.
+**Both done.**
 
+- `src/prompts/README.md` — `tools/list` is now listed in § Surfaces (it was absent, which
+  is part of how it went unmeasured), and § *The tool-surface budget* carries the rule, the
+  two load-bearing constraints, and the schema-to-guide break-even.
+- `docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`
+  — its `## Fix` proposed paying for `anchor_heading` out of prose duplicating
+  `get_guide("librarian")`, on the assumption that guide bytes are cheaper than schema
+  bytes. The cache measurement refutes that; the note is kept with the correction beside
+  it, because the correction is the useful part. Bug fixed in `01194e21` and archived.
 ## Out of scope
 
 - Guide-corpus compaction. The cost there is the **1,336 auto-injections across 21
@@ -265,4 +269,3 @@ commit body should record that the addition was paid for rather than absorbed.
 and today's wire, with no inferential step. Medium on the budget's exact value; it should
 be measured, then held. Low on which low-traffic tools are dead, which is why nothing
 here touches them.
-

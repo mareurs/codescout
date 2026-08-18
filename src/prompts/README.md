@@ -10,6 +10,7 @@ Read this when touching `source.md` (the single source for the `server_instructi
   - `server_instructions` surface — injected **once at MCP session start**, not per-request. Token cost is session-scoped, not per-call — invest in clarity over brevity.
   - `onboarding_prompt` surface — one-time onboarding, read only when a project is activated for the first time.
 - `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project and embedded into the project's system prompt via onboarding.
+- **`tools/list`** — every tool's `description()` + `input_schema()`, delivered **on every request of every session**. The largest surface by an order of magnitude and the only one with a per-request cost: **57,148 characters** as of 2026-08-18, of which schemas are 48,627. Budgeted — see § The tool-surface budget.
 ## Rules for editing the `server_instructions` surface
 
 1. **Cap hard rules at 5–8.** Beyond 8 behavioral constraints, compliance on all drops. Consolidate, don't accumulate.
@@ -23,6 +24,20 @@ Read this when touching `source.md` (the single source for the `server_instructi
 
    **Two things about the old rule were wrong, and both stayed green for months.** The cap was `2200` — *above* the 2048 cliff it existed to protect. And it was compared against `String::len()`, which counts **bytes**: this surface is dense with em-dashes and arrows, so the same slice measured 2127 bytes and 2081 chars. Count characters, not bytes, and never raise the number. (BL-9, `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.) When the test fails, do NOT raise the cap — author a `get_guide(topic)` entry, reference it from the slice, **and give the topic a trigger** (a tool's `relevant_guide_topic()`) or record it in `prompts::PULL_ONLY_GUIDE_TOPICS` with the reason it is pull-only. This instruction used to stop at "author the entry", and that one missing step is why 7 of 10 topics — 47,343 of 75,441 bytes, 63% of the guide corpus — fired for nothing: a guide nothing triggers is not filed, it is removed from the agent's view. `server::tests::every_guide_topic_is_triggered_or_declared_pull_only` now fails the build rather than letting the omission pass, so the choice is forced but not made for you. Note the budget tension before reaching for a trigger: `librarian` alone is 19.9 KB and already auto-injects on a routine `artifact` call. (Don't put a literal "EDITOR NOTE" HTML comment containing the surface/end marker strings into `source.md` itself; the extractor at `src/prompts/source.rs::extract_surface` does a substring `find` and will match the comment first, breaking the slice — F-5 in `docs/trackers/archive/prompt-guide-refactor-session-log.md`.)
 
+## The tool-surface budget
+
+`tools/list` is the fourth prompt surface and the only one with a **per-request** cost. Measured 2026-08-18 across four Claude Code sessions and three models, **100.0% of input reads are cache hits**, so this block is re-read at cache-read rates for the life of a session — about 5% of a long session's cached prefix, 10% of a short one's.
+
+**Budget: `TOOL_SURFACE_CHAR_BUDGET` in `src/server.rs`**, enforced by `server::tests::tool_surface_under_budget`, with `tool_surface_report_lengths` as the per-tool map (`cargo test --lib tool_surface_report_lengths -- --nocapture`). Same instruction as rule 8 above: **do not raise it — find the bytes.** Ratchet it *down* whenever a trim frees room. It has already been paid down once: declaring `anchor_heading` cost +808 and was funded by compressing the injected `workspace` description.
+
+Two things about it are load-bearing.
+
+- **The budget is on the payload, not the item.** Descriptions were already capped per tool — 300 chars, or 1800 for the librarian family that `is_librarian_tool` exempts — and the surface still reached ~59K characters, because **a per-item cap does not bound a sum**: growth moved sideways into the then-unmeasured `input_schema()`, and N items may each sit at their own limit. Do not answer a breach by adding a per-tool schema cap; that is the mechanism that produced the breach.
+- **Measure what `list_tools` builds.** `advertised_surface()` reproduces the `availability(&caps)` filter and the `inject_workspace_param()` injection, both of which happen *after* `input_schema()` returns — the injection alone is 6,528 characters across 24 pinnable tools. Summing raw `input_schema()` would measure a string nobody receives, which is the defect `production_render_fits_the_client_channel` exists to prevent on the sibling surface. Keep the helper in step with `list_tools` or the gate is decorative.
+
+**Moving prose from a schema into a `get_guide` topic is not a saving by default.** Both land in the same cached prefix. A guide fired at turn K costs `X × (N−K) × cache_read + X × cache_write`, against the schema's `X × N × cache_read` — break-even at **K ≈ 12.5 turns**, and `librarian` auto-injects on the first `artifact` call. It wins only for sessions that never trigger the guide at all.
+
+Full derivation, the rejected alternatives, and the open routing experiment: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
 ## Versioning — when to bump ONBOARDING_VERSION
 
 Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing a surface that produces the **stored per-project system prompt** — the `onboarding_prompt` slice of `source.md`, or `build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system-prompt regeneration for all projects onboarded with the previous version.

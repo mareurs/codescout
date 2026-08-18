@@ -2162,7 +2162,7 @@ mod tests {
     /// advertised — wants the schema derived from `Args` via `schemars` (already a
     /// dependency), deferred under rule-of-three; see the spec's Revisit-when.
     ///
-    /// `docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`
+    /// `docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`
     #[tokio::test]
     async fn artifact_advertises_the_append_entry_section_writer() {
         let (_dir, server) = make_server().await;

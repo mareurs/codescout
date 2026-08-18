@@ -650,7 +650,7 @@ a code-first `` `A-3` `` heading, so the *claimed* set is not merely "defined pl
 ### Why this file is `fixed` but NOT archived
 
 The archive move re-keys the artifact and requires every citation — path **and** 16-hex id — to be
-re-pointed in the same commit. This file is cited **39 times across 19 files**, and one of them is
+re-pointed in the same commit. This file is cited **39 times across 19 files**, and one of them was
 `docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`: a concurrent
 session's **untracked, in-flight** bug file, which cites this path twice.
 
@@ -658,12 +658,16 @@ Re-pointing it would mean editing another session's uncommitted work; not re-poi
 knowingly break their document. Neither is acceptable, so the move waits until that file lands.
 BL-40 and BL-41 were archived in the same pass precisely because they carry no such citation.
 
-**To finish:** once that file is committed, `artifact(action="move", id="d34dfcd2cc718bd8",
-new_rel_path="docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md")`,
-then sweep all 39 citations in the move's own commit — 8 of them are Rust doc comments, in
-`doctor.rs`, `augmentation.rs`, `append_entry.rs`, `update_entry.rs` and `tracker_design.rs`.
-`master...experiments` is `0 1040`, so promotion is fast-forward: label each SHA `experiments` and
-write **no** pending-master-SHA line.
+**RESOLVED 2026-08-18 (later the same day) — the blocker cleared, and more cleanly than expected.**
+That file landed in `01194e21`, was fixed in the same commit, and is now archived at
+`docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`. Its
+citations of *this* path therefore sit under `docs/issues/archive/**`, which
+`get_guide("tracker-conventions")` explicitly exempts from re-pointing — those are historical
+snapshots, and `apply_drops`' `archive_drop` exists so a retired document citing a moved path does
+not gate. So the move no longer requires touching anyone's in-flight work.
+
+The other 38 citations across 18 files still need the usual same-commit re-point, and that is now
+the only thing standing between this file and `archive/`.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.

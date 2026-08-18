@@ -1,7 +1,7 @@
 ---
-id: '509c1f12fb819909'
+id: 10df47a34b5b3fe7
 kind: bug
-status: open
+status: fixed
 title: 'BUG: append_entry''s server-side body writer is undeclared in the artifact schema, so the one path that cannot produce an uncitable entry is invisible'
 tags:
 - prompt-surface
@@ -9,6 +9,7 @@ tags:
 - append_entry
 - schema
 topic: prompt-surfaces
+closed: 2026-08-18
 ---
 
 ---
@@ -147,19 +148,39 @@ Single-surface edit in `Artifact::input_schema()` (`src/librarian/tools/artifact
 3. Fold the reserve-only path's `next_step` guidance into the schema so the correct
    call is reachable *before* the fallible one.
 
-Note the byte budget: `artifact` is already the largest tool on the wire (12,102 chars,
-51 params, 20.6% of the whole `tools/list` surface). Declaring a 52nd param argues for
-paying it out of the existing prose — `patch` alone spends 1,221 chars, `new_rel_path`
-509, `entry_collection` 496, much of it duplicating `get_guide("librarian")`, which
-auto-injects on the first `artifact` call anyway.
+**Done in `01194e21` (`experiments`).** All three points landed.
+
+**The byte note above was written before the measurement and is wrong; kept because the
+correction is the useful part.** It argued for funding the 52nd param out of prose that
+duplicates `get_guide("librarian")`, on the assumption that guide bytes are cheaper than
+schema bytes. They are not. Measured 2026-08-18 across four sessions and three models,
+**100.0% of input reads are cache hits**, so both surfaces sit in the same cached prefix
+and are re-read at the same $0.30/M. A guide fired at turn K costs
+`X × (N−K) × cache_read + X × cache_write` against the schema's `X × N × cache_read` —
+break-even at **K ≈ 12.5 turns**, and `librarian` auto-injects on the first `artifact`
+call. Moving that prose would have been a wash.
+
+What actually paid for it: the declaration cost **+808 chars** and breached
+`TOOL_SURFACE_CHAR_BUDGET` (58,572 → 59,380) on the gate's first real use. It was funded
+by compressing the `workspace` description injected into all 24 pinnable tools (225 → 131
+chars), keeping all four of its facts. Net **58,572 → 57,148**, with the budget ratcheted
+down to the new total rather than left slack.
 
 ## Tests added
 
-None yet. A regression test belongs with the fix: assert every `Args` field that the
-server accepts appears in the advertised `input_schema().properties`. That gate does not
-exist for any tool today — `all_tools_have_valid_schemas` (`src/server.rs:2299`) checks
-only `is_object` and `type == "object"`.
+`server::tests::artifact_advertises_the_append_entry_section_writer` (`src/server.rs`) —
+asserts `artifact`'s advertised schema carries `title`, `body` and `anchor_heading`.
+Mutation-verified: renaming the schema key makes it fail, naming both the missing field
+and the call site that accepts it.
 
+The **general** form — every field the server accepts is advertised — is deliberately not
+tested here. It wants the schema derived from `Args` via `schemars` (already a direct
+dependency), deferred under this project's rule-of-three with one confirmed instance and
+one unverified. See the spec's *Revisit-when*.
+
+Also landed alongside: `server::tests::tool_surface_under_budget` and
+`tool_surface_report_lengths` (`598b92f2`), which is why a future instance of this class
+has to be paid for rather than absorbed.
 ## Workarounds
 
 Pass `anchor_heading` anyway — it is accepted. Full form:
@@ -171,13 +192,13 @@ artifact(action="append_entry", id="<ledger id>", id_prefix="F",
 
 ## Resume
 
-Edit `Artifact::input_schema()` per § Fix, then add the accepted-fields-are-advertised
-regression test. Before writing it, decide whether the test lives per-tool or as a
-server-wide sweep over `server.tools` — the latter would also catch the same class in
-`librarian`, whose `doctor` action gained four ledger-integrity checks
-(`snapshot_drift`, `ledger_defines_nothing`, `entry_without_definition`,
-`params_behind_body`) that its description does not name.
+N/A — fixed and verified on `experiments` (`01194e21`), gate green (`cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` 4,164 passed), regression test
+mutation-verified.
 
+No pending-master-SHA line: `git rev-list --left-right --count master...experiments`
+returns `0 1051`, so the promotion path is **fast-forward** and this `experiments` SHA
+already is the master SHA.
 ## References
 
 - `src/librarian/tools/append_entry.rs:34,112-132`
@@ -186,4 +207,3 @@ server-wide sweep over `server.tools` — the latter would also catch the same c
 - `docs/trackers/prompt-surface-compaction-session-log.md` — F-1 (this bug's evidence), W-1
 - `docs/trackers/reconnaissance-patterns.md` — R-106
 - `docs/issues/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md` — parent bug, stale Resume
-

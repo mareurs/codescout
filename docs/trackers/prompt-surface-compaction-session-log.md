@@ -32,7 +32,7 @@ entry_high_water_W: 1
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-08-18 | high | prompt-surface | open | `append_entry`'s `anchor_heading` is implemented but not advertised in the `artifact` schema |
+| F-1 | 2026-08-18 | high | prompt-surface | fixed-verified | `append_entry`'s `anchor_heading` is implemented but not advertised in the `artifact` schema |
 | F-2 | 2026-08-18 | med | self-friction | fixed-verified | Read wire duplication as source duplication — the `workspace` param is injected once, not authored 24× |
 ## Wins Index
 
@@ -95,9 +95,9 @@ The parameter is real and load-bearing: `src/librarian/tools/append_entry.rs:34`
 
 **Severity:** high — a correctness feature invisible on the only surface an agent reads.
 
-**Status:** open
+**Status:** fixed-verified — declared in `01194e21`, pinned by `server::tests::artifact_advertises_the_append_entry_section_writer` (mutation-verified: renaming the schema key makes it fail). Gate green, 4,164 passing.
 
-**Fix idea / Pointer:** Declare `anchor_heading` in `Artifact::input_schema()` and re-scope the `title`/`body` descriptions to name their `append_entry` role. Bug file: `docs/issues/2026-08-18-append-entry-anchor-heading-undeclared-in-schema.md`.
+**Fix idea / Pointer:** Declared `anchor_heading` in `Artifact::input_schema()` and re-scoped the `title`/`body` descriptions to name their `append_entry` role. Bug file: `docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md` (archived; the earlier pointer here named a slug that was never created). The +808 chars breached `TOOL_SURFACE_CHAR_BUDGET` and were paid by compressing the injected `workspace` description — see the spec, `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
 
 ## F-2 — Read wire duplication as source duplication — the `workspace` param is injected once, not authored 24×
 
