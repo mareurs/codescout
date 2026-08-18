@@ -1887,7 +1887,7 @@ run_command("cd /home/marius/.claude-kat/jobs/44c01c0f/tmp && awk '…' artifact
 
 **Fix idea:** resolve a relative token against the segment's *effective* cwd rather than the project root. `check_source_file_access` already splits on `&&`/`;`/`|`, so a leading `cd <path>` in the segment is available at the point the decision is made. Keep the conservative bias: no `cd` seen, or an unresolvable `cd` target, still means inside.
 
-**Filed:** `docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`.
+**Filed:** `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md` — **FIXED 2026-08-18**, `be2d7781`, wire-verified after rebuild. Two causes behind one predicate: the shell can move (`cd` is now tracked per run, never across a pipe, and only when fully resolved), and an option can carry a source extension without naming a file (`--include='*.mjs'` is a filter pattern, and its relativeness forced the in-project verdict on its own). The second carve-out is keyed on **positive evidence** of an out-of-project operand, not on "options are not paths" — the tidier rule silently stops guarding `grep -rn x src/ --include='*.rs'`, where the glob is the only token naming the extension because `src/` carries none.
 
 **Status:** open.
 

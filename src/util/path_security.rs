@@ -1254,7 +1254,7 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // single cwd, since `cd x | cmd` puts the cd in a subshell that cannot affect
     // the other stage. Propagating cwd across a pipe would be a bypass rather than
     // a carve-out.
-    // BUG docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
+    // BUG docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
     let runs = split_outside_quotes(&stripped, &["&&", "||", ";", "\n"]);
 
     // `run_command` starts at the project root, so that is the cwd until a `cd`
@@ -1434,7 +1434,7 @@ fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path, 
 /// [`Cwd::Unknown`] means a `cd` the gate could not resolve, and also keeps the
 /// blocking verdict: the gate opens only on a move it fully understands.
 ///
-/// BUG docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
+/// BUG docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
 fn path_is_within_project(tok: &str, project_root: &Path, cwd: &Cwd) -> bool {
     let expanded: PathBuf = match tok.strip_prefix("~/") {
         Some(rest) => match std::env::var_os("HOME") {

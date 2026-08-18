@@ -1,5 +1,5 @@
 ---
-id: '70cd189fa2590af3'
+id: 92a88ff0405b47bc
 kind: bug
 status: fixed
 title: 'BUG: the shell-on-source gate counts every relative path as in-project, so `cd <outside> && awk x.rs` is refused with a hint that cannot be followed — the residue of 433100bd'
@@ -292,21 +292,30 @@ command. Renaming the file to a non-source extension works but teaches the wrong
 
 ## Resume
 
-Code is done and gated (`cargo fmt --check`, `clippy --workspace --all-targets -D
-warnings`, `cargo test --workspace` — 4116 passed, 0 failed, 50 ignored).
+**Nothing. Wire-verified 2026-08-18** against the live server after `cargo rb` +
+`/mcp` (binary `89f32dbe…`, built 08:15:49, servers started 08:15:54/08:16:03 with
+no `(deleted)` inode).
 
-One step left, and it needs a rebuild the session cannot do to itself: **`cargo rb`
-then `/mcp`**, and re-run the reproduction from *Symptom* against the live server.
-Until then the running MCP binary still carries the old predicate, so probing this
-session's own `run_command` will show the OLD behaviour and read as a failed fix —
-the same trap `src/prompts/README.md` was corrected for on 2026-08-17.
+| Probe | Before | After |
+|---|---|---|
+| `cd <outside> && awk '{print}' head.rs` | refused | **runs**, exit 0, real content |
+| `grep -rn readInput <abs sibling repo> --include='*.mjs'` | refused | **runs**, 31 matches |
+| `cat src/main.rs` | refused | **still refused** |
 
-The two commands to run after the rebuild, and the verdict each must give:
+The third row is the one that makes the other two mean anything. Without it, two
+passes are equally consistent with the gate having been deleted rather than
+corrected — the same discriminating-pair discipline the IL3 warn-hook fix used.
 
-- `cd /tmp/scratch && awk '{print}' head.rs` → runs (was refused)
-- `grep -rn 'x' <abs-sibling-repo> --include='*.mjs'` → runs (was refused)
-- `cat src/main.rs` → still refused — the control; without it the first two are
-  equally consistent with the gate having been removed.
+One probe was run twice on purpose. The first form of the sibling-repo grep
+returned `exit_code: 1` with no output, which is grep's *no-match* code and not a
+refusal — evidence the command executed, but weak evidence, since an empty result
+looks like a quiet failure. Re-running with a pattern that had to match turned it
+into 31 lines of real output. A green that would read the same in a broken world
+proves nothing.
+
+Gate at the fix commit `be2d7781`: `cargo fmt --check`, `clippy --workspace
+--all-targets -D warnings`, `cargo test --workspace` — 4116 passed, 0 failed,
+50 ignored.
 ## References
 
 - `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` — GF-3, the audit this is the
