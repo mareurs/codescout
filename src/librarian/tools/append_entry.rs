@@ -8,8 +8,10 @@ use serde_json::{json, Value};
 struct Args {
     id: String,
     /// Omit for a PROSE ledger — one whose entries live as `## PREFIX-N` body
-    /// sections rather than params rows. The call then reserves an id and
-    /// writes nothing. See `augmentation::allocate_entry_id`.
+    /// sections rather than params rows. The call then allocates an id, and either
+    /// writes the section itself (when `title` + `body` + `anchor_heading` are
+    /// given) or reserves the id and writes nothing. See
+    /// `augmentation::allocate_entry_id`.
     #[serde(default)]
     entry_collection: Option<String>,
     id_prefix: String,
@@ -17,6 +19,19 @@ struct Args {
     entry: Value,
     #[serde(default)]
     cites: Vec<String>,
+    /// Prose-ledger section writing. All three or none: the server formats the
+    /// heading as `<level> <ID> — <title>` and inserts it before `anchor_heading`,
+    /// in the same file write that records the high-water mark.
+    ///
+    /// Supplying them is strictly better than reserving and writing yourself: a
+    /// hand-written heading missing its dash-and-title defines no token under
+    /// `link_scan`'s `def_re`, and every citation of the entry dangles.
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    anchor_heading: Option<String>,
 }
 
 fn default_entry() -> Value {
@@ -87,8 +102,46 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
         }
+        // All three or none. A partial trio is an incomplete intent, and the two
+        // halves fail differently: without `anchor_heading` the server would have to
+        // GUESS placement, and this project's input-handling law is that a write
+        // accepts an explicit target and never infers one — a wrong guess on a write
+        // needs manual repair (docs/adrs/2026-07-10-repair-and-continue-input-handling.md).
+        // Without `title` there is no `— <title>` to format, which is the entire
+        // reason this path exists.
+        let section = match (&a.title, &a.body, &a.anchor_heading) {
+            (None, None, None) => None,
+            (Some(title), Some(body), Some(anchor)) => Some(augmentation::PendingSection {
+                title: title.clone(),
+                body: body.clone(),
+                anchor_heading: anchor.clone(),
+            }),
+            _ => {
+                let missing: Vec<&str> = [
+                    ("title", a.title.is_none()),
+                    ("body", a.body.is_none()),
+                    ("anchor_heading", a.anchor_heading.is_none()),
+                ]
+                .into_iter()
+                .filter(|(_, absent)| *absent)
+                .map(|(name, _)| name)
+                .collect();
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "append_entry: writing a prose entry needs `title`, `body` and \
+                         `anchor_heading` together — missing: {}",
+                        missing.join(", ")
+                    ),
+                    "Pass all three to have the server write the section (heading formatted \
+                     as `<ID> — <title>`, so it cannot be born undefined), or pass none of \
+                     them to reserve an id only and write the section yourself."
+                        .to_string(),
+                ));
+            }
+        };
         let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
-        let outcome = augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix)?;
+        let outcome =
+            augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix, section.as_ref())?;
         // Phrase the hint in the LEDGER'S shape, never in one we picked. The hard-coded
         // `##` here told the `###` U-N ledger to write H2 — against its 36 siblings, its
         // own augmentation prompt, and docs/TAXONOMY.md, all three of which say H3. When
@@ -138,21 +191,39 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
             _ => String::new(),
         };
-        return Ok(json!({
-            "id": outcome.id,
-            "artifact_id": target,
-            "reserved": true,
-            "body_max": outcome.body_max,
-            "reserved_max": outcome.reserved_max,
-            "frontmatter_max": outcome.frontmatter_max,
-            "next_step": format!(
+        // Two different outcomes, and the response must not describe one as the other.
+        // A caller told to "write the section" after the server already wrote it would
+        // write a duplicate heading — two active definers for one token, which is worse
+        // than the dangling case this path exists to prevent.
+        let next_step = if outcome.section_written {
+            format!(
+                "Wrote {id} and recorded the ledger's high-water mark, in one file write. \
+                 The heading is `{heading} {id} — <title>`, which is the shape link_scan \
+                 requires to define the token, so the entry is already citable. Do NOT \
+                 write the section again.{compaction_note}",
+                id = outcome.id
+            )
+        } else {
+            format!(
                 "Reserved {id} and recorded the ledger's high-water mark in frontmatter; the \
                  entry itself is yours to write. Add the section as \
                  `{heading} {id} — <title>` — link_scan defines an entry token only \
                  in that shape, so a heading without the dash-and-title defines nothing and \
-                 every citation of {id} dangles.{level_note}{compaction_note}",
+                 every citation of {id} dangles.{level_note} Next time, pass `title`, `body` \
+                 and `anchor_heading` to have the server write it and remove that \
+                 failure mode entirely.{compaction_note}",
                 id = outcome.id
-            ),
+            )
+        };
+        return Ok(json!({
+            "id": outcome.id,
+            "artifact_id": target,
+            "reserved": !outcome.section_written,
+            "section_written": outcome.section_written,
+            "body_max": outcome.body_max,
+            "reserved_max": outcome.reserved_max,
+            "frontmatter_max": outcome.frontmatter_max,
+            "next_step": next_step,
         }));
     }
 
@@ -911,7 +982,7 @@ mod tests {
         // Without this the test could pass because the fixture refuses everything.
         let main_alloc = {
             let mut cat = ctx.catalog.lock();
-            augmentation::allocate_entry_id(&mut cat, &main_id, "HY")
+            augmentation::allocate_entry_id(&mut cat, &main_id, "HY", None)
                 .unwrap()
                 .id
         };

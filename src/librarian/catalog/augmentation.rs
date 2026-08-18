@@ -694,7 +694,20 @@ pub struct AllocateOutcome {
     /// nothing — and the caller must then say the level is a default rather than an
     /// observation. See `body_entry_heading_level`, and U-40 in
     /// `docs/trackers/codescout-usage-frictions.md` for what the assertion cost.
+    ///
+    /// Deliberately still an OBSERVATION even when a `PendingSection` was written:
+    /// the allocator formats that section at `heading_level.unwrap_or(2)`, but it does
+    /// not overwrite this field with the level it chose. A caller cannot otherwise
+    /// tell "the ledger uses H3" from "nothing was headed, so I picked H2", and
+    /// asserting the latter as the former is U-40 itself.
     pub heading_level: Option<usize>,
+    /// Whether a `PendingSection` was supplied and written in the same file write.
+    ///
+    /// `false` is the reserve-only path: the id is durable, the entry is the caller's
+    /// to write, and the returned hint must say so. `true` means the entry is already
+    /// on disk with a `def_re`-conformant heading and the caller must NOT write it
+    /// again.
+    pub section_written: bool,
 }
 
 /// Frontmatter key by which an artifact declares itself a ledger owning an id
@@ -718,6 +731,37 @@ pub const ENTRY_HIGH_WATER_PREFIX: &str = "entry_high_water_";
 /// The frontmatter key holding `id_prefix`'s committed high-water mark.
 pub fn entry_high_water_key(id_prefix: &str) -> String {
     format!("{ENTRY_HIGH_WATER_PREFIX}{id_prefix}")
+}
+
+/// A body section for [`allocate_entry_id`] to write in the same file write that
+/// records the high-water mark.
+///
+/// **Why the allocator writes it rather than the caller.** `allocate_entry_id`
+/// already writes the file — it splices `entry_high_water_<PREFIX>` into frontmatter
+/// inside its `IMMEDIATE` transaction. A caller that wrote the section afterwards
+/// would do a second read-modify-write outside that transaction, so a peer session
+/// allocating on the same file in between gets clobbered — and what gets clobbered is
+/// the peer's committed mark, walking the counter BACKWARDS. That is the reissue
+/// defect `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`
+/// closed, reintroduced by the back door. One file write, one transaction.
+///
+/// The already-accepted failure mode is unchanged: a crash before the write leaks an
+/// integer, which every ledger convention here tolerates. A clobbered peer mark is
+/// not tolerable, and that is the difference.
+#[derive(Debug, Clone)]
+pub struct PendingSection {
+    /// Entry title. The allocator formats the heading as `<level> <ID> — <title>`,
+    /// which is exactly `link_scan`'s `def_re` shape — so an entry written this way
+    /// can never be born undefined. Callers never format the heading themselves;
+    /// that is the whole point (CAP-5 defect class 2).
+    pub title: String,
+    /// Section prose, written verbatim beneath the heading.
+    pub body: String,
+    /// Existing heading to insert BEFORE. Required rather than optional: a wrong
+    /// guess about placement on a WRITE needs manual repair, and this project's
+    /// input-handling law is that writes accept an explicit target and never infer
+    /// one (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
+    pub anchor_heading: String,
 }
 
 /// The id namespaces a parsed frontmatter block declares via `entry_prefix`.
@@ -792,6 +836,7 @@ pub fn allocate_entry_id(
     cat: &mut Catalog,
     artifact_id: &str,
     id_prefix: &str,
+    section: Option<&PendingSection>,
 ) -> Result<AllocateOutcome> {
     let tx = cat
         .conn
@@ -926,6 +971,56 @@ pub fn allocate_entry_id(
                     .to_string(),
             )
         })?;
+    // The entry section, spliced into the SAME string the mark went into, so one
+    // `fs::write` carries both. See `PendingSection` for why this cannot be a second
+    // write by the caller.
+    //
+    // The heading is formatted here and nowhere else: `<level> <ID> — <title>` is
+    // exactly `link_scan`'s `def_re` (`^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`), so an entry
+    // written through this path cannot be born undefined. Callers used to receive the
+    // id plus a hint asking them to format it, and a heading missing its
+    // dash-and-title defines no token — the mechanism behind ~30 of 39 sampled
+    // dangling tokens in this repo. CAP-5 defect class 2.
+    // Kept as two values on purpose. `observed_level` is an OBSERVATION and stays
+    // `None` when the body heads nothing, because the caller phrases its hint
+    // differently for a default than for a convention — collapsing them is U-40 in
+    // `docs/trackers/codescout-usage-frictions.md`, where a hard-coded `##` told a
+    // `###` ledger the wrong level while claiming it was the ledger's own.
+    // `level` is only the formatting choice made here.
+    let observed_level = body_entry_heading_level(body, id_prefix);
+    let level = observed_level.unwrap_or(2);
+    let id = format!("{id_prefix}-{next}");
+    let updated = match section {
+        None => updated,
+        Some(s) => {
+            let heading = "#".repeat(level);
+            // Trailing blank line so the anchor heading that follows is not glued to
+            // this section's last prose line. Caught by reading a mutation test's
+            // failure output, which printed `the prose\n## Template for new entries`.
+            let section_text = format!("{heading} {id} — {}\n\n{}\n\n", s.title, s.body.trim_end());
+            crate::tools::markdown::edit_markdown::perform_section_edit_ext(
+                &updated,
+                &s.anchor_heading,
+                "insert_before",
+                Some(&section_text),
+                None,
+                false,
+            )
+            .map_err(|e| {
+                RecoverableError::with_hint(
+                    format!(
+                        "allocate_entry_id: cannot place {id} before `{}`: {e} — no id was \
+                         allocated and nothing was written",
+                        s.anchor_heading
+                    ),
+                    "`anchor_heading` must name a heading that exists in the ledger verbatim. \
+                     Read the current headings with artifact(action=\"get\", id=…) and pass one \
+                     of them."
+                        .to_string(),
+                )
+            })?
+        }
+    };
     std::fs::write(&abs_path, &updated).map_err(|e| {
         RecoverableError::new(format!(
             "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e} — no \
@@ -936,11 +1031,12 @@ pub fn allocate_entry_id(
     tx.commit()?;
 
     Ok(AllocateOutcome {
-        id: format!("{id_prefix}-{next}"),
+        id,
         body_max,
         reserved_max,
         frontmatter_max,
-        heading_level: body_entry_heading_level(body, id_prefix),
+        heading_level: observed_level,
+        section_written: section.is_some(),
     })
 }
 
@@ -2160,7 +2256,7 @@ mod tests {
         art.abs_path = md.clone();
         art_upsert(&cat, &art).unwrap();
 
-        let out = allocate_entry_id(&mut cat, "art1", "R").unwrap();
+        let out = allocate_entry_id(&mut cat, "art1", "R", None).unwrap();
         assert_eq!(out.id, "R-10", "max across BOTH body formats, plus one");
         assert_eq!(out.body_max, Some(9));
         assert_eq!(out.reserved_max, None);
@@ -2185,8 +2281,8 @@ mod tests {
         art.abs_path = md.clone();
         art_upsert(&cat, &art).unwrap();
 
-        let first = allocate_entry_id(&mut cat, "art1", "R").unwrap();
-        let second = allocate_entry_id(&mut cat, "art1", "R").unwrap();
+        let first = allocate_entry_id(&mut cat, "art1", "R", None).unwrap();
+        let second = allocate_entry_id(&mut cat, "art1", "R", None).unwrap();
 
         assert_eq!(first.id, "R-42");
         assert_eq!(second.id, "R-43", "the reservation must survive the read");
@@ -2231,7 +2327,7 @@ mod tests {
         art.abs_path = live.clone();
         art_upsert(&cat, &art).unwrap();
 
-        let first = allocate_entry_id(&mut cat, "live", "HY").unwrap();
+        let first = allocate_entry_id(&mut cat, "live", "HY", None).unwrap();
         assert_eq!(first.id, "HY-11", "precondition: history runs to HY-10");
         assert_eq!(first.frontmatter_max, None, "no mark existed yet");
 
@@ -2277,7 +2373,7 @@ mod tests {
             )
             .unwrap();
 
-        let out = allocate_entry_id(&mut cat, "live", "HY").unwrap();
+        let out = allocate_entry_id(&mut cat, "live", "HY", None).unwrap();
         assert_eq!(out.body_max, None, "the live body claims no id any more");
         assert_eq!(out.reserved_max, None, "the reservation is gone");
         assert_eq!(
@@ -2310,10 +2406,16 @@ mod tests {
         art.abs_path = md.clone();
         art_upsert(&cat, &art).unwrap();
 
-        assert_eq!(allocate_entry_id(&mut cat, "art1", "F").unwrap().id, "F-1");
-        assert_eq!(allocate_entry_id(&mut cat, "art1", "F").unwrap().id, "F-2");
         assert_eq!(
-            allocate_entry_id(&mut cat, "art1", "W").unwrap().id,
+            allocate_entry_id(&mut cat, "art1", "F", None).unwrap().id,
+            "F-1"
+        );
+        assert_eq!(
+            allocate_entry_id(&mut cat, "art1", "F", None).unwrap().id,
+            "F-2"
+        );
+        assert_eq!(
+            allocate_entry_id(&mut cat, "art1", "W", None).unwrap().id,
             "W-1",
             "a second prefix must start at 1, not inherit F's high-water mark"
         );
@@ -2338,7 +2440,7 @@ mod tests {
         art.abs_path = md.clone();
         art_upsert(&cat, &art).unwrap();
 
-        let err = allocate_entry_id(&mut cat, "art1", "R").unwrap_err();
+        let err = allocate_entry_id(&mut cat, "art1", "R", None).unwrap_err();
         let text = err.to_string();
         assert!(
             text.contains("does not declare an entry_prefix"),
@@ -2389,11 +2491,11 @@ mod tests {
         let (p1, p2) = (db.clone(), db.clone());
         let h1 = std::thread::spawn(move || {
             let mut cat = Catalog::open(&p1).unwrap();
-            allocate_entry_id(&mut cat, "art1", "R").unwrap().id
+            allocate_entry_id(&mut cat, "art1", "R", None).unwrap().id
         });
         let h2 = std::thread::spawn(move || {
             let mut cat = Catalog::open(&p2).unwrap();
-            allocate_entry_id(&mut cat, "art1", "R").unwrap().id
+            allocate_entry_id(&mut cat, "art1", "R", None).unwrap().id
         });
 
         let mut ids = vec![h1.join().unwrap(), h2.join().unwrap()];
@@ -2465,6 +2567,119 @@ mod tests {
                  a form only one of them honours is a silent hole in the guard"
             );
         }
+    }
+
+    /// The point of the whole path: the SERVER formats the heading, so an entry cannot
+    /// be born undefined. `link_scan`'s `def_re` is
+    /// `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, and a heading missing its dash-and-title
+    /// defines no token — the mechanism behind ~30 of 39 sampled dangling tokens in
+    /// this repo. Reserve-and-let-the-agent-write leaves that failure available;
+    /// this closes it. CAP-5 defect class 2.
+    #[test]
+    fn a_written_section_gets_a_def_re_conformant_heading_at_the_ledgers_own_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        // Existing entries are H3, so the new one must be H3 — not a hard-coded H2.
+        // U-40 in docs/trackers/codescout-usage-frictions.md is what happens otherwise.
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: U\n---\n\n# Ledger\n\n### U-38 — first\n\nbody\n\n## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "server wrote this".to_string(),
+            body: "the prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+        };
+        let out = allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
+
+        assert_eq!(out.id, "U-39");
+        assert!(out.section_written, "the section must be reported written");
+        assert_eq!(
+            out.heading_level,
+            Some(3),
+            "heading_level stays an OBSERVATION of the ledger, not the level we chose"
+        );
+
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("### U-39 — server wrote this"),
+            "heading must be `<level> <ID> — <title>` at the ledger's own level: {text}"
+        );
+        assert!(
+            text.contains("the prose"),
+            "the section body must be written: {text}"
+        );
+        // The anchor still follows it — inserted BEFORE, not appended at the end.
+        let entry_at = text.find("### U-39").unwrap();
+        let anchor_at = text.find("## Template for new entries").unwrap();
+        assert!(
+            entry_at < anchor_at,
+            "the entry must be inserted before the anchor, not after it: {text}"
+        );
+        assert!(
+            text.contains("the prose\n\n## Template for new entries"),
+            "a blank line must separate the section from the anchor heading that \
+             follows, or the heading is glued to the last prose line: {text}"
+        );
+        // And the mark advanced in the SAME write.
+        assert!(
+            text.contains("entry_high_water_U: 39"),
+            "the committed mark must advance in the same file write: {text}"
+        );
+    }
+
+    /// One file write, or the peer race comes back. `allocate_entry_id` writes the
+    /// frontmatter mark inside its `IMMEDIATE` transaction; a caller that wrote the
+    /// section afterwards would read-modify-write the file a second time outside that
+    /// transaction, and a peer allocating in between would have its committed mark
+    /// clobbered — walking the counter BACKWARDS, which is the reissue defect
+    /// `2026-08-17-ledger-id-reissue-silently-repoints-citations.md` closed.
+    ///
+    /// Asserting on the OUTCOME of a failed placement is how that is pinned: a bad
+    /// anchor must leave the file byte-identical, which is only possible if the mark
+    /// and the section share one write.
+    #[test]
+    fn a_bad_anchor_writes_nothing_at_all_not_even_the_high_water_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        let before = "---\nkind: tracker\nentry_prefix: R\n---\n\n# Ledger\n\n## R-7 — an entry\n";
+        std::fs::write(&md, before).unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "never lands".to_string(),
+            body: "x".to_string(),
+            anchor_heading: "## No Such Heading".to_string(),
+        };
+        let err = allocate_entry_id(&mut cat, "art1", "R", Some(&section)).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("No Such Heading"),
+            "the error must name the anchor it could not find: {text}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            before,
+            "a failed placement must leave the file byte-identical — the mark and the \
+             section share one write, so neither lands"
+        );
+
+        // And the id was not consumed: the next successful call still gets R-8.
+        let ok = allocate_entry_id(&mut cat, "art1", "R", None).unwrap();
+        assert_eq!(
+            ok.id, "R-8",
+            "a refused placement must not burn the id it would have used"
+        );
     }
 
     #[test]
