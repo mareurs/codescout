@@ -913,12 +913,14 @@ impl CodeScoutServer {
             return Ok(err);
         }
 
-        // Before the ledger this request will consult: a `/clear` mints a new
-        // conversation id without respawning us, so the ledger has to be
-        // re-armed for it here rather than at construction.
-        // Before the ledger this request will consult: a `/clear` mints a new
-        // conversation id without respawning us, so the ledger has to be
-        // re-armed for it here rather than at construction.
+        // BEFORE the ledger this request will consult, and therefore before
+        // `tool.call_content` below decides guide delivery: a `/clear` mints a
+        // new conversation id without respawning us, so the ledger has to be
+        // re-armed for it here rather than at construction. Position is
+        // load-bearing, not stylistic — polling after the tool ran would let
+        // the first post-`/clear` response answer from the stale ledger and
+        // suppress a guide the new conversation never received. Guarded by
+        // `guide_hint_tests::a_tool_call_polls_the_rendezvous_and_re_arms`.
         self.poll_rendezvous();
 
         let mut ctx = self.build_context(progress, peer);
@@ -4968,6 +4970,49 @@ mod guide_hint_tests {
             .await
             .expect("dispatch ok");
         assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+
+        // THE POSITION GUARD — this is the assertion that pins WHERE the poll
+        // sits, and the ledger assertion below cannot do its job.
+        //
+        // Inspecting the ledger AFTER the call is satisfied by BOTH orderings:
+        // polling before `tool.call_content` and polling after it leave the same
+        // end state, which is why moving `self.poll_rendezvous()` below the tool
+        // call left all 4050 lib tests green. This assertion reads THIS
+        // response instead. A re-armed ledger is empty, `is_empty()` is what
+        // fires the session opener inside `call_content`, so the opener can only
+        // ride this very response if the rekey landed first.
+        //
+        // The off-by-one is not cosmetic: with the poll after the tool ran, the
+        // first call following a `/clear` answers from the STALE conv-A ledger
+        // and suppresses a guide the new conversation never received — one lost
+        // re-send per `/clear`, in the degrade-to-SUPPRESSING direction the
+        // phase's global constraints forbid, and the exact defect this phase
+        // exists to remove.
+        //
+        // Probed via the APPENDED GUIDE BODY, not via `_guide_hint`. Measured,
+        // not assumed: `tree` is `OutputForm::Text` with a `format_compact`
+        // (src/tools/tree.rs:58-69), so its primary block is rendered text and
+        // the `_guide_hint` field injected into the `Value` never reaches the
+        // wire — `extract_hint` returns `None` here even when the opener fired.
+        // The second block is pushed regardless of output form, and it is also
+        // the stronger probe: the body is what actually costs tokens and what
+        // the model reads.
+        let marker = format!(
+            "<!-- auto-injected get_guide('{}')",
+            crate::prompts::SESSION_OPENING_GUIDE
+        );
+        assert!(
+            all_text(&result).contains(&marker),
+            "the re-arm must land BEFORE call_content, so this same response \
+             carries the opener's guide body; blocks: {:?}",
+            result
+                .content
+                .iter()
+                .map(|c| c
+                    .as_text()
+                    .map(|t| t.text.chars().take(80).collect::<String>()))
+                .collect::<Vec<_>>()
+        );
 
         assert!(
             !server.guide_hints_emitted.lock().contains("librarian"),
