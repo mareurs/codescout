@@ -122,6 +122,28 @@ being silent. This bug is that the predicate that fix chose is too permissive to
 one drift shape that breaks citations — the fix reports the *values* being stale while the
 *identity* is absent.
 
+### The sharper statement: the codebase already knew the rule, on the sibling path in the same file
+
+Found 2026-08-18 while implementing step 2, and it is a better account of the defect than "two
+predicates disagree". `append_entry` has **two** paths, ~65 lines apart in one file:
+
+- **Prose ledgers** (no `entry_collection`, ids reserved and the author writes a body section) —
+  already fully correct. `append_entry.rs:23` documents the heading as `<level> <ID> — <title>`;
+  `:201` and `:210` tell the caller *"the shape link_scan defines an entry token only…"*; `:136`
+  says a section written that way **"cannot be born undefined"**. It even derives the ledger's own
+  heading level so a `###`-level ledger is told `### U-40 — <title>` rather than `##` (the U-40
+  fix).
+- **Params ledgers** (`entry_collection`, rows in the catalog) — says *"Add the row(s) to the
+  body's table/section"* and never mentions a heading at all.
+
+So the rule was not missing, and nobody had to be taught it: it was **stated correctly, in the
+right words, in the same file**, and simply never transferred to the sibling path. An author on
+the params path was actively instructed toward the shape that cannot be cited, by a tool that
+spells out the correct shape sixty lines away.
+
+That reframes the fix. Step 2 is not new knowledge; it is bringing the params path up to what the
+prose path already said. It also explains why the defect survived so long with nothing anomalous
+to notice — every message an author read was confident, specific, and locally consistent.
 ## Evidence
 
 ### The population, in one tracker
@@ -238,6 +260,26 @@ rather than the correctness side.
 Not implemented. **Additive — do not retune `body_claimed_indices`;** hypothesis 3 records
 why narrowing it re-opens a closed bug.
 
+> **STEP 0 DECIDED 2026-08-18 — branch (a): definitions live in headings, and the write path
+> demands them.** Steps 1 and 2 are landed on that basis (`de4df2cd`, `f19d5296`).
+>
+> **One premise of (a) as written below was wrong, and the correction changes where (a) is
+> enforced — not whether.** (a) proposed requiring a `render_template` to emit
+> `## <ID> — <title>`. Measured instead of assumed: `render_params` has exactly three callers
+> (`grep 'render_params\s*\('`), and only one writes a body — `legibility_scan`'s
+> `render_managed_body`, whose compiled-in `render_template.j2` keys rows by file/symbol
+> (`c.key`), not by `PREFIX-N`. The other two are `context.rs` (into the `librarian(context)`
+> bundle) and a test. **No template anywhere writes an entry-token body.** Every `PREFIX-N`
+> ledger's body is hand-maintained — which is exactly why `snapshot_missing`/`snapshot_stale`
+> exist and why their text says "add the row".
+>
+> So template validation would have made **zero** `BL-N` citable, and it is dropped as a red
+> herring; recorded here so nobody re-proposes it. (a) enforces at the **write path** instead:
+> the tool that tells a maintainer what the body owes now asks for a heading. That is step 2,
+> and it is cheaper than the cost quoted below — there is no re-render pass, because nothing
+> re-renders these bodies. The real cost is that a maintainer writes a heading per entry
+> instead of a row: the same hand edit, in a citable shape.
+
 **Step 0 — settle the design fork first, because steps 1-3 mean different things on either side
 of it.** A params-rendered ledger has no headings by construction, so "warn per undefined entry"
 would fire on every single append to the busiest tracker in the repo, forever. That is not an
@@ -279,7 +321,20 @@ Then, whichever branch:
    bare `expect` is itself an `unfulfilled_lint_expectations` error under `-D warnings`
    with `--all-targets`.
 
-2. **A distinct advisory, because the remedy is distinct.** Add `undefined_in_body` to
+2. **A distinct advisory, because the remedy is distinct. — DONE, `f19d5296`.** `undefined_in_body`
+   now ships on both `AppendOutcome` and `UpdateEntryOutcome` and is emitted by both tools.
+   Three-way (`definition_gap`, pure and separately tested) rather than a bool, because
+   `EntryUndefined` and `LedgerDefinesNothing` need different remedies — collapsing them would
+   tell a queue maintainer to "add a heading for BL-39" while the other 38 stay equally
+   uncitable.
+
+   **Not gated on `body_keeps_snapshot`, deliberately — the one real design call in step 2.**
+   That gate is right for the row question (don't nag a params-canonical tracker about rows it
+   never meant to keep) and wrong here: it would silence precisely the larger half of the
+   defect, the ledger with no definitions at all, whose entries are the ones already broken. An
+   advisory that goes quiet where citations break is the bug, not a pattern to copy.
+
+   Original plan text follows. Add `undefined_in_body` to
    `AppendOutcome` and `UpdateEntryOutcome`, populated from the new predicate: the entry has a
    row (so `snapshot_missing` stays quiet, correctly) but no definition. Word it as the action
    owed — *"`A-26` has an index row but no `## A-26 — <title>` heading, so every citation of
@@ -370,31 +425,29 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 
 ## Resume
 
-**Step 1 is done (`de4df2cd`) — the predicate exists, is tested, and is mutation-verified.**
-What is left is blocked on a decision, not on code.
+**Steps 0, 1 and 2 are done.** Step 0 decided branch (a) — with the correction in § Fix that (a)
+enforces at the *write path*, not in template validation, because no template writes an
+entry-token body. Step 1 is `de4df2cd` (`body_defined_indices`, delegating to
+`link_scan::extract`). Step 2 is `f19d5296` (`undefined_in_body` on both entry-writing tools,
+three-way classification, mutation-verified).
 
-Decide **step 0**: (a) rendered ledgers must emit a definition, or (b) the resolver accepts a
-generated row as one. Everything remaining reads differently depending on the answer — under
-(b) a row-only entry is citable, so the step-2 advisory would be *wrong* to fire. Do not let
-an implementer pick this silently mid-patch; whichever is convenient at that line is not the
-same as whichever is right. Recommendation and the cost of each side are in § Fix. My read is
-(a): one definition rule in the codebase, and a wrong template fails visibly in a diff where
-a second resolver rule's failure mode is invisible.
+**Next is step 3, the `doctor` sweep, and it is the only step that reaches the entries already
+broken.** Step 2 fires on the *next* write; the 25 dead `A-N` citations and 117 dead `BL-N`
+citations were written weeks ago and no per-write advisory will ever see them. Add a
+`row_without_definition` check to `src/librarian/tools/doctor.rs` using the now-shared
+`body_defined_indices` — read-only, like the rest of `doctor`, reporting per artifact: prefix,
+entries claimed, entries defined, and the count of citations left dangling.
 
-Once that is settled, steps 2-3 in order — the `undefined_in_body` advisory, then the
-`doctor` sweep. **Step 3 is the only one that surfaces the entries already broken**; a
-per-write advisory never will, because those 25 `A-N` and 117 `BL-N` citations were written
-weeks ago.
+Then step 4, the backfill, and **only then**: ten `## A-N — <title>` sections in the hamsa audit
+log, and a format decision for the `BL-N` queue. Doing it before step 3 removes the evidence the
+check is missing.
 
-Do **not** start with the backfill (step 4). It is the visible half and the tempting one, and
-doing it first removes the evidence that the check is missing while leaving the next row-only
-entry just as silent.
-
-One loose thread worth knowing before step 2: the RED run showed `body_claimed_indices` also
-counts a heading inside a fenced block and a code-first `` `A-3` `` heading (`{1,2,3,4,5}` on
-the delegation fixture). Harmless for id allocation — over-claiming is safe, by that
-function's own documented argument — but it means the *claimed* set is not merely "defined
-plus rows", and any step-2 wording contrasting the two should not imply that it is.
+Step 5 stays open and is now *more* clearly needed, not less:
+`get_guide("tracker-conventions")` still presents the two entry formats as equivalent choices.
+Under (a) they are not — an index rendered from params yields a ledger whose entries are
+uncitable — and that guide is the reason an author picks the losing one. Whoever writes it should
+read § Root cause's *sharper statement* first: `append_entry`'s prose path already states the rule
+in the right words, so the guide has a correct sentence to copy rather than invent.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.
