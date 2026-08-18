@@ -1889,7 +1889,7 @@ run_command("cd /home/marius/.claude-kat/jobs/44c01c0f/tmp && awk '…' artifact
 
 **Filed:** `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md` — **FIXED 2026-08-18**, `be2d7781`, wire-verified after rebuild. Two causes behind one predicate: the shell can move (`cd` is now tracked per run, never across a pipe, and only when fully resolved), and an option can carry a source extension without naming a file (`--include='*.mjs'` is a filter pattern, and its relativeness forced the in-project verdict on its own). The second carve-out is keyed on **positive evidence** of an out-of-project operand, not on "options are not paths" — the tidier rule silently stops guarding `grep -rn x src/ --include='*.rs'`, where the glob is the only token naming the extension because `src/` carries none.
 
-**Status:** open.
+**Status:** FIXED 2026-08-18 (`be2d7781`, archived `92a88ff0405b47bc`) — zombie-open caught 2026-08-18, the entry's own "Filed:" line already said FIXED while this field still said open. Verified rather than trusted: `git branch --contains be2d7781` shows `experiments`; `path_is_within_project` (`src/util/path_security.rs:1438`) carries the `Cwd::At`/`Cwd::Unknown` split the entry describes; regression test `a_cd_out_of_the_project_makes_a_relative_source_read_reachable_again` exists.
 
 ---
 
