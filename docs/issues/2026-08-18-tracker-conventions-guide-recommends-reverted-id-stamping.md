@@ -4,9 +4,7 @@ opened: 2026-08-18
 closed:
 severity: medium
 owner: marius
-related:
-  - docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md
-  - docs/superpowers/plans/2026-08-18-ledger-aware-librarian-guard.md
+related: ["docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md", "docs/superpowers/plans/2026-08-18-ledger-aware-librarian-guard.md"]
 tags:
   - librarian
   - guard
@@ -57,7 +55,7 @@ get_guide("tracker-conventions")
 ```
 
 Scroll to `### Make the tracker guarded`. Then read the retraction of the same advice in
-`docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
+`docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
 § *Status* → *Retracted: "26 of 66 unprotected" is not a defect*, and the revert commit:
 
 ```
@@ -96,7 +94,7 @@ the retraction did not propagate.
 
 ### The two surfaces disagree, and the wrong one is the one that auto-loads
 
-`docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
+`docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
 § *Status*:
 
 > `src/util/librarian_guard.rs` pins the predicate on purpose. The test
@@ -180,9 +178,11 @@ one section per § *Fix* above, after
 
 ## References
 
-- `docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md` —
-  the sibling bug that retracted this advice in its own `## Status` section. Not yet
-  archived at filing time; if it has moved, look under `docs/issues/archive/`.
+- `docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
+  (artifact `388290ad0f86fe03`) — the sibling bug that retracted this advice in its own
+  `## Status` section. Fixed and archived 2026-08-18 in `f4db4e9c` + `9ac00440`; its
+  shipped-notes subsection records that the correct replacement advice is *declare
+  `entry_prefix`*.
 - `docs/superpowers/plans/2026-08-18-ledger-aware-librarian-guard.md` — the plan whose
   Task 1 makes the replacement advice true.
 - `bb9a94d7` (**experiments**) — the revert of the id-stamping experiment.

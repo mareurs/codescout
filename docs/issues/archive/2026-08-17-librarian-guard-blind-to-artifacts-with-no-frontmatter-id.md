@@ -1,7 +1,7 @@
 ---
-id: '88129ecc9c4c87a2'
+id: 388290ad0f86fe03
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the librarian guard is blind to any artifact whose frontmatter omits `id:` — 26 of 66 tracker/bug files are unprotected, including the most-damaged ledger'
 tags:
 - librarian
@@ -143,6 +143,61 @@ into prescribing an array-replacing call for two of its own slots (`9943164e`).
    without making a typo fix in a 2,800-line tracker a ceremony — which is the
    real objection to the whole-file guard this bug originally proposed.
 
+#### What shipped, 2026-08-18 — and how the three pieces actually stood
+
+Plan: `docs/superpowers/plans/2026-08-18-ledger-aware-librarian-guard.md`. Reconnaissance
+before drafting it found this section's three pieces in three different states.
+
+**Pieces 1 and 2 were already shipped.** `ENTRY_PREFIX_KEY` and `entry_high_water_<PREFIX>`
+exist in `src/librarian/catalog/augmentation.rs`, and `allocate_entry_id` is wired to the
+MCP surface at `src/librarian/tools/append_entry.rs:91` on the prose path
+(`entry_collection` omitted) — hardened since by three follow-up fixes (worktree collision,
+heading-level reporting, `frontmatter_max` diagnostics). This file's own text said "NOT yet
+wired"; that was true at `540c29c3` and stale by the time it was read.
+
+**Piece 3's goal shipped; its proposed mechanism was cut.**
+
+Shipped, commit `f4db4e9c` (**experiments**): `declared_entry_prefixes` in
+`src/util/librarian_guard.rs`, plus a third arm in `guard_with_oracle`'s union — stamped
+`id:` OR augmented OR **declares `entry_prefix`**. Hand-parses the frontmatter because
+`librarian` is a Cargo feature and that module compiles under `--no-default-features`;
+`cargo check --no-default-features` is in the gate.
+
+Cut: the heading-scoped guard this section proposed. **Its premise was measured false.**
+The argument for heading-scoping was that a whole-file guard makes "a typo fix in a
+2,800-line tracker a ceremony". But `artifact(action="update", patch={body_edits:
+[{heading, action: "edit", old_string, new_string}]})` is already a section-scoped text
+swap, and it works on any catalog row — verified on `docs/trackers/skill-frictions.md`, a
+row with **no `id:` and no augmentation**, which returned `old_string not found`, i.e.
+reached the swap logic. Augmentation is not required. So the ergonomic gap the
+heading-scoping existed to close does not exist, and building it would have cost a fourth
+parameter on a public function threaded through three call sites, a regex, and four tests,
+for a class of file with **zero current members**. What survives of it is hint text: the
+ledger refusal now names both routes, `append_entry` for an entry and `body_edits` for
+prose, with a test pinning that the entry route does *not* leak into the augmented arm
+(where the file is a rendered snapshot and `append_entry` would be wrong).
+
+**The hole was verified end-to-end, not inferred.** All five ledgers that exist today were
+already guarded — `capability-proposals.md` and `tracker-hygiene-log.md` by a stamped
+`id:`, `codescout-usage-frictions.md`, `codescout-usage-hookify.md` and
+`reconnaissance-patterns.md` by augmentation (the last two confirmed by live `edit_markdown`
+probe). So the protection was **accidental, not principled**. The reachable hole is a file
+created the documented way: a scratch ledger with `entry_prefix: ZZ` /
+`entry_high_water_ZZ: 3` / no `id:` / not augmented accepted a hand-written `## ZZ-4`
+heading via `edit_markdown` and left the mark at 3. Compaction later lowers `body_max` back
+to 3, and `allocate_entry_id`'s `next = max(body_max+1, reserved_max+1, frontmatter_max+1,
+1)` reissues `ZZ-4` — re-arming
+`docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`.
+
+**A defect the plan itself introduced, caught in review.** Piece 3 necessarily creates a
+second reader of `entry_prefix`, and the plan's first draft held the two in agreement with
+a doc comment: *"accepts all three YAML forms `allocate_entry_id` honours"*. That is a
+co-change contract enforced by prose — it proves someone knew and supplies no mechanism,
+the shape that cost this project 48 needlessly-compiled crates
+(`docs/adrs/2026-07-25-embedding-transport-boundary.md`). Commit `9ac00440`
+(**experiments**) replaces the sentence with
+`both_entry_prefix_readers_agree_on_every_yaml_form`: 11 YAML forms, both readers,
+`assert_eq!`. The hand parser matched `serde_yml` on every form first run.
 ### One genuine inconsistency, low severity
 
 The guard has two signals with different semantics: the `id:` line (a membership
@@ -151,3 +206,57 @@ comment describes augmentation as *the* predicate, yet the `id:` path guards
 files that are catalogued and unaugmented — `tracker-hygiene-log.md` is exactly
 that, and is refused. Not harmful, and probably back-compat from before the
 oracle existed, but it is what made this bug's premise look true on inspection.
+
+### Tests added, 2026-08-18
+
+All gate-green, all mutation-verified.
+
+In `src/util/librarian_guard.rs` (commit `f4db4e9c`, **experiments**):
+
+- `a_declared_ledger_is_guarded_with_no_id_and_no_augmentation` — the core arm.
+  Mutation-verified: forcing `let ledger = false` drops it with `a declared ledger must be
+  guarded: ()`.
+- `every_yaml_form_of_entry_prefix_is_recognised` — scalar, quoted scalar, inline flow,
+  block sequence. Protection must not depend on which writer last emitted the file — the
+  same reasoning as BL-33's quoted-id fix.
+- `entry_prefix_outside_frontmatter_declares_nothing` — a doc that *discusses*
+  `entry_prefix` in prose owns no namespace; otherwise every convention doc in `docs/`
+  becomes a ledger.
+- `a_valueless_entry_prefix_declares_nothing` — bare key, empty string, empty flow list.
+  Load-bearing rather than defensive: an empty prefix would make every numbered heading in
+  the file read as an entry.
+- `a_ledger_refusal_names_both_the_entry_route_and_the_prose_route` — the hint must carry
+  `append_entry` **and** `body_edits`. A single-branch hint is the failure mode being
+  avoided, not a smaller version of it.
+- `the_ledger_hint_does_not_leak_into_the_augmented_or_stamped_arms` — an augmented file's
+  params live in the catalog, so `append_entry` is the wrong route there; both other arms
+  keep the generic hint.
+
+In `src/librarian/catalog/augmentation.rs` (commit `9ac00440`, **experiments**):
+
+- `both_entry_prefix_readers_agree_on_every_yaml_form` — 11 forms through both readers,
+  asserted equal. Mutation-verified by blinding the guard to block sequences: it fails
+  naming that form, `left ["F", "W"]` against `right []`, which states the silent hole as a
+  diff — the allocator issuing `F-N` for a ledger the guard reads as not-a-ledger.
+
+The pinned `a_catalogued_but_unaugmented_file_stays_directly_editable` is **unmodified and
+green**. It was the contract this fix had to not break, and it is why Fix options 2 and 3
+stay withdrawn.
+
+Not added: any test of the heading-scoped guard, which was cut — see the shipped-notes
+subsection above for the measurement that killed it.
+
+### Resume
+
+Fixed on **experiments** in `f4db4e9c` (guard arm + hint) and `9ac00440` (parity test).
+`git rev-list --left-right --count master...experiments` had a `0` on the left at fix time,
+so fast-forward is available and the `experiments` SHAs already *are* the master SHAs — no
+cherry-pick, no second SHA to record.
+
+One follow-up, filed separately rather than folded in:
+`docs/issues/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`.
+`get_guide("tracker-conventions")` § *Make the tracker guarded* still prescribes stamping
+`id:` into frontmatter — the remedy this file retracted and `bb9a94d7` reverted. The guide
+auto-injects on the first `artifact` call of every session, so the disproved advice sits on
+a louder surface than the retraction. With this fix shipped, the correct advice is *declare
+`entry_prefix`*.

@@ -78,7 +78,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
-| BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — 26 of 66 tracker/bug files unprotected; plan at `docs/superpowers/plans/2026-08-18-ledger-aware-librarian-guard.md` | open | `88129ecc9c4c87a2` |
+| BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -577,3 +577,45 @@ output).
 - **Before writing into a foreign repo, run the read-only precondition check first.** The
   dry-run says *which* files; a `grep` on the shape says *which code path* they will take.
   Both are free, and together they make the apply reviewable in advance (BL-34).
+
+### 2026-08-18 (later) — BL-38 fixed, and two of its three pieces were already shipped
+
+`f4db4e9c` and `9ac00440` (**experiments**) closed BL-38. The interesting part is what
+reconnaissance found before any code was written: the plan's three-piece design stood in
+three different states.
+
+Pieces 1 and 2 — declare `entry_prefix` in frontmatter, wire `allocate_entry_id` to the
+tool surface — were **already shipped**, the latter at
+`src/librarian/tools/append_entry.rs:91` and hardened since by three follow-up fixes. The
+bug file said "NOT yet called from any MCP tool"; true at `540c29c3`, stale by the time it
+was read.
+
+Piece 3's goal shipped: `declared_entry_prefixes` plus a third arm in the guard's union, so
+a ledger is guarded by its declaration rather than incidentally. All five ledgers that
+exist today were *already* guarded — two by a stamped `id:`, three by augmentation — so the
+protection was accidental, not principled. The reachable hole was proved end-to-end rather
+than argued: a scratch ledger with `entry_prefix: ZZ` / `entry_high_water_ZZ: 3` / no `id:`
+/ not augmented accepted a hand-written `## ZZ-4` heading via `edit_markdown` and left the
+mark at 3, which is the input compaction later reads back to reissue `ZZ-4`.
+
+Piece 3's *mechanism* was **cut**. The heading-scoped guard existed to answer the objection
+that a whole-file guard makes a typo fix in a 2,800-line tracker a ceremony — and that
+premise is false. `artifact(update, patch={body_edits: [{heading, action: "edit",
+old_string, new_string}]})` is already a section-scoped swap and works on any catalog row,
+verified on `skill-frictions.md`, which has neither `id:` nor augmentation. Building it
+would have cost a fourth parameter on a public function threaded through three call sites,
+for a class of file with zero current members. What survives is hint text routing both
+intents.
+
+One defect the plan itself introduced, caught in review: it held the guard's hand-rolled
+`entry_prefix` reader and the librarian's `serde_yml` one in agreement with a doc comment.
+That is a co-change contract enforced by prose — the shape that cost this project 48
+needlessly-compiled crates (`docs/adrs/2026-07-25-embedding-transport-boundary.md`). Now a
+parity test over 11 YAML forms.
+
+Follow-up filed rather than folded in:
+`docs/issues/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`.
+`get_guide("tracker-conventions")` still prescribes stamping `id:` into frontmatter — the
+remedy BL-38's own file retracted and `bb9a94d7` reverted — and that guide auto-injects on
+the first `artifact` call of every session, so the disproved advice sits on a louder surface
+than the retraction.

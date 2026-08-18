@@ -10,7 +10,9 @@ The spec's heading-scoped guard is deliberately **not** built; Task 2's Alternat
 
 **Tech Stack:** Rust, `regex`, `cargo test --lib`. No new dependencies.
 
-**Spec:** `docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md` (artifact `88129ecc9c4c87a2`) — specifically its `## Status` → *"The shape the fix should take"* section. That bug file already carries one retraction; read the whole `## Status` section before starting, not just the summary.
+**Status: EXECUTED 2026-08-18** — Task 1 in `f4db4e9c`, Task 2 in `9ac00440`, both **experiments**. The spec's heading-scoped guard was cut, not built; Task 2's Alternatives section records the measurement. Kept for the record.
+
+**Spec:** `docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md` (artifact `388290ad0f86fe03`, archived on fix) — specifically its `## Status` → *"The shape the fix should take"* section. That bug file already carries one retraction; read the whole `## Status` section before starting, not just the summary.
 
 ---
 
@@ -77,7 +79,7 @@ Add to the bottom of `mod tests` in `src/util/librarian_guard.rs`:
     /// `entry_high_water_ZZ: 3` accepted an `## ZZ-4` heading via `edit_markdown`
     /// and left the mark at 3, which is the input compaction later reads back to
     /// reissue `ZZ-4`.
-    /// docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md
+    /// docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md
     #[test]
     fn a_declared_ledger_is_guarded_with_no_id_and_no_augmentation() {
         struct NothingIsAugmented;
@@ -612,6 +614,7 @@ artifact(action="update", id="88129ecc9c4c87a2",
          patch={status: "fixed", body_edits: [...]})
 artifact(action="move", id="88129ecc9c4c87a2",
          new_rel_path="docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md")
+# DONE — minted 388290ad0f86fe03; citations re-pointed in the same commit.
 ```
 
 Read the returned new id from the `move` response and re-point every citation of the old id or old path in the same commit — `grep -rn '88129ecc9c4c87a2\|librarian-guard-blind-to-artifacts' . --include='*.md' --include='*.rs'`. Leave `docs/issues/archive/**` hits alone; those are historical snapshots.

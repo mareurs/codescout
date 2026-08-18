@@ -519,7 +519,7 @@ mod tests {
     /// `entry_high_water_ZZ: 3` accepted an `## ZZ-4` heading via `edit_markdown`
     /// and left the mark at 3, which is the input compaction later reads back to
     /// reissue `ZZ-4`.
-    /// docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md
+    /// docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md
     #[test]
     fn a_declared_ledger_is_guarded_with_no_id_and_no_augmentation() {
         struct NothingIsAugmented;
