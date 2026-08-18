@@ -2036,6 +2036,62 @@ mod redesign_invariants {
         );
     }
 
+    /// The quickref must NOT route `call_graph` or `tree`. Measured and **refuted** —
+    /// hamsa **A-26**, `docs/trackers/prompt-hamsa-audit-log.md`.
+    ///
+    /// Same shape as the A-25 guard above, one day later, and read it before re-adding:
+    ///
+    /// - The motive was an ABSENCE, not a failure: `call_graph` = 0 calls across 26,705
+    ///   calls in four projects. A null cannot separate *unrouted* from *never tempted*
+    ///   from *substituted*, and only the first was tested.
+    /// - Two routing lines shipped anyway (`ba16b16a`) with no base arm, which P-3 makes
+    ///   binding for a `source.md`-derived surface.
+    /// - Then it was measured, 2026-08-18, 10 runs per arm on pinned sonnet, ship rule
+    ///   pre-registered. Base (no lines) **0/10** named `call_graph`; treatment (lines)
+    ///   **0/10**; positive control (a MANDATORY directive) **10/10**. All twenty
+    ///   base+treatment runs answered `references(...)` byte-identically, on a fixture
+    ///   built so one hop provably cannot answer the question.
+    ///
+    /// **Why it failed, which is the useful part:** the line is a routing entry competing
+    /// with an adjacent, emphasised, semantically overlapping neighbour — `Who calls X →
+    /// references(symbol, path) — NOT grep` sits directly above it and already claims the
+    /// question. *Naming* a tool does not displace a strong competing prior; the control
+    /// shows what does — *contrasting* the two and forbidding the wrong one. The evidence
+    /// points at **substituted**, not unrouted: the model reaches for `references`, whose
+    /// one hop is the wrong tool here but the habitual one.
+    ///
+    /// A CONTRASTIVE wording (`Who calls X → references | transitively → call_graph`) is a
+    /// DIFFERENT intervention. It needs its own base arm and its own A-N row; it must not
+    /// be smuggled in as a revision of A-26. Until such a row exists and ships, this test
+    /// stands. Scenario: `prompt-engineering` `scenarios/call-graph-routing/`.
+    #[test]
+    fn quickref_does_not_carry_the_refuted_call_graph_routing() {
+        let rendered = build_server_instructions(None);
+        let quickref = rendered
+            .split("## Search/Edit decision quickref")
+            .nth(1)
+            .and_then(|s| s.split("\n## ").next())
+            .expect("server instructions must contain the Search/Edit quickref");
+        for refuted in ["call_graph", "tree("] {
+            assert!(
+                !quickref.contains(refuted),
+                "the quickref routes `{refuted}`, which hamsa A-26 measured and REFUTED \
+                 (base 0/10 vs treatment 0/10 naming call_graph, positive control 10/10 — \
+                 the line moved nothing). Re-adding needs a new pre-registered A-N row, not \
+                 a re-reading of A-26 — and if the wording changed, make it CONTRASTIVE \
+                 against `references` rather than a bare mention, which is what A-26 found \
+                 lacking. Quickref read:\n{quickref}"
+            );
+        }
+        // `references` itself is NOT what was refuted — it predates A-26 and is the line
+        // the model already follows. Only the added routing entries were.
+        assert!(
+            quickref.contains("references(symbol, path)"),
+            "the quickref must still route `references`; A-26 refuted the ADDED lines, not \
+             the existing one. Quickref read:\n{quickref}"
+        );
+    }
+
     #[test]
     fn server_instructions_does_not_concat_librarian() {
         // After Task 14 lands, the librarian block must not be appended.
