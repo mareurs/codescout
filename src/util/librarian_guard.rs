@@ -255,7 +255,7 @@ fn clean_prefix(raw: &str) -> Option<String> {
 /// The two together are a union, not a fallback: a stamped id says the librarian
 /// *wrote* this file, augmentation says the file is not where its state *lives*,
 /// and neither implies the other.
-fn is_librarian_id(val: &str) -> bool {
+pub(crate) fn is_librarian_id(val: &str) -> bool {
     let val = strip_matching_quotes(val);
     val.len() == 16 && val.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }

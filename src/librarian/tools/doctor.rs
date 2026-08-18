@@ -1206,7 +1206,22 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// `edit_file` refuse it, and `artifact(update)`'s `extra` cannot write `id`).
 /// That is why the repair lives here.
 ///
-/// Only a **present and wrong** id is a violation. The three abstentions are
+/// **Two findings, not one, because the causes differ and so do the remedies.**
+/// A declared value that is not a 16-hex catalog id was never minted by the catalog,
+/// so no move produced it — `frontmatter_id_is_not_a_catalog_id`. Reporting those as
+/// `frontmatter_id_mismatch` told the reader to look for a move that never happened,
+/// and measured 2026-08-18 that was **3 of 6** live instances: two ADR/FDR template
+/// placeholders and a `meetings-reranker` slug. The split is also what keeps the
+/// repair safe, since `scan_frontmatter_id_mismatches` feeds `fix=repair_frontmatter_id`
+/// and now sees only the stale-move rows.
+///
+/// Shape is tested with [`crate::util::librarian_guard::is_librarian_id`] rather than a
+/// local regex, deliberately: it strips matching quotes, because a quoted id is 18
+/// characters and once failed a raw length test — leaving 15 files in `docs/trackers/`
+/// unguarded (BL-33). Re-deriving the predicate here would reintroduce that defect in a
+/// second place.
+///
+/// Only a **present and differing** id is a violation. The three abstentions are
 /// deliberate:
 /// - **No `id:` at all** is not a false assertion, and stamping one would newly
 ///   subject the file to the librarian guard — `docs/trackers/skill-frictions.md`
@@ -1220,6 +1235,22 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     let declared = fm?.id?;
     if declared == id {
         return None;
+    }
+    if !crate::util::librarian_guard::is_librarian_id(&declared) {
+        return Some(Violation::new(
+            "frontmatter_id_is_not_a_catalog_id",
+            Some(id.to_string()),
+            abs_path,
+            format!(
+                "frontmatter declares id '{declared}', which is not a 16-hex catalog id, so it \
+                 was never minted by the catalog and no move produced it — the row's id is \
+                 '{id}'. Common causes: a template placeholder, or a hand-written slug. \
+                 `fix=repair_frontmatter_id` deliberately SKIPS this row: overwriting the value \
+                 would destroy a placeholder, and stamping a 16-hex id newly subjects the file \
+                 to the librarian guard. Decide by hand whether the file belongs in the catalog \
+                 at all."
+            ),
+        ));
     }
     Some(Violation::new(
         "frontmatter_id_mismatch",
@@ -1606,6 +1637,14 @@ fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>
 /// The `frontmatter_id_mismatch` rows on their own, for `fix=repair_frontmatter_id`.
 /// Ordered by `abs_path` for the same reason [`scan_artifact_paths`] is — a stable
 /// order is what makes a reported sweep reproducible.
+///
+/// **The check-name filter is the write guard, not tidiness.** The scan's own name has
+/// always promised only the mismatch rows, but the check emitted exactly one kind, so
+/// nothing enforced it. Now that a declared non-catalog id yields
+/// `frontmatter_id_is_not_a_catalog_id`, this filter is what keeps `confirm=true` from
+/// splicing a template's `id: ADR-{NUMBER}` to a 16-hex id. Pinned by
+/// `repair_frontmatter_id_never_rewrites_a_value_that_was_never_a_catalog_id`, which
+/// reproduced that rewrite before the guard existed.
 fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
@@ -1614,6 +1653,7 @@ fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Vio
     Ok(rows
         .iter()
         .filter_map(|(id, abs_path)| check_frontmatter_id_matches_catalog(id, abs_path))
+        .filter(|v| v.check == "frontmatter_id_mismatch")
         .collect())
 }
 
@@ -1852,6 +1892,59 @@ mod tests {
         }
     }
 
+    /// The discriminating pair the check could not tell apart. Both files declare an
+    /// `id:` differing from the catalog row, so both were filed as
+    /// `frontmatter_id_mismatch` and both readers were told the same story — *"a move
+    /// re-keys the row and this file kept the id it was moved away from"*. True of the
+    /// first. **False of the second:** `ADR-{NUMBER}` was never a catalog id, so no move
+    /// ever produced it, and a reader following that detail goes hunting for a commit
+    /// that does not exist.
+    ///
+    /// Measured 2026-08-18 on the live catalog: **3 of 6** instances were the second
+    /// kind — two ADR/FDR template placeholders and a `meetings-reranker` slug.
+    ///
+    /// The **quoted** fixture is deliberate, not decoration. `is_librarian_id` strips
+    /// matching quotes because a quoted id is 18 characters and once failed a raw length
+    /// test, leaving 15 of `docs/trackers/` unguarded (BL-33). Re-deriving the shape test
+    /// here with a hand-rolled 16-hex regex would have reintroduced exactly that defect,
+    /// so this pins that a quoted-but-stale id still reads as a catalog id.
+    #[test]
+    fn a_declared_value_that_was_never_a_catalog_id_is_a_different_finding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let write = |name: &str, body: &str| -> String {
+            let p = tmp.path().join(name);
+            std::fs::write(&p, body).unwrap();
+            crate::util::fs::RepoPath::from_path(&p).into_string()
+        };
+
+        let quoted_stale = write(
+            "quoted.md",
+            "---\nid: 'aaaaaaaaaaaaaaaa'\nkind: bug\n---\n# x\n",
+        );
+        let v = check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &quoted_stale)
+            .expect("a quoted-but-stale catalog id is still a stale move");
+        assert_eq!(
+            v.check, "frontmatter_id_mismatch",
+            "quoting is a property of the last writer, never of the artifact"
+        );
+
+        let placeholder = write(
+            "adr-template.md",
+            "---\nid: ADR-{NUMBER}\nkind: adr\n---\n# x\n",
+        );
+        let v = check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &placeholder)
+            .expect("a non-id value still differs from the row and is worth reporting");
+        assert_eq!(
+            v.check, "frontmatter_id_is_not_a_catalog_id",
+            "a template placeholder is not a stale move and must not be filed as one"
+        );
+        assert!(
+            !v.detail.contains("moved away from"),
+            "the detail must not assert a move that never happened: {}",
+            v.detail
+        );
+    }
+
     /// The sweep, end to end through `call`: default scan reports, dry-run previews
     /// without touching disk, `confirm=true` repairs every stale file in one pass.
     ///
@@ -2027,6 +2120,87 @@ mod tests {
             declared(outside.path().join("out.md")).as_deref(),
             Some("deaddeaddeaddead"),
             "a file in another repository must be left exactly as it was"
+        );
+    }
+
+    /// The destructive half, and the one with teeth.
+    ///
+    /// `fix=repair_frontmatter_id` filtered its rows by PATH containment and nothing
+    /// else, so `confirm=true` would splice a template's `id: ADR-{NUMBER}` to a 16-hex
+    /// id — destroying the placeholder that makes it a template, and (because a 16-hex
+    /// `id:` is one of the three things `librarian_guard` keys on) making every copy of
+    /// it guard-refused for `edit_markdown`.
+    ///
+    /// That is the **same harm** the existing no-`id:` abstention prevents, and its
+    /// stated reason covers this case verbatim: stamping an id newly subjects the file to
+    /// the guard. The old code simply tested the wrong predicate — "is there an `id:`
+    /// value?" rather than "is there a CATALOG id?". Note a placeholder-bearing template
+    /// is **unguarded today**, since `is_librarian_id("ADR-{NUMBER}")` is false, so this
+    /// write would have created the very condition the abstention exists to avoid.
+    ///
+    /// Isolated from `repair_frontmatter_id_sweeps_the_stale_and_leaves_everything_else`
+    /// on purpose: this rejects one class, so its fixture must be the only reason
+    /// anything is left alone. And the stale row is a **positive control** — without it
+    /// a repair that silently did nothing would pass.
+    #[tokio::test]
+    async fn repair_frontmatter_id_never_rewrites_a_value_that_was_never_a_catalog_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = crate::util::fs::RepoPath::from_path(tmp.path()).into_string();
+        let seed = |name: &str, fm_id: &str| -> String {
+            std::fs::write(
+                tmp.path().join(name),
+                format!("---\nid: {fm_id}\nkind: adr\n---\n\n# {name}\n"),
+            )
+            .unwrap();
+            format!("{root}/{name}")
+        };
+        let read = |name: &str| std::fs::read_to_string(tmp.path().join(name)).unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(
+            &cat,
+            "1111111111111111",
+            &seed("stale.md", "dead111111111111"),
+        );
+        seed_artifact(
+            &cat,
+            "2222222222222222",
+            &seed("adr-template.md", "ADR-{NUMBER}"),
+        );
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let applied = call(
+            &ctx,
+            json!({ "fix": "repair_frontmatter_id", "root": root, "confirm": true }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            applied["totals"]["files"], 1,
+            "only the genuinely stale catalog id may be rewritten, got: {applied}"
+        );
+        // Read through the parser, never by string match: it is authoritative about
+        // what YAML actually sees, including whatever quoting the splice emitted.
+        // Asserting a spelling the writer does not produce is its own defect.
+        let declared = |name: &str| -> Option<String> {
+            crate::librarian::frontmatter::parse(&read(name))
+                .unwrap()
+                .0
+                .and_then(|fm| fm.id)
+        };
+        assert_eq!(
+            declared("stale.md").as_deref(),
+            Some("1111111111111111"),
+            "positive control: the stale one MUST still be repaired, or this test passes \
+                 by the sweep doing nothing at all. File: {}",
+            read("stale.md")
+        );
+        assert_eq!(
+            declared("adr-template.md").as_deref(),
+            Some("ADR-{NUMBER}"),
+            "the placeholder must survive untouched. File: {}",
+            read("adr-template.md")
         );
     }
 

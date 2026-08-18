@@ -1,7 +1,7 @@
 ---
 id: '9c953c973226d4e0'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: frontmatter_id_mismatch asserts one cause for every mismatch, and its repair would overwrite a template''s id placeholder'
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - destructive-repair
 - cross-repo
 topic: catalog-drift
+closed: 2026-08-18
 ---
 
 # BUG: `frontmatter_id_mismatch` asserts one cause, and its repair would overwrite a placeholder
@@ -117,30 +118,69 @@ than guessed.
 
 ## Fix
 
-Not implemented. The two halves are independent and the first is nearly free.
+**SHIPPED 2026-08-18.** Both halves, and the fix turned out to be smaller than filed because
+the predicate it needed already existed.
 
-1. **Branch the message on the shape of `declared`.** If it is not a 16-hex id, say so — *"the
-   declared value is not a catalog id (template placeholder? slug?), so this is not a stale
-   move"*. One `if`, and it stops sending readers after a nonexistent commit.
-2. **Add the fourth abstention: never rewrite a non-16-hex `id:`.** Cheapest correct form is a
-   shape guard in `mv::repair_frontmatter_id` beside the existing present-or-absent gate, so
-   both the move path and the sweep inherit it. Report such files under a distinct check name
-   (or a `severity_reason`) rather than silently skipping — a template sitting in the catalog is
-   itself worth a human's attention.
-3. **Consider whether templates belong in the catalog at all.** `docs/adr/templates/*.md` is
-   arguably not an artifact. Classifier exclusion would remove the rows rather than annotate
-   them — cleaner, but it is a per-repo `.codescout/librarian.toml` decision in repos this
-   session does not own.
+1. **Two findings, not one.** `check_frontmatter_id_matches_catalog` now branches: a declared
+   value that is not a 16-hex catalog id yields **`frontmatter_id_is_not_a_catalog_id`**, whose
+   message says the value was never minted by the catalog, names the likely causes (template
+   placeholder, hand-written slug), states that the repair deliberately skips the row, and says
+   why. The stale-move message is unchanged for the rows it is actually true of.
+2. **The repair cannot reach those rows.** `scan_frontmatter_id_mismatches` — which feeds
+   `fix=repair_frontmatter_id` — now filters to `check == "frontmatter_id_mismatch"`. Its name
+   had always promised only those rows; nothing enforced it while the check emitted one kind.
+3. **And the move path is guarded independently.** `mv::repair_frontmatter_id`'s gate went from
+   `id != new_id` to `id != new_id && is_librarian_id(id)`. `artifact(move)` reaches that
+   function without passing through `doctor` at all, so the filter in (2) would not have covered
+   it.
 
+**`is_librarian_id` already existed** in `src/util/librarian_guard.rs` — the fix was making it
+`pub(crate)`, not writing it. That matters for more than economy: it **strips matching quotes**,
+because a quoted id is 18 characters and once failed a raw length test, leaving 15 files in
+`docs/trackers/` unguarded (BL-33). A hand-rolled 16-hex regex here would have reintroduced that
+exact defect in a second place — and the real corpus has quoted ids, including the BL-41 bug file
+archived the same day (`id: '52269554ea4f51a4'`). Pinned by the quoted fixture in the test below.
+
+**The sharper framing, found while fixing rather than while filing:** this is not a new
+abstention. The existing no-`id:` abstention's *stated reason* — stamping an id newly subjects
+the file to the librarian guard — already covers this case verbatim, because
+`is_librarian_id("ADR-{NUMBER}")` is false, so a placeholder-bearing template is **unguarded
+today** and the repair would have created precisely the condition that abstention exists to
+avoid. The code was not missing a rule; it was testing the wrong predicate — "is there an `id:`
+value?" instead of "is there a *catalog* id?".
+
+Option (3) from the original filing — excluding templates from the catalog via a per-repo
+classifier rule — was not taken. It is still the cleaner end state, but it is a decision for each
+repo that owns those templates, and the rows are now reported honestly rather than silently
+misfiled.
 ## Tests added
 
-None yet. Fix (2) needs the discriminating pair memory `test-design-discipline` calls for: one
-fixture with a genuinely stale 16-hex id (**must** be repaired) and one with `ADR-{NUMBER}`
-(**must not** be), because a test that only asserts "the stale one got fixed" stays green under
-a repair that rewrites everything. The existing
-`repair_frontmatter_id_sweeps_the_stale_and_leaves_everything_else` is the right shape and its
-`d.md` row makes exactly this argument for the no-id case — it needs a placeholder sibling.
+Two, both written before the code and both watched fail.
 
+**`a_declared_value_that_was_never_a_catalog_id_is_a_different_finding`** — the discriminating
+pair the check could not tell apart. A **quoted** stale hex id must still be
+`frontmatter_id_mismatch` (the BL-33 regression guard), and `ADR-{NUMBER}` must be the new check
+with a detail that does **not** contain "moved away from". A single-fixture test could not
+separate these: both differ from the row.
+
+**`repair_frontmatter_id_never_rewrites_a_value_that_was_never_a_catalog_id`** — the destructive
+half, end to end through `call` with `confirm=true`. Kept isolated from
+`repair_frontmatter_id_sweeps_the_stale_and_leaves_everything_else` on purpose: this rejects one
+class, so its fixture must be the only reason anything survives. It carries a stale-hex row as a
+**positive control**, without which a repair that silently did nothing would pass.
+
+### Two things the RED runs established that the filing could not
+
+- **The destruction is REPRODUCED, not merely reasoned.** The filing was careful to say the
+  destructive half was "reasoned from the code path, NOT executed". The first RED run executed
+  it: the sweep reported `repaired: [adr-template.md …]` and rewrote `id: ADR-{NUMBER}` to
+  `id: 2222222222222222`. Upgrading that claim is the point of watching a test fail.
+- **The positive control caught MY error, not the code's.** After the guard landed, the test
+  still failed — on the control, because I asserted `read(…).contains("id: 1111111111111111")`
+  and the splice does not emit that spelling. The code was right; my assertion was. Rewritten to
+  read through `frontmatter::parse`, which is what `mv::repair_frontmatter_id`'s own comment
+  calls authoritative about what YAML sees. Asserting a spelling the writer never produces is the
+  mirror of the fixture-derived-from-the-code defect in memory `test-design-discipline`.
 ## Workarounds
 
 **Always read the dry run's `files[]` before `confirm=true`**, and scope `root=` to the repo you
@@ -150,13 +190,22 @@ catch this, because the templates are visible by name in the preview.
 
 ## Resume
 
-Fix (1) is a one-line branch and can ship independently of everything else. Fix (2) is the one
-with teeth. Neither is urgent: the repair is opt-in, root-scoped, and requires `confirm=true`,
-and no session has run it against the affected repos.
+Nothing outstanding on the code. Verify on the wire after the next `cargo rb` + `/mcp`: the six
+`frontmatter_id_mismatch` rows should split **3 / 3** between the two check names, and the three
+non-id rows should be the two ADR/FDR template placeholders plus the `meetings-reranker` slug.
 
-Note the affected files are all outside codescout, so verifying a fix end-to-end means either a
-synthetic fixture (preferred) or the owner's go-ahead to touch those repos.
+Still open, and deliberately so: **whether those templates belong in the catalog at all.** Option
+(3) is a per-repo `.codescout/librarian.toml` classifier decision in repos this session does not
+own, and all six affected files are outside codescout. The defect was in codescout's code, so it
+is fixed here against synthetic fixtures; the data question goes with the repos.
 
+Not yet re-measured either: **why the count moved 4 → 6** during the session. No codescout change
+explained it and the concurrent session's commits touched unrelated files. Most likely a reindex
+admitting two rows — recorded as unexplained rather than guessed, and now cheaper to answer,
+since the two check names separate the populations.
+
+Fast-forward path (`master...experiments` is `0` on the left), so the fix SHA below is already the
+master-side SHA and there is no second one to record.
 ## References
 
 - `src/librarian/tools/doctor.rs` — `check_frontmatter_id_matches_catalog`, and the
@@ -165,4 +214,3 @@ synthetic fixture (preferred) or the owner's go-ahead to touch those repos.
   placeholder hazard for the other keys
 - `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md` (BL-23 — why the repair exists)
 - `docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md` (why stamping an `id:` changes guard behaviour)
-

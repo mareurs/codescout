@@ -159,12 +159,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// Rewrite a moved file's frontmatter `id:` to the id the move just minted, and
 /// return the file's post-repair content.
 ///
-/// **Only an id already present is rewritten.** A file carrying none is not
-/// asserting anything false, and `frontmatter::rewrite_frontmatter_normalizing` would *insert* a
-/// block rather than skip — stamping an `id:` is exactly what subjects a file to
-/// the librarian guard, so archiving a prose tracker like
-/// `docs/trackers/skill-frictions.md` would quietly make `edit_markdown` refuse
-/// the workflow CLAUDE.md documents for it.
+/// **Only a present 16-hex CATALOG id is rewritten**, and both halves of that matter.
+/// A file carrying no `id:` is not asserting anything false, and
+/// `frontmatter::rewrite_frontmatter_normalizing` would *insert* a block rather than
+/// skip — stamping an `id:` is exactly what subjects a file to the librarian guard, so
+/// archiving a prose tracker like `docs/trackers/skill-frictions.md` would quietly make
+/// `edit_markdown` refuse the workflow CLAUDE.md documents for it.
+///
+/// A file carrying a value that is *not* a catalog id — `id: ADR-{NUMBER}` in a template,
+/// a hand-written slug — is the **same harm reached by a different route**, and the gate
+/// missed it until 2026-08-18 because it tested "is there an `id:` value?" rather than "is
+/// there a catalog id?". Splicing such a value to a 16-hex id destroys the placeholder AND
+/// newly guards every copy of the template, since `is_librarian_id` is false for it today.
+/// Reproduced before the fix by
+/// `doctor::tests::repair_frontmatter_id_never_rewrites_a_value_that_was_never_a_catalog_id`.
+/// The skip is silent here, as befits a best-effort post-rename step; `doctor` reports the
+/// condition as `frontmatter_id_is_not_a_catalog_id`.
 ///
 /// **Best-effort by design.** The rename has already happened by the time this
 /// runs, so unparseable frontmatter must not abort the move and strand the
@@ -183,7 +193,10 @@ pub(super) fn repair_frontmatter_id(
     // the block would reformat every other key, and a `{Placeholder}` would stop
     // being one. BL-34.
     let needs_repair = match crate::librarian::frontmatter::parse(&content) {
-        Ok((Some(fm), _)) => fm.id.as_deref().is_some_and(|id| id != new_id),
+        Ok((Some(fm), _)) => fm
+            .id
+            .as_deref()
+            .is_some_and(|id| id != new_id && crate::util::librarian_guard::is_librarian_id(id)),
         Ok((None, _)) => false,
         Err(err) => {
             tracing::warn!(
