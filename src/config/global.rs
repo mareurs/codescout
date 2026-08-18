@@ -52,6 +52,10 @@ pub(crate) fn global_config_dir_from(
 ) -> Option<PathBuf> {
     let base = xdg_config_home
         .map(PathBuf::from)
+        // The XDG basedir spec: a relative value is invalid and must be ignored,
+        // so it falls through to `$HOME/.config` rather than resolving against the
+        // process CWD. Same gate as `state_dir_from` in `src/util/fs.rs`.
+        .filter(|p| p.is_absolute())
         .or_else(|| home.map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("codescout"))
 }
@@ -263,6 +267,29 @@ mod tests {
     #[test]
     fn config_dir_none_when_neither_set() {
         assert!(global_config_dir_from(None, None).is_none());
+    }
+
+    /// XDG basedir spec: "All paths set in these environment variables must be
+    /// absolute. If an implementation encounters a relative path in any of these
+    /// variables it should consider the path invalid and ignore it." A relative
+    /// value must therefore fall through to `$HOME/.config`, not resolve against
+    /// the process CWD. Mirrors `state_dir_from`'s gate in `src/util/fs.rs`.
+    #[test]
+    fn config_dir_ignores_relative_xdg_and_falls_back_to_home() {
+        let dir = global_config_dir_from(
+            Some(OsStr::new("relative/state")),
+            Some(OsStr::new("/tmp/fake-home")),
+        )
+        .unwrap();
+        assert_eq!(dir, PathBuf::from("/tmp/fake-home/.config/codescout"));
+    }
+
+    /// The relative value is *ignored*, not used as a base — so with no `HOME` to
+    /// fall back to there is no config dir at all. Without this case, a fix that
+    /// merely reordered the branches would still pass the test above.
+    #[test]
+    fn config_dir_none_when_xdg_is_relative_and_home_unset() {
+        assert!(global_config_dir_from(Some(OsStr::new("relative/state")), None).is_none());
     }
 
     #[test]
