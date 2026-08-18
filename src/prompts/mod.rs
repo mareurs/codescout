@@ -1979,23 +1979,40 @@ mod redesign_invariants {
         );
     }
 
-    /// IL1's always-loaded text must state the CONDITION, not just the permission.
+    /// IL1's always-loaded text must NOT carry the overlap-condition clause. It was
+    /// measured and **refuted** — hamsa **A-25**, `docs/trackers/prompt-hamsa-audit-log.md`.
     ///
-    /// `read_file`'s gate refuses a source range whenever it overlaps a named symbol.
-    /// A wording that says only "read_file is right for imports/glue" grants far more
-    /// than the gate allows, and agents plan reads against the always-loaded text
-    /// rather than the on-demand guide — which is accurate but must be asked for.
-    /// That gap produced the largest single error class in the recorded corpus: 416
-    /// refusals across 89 sessions, 4.7 per session
-    /// (docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md).
+    /// This guard used to assert the opposite. The history is the point, so read it before
+    /// re-adding anything:
     ///
-    /// This is a REGRESSION guard, not a style check. The condition was authored,
-    /// then deleted again by the slice refit that fitted the channel to 1900 chars
-    /// (391fdcdc). That is the failure mode worth a test: the clause is 57 characters,
-    /// it reads like filler to anyone counting budget, and its absence costs more
-    /// than everything the refit saved. Whatever removes it should fail here first.
+    /// - The gate refuses a source range whenever it overlaps a named symbol, and the
+    ///   always-loaded wording "read_file is right for imports/glue" grants far more than
+    ///   that. The deficit is real and large: 416 refusals across 89 sessions, 4.7 per
+    ///   session, the largest single error class in the corpus.
+    /// - So a 57-character clause was authored — "refused only when the range overlaps a
+    ///   symbol; force=true reads it anyway" — deleted a day later by a budget refit
+    ///   (`391fdcdc`), then restored and guarded here.
+    /// - Then it was actually measured, 2026-08-18, 10 runs per arm on pinned sonnet with
+    ///   the ship rule pre-registered before either arm ran. Base arm: **10/10** planned a
+    ///   bare line-range read over a symbol — deficit confirmed, far past its 3/10 bar.
+    ///   Clause arm: **8/10 still did**. The rule required <= 1/10; 0/10 -> 2/10 passing is
+    ///   Fisher p~0.47, noise.
+    ///
+    /// **Why it failed, which is the useful part:** the clause is *informational*, not
+    /// *directive*. It states the gate's condition but supplies no procedure, and an agent
+    /// asked for lines 40-55 cannot know whether they overlap a symbol without checking —
+    /// so it adds a fact that cannot be acted on. The one arm-B run that passed is the
+    /// tell: it called `symbol_at` to resolve exactly that unknown.
+    ///
+    /// A *directive* wording ("on a mid-file range, pass force=true or fetch the symbol by
+    /// name") is a DIFFERENT intervention. It needs its own base arm and its own A-N row;
+    /// it must not be smuggled in as a revision of A-25. Until such a row exists and ships,
+    /// this test stands — and the deficit is addressed by CODE instead: the
+    /// `start == 1 && end <= 60` head-read exemption plus the extent-ordered refusal hint,
+    /// which together exempt 102 of 103 `start == 1` refusals and were never subject to the
+    /// prompt-eval gate.
     #[test]
-    fn il1_states_the_overlap_condition_not_just_the_permission() {
+    fn il1_does_not_carry_the_refuted_overlap_clause() {
         let rendered = build_server_instructions(None);
         // Everything before Iron Law 2's marker is the header plus IL1.
         let il1 = rendered
@@ -2003,15 +2020,19 @@ mod redesign_invariants {
             .next()
             .expect("server instructions must contain Iron Law 2");
         assert!(
-            il1.contains("overlap"),
-            "Iron Law 1 must state WHEN a line-range read is refused — that the range \
-             overlaps a symbol — not merely that read_file is right for glue. Pay for \
-             it elsewhere; do not drop the condition. IL1 read:\n{il1}"
+            !il1.contains("overlaps a symbol"),
+            "Iron Law 1 carries the overlap-condition clause that hamsa A-25 measured and \
+             REFUTED (base 10/10 vs clause 8/10 planning the refused read, ship rule was \
+             <= 1/10). Re-adding it needs a new pre-registered A-N row, not a re-reading of \
+             A-25 — and if the wording changed, make it DIRECTIVE rather than \
+             informational, which is what A-25 found lacking. IL1 read:\n{il1}"
         );
+        // The escape hatch itself is NOT what was refuted — only the condition clause was.
+        // Naming `force=true` costs nothing extra and predates the clause.
         assert!(
             il1.contains("force=true"),
-            "Iron Law 1 must name the escape hatch beside the condition, or the \
-             condition reads as a dead end. IL1 read:\n{il1}"
+            "Iron Law 1 must still name the escape hatch; A-25 refuted the CONDITION \
+             clause, not the mention of force. IL1 read:\n{il1}"
         );
     }
 
