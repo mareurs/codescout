@@ -78,6 +78,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(note) = outcome.snapshot_stale {
         out["snapshot_stale"] = json!(note);
     }
+    // The citation half, and independent of the row half above: `snapshot_stale` is
+    // satisfied by an index row showing current values, while a row defines no token at
+    // all. An entry can be perfectly in-sync and still be uncitable.
+    if let Some(note) = outcome.undefined_in_body {
+        out["undefined_in_body"] = json!(note);
+    }
     Ok(out)
 }
 
@@ -265,6 +271,121 @@ mod tests {
         assert!(
             result.get("snapshot_stale").is_none(),
             "no body snapshot means nothing can be behind, got: {result}"
+        );
+    }
+
+    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    ///
+    /// The bug, end to end. This body is the same row-only shape
+    /// `patching_a_rendered_row_says_the_committed_table_now_disagrees` uses, and
+    /// that is the point: the row question was always answered here while the
+    /// citation question went unasked. Asserting BOTH fields on one response is
+    /// what pins them as orthogonal — an entry can be perfectly in-sync with its
+    /// rendered row and still be uncitable.
+    #[tokio::test]
+    async fn patching_a_row_only_ledger_also_reports_that_nothing_can_cite_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID | status |\n| T-1 | open |\n| T-2 | open |\n| T-3 | open |\n",
+            &["T-1", "T-2", "T-3"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        let note = result["undefined_in_body"]
+            .as_str()
+            .expect("a ledger with no heading anywhere must say so");
+        assert!(
+            note.contains("defines NO"),
+            "no T-N is defined anywhere, so this is a whole-ledger format issue and \
+                 must not read as one row's omission: {note}"
+        );
+        assert!(
+            note.contains("T-N"),
+            "the message has to name the prefix, since the remedy is per-ledger: {note}"
+        );
+        assert!(
+            result["snapshot_stale"].is_string(),
+            "the row half still fires independently — the two are orthogonal, which \
+                 is the whole reason a second field was needed: {result}"
+        );
+    }
+
+    /// The negative control. Without it, a mutation that made
+    /// `undefined_in_body` unconditional would pass every other test here.
+    #[tokio::test]
+    async fn patching_an_entry_that_has_its_own_heading_reports_no_citation_gap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("log.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# L\n\n## T-1 — first\n\nbody\n\n## T-2 — second\n\nbody\n",
+            &["T-1", "T-2"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-1", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.get("undefined_in_body").is_none(),
+            "`## T-1 — first` defines the token, so there is no citation gap: {result}"
+        );
+    }
+
+    /// The third case, and the one that justifies three outcomes instead of a bool:
+    /// this ledger demonstrably writes definitions and T-2 missed one. The remedy is
+    /// one heading, so the message must blame the entry — telling this author it is a
+    /// whole-ledger format issue would send them to migrate a format that is fine.
+    #[tokio::test]
+    async fn patching_an_undefined_entry_in_a_defining_ledger_blames_the_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("log.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# L\n\n## T-1 — first\n\nbody\n\n| ID | status |\n| T-2 | open |\n",
+            &["T-1", "T-2"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "tasks",
+                   "entry_id": "T-2", "fields": {"status": "done"}}),
+        )
+        .await
+        .unwrap();
+
+        let note = result["undefined_in_body"]
+            .as_str()
+            .expect("T-2 has no heading");
+        assert!(
+            note.contains("has no `## T-2 — <title>` heading"),
+            "must name the exact heading to write: {note}"
+        );
+        assert!(
+            note.contains("defines its other entries"),
+            "and must distinguish itself from the whole-ledger case: {note}"
         );
     }
 

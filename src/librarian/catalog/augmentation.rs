@@ -239,6 +239,15 @@ pub struct UpdateEntryOutcome {
     /// previous values — no id comparison can see that, so the signal is
     /// "you changed fields the body still renders the old way".
     pub snapshot_stale: Option<String>,
+    /// Set when the entry has no `## <ID> — <title>` heading, so nothing can cite it.
+    ///
+    /// Orthogonal to `snapshot_stale`, and both can be `Some` at once: that one asks
+    /// whether the body *carries* the row (an index row satisfies it), this asks
+    /// whether anything can *cite* the entry (an index row does not). Unlike
+    /// `snapshot_stale` it is NOT gated on `body_keeps_snapshot` — see
+    /// `undefined_in_body_note` for why gating it would silence the larger half of the
+    /// defect.
+    pub undefined_in_body: Option<String>,
 }
 
 /// Patch the fields of ONE entry in `params.<entry_collection>`, leaving every
@@ -410,12 +419,14 @@ pub fn update_entry(
         .filter_map(|(_, n)| n.parse::<u64>().ok())
         .collect();
     let snapshot_stale = snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices);
+    let undefined_in_body = undefined_in_body_note(cat, artifact_id, entry_id);
 
     Ok(UpdateEntryOutcome {
         entry_id: entry_id.to_string(),
         changed_fields,
         entries_total,
         snapshot_stale,
+        undefined_in_body,
     })
 }
 
@@ -476,6 +487,59 @@ fn snapshot_stale_note(
     })
 }
 
+/// Whether `entry_id` is missing the `## <ID> — <title>` heading that makes it
+/// citable, and if so which of the two failures it is.
+///
+/// The twin of [`snapshot_stale_note`], and the reason both are needed: that one asks
+/// whether the body *carries* the row, which an index row satisfies. This asks whether
+/// anything can *cite* the entry, which an index row does not satisfy at all —
+/// `link_scan`'s resolver binds a token to a defining heading. An entry can therefore
+/// pass every existing check and be permanently unreachable, which is exactly the bug
+/// this closes (`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
+///
+/// **Deliberately NOT gated on [`body_keeps_snapshot`].** That gate exists so a
+/// params-canonical tracker is not nagged about rows it never intended to keep, and it
+/// is right for the row question. Applying it here would silence precisely the larger
+/// half of the defect — the ledger that keeps no definitions *at all*, whose entries
+/// are the ones already broken (measured 2026-08-18: zero `BL-N` definitions repo-wide
+/// against 117 cross-file citations). An advisory that goes quiet where citations break
+/// is the failure being fixed, not a design to copy.
+///
+/// Best-effort throughout, matching `snapshot_stale_note`: an unreadable file or an
+/// unparseable id yields `None`. This runs after the transaction has committed, so a
+/// missing advisory is a far smaller harm than a failed write.
+fn undefined_in_body_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> Option<String> {
+    let (prefix, num) = entry_id.rsplit_once('-')?;
+    let num: u64 = num.parse().ok()?;
+    let abs_path: String = cat
+        .conn
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE id = ?1",
+            [artifact_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    let body = std::fs::read_to_string(&abs_path).ok()?;
+    match definition_gap(&body_defined_indices(&body, prefix), num) {
+        DefinitionGap::Defined => None,
+        DefinitionGap::EntryUndefined => Some(format!(
+            "`{entry_id}` has no `## {entry_id} — <title>` heading in the body, so every citation \
+             of it resolves to nothing — an index row does not define a token. This ledger defines \
+             its other entries, so this one is an omission: add the heading via \
+             artifact(action=\"update\", patch={{body_edits: [...]}})."
+        )),
+        DefinitionGap::LedgerDefinesNothing => Some(format!(
+            "This ledger defines NO `{prefix}-N` heading anywhere in its body, so `{entry_id}` and \
+             every other entry in it are uncitable — `link_scan` binds a token to a \
+             `## {prefix}-N — <title>` heading, and index rows define nothing. This is a \
+             whole-ledger format issue, not something one row can fix: see \
+             docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md."
+        )),
+    }
+}
+
 /// Result of a successful [`append_entry`].
 #[derive(Debug)]
 pub struct AppendOutcome {
@@ -489,6 +553,10 @@ pub struct AppendOutcome {
     /// Always includes the id just assigned. Empty for a prose-only tracker
     /// (one whose body claims no ids at all) — see `body_claimed_indices`.
     pub snapshot_missing: Vec<String>,
+    /// Set when the id just assigned has no `## <ID> — <title>` heading, so nothing
+    /// can cite it. Distinct from `snapshot_missing`, which an index row satisfies;
+    /// see `undefined_in_body_note`.
+    pub undefined_in_body: Option<String>,
 }
 
 /// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
@@ -666,10 +734,14 @@ pub fn append_entry(
         }
     }
     tx.commit()?;
+    // After the commit, deliberately: this reads the body off disk and must never be
+    // able to fail a write that already succeeded.
+    let undefined_in_body = undefined_in_body_note(cat, artifact_id, &new_id);
     Ok(AppendOutcome {
         id: new_id,
         warning,
         snapshot_missing,
+        undefined_in_body,
     })
 }
 
@@ -1171,19 +1243,6 @@ pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collecti
 /// renders its index from `params` defines no token by construction, and that is a
 /// legitimate design. Callers must treat empty as "this ledger defines nothing" and
 /// not report per-entry breakage on every write.
-// `expect`, not `allow`: this lands one step ahead of its production consumer, and
-// `expect` FAILS the build once a caller appears — so the marker removes itself instead
-// of rotting here as a permanent exemption. The consumer is deliberately deferred:
-// whether a row-only entry is a defect at all depends on an unsettled design decision
-// (require a `render_template` to emit a definition, vs. teach the resolver to accept a
-// generated row), and under the second branch an advisory built on this would be wrong.
-// The predicate itself is correct either way, which is why it ships first.
-//
-// `cfg_attr(not(test))` because "unused" is configuration-dependent: the tests below DO
-// call it, so under `cfg(test)` the expectation is unfulfilled and `-D warnings` rejects
-// it via `unfulfilled_lint_expectations`. Only the lib build is genuinely missing a
-// caller, and that is the build the marker is for.
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn body_defined_indices(body: &str, id_prefix: &str) -> std::collections::BTreeSet<u64> {
     let want = format!("{id_prefix}-");
     crate::librarian::tools::link_scan::extract::extract(body)
@@ -1191,6 +1250,43 @@ pub(crate) fn body_defined_indices(body: &str, id_prefix: &str) -> std::collecti
         .into_iter()
         .filter_map(|d| d.token.strip_prefix(&want)?.parse::<u64>().ok())
         .collect()
+}
+
+/// What a ledger's body fails to say about one entry, in citation terms.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DefinitionGap {
+    /// A `## <ID> — <title>` heading defines it. Citable; nothing to report.
+    Defined,
+    /// The body defines other entries of this prefix but not this one.
+    EntryUndefined,
+    /// The body defines no entry of this prefix at all.
+    LedgerDefinesNothing,
+}
+
+/// Classify what a ledger's body fails to say about entry `num`, given the set of
+/// indices its body actually **defines** (from [`body_defined_indices`]).
+///
+/// Three outcomes rather than a bool, because the two failures need different
+/// remedies and telling them apart is the whole value of the check:
+///
+/// - `EntryUndefined` — the ledger demonstrably writes definitions and this entry
+///   missed one. The author writes one heading and it is fixed.
+/// - `LedgerDefinesNothing` — no entry of this prefix is defined anywhere, so nothing
+///   done to this one row helps: the ledger's entry format has to change. Reporting
+///   this as a per-entry omission would tell a queue maintainer to "add a heading for
+///   BL-39" while the other 38 stay equally uncitable.
+///
+/// `claimed` is deliberately not a parameter. Whether the number is *taken* has no
+/// bearing on whether the entry is *citable*, and conflating those two questions is
+/// the defect this whole path exists to close.
+pub(crate) fn definition_gap(defined: &std::collections::BTreeSet<u64>, num: u64) -> DefinitionGap {
+    if defined.contains(&num) {
+        DefinitionGap::Defined
+    } else if defined.is_empty() {
+        DefinitionGap::LedgerDefinesNothing
+    } else {
+        DefinitionGap::EntryUndefined
+    }
 }
 
 /// The heading level this ledger already uses for its `<id_prefix>-N` entry sections.
@@ -2025,6 +2121,39 @@ mod tests {
         assert_eq!(
             body_claimed_indices(body, "BL"),
             [1, 2].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn definition_gap_is_defined_when_the_heading_exists() {
+        let defined = [1u64, 2].into_iter().collect();
+        assert_eq!(definition_gap(&defined, 2), DefinitionGap::Defined);
+    }
+
+    #[test]
+    fn definition_gap_blames_the_entry_when_siblings_are_defined() {
+        // The hybrid failure: the ledger clearly writes definitions, and this one
+        // entry missed. Remedy is one heading, and the author is the right person
+        // to write it — measured on the hamsa audit log, `## A-1`..`## A-14`
+        // present and A-15..A-24 row-only.
+        let defined = [1u64, 2].into_iter().collect();
+        assert_eq!(definition_gap(&defined, 7), DefinitionGap::EntryUndefined);
+    }
+
+    #[test]
+    fn definition_gap_blames_the_ledger_when_nothing_is_defined() {
+        // The by-design failure, and it needs a DIFFERENT message: no entry of
+        // this prefix is defined anywhere, so nothing the author does to one row
+        // fixes it — the ledger's whole entry format has to change. Measured on
+        // the BL-N queue: zero definitions repo-wide, 117 dead citations.
+        //
+        // Distinguishing the two is the point of this function. Collapsing them
+        // would tell a queue maintainer to "add a heading for BL-39" when every
+        // one of the other 38 is equally uncitable.
+        let defined = std::collections::BTreeSet::new();
+        assert_eq!(
+            definition_gap(&defined, 39),
+            DefinitionGap::LedgerDefinesNothing
         );
     }
 

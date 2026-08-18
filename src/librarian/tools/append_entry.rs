@@ -272,6 +272,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             outcome.snapshot_missing.len()
         ));
     }
+    // Separate from snapshot_missing on purpose: that one is satisfied by an index row,
+    // and a row defines no citable token. Both can be present at once, and they ask for
+    // different things — a row, and a heading.
+    if let Some(note) = outcome.undefined_in_body {
+        out["undefined_in_body"] = json!(note);
+    }
     Ok(out)
 }
 
@@ -436,6 +442,49 @@ mod tests {
             "F-4 was already adrift and F-5 was just created; F-1..F-3 are rendered"
         );
         assert!(result["snapshot_hint"].as_str().unwrap().contains("git"));
+    }
+
+    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    ///
+    /// `append_entry` emits `undefined_in_body` from its own call site, so it needs
+    /// its own test — the update_entry tests cover the classification but not this
+    /// wiring. Reuses the fixture above deliberately: the id it just minted is
+    /// reported as needing a row AND as uncitable, which is the pair of facts a
+    /// single `snapshot_missing` could never carry. Telling the author to "add the
+    /// row" is what let ten A-N entries and 117 BL-N citations go dark.
+    #[tokio::test]
+    async fn append_also_says_the_new_id_is_not_yet_citable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID |\n| F-1 |\n| F-2 |\n| F-3 |\n",
+            &["F-1", "F-2", "F-3"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"}}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id"], "F-4");
+        let note = result["undefined_in_body"]
+            .as_str()
+            .expect("a row-only ledger must say the new id is uncitable");
+        assert!(
+            note.contains("defines NO"),
+            "no F-N is defined anywhere, so it is the whole-ledger message: {note}"
+        );
+        assert!(
+            result["snapshot_missing"].is_array(),
+            "and the row half still reports independently: {result}"
+        );
     }
 
     /// The gate. A tracker whose body anchors no ids keeps its rows in params
