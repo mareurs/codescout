@@ -138,7 +138,20 @@ mod tests {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
-            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            // Mid-session, not a bare default: the session opener fires on the
+            // first guide-eligible call of a truly empty ledger and appends a
+            // second content block to `call_content`'s response. Verified safe
+            // for every test in this module: only
+            // `get_guide_large_topic_returns_full_body_inline_not_buffered` goes
+            // through `call_content` (everything else calls `GetGuide::call`
+            // directly, whose body/note never depend on whether the opener's
+            // own topic is already in the ledger), and that is the one test
+            // this change exists for — see its doc comment. Opener delivery
+            // itself is covered by `server::guide_hint_tests`, per
+            // `GuideLedger::mid_session`'s own doc comment.
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                crate::tools::guide_ledger::GuideLedger::mid_session(),
+            )),
             workspace_override: None,
         }
     }
@@ -205,6 +218,12 @@ mod tests {
         // well above the ~10 KB (MAX_INLINE_TOKENS * 4) inline-buffer threshold, so
         // without GetGuide's `force_inline()` override, call_content's overflow
         // branch would divert it to the output buffer and return only a ref handle.
+        //
+        // Uses the shared `ctx()`, which starts mid-session — this test measures
+        // the SHAPE of the primary content block, and the session opener (fires
+        // on the first guide-eligible call of a fresh ledger) appends a second,
+        // unrelated content block. Starting from an empty ledger would make this
+        // test measure the opener instead of the property it's named for.
         let g = GetGuide::new();
         let ctx = ctx().await;
 
@@ -222,8 +241,18 @@ mod tests {
             .call_content(json!({"topic": "librarian"}), &ctx)
             .await
             .unwrap();
-        assert_eq!(content.len(), 1, "guide must be a single inline block");
-        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+
+        // Assert on the primary block's actual shape rather than the block
+        // count. A count is a proxy for "inline, not buffered" — and the proxy
+        // is what broke here: Phase C made `content.len() == 2` a legitimate,
+        // unrelated outcome (session opener + guide body) for a ledger that
+        // starts empty, without the guide itself ever being buffered. The
+        // property this test is named for is about the PRIMARY block's shape,
+        // so check that directly.
+        let primary = content
+            .first()
+            .expect("call_content must return at least one block");
+        let text = primary.as_text().map(|t| t.text.as_str()).unwrap_or("");
         assert!(
             !text.contains("@tool_"),
             "guide must NOT be diverted to a @tool_ buffer handle, got: {}",
@@ -231,7 +260,13 @@ mod tests {
         );
         assert!(
             text.contains("artifact"),
-            "the full librarian guide body must be present inline"
+            "the full librarian guide body must be present inline in the primary block"
+        );
+        assert!(
+            text.len() > 10_000,
+            "primary block must carry the full ~14 KB guide body inline, not a short \
+             buffer-ref envelope — got {} bytes",
+            text.len()
         );
     }
 
