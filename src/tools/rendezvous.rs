@@ -107,13 +107,14 @@ fn gc(dir: &Path) {
         else {
             continue;
         };
-        // Pid 0 addresses the caller's process GROUP under POSIX `kill`, not
-        // process number zero — `process_alive(0)` is unconditionally true, so
-        // without this explicit skip a stray `0.json` would look permanently
-        // alive by construction, never dead-pid-collected. It also can never be
-        // a real published entry (`std::process::id()` is never 0), so skipping
-        // it here costs nothing.
         if pid == 0 {
+            // A stray `0.json` can only be garbage: `std::process::id()` is
+            // never 0, and `process_alive(0)` is unconditionally true on unix
+            // because `kill(0, 0)` addresses the caller's process GROUP, not
+            // process number zero — so the liveness check below would never
+            // collect it. Collect it here explicitly rather than letting it
+            // live forever.
+            let _ = std::fs::remove_file(&path);
             continue;
         }
         if !crate::platform::process_alive(pid) {
@@ -177,6 +178,58 @@ mod tests {
         let r = Rendezvous::publish(None, Some("sess-1"));
         assert!(r.path().is_none());
     }
+    /// M10: both filesystem-failure branches in `publish` (the `create_dir_all`
+    /// early return and the `write_utf8` match arm) were unguarded — flipping
+    /// either to `Some(path)` kept the suite green. `path()` is exactly what
+    /// Task 5's read side consumes, so a bogus `Some` is a lie: the read side
+    /// would stat and parse a file that was never written.
+    ///
+    /// Two independent scenarios, one per branch, both proven with a real
+    /// filesystem operation (not assumed): root and some exotic filesystems
+    /// ignore mode bits, so each scenario checks its own precondition and
+    /// degrades to a no-op rather than asserting on an untriggered condition.
+    #[cfg(unix)]
+    #[test]
+    fn publish_degrades_to_none_on_filesystem_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Branch A (create_dir_all fails): `dir` does not exist yet and its
+        // parent is unwritable, so creating it fails outright.
+        let parent = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let candidate = parent.path().join("servers");
+        if std::fs::create_dir(&candidate).is_ok() {
+            let _ = std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o700));
+            return;
+        }
+        let r1 = Rendezvous::publish(Some(candidate), Some("sess"));
+        assert!(
+            r1.path().is_none(),
+            "a create_dir_all failure must degrade to None, never claim a path \
+             that was never written"
+        );
+        let _ = std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o700));
+
+        // Branch B (write_utf8 fails): `dir` already exists — create_dir_all
+        // succeeds trivially — but the directory itself is unwritable, so
+        // writing the entry file into it fails.
+        let existing = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(existing.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let probe = existing.path().join("probe");
+        if std::fs::write(&probe, "x").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            let _ =
+                std::fs::set_permissions(existing.path(), std::fs::Permissions::from_mode(0o700));
+            return;
+        }
+        let r2 = Rendezvous::publish(Some(existing.path().to_path_buf()), Some("sess"));
+        assert!(
+            r2.path().is_none(),
+            "a write failure inside an existing-but-unwritable directory must \
+             degrade to None, never claim a path that was never written"
+        );
+        let _ = std::fs::set_permissions(existing.path(), std::fs::Permissions::from_mode(0o700));
+    }
 
     #[test]
     fn publish_collects_entries_whose_process_is_gone() {
@@ -193,6 +246,24 @@ mod tests {
         assert!(
             !dir.path().join(format!("{dead}.json")).exists(),
             "a dead pid's entry must be collected"
+        );
+    }
+    #[test]
+    fn publish_collects_a_stray_pid_zero_file() {
+        // `process_alive(0)` is unconditionally true (POSIX `kill(0, 0)`
+        // addresses the caller's process GROUP, not process number zero), so
+        // pid 0 needs its own explicit collection path in `gc` rather than
+        // falling through the liveness check, which would never fire for it.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("0.json"),
+            r#"{"pid":0,"ppid":1,"started_at":"2026-01-01T00:00:00Z","cwd":"/","session":null,"hook_at":null}"#,
+        )
+        .unwrap();
+        Rendezvous::publish(Some(dir.path().to_path_buf()), None);
+        assert!(
+            !dir.path().join("0.json").exists(),
+            "a stray 0.json must be collected, not left immortal"
         );
     }
 
@@ -273,10 +344,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("notes.txt"), "hello").unwrap();
         std::fs::write(dir.path().join("garbage.json"), "{{{{").unwrap();
+        // M4: a numeric-stemmed but non-`.json` file, keyed to a genuinely DEAD
+        // pid. If the `.json` extension filter in `gc` were deleted, `gc` would
+        // parse this stem as a pid, find it dead, and remove the file. Neither
+        // `notes.txt` nor `garbage.json` would catch that mutation: both are
+        // skipped by the stem-parse guard instead, for an unrelated reason
+        // (neither stem is numeric) — this file is what actually exercises the
+        // extension check.
+        let dead = a_dead_pid();
+        std::fs::write(dir.path().join(format!("{dead}.txt")), "not json").unwrap();
+
         Rendezvous::publish(Some(dir.path().to_path_buf()), None);
+
         assert!(
             dir.path().join("notes.txt").exists(),
-            "non-json must be left alone"
+            "non-json, non-numeric-stem file must be left alone"
+        );
+        assert!(
+            dir.path().join("garbage.json").exists(),
+            "a .json file with a non-numeric stem must be left alone"
+        );
+        assert!(
+            dir.path().join(format!("{dead}.txt")).exists(),
+            "a numeric-stemmed but non-.json file must be left alone, even for a dead pid"
         );
     }
 }

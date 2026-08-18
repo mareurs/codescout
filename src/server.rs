@@ -4185,6 +4185,26 @@ mod guide_hint_tests {
         let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
         (dir, server)
     }
+    /// M11: nothing previously pinned that construction publishes the
+    /// rendezvous slot at ALL. The module's own unit tests
+    /// (`src/tools/rendezvous.rs`) call `Rendezvous::publish` directly, so they
+    /// can't see whether `from_parts_with_env` ever actually calls it; every
+    /// other test here builds a server and never inspects `servers_dir`.
+    /// Replacing the real call with `Rendezvous::publish(None, session_key.id())`
+    /// left the whole suite green.
+    #[tokio::test]
+    async fn from_parts_with_env_publishes_the_rendezvous_slot() {
+        let (dir, _server) = make_server().await;
+        let slot = dir
+            .path()
+            .join("servers")
+            .join(format!("{}.json", std::process::id()));
+        assert!(
+            slot.exists(),
+            "CodeScoutServer::from_parts_with_env must publish a rendezvous slot \
+             at construction — Task 5's read side has nothing to read otherwise"
+        );
+    }
 
     fn tool_by_name(server: &CodeScoutServer, name: &str) -> Arc<dyn crate::tools::Tool> {
         server
