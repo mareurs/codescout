@@ -452,6 +452,110 @@ Two rule types. First a self-reinforcing one ("end every reply with `STATUS: ack
 
 **Outcome (2026-07-07, same day): CEILING — the no-ship branch fired.** Arm A (fable, no snippet, runs:10): **10/10 surgical** — every run made exactly the TOTAL-line fix and left all four planted temptations untouched (scenario PASS under `pass_threshold: 1.0` = every run passed; the check also requires the *correct* fix, so all 10 fixed the bug). 270,599 ms, $0.36. Arm B skipped per protocol — running it would measure a snippet against a failure that does not occur. **T-2 closed not-indicated**; the imported FND-8 "unrequested tidying" default does not manifest locally on surgical-fix tasks, consistent with the A-4–A-9 pattern (single-turn adherence at ceiling; imported fixes keep treating absent failures). Limits: single-turn, small-file, one stimulus — a field sighting of *shipped* unrequested tidying re-opens this with that transcript as the new stimulus. Suite kept for reuse: `prompt-engineering/scenarios/fable-tidying/` (fixture + mutation-tested checker + both arms).
 
+## A-15 — same-repo subagents never learn project memories exist: `memory` / `semantic_search` / `get_guide` 0 of 10
+
+**Gap, measured — and the reported symptom was refuted.** Same-repo code-exploring subagents get
+CODESCOUT RULES + CLAUDE.md but never learn memories exist (the memory-list banner is
+SessionStart-only, main agent only) and never see `server_instructions`' search quickref
+(claude-code#29655). Field data, session `fc0e9019`, n=10: `memory()` 0/10, `semantic_search` 0/10,
+`get_guide` 0/10, denied native-`Read` attempts in 6/10. But *"grep-heavy, symbols-light"* did
+**not** hold — 8 of 10 were symbols-first (21-40 symbols against 8-18 greps), and the two grep-heavy
+agents had grep-shaped tasks. Exploration-*quality* deficit unproven: the audits still found real
+bugs. Full row in params.
+
+## A-16 — recon and protocol arms vs control: KNOWN-marking held only where Phase 0 actually ran, "fewer calls" FAILED, and the control found the batch's top bug
+
+**MIXED.** C2 marked a filed bug KNOWN by catalog id; C1 skipped the memory+ledger steps and
+re-reported a filed bug as new, as did control A1 and B2. Precision favoured the treatments — the
+control produced the only clear false positive, B and C had none. *"C uses fewer calls"* failed
+outright (C 126 vs A 114, B 109). Arm signatures were real (recon → doc-vs-code findings and
+live-run verification; protocol → ledger-aware, guide-anchored contract findings) but the control
+stayed fully competitive on raw discovery, finding the batch's top bug. Also resolves A-15's n=1
+smoke: HELD. Control contamination noted — A3 spontaneously called memory + get_guide, because
+CLAUDE.md reaches subagents.
+
+## A-17 — deploy the A-16 winner to the real delivery surface and confirm it reaches subagents
+
+**Not run.** Gap only: take A-16's winning arm to the actual delivery surface and verify it arrives
+for subagents rather than only for the main agent — which is A-15's mechanism restated as a
+deployment question.
+
+## A-18 — the tracker-hygiene supersession guard is NOT warranted: sonnet already discriminated 20/20
+
+**Held — NO-SHIP**, and the seventh no-ship of nine. Base arm (skill @1.15.0, no guard), sonnet,
+n=10×2: superseded scenario 10/10 WITHHOLD, clean mutation twin 10/10 PROMOTE — 20/20 correct
+discrimination, so the D10 step-1 guard adds nothing. Residue stated: sonnet-only, and an isolated
+decision is easier than the in-flow one, which makes a base-arm ceiling weak evidence on its own —
+corroborated here by the live trace. Scenarios kept as regression guards
+(`prompt-engineering/scenarios/skills/tracker-hygiene-d10-{superseded,clean-twin}`).
+
+## A-19 — resolved by routing rather than by eval: the seam-classes moved to on-demand entries, 0 of 3 enriched hunks kept resident
+
+**Resolved architecturally; the eval path was mooted rather than run.** The two seam-classes were
+promoted to ledger entries R-41/R-42 — their designed on-demand home — and the SKILL.md Phase-1
+bullets collapsed to a diagnostic plus a pointer. The C14 hard-SKIP was reverted to soft and then
+dropped. Net: 0 of 3 enriched hunks kept as resident prose, consistent with the H12 no-ship prior.
+
+## A-20 — the verify-before-assert paragraph works (93.3% vs 0% bare), but P1/P3/P4 were refuted and P5 is untestable at ceiling
+
+**P1/P3/P4 REFUTED; P2 inside noise; P5 untestable** — the instrument class saturated at 100% in
+every arm because the traps name the artifact. The a2 prose dominated: plausibility verified 93.3%
+versus 0% bare, overall correct 100%. The `t2` trap matters most because its false premise is a
+**live sentence in codescout's real `iron-laws-detail` guide**: bare 0/5, a2 5/5. Mechanism is
+transcript-bound — a4 tagged `VERIFIED — GUIDE.md:1-9 (read this session)`, so a poisoned source
+satisfies the contract's letter. Stacking diluted rather than added. Active-ingredient question
+handed to A-21.
+
+## A-21 — the active ingredient is an unconditional imperative that binds at every claim: b2 alone hit 100%, beating the full paragraph
+
+**Run same day, n=15/arm; 1 of 6 predictions held — and the one that held inverted a prediction.**
+b2, imperative-only, scored **100.0%**, the best arm in the grid, exceeding the full a2 paragraph at
+93.3%. Revised mechanism fitting all 11 arms: the active ingredient is an **unconditional imperative
+that binds at every claim** (*do not hypothesise — ALWAYS VERIFY*), because it attacks
+suspicion-scarcity by never waiting for doubt. Conditional guards gate on the doubt a planted belief
+suppresses; procedural detail only applies once checking has begun; labelling contracts produce
+honest tags rather than checks. **CLOSED 2026-08-16, shipped and re-measured at n=35 as its own arm
+(100% verified, 100% correct)** — `iron-laws-detail` `43fac6c8`, bootstrap guide `5917e37e`, and the
+Conclude Last antidote applied to all three machine-local CLAUDE.md profiles.
+
+## A-22 — P1 held on a cold-session probe against the shipped binary; the first deletion arm realised only 41% of its byte estimate
+
+**P1 HELD, verified live.** A cold-session probe pointed the release binary at a temp root so no
+session ledger existed, then issued one `tools/call` for `tree` — the response carried the
+auto-injected bootstrap block, where the pre-`26ce904b` binary returns none. The method note is the
+keeper: the probe **had** to leave the session to be valid, because every clearing path runs through
+the `workspace` tool whose own `call_content` consumes the opener, so no in-session experiment could
+discriminate the two builds. **P3 SHARPENED** by the D1 deletion arm: containment checked
+mechanically rather than by eye, net 488 bytes against a ~1190-byte estimate — a **41% realisation
+rate** — which puts true extraction nearer 2.5 KB than 6 KB and nowhere near a 30 KB target.
+**P2 remains OPEN**: the base arm for the always-on core has not run.
+
+## A-23 — the R-N ledger is seven laws restated: both predictions held, and the graph "hairball" refuted the method claim and then became the evidence
+
+**Both registered predictions held** — law A landed at 35 of 99 instances (35.4%, inside the 30-40%
+band) and the taxonomy needed exactly one addition, giving seven laws against a predicted 5-7.
+**The unregistered method claim was refuted twice, and that is the finding:** 80 of 91 R-N mentions
+fall in one connected component. Not a method failure — everything is kin to everything *because*
+these are seven laws restated with different nouns, so the hairball is the evidence for distillation
+and a clean graph would have argued against it. Strongest single finding: the C-chain runs
+R-3 → R-73b → R-77 → R-79 → R-87 and the entries themselves label those "third", "fourth",
+"fifth" recurrence — the ledger recording its own failures to prevent, five deep, on one law.
+Two measurement corrections were caught mid-pass before acting on either.
+
+## A-24 — Iron-Law refusals teach the call, not the predicate: 96% immediate compliance but 47-71% per-session repeat, and the guide holding the predicate cannot arrive on an Err
+
+**Gap, and two independent halves measured in one pass.** Iron-Law violations are 62% of all errors
+(557/894), and the refusal message is the only surface reaching an agent at the moment of the
+mistake — it names WHAT was blocked and never WHY the predicate fired. The two figures separate the
+halves: immediate compliance 96% and immediate repeat 3% (this guard is healthy), against
+**per-session repeat of 47% for `il3_pipe` and 71% for `il1`** — so agents obey every time and
+cannot predict the next one. `iron-laws-detail`, which holds the predicate, was fetched **once in 30
+days** against those 557 violations, and could not have arrived anyway: guide injection sits after
+`self.call(..)?` in `call_content`, so an `Err` never reaches it. Second half: the gate was also
+over-firing — 47 of 94 `git` refusals carried an explicit output limiter, and 43 of 111
+`shell_on_source` refusals were `wc` (a count, not content) or a path outside the project where the
+suggested `symbols` remedy cannot serve at all.
+
 ## A-25 — IL1's overlap condition: the deficit is real (10/10) and stating the condition does not fix it — REFUTED, reverted behind an inverted guard
 
 **Symptom:** local and large. 416 refusals across 89 sessions, 4.7 per session — the largest single error class in the recorded corpus, with 14% immediately followed by another refusal of the same family. Unlike A-4–A-9 and A-14, this audit did **not** open on an imported fix or a suspected ceiling: the failure was measured in the field first, and the eval's job was to test whether a wording change repairs it.
