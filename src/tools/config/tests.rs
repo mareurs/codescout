@@ -653,6 +653,87 @@ async fn activate_hint_shows_switched_when_away_from_home() {
     );
 }
 
+/// hamsa A-29 — the gate parses, and it parses CLOSED by default.
+///
+/// Pure, by convention: `docs/conventions/test-env-isolation.md` retired
+/// `EnvGuard` + `#[serial]` crate-wide, so the env read stays at the edge and only
+/// the decision is tested.
+#[test]
+fn pin_notice_gate_is_closed_unless_explicitly_opened() {
+    for opener in ["1", "true"] {
+        assert!(
+            super::pin_notice_enabled_from(Some(opener)),
+            "{opener:?} must open the gate"
+        );
+    }
+    for closed in [
+        None,
+        Some(""),
+        Some("0"),
+        Some("false"),
+        Some("yes"),
+        Some("TRUE"),
+    ] {
+        assert!(
+            !super::pin_notice_enabled_from(closed),
+            "{closed:?} must leave the gate closed — anything but an explicit opener is off, \
+             so an unvalidated intervention cannot reach production by typo"
+        );
+    }
+}
+
+/// hamsa A-29 — the notice CONTRASTS; it does not merely mention.
+///
+/// A-26 measured that naming a tool in a routing line does not displace a strong
+/// competing prior — what moved its number was explicitly contrasting the two and
+/// naming the wrong one. The prior here is not hypothetical: this text is appended to
+/// a sentence telling the agent to activate back when done, which normalises
+/// activate-then-restore as *the* pattern. So each of these three parts is
+/// load-bearing, and a rewrite that drops one is a different intervention.
+#[test]
+fn pin_notice_contrasts_the_competing_prior_rather_than_naming_the_pin() {
+    let text = super::workspace_pin_contrast("/home/me/work/other-repo");
+
+    assert!(
+        text.contains("server-global"),
+        "must state the SCOPE — an agent that does not know activation is process-wide \
+         cannot infer it just clobbered a peer. Got: {text:?}"
+    );
+    assert!(
+        text.contains("do not activate"),
+        "must name the WRONG action, not just the right one (A-26). Got: {text:?}"
+    );
+    assert!(
+        text.contains("workspace=\"/home/me/work/other-repo\""),
+        "must give the pin already filled in with the path the agent just used, so the \
+         remedy is copyable rather than derivable. Got: {text:?}"
+    );
+}
+
+/// hamsa A-29 — DEFAULT OFF is the shipped behaviour, and stays that way until an arm
+/// says otherwise.
+///
+/// This is the same discipline as the inverted guards on A-25/A-26/A-27: an
+/// intervention that has not been measured must not reach production by drift. Arms A
+/// and B of A-29 are *today's* behaviour, so if this test ever fails the arms stopped
+/// measuring what they claim to.
+#[test]
+fn switch_away_hint_carries_no_pin_notice_while_the_gate_is_shut() {
+    assert!(
+        !super::pin_notice_enabled_from(None),
+        "with no env set the gate is shut"
+    );
+    // The composed hint is only reachable through an activation; what is pinned here is
+    // the contract the composition relies on — the suffix is appended IFF the gate is
+    // open, so a shut gate is byte-identical to the pre-A-29 hint.
+    let suffix = super::workspace_pin_contrast("/tmp/x");
+    assert!(
+        !suffix.is_empty(),
+        "the suffix must be non-empty, or 'gate open' and 'gate shut' would be \
+         indistinguishable and arm C would silently equal arm B"
+    );
+}
+
 #[tokio::test]
 async fn activate_hint_shows_returned_when_back_home() {
     let dir1 = tempdir().unwrap();

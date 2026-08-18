@@ -548,6 +548,51 @@ enum HintScenario {
     SwitchAway,
 }
 
+/// Opt-in: append the per-call `workspace=` pin to the switch-away hint.
+///
+/// Gated because it is the intervention under measurement in hamsa A-29, and the arms
+/// have to differ in server behaviour without differing in binary — an env switch keeps
+/// the comparison controlled where a rebuild between arms would not.
+/// Default OFF preserves today's behaviour, which is arms A/B.
+fn workspace_pin_notice_enabled() -> bool {
+    pin_notice_enabled_from(
+        std::env::var("CODESCOUT_WORKSPACE_PIN_NOTICE")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// The pure half of the gate, so tests never touch real process env.
+///
+/// `docs/conventions/test-env-isolation.md` retired `EnvGuard` + `#[serial]` crate-wide:
+/// it cannot coordinate with non-serial tests elsewhere that read the same var. Reading
+/// env at the edge and testing the parse in isolation is the pattern that replaced it.
+fn pin_notice_enabled_from(raw: Option<&str>) -> bool {
+    matches!(raw, Some("1") | Some("true"))
+}
+
+/// The contrast appended to a switch-away hint when the notice is enabled.
+///
+/// **Contrastive by design, not descriptive.** hamsa A-26 measured that NAMING a tool in
+/// a routing line does not displace a strong competing prior; what moved the number was
+/// explicitly contrasting the two and naming the wrong one. And the prior here is not
+/// hypothetical — it is the sentence this text is appended to, which tells the agent to
+/// activate back when done and so normalises activate-then-restore as *the* pattern.
+///
+/// The scope claim is the load-bearing half: `Agent::activate` mutates a single shared
+/// project (`activate_replaces_previous_project`), so an agent that does not know
+/// activation is server-global has no way to infer that it just clobbered a peer.
+///
+/// hamsa A-29. See `docs/trackers/prompt-hamsa-audit-log.md`.
+fn workspace_pin_contrast(project_root: &str) -> String {
+    format!(
+        " Note: activating is server-global — it replaced the active project for every \
+         session on this server, not just yours. If you are one of several agents working \
+         concurrently, do not activate: pass workspace=\"{project_root}\" on each call \
+         instead, which scopes only your own calls."
+    )
+}
+
 /// Best-effort Qdrant probe: does this project have any chunks indexed?
 ///
 /// Returns `false` when the retrieval stack is offline or the probe fails.
@@ -768,20 +813,28 @@ async fn build_activation_response(
                 .as_ref()
                 .map(|p| to_forward_slash(p))
                 .unwrap_or_default();
-            format!(
+            let mut h = format!(
                 "Browsing {} (read-only). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
                 project_name, project_root_str, home_str,
-            )
+            );
+            if workspace_pin_notice_enabled() {
+                h.push_str(&workspace_pin_contrast(&project_root_str));
+            }
+            h
         }
         HintScenario::SwitchAway => {
             let home_str = home_root
                 .as_ref()
                 .map(|p| to_forward_slash(p))
                 .unwrap_or_default();
-            format!(
+            let mut h = format!(
                 "Switched project (read-write). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
                 project_root_str, home_str,
-            )
+            );
+            if workspace_pin_notice_enabled() {
+                h.push_str(&workspace_pin_contrast(&project_root_str));
+            }
+            h
         }
     };
 
