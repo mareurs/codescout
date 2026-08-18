@@ -161,9 +161,14 @@ impl GuideLedger {
     /// strictly weaker `!emitted.contains(SESSION_OPENING_GUIDE)` check in
     /// `Tool::call_content` (`src/tools/core/types.rs`), so a non-empty
     /// ledger that merely lacks the bootstrap topic — e.g. after a surgical
-    /// `re_arm` — also fires it. `is_empty` is no longer that condition; it
-    /// is used where "nothing surfaced yet" itself is the question (e.g. a
-    /// fresh session).
+    /// `re_arm` — also fires it. `is_empty` is no longer that condition.
+    ///
+    /// Its one production caller is `CodeScoutServer::from_parts_with_env`,
+    /// immediately after the ledger is loaded at construction — every other
+    /// reference is a test. That call site asks a narrower question than
+    /// "is this session fresh": whether a prior server already served this
+    /// conversation at all, which is what decides whether the
+    /// project-scoped bootstrap topic needs re-arming on a reconnect.
     pub fn is_empty(&self) -> bool {
         self.emitted.is_empty()
     }
