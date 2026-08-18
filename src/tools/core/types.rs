@@ -700,11 +700,21 @@ pub trait Tool: Send + Sync {
                     "anonymous guide ledger idle TTL re-armed {rearmed_count} topic(s)"
                 );
             }
-            if emitted.is_empty() {
-                // Session opener. An empty ledger means this is the session's
-                // first guide-eligible call — or the first since an `activate`
-                // or post-compact re-arm cleared it — so the orientation guide
-                // goes out now, whatever tool was called.
+            if !emitted.contains(crate::prompts::SESSION_OPENING_GUIDE) {
+                // Session opener. Fires whenever the bootstrap topic
+                // specifically is absent, not merely whenever the whole
+                // ledger is empty — those diverge the moment something
+                // re-arms just that one topic. `GuideLedger::re_arm` (used by
+                // a project-switch-scoped re-arm) can remove
+                // `SESSION_OPENING_GUIDE` from a set that still holds nine
+                // other topics; the set stays non-empty, so an `is_empty()`
+                // trigger would never observe that re-arm and the opener
+                // would silently stop firing for the rest of the session.
+                // Checking for the topic directly makes a surgical re-arm
+                // observable. This also retires a latent bug: an explicit
+                // `get_guide(...)` as a session's first call used to make the
+                // ledger non-empty and suppress the opener for the whole
+                // session — `contains` doesn't care what else is in the set.
                 //
                 // Before 2026-08-16 this fired only for `workspace`, so a
                 // session opening with symbols/grep/read_file never received

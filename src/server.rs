@@ -4323,6 +4323,21 @@ mod guide_hint_tests {
             .join("\n")
     }
 
+    /// Scan every content block for the auto-injected guide-body marker for
+    /// `topic`. `extract_hint` parses block 0 as JSON and returns `None`
+    /// whenever the tool's primary block is text-form rather than JSON — so
+    /// it cannot see the opener fire for those tools at all. This reads the
+    /// guide-body block `call_content` appends instead: that marker is
+    /// pushed regardless of the tool's output form, so it is the reliable
+    /// probe for "did the opener actually fire."
+    fn content_carries_guide_body(content: &[rmcp::model::Content], topic: &str) -> bool {
+        let marker = format!("<!-- auto-injected get_guide('{topic}')");
+        content
+            .iter()
+            .filter_map(|c| c.as_text())
+            .any(|t| t.text.contains(&marker))
+    }
+
     #[tokio::test]
     async fn a_refusal_carries_the_gate_condition_once_per_family() {
         let (_dir, server) = make_server().await;
@@ -4572,6 +4587,87 @@ mod guide_hint_tests {
                 .contains("librarian"),
             "the tool's own guide must still arrive, one call later"
         );
+    }
+
+    /// The §5 predicate. A ledger holding other topics but NOT the bootstrap
+    /// must still fire the opener. Under the old `is_empty()` trigger this is
+    /// false — which is why a surgical re-arm would inject nothing.
+    #[tokio::test]
+    async fn opener_fires_when_bootstrap_absent_from_a_nonempty_set() {
+        let (dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+
+        // Seed a non-empty ledger that deliberately lacks the bootstrap topic.
+        {
+            let mut led = server.guide_hints_emitted.lock();
+            led.insert("librarian".to_string());
+            led.insert("progressive-disclosure".to_string());
+            assert!(!led.is_empty());
+            assert!(!led.contains(crate::prompts::SESSION_OPENING_GUIDE));
+        }
+
+        let tool = tool_by_name(&server, "run_command");
+        let result = tool
+            .call_content(json!({"command": "echo hi"}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            content_carries_guide_body(&result, crate::prompts::SESSION_OPENING_GUIDE),
+            "a ledger without the bootstrap topic must re-open the session, \
+             even though it is not empty"
+        );
+        let _ = dir;
+    }
+
+    /// Retires a latent bug: an explicit get_guide as the session's first call
+    /// made the set non-empty and suppressed the opener for the whole session.
+    #[tokio::test]
+    async fn explicit_get_guide_first_does_not_suppress_the_opener() {
+        // Retires a latent bug: `GetGuide::call` inserts the requested topic
+        // into the ledger BEFORE `call_content`'s opener check runs (it runs
+        // via `self.call()`, which executes first in `call_content`). Under
+        // the old `is_empty()` trigger that insert alone made the ledger
+        // non-empty, so the opener never fired on this call — and, since
+        // `is_empty()` never turns true again on its own, never fired for
+        // the REST OF THE SESSION either.
+        //
+        // Under the new `!contains(bootstrap)` predicate the ledger is
+        // non-empty (it holds "librarian") but still lacks the bootstrap
+        // topic specifically, so the SAME call_content invocation that just
+        // inserted "librarian" also fires the opener — deterministically,
+        // because the ledger check runs after `self.call()` returns within
+        // one invocation. So the guide body lands on THIS first call's own
+        // response, not a later one. Verified empirically: asserting on the
+        // second (`run_command`) call's content fails even with the fix
+        // applied, because the opener already fired and deduped by then.
+        let (dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+
+        let guide = tool_by_name(&server, "get_guide");
+        let first = guide
+            .call_content(json!({"topic": "librarian"}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            content_carries_guide_body(&first, crate::prompts::SESSION_OPENING_GUIDE),
+            "an explicit get_guide must not consume the session opener — the \
+             bootstrap guide must still ride out, on this very call"
+        );
+
+        // Corollary: having fired once, it must not re-fire on the next call
+        // (same dedup as every other topic).
+        let tool = tool_by_name(&server, "run_command");
+        let second = tool
+            .call_content(json!({"command": "echo hi"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            !content_carries_guide_body(&second, crate::prompts::SESSION_OPENING_GUIDE),
+            "the opener must not re-fire once already delivered"
+        );
+        let _ = dir;
     }
 
     /// Regression for docs/issues/archive/2026-06-01-librarian-adapter-stale-is-write.md:
