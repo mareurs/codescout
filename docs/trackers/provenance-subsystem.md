@@ -919,6 +919,11 @@ typo'd filter field is detectable (considered 26, matched 0).
 
 Narrative for entries that need more than a table row goes below, newest first.
 
+**Separately from narrative, an entry needs a `PV-N — <title>` heading to be citable at all** —
+`link_scan` derives a definition from that shape and from nothing else, so a params row defines
+no token. § *Defining sections for cited entries* below carries a compact heading for every
+`PV-N` another file references; add one there when you cite a new entry from elsewhere.
+
 ### PV-2 — M1's verdict rests on a biased sample
 
 The compaction check was the pre-registered invalidator and it came back
@@ -1010,13 +1015,101 @@ not the thing the programme set out to find.
 
 ---
 
+
+### Defining sections for cited entries
+
+Compact by design — these are **not** narrative in the sense § *Conventions* means, and adding one
+is not a claim that a table row was insufficient. They exist because a heading is the **only**
+thing that makes a `PV-N` citable: `link_scan` binds a token to `## <ID> — <title>` and to nothing
+else, so a params row — however complete, and however well the `render_template` projects it into
+`librarian(context)` — defines nothing.
+
+**Scoped to the entries other files actually cite**, measured 2026-08-18: 22 of the 64 undefined
+`PV-N` had live external citations (`provenance-probe-session-log.md`, `reconnaissance-patterns.md`,
+`tracker-hygiene-log.md`) and every one of them resolved to nothing. The other 42 are deliberately
+left — mass-promotion would contradict this tracker's own "narrative only when a row is
+insufficient" rule, and it is **safe** to leave them precisely because prefix `PV` is now defined:
+`link_scan` reports a citation of an undefined `PV-N` as *dangling*, so future breakage is visible
+rather than silent. That guarantee is what does not hold for a ledger defining nothing at all — see
+`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+
+Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e0060ed9b8", entry_filter={"id": {"eq": "PV-53"}})`.
+
+#### PV-8 — large-context regime reconstructed from Langfuse
+`gap` · **settled** (DONE) · resolves PV-2 · evidence `round2_langfuse.json`
+
+#### PV-25 — Metric granularity is a free parameter, so pre-register the unit with the threshold
+`hazard` · **settled**
+
+#### PV-26 — Closed as a class: measured on the corrected target and found to be opportunity, not signal
+`task` · **settled**
+
+#### PV-27 — A provenance sidecar sits inside its own measurement domain permanently and by design
+`hazard` · **open**
+
+#### PV-29 — Killed: the buffering hook's trigger population is empty once browser data is excluded
+`task` · **killed**
+
+#### PV-30 — There is a FOURTH state, `invented`, and the unit definition excludes it by construction
+`finding` · **settled**
+
+#### PV-31 — A count-threshold target inflates any count-correlated trigger — confirmed, not hypothetical
+`hazard` · **settled**
+
+#### PV-38 — The atomic residual carries a convergent-naming signature, rarer in-repo than in English
+`finding` · **settled**
+
+#### PV-44 — A classifier's DEFAULT return value masquerading as a category
+`hazard` · **settled** · the fourth eligibility failure found in this programme
+
+#### PV-53 — THE CHECK: what would be invisible to this metric even if it were happening constantly?
+`hazard` · **settled**
+
+#### PV-55 — Pre-registration needs three lines: unit per metric, what it cannot see, shared domain
+`hazard` · **open**
+
+#### PV-56 — A hypothesis is a bet, a verdict line is a report, and only one of them is self-settling
+`hazard` · **settled**
+
+#### PV-58 — THE DOMAIN TEST: can the things compared even have the same mix, given what they are?
+`hazard` · **settled**
+
+#### PV-60 — Closed: retrieval exposure confirmed, remediated and verified
+`finding` · **settled**
+
+#### PV-61 — Base64 image data was counted as text — 60% of the sample, ~10% of the population
+`finding` · **settled**
+
+#### PV-62 — Stratifying by size selected for the artifact that creates size
+`hazard` · **settled** · the axis was conversation depth, not session size
+
+#### PV-63 — The programme now yields ZERO buildable interventions
+`decision` · **settled**
+
+#### PV-64 — codescout's own output discipline is confirmed healthy — by absence
+`finding` · **settled**
+
+#### PV-65 — The Langfuse arm sampled 64 requests from 63,574, and requests are not independent
+`hazard` · **settled**
+
+#### PV-66 — Full-population re-run: what actually changed, and what held
+`finding` · **settled**
+
+#### PV-67 — M1 is undefined for 70% of the corpus, and systematically for the small sessions
+`hazard` · **open**
+
+#### PV-68 — An inline provenance Iron Law does not fit the server_instructions slice cap
+`hazard` · **open**
 ## Conventions for this tracker
 
 - **ID prefix:** `PV-N`, monotonic, never reused. Registered in
   [`docs/TAXONOMY.md`](../TAXONOMY.md).
 - **Append via** `artifact(action="append_entry", id="<this>", id_prefix="PV",
   entry_collection="items", entry={...})` — assigns the next ID atomically.
-  Add narrative below only when a table row is insufficient.
+  Add narrative below only when a table row is insufficient. **Add a compact defining heading
+  (§ *Defining sections for cited entries*) as soon as anything cites the entry** — that is a
+  citability requirement, not a narrative one: a params row defines no `PV-N` token, so a cited
+  entry with no heading resolves to nothing. Confirm with `librarian(action="doctor")`.
 - **Query via** `artifact(action="get", id="<this>", entry_filter={"type":
   {"eq":"decision"}})` — the entry collection is filterable.
 - **`type` vocabulary:** `finding` (settled measurement result) · `gap`

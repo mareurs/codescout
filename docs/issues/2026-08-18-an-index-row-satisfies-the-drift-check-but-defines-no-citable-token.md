@@ -185,6 +185,25 @@ So `ledger_defines_nothing` is the more dangerous of the two states, not the mil
 path is silent about it, the citation resolver is silent about it, and until 2026-08-18 nothing in
 the repo could see it.
 
+**The correction was then tested against a prediction, and held.** The three backfills performed
+the *same* operation — add defining headings — on ledgers sitting on different sides of the gate,
+and the metric behaved differently each time, as the mechanism requires:
+
+| ledger | prefix defined beforehand? | `dangling` | `edges_added` |
+|---|---|---|---|
+| `windows-platform-support` (4a) | no | 621 → **621** (no movement) | **22** |
+| `open-issue-work-queue` (4b) | no | 621 → **622** (+1, exposing hidden breakage) | **33** |
+| `provenance-subsystem` (4c) | **yes** (PV-2/4/5/7) | 622 → **574** (−48) | 4 |
+
+The PV case was predicted before it was run and is the sharpest evidence: prefix `PV` was already
+known, so its 22 broken citations *were* being counted, and fixing them moved the number by 48
+citation instances — while `edges_added` barely moved, because the three citing files already had
+edges via the entries that were defined.
+
+So the two metrics are complementary rather than redundant, and which one shows your progress
+depends on which check you are fixing: **`edges_added` for `ledger_defines_nothing`, `dangling` for
+`entry_without_definition`.** Use `doctor` for both.
+
 ### The population, in one tracker
 
 `docs/trackers/prompt-hamsa-audit-log.md` has body sections `## A-1` … `## A-14`, then
