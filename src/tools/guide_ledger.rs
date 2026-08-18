@@ -20,8 +20,9 @@ use std::path::{Path, PathBuf};
 
 /// Prune a ledger once it has been idle this long. Measured 2026-08-18 across
 /// 258 sessions: 0.0% of live sessions would be pruned at 30 days (observed
-/// maxima: 28.9-day lifespan, 27.0-day idle gap), so 35 gives headroom for ~60
-/// bytes per file. See the spec's §8.
+/// maxima: 28.9-day lifespan, 27.0-day idle gap), so 35 gives six extra days
+/// of headroom, at a cost of ~60 bytes per file. See
+/// `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § 8.
 const GC_MAX_IDLE_DAYS: i64 = 35;
 
 /// Topics emitted this session, each stamped with when it was delivered,
@@ -712,8 +713,9 @@ mod tests {
 
         // A stray non-ledger file with an ancient mtime must survive: gc's
         // directory walk is scoped to files it recognizes as ledgers (`.json`),
-        // never to "anything old in this directory". After Task 6 this
-        // directory lives under the user's $XDG_STATE_HOME.
+        // never to "anything old in this directory". This directory may be
+        // relocated to a user-level state dir in future, which is why the
+        // filter is by extension, not by age.
         let stray = hints.join("notes.txt");
         std::fs::write(&stray, "not a ledger").unwrap();
         let ancient_mtime =
@@ -726,6 +728,87 @@ mod tests {
         assert!(
             stray.exists(),
             "gc must never delete a file without a .json extension"
+        );
+    }
+
+    #[test]
+    fn gc_keeps_an_unparseable_json_file_with_a_fresh_mtime() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        // Garbage content: read_entries returns an empty map, so `newest` is
+        // None and gc must fall back to file_mtime. A fresh mtime means the
+        // file is not idle yet — this pins the fallback's "keep" direction.
+        let garbage = hints.join("garbage.json");
+        std::fs::write(&garbage, "not valid json").unwrap();
+
+        let _ = GuideLedger::load("some-other-session", Some(hints.clone()));
+
+        assert!(
+            garbage.exists(),
+            "an unparseable .json file with a fresh mtime must survive"
+        );
+    }
+
+    #[test]
+    fn gc_prunes_an_unparseable_json_file_with_an_ancient_mtime() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        // Same garbage content, but an ancient mtime: the mtime fallback must
+        // still catch a genuinely idle file. This is the branch
+        // `newest.or_else(|| file_mtime(&path))` exists for, and it pins the
+        // fallback's "prune" direction — without it, an unparseable ledger
+        // would never be collected (a leak).
+        let garbage = hints.join("garbage.json");
+        std::fs::write(&garbage, "not valid json").unwrap();
+        let ancient_mtime =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 24 * 60 * 60);
+        filetime::set_file_mtime(
+            &garbage,
+            filetime::FileTime::from_system_time(ancient_mtime),
+        )
+        .unwrap();
+
+        let _ = GuideLedger::load("some-other-session", Some(hints.clone()));
+
+        assert!(
+            !garbage.exists(),
+            "an unparseable .json file with an ancient mtime must be pruned via the mtime fallback"
+        );
+    }
+
+    #[test]
+    fn gc_keeps_a_json_file_whose_mtime_predates_the_unix_epoch() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        std::fs::create_dir_all(&hints).unwrap();
+
+        // A pre-epoch mtime makes `modified.duration_since(UNIX_EPOCH)` return
+        // Err, so `file_mtime` yields None too — the fail-safe path where
+        // NEITHER a stamp NOR a usable mtime exists. `idle_since` must then be
+        // None, and the file must survive: a mutant that substitutes any
+        // "assume idle" default here (e.g. `.or(Some(cutoff))`) would delete a
+        // file gc has no evidence about, which is the inversion the design
+        // exists to prevent.
+        //
+        // Portability: FileTime::from_unix_time(-100, 0) sets a mtime just
+        // before 1970. On Windows this remains a valid, in-range FILETIME
+        // (which natively supports dates back to 1601), and std's SystemTime
+        // on every supported platform can represent pre-epoch instants, so
+        // `duration_since(UNIX_EPOCH)` returning Err is expected everywhere,
+        // not a Unix-only artifact. Not #[cfg(unix)]-gated on that basis.
+        let garbage = hints.join("garbage.json");
+        std::fs::write(&garbage, "not valid json").unwrap();
+        filetime::set_file_mtime(&garbage, filetime::FileTime::from_unix_time(-100, 0)).unwrap();
+
+        let _ = GuideLedger::load("some-other-session", Some(hints.clone()));
+
+        assert!(
+            garbage.exists(),
+            "a file with neither a parseable stamp nor a usable mtime must never be pruned"
         );
     }
 }
