@@ -86,6 +86,35 @@ pub fn write_utf8(path: &Path, content: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", path.display(), e))
 }
 
+/// Per-user directory for **persistent** state.
+///
+/// Distinct from [`crate::socket_discovery::per_user_runtime_dir`], which serves
+/// sockets and lock files that are expected to die with the boot. This one holds
+/// data that must outlive a reboot.
+///
+/// `$XDG_STATE_HOME` when set to an absolute path, else `$HOME/.local/state`.
+/// `None` when neither is available — callers degrade rather than guess.
+pub fn per_user_state_dir() -> Option<PathBuf> {
+    state_dir_from(
+        std::env::var_os("XDG_STATE_HOME"),
+        crate::platform::home_dir(),
+    )
+}
+
+/// Pure core of [`per_user_state_dir`], split out so tests never mutate the
+/// process environment — concurrent `set_var` is UB and this suite is not
+/// serialized (docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md).
+fn state_dir_from(xdg: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(x) = xdg {
+        let p = PathBuf::from(x);
+        // The XDG basedir spec: a relative value must be treated as unset.
+        if p.is_absolute() {
+            return Some(p);
+        }
+    }
+    Some(home?.join(".local").join("state"))
+}
+
 /// Normalize a path to its forward-slash string form.
 ///
 /// Always replaces `\` with `/`, on every platform — the catalog stores
@@ -400,5 +429,36 @@ mod tests {
 
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o755, "exec bit must survive atomic_write");
+    }
+
+    #[test]
+    fn state_dir_prefers_an_absolute_xdg_state_home() {
+        let got = state_dir_from(
+            Some(std::ffi::OsString::from("/xdg/state")),
+            Some(PathBuf::from("/home/u")),
+        );
+        assert_eq!(got, Some(PathBuf::from("/xdg/state")));
+    }
+
+    #[test]
+    fn state_dir_ignores_a_relative_xdg_state_home() {
+        // The XDG basedir spec requires relative paths to be treated as unset.
+        let got = state_dir_from(
+            Some(std::ffi::OsString::from("relative/state")),
+            Some(PathBuf::from("/home/u")),
+        );
+        assert_eq!(got, Some(PathBuf::from("/home/u/.local/state")));
+    }
+
+    #[test]
+    fn state_dir_falls_back_to_home_local_state() {
+        let got = state_dir_from(None, Some(PathBuf::from("/home/u")));
+        assert_eq!(got, Some(PathBuf::from("/home/u/.local/state")));
+    }
+
+    #[test]
+    fn state_dir_is_none_when_neither_is_available() {
+        // The caller degrades to an in-memory ledger rather than guessing a path.
+        assert_eq!(state_dir_from(None, None), None);
     }
 }
