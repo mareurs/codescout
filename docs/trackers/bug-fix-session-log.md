@@ -158,6 +158,8 @@ time_scope: open-ended
 | W-46 | 2026-08-18 | high | Before rehoming state from per-project to per-user, scout whether the tests' hermeticity *depended* on the per-project path | Plan's verbatim code would have made `guide_ledger_survives_mcp_restart` pass on the first `cargo test` and fail on every run after — a self-poisoning test — and pointed a 35-day GC at the developer's real `~/.local/state` | validated |
 | W-47 | 2026-08-18 | med-high | Walk the live process tree before designing against process topology | Rendezvous entries would likely have been published from a shared path, giving 2 `codescout mux` processes a `<pid>.json` no hook can ever match — permanent stale entries in a brand-new directory; also supplied the GC sizing (25 live servers, 22 `claude`) the spec omits | validated |
 
+| W-48 | 2026-08-18 | med-high | When a change invalidates a *rationale*, sweep the class corpus-wide and ask **by what method** the enumeration was done — a count is not a method | An Opus review that left zero surviving mutants in the code still listed only **5 of 11** doc sites naming `is_empty()` as the opener trigger; a targeted read found a 6th, a corpus sweep found 5 more. Six void-or-stale rationales would have survived in the exact files the next task's implementer reads | validated |
+
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -4082,6 +4084,57 @@ three librarian temp-write-guard tests silently invert there. Sibling of
 `bug-fix-session-log:F-55` and of `bug-fix-session-log:F-54` — all three are results that
 describe the *harness* while reading as facts about the *branch*, which is the recurring
 shape in this stream.
+
+## W-48 — A review found 5 of 11 instances of a doc-defect class; asking "by what method did you enumerate?" is what exposed the other 6
+
+**Observed:** 2026-08-18, guide-ledger Phase C Task 2. A one-line predicate change
+(`emitted.is_empty()` → `!emitted.contains(SESSION_OPENING_GUIDE)`) invalidated documentation
+that named `is_empty()` as the session-opener's trigger.
+
+**Pattern:** When a change invalidates a *rationale* rather than a fact, treat the affected
+comments as a **defect class** and sweep the corpus — then ask the implementer **by what method**
+it enumerated, and require a corpus-wide search rather than accepting a count. A partial sweep is
+worse than none, because corrected comments clustered together read as finished.
+
+Two sub-rules the datapoint produced:
+
+1. **A found instance is evidence about the search, not the corpus.** Round 1's extra find came
+   from a *targeted read* (tracing `notice_once` callers). It could not have found a site
+   unrelated to `notice_once` — and two of the five later found were exactly that. The count
+   looked like diligence; the method was the thing that mattered.
+2. **Classify each site void-rationale vs merely-stale.** *Void-rationale* states a mechanism now
+   factually false, and is the dangerous kind because a wrong reason invites action — e.g. the
+   comment documenting why `notices` is a **separate set** from `emitted` ("a sentinel key would
+   silently suppress `SESSION_OPENING_GUIDE`") became untrue, so the design stayed right while its
+   justification vanished, inviting someone to collapse the two sets. *Merely-stale* keeps a
+   correct conclusion and only misnames the mechanism — e.g. the `tick()`-ordering constraint,
+   still necessary, still forbidding the same reordering, just naming a function that moved.
+
+**Counterfactual, measured:** the Opus task review — which applied six mutations and found no
+surviving mutants — listed **5** sites. The implementer's targeted read found a 6th. The
+corpus-wide sweep found **5 more**, for 11 total. So the review caught **45%** of the class, and
+a review good enough to leave zero coverage gaps in the *code* still under-counted the *docs* by
+more than half. Without the sweep, six wrong rationales would have survived in the exact files
+the next task's implementer reads while working on the sibling API.
+
+**Confirming data points:**
+1. W-9 (2026-05-15) — spot-check sibling callers of a just-fixed shared helper before closing the
+   bug class. Same principle, code side.
+2. R-3 / R-73b / R-77 / R-79 in `docs/trackers/reconnaissance-patterns.md` — "a search that finds
+   nothing is evidence about the search, not about the world." This entry is the positive form:
+   a search that finds *something* is also evidence about the search.
+3. W-48 (this entry) — 11 sites, 5 found by review, method-questioning found the rest.
+
+**Impact:** med-high — documentation-only blast radius, but the void-rationale sites actively
+invite a wrong refactor, and one of them guarded a design decision (`notices` as a separate set)
+whose justification would otherwise have silently disappeared.
+
+**Promote-when:** a second change invalidates a rationale cluster and the method-question again
+surfaces sites a review missed. At two datapoints, promote to CLAUDE.md as: *when a change makes a
+stated rationale false, sweep the class corpus-wide and require the enumeration method, not the
+count.*
+
+**Status:** validated — single strong datapoint with hard numbers (5 of 11), pending a second.
 
 ## Template for new entries
 
