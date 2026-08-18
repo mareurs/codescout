@@ -97,12 +97,15 @@ impl Tool for Workspace {
         // rule stopped reaching anyone. It is the measured instance of BL-25.
         //
         // This arm used to return SESSION_OPENING_GUIDE. That was already redundant:
-        // `activate` clears the guide ledger inside `call()`, and `call_content`
-        // re-checks it afterwards — a cleared ledger lacks SESSION_OPENING_GUIDE,
-        // so the opener's trigger (the `!emitted.contains(SESSION_OPENING_GUIDE)`
-        // check in `Tool::call_content`, `src/tools/core/types.rs`) fires
-        // regardless of what this returns. The re-arm is therefore
-        // unaffected, and `post_compact_rearms_guide_hints` covers it.
+        // `ActivateProject::call` governs the bootstrap topic itself — re-arming
+        // it via `PROJECT_SCOPED` on a genuine project switch, or wiping it along
+        // with everything else via the blunt clear when no rendezvous is active
+        // (same-project re-activation touches neither). The opener's trigger (the
+        // `!emitted.contains(SESSION_OPENING_GUIDE)` check in `Tool::call_content`,
+        // `src/tools/core/types.rs`) is already downstream of that logic regardless
+        // of what this arm returns, so returning it here would only be a second,
+        // redundant path to the same effect. `post_compact_rearms_guide_hints`
+        // covers the separate `ProjectStatus` clear.
         //
         // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         Some("workspace-state")
@@ -117,7 +120,11 @@ impl ActivateProject {
 /// Topics forgotten on a genuine project switch. Deliberately just the one:
 /// the tool-contract guides the model already holds stay valid across a switch,
 /// and re-sending them is the waste this phase exists to remove.
-const PROJECT_SCOPED: &[&str] = &["project-activation-bootstrap"];
+///
+/// Tied to `SESSION_OPENING_GUIDE` by construction rather than a second copy
+/// of the literal: that's the exact topic the opener trigger in
+/// `Tool::call_content` keys on, so the two must never drift apart.
+const PROJECT_SCOPED: &[&str] = &[crate::prompts::SESSION_OPENING_GUIDE];
 
 pub struct ProjectStatus;
 

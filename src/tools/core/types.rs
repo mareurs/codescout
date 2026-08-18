@@ -68,7 +68,12 @@ pub struct ToolContext {
     pub section_coverage:
         std::sync::Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
     /// Session-scoped set of guide topics already hinted to the model.
-    /// Reset on workspace(action="activate").
+    /// `workspace(action="activate")` touches this conditionally, not always:
+    /// a genuine project switch re-arms just the project-scoped topic when a
+    /// companion rendezvous is active, falls back to clearing the whole set
+    /// when it isn't (a `/clear` would otherwise be invisible to the server),
+    /// and a same-project re-activation leaves it alone entirely. See
+    /// `ActivateProject::call` (`PROJECT_SCOPED`, `rendezvous_active`).
     pub guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
     /// Per-request workspace pin (Phase 2 plumbing for per-request workspace
     /// resolution). Populated in `call_tool_inner` from an optional `workspace`

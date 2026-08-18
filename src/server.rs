@@ -5042,9 +5042,76 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    /// A missing or malformed `path` must not wipe the ledger. Today it does,
-    /// because the clear is the function's first statement and the param check
-    /// is two lines later.
+    /// F-52 regression: the comparand must be `default_workspace_root`, not
+    /// `Agent::project_root()` (== `focused_project_root()`). Focusing a
+    /// sub-project via `activate_within_workspace` never touches
+    /// `default_workspace_root` — only `ws.focused` — so a later
+    /// re-activation of the WORKSPACE ROOT is still the SAME project by that
+    /// measure. `project_root()` would disagree (it'd report the focused
+    /// sub-project as "current"), reading the root re-activation as a switch
+    /// and wrongly re-arming the bootstrap topic.
+    async fn root_reactivation_with_subproject_focused_does_not_rearm() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let sub = dir.path().join("packages").join("api");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join("package.json"),
+            r#"{"name":"api","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        let ws_path = dir.path().join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some(uuid::Uuid::new_v4().to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        let ctx = shared_ctx(&server);
+        let workspace = tool_by_name(&server, "workspace");
+
+        // Focus the sub-project. Does NOT touch `default_workspace_root`.
+        let _ = workspace
+            .call_content(json!({"action": "activate", "path": "api"}), &ctx)
+            .await
+            .unwrap();
+
+        ctx.guide_hints_emitted.lock().set_rendezvous_active(true);
+        ctx.guide_hints_emitted
+            .lock()
+            .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+
+        // Re-activate the WORKSPACE ROOT while "api" is still focused.
+        let result = workspace
+            .call_content(
+                json!({"action": "activate", "path": dir.path().to_str().unwrap()}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            !content_carries_guide_body(&result, crate::prompts::SESSION_OPENING_GUIDE),
+            "re-activating the repo root while a sub-project is focused must \
+             NOT read as a project switch"
+        );
+    }
+
+    #[tokio::test]
+    /// A missing/malformed `path`, or a `path` naming a nonexistent directory,
+    /// must not wipe the ledger. Today both do, because the clear is the
+    /// function's first statement and both checks happen later.
     async fn malformed_activate_leaves_ledger_intact() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
@@ -5061,6 +5128,19 @@ mod guide_hint_tests {
         assert!(
             ctx.guide_hints_emitted.lock().contains("librarian"),
             "a malformed activate call must not wipe the ledger"
+        );
+
+        let result = workspace
+            .call_content(
+                json!({"action": "activate", "path": "/nonexistent/does-not-exist-9c3f1a"}),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err(), "a nonexistent directory must still error");
+
+        assert!(
+            ctx.guide_hints_emitted.lock().contains("librarian"),
+            "a nonexistent-directory activate call must not wipe the ledger either"
         );
     }
 
