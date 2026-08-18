@@ -163,11 +163,18 @@ pub struct CodeScoutServer {
 
 impl CodeScoutServer {
     pub async fn new(agent: Agent) -> Self {
+        Self::new_with_env(agent, ServerEnv::from_env()).await
+    }
+
+    /// [`Self::new`] with the environment supplied explicitly — the test seam for
+    /// callers (peer-serve, `make_server_no_project`) that build through `new`
+    /// rather than `from_parts` directly. See [`ServerEnv`].
+    pub async fn new_with_env(agent: Agent, env: ServerEnv) -> Self {
         let lsp = match agent.project_root().await {
             Some(root) => LspManager::new_arc_with_root(root),
             None => LspManager::new_arc(),
         };
-        Self::from_parts(agent, lsp, false).await
+        Self::from_parts_with_env(agent, lsp, false, env).await
     }
 
     /// Create a server with an existing LspManager (used for HTTP multi-session).
@@ -269,6 +276,12 @@ impl CodeScoutServer {
         // it under a project root made it depend on the companion plugin's
         // worktree symlink and made it silently ephemeral whenever the cwd was not
         // a project. See docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md §2.
+        //
+        // The `or_else` fallback below (real `per_user_state_dir()`) is deliberately
+        // untested: every test in this codebase sets `env.guide_hints_dir` so this
+        // branch never runs under `cargo test` — exercising it directly would mean
+        // touching the developer's real state directory, which is exactly what this
+        // injection point exists to prevent. See the audit table in the Task 6 report.
         let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
         });
@@ -1730,9 +1743,15 @@ mod tests {
         (dir, server)
     }
 
-    async fn make_server_no_project() -> CodeScoutServer {
+    async fn make_server_no_project() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::tempdir().unwrap();
         let agent = Agent::new(None).await.unwrap();
-        CodeScoutServer::new(agent).await
+        let env = ServerEnv {
+            guide_hints_dir: Some(dir.path().join("guide_hints")),
+            ..Default::default()
+        };
+        let server = CodeScoutServer::new_with_env(agent, env).await;
+        (dir, server)
     }
 
     #[tokio::test]
@@ -2427,7 +2446,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_info_without_project_still_works() {
-        let server = make_server_no_project().await;
+        let (_dir, server) = make_server_no_project().await;
         let info = server.get_info();
         assert!(info.instructions.is_some());
     }
@@ -4399,6 +4418,13 @@ mod guide_hint_tests {
     /// a cross-project session, and a cwd that is not a project all resolve to
     /// different roots for the same conversation, and the ledger has to follow
     /// the conversation. See the spec's §2.
+    ///
+    /// Both halves matter: the negative assertion alone survives the binding being
+    /// hard-coded to `None`, `persist()` becoming a no-op, or `env.guide_hints_dir`
+    /// being ignored in favour of the real-state fallback — all three still leave
+    /// `<project>/.codescout/guide_hints` absent. The positive assertion is what
+    /// catches the third case (an injection silently dropped), which the negative
+    /// assertion alone lets through as a false green.
     #[tokio::test]
     async fn guide_ledger_does_not_live_under_the_project_root() {
         let (dir, server) = make_server().await;
@@ -4413,6 +4439,15 @@ mod guide_hint_tests {
         assert!(
             !in_project.exists(),
             "guide_hints must no longer be written under the project root"
+        );
+
+        let injected = dir.path().join("guide_hints");
+        assert!(
+            injected
+                .read_dir()
+                .map(|mut e| e.next().is_some())
+                .unwrap_or(false),
+            "the ledger must land in the injected per-user directory"
         );
     }
 

@@ -99,7 +99,8 @@ impl PeerClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::peer::server::{accept_one, bind_peer_socket, build_server_for};
+    use crate::peer::server::{accept_one, bind_peer_socket, build_server_for_with_env};
+    use crate::server::ServerEnv;
 
     #[tokio::test]
     async fn client_hello_then_tool_call() {
@@ -110,7 +111,11 @@ mod tests {
 
         let (sr, ss) = (root.clone(), sock.clone());
         let handle = tokio::spawn(async move {
-            let ctx = build_server_for(&sr, true).await.unwrap();
+            let env = ServerEnv {
+                guide_hints_dir: Some(sr.join("guide_hints")),
+                ..Default::default()
+            };
+            let ctx = build_server_for_with_env(&sr, true, env).await.unwrap();
             let listener = bind_peer_socket(&ss).unwrap();
             accept_one(&listener, &ctx).await.unwrap();
         });
