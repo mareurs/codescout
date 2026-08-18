@@ -242,11 +242,11 @@ impl Tool for ArtifactAugment {
                 },
                 "render_template": {
                     "type": "string",
-                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing template back to preserve it (or use merge=true to patch just this field)."
+                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body."
                 },
                 "params_schema": {
                     "type": "object",
-                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing schema back to preserve it (or use merge=true to patch just this field)."
+                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated."
                 },
                 "merge": {
                     "type": "boolean",
@@ -255,16 +255,16 @@ impl Tool for ArtifactAugment {
                 "append_mode": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block. On merge=false this field is overwritten with the call's value (false if omitted) — pass the existing value back to preserve append behaviour (or use merge=true to patch just this field)."
+                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block."
                 },
                 "history_cap": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing cap back to preserve it (or use merge=true to patch just this field)."
+                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append."
                 },
                 "entry_collection": {
                     "type": "string",
-                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables artifact(get, entry_filter=...). On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing value back to preserve it (or use merge=true to patch just this field)."
+                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables artifact(get, entry_filter=...)."
                 }
             }
         })
@@ -1134,5 +1134,89 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    /// Inverted guard: pins the ABSENCE of a refuted intervention.
+    ///
+    /// Until 2026-08-18 five properties each restated the merge=false rule for
+    /// themselves — 882 characters, on a surface delivered with every request. hamsa
+    /// A-27 measured them and they buy nothing:
+    ///
+    /// | arm | statements of the rule | preservation cue | passed |
+    /// |---|---|---|---|
+    /// | base | 7 | yes | 10/10 |
+    /// | treatment (this cut) | 2 | yes | 10/10 |
+    /// | control-null | 0 | yes | 10/10 |
+    /// | control-positive | 0 + mandatory merge=false | yes | 0/10 |
+    /// | uncued control-null | 0 | **no** | 10/10 |
+    ///
+    /// The positive control is what makes that data rather than theatre: the same
+    /// fixture channel, stimulus, checker and model move 10/10 to 0/10, so the surface
+    /// demonstrably reaches the model and the ties are real. The uncued arm closes the
+    /// other hole — with zero statements AND no "change nothing else" cue, the model
+    /// still passed `merge=true` ten times out of ten. The behaviour is carried by the
+    /// parameter's own semantics, not by the prose.
+    ///
+    /// Re-adding any of it needs a NEW base arm (P-3), not an intuition that more
+    /// warning is safer. Note what is deliberately NOT cut: the tool description and
+    /// the `merge` property still state the rule once each, and `params`' RFC 7396
+    /// sentence is untouched — array replacement is a DIFFERENT rule, and it is the one
+    /// that actually caused data loss (an entry collection went 19 rows to 1 on
+    /// 2026-08-16). Cutting those two survivors is a different intervention needing its
+    /// own arm.
+    ///
+    /// The BEHAVIOUR remains pinned by `merge_true_patches_sibling_fields_preserving_rest`
+    /// — this guard is about the prose only.
+    ///
+    /// Ledger: `docs/trackers/prompt-hamsa-audit-log.md` A-27.
+    /// Scenario: `prompt-engineering/scenarios/augment-merge-restatement/`.
+    #[test]
+    fn augment_schema_does_not_restate_the_merge_rule_per_field() {
+        let schema = ArtifactAugment.input_schema();
+        let props = schema["properties"]
+            .as_object()
+            .expect("schema has properties");
+
+        for field in [
+            "render_template",
+            "params_schema",
+            "append_mode",
+            "history_cap",
+            "entry_collection",
+        ] {
+            let desc = props[field]["description"].as_str().unwrap_or_default();
+            assert!(
+                !desc.contains("On merge=false this field is overwritten"),
+                "`{field}` restates the merge=false rule again. A-27 measured five arms \
+                 and the rule text moves nothing (0 statements still scored 10/10 with \
+                 no cue); re-adding needs a new base arm, not an intuition."
+            );
+        }
+
+        // The two surviving statements are load-bearing as DOCUMENTATION even though
+        // they proved not load-bearing as ROUTING; an over-zealous later cut that
+        // removes them is a different intervention and must not ride on A-27.
+        assert!(
+            ArtifactAugment
+                .description()
+                .contains("fields you omit silently reset"),
+            "the tool description must still state the merge=false rule once"
+        );
+        assert!(
+            props["merge"]["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("omitted fields are preserved"),
+            "the `merge` property must still state the rule once"
+        );
+        // Rule B is a different rule and the one with a real incident behind it.
+        assert!(
+            props["params"]["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("RFC 7396"),
+            "`params` must keep its RFC 7396 sentence — array replacement is the rule \
+             that actually caused data loss, and A-27 did not test it"
+        );
     }
 }

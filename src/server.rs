@@ -2153,13 +2153,20 @@ mod tests {
     ///
     /// Spec: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
     /// Measured 2026-08-18 by `tool_surface_report_lengths` against this harness:
-    /// 27 tools, 8,521 description + 48,627 schema. Set as a hard ratchet at that
+    /// 27 tools, 8,521 description + 47,745 schema. Set as a hard ratchet at that
     /// value — there is deliberately zero headroom.
     ///
-    /// It has already been paid down once. Declaring `anchor_heading` on `artifact`
-    /// cost +808 and breached the then-current 58,572; compressing the injected
-    /// `workspace` description (225 chars to 131, times 24 pinnable tools) returned
-    /// 2,232, and the constant was ratcheted to the new total rather than left slack.
+    /// It has been paid down twice. Declaring `anchor_heading` on `artifact` cost +808
+    /// and breached the then-current 58,572; compressing the injected `workspace`
+    /// description (225 chars to 131, times 24 pinnable tools) returned 2,232, and the
+    /// constant was ratcheted to the new total rather than left slack. Then hamsa A-27
+    /// cut `artifact_augment`'s five per-field restatements of the merge=false rule,
+    /// returning 882 (4,436 to 3,554) and ratcheting 57,148 to 56,266. That cut is the
+    /// only one here backed by a measured eval rather than by inspection: five arms,
+    /// ten runs each, and the schema with ZERO statements of the rule still produced
+    /// `merge=true` 10/10 with the preservation cue removed. See
+    /// `augment_schema_does_not_restate_the_merge_rule_per_field` before re-adding any
+    /// of it.
     ///
     /// Take this number from the report test, never from an external probe. A
     /// scratch probe that re-serialised the payload with Python's `json.dumps`
@@ -2167,7 +2174,7 @@ mod tests {
     /// six-character ASCII escape, so the over-count tracked prose density and
     /// every per-tool delta came out a multiple of 5. `serde_json` emits UTF-8
     /// directly, as the wire does.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_148;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_266;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
