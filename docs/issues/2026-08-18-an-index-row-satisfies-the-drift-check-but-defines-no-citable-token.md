@@ -222,6 +222,32 @@ and no amount of author diligence prevents it.
 Correct, and it went quiet the moment the table row was added — while `BL-39` remained, and
 remains, undefined and uncitable. The advisory tracked the thing that was already fine and stayed
 silent about the thing that was broken. This is the defect in one exchange.
+### The real magnitude, from the sweep rather than from grep (2026-08-18, `758b37dc`)
+
+Step 3's `doctor` checks were run against the live catalog with the fresh release binary via
+the CLI — `codescout doctor --json`, which needs no `/mcp` reconnect. **13 affected ledgers
+across five repos**, and the sweep found substantially more than the two cases measured by hand
+above:
+
+| check | ledger | undefined |
+|---|---|---|
+| `entry_without_definition` | `docs/trackers/provenance-subsystem.md` | **64 of 68** `PV-N` |
+| `entry_without_definition` | `docs/trackers/prompt-hamsa-audit-log.md` | 10 of 25 `A-N` |
+| `entry_without_definition` | `mirela:docs/trackers/or-tools-knowledge.md` | 1 of 35 `OTK-N` |
+| `ledger_defines_nothing` | `docs/trackers/open-issue-work-queue.md` | all `BL-N` |
+| `ledger_defines_nothing` | 5 more in codescout, 4 in researcher / mirela / stefanini | all |
+
+Two things worth carrying forward.
+
+**The case that opened this bug is not the biggest one.** `provenance-subsystem.md` has **64 of
+68** `PV-N` entries undefined — six times the hamsa population, and nobody knew. That is the
+argument for step 3 existing at all, stated as a number: hand-measurement found the ledgers I
+happened to be editing, and the sweep found the ones I was not.
+
+**The hamsa result is a correctness check on the tool, not just a finding.** The sweep derived
+`A-15 … A-24` independently and agreed **exactly** with the manual `grep '^#{1,4} A-(1[5-9]|2[0-9]) '`
+run recorded above. Two methods, one answer, on a population of ten — which is the strongest
+evidence available here that `body_defined_indices` means what it claims to.
 ### Why an author lands here without noticing
 
 The tracker's documented append flow is three steps — allocate, row, body — and only the
@@ -343,14 +369,30 @@ Then, whichever branch:
    must never fail a committed write. Under (a) this fires only on hand-maintained ledgers;
    under (b) it fires only where the declaration is absent.
 
-3. **Surface it where the count is already computed.** `librarian(action="doctor")` reports
+3. **Surface it where the count is already computed. — DONE, `758b37dc`.** Two checks in
+   `src/librarian/tools/doctor.rs`, `entry_without_definition` and `ledger_defines_nothing`,
+   running beside `scan_snapshot_drift` rather than inside it. Verified against the live catalog
+   through the CLI: **13 ledgers across five repos** — see § Evidence *The real magnitude*. The
+   RED was watched against the plausible mistake (copying `snapshot_drift`'s `body_keeps_snapshot`
+   gate), and only the one test that asserts both scans on one fixture failed.
+
+   Original plan text follows. `librarian(action="doctor")` reports
    catalog drift and already touches this area (`src/librarian/tools/doctor.rs`); a
    `row_without_definition` check there gives a repo-wide sweep, which is what finds the
    pre-existing entries rather than only the next one written. This is also the only step that
    surfaces the 117 `BL-N` citations — a per-write advisory never will, because those entries were
    written months ago.
 
-4. **Backfill.** Ten `## A-N — <title>` sections in `docs/trackers/prompt-hamsa-audit-log.md`,
+4. **Backfill — RE-SCOPED by step 3's findings, and now the largest piece of work here.** The
+   plan below assumed two ledgers. The sweep found **13**, and the biggest is not the one this
+   bug opened on: `provenance-subsystem.md` has 64 of 68 `PV-N` entries undefined against the
+   hamsa log's 10 of 25. Do **not** treat this as one mechanical pass — promoting a row to a
+   headed section means writing that entry's title and body, which is content work per ledger and
+   per maintainer, and 64 of them is a project rather than a chore. Sequence it by citation
+   damage (how many live citations each ledger's undefined entries have) rather than by count,
+   and let `doctor` confirm each ledger as it is finished.
+
+   Original plan text follows. Ten `## A-N — <title>` sections in `docs/trackers/prompt-hamsa-audit-log.md`,
    promoting each Index row's content per the compaction ladder in
    `get_guide("tracker-conventions")` § *Compaction and archival*; plus whatever branch (a) or (b)
    implies for the rendered ledgers. Expected effect, extrapolating from the A-25 measurement: on
@@ -425,29 +467,36 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 
 ## Resume
 
-**Steps 0, 1 and 2 are done.** Step 0 decided branch (a) — with the correction in § Fix that (a)
-enforces at the *write path*, not in template validation, because no template writes an
-entry-token body. Step 1 is `de4df2cd` (`body_defined_indices`, delegating to
-`link_scan::extract`). Step 2 is `f19d5296` (`undefined_in_body` on both entry-writing tools,
-three-way classification, mutation-verified).
+**Steps 0-3 are done.** Step 0 decided branch (a), with the § Fix correction that (a) enforces at
+the write path rather than in template validation. Step 1 `de4df2cd` (the predicate). Step 2
+`f19d5296` (`undefined_in_body` on both entry-writing tools). Step 3 `758b37dc` (the `doctor`
+sweep), verified on the live catalog through the CLI.
 
-**Next is step 3, the `doctor` sweep, and it is the only step that reaches the entries already
-broken.** Step 2 fires on the *next* write; the 25 dead `A-N` citations and 117 dead `BL-N`
-citations were written weeks ago and no per-write advisory will ever see them. Add a
-`row_without_definition` check to `src/librarian/tools/doctor.rs` using the now-shared
-`body_defined_indices` — read-only, like the rest of `doctor`, reporting per artifact: prefix,
-entries claimed, entries defined, and the count of citations left dangling.
+**Read § Evidence *The real magnitude* before doing anything else.** Step 3 changed this bug's
+size: **13 ledgers across five repos**, and the largest is `provenance-subsystem.md` at 64 of 68
+undefined `PV-N` — six times the population this bug opened on, previously unknown.
 
-Then step 4, the backfill, and **only then**: ten `## A-N — <title>` sections in the hamsa audit
-log, and a format decision for the `BL-N` queue. Doing it before step 3 removes the evidence the
-check is missing.
+**Two things left, and the smaller one should go first.**
 
-Step 5 stays open and is now *more* clearly needed, not less:
-`get_guide("tracker-conventions")` still presents the two entry formats as equivalent choices.
-Under (a) they are not — an index rendered from params yields a ledger whose entries are
-uncitable — and that guide is the reason an author picks the losing one. Whoever writes it should
-read § Root cause's *sharper statement* first: `append_entry`'s prose path already states the rule
-in the right words, so the guide has a correct sentence to copy rather than invent.
+**Step 5 (the guide) before step 4 (the backfill).** `get_guide("tracker-conventions")` still
+presents the two entry formats as equivalent choices, and under (a) they are not — an index
+rendered from params yields a ledger whose every entry is uncitable. Until that is fixed, the guide
+keeps minting new instances of exactly what step 4 is cleaning up. It is also cheap: § Root cause's
+*sharper statement* shows `append_entry`'s prose path already states the rule in the right words
+(`:201`, `:210`, and `:136`'s "cannot be born undefined"), so the guide has a correct sentence to
+copy rather than invent.
+
+**Step 4 last, and not as one pass.** Promoting a row to a headed section means writing that
+entry's title and body — content work, per ledger, per maintainer. 64 of them is a project.
+Sequence by citation damage rather than by entry count: run `librarian(action="link_scan")` and
+count how many live citations each ledger's undefined entries actually have, then start where the
+dead links are, not where the rows are. `doctor` confirms each ledger as it is finished, which is
+what makes the work checkable in pieces.
+
+One caveat carried forward from the RED runs, still true: `body_claimed_indices` also counts a
+heading inside a fenced block and a code-first `` `A-3` `` heading. Harmless for id allocation —
+over-claiming is safe by that function's own argument — but the *claimed* set is not merely
+"defined plus rows", so do not write documentation that implies it is.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.
