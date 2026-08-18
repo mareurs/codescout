@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 105
+entry_high_water_R: 106
 entry_prefix: R
 ---
 
@@ -280,6 +280,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-106 | 2026-08-18 | hit (pre-edit) → rule | **A generated surface is ground truth about cost and about nothing else — read the generator before proposing the remedy.** Measured the live `tools/list` payload, found one 225-char `workspace` description repeated verbatim on 24 tools, and proposed a "free mechanical dedup, zero risk". The source holds exactly ONE copy: `inject_workspace_param` injects it into every `pinnable()` tool at list time | `src/server.rs:496-508` + `:1024-1026`; prompt-surface-compaction-session-log:F-2, :W-1; kin R-91, R-100 |
 | R-105 | 2026-08-18 | miss (human review) → rule | **A key derived from runtime state is a claim about that state's lifetime — enumerate the lifecycle events before proposing it.** Proposed parent-PID + parent-start-time as the agent-agnostic session key for the guide ledger and scouted it hard against ONE event (MCP subprocess respawn); never enumerated client *resume*, which restarts the parent while the conversation continues. The falsifying evidence was already in hand and unread | bug-fix-session-log:F-53; session 2c518eb6 spans 12 days / 9630 calls / 67 MCP procs under a 17h-old `claude` process; kin R-91, R-50 |
 | R-55b | 2026-08-08 | miss | A host-specific symptom accepted as the norm without sweeping the other hosts | 9 of 15 declared roots swept; all nine had zero untracked entries |
 | R-57b | 2026-08-08 | miss | An identifier's shape says nothing about whether the thing exists — check its declared root | caught by an unrelated tool response an hour after the claim was published |
@@ -3096,6 +3097,30 @@ state's lifecycle events before proposing it, not just the one that motivated it
 **Status:** open — 1 datapoint
 
 **Kin:** R-91 (state what a measurement cannot see before attaching a conclusion to it), R-50 (the view is not the set)
+
+## R-106 — A generated surface is ground truth about cost, and about nothing else
+
+**Verdict:** hit (pre-edit) → rule
+
+**Observed:** 2026-08-18, codescout prompt-surface audit. Recon invoked by the user after the baseline report was delivered, before any compaction edit.
+
+**Seam:** the `workspace` parameter as it appears in the MCP `tools/list` payload, versus the code that puts it there.
+
+I drove the release binary over stdio with a real `initialize` + `tools/list` handshake and ran a duplicate-detector across every advertised property description. It found the `workspace` param's 225-char description repeated **verbatim on 24 of 27 tools** — 5,400 chars, 5,175 redundant, 8.8% of all schema bytes. I ranked that as the first compaction target and described it to the user as *"mechanical, no eval needed, no judgment involved"* and *"a free 5.2 KB with zero eval risk"*.
+
+The scout read the generator. `src/server.rs:1024-1026` calls `CodeScoutServer::inject_workspace_param` for every tool whose `pinnable()` returns true; that function (`src/server.rs:496-508`) inserts **one** hard-coded `json!` block, idempotently, at `list_tools` time. The source was already DRY. The duplication is a property of the MCP wire format, where each tool carries its own complete schema.
+
+The measurement was right and the inference was wrong, in a specific way worth naming: *duplicated on the wire* and *authored 24 times* are different claims, and only the second licenses "dedupe it". Every byte I counted is genuinely paid on every request — the cost finding survives intact. What did not survive is the remedy, its risk profile, and its priority. The real lever turned out to be `t.pinnable()`: auditing which tools need a workspace pin at all removes whole 259-byte blocks instead of trimming one shared sentence, and that lever is **invisible from the wire dump** because a tool that is not pinnable simply has no such property to observe.
+
+The same pass, run the other way round, produced the mirror-image finding and is the reason this entry is a rule rather than an anecdote. `append_entry`'s response hint instructs the caller to pass `anchor_heading`; the advertised schema declares no such property. Reading only the generated surface concludes the hint is advertising a phantom. Reading only the source concludes the feature ships fine. Reading both states the actual defect — implemented at `append_entry.rs:34`, undeclared on the only surface an agent sees (`prompt-surface-compaction-session-log:F-1`, severity high). **Neither surface alone was sufficient, in either direction.**
+
+**Promote-when:** a second session makes a generated-surface-vs-generator inference error, or is saved from one. At two datapoints, fold into `## The seven laws` as a named clause under **law A** — *ground truth is the artifact, and a generated artifact is ground truth about cost only; authorship, and therefore the remedy, lives in the generator.* Note the pull toward law B ("the instrument decides the answer") is a near-miss: the instrument here was correct and well-chosen. The error was in what the reading licensed, not in the reading.
+
+**Status:** open — single datapoint, caught pre-edit, no wrong edit shipped.
+
+**Kin:** R-91, R-100 (self-caught refutation before filing), and law A.
+
+---
 
 ## Template for new entries
 

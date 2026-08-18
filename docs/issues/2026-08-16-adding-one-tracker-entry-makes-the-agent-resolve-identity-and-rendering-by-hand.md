@@ -181,7 +181,7 @@ existing params-driven snapshot.
 yourself", and **nothing validates the heading the agent then writes**. `link_scan`'s
 `def_re` is `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so `## R-105` without ` — title` defines no
 token and every citation of it dangles — the mechanism that produced ~30 of 39 sampled
-dangling tokens in this repo. So: **a server-side body writer** (extend `append_entry`
+dangling tokens in this repo. **→ SHIPPED 2026-08-18 09:42 in `5d5ed457`; see the CORRECTION at the top of § Resume.** The remaining gap is that it is unadvertised, not that it is unbuilt. Original text: So: **a server-side body writer** (extend `append_entry`
 rather than add `append_section`, per CAP-5's storage-vs-API argument) closes that class,
 and is the next piece of work. (2) is small and independent. (3) needs its own design pass
 for the anchoring question above.
@@ -205,7 +205,13 @@ Do not trust a commit message's claim that an id exists.
 
 ## Resume
 
-**Current next action, 2026-08-18:** build the server-side body writer — extend
+**CORRECTION, 2026-08-18 (later the same day) — the next action below had already shipped when it was written.** `5d5ed457` ("feat(librarian): the server writes the prose entry, so it cannot be born undefined") landed at **09:42**; this file's last commit `32e8bf51` is **09:32**. Ten minutes, and nothing re-read the bug afterwards — the fix-then-forget pattern CLAUDE.md's verify-open cadence describes. `append_entry` now accepts `title` + `body` + `anchor_heading` as a set and writes a `def_re`-conformant `## <ID> — <title>` heading itself, atomically with the id assignment; a partial set is refused naming the missing field, and a bad anchor writes nothing at all. **CAP-5 defect class 2 is closed.** Verified first-hand: three entries (`prompt-surface-compaction-session-log:F-1`, `:F-2`, `:W-1`) were written through it, each returning `"section_written": true`.
+
+**Actual current next action:** the capability is undeclared in the `artifact` tool's advertised schema — `anchor_heading` is not among its 51 properties, and `title`/`body` are documented `create`-only — so the one path that cannot produce an uncitable entry is unreachable without first doing it the fallible way. Filed as `docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`. After that: option (2) (surface the archetype in `find`) is small and independent; option (3) still needs its render-region anchoring design pass.
+
+---
+
+**Superseded next action, 2026-08-18 09:32:** build the server-side body writer — extend
 `append_entry` so the call that assigns an id also writes `## <ID> — <title>`, per CAP-5's
 argument that a second `append_section` action would encode a storage distinction as an API
 one. That closes CAP-5 defect class 2, which is the only one of its four still live:
