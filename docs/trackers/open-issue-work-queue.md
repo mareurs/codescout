@@ -78,6 +78,8 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
+| BL-40 | 1 | every drift check asks whether the body kept up with params — nothing detects params falling behind a body that ran ahead | open | `bde782f4cc52ac22` |
+| BL-41 | 1 | link_scan's dangling count is prefix-gated, so a namespace with zero definitions reports as healthy | open | `52269554ea4f51a4` |
 | BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Only step 4 left: backfill 13 ledgers across 5 repos (largest 64 of 68), sequenced by citation damage, content work not a sweep | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
@@ -237,6 +239,12 @@ See `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-n
 
 ### BL-39 — the two sanctioned entry formats are not equivalent
 **in-progress** — a params-rendered index defines no citable token. Steps 0-3 and 5 done; step 4 (this backfill) is what gave the section you are reading its heading.
+
+### BL-40 — every drift check asks whether the body kept up with params, never the reverse
+**open** — found by nearly publishing from the stale side: `windows-platform-support.md` had 29 params rows against 35 in the body, with two statuses stale. `append_entry`'s `warning` is the only surface that sees this direction, and only during an append.
+
+### BL-41 — link_scan's dangling count is prefix-gated, so a whole namespace can read as healthy
+**open** — 129 dead `WIN-N` citations moved the project total by zero. The gate is right in intent (it suppresses `CI-2`-shaped prose) and wrong in discriminator: it cannot tell "not a namespace" from "a namespace that is wholly broken".
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
@@ -298,6 +306,50 @@ both from the 2026-08-15 tool-usage investigation. If picking by impact rather t
 there.
 
 ## History
+
+### 2026-08-18 (session close) — the citability chain, and what a later session should pick up
+
+One long session. Written here rather than in any `next` field because **`next` lives only in the
+catalog, which is machine-local and git-ignored** — the defect BL-29 names, and the reason a
+session's own record has to be committed prose.
+
+**Closed.** BL-13 (IL1 wording measured as hamsa A-25 and REFUTED — reverted at `32b34efa` behind an
+inverted guard test, bug archived). U-44 (companion IL3 warn-hook — fix was already shipped in
+1.16.9; verified across all three profiles and on the wire, and the closure found `docs/architecture/companion-plugin.md`
+wrong in **every** row, since the 1.14.0 `.sh`→`.mjs` port was never swept there). The
+`tracker-conventions` id-stamping bug (`450df27edcfe9c08`), whose real origin turned out to be
+`tracker_design`'s **archetype defaults** rather than the guide.
+
+**BL-39, steps 0-3 and 5 shipped.** `de4df2cd` `body_defined_indices` → `f19d5296`
+`undefined_in_body` on both entry-writing tools → `758b37dc` the two `doctor` checks → `d3c1e6ed`
+guide + `librarian.md` + the archetype defaults. Step 4 (backfill) is **4 of 13 ledgers**: WIN
+(`f04e4c17`), BL (`0d101eb8`), PV (`f5f602e6`), A (`9703102c`). Project dangling **621 → 547** and
+**67 edges** materialised.
+
+**Filed this session and NOT yet worked: BL-40 and BL-41.** Both were found by doing step 4 rather
+than by looking for them, and both are cheap:
+
+- **BL-40** — no check sees params falling behind a body that ran ahead. Nearly published two wrong
+  statuses and dropped six entries from `windows-platform-support.md`.
+- **BL-41** — `link_scan`'s dangling count is prefix-gated, so a wholly-undefined namespace reads as
+  healthy. 129 dead `WIN-N` citations moved the total by zero.
+
+**Read BL-41 before trusting any dangling number**, including the 621 → 547 above. Which metric
+moves depends on whether the prefix already had one definition: `edges_added` measures
+`ledger_defines_nothing` progress, `dangling` measures `entry_without_definition` progress, and
+`doctor` measures both. That was established by prediction across four backfills, not in hindsight.
+
+**Next, in this order.** BL-40 and BL-41 first — both are small, and BL-41 changes what the numbers
+mean for the rest of step 4. Then the remaining codescout-local ledgers by external citation count:
+SD + GF (~36), `fable-tuning-findings.md` (FND, 19). **`fable-tuning-tasks.md` is a prefix decision,
+not a backfill** — its `T` prefix is already defined by `tool-usage-patterns.md` (T-001…T-24), so
+adding `## T-N` headings there makes those tokens *ambiguous* rather than resolved. Four ledgers in
+`researcher` / `mirela` / `stefanini` need their own workspaces activated and are a separate call.
+
+**Two standing constraints for whoever continues.** `tracker_design`'s SYSTEM_PROMPT has **~102
+bytes** of inline headroom, down from ~640 — treat it as zero, and `default_response_fits_inline` is
+what will say so. And `body_claimed_indices` also counts a heading inside a fenced block and a
+code-first `` `A-3` `` heading, so the *claimed* set is not merely "defined plus rows".
 
 ### 2026-08-18 — the shell-gate cluster closed, and the snapshot had drifted on six rows
 

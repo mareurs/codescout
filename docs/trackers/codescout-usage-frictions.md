@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 47
+entry_high_water_U: 49
 entry_prefix: U
 ---
 
@@ -1943,6 +1943,46 @@ Re-verified independently, at the bytes and on the wire, not from the record:
 
 ---
 
+
+### U-48 — I tripped IL3 three times in the session whose subject matter was IL3
+
+**Observed:** 2026-08-18, in a session that fixed the IL3 warn-hook (U-44), rewrote the IL3 row in `docs/architecture/companion-plugin.md`, and put the rule into two guides. Three of my own calls were refused by that same gate: `cargo clippy ... 2>&1 | tail -5`, `git -C <repo> check-ignore -v <paths> 2>&1 | head`, and `cargo rb 2>&1 | tail -3`.
+
+**Got:** all three are **true positives**. The gate was right every time, the rule was in context every time, and I had just finished writing prose about it.
+
+**Why this is a friction entry and not a confession.** It is a field replication of A-24 on a sample of one agent: A-24 measured immediate compliance at 96% against **per-session repeat of 47% for `il3_pipe` and 71% for `il1`** — agents obey every refusal and still cannot predict the next one, because the message teaches the CALL and not the PREDICATE. My three slips are that shape exactly. Each refusal was obeyed correctly and immediately; none made the next pipe predictable.
+
+The three share a form worth naming: **each was a convenience trim appended to a long-output build or git command** (`| tail -3`, `| head`) reached for to keep the response small — the exact habit `@cmd_*` buffers exist to replace. Knowing the rule as prose is evidently a different representation from applying it while composing a command.
+
+**Cost:** three wasted round-trips and no wrong output, since IL3 denies rather than warns. The evidential cost is larger: an agent that has just authored the rule is not a clean subject for judging whether the rule is learnable, so my own compliance is not evidence about the surface.
+
+**Fix idea:** none for the gate — it works. This belongs with A-24's finding that the refusal should name the predicate, not just the call. Worth citing there as the n=1 in-the-wild replication.
+
+**Status:** open — evidence for A-24, no independent fix.
+
+---
+
+### U-49 — `entry_filter={}` is rejected instead of meaning "every entry"
+
+**Observed:** 2026-08-18, trying to read all entries of a params ledger to backfill headings.
+
+```
+artifact(action="get", id="52451519052d207c", entry_filter={})
+→ leaf must have exactly one field, got 0
+  hint: Each leaf has shape `{field: {op: value}}`. Wrap multiple fields with `and`/`or`.
+```
+
+**Got:** an error whose hint is about leaf *shape*, which is not the mistake. The intent — "no constraint, return everything" — is the obvious reading of an empty filter and the natural way to ask for a whole collection.
+
+**Workaround found:** `entry_filter={"id": {"contains": "<PREFIX>-"}}`, which matches every row because every id carries its prefix. It works, and it is a tautology dressed as a filter — the sign of a missing affordance rather than a real constraint.
+
+**Cost:** small per instance, paid four times in one session (once per ledger backfilled), each time re-deriving the same tautology. The `get` response already carries `entry_total` alongside `entries`, so "all rows" is clearly an expected shape.
+
+**Fix idea:** treat `{}` as the identity filter and return the whole collection, or refuse it with a hint that names the tautology workaround. The first is better: an empty AST node has one sensible meaning, and the filter engine already reports `entry_total` for the unfiltered set.
+
+**Status:** open.
+
+---
 ### U-45 — The heredoc carve-out in the source gate covers only the segment holding `<<`, so one `|` anywhere in the body re-exposes it — and this one blocks, it does not warn
 
 **Observed:** 2026-08-17, committing U-44. `git commit -F -` with a heredoc message was **refused** — not warned — because the message body quotes a regex alternation full of `|` characters. The gate split the *prose* on those pipes, found a segment beginning `head`, found a filename elsewhere in the same span, and read it as `head <source-file>`.
