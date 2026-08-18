@@ -200,6 +200,29 @@ All notable changes to codescout are documented here.
   roots. Repos with no worktrees are unaffected, and that case is pinned by its own test.
   See `docs/issues/archive/2026-08-16-worktree-write-guard-is-dead-code-in-production.md`.
 
+- **`artifact(action="get")` on an unknown id now returns an error instead of `null`.**
+  The `None` arm returned `Ok(Value::Null)` — a *success* carrying a null payload, which
+  no caller could tell from an artifact that exists with an empty body. Since an artifact
+  id is `sha256(abs_path)`, archiving one re-keys it, so "this id stopped resolving" is a
+  routine event with three different causes and three different repairs. The error now
+  names the id and **both** recovery paths: `librarian(action="reindex")` for something
+  never indexed, and a `find` by `rel_path` with `include_archived=true` for something
+  re-keyed by a move. **MCP callers are unaffected** — they already collapsed `Ok(Null)`
+  and `Err` identically — but the CLI now exits non-zero where it used to print `null`.
+  See `docs/issues/archive/2026-08-17-artifact-get-returns-null-for-unknown-id.md`.
+
+- **The IL3 advisory hook is gone** (`codescout-companion` 1.16.9). It decided
+  "unbounded LHS" from one flat regex that included `ls`, `cat`, `diff`, `du`, `stat` and
+  an unconditional `git` — every one of which this server's gate treats as **bounded and
+  allowed** — so it warned on legal pipes while its own message named `ls` and `cat` as
+  pass-through. Measured 3 warnings, 3 legal pipes, 0 true positives. It was deleted
+  rather than corrected: being `contextPreToolUse` it could never block, so it was
+  redundant whenever the server refused and wrong whenever the server allowed, and
+  re-deriving its predicate would have rebuilt the duplication that caused the bug.
+  **Enforcement is unchanged** — `run_command` still refuses real violations, with the
+  `@cmd_*` recovery path the advisory lacked.
+  See `docs/issues/archive/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md`.
+
 - **sqlite-vec indexes now live under the project root, not `$HOME`.** The store
   directory resolves as `CODESCOUT_SQLITE_DIR` if set, else
   `<project_root>/.codescout/embeddings/`, else — for callers with no project root at
@@ -271,6 +294,62 @@ All notable changes to codescout are documented here.
   which background operation was running at time of death.
 
 ### Fixed
+
+- **`artifact(action="find")` answered `count: 0` identically for "nothing is there" and
+  "the catalog has never looked."** An artifact created outside `artifact(action="create")`
+  — by `create_file`, a plain write, or a peer's git commit — is absent until a reindex,
+  and the response said nothing, so a lagging catalog and an empty filesystem were
+  byte-identical answers. `find` now walks the scope's own root with the same two filters
+  the indexer applies and reports `unindexed_files` plus a hint naming `reindex`. Skipped
+  inside a linked worktree, where the disk count and the overlay catalog count are not the
+  same quantity. See
+  `docs/issues/archive/2026-08-17-artifact-find-is-silent-about-files-the-catalog-has-never-seen.md`.
+
+- **`artifact(action="find")` silently dropped a top-level `rel_path` and answered with
+  page 1 of the whole catalog.** `rel_path` is a create-time parameter; on `find` it was
+  accepted and ignored, so a narrowing query returned every artifact in scope and looked
+  like a successful broad search. It is now lifted into
+  `filter={"rel_path": {"contains": …}}` and the lift is reported under `corrections`, so
+  the response says what it actually ran. See
+  `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md`.
+
+- **The source gate's heredoc carve-out covered only the segment holding `<<`, so one `|`
+  anywhere in the body re-exposed it.** A heredoc body is data, not a command line, but the
+  body was split into segments before the carve-out ran — and each fragment after a pipe was
+  then read as a command. Bodies are now stripped *before* the split, which also closes the
+  inverse bypass where `cat src/main.rs <<< x` skipped the whole segment because it contained
+  `<<`. See `docs/issues/archive/2026-08-17-heredoc-carve-out-defeated-by-a-pipe-in-the-body.md`.
+
+- **Neither gate split on a newline, so a source read on the second line of a multi-line
+  command was never seen.** A segment's command is its first token, and without a newline
+  separator `echo hi\ncat src/main.rs` was one segment whose first token was `echo`. Both
+  gates now treat `\n` as a separator; quote state carries across line breaks, so a newline
+  inside a quoted argument stays data. See
+  `docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md`.
+
+- **The shell-on-source gate counted every relative path as in-project, refusing reads it
+  could not offer an alternative for.** `run_command` starts at the project root, so a
+  relative token was treated as inside "by construction" — but `cd` moves the shell, and the
+  gate already split on `&&` without consulting it. A second, independent path in: an option
+  can carry a source extension without naming a file, and `--include='*.mjs'` forced the
+  in-project verdict on its own. Both refusals named `symbols`/`read_file`/`grep`, which
+  resolve against the active project and cannot serve an outside path at all. `cd` is now
+  tracked per run — never across a pipe, where it runs in a subshell — and only when fully
+  resolved; an option glob is discounted only given positive evidence of an out-of-project
+  operand, because `grep -rn x src/ --include='*.rs'` genuinely is a project read and the
+  glob is the only token that says so. See
+  `docs/issues/archive/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md`.
+
+- **`chunk_id` omitted the chunk index, so duplicate-content chunks in one file collapsed to
+  a single point.** Two chunks with identical text hashed to one id and the later overwrote
+  the earlier, silently losing a retrieval target. Ids are now disambiguated by `start_line`.
+  See `docs/issues/archive/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md`.
+
+- **After `EnterWorktree`, MCP writes were blocked until activation but reads were not.**
+  Git reconnaissance answered about the *old* checkout while the notice saying so sat in a
+  sibling field beside the answer, where it read as boilerplate rather than as a correction
+  to the result just given. The notice is now prefixed into stdout itself. See
+  `docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
 
 - **`edit_markdown(action="edit")` deleted the matched text when `new_string` was
   omitted.** The key was read as `unwrap_or("")`, so a `content`/`new_string` mix-up —
@@ -517,6 +596,19 @@ All notable changes to codescout are documented here.
   respectively.
 
 ### Docs
+
+- **`src/prompts/README.md` claimed `/mcp` re-reads the sliced prompt text.** It does
+  not: MCP delivers `instructions` once, at `initialize`, and a mid-conversation reconnect
+  refreshes tool schemas without rebuilding the already-composed system prompt. Two commit
+  messages had told the next author to verify a prompt-surface change by rebuilding and
+  reconnecting in the same session — the one procedure that cannot show it. Corrected, and
+  split into the two halves that behave differently. See
+  `docs/issues/archive/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`.
+
+- **A doc comment in `edit_markdown` opened an unterminated rustdoc code fence.** It
+  described fence detection with a literal triple-backtick at line start, so rustdoc read
+  the rest of the line as fence attributes and rendered the remaining prose as code —
+  warning on every `cargo test`. Escaped as inline code.
 
 - **Seven new manual pages** for subsystems that had none: worktree overlay,
   catalog GC &amp; repair, entry citations, `link_scan`, `artifact(action="graft")`,
