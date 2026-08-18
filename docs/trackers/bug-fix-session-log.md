@@ -101,6 +101,8 @@ time_scope: open-ended
 | F-52 | 2026-08-18 | med | architectural | open | `Agent::project_root()` returns the FOCUSED SUB-PROJECT root, not the workspace root — wrong comparand for a "did the project change?" predicate |
 
 | F-54 | 2026-08-18 | med | process | mitigated | A dispatched subagent's full-suite run read a *concurrent* session's mid-edit working tree, saw a prompt-surface snapshot test fail, and reported it as a live failure — the shared-checkout analogue of the `src/prompts/README.md` shared-branch verify hazard |
+| F-55 | 2026-08-18 | med | codescout-tool | promoted-to-bug-tracker | `grep(glob=<abs path outside the project>)` returns `0 matches` instead of an error, and the warning blames hidden-path pruning — a cause it never checked, whose suggested fix cannot help. `path=` on the same file matches fine |
+
 ## Wins Index
 
 
@@ -153,6 +155,8 @@ time_scope: open-ended
 | W-45 | 2026-08-18 | med-high | Scout the change's own regression test AND the prose surface that documents the policy | `activate_project_resets_hints` (`server.rs:4292`) pins the exact policy being replaced, and activates the SAME root `make_server()` built the agent with — it inverts under the new policy and would have read as "your change is wrong" rather than "this test encodes the policy you replaced". Separately `workspace-state.md:51` documents the old mechanism and is `include_str!`'d into every session's context, so the code change alone ships a falsehood in an always-injected guide | validated |
 
 | W-46 | 2026-08-18 | high | Before rehoming state from per-project to per-user, scout whether the tests' hermeticity *depended* on the per-project path | Plan's verbatim code would have made `guide_ledger_survives_mcp_restart` pass on the first `cargo test` and fail on every run after — a self-poisoning test — and pointed a 35-day GC at the developer's real `~/.local/state` | validated |
+| W-47 | 2026-08-18 | med-high | Walk the live process tree before designing against process topology | Rendezvous entries would likely have been published from a shared path, giving 2 `codescout mux` processes a `<pid>.json` no hook can ever match — permanent stale entries in a brand-new directory; also supplied the GC sizing (25 live servers, 22 `claude`) the spec omits | validated |
+
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -3951,6 +3955,86 @@ is documented on the struct — the gap is remembering to look for it.
 
 **Status:** validated — plan defect caught and corrected in the dispatch (controller
 Ruling 21) before any implementer ran.
+
+## F-55 — `grep(glob=<abs path outside the project>)` returned a lying zero, and the warning named a cause it had not checked
+
+**Observed:** 2026-08-18, pre-plan reconnaissance for Phase B of the guide-ledger
+spec, scouting the companion plugin's `hooks/lib.mjs` from the codescout project.
+
+**When:** About to write a Phase B implementation plan whose §6 hook work lands in
+that exact file. Needed to know which helpers already exist.
+
+**Expected:** Either matches, or an error saying the target is outside the active
+project.
+
+**Got:** `0 matches`, plus a warning attributing the zero to unsearched hidden
+directories and recommending `include_hidden=true`. Both are wrong here: the
+target is not hidden, and the flag cannot help. The control call —
+`grep(pattern=..., path=<the same absolute path>)` — matched on the first try.
+The file exports 8 functions.
+
+**Probable cause:** `glob` is matched against candidates produced by a walk rooted
+at the active project, so an absolute foreign path can never match; `path` resolves
+directly and escapes the root. Measured as a boundary (the A/B pair), not yet read
+in the source. Compounding it, the hidden-paths warning appears to fire on *any*
+zero rather than only when hidden pruning could explain it.
+
+**Workaround:** Use `path=` for a single foreign file; `run_command` + shell `grep`
+for a cross-repo sweep; or activate the other workspace.
+
+**Severity:** med — a false negative that reads as a finding. Had it stood, the
+Phase B plan would have been written believing `lib.mjs` exported nothing, and the
+hook task would have duplicated `readInput`, `emit`, `detectFor` and `git` instead
+of reusing them. This is the reconnaissance skill's own "a search that finds nothing
+is evidence about the search, not about the world" — hit while running that skill.
+
+**Status:** promoted-to-bug-tracker —
+`docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`.
+
+**Fix idea / Pointer:** Reject an absolute `glob` outside the project root with a
+`RecoverableError` naming `path=` as the remedy, and gate the hidden-paths warning
+on hidden pruning actually being able to explain the zero.
+
+## W-47 — Measuring the process tree beat reasoning about it: the rendezvous spec's key assumption held, and a second one it never mentioned did not
+
+**Observed:** 2026-08-18, scouting §6 (companion rendezvous) of the guide-ledger
+spec before writing the Phase B plan.
+
+**Pattern:** When a design's safety rests on a claim about *runtime* process
+topology — "the server's ppid is on the hook's ancestry" — walk the live tree and
+count the population, rather than reasoning from how the processes are supposed to
+be spawned. Both the confirmation and the surprise come from the same one-command
+measurement.
+
+**Counterfactual:** The spec's stated assumption held — this session's server
+(`pid=1844342`) has `ppid=2417823`, the `claude` process that also spawns the hook,
+so ancestry-based selection works. But the same walk showed **25 codescout processes
+alive on this host**, two of which (`2220116`, `2280210`) are `codescout mux` LSP
+multiplexers whose parent is *another codescout*, not `claude`. Those are invisible
+from the spec, which describes one server per hook. Without the measurement the plan
+would likely have published the rendezvous entry from a shared construction path,
+giving every mux process a `<pid>.json` that no hook can ever match — permanently
+stale entries, indistinguishable from dead servers, in a directory whose GC policy
+Phase B still has to write. The population count (25 live, 22 `claude`) is also the
+sizing input for that GC, and it was not in the spec either.
+
+**Confirming data points:**
+1. F-53 (2026-08-18) — a PPID-derived session key was proposed without enumerating
+   client session-resume; the refuting evidence was already in hand and unread. Same
+   root: reasoning about process identity instead of measuring it.
+2. W-47 (this entry) — measuring first confirmed one assumption and refuted the
+   completeness of another, before any plan text existed.
+
+**Impact:** med-high — prevented a stale-entry class in a new on-disk directory,
+and supplied the GC sizing the spec omits.
+
+**Promote-when:** A third process-topology assumption is settled by measurement
+rather than argument. At that point promote to the reconnaissance skill as a named
+seam class: *runtime process topology is a seam; walk the tree before designing
+against it.*
+
+**Status:** validated — measurement taken this session, findings feed the Phase B
+plan directly.
 
 ## Template for new entries
 
