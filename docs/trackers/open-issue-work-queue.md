@@ -80,9 +80,9 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
 | BL-40 | 1 | every drift check asks whether the body kept up with params — nothing detects params falling behind a body that ran ahead | **done** `87f3b936` — fired twice on its first live run, incl. a second repo nobody had looked at; data repair split to BL-42 | `bde782f4cc52ac22` |
 | BL-41 | 1 | link_scan's dangling count is prefix-gated, so a namespace with zero definitions reports as healthy | **done** `ff088630` — measured on the wire: dangling 548 → 471, but BL-41's own contribution is **ZERO**; the prediction in the bug file was wrong. Coverage completion → BL-43 | `52269554ea4f51a4` |
-| BL-42 | 2 | DATA REPAIR: 16 entry rows exist in a tracker body and in no params row, so their ids were never allocated and a later `append_entry` can reissue them | open | `bde782f4cc52ac22` |
-| BL-43 | 1 | complete BL-41's coverage — a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate | open — one frontmatter line per ledger; do it with BL-39 step 4's remainder, same two files | `52269554ea4f51a4` |
-| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Step 4 substantially done — `doctor` `ledger_defines_nothing` **10 → 2**, `entry_without_definition` **3 → 1**. Backfilled: WIN `f04e4c17`, BL `0d101eb8`, PV `f5f602e6`, A `9703102c`, SD+GF+FND+T `c7bdfd22`, plus mirela G-6 and OTK-35 (uncommitted — user's checkout). Remaining: researcher `T`×2 and stefanini `CR`×8, both **outside this session's working dirs**; and `provenance-subsystem`'s 42 uncited PV, left undefined on purpose | `d34dfcd2cc718bd8` |
+| BL-42 | 2 | DATA REPAIR: entry rows exist in a tracker body and in no params row, so their ids were never allocated and a later `append_entry` can reissue them | open — **codescout half only**: the 6 WIN rows. The mirela SI×10 half is handed off | `bde782f4cc52ac22` |
+| BL-43 | 1 | complete BL-41's coverage — a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate | **dropped — handed off**, both targets are other repos; codescout's own declarations are already done | `52269554ea4f51a4` |
+| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Step 4 substantially done — `doctor` `ledger_defines_nothing` **10 → 2**, `entry_without_definition` **3 → 1**. Backfilled: WIN `f04e4c17`, BL `0d101eb8`, PV `f5f602e6`, A `9703102c`, SD+GF+FND+T `c7bdfd22`, plus mirela G-6 and OTK-35 (uncommitted — user's checkout). **Step 4 is COMPLETE for codescout** — no codescout ledger reports `ledger_defines_nothing`. researcher `T`×2 and stefanini `CR`×8 were HANDED OFF to those repos 2026-08-18 by explicit decision, not left pending here. The only codescout remainder is `provenance-subsystem`'s 42 uncited PV, left undefined on purpose | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
@@ -253,8 +253,19 @@ The wiring is the load-bearing choice and it is not the one the bug file propose
 
 **Still open on this entry:** the predicted dangling RISE is unmeasured. `link_scan` runs in the MCP server and has no CLI, so it needs `cargo rb` + `/mcp` first. Pre-fix baseline, taken on the old binary right before the rebuild: dangling **548**, ambiguous 410, 3,649 citations, 1,055 artifacts, `edges_added` 0.
 
-### BL-42 — DATA REPAIR: 16 rows live in a body and in no params row, so their ids can be reissued
-**open** — surfaced by BL-40's new check on its first live run, so this is the fix proving itself rather than fresh breakage. `windows-platform-support.md` WIN-30, WIN-32..WIN-36 (6 of 35), left stale on purpose at the last session close so the check had something true to find; and `mirela/backend-kotlin/docs/trackers/solver-invariants.md` SI-59..SI-68 (10 of 68), **new and the more urgent**, because an unallocated id is silent corruption rather than a stale display. Remedy is `append_entry` / `update_entry` — **not** re-rendering the body, which would delete the newer record.
+### BL-42 — DATA REPAIR: rows live in a body and in no params row, so their ids can be reissued
+**open, scoped to codescout 2026-08-18.** Surfaced by BL-40's new check on its first live run, so this is the fix proving itself rather than fresh breakage.
+
+**Ours:** `windows-platform-support.md` WIN-30, WIN-32..WIN-36 (6 of 35). Left stale on purpose at an earlier session close so the new check had something true to find; that duty is discharged, so repair them. Remedy is `append_entry` / `update_entry` — **not** re-rendering the body, which is `snapshot_drift`'s remedy and here would delete the newer record. Verify: `doctor` `params_behind_body` 2 → 1.
+
+**Handed off:** `mirela/backend-kotlin/docs/trackers/solver-invariants.md` SI-59..SI-68 (10 of 68) — new, never reported by any surface, and the more urgent of the two because an unallocated id is silent corruption rather than a stale display. It will be solved in that repo properly. Recorded here only so the finding is not lost with this queue's scope change.
+
+### BL-43 — complete BL-41's coverage: an undeclared, undefined ledger is still invisible
+**dropped from this queue 2026-08-18 — handed off, not withdrawn.** Both remaining targets are other repos (stefanini `CR`×8, researcher `T`×2).
+
+**Codescout's half is already done.** `entry_prefix` is declared on all four ledgers backfilled in `c7bdfd22`, and every one of the nine prefixes declared in this repo now has at least one defining heading. Nothing here is affected.
+
+**The finding stands** and lives in the BL-41 bug file: a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate, so BL-41's retrospective coverage is incomplete by construction — measured, not predicted. Its prospective value is unaffected: the next ledger created here with `entry_prefix` and row-only entries dangles loudly.
 ### BL-43 — complete BL-41's coverage: an undeclared, undefined ledger is still invisible
 **open** — measured 2026-08-18, and it is the honest counterpart to BL-41's result. BL-41's marginal effect on the current corpus is **zero**: all nine declared prefixes (`GF`, `CAP`, `U`, `H`, `FND`, `T`, `R`, `SD`, `HY`) now have at least one defining heading, and `SD`/`GF`/`FND`/`T` got their declaration and their headings in the *same* commit (`c7bdfd22`), so the widened gate never had a case to fire on.
 
@@ -429,6 +440,28 @@ Both bug files are left `fixed` and **NOT archived**, deliberately. BL-43 and BL
 remainder target the same two out-of-scope ledgers; archiving now would bury BL-43's rationale in
 a file nothing re-reads and force the 11-citation sweep (3 of them in Rust source) twice instead
 of once.
+#### Scope decision — 2026-08-18: cross-repo trackers leave this queue
+
+Explicit call: **other repos' trackers and issues are solved in those repos, properly.** This
+queue is codescout's. What that changed, and what it deliberately did not:
+
+| item | disposition |
+|---|---|
+| BL-39 step 4 | **complete for codescout** — no codescout ledger reports `ledger_defines_nothing`; researcher `T`×2 + stefanini `CR`×8 handed off |
+| BL-42 | **split** — the 6 WIN rows are ours; SI-59..SI-68 handed off |
+| BL-43 | **dropped, handed off** — both targets are elsewhere; codescout's own declarations already done |
+| mirela G×6 + OTK-35 | left uncommitted in that checkout for its owner; pure additions, 41 + 8 lines |
+
+Two things this does NOT mean. The **findings** are not withdrawn — each is recorded above with
+its measurement, because a scope change should not be able to erase evidence. And the
+**codescout-owned halves of cross-repo findings stay ours**: the `frontmatter_id_mismatch`
+defect lives in `doctor.rs` and `mv.rs` even though every affected file is in another repo, so
+it is fixed here against synthetic fixtures.
+
+This also unblocks the archive sweep that was deferred. BL-39, BL-40 and BL-41 were all held
+`fixed`-but-unarchived for one reason — BL-43 and step 4's remainder shared their two out-of-scope
+files, and archiving early would have buried the rationale and forced the 11-citation sweep twice.
+With the remainder handed off, all three can archive in one pass with one sweep.
 ### 2026-08-18 (session close) — the citability chain, and what a later session should pick up
 
 One long session. Written here rather than in any `next` field because **`next` lives only in the

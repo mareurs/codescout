@@ -225,9 +225,15 @@ the gate still hides a wholly-broken namespace there — exactly the defect this
 surviving its own fix.
 
 **Cheap completion:** declare `entry_prefix` on the remaining undefined ledgers. That is one
-frontmatter line each and it converts BL-41 from a recurrence guard into actual coverage. Both
-remaining ledgers are outside the working directories of the session that shipped this, so it
-needs the owner's go-ahead.
+frontmatter line each and it converts BL-41 from a recurrence guard into actual coverage.
+
+**HANDED OFF 2026-08-18 by explicit decision** — both remaining ledgers are in other repos
+(stefanini `CR`×8, researcher `T`×2) and are solved there, properly, not from here. Codescout's
+own half is already done: `entry_prefix` is declared on all four ledgers backfilled in
+`c7bdfd22`, and every one of the nine prefixes declared in this repo has at least one defining
+heading. So **within codescout this fix is complete**, and its incompleteness is a statement
+about other repos' data rather than about this code. Tracked as the dropped-and-handed-off BL-43
+in `docs/trackers/open-issue-work-queue.md`.
 
 ### What the fix is actually worth
 

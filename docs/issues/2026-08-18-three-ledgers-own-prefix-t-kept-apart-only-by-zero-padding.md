@@ -129,15 +129,30 @@ would have been churn. It becomes required the moment researcher's `T-1`/`T-2` g
 
 ## Resume
 
-Do (2) before (3). The immediate guard is the ceiling note in `fable-tuning-tasks.md`; the
-immediate risk is whoever backfills `researcher/docs/trackers/langfuse-tracing-roadmap.md`
-without reading this file — which is the likely next action, since it is one of the two
-ledgers `doctor` still reports as `ledger_defines_nothing`.
+**Scoped to codescout 2026-08-18.** Both claimants that matter here are codescout's own —
+`tool-usage-patterns.md` and `fable-tuning-tasks.md` — so the hazard is fully ours to fix even
+though a third claimant sits in `researcher`.
 
+Do **(2) report the overlap in `doctor`** first. It is the only step that converts a latent trap
+into a visible one, and it must compare **token strings** rather than parsed indices —
+`body_defined_indices` parses `"001"` to `1`, so an index-based comparison would miss precisely
+this case and ship a check that cannot see the bug it was written for.
+
+Then **(3) normalise the padding**, re-pointing the 16 external citations of `T-0NN` in the same
+commit. Not before (2): (3) removes the accidental disjointness that is currently the only thing
+preventing a collision, so the guard has to exist first.
+
+**(4) is out of scope** — renaming `researcher`'s 2-entry prefix is that repo's call, and it was
+handed off with the rest of the cross-repo tracker work. The original Resume named "whoever
+backfills researcher's ledger without reading this file" as the immediate risk; that backfill is
+no longer queued here, so the immediate risk is now simply that (3) gets done before (2).
+
+The interim guard remains the ceiling note written into `fable-tuning-tasks.md`'s own body by
+`c7bdfd22` — a convention enforced by prose, which is the shape SD-2 exists to remove, so treat
+it as a stopgap with a known expiry rather than a fix.
 ## References
 
 - `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` (BL-39 — the backfill that surfaced this)
 - `docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md` (BL-41 — declared prefixes now widen the gate)
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*
 - `docs/trackers/structural-debt-refactor.md` SD-2 (why a prose-enforced co-change contract is the shape to avoid)
-
