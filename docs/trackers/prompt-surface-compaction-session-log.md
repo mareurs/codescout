@@ -34,7 +34,7 @@ entry_high_water_W: 1
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-08-18 | high | prompt-surface | fixed-verified | `append_entry`'s `anchor_heading` is implemented but not advertised in the `artifact` schema |
 | F-2 | 2026-08-18 | med | self-friction | fixed-verified | Read wire duplication as source duplication — the `workspace` param is injected once, not authored 24× |
-| F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — **experiment due 2026-09-02** |
+| F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -157,7 +157,41 @@ The parameter is real and load-bearing: `src/librarian/tools/append_entry.rs:34`
 
 **Severity:** med — 19.2% of a per-request surface, but acting on the wrong reading is worse than waiting.
 
-**Status:** open — experiment running, due 2026-09-02.
+**Status:** open — the 19.2% question is NOT settled, but the field experiment below is **superseded, closed 2026-08-18**, and the reading has changed.
+
+---
+
+### Outcome of the field experiment: superseded before it started
+
+Hamsa audit **A-26** ran the controlled arms the same day, and they answered in an hour
+what this two-week field study would have spent a fortnight failing to detect.
+
+| arm | named `call_graph` |
+|---|---:|
+| base (no quickref lines) | **0/10** |
+| treatment (lines shipped) | **0/10** |
+| positive control (MANDATORY directive) | **10/10** |
+
+The routing intervention was reverted in `89d32048`. Two consequences for this entry:
+
+**The hypothesis this entry pre-registered was the wrong one.** F-3 named three readings
+of a null — unrouted, never-tempted, **substituted** — and tested only the first. The
+arms point at the third: on a question where one hop is provably insufficient, twenty of
+twenty runs reached for `references`, byte-identically, with and without the routing
+line. That is a strong competing prior, not an ignorance of the tool — whose 1,060-char
+description ships on every request and already says *callers (blast radius)*.
+
+**The measurement design was also wrong in a way worth keeping.** This entry proposed a
+naturalistic two-week window with `symbols` as a workload-presence control. That could
+never have separated the three hypotheses either — it would have observed another null
+and licensed nothing, exactly as the 30-day window before it did. A controlled arm with a
+positive control settled it in three runs of ten. **Where a controlled arm is available,
+a field window is the weaker instrument, not the more realistic one.**
+
+What remains open is the original question for the other nine tools: 11,299 characters,
+19.2% of the per-request surface, for 38 calls in 30 days. Nothing here authorises a trim
+— a null still does not authorise a deletion — and the next move for any of them is a
+controlled arm on a stimulus that tempts the tool, not another observational window.
 
 ---
 
