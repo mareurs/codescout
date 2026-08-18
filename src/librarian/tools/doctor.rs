@@ -171,6 +171,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
     all_violations.extend(scan_snapshot_drift(&cat.conn)?);
+    // Runs beside snapshot_drift rather than inside it: the two ask different
+    // questions of the same body (does it carry the row / can anything cite the
+    // entry) and are allowed to disagree. See `scan_undefined_entries`.
+    all_violations.extend(scan_undefined_entries(&cat.conn)?);
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -1339,6 +1343,150 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
     Ok(out)
 }
 
+/// `ledger_defines_nothing` / `entry_without_definition`: an augmented ledger's
+/// `params` hold entry ids that its body never defines as citable tokens.
+///
+/// The twin of [`scan_snapshot_drift`] and deliberately not a variant of it. That one
+/// asks whether the body *carries* the row, which an index row satisfies. This asks
+/// whether anything can *cite* the entry, which an index row does not satisfy at all:
+/// `link_scan` binds a token to a `## <ID> — <title>` heading, so a row-only entry is
+/// unreachable however visible it is in the rendered table.
+/// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+///
+/// **Why this scan has to exist at all, rather than just the write-path advisory.**
+/// `append_entry`/`update_entry` now report `undefined_in_body`, but only for the entry
+/// being written. The damage is historical: measured 2026-08-18, ten row-only `A-N`
+/// entries with 25 dead cross-file citations, and a ledger with zero `BL-N`
+/// definitions against 117. None of those will ever be written again, so no per-write
+/// signal reaches them. A sweep is the only thing that does.
+///
+/// **Two checks, not one, because the remedies differ.** `entry_without_definition`
+/// means the ledger writes definitions and these entries missed — one heading each,
+/// and the author is the right person to write it. `ledger_defines_nothing` means no
+/// entry of the prefix is defined anywhere, so nothing done to one row helps and the
+/// ledger's entry format is the subject. Emitting the latter per-entry would be N
+/// findings that all say the same thing.
+///
+/// **NOT gated on `body_keeps_snapshot`, and that is the design decision here.** That
+/// gate is right for the row question — a params-canonical tracker mentions a few ids
+/// in passing without maintaining a snapshot, and nagging it is noise. Reusing it here
+/// would silence precisely the population already broken, since a ledger that defines
+/// nothing also tends to anchor little. An advisory that goes quiet where citations
+/// break is the defect being fixed, not a pattern to copy.
+///
+/// **Scoped to params-backed ledgers** (`entry_collection IS NOT NULL`), because those
+/// are the only ledgers where the catalog asserts an entry exists that the body may not
+/// define. For a prose ledger the body *is* the record: an id with no heading is not an
+/// entry that lost its definition, it is an entry that was never written, and reporting
+/// it would require guessing intent from a high-water mark.
+///
+/// Reports only; there is no `fix=`. Writing an entry's heading means writing its
+/// title and body, which is content, not repair.
+fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    // Ordered by abs_path for the same reason `scan_artifact_paths` is: a report whose
+    // row order shifts after a VACUUM cannot be diffed against a prior run.
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path, g.entry_collection, g.params \
+         FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
+         WHERE g.entry_collection IS NOT NULL ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path, collection, params_text) in rows {
+        let Ok(params) = serde_json::from_str::<serde_json::Value>(&params_text) else {
+            continue;
+        };
+        let ids: Vec<&str> = params
+            .get(&collection)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.get("id").and_then(|v| v.as_str()))
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        // One prefix per collection is the tracker convention; a mixed set is a
+        // different defect, and guessing which prefix "owns" the body would
+        // manufacture findings. Same reasoning as `scan_snapshot_drift`.
+        let mut split = ids.iter().filter_map(|i| i.rsplit_once('-'));
+        let Some((prefix, _)) = split.next() else {
+            continue;
+        };
+        if ids
+            .iter()
+            .any(|i| i.rsplit_once('-').map(|(p, _)| p) != Some(prefix))
+        {
+            continue;
+        }
+        let claimed: std::collections::BTreeSet<u64> = ids
+            .iter()
+            .filter_map(|i| i.rsplit_once('-'))
+            .filter_map(|(_, n)| n.parse::<u64>().ok())
+            .collect();
+
+        // A file that is gone is `missing_file`'s finding, not this one.
+        let Ok(body) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let defined = crate::librarian::catalog::augmentation::body_defined_indices(&body, prefix);
+        let undefined: Vec<String> = claimed
+            .difference(&defined)
+            .map(|n| format!("{prefix}-{n}"))
+            .collect();
+        if undefined.is_empty() {
+            continue;
+        }
+
+        if defined.is_empty() {
+            out.push(Violation::new(
+                "ledger_defines_nothing",
+                Some(id),
+                abs_path,
+                format!(
+                    "No `{prefix}-N` heading exists anywhere in this body, so all {} entries in \
+                     `{collection}` are uncitable — `link_scan` defines a token only from a \
+                     `## {prefix}-N — <title>` heading, and index rows define nothing. Every \
+                     citation of every entry here resolves to nothing. This is the ledger's entry \
+                     format, not one row's omission: fixing it means giving each entry a heading, \
+                     per get_guide(\"tracker-conventions\") § Entry headings.",
+                    claimed.len()
+                ),
+            ));
+        } else {
+            // Bounded sample; the count carries the magnitude. An unbounded list of 50
+            // ids buries every other finding — the failure
+            // `abs_path_outside_managed_roots` already had to cap for.
+            const SAMPLE: usize = 8;
+            let shown = undefined.iter().take(SAMPLE).cloned().collect::<Vec<_>>();
+            let suffix = if undefined.len() > SAMPLE {
+                format!(" … (+{} more)", undefined.len() - SAMPLE)
+            } else {
+                String::new()
+            };
+            out.push(Violation::new(
+                "entry_without_definition",
+                Some(id),
+                abs_path,
+                format!(
+                    "{} of {} `{}` entries have no `## <ID> — <title>` heading, so every citation \
+                     of them resolves to nothing: {}{}. This ledger defines its other entries, so \
+                     these are omissions — add a heading for each.",
+                    undefined.len(),
+                    claimed.len(),
+                    collection,
+                    shown.join(", "),
+                    suffix
+                ),
+            ));
+        }
+    }
+    Ok(out)
+}
+
 /// The `frontmatter_id_mismatch` rows on their own, for `fix=repair_frontmatter_id`.
 /// Ordered by `abs_path` for the same reason [`scan_artifact_paths`] is — a stable
 /// order is what makes a reported sweep reproducible.
@@ -2215,6 +2363,118 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    ///
+    /// The whole-ledger case, and the larger half of that bug: no `BL-N` heading
+    /// exists anywhere, so every entry is uncitable and nothing done to one row
+    /// helps. Measured on the real queue: zero definitions against 117 cross-file
+    /// citations.
+    ///
+    /// ONE violation for the ledger, not one per entry. Six findings that all say
+    /// "change the ledger's format" is five findings of noise.
+    #[test]
+    fn undefined_entries_reports_a_row_only_ledger_once_for_the_whole_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "queue",
+            tmp.path(),
+            "# Queue\n\n| ID | task |\n| BL-1 | a |\n| BL-2 | b |\n| BL-3 | c |\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "one finding per LEDGER, got {v:?}");
+        assert_eq!(v[0].check, "ledger_defines_nothing");
+        assert!(
+            v[0].detail.contains("BL-N") && v[0].detail.contains('3'),
+            "must name the prefix (the remedy is per-ledger) and the entry count \
+             (the magnitude): {}",
+            v[0].detail
+        );
+    }
+
+    /// The per-entry case: this ledger demonstrably writes definitions and BL-3
+    /// missed one, so the remedy is a single heading and the message must blame the
+    /// entry. A separate `check` name from the whole-ledger finding, so a report can
+    /// be filtered and counted by which remedy it needs.
+    #[test]
+    fn undefined_entries_names_only_the_undefined_rows_in_a_defining_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n\n| ID | task |\n| BL-3 | c |\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].check, "entry_without_definition");
+        assert!(v[0].detail.contains("BL-3"), "{}", v[0].detail);
+        assert!(
+            !v[0].detail.contains("BL-1"),
+            "BL-1 has its heading — naming it makes the finding untrustworthy: {}",
+            v[0].detail
+        );
+    }
+
+    /// The negative control. Without it, a scan that reported unconditionally would
+    /// satisfy both tests above.
+    #[test]
+    fn undefined_entries_is_silent_when_every_entry_has_its_heading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\nbody\n\n## BL-2 — second\n\nbody\n",
+            &["BL-1", "BL-2"],
+        );
+        assert!(
+            scan_undefined_entries(&cat.conn).unwrap().is_empty(),
+            "every entry is defined — there is nothing to report"
+        );
+    }
+
+    /// The test that pins the design decision, by asserting BOTH scans on ONE
+    /// fixture. The body anchors a small scattered minority (1 of 6), so
+    /// `body_keeps_snapshot` is false and `snapshot_drift` stays silent — correctly,
+    /// because those rows are deliberately params-canonical.
+    ///
+    /// This check must fire anyway. Reusing that gate here would silence exactly the
+    /// population already broken, which is the bug: an advisory that goes quiet where
+    /// citations break. The two scans ask different questions of the same body and are
+    /// allowed to disagree — that disagreement is the fix, not a bug in it.
+    #[test]
+    fn undefined_entries_fires_where_snapshot_drift_is_deliberately_silent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "prose",
+            tmp.path(),
+            "# Notes\n\nSee also BL-1 in passing.\n\n| ID |\n| BL-1 |\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
+        );
+
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "a minority anchor is a params-canonical tracker; nagging it is noise"
+        );
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "but not one of its six entries can be cited, and that is worth saying: {v:?}"
+        );
+        assert_eq!(v[0].check, "ledger_defines_nothing");
     }
 
     /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
