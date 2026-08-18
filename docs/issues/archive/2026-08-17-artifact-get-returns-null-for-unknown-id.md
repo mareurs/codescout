@@ -156,10 +156,10 @@ the obvious follow-up query reproduces the same empty answer for a second reason
 
 ## Resume
 
-Single-site change at `src/librarian/tools/get.rs:127`. Check first whether any
-caller or test asserts on the `null` return — `get` is on the hot path for every
-tracker read, and something may already depend on the soft failure.
-
+Fixed at `src/librarian/tools/get.rs`, commit `9a71357e` (**experiments**). This
+repo is currently fast-forward-eligible onto `master` (`git rev-list
+--left-right --count master...experiments` had a `0` on the left at fix time),
+so no cherry-pick is expected — no second master-side SHA to record.
 ## References
 
 - `src/librarian/tools/get.rs:127` — the `None` arm.
