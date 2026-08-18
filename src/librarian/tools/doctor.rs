@@ -98,11 +98,14 @@ use super::{RecoverableError, ToolContext};
 /// One violation of a doctor invariant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Violation {
-    /// Which check fired. One of: `abs_path_must_be_absolute`,
-    /// `backslash_in_abs_path`, `ads_colon_in_abs_path`,
-    /// `dotdot_segment_in_abs_path`, `missing_file`,
-    /// `backslash_in_git_root`, `worktree_scoped_row`,
-    /// `abs_path_outside_managed_roots`.
+    /// Which check fired.
+    ///
+    /// Deliberately not enumerated here: this list named eight checks and had gone
+    /// stale by three (`snapshot_drift`, `ledger_defines_nothing`,
+    /// `entry_without_definition`) before anyone noticed, because nothing gates a doc
+    /// comment against the `scan_*` functions that emit these strings. The authoritative
+    /// set is the `Violation::new` call sites — every `scan_*` function in this module
+    /// documents its own check names on itself.
     pub check: String,
     /// The artifact id that owns the violating row, when applicable.
     /// `None` for table-wide checks (e.g. `commits.git_root` has no
@@ -175,6 +178,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // questions of the same body (does it carry the row / can anything cite the
     // entry) and are allowed to disagree. See `scan_undefined_entries`.
     all_violations.extend(scan_undefined_entries(&cat.conn)?);
+    // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
+    // ahead. Same two sets, subtracted the other way; opposite remedy.
+    all_violations.extend(scan_params_behind_body(&cat.conn)?);
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -1226,32 +1232,39 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     ))
 }
 
-/// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
-/// markdown body line-anchors nowhere.
+/// One params-backed ledger, with everything the three entry-drift scans need in order
+/// to compare its `params` against its body.
+struct ParamsBackedLedger {
+    id: String,
+    abs_path: String,
+    collection: String,
+    /// The single prefix every id in the collection shares.
+    prefix: String,
+    /// The entry indices `params` claim exist.
+    claimed: std::collections::BTreeSet<u64>,
+    /// The body as read from disk. Each scan derives its own set from it —
+    /// `body_claimed_indices` for the row question, `body_defined_indices` for the
+    /// citability question — so this deliberately does not pick one for them.
+    body: String,
+}
+
+/// Every ledger whose entry rows live in `params`, in a stable order.
 ///
-/// Entry rows live in `params`, and params live in the catalog — which is
-/// machine-local and git-ignored. A tracker that also keeps a rendered snapshot
-/// in its body is the only way those rows reach git, and nothing re-renders it:
-/// `append_entry`/`update_entry` write params and return success while the
-/// committed file stays byte-identical, so `git status` is clean and the row
-/// exists on exactly one machine.
-/// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+/// [`scan_snapshot_drift`], [`scan_undefined_entries`] and [`scan_params_behind_body`]
+/// ask three different questions of the same two surfaces, and each needs the same
+/// preamble first: the augmentation row, the collection's ids, the single prefix owning
+/// them, and the body off disk. Extracted at the point a third hand-rolled copy would
+/// have existed — three checks that must agree on what a ledger *is* drifting apart is
+/// the same failure mode this whole family of bugs is about.
 ///
-/// **The gate is the body, not the augmentation config.** A tracker is treated
-/// as snapshot-keeping iff its body already line-anchors at least one
-/// `PREFIX-N`. That is self-configuring and precise: a prose-only tracker
-/// (rows deliberately only in params, `render_template` projecting them into
-/// `librarian(context)` instead) anchors none and is silent here. Gating on
-/// `render_template != NULL` would be the wrong test in both directions — 26 of
-/// 28 augmented trackers declare one, and its documented purpose is precisely
-/// that the body does NOT carry the rows.
+/// Ordered by `abs_path` for the reason `scan_artifact_paths` is: a report whose row
+/// order shifts after a VACUUM cannot be diffed against a prior run.
 ///
-/// Reports only; there is no `fix=`. Re-rendering a body is a content decision
-/// (which section, what column order, how much of the row to include) that
-/// belongs to whoever maintains the tracker.
-fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
-    // Ordered for the same reason as `scan_artifact_paths` — a report whose row
-    // order shifts after a VACUUM is one nobody can diff against a prior run.
+/// Skips, all silent and all deliberate: unparseable `params` (a different defect); an
+/// empty collection (nothing to compare); a **mixed or malformed** prefix set, since one
+/// prefix per collection is the tracker convention and guessing which one "owns" the body
+/// would manufacture findings; and a file that is gone, which is `missing_file`'s finding.
+fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBackedLedger>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.abs_path, g.entry_collection, g.params \
          FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
@@ -1276,13 +1289,13 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
         if ids.is_empty() {
             continue;
         }
-        // A single prefix per collection is the tracker convention. A mixed set
-        // is a different defect (or a deliberately heterogeneous collection),
-        // and guessing which prefix "owns" the body would manufacture findings.
         let mut split = ids.iter().filter_map(|i| i.rsplit_once('-'));
         let Some((prefix, _)) = split.next() else {
             continue;
         };
+        // Over ALL ids, not just the ones that split: an id carrying no `-` yields
+        // `None != Some(prefix)` and bails too, which is what a malformed collection
+        // should do.
         if ids
             .iter()
             .any(|i| i.rsplit_once('-').map(|(p, _)| p) != Some(prefix))
@@ -1294,22 +1307,68 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
             .filter_map(|i| i.rsplit_once('-'))
             .filter_map(|(_, n)| n.parse::<u64>().ok())
             .collect();
-
-        // A file that is gone is `missing_file`'s finding, not this one.
         let Ok(body) = std::fs::read_to_string(&abs_path) else {
             continue;
         };
-        let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(&body, prefix);
+        out.push(ParamsBackedLedger {
+            id,
+            abs_path,
+            collection,
+            prefix: prefix.to_string(),
+            claimed,
+            body,
+        });
+    }
+    Ok(out)
+}
+
+/// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
+/// markdown body line-anchors nowhere.
+///
+/// Entry rows live in `params`, and params live in the catalog — which is
+/// machine-local and git-ignored. A tracker that also keeps a rendered snapshot
+/// in its body is the only way those rows reach git, and nothing re-renders it:
+/// `append_entry`/`update_entry` write params and return success while the
+/// committed file stays byte-identical, so `git status` is clean and the row
+/// exists on exactly one machine.
+/// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+///
+/// **The gate is the body, not the augmentation config.** A tracker is treated
+/// as snapshot-keeping iff its body already line-anchors at least one
+/// `PREFIX-N`. That is self-configuring and precise: a prose-only tracker
+/// (rows deliberately only in params, `render_template` projecting them into
+/// `librarian(context)` instead) anchors none and is silent here. Gating on
+/// `render_template != NULL` would be the wrong test in both directions — 26 of
+/// 28 augmented trackers declare one, and its documented purpose is precisely
+/// that the body does NOT carry the rows.
+///
+/// For the opposite direction — a body that has run AHEAD of `params` — see
+/// [`scan_params_behind_body`]. The two consume the same [`ParamsBackedLedger`] and
+/// differ only in which way round they subtract, so keep their remedies straight:
+/// this one's is to re-render the body, and that one's is emphatically not.
+///
+/// Reports only; there is no `fix=`. Re-rendering a body is a content decision
+/// (which section, what column order, how much of the row to include) that
+/// belongs to whoever maintains the tracker.
+fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut out = Vec::new();
+    for ledger in params_backed_ledgers(conn)? {
+        let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(
+            &ledger.body,
+            &ledger.prefix,
+        );
         // Not merely "anchors something" — anchors a MAJORITY. A tracker whose
         // rows are canonical in params can still line-anchor a few ids in
         // unrelated tables and narrative headings; reporting those as a lagging
         // snapshot nags a deliberate design decision. See `body_keeps_snapshot`.
-        if !crate::librarian::catalog::augmentation::body_keeps_snapshot(&claimed, &in_body) {
+        if !crate::librarian::catalog::augmentation::body_keeps_snapshot(&ledger.claimed, &in_body)
+        {
             continue;
         }
-        let missing: Vec<String> = claimed
+        let missing: Vec<String> = ledger
+            .claimed
             .difference(&in_body)
-            .map(|n| format!("{prefix}-{n}"))
+            .map(|n| format!("{}-{}", ledger.prefix, n))
             .collect();
         if missing.is_empty() {
             continue;
@@ -1326,15 +1385,15 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
         };
         out.push(Violation::new(
             "snapshot_drift",
-            Some(id),
-            abs_path,
+            Some(ledger.id),
+            ledger.abs_path,
             format!(
                 "{} of {} `{}` rows exist only in the catalog — the body line-anchors none of \
                  them, so they are absent from git: {}{}. The catalog is machine-local and \
                  git-ignored; re-render the snapshot section from params.",
                 missing.len(),
-                claimed.len(),
-                collection,
+                ledger.claimed.len(),
+                ledger.collection,
                 shown.join(", "),
                 suffix
             ),
@@ -1383,57 +1442,13 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 /// Reports only; there is no `fix=`. Writing an entry's heading means writing its
 /// title and body, which is content, not repair.
 fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
-    // Ordered by abs_path for the same reason `scan_artifact_paths` is: a report whose
-    // row order shifts after a VACUUM cannot be diffed against a prior run.
-    let mut stmt = conn.prepare(
-        "SELECT a.id, a.abs_path, g.entry_collection, g.params \
-         FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
-         WHERE g.entry_collection IS NOT NULL ORDER BY a.abs_path",
-    )?;
-    let rows: Vec<(String, String, String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
-        .collect::<rusqlite::Result<_>>()?;
-
     let mut out = Vec::new();
-    for (id, abs_path, collection, params_text) in rows {
-        let Ok(params) = serde_json::from_str::<serde_json::Value>(&params_text) else {
-            continue;
-        };
-        let ids: Vec<&str> = params
-            .get(&collection)
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|e| e.get("id").and_then(|v| v.as_str()))
-            .collect();
-        if ids.is_empty() {
-            continue;
-        }
-        // One prefix per collection is the tracker convention; a mixed set is a
-        // different defect, and guessing which prefix "owns" the body would
-        // manufacture findings. Same reasoning as `scan_snapshot_drift`.
-        let mut split = ids.iter().filter_map(|i| i.rsplit_once('-'));
-        let Some((prefix, _)) = split.next() else {
-            continue;
-        };
-        if ids
-            .iter()
-            .any(|i| i.rsplit_once('-').map(|(p, _)| p) != Some(prefix))
-        {
-            continue;
-        }
-        let claimed: std::collections::BTreeSet<u64> = ids
-            .iter()
-            .filter_map(|i| i.rsplit_once('-'))
-            .filter_map(|(_, n)| n.parse::<u64>().ok())
-            .collect();
-
-        // A file that is gone is `missing_file`'s finding, not this one.
-        let Ok(body) = std::fs::read_to_string(&abs_path) else {
-            continue;
-        };
-        let defined = crate::librarian::catalog::augmentation::body_defined_indices(&body, prefix);
-        let undefined: Vec<String> = claimed
+    for ledger in params_backed_ledgers(conn)? {
+        let prefix = &ledger.prefix;
+        let defined =
+            crate::librarian::catalog::augmentation::body_defined_indices(&ledger.body, prefix);
+        let undefined: Vec<String> = ledger
+            .claimed
             .difference(&defined)
             .map(|n| format!("{prefix}-{n}"))
             .collect();
@@ -1444,16 +1459,17 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
         if defined.is_empty() {
             out.push(Violation::new(
                 "ledger_defines_nothing",
-                Some(id),
-                abs_path,
+                Some(ledger.id),
+                ledger.abs_path,
                 format!(
                     "No `{prefix}-N` heading exists anywhere in this body, so all {} entries in \
-                     `{collection}` are uncitable — `link_scan` defines a token only from a \
+                     `{}` are uncitable — `link_scan` defines a token only from a \
                      `## {prefix}-N — <title>` heading, and index rows define nothing. Every \
                      citation of every entry here resolves to nothing. This is the ledger's entry \
                      format, not one row's omission: fixing it means giving each entry a heading, \
                      per get_guide(\"tracker-conventions\") § Entry headings.",
-                    claimed.len()
+                    ledger.claimed.len(),
+                    ledger.collection
                 ),
             ));
         } else {
@@ -1469,20 +1485,97 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
             };
             out.push(Violation::new(
                 "entry_without_definition",
-                Some(id),
-                abs_path,
+                Some(ledger.id),
+                ledger.abs_path,
                 format!(
                     "{} of {} `{}` entries have no `## <ID> — <title>` heading, so every citation \
                      of them resolves to nothing: {}{}. This ledger defines its other entries, so \
                      these are omissions — add a heading for each.",
                     undefined.len(),
-                    claimed.len(),
-                    collection,
+                    ledger.claimed.len(),
+                    ledger.collection,
                     shown.join(", "),
                     suffix
                 ),
             ));
         }
+    }
+    Ok(out)
+}
+
+/// `params_behind_body`: an augmented ledger's markdown body anchors entry ids that its
+/// `params` hold no row for — the inverse of [`scan_snapshot_drift`].
+///
+/// Every drift surface codescout had asked one direction of one question: *has the
+/// **body** kept up with `params`?* `update_entry`'s `snapshot_stale`, `append_entry`'s
+/// `snapshot_missing` and `scan_snapshot_drift` all compute
+/// `claimed.difference(&in_body)`. Nothing computed the reverse, so a body that had run
+/// **ahead** — rows written into the file by hand, or written before their params row was
+/// ever appended — read as perfectly healthy on every surface.
+/// docs/issues/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md
+///
+/// **The remedy is the opposite of `snapshot_drift`'s, which is why this is a separate
+/// check rather than more samples in that one.** There the body is stale and re-rendering
+/// it from `params` is repair. Here `params` is stale, and re-rendering would DELETE the
+/// newer record. The measured near-miss: generating BL-39's defining headings from the WIN
+/// ledger's `params` would have published `WIN-28`/`WIN-29` as `open` when both were
+/// `fixed`, and emitted no section at all for six further entries — in the pass whose
+/// whole purpose was making entries citable.
+///
+/// **Ids only, never statuses.** A status mismatch between a params row and a rendered
+/// table cell needs a text comparison against a column whose format is each tracker's own
+/// choice — fragile, and a separate decision. The id-set difference is exact, and it is
+/// what caught the WIN case.
+///
+/// **Not gated on `body_keeps_snapshot`**, for the reason spelled out on
+/// [`scan_undefined_entries`]: that gate answers the *row* question, where a
+/// params-canonical tracker anchoring a few ids in passing must not be nagged. Reusing it
+/// here would silence a body id the catalog has never seen, which is the entire finding.
+/// Pinned by `params_behind_body_is_not_gated_on_body_keeps_snapshot`.
+///
+/// Reports only; there is no `fix=`. The missing rows carry a status and dates that no
+/// scan can infer from an id.
+fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut out = Vec::new();
+    for ledger in params_backed_ledgers(conn)? {
+        let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(
+            &ledger.body,
+            &ledger.prefix,
+        );
+        let unrowed: Vec<String> = in_body
+            .difference(&ledger.claimed)
+            .map(|n| format!("{}-{}", ledger.prefix, n))
+            .collect();
+        if unrowed.is_empty() {
+            continue;
+        }
+        // Bounded sample; the count carries the magnitude. Same cap and reasoning as
+        // its two siblings — an unbounded list buries every other finding.
+        const SAMPLE: usize = 8;
+        let shown = unrowed.iter().take(SAMPLE).cloned().collect::<Vec<_>>();
+        let suffix = if unrowed.len() > SAMPLE {
+            format!(" … (+{} more)", unrowed.len() - SAMPLE)
+        } else {
+            String::new()
+        };
+        out.push(Violation::new(
+            "params_behind_body",
+            Some(ledger.id),
+            ledger.abs_path,
+            format!(
+                "{} of {} `{}` ids are anchored in the body but have no row in `params`: {}{}. \
+                 The body ran ahead of the catalog, so these entries exist in git and in no \
+                 `entry_filter` query — and no id was allocated for them, so a later \
+                 `append_entry` can reissue the same number. Add the missing rows with \
+                 `append_entry` / `update_entry`. This is the inverse of `snapshot_drift`: do \
+                 NOT rewrite the body from `params`, which would delete the newer record.",
+                unrowed.len(),
+                in_body.len(),
+                ledger.collection,
+                shown.join(", "),
+                suffix
+            ),
+        ));
     }
     Ok(out)
 }
@@ -2475,6 +2568,162 @@ mod tests {
             "but not one of its six entries can be cited, and that is worth saying: {v:?}"
         );
         assert_eq!(v[0].check, "ledger_defines_nothing");
+    }
+
+    /// The core positive. The body's index table carries ids that `params` has no
+    /// row for — the shape measured on the WIN ledger in
+    /// `docs/issues/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md`,
+    /// where six rows lived in git and in no query.
+    #[test]
+    fn params_behind_body_reports_a_body_id_with_no_params_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "ahead",
+            tmp.path(),
+            "| ID |\n| BL-1 |\n| BL-2 |\n| BL-3 |\n",
+            &["BL-1", "BL-2"],
+        );
+
+        let v = scan_params_behind_body(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].check, "params_behind_body");
+        assert!(v[0].detail.contains("BL-3"), "{}", v[0].detail);
+    }
+
+    /// The direction pin: on a body that LAGS params, the old check fires and the new
+    /// one must stay silent. Both read the same two sets; only the subtraction order
+    /// differs, so an implementation that got it backwards would pass every
+    /// single-check test and fail here.
+    #[test]
+    fn a_lagging_body_is_snapshot_drift_and_never_params_behind_body() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "lagging",
+            tmp.path(),
+            "| ID |\n| BL-1 |\n| BL-2 |\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        assert_eq!(
+            scan_snapshot_drift(&cat.conn).unwrap().len(),
+            1,
+            "BL-3 is in params and not in the body — that is the original check"
+        );
+        assert!(
+            scan_params_behind_body(&cat.conn).unwrap().is_empty(),
+            "nothing ran ahead here; reporting it would be the same finding twice"
+        );
+    }
+
+    /// Fires where `snapshot_drift` is silent because nothing is missing FROM the
+    /// body. A body that is a superset of params leaves `claimed.difference(&in_body)`
+    /// empty, so the only surface codescout had reports a clean bill of health.
+    #[test]
+    fn params_behind_body_fires_where_snapshot_drift_sees_a_complete_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "superset",
+            tmp.path(),
+            "| ID |\n| BL-1 |\n| BL-2 |\n| BL-3 |\n| BL-4 |\n| BL-5 |\n| BL-6 |\n| BL-7 |\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
+        );
+
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "every params row IS in the body, so the snapshot looks perfectly in sync"
+        );
+        let v = scan_params_behind_body(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "but BL-7 exists in git and in no query: {v:?}");
+        assert!(v[0].detail.contains("BL-7"), "{}", v[0].detail);
+    }
+
+    /// **Not gated on `body_keeps_snapshot`, and this is the test that pins it.**
+    /// Here the body anchors a single scattered id, so that gate is false and
+    /// `snapshot_drift` stays silent by design — correctly, because those rows are
+    /// params-canonical. Reusing the gate would silence BL-7 too, and BL-7 is a row
+    /// the catalog has never seen. Same argument as
+    /// `undefined_entries_fires_where_snapshot_drift_is_deliberately_silent`.
+    #[test]
+    fn params_behind_body_is_not_gated_on_body_keeps_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "prose_ahead",
+            tmp.path(),
+            "# Notes\n\n| ID |\n| BL-7 |\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4", "BL-5", "BL-6"],
+        );
+
+        assert!(
+            !crate::librarian::catalog::augmentation::body_keeps_snapshot(
+                &[1u64, 2, 3, 4, 5, 6].into_iter().collect(),
+                &[7u64].into_iter().collect()
+            ),
+            "fixture precondition: this body does NOT keep a snapshot"
+        );
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "the gate silences the row question here, as it should"
+        );
+        let v = scan_params_behind_body(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "but BL-7 has no row at all: {v:?}");
+        assert!(v[0].detail.contains("BL-7"), "{}", v[0].detail);
+    }
+
+    /// The remedy is `append_entry`, NOT a body edit — the opposite of
+    /// `snapshot_drift`'s advice. Re-rendering the snapshot from params here would
+    /// delete the six rows that are the newer record, so the message getting this
+    /// backwards is data loss rather than noise.
+    #[test]
+    fn params_behind_body_names_append_entry_as_the_remedy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "remedy",
+            tmp.path(),
+            "| ID |\n| BL-1 |\n| BL-2 |\n",
+            &["BL-1"],
+        );
+
+        let v = scan_params_behind_body(&cat.conn).unwrap();
+        let detail = &v[0].detail;
+        assert!(detail.contains("append_entry"), "{detail}");
+        assert!(
+            !detail.contains("re-render the snapshot section from params"),
+            "that is `snapshot_drift`'s remedy and it destroys the newer record: {detail}"
+        );
+    }
+
+    /// The sample cap needs a fixture that EXCEEDS it — a minimal one proves only the
+    /// under-cap case and leaves `if more > 0` unexecuted. Memory
+    /// `test-design-discipline`: that exact hole shipped in `grep`'s
+    /// `completeness_warning` with seven green tests.
+    #[test]
+    fn params_behind_body_caps_its_sample_and_counts_the_remainder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let body: String = (1..=13).map(|n| format!("| BL-{n} |\n")).collect();
+        seed_tracker(&cat, "capped", tmp.path(), &body, &["BL-1"]);
+
+        let v = scan_params_behind_body(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let detail = &v[0].detail;
+        assert!(
+            detail.contains("(+4 more)"),
+            "12 unrowed, 8 shown: {detail}"
+        );
+        assert!(
+            !detail.contains("BL-13"),
+            "the 13th must be behind the cap: {detail}"
+        );
     }
 
     /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
