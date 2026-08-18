@@ -49,11 +49,17 @@ pub struct GuideLedger {
     ///
     /// Deliberately a SEPARATE set from `emitted`, and not persisted:
     ///
-    /// - `emitted.is_empty()` is the session-opening guide's trigger in
-    ///   `Tool::call_content`. A sentinel key stashed in `emitted` would make
-    ///   that false and silently suppress `SESSION_OPENING_GUIDE` — for
-    ///   exactly the sessions a notice fires in, since notices fire on the
-    ///   first eligible call.
+    /// - the opener's trigger in `Tool::call_content`
+    ///   (`!emitted.contains(SESSION_OPENING_GUIDE)`, `src/tools/core/types.rs:703`)
+    ///   only cares whether that one literal topic string is present. A
+    ///   sentinel key stashed in `emitted` therefore only risks suppressing
+    ///   the opener if it collides with that exact string — the same
+    ///   collision the next bullet already rules out by keeping notices out
+    ///   of the topic namespace. (Before 2026-08-18 the trigger was
+    ///   `emitted.is_empty()`, under which ANY sentinel key made that false
+    ///   and silently suppressed `SESSION_OPENING_GUIDE` for exactly the
+    ///   sessions a notice fires in — the reason this split existed
+    ///   originally.)
     /// - keeping it out of `emitted` also keeps it out of the topic
     ///   namespace, so a notice key can never collide with a future guide
     ///   topic, and out of the persisted JSON — which now carries a
@@ -149,9 +155,15 @@ impl GuideLedger {
     /// Has nothing been surfaced yet this session?
     ///
     /// True at session start and again after [`clear`](Self::clear) (workspace
-    /// activate / post-compact re-arm). This is the condition that fires the
-    /// session-opening guide from any tool — see
-    /// `prompts::SESSION_OPENING_GUIDE`.
+    /// activate / post-compact re-arm). An empty ledger always lacks
+    /// `SESSION_OPENING_GUIDE`, so this used to double as the session-opening
+    /// guide's firing condition. As of 2026-08-18 the opener fires on the
+    /// strictly weaker `!emitted.contains(SESSION_OPENING_GUIDE)`
+    /// (`Tool::call_content`, `src/tools/core/types.rs:703`), so a non-empty
+    /// ledger that merely lacks the bootstrap topic — e.g. after a surgical
+    /// `re_arm` — also fires it. `is_empty` is no longer that condition; it
+    /// is used where "nothing surfaced yet" itself is the question (e.g. a
+    /// fresh session).
     pub fn is_empty(&self) -> bool {
         self.emitted.is_empty()
     }
@@ -319,11 +331,13 @@ impl GuideLedger {
     /// live processes sharing one session id would need to write simultaneously
     /// for that to matter, and an MCP reconnect is kill-then-spawn, not overlap.
     ///
-    /// Deleting on empty is load-bearing beyond tidiness: `is_empty()` is what
-    /// fires `SESSION_OPENING_GUIDE` (`src/tools/core/types.rs:703`), so a ledger
-    /// emptied by `expire_idle` re-opens the session on its next load. That is
-    /// intended for a client idle past its TTL — spec §7. Writing `{}` here
-    /// instead would suppress the opener permanently.
+    /// Deleting on empty is load-bearing beyond tidiness: an empty ledger
+    /// always lacks `SESSION_OPENING_GUIDE`, so the opener's trigger
+    /// (`!emitted.contains(SESSION_OPENING_GUIDE)`, `src/tools/core/types.rs:703`)
+    /// holds again once loaded — so a ledger emptied by `expire_idle`
+    /// re-opens the session on its next load. That is intended for a client
+    /// idle past its TTL — spec §7. Writing `{}` here instead would suppress
+    /// the opener permanently.
     fn persist(&self) {
         let Some(path) = &self.path else { return };
         if self.emitted.is_empty() {
@@ -981,12 +995,15 @@ mod tests {
     #[test]
     fn expiring_the_last_topic_deletes_the_file_so_the_session_opener_re_fires() {
         // DECISION, not an accident (spec §7, confirmed 2026-08-18): a fully
-        // expired ledger re-opens the session. `is_empty()` is the opener's
-        // trigger (src/tools/core/types.rs:703), and persist deletes the file
-        // when the map empties — so a reload is empty and the opener fires.
-        // Pinned because both halves look like reasonable refactors: making
-        // persist write `{}` instead of deleting would suppress the opener
-        // permanently, and nothing else would catch it.
+        // expired ledger re-opens the session. An empty ledger always lacks
+        // `SESSION_OPENING_GUIDE`, so the opener's trigger
+        // (`!emitted.contains(SESSION_OPENING_GUIDE)`,
+        // src/tools/core/types.rs:703) holds again once loaded; persist
+        // deletes the file when the map empties, so a reload comes back
+        // empty and the opener fires. Pinned because both halves look like
+        // reasonable refactors: making persist write `{}` instead of
+        // deleting would suppress the opener permanently, and nothing else
+        // would catch it.
         use std::time::Duration;
         let dir = tempfile::tempdir().unwrap();
         let mut l = GuideLedger::load("s-expire", Some(dir.path().to_path_buf()));

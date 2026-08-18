@@ -691,9 +691,10 @@ pub trait Tool: Send + Sync {
         let hint_topic: Option<String> = {
             let mut emitted = ctx.guide_hints_emitted.lock();
             // Anonymous tier only (a no-op when no TTL is configured): re-arm
-            // topics the model plausibly no longer holds. Must run BEFORE
-            // is_empty(), or an expiry that empties the ledger goes unseen until
-            // the next call.
+            // topics the model plausibly no longer holds. Must run BEFORE the
+            // opener check below (`!emitted.contains(SESSION_OPENING_GUIDE)`),
+            // or an expiry that empties the ledger goes unseen until the next
+            // call.
             let rearmed_count = emitted.tick();
             if rearmed_count > 0 {
                 tracing::debug!(

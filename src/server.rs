@@ -4382,11 +4382,18 @@ mod guide_hint_tests {
 
     #[tokio::test]
     async fn a_refusal_does_not_suppress_the_session_opening_guide() {
-        // The hazard this design had to avoid. `GuideLedger::emitted.is_empty()`
-        // is the session opener's trigger, so stashing the refusal key there
-        // would silently cost every session that happens to start with a
-        // refusal its orientation guide. `notice_once` keeps it in the separate
-        // `notices` set for exactly this reason.
+        // The hazard this design had to avoid. Before 2026-08-18 the opener's
+        // trigger was `GuideLedger::emitted.is_empty()`, so stashing the
+        // refusal key (`refusal-predicate:<family>`) in `emitted` via `insert`
+        // rather than `notice_once` would have silently cost every session
+        // that happens to start with a refusal its orientation guide — ANY
+        // key landing in `emitted` made it non-empty. As of 2026-08-18 the
+        // trigger is `!emitted.contains(SESSION_OPENING_GUIDE)`
+        // (`src/tools/core/types.rs:703`), under which a refusal key would
+        // only matter if it collided with that literal topic string — which
+        // it does not. `notice_once` keeps it in the separate `notices` set
+        // regardless, since that also protects the topic namespace and the
+        // persisted stamp shape (see `GuideLedger::notices`).
         let (_dir, server) = make_server().await;
 
         let refused = server
@@ -4594,7 +4601,7 @@ mod guide_hint_tests {
     /// false — which is why a surgical re-arm would inject nothing.
     #[tokio::test]
     async fn opener_fires_when_bootstrap_absent_from_a_nonempty_set() {
-        let (dir, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
 
         // Seed a non-empty ledger that deliberately lacks the bootstrap topic.
@@ -4617,7 +4624,6 @@ mod guide_hint_tests {
             "a ledger without the bootstrap topic must re-open the session, \
              even though it is not empty"
         );
-        let _ = dir;
     }
 
     /// Retires a latent bug: an explicit get_guide as the session's first call
@@ -4641,7 +4647,7 @@ mod guide_hint_tests {
         // response, not a later one. Verified empirically: asserting on the
         // second (`run_command`) call's content fails even with the fix
         // applied, because the opener already fired and deduped by then.
-        let (dir, server) = make_server().await;
+        let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
 
         let guide = tool_by_name(&server, "get_guide");
@@ -4667,7 +4673,6 @@ mod guide_hint_tests {
             !content_carries_guide_body(&second, crate::prompts::SESSION_OPENING_GUIDE),
             "the opener must not re-fire once already delivered"
         );
-        let _ = dir;
     }
 
     /// Regression for docs/issues/archive/2026-06-01-librarian-adapter-stale-is-write.md:
