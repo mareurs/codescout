@@ -11,7 +11,7 @@ topic: prompt-surfaces
 entry_prefix:
 - F
 - W
-entry_high_water_F: 4
+entry_high_water_F: 5
 entry_high_water_W: 2
 ---
 
@@ -36,6 +36,7 @@ entry_high_water_W: 2
 | F-2 | 2026-08-18 | med | self-friction | fixed-verified | Read wire duplication as source duplication — the `workspace` param is injected once, not authored 24× |
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 | F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
+| F-5 | 2026-08-19 | high | self-friction | fixed-verified | A guard that names the invariant but never exercises it — forcing the gate open left 62/62 passing; "mutation-tested" is a per-ASSERTION claim, not a per-commit one |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -355,6 +356,61 @@ on legibility and measure them.*
 
 **Status:** validated — two datapoints, both this session, both pointing the same way.
 Awaiting the promotion criterion.
+
+## F-5 — A guard that names the invariant but never exercises it — "I mutation-tested it" is a per-ASSERTION claim, not a per-commit one
+
+**Observed:** 2026-08-19, reviewing `b3161def` (the A-29 pin notice) before running any
+arm. The commit shipped four assertions and its message reported "mutation-verified …
+3 of 3 killed".
+
+**Expected:** `switch_away_hint_carries_no_pin_notice_while_the_gate_is_shut` guards the
+default-off invariant — that an unmeasured intervention cannot reach production.
+
+**Got:** it guarded nothing. It checked the gate parser and that the suffix string was
+non-empty; it never touched the composed hint. **Forcing
+`workspace_pin_notice_enabled()` to return `true` unconditionally left all 62 tests in
+the module passing.** The neighbouring `activate_hint_shows_switched_when_away_from_home`
+cannot catch it either — it asserts `contains`, which an appended suffix does not disturb.
+
+**Probable cause — and the part worth carrying forward.** The commit *did* mutation-test
+three assertions, honestly and successfully. The fourth was the one whose mechanism I had
+not thought through, and it is exactly the one that got a coverage claim instead of a
+mutation. **Mutation-testing is a claim about an ASSERTION, not about a commit**; reporting
+"3 of 3 killed" alongside a fourth untested assertion reads as full coverage and is how a
+green bar acquires authority. The tell was available and I did not look: the three tested
+assertions each named a *string*, and the untested one named a *behaviour* — and only the
+behaviour needed a real call to observe.
+
+**Second defect, found by the same fix.** Once the guard drove a real activation, its
+failure message printed the composed hint — which read *"remember to `workspace(...)` when
+done"* immediately followed by *"do not activate"*. A flat contradiction, invisible in
+source because the two halves sit ~200 lines apart and each is fine alone. It would have
+shipped into A-29's arms and measured a muddled instruction while still returning a number.
+**Reading the artifact the user actually receives is a different act from reading the code
+that builds it**, and only the first one finds this class.
+
+**Workaround:** none needed — both fixed in `b8f6200a`. The guard now drives a real
+activation and asserts on the returned hint; the intervention text conditions both
+instructions instead of appending one after the other.
+
+**Severity:** high — not for the bug's blast radius (the gate was shut, so nothing
+shipped) but for the *method*. An unmeasured prompt intervention reaching production with
+a green suite is the precise failure the inverted guards on A-25/A-26/A-27 exist to
+prevent, and the guard that was supposed to prevent it was itself the hole.
+
+**Status:** fixed-verified — mutation re-applied after the fix; the new guard fails,
+naming the leaked marker.
+
+**Fix idea / Pointer:** two habits, both cheap:
+
+1. **Mutate the invariant, not the helper.** If a guard's name says "X cannot reach
+   production", the mutation is *make X reach production* — not *break the parser X reads*.
+   If the whole suite still passes, the guard is decorative.
+2. **Assert on the artifact the caller receives.** For anything composed from parts
+   (hints, prompts, rendered surfaces), a test over the parts cannot see contradiction
+   between them. Related: [[W-2]] on measuring the wrong axis, and the same lesson at
+   harness level as `prompt-engineering:OP-5`, where a checker missing its exec bit
+   reports a clean `0/N` that is character-identical to a genuine floor.
 
 ## Template for new entries
 

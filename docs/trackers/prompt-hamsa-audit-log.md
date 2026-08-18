@@ -1166,3 +1166,59 @@ behaviour** — not whether it is worth doing.
 Outcome (4) is a live possibility and would retroactively weaken A-28. It is written here
 **before** running, so that it reads as a pre-registered branch rather than a post-hoc
 rescue of a result I would rather keep.
+
+
+### A-29 — implementation status (pre-arm, 2026-08-19)
+
+**The intervention is BUILT and OFF. No arm has run; `outcome` stays empty per P-2.**
+
+| | |
+|---|---|
+| code | `codescout:b3161def`, reviewed and fixed in `codescout:b8f6200a` |
+| gate | `CODESCOUT_WORKSPACE_PIN_NOTICE=1\|true`, **default OFF** |
+| where | `src/tools/config/mod.rs` — `workspace_pin_contrast`, both `SwitchAway` branches |
+| guard | `switch_away_hint_carries_no_pin_notice_while_the_gate_is_shut` (drives a real activation) |
+| scenario | `prompt-engineering/scenarios/workspace-pin-notice/` — arm A only, `runs: 1` smoke |
+| harness | `prompt-engineering:da67b42` made the Layer-3 subscription path work at all |
+
+**Reconnaissance changed the design twice, and both are load-bearing for anyone resuming:**
+
+1. The trigger already existed — `HintScenario::SwitchAway` classifies exactly this
+   activation, and `Agent::note_activation` already *detects* the concurrent clobber. Its
+   doc comment says "the real fix is per-request workspace pinning". The information was
+   computed and thrown away.
+2. The competing instruction **is the sentence being replaced**. The stock `SwitchAway`
+   hint said "remember to `workspace(action='activate', …)` when done" — it teaches
+   activate-then-restore and never mentions the pin, so it normalises the very behaviour
+   A-28 measured as the failure.
+
+**Two defects found in review, before any arm — both would have contaminated the run:**
+
+- The first guard was a **green bar**: it claimed the default-off invariant in its name
+  and never touched the composed hint. Forcing the gate permanently open left **62/62
+  passing**. An unmeasured intervention could have shipped with nothing failing.
+- The text **contradicted itself**. Appending produced adjacent sentences reading
+  "remember to … activate … when done" and then "do not activate". Found only by reading
+  the real composed string out of a failing test — in source the halves are ~200 lines
+  apart and each looks fine alone. Since A-26's finding is that competing instructions
+  decide whether guidance lands, this would have measured a muddled instruction and still
+  returned a number. Both clauses are now **conditioned**.
+
+**What blocks the run: `G-13`** (`prompt-engineering/docs/trackers/prompt-tdd-harness-backlog.md`).
+`tool_not_called` accepts no `args` matcher, so *"`workspace` was never called"* is
+expressible and *"never called **with `action: activate`**"* is not — and
+`workspace(action="status")` is legitimate. The smoke run failed on exactly that
+imprecision, so its result is uninterpretable and is **not** a datapoint.
+
+**To resume, in order:**
+
+1. Write a custom checker over `PROMPT_TDD_TRACE_FILE` (tier 4 exports it) classifying
+   activate / pinned / abs-path / neither. Mutation-test it in two layers first (P-6).
+2. Build arms B/C/D from arm A by substitution; assert the stimulus is byte-identical.
+   Arm C sets `CODESCOUT_WORKSPACE_PIN_NOTICE=1` — `run_env = {**os.environ}`, so it
+   propagates to the MCP subprocess.
+3. `scripts/run_arms.py --config scenarios/workspace-pin-notice/prompt_tdd.yaml --all`.
+4. Cost: ~$0.27/run measured, so ~$11 for 4×10. Subscription-billed, not the paid API —
+   `via_subscription` stays true because this scenario has no `AskUserQuestion` gate.
+5. `mcp_command` must stay pointed at the **debug** binary; the release build on PATH is
+   a different tree (OP-7).
