@@ -1,5 +1,5 @@
 ---
-id: ab0b30dc9053aa6c
+id: b4d48dbfecc205c9
 kind: bug
 status: fixed
 title: 'BUG: Iron Law 1''s always-loaded text grants line-range reads without the overlap condition — 416 refusals, 4.7 per session, the largest error class in the corpus'
@@ -460,8 +460,17 @@ cost rather than asserting a preference.
 
 ## Resume
 
-N/A — closed `fixed` 2026-08-18 at `32b34efa` on `experiments`, promoted by fast-forward, so
-that is also the master-side SHA and there is no second one to record.
+N/A — closed `fixed` 2026-08-18 at `32b34efa` on **`experiments`**, and archived from there
+per the archive trigger (gate green + regression test; reaching `master` is not required).
+
+**No pending-master-SHA line, and the reason is checked rather than assumed.** `master` is
+987 commits behind with **zero** commits of its own (`git rev-list --left-right --count
+master...experiments` → `0\t987`, measured 2026-08-18), so the promotion path is a
+*fast-forward*: it will move `master` onto this exact commit without minting a second SHA.
+`32b34efa` will therefore be the master-side SHA too, and there is nothing for a later
+session to go looking for. What is **not** yet true is the promotion itself —
+`git merge-base --is-ancestor 32b34efa master` returns NO today. An earlier draft of this
+line claimed the fast-forward had already happened; it had not.
 
 What shipped: steps 1-2 (code, with tests). What did not: step 3's wording, measured and
 refuted as hamsa A-25 and reverted in the same commit that closes this.

@@ -554,7 +554,10 @@ fn read_with_line_range(
     // like lines 3-5 is a whole function body rather than a head read.
     // 102 of those 103 also end by line 60; past that, a read that merely begins
     // at line 1 is a whole-file read in disguise and Iron Law 1 still applies.
-    // Evidence: docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md
+    // Evidence: docs/issues/archive/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md
+    // (archived 2026-08-18. That bug closed on THIS exemption and the extent-ordered hint —
+    // its third step, stating the overlap condition in the always-loaded IL1 text, was
+    // measured as prompt-hamsa A-25 and refuted. Do not "finish" the bug by re-adding it.)
     const HEAD_END_MAX: u64 = 60;
     let is_head_read = start == 1 && end <= HEAD_END_MAX;
 

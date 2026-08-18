@@ -575,34 +575,72 @@ Add to decision tree:
 | `grep("a\|b\|c")` across a dir to find concept files | `grep` with `path=` scope ✓ (if dir known); `semantic_search` only for whole-codebase | Semantic search adds noise when scope is already known |
 | `semantic_search("concept")` when you already know the directory | `grep(pattern, path=<dir>)` | Embeddings rank by whole-codebase similarity; grep is a hard path filter |
 
-### Iron Law 1 — state the overlap condition, not just the permission (2026-08-15)
+### Iron Law 1 — state the overlap condition, not just the permission (2026-08-15) — MEASURED AND REFUTED 2026-08-18
 
-**Surface:** `src/prompts/source.md:8-9` (the `server_instructions` slice — always loaded).
+> **This candidate is closed. Do not implement the wording below.** It shipped 2026-08-16, was
+> deleted the next day by a character-budget refit (`391fdcdc`), was restored, and was then put
+> through the subtract-and-measure protocol as prompt-hamsa **A-25** — where it lost. Reverted at
+> `32b34efa` on `experiments`, behind an **inverted** guard test
+> (`il1_does_not_carry_the_refuted_overlap_clause`) that fails if the clause returns. Everything
+> below the ruling is kept because the *diagnosis* held up; only the *fix* did not.
 
-**Current text:** *"Line-range read_file is fine for imports/glue."*
+| Arm (10 runs each, sonnet pinned, rule pre-registered at `e2fbefe2` before either arm ran) | Planned the refused bare line-range read |
+|---|---|
+| A — base, no clause | **10/10** — ship rule needed ≥ 3/10, so the deficit below is **confirmed** |
+| B — with the candidate clause | **8/10** — ship rule needed ≤ 1/10 |
 
-**Problem:** a permission with its condition dropped. The gate refuses any range overlapping any
-named symbol, which in a source file is nearly every line. The on-demand
-`get_guide("iron-laws-detail")` is *correct* (*"Gate is overlap-based, not absolute"*) — so this is a
-**compression defect**, not doc-vs-code drift: the condition lives only on the surface an agent has
-to ask for, while planning happens against the one always in context. Measured cost: the largest
-error family in the corpus (416 lifetime; 87 in August across 15 sessions).
+0/10 → 2/10 passing is Fisher p≈0.47: noise.
 
-**Candidate wording**, condition included and escape named:
+**Why it failed, which is the transferable part:** the clause is *informational*, not *directive*.
+It states the gate's condition but supplies no procedure — and an agent asked for lines 40-55 cannot
+know whether they overlap a symbol without checking, so the clause hands over a fact it cannot act
+on. The one passing arm-B run is the tell: it called `symbol_at` to resolve exactly that unknown.
+Arm A corroborates from the other side — its ten answers disagreed on the *signature* (`lines=`,
+`start/end`, `start_line/end_line`, `line_range=[..]`) while agreeing completely on the *permission*.
+The always-loaded text leaves an agent unsure only about parameter spelling. Not one of the twenty
+runs opened the fixture to check for overlap.
+
+**The live successor is a different intervention, not a re-reading of A-25.** A *directive* wording —
+something shaped like "on a mid-file range, pass `force=true` or fetch the symbol by name" — supplies
+a procedure rather than a fact, which is precisely what A-25 found lacking. It needs its own
+pre-registered A-N row and its own treatment arm; the base arm is already measured at 10/10, so a
+successor does not have to re-run it. Fork
+`prompt-engineering/scenarios/il1-overlap-condition/` (`prompt-engineering:f2f7958`).
+
+---
+
+**Surface:** `src/prompts/source.md:8-10` (the `server_instructions` slice — always loaded).
+
+**Current text** (restored by the revert): *"Line-range read_file is right for imports/glue;
+force=true overrides."*
+
+**Problem — confirmed by arm A, and it is still open.** A permission with its condition dropped. The
+gate refuses any range overlapping any named symbol, which in a source file is nearly every line. The
+on-demand `get_guide("iron-laws-detail")` is *correct* (*"Gate is overlap-based, not absolute"*) — so
+this is a **compression defect**, not doc-vs-code drift: the condition lives only on the surface an
+agent has to ask for, while planning happens against the one always in context. Measured cost: the
+largest error family in the corpus (416 lifetime; 87 in August across 15 sessions).
+
+**Candidate wording — REFUTED, retained only so a later session recognises it and does not re-add it:**
 
     Line-range read_file is fine for imports/glue; on source a range
     overlapping a symbol is refused - pass force=true for an exact slice.
 
-**Constraint:** the slice is capped at 2200 bytes (`src/prompts/README.md`), so something else in it
-has to give. That trade is the open decision, not the wording.
+**Constraint:** the slice is capped at 1900 **characters** (`src/prompts/README.md`), so something
+else in it has to give. That trade was costed in the bug file; the § Fix cap table there is retired,
+and the character accounting in its § Evidence *Regression* is the live one.
 
 **Do not pair this with relaxing the gate.** T-18 records that the guard is healthy for the
 symbol-body population; only the non-definition minority is mis-served, and that is better fixed at
-the gate's head-read case than by weakening it.
+the gate's head-read case than by weakening it — which is what actually shipped: the head-read
+exemption (`start == 1 && end <= 60`) plus the extent-ordered hint exempt 102 of 103 `start == 1`
+refusals, are code with their own tests, and were never subject to the prompt-eval gate.
 
-Evidence: `docs/issues/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md`,
-`docs/trackers/2026-08-15-tool-usage-investigation.md` TU-2 / TU-11b.
-
+Evidence: `docs/issues/archive/2026-08-15-il1-always-loaded-text-omits-the-overlap-condition.md`
+(archived 2026-08-18; catalog id `b4d48dbfecc205c9` — the move re-keyed it, so any earlier id cited
+for this bug no longer resolves),
+`docs/trackers/2026-08-15-tool-usage-investigation.md` TU-2 / TU-11b, and
+`docs/trackers/prompt-hamsa-audit-log.md` A-25 for the full pre-registration and outcome.
 ### Progressive-disclosure guide — document the handle addressing grammar (2026-08-15)
 
 **Surface:** `get_guide("progressive-disclosure")` (guide topic, not the byte-capped slice).

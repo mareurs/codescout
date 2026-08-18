@@ -55,7 +55,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-11 | 2 | `context`/`workspace_state_at`/`link_scan` never dedup the worktree overlay | done | `d31233700ca979c2` |
 | BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
 | BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | **done, archived** | `a742a50ea6723daf` |
-| BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
+| BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording — ran as hamsa A-25, clause LOST (base 10/10, clause 8/10 vs a ≤ 1/10 ship bar), reverted at `32b34efa` behind an inverted guard | **done, archived** | `b4d48dbfecc205c9` |
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | done | `1780acde047ffca2` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | done | `6902806f459fcf62` |
 | BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | open | `403e3fad0356f171` |
@@ -78,6 +78,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
+| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | open | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
