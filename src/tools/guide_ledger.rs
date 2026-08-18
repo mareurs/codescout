@@ -141,8 +141,8 @@ impl GuideLedger {
 
     /// Forget the named topics so they inject again, leaving every other topic
     /// in place. This is the surgical twin of [`clear`](Self::clear): a project
-    /// switch re-teaches only the project-scoped guide, not the nine
-    /// tool-contract guides the model already holds.
+    /// switch re-teaches only the project-scoped guide, not the tool-contract
+    /// guides the model already holds.
     ///
     /// Persists only when something was actually removed.
     pub fn re_arm(&mut self, topics: &[&str]) {
@@ -492,10 +492,33 @@ mod tests {
 
     #[test]
     fn re_arm_of_an_absent_topic_is_a_no_op() {
-        let mut l = GuideLedger::default();
+        // File-backed rather than `GuideLedger::default()`: a `default()` ledger
+        // has `path: None`, so `persist()` early-returns unconditionally and this
+        // test could not tell a real no-op from a mutant that calls `persist()`
+        // regardless of whether anything was removed. Reading and asserting the
+        // file's mtime, as `expire_idle_that_changes_nothing_does_not_touch_the_file`
+        // does, closes that gap.
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+
+        let mut l = GuideLedger::load("sess-rearm-absent", Some(hints.clone()));
         l.insert("librarian".to_string());
+        let before = std::fs::metadata(hints.join("sess-rearm-absent.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+
         l.re_arm(&["never-emitted"]);
         assert!(l.contains("librarian"));
+
+        let after = std::fs::metadata(hints.join("sess-rearm-absent.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "re_arm of an absent topic must not rewrite the file"
+        );
     }
 
     #[test]
@@ -544,5 +567,18 @@ mod tests {
             .modified()
             .unwrap();
         assert_eq!(before, after, "a no-op expiry must not rewrite the file");
+    }
+
+    #[test]
+    fn expire_idle_of_an_unconvertible_duration_is_a_no_op() {
+        // std::time::Duration::MAX is far outside chrono::Duration's representable
+        // range, so `from_std` fails and the `else { return 0 }` branch fires
+        // without ever touching `self.emitted`. A mutant that returns
+        // `self.emitted.len()` instead of `0` here would return 1, not 0 — this
+        // is the only test that exercises that branch at all.
+        let mut l = GuideLedger::default();
+        l.insert("librarian".to_string());
+        assert_eq!(l.expire_idle(std::time::Duration::MAX), 0);
+        assert!(l.contains("librarian"));
     }
 }
