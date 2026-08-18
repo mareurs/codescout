@@ -58,12 +58,17 @@ measurement is picking up something other than what we think.
 
 ### S-03 — `re_arm` returns `()` where `expire_idle` returns `usize` ✅ DECIDED 2026-08-19
 
-Phase C's `ActivateProject::call` is the first real caller this entry was waiting on: it
+Phase C's `ActivateProject::call` was the first real caller this entry was waiting on: it
 calls `led.re_arm(PROJECT_SCOPED)` only when `led.rendezvous_active()` and the project
-actually switched, and discards the return value — no logging. The caller already knows
-exactly which topic it named, so a removal count would carry no information;
-`expire_idle`'s caller (the idle-TTL sweep) doesn't know in advance what it will find,
-which is why that one needs a count. The design spec's own `GuideLedger` API sketch (§3
+actually switched, and discards the return value — no logging. There are now **two**
+production callers, not one: `CodeScoutServer::from_parts_with_env` (`src/server.rs`)
+also calls `led.re_arm(PROJECT_SCOPED)`, on any non-empty reloaded ledger at server
+construction — ungated by rendezvous state — and likewise discards the return value.
+Both callers already know exactly which topic they named, so a removal count would
+carry no information at either call site; `expire_idle`'s caller (the idle-TTL sweep)
+doesn't know in advance what it will find, which is why that one needs a count. Two
+callers, neither wanting the value, *strengthens* the "leave it `()`" ruling rather than
+undermining it. The design spec's own `GuideLedger` API sketch (§3
 `GuideLedger` API, `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`)
 never gave `re_arm` a return value either, so the asymmetry was deliberate from the design,
 not an oversight waiting on a caller to decide it. Left as `()`; no harmonization needed.

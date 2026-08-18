@@ -2469,7 +2469,7 @@ direction that made the work look bigger or impossible.**
 |---|---|
 | "a 38-site mechanical change to `ToolContext`" | **133** construction sites (`guide_hints_emitted:` → 134 matches, one the declaration) |
 | "pick one deliberately; do not add a second one-shot mechanism" — a binary between a `ToolContext` field and a ledger sentinel | A **third** option existed: a separate `notices` set on `GuideLedger`. One construction site, no namespace collision |
-| the sentinel is "a semantic compromise" | It is a **live regression**: `types.rs:626` reads `if emitted.is_empty()`, which IS the session-opening guide's trigger |
+| the sentinel is "a semantic compromise" | It is a **live regression**: `Tool::call_content` (`src/tools/core/types.rs`) gated the session-opening guide on `emitted.is_empty()` at the time of this observation — any key landing in `emitted` suppressed it. (As of Phase C, 2026-08-18, the trigger is `!emitted.contains(SESSION_OPENING_GUIDE)`; a sentinel outside that literal topic string no longer collides — see `GuideLedger::notices`.) |
 | "the guard proves the condition is detectable, and then only spends the detection on half the surface" | It spends it on **neither**. `guard_worktree_write` returns `Ok` on line 1 in every real session |
 | "Not yet reproduced — no worktree session with shadow rows was active" | A unit fixture reproduced **both** halves in milliseconds; the second half needed no worktree session at all |
 
