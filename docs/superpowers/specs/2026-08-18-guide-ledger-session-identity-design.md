@@ -576,5 +576,53 @@ Also update memory `claude-code-mcp-env` with the lifecycle matrix.
    the tier-2 caveat.
 2. ~~GC window~~ — **resolved 2026-08-18 by measurement.** 35 days on idle age; 30 d is the
    first zero-loss value and 35 d adds headroom above the 28.9 d observed maximum. See §8.
-3. Whether to ship the `_meta` reader (rank 3) now or when a client sends one. **Still
-   open** — ~30 lines, no current sender, forward-compatible with `transports-wg#36`.
+3. ~~Whether to ship the `_meta` reader (rank 3) now~~ — **still deferred, but the reasoning
+   is now measured rather than assumed.** Researched 2026-08-18 against primary sources; the
+   findings below correct three claims this document made from memory.
+
+### Rank 3 (`_meta`) — what the ecosystem actually supports, measured 2026-08-18
+
+**The protocol moved, and this document's framing of `_meta` was stale.** The current spec
+revision (**2026-07-28**) *removed* protocol-level sessions and `Mcp-Session-Id` entirely
+(SEP-2567), making every request stateless and self-describing via `_meta`. So `_meta` is not a
+niche side-channel — it is now protocol-core, carrying `protocolVersion` and `clientInfo`. The
+stdio transport spec also states outright that there is no header layer, so for a stdio server
+`_meta` is the *only* per-request channel that exists.
+
+**But there is no reserved key for conversation identity, and the proposal for one was closed.**
+`Mcp-Client-Session-Id` via `params._meta` (PR #2822) — transport-agnostic, stdio included,
+shaped exactly like what this design wants — was closed by a maintainer for lacking "compelling
+use cases", and redirected to `transports-wg#36` (opened 2026-06-08, still soliciting them).
+So rank 3 today means inventing a private key and hoping the eventual standard matches.
+
+**One real client does send per-request conversation metadata**, contradicting this document's
+"no client sends it today": **OpenAI Codex CLI** merged `x-codex-turn-metadata` in `_meta`
+(PR #15190, 2026-03-19). It is vendor-namespaced, which is the significant part — it means the
+eventual shape of rank 3 is **a probe list of known keys**, structurally identical to rank 2's
+`HARNESS_SESSION_VARS`, not a single standard key. Claude Code, Claude Desktop and claude.ai
+send **no** conversation identifier; that is confirmed by an open first-party issue (#41836),
+not merely by absence of evidence.
+
+**`rmcp` support confirmed at the source**, not from docs: `rmcp-1.3.0/src/service.rs:654-663`
+populates `RequestContext.meta` from the request's own `_meta`, and `Meta` is a generic
+JSON-object wrapper rather than a `progressToken`-only carrier.
+
+**A risk this research surfaced that was not previously recorded:** rank 2 depends on
+`CLAUDE_CODE_SESSION_ID`, which genuinely *is* set in the MCP subprocess environment (verified
+on this host) but is **undocumented in any official Claude Code source** — multiple feature
+requests ask for a differently-named variable with no acknowledgment the existing one exists. It
+could be renamed or removed without notice. The Agent-Agnostic degradation covers that (the
+server falls to the anonymous tier plus the §7 TTL rather than misbehaving), but the dependency
+is on an undocumented interface and should be read that way.
+
+**Consequence for the "Out of scope" item below.** Filing the codescout use case on
+`transports-wg#36` is no longer merely "cheap and worth doing" — the WG issue is *explicitly
+soliciting* the use cases whose absence closed PR #2822, and this design has a measured one
+(~900K tokens, a reproducible mechanism, and a working-but-plugin-dependent workaround). It is
+the single highest-leverage action available for removing the companion dependency.
+
+`env`-in-config support is near-universal across clients (confirmed for Claude Desktop, Claude
+Code, Cursor, VS Code, Zed, Continue, JetBrains), and — the load-bearing half — it is resolved
+**once at launch and never refreshed** in every client checked. That is why an env var cannot
+track a conversation change, and it is what makes the rendezvous necessary rather than merely
+convenient.
