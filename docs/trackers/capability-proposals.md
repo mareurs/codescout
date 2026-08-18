@@ -528,7 +528,9 @@ artifact found on 2026-08-18 by the same mechanism — a fix landed and nothing 
 document that asked for it. The other two:
 `docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`
 (said "NOT yet called from any MCP tool" of code already wired) and
-`docs/issues/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`.
+`docs/issues/archive/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`
+(fixed and archived the same day, `d3c1e6ed` — and chasing it one layer down found the real
+origin in `tracker_design`'s archetype defaults, not the guide).
 
 **Open questions.**
 

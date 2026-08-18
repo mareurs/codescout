@@ -400,7 +400,36 @@ Then, whichever branch:
    (1)-(3) land**, so the new check confirms the backfill rather than the backfill hiding the
    absence of a check.
 
-5. **Fix the guide in the same change.** `get_guide("tracker-conventions")` presents the two entry
+5. **Fix the guide. — DONE, `d3c1e6ed`, and it went one layer deeper than planned.**
+   `get_guide("tracker-conventions")` § *One entry format, never two* no longer offers a
+   params-rendered index as an equal option: the headings ARE the index, and the withdrawal cites
+   both measured reasons (no `render_template` writes a body; rows are uncitable). Fixed in the
+   same pass as bug `450df27edcfe9c08` (the `id:`-stamping prescription), since both were
+   prescription defects in one file. One sentence also went into `guides/librarian.md`, which
+   auto-injects every session and whose *"don't hand-maintain the table"* heading reads as *"a
+   table appears for you"*.
+
+   **The origin was NOT the guide, and this is the transferable part.**
+   `librarian(tracker_design)` — the surface CLAUDE.md tells you to call *before* creating a
+   tracker — shipped the losing shape as an archetype **default**: `task_list` (the archetype the
+   `BL-N` queue uses) had **no per-entry section at all** alongside a row-rendering
+   `render_template_example`; `failure_table` documented entry headings as *"Optional … when
+   warranted"*; `constitution` prescribed `` `## C-N` `` with no dash-and-title, which defines
+   nothing. An author following any of them faithfully produced exactly the ledgers step 3 found.
+   All three corrected, plus Step 6 of the teaching prompt, and `task_list` gained the
+   `entry_collection: "tasks"` its own Step 5b prose already claimed it had.
+
+   Guarded structurally rather than by keyword:
+   `every_archetype_with_an_entry_collection_teaches_where_the_defining_heading_goes` keys on each
+   archetype's own `entry_collection` declaration, so a future archetype is covered without anyone
+   remembering the test. Watched fail on `failure_table` first.
+
+   Cost paid honestly: the Step 6 bullet broke `default_response_fits_inline` (10,096 bytes
+   against a 10,000-byte inline threshold), exactly as that test's comment predicted. Trimmed to
+   the essential rule with the measurements moved into the guide — now **9,898 bytes, ~102 bytes
+   of headroom**, down from ~640. Treat 102 as zero.
+
+   Original plan text follows. **Fix the guide in the same change.** `get_guide("tracker-conventions")` presents the two entry
    formats as equivalent choices. Until step 0 lands they are not, and the guide is the reason an
    author picks the one that silently breaks citations. Whichever branch wins, the guide has to say
    what a rendered ledger must emit to be citable.
@@ -467,36 +496,38 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 
 ## Resume
 
-**Steps 0-3 are done.** Step 0 decided branch (a), with the § Fix correction that (a) enforces at
-the write path rather than in template validation. Step 1 `de4df2cd` (the predicate). Step 2
-`f19d5296` (`undefined_in_body` on both entry-writing tools). Step 3 `758b37dc` (the `doctor`
-sweep), verified on the live catalog through the CLI.
+**Steps 0, 1, 2, 3 and 5 are done. Only step 4 — the backfill — is left.**
 
-**Read § Evidence *The real magnitude* before doing anything else.** Step 3 changed this bug's
-size: **13 ledgers across five repos**, and the largest is `provenance-subsystem.md` at 64 of 68
-undefined `PV-N` — six times the population this bug opened on, previously unknown.
+| step | what | SHA |
+|---|---|---|
+| 0 | decided branch (a); template validation dropped after measuring that no template writes an entry-token body | — |
+| 1 | `body_defined_indices`, delegating to `link_scan::extract` | `de4df2cd` |
+| 2 | `undefined_in_body` on `append_entry` / `update_entry` | `f19d5296` |
+| 3 | `doctor` checks `entry_without_definition` / `ledger_defines_nothing` | `758b37dc` |
+| 5 | guide + `librarian.md` + the archetype defaults that were the real origin | `d3c1e6ed` |
 
-**Two things left, and the smaller one should go first.**
+Step 5 was taken before step 4 on purpose — until the intake stopped teaching the losing shape,
+the backfill would have been cleaning up after a source still producing new cases. That turned out
+to matter more than expected: the origin was not the guide but `tracker_design`'s archetype
+**defaults**, and `task_list` — the archetype the `BL-N` queue itself uses — had no per-entry
+section at all. Fixing only the guide would have left every future `task_list` tracker broken by
+default.
 
-**Step 5 (the guide) before step 4 (the backfill).** `get_guide("tracker-conventions")` still
-presents the two entry formats as equivalent choices, and under (a) they are not — an index
-rendered from params yields a ledger whose every entry is uncitable. Until that is fixed, the guide
-keeps minting new instances of exactly what step 4 is cleaning up. It is also cheap: § Root cause's
-*sharper statement* shows `append_entry`'s prose path already states the rule in the right words
-(`:201`, `:210`, and `:136`'s "cannot be born undefined"), so the guide has a correct sentence to
-copy rather than invent.
+**Step 4 is the whole remaining job, and it is content work, not a sweep.** 13 ledgers across five
+repos (§ Evidence *The real magnitude*), largest `provenance-subsystem.md` at 64 of 68. Promoting a
+row to a headed section means writing that entry's title and body. Sequence by **citation damage**
+rather than row count: run `librarian(action="link_scan")`, count how many live citations each
+ledger's undefined entries actually have, and start where the dead links are. `doctor` confirms
+each ledger as it finishes, which is what makes the work checkable in pieces.
 
-**Step 4 last, and not as one pass.** Promoting a row to a headed section means writing that
-entry's title and body — content work, per ledger, per maintainer. 64 of them is a project.
-Sequence by citation damage rather than by entry count: run `librarian(action="link_scan")` and
-count how many live citations each ledger's undefined entries actually have, then start where the
-dead links are, not where the rows are. `doctor` confirms each ledger as it is finished, which is
-what makes the work checkable in pieces.
+Two constraints to carry into it:
 
-One caveat carried forward from the RED runs, still true: `body_claimed_indices` also counts a
-heading inside a fenced block and a code-first `` `A-3` `` heading. Harmless for id allocation —
-over-claiming is safe by that function's own argument — but the *claimed* set is not merely
-"defined plus rows", so do not write documentation that implies it is.
+- **`tracker_design`'s SYSTEM_PROMPT has ~102 bytes of inline headroom.** Any addition must pay for
+  itself with an argued cut; `default_response_fits_inline` is what will say so.
+- **`body_claimed_indices` also counts a heading inside a fenced block and a code-first
+  `` `A-3` `` heading.** Harmless for id allocation — over-claiming is safe by that function's own
+  argument — but the *claimed* set is not merely "defined plus rows", so do not write documentation
+  implying it is.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.

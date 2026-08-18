@@ -78,7 +78,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
-| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0-3 done (`de4df2cd` predicate, `f19d5296` advisory, `758b37dc` doctor sweep). The sweep resized the bug: **13 ledgers across 5 repos**, largest `provenance-subsystem.md` at 64 of 68 undefined `PV-N`. Next is step 5 (fix the guide, which keeps minting new cases) BEFORE step 4 (backfill, now a project not a chore) | `d34dfcd2cc718bd8` |
+| BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Only step 4 left: backfill 13 ledgers across 5 repos (largest 64 of 68), sequenced by citation damage, content work not a sweep | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
@@ -614,9 +614,15 @@ That is a co-change contract enforced by prose — the shape that cost this proj
 needlessly-compiled crates (`docs/adrs/2026-07-25-embedding-transport-boundary.md`). Now a
 parity test over 11 YAML forms.
 
-Follow-up filed rather than folded in:
-`docs/issues/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`.
-`get_guide("tracker-conventions")` still prescribes stamping `id:` into frontmatter — the
-remedy BL-38's own file retracted and `bb9a94d7` reverted — and that guide auto-injects on
-the first `artifact` call of every session, so the disproved advice sits on a louder surface
-than the retraction.
+Follow-up filed rather than folded in — and **fixed later the same day at `d3c1e6ed`**, archived to
+`docs/issues/archive/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`.
+`get_guide("tracker-conventions")` had gone on prescribing stamping `id:` into frontmatter — the
+remedy BL-38's own file retracted and `bb9a94d7` reverted — on a surface that auto-injects at the
+first `artifact` call of every session, so the disproved advice sat somewhere louder than its own
+retraction. It now says *declare `entry_prefix`* instead, which BL-38's fix is what made true.
+
+Chasing it one layer down found the origin: `librarian(tracker_design)`, the surface you are told
+to call *before* creating a tracker, shipped the losing shape as an archetype **default** —
+`task_list` with no per-entry section at all, `failure_table` calling entry headings "optional",
+`constitution` prescribing `## C-N` without the dash-and-title that makes a heading define
+anything. The guide was the second-loudest place the shape was taught, not the cause.
