@@ -39,9 +39,9 @@ How the Claude **Fable** model (`claude-fable-5`) behaved when it "ran great" (J
 ## Local-trace evidence (FND-11..12)
 
 - **130 genuine `model=fable` sessions**, Jun 13 – Jul 6, in `~/.claude-sdd` — **Opus-4.8-dominant with Fable minority** (multi-model usage), plus ~40 `prompt-test` one-offs (active A/B testing).
-- Silent-fallback signature **not found** in 2 sampled sessions (0 refusal / 0 fallback blocks; early Jun-15 & recent Jul-5) — hypothesis unconfirmed in local data; needs a Langfuse served-by / stop_reason check (see tasks T-8/T-9).
+- Silent-fallback signature **not found** in 2 sampled sessions (0 refusal / 0 fallback blocks; early Jun-15 & recent Jul-5) — hypothesis unconfirmed in local data; needs a Langfuse served-by / stop_reason check (see tasks FT-8/FT-9).
 
-**FND-14 (2026-07-07, definitive):** full-corpus scan of served models (JSONL `message.model` = what the API actually returned) across all 3 profiles: 81 fable-containing sessions, ~145k assistant messages, **0 refusal stop_reasons, 0 per-call Opus interleaves**. All 16 mixed-model sessions mix in large contiguous blocks (manual `/model` switches / resumes), never the lone-Opus-response-mid-Fable-run reroute shape. Silent fallback (FND-7) **refuted for local usage** — FND-12 resolved, T-9 done, T-12 dropped. Method, numbers, and the honest-model-field caveat: `fable-tuning-research.md` § Local-trace forensics (2026-07-07 entry).
+**FND-14 (2026-07-07, definitive):** full-corpus scan of served models (JSONL `message.model` = what the API actually returned) across all 3 profiles: 81 fable-containing sessions, ~145k assistant messages, **0 refusal stop_reasons, 0 per-call Opus interleaves**. All 16 mixed-model sessions mix in large contiguous blocks (manual `/model` switches / resumes), never the lone-Opus-response-mid-Fable-run reroute shape. Silent fallback (FND-7) **refuted for local usage** — FND-12 resolved, FT-9 done, FT-12 dropped. Method, numbers, and the honest-model-field caveat: `fable-tuning-research.md` § Local-trace forensics (2026-07-07 entry).
 ## Self-reflection lane — fable vs opus tool-use (FND-17)
 
 **Method.** Bucket recent Langfuse traces by `served_model` (now logged per call — a trace's served_model == the model that drove the agent for that call). Scanned 2000 traces (2026-07-10): opus 1070 / sonnet 845 / **fable 84** (2 sessions) / 1 none.
@@ -50,7 +50,7 @@ How the Claude **Fable** model (`claude-fable-5`) behaved when it "ran great" (J
 
 **Tool discipline (within-subject).** Session `34c9183a` (mirela-backend-kotlin, ~/.claude) ran on fable 09:04–09:58 (62 calls) then switched models. Fable-window tools: read_file 11, run_command 10, artifact 9, symbols 8, read_markdown 6, edit_markdown 5, + task-tracking + 2 Agent dispatches (one a well-formed *opus* review brief). **0 native Bash, 1 native Read** (1.6% native). Rest-of-session (324 calls, opus/sonnet): 2.8% native. No IL-violation surge on fable; if anything the native leak was *lower* — though task-mix confounds it (the fable window skewed toward doc/recon work, which structurally uses codescout tools).
 
-**Caveats.** Cohort thin (89 fable calls, 1 deep-audited session). This session's own fable window (`9175beae`, ~/.claude-sdd) was not deep-audited: `cc.py` is pinned to `~/.claude` (T-10) and mis-encodes dotted worktree dir names (bug filed in llm-proxy `docs/issues/`). Verdict: **parity, not degradation** — corroborates FND-14 (fallback refuted) and FND-16 (anti-tidying ceiling).
+**Caveats.** Cohort thin (89 fable calls, 1 deep-audited session). This session's own fable window (`9175beae`, ~/.claude-sdd) was not deep-audited: `cc.py` is pinned to `~/.claude` (FT-10) and mis-encodes dotted worktree dir names (bug filed in llm-proxy `docs/issues/`). Verdict: **parity, not degradation** — corroborates FND-14 (fallback refuted) and FND-16 (anti-tidying ceiling).
 ## Findings — per-entry anchors
 
 > **Added 2026-08-18.** No `FND-N` heading existed anywhere in this body, so `link_scan` bound none of the eighteen tokens and every citation of them — including the cross-file ones from `prompt-hamsa-audit-log` — resolved to nothing. The grouped sections above carry the narrative for FND-1..13 and FND-17; **FND-14, 15, 16 and 18 had no body section at all**, so their claims existed only in the machine-local catalog. Each anchor below carries the entry's claim, so the record travels with the repo.
@@ -145,13 +145,13 @@ Anti-overplanning and grounded-progress-claims. Narrative: § *The lever (FND-9.
 
 **Dimension:** meta · **Source:** local-audit · **Confidence:** high · **Status:** confirmed
 
-Run as `fable-tuning-tasks:T-7` / hamsa A-13. Neither reasoning-extraction nor token-countdown appears in any delivered surface; the only token language shipped is tool-OUTPUT sizing (progressive-disclosure), which is not a context countdown. Complements FND-10.
+Run as `fable-tuning-tasks:FT-7` / hamsa A-13. Neither reasoning-extraction nor token-countdown appears in any delivered surface; the only token language shipped is tool-OUTPUT sizing (progressive-disclosure), which is not a context countdown. Complements FND-10.
 
 ### FND-16 — The tidying-temptation A/B hit the ceiling: 10/10 surgical with no guidance
 
 **Dimension:** local-trace · **Source:** local-eval · **Confidence:** high · **Status:** confirmed
 
-Run as `fable-tuning-tasks:T-2` / hamsa A-14, fable, runs:10. FND-8's "unrequested tidying" default does not manifest locally on surgical-fix tasks, so the snippet was **not shipped** — the pre-registered ceiling branch fired. Weakens the prior for the T-3..T-6 snippet additions; each still needs its own base-arm-first eval.
+Run as `fable-tuning-tasks:FT-2` / hamsa A-14, fable, runs:10. FND-8's "unrequested tidying" default does not manifest locally on surgical-fix tasks, so the snippet was **not shipped** — the pre-registered ceiling branch fired. Weakens the prior for the FT-3..FT-6 snippet additions; each still needs its own base-arm-first eval.
 
 ### FND-17 — Self-reflection lane: no fable degradation in local tool use
 
@@ -163,7 +163,7 @@ Traces bucketed by `served_model`, n=2000. Engagement comparable — fable 83% `
 
 **Dimension:** local-trace · **Source:** local-eval · **Confidence:** medium · **Status:** confirmed
 
-Run as `fable-tuning-tasks:T-6`, fable, runs:2. Re-pinned the guidance-decay scenario `F-nr-far` to fable: a formatting rule stated once in turn 1, buried under 5 non-code filler turns, with a distant code probe and a mechanical contains-check on `// reviewed` at `pass_threshold` 1.0. **2/2 HELD** — so the T-6 anti-decay / anti-early-stopping snippet has nothing to fix and was **not shipped**, per the pre-registered rule. Extends FND-16's single-turn ceiling along the turn axis. Scenario kept at `prompt-engineering/scenarios/fable-latent-decay/far`. **UNTESTED facet:** autonomous multi-step task QUALITY (the `anthropic_mcp` `max_turns` adapter) — the BridgeMind debug shape. Scripted-history decay is not autonomous-loop degradation.
+Run as `fable-tuning-tasks:FT-6`, fable, runs:2. Re-pinned the guidance-decay scenario `F-nr-far` to fable: a formatting rule stated once in turn 1, buried under 5 non-code filler turns, with a distant code probe and a mechanical contains-check on `// reviewed` at `pass_threshold` 1.0. **2/2 HELD** — so the FT-6 anti-decay / anti-early-stopping snippet has nothing to fix and was **not shipped**, per the pre-registered rule. Extends FND-16's single-turn ceiling along the turn axis. Scenario kept at `prompt-engineering/scenarios/fable-latent-decay/far`. **UNTESTED facet:** autonomous multi-step task QUALITY (the `anthropic_mcp` `max_turns` adapter) — the BridgeMind debug shape. Scripted-history decay is not autonomous-loop degradation.
 ## History
 
 ### 2026-07-07 — tracker created

@@ -30,10 +30,10 @@ How did Fable behave when it "ran great" (Jun 9 2026 GA / April Mythos Preview) 
 ## Local-trace forensics (this machine)
 
 - **130 genuine `model=fable` sessions** Jun 13–Jul 6 (`~/.claude-sdd`); **Opus-4.8-dominant, Fable minority**; ~40 `prompt-test` one-offs. `prompt-hamsa-audit-log` (id `59ebeebb6ed05c89`) already runs pre-registered A/B evals with "original Fable captures" as a baseline.
-- **Fallback check:** 2 sampled sessions (Jun-15, Jul-5) → 0 refusal, 0 fallback blocks. Silent-fallback unconfirmed locally; needs a Langfuse served-by check (tasks T-8/T-9).
+- **Fallback check:** 2 sampled sessions (Jun-15, Jul-5) → 0 refusal, 0 fallback blocks. Silent-fallback unconfirmed locally; needs a Langfuse served-by check (tasks FT-8/FT-9).
 - **Tooling caveats:** `cc.py` is pinned to `~/.claude` (can't read the sdd sessions); `lf.py` Langfuse keys didn't auto-discover.
 
-**2026-07-07 — T-9 full-corpus served-model scan (definitive local answer to FND-7/FND-12).**
+**2026-07-07 — FT-9 full-corpus served-model scan (definitive local answer to FND-7/FND-12).**
 
 *Method:* the Langfuse lane turned out impossible — llm-proxy logs the **request-side** model (`passthrough.rs` `parsed.get("model")`) and discards the response's `/message/model` in both SSE and buffered paths, so "served-by" never reached Langfuse. Instead scanned CC JSONL directly: every assistant message stores the API response's `model` field = the served model. Scanner: session scratchpad `fallback_scan.py` (aggregates only; per-session model-run compression + refusal stop_reason counts) over `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`.
 
@@ -41,7 +41,7 @@ How did Fable behave when it "ran great" (Jun 9 2026 GA / April Mythos Preview) 
 
 *Caveat:* detection relies on the response `model` field being honest. That is the same channel BridgeMind used to count 9/12 rerouted tasks (FND-7), so the mechanism *as reported* would have been visible here.
 
-*Verdict:* **silent Opus fallback REFUTED for local usage** → FND-14 (findings), FND-12 resolved, T-9 done, T-12 dropped as moot. Forward monitoring **SHIPPED same day** (user go-ahead): llm-proxy now captures `/message/model` as `served_model` — trace metadata `requested_model`/`served_model`, `lf.py find` SERVED column + `lf.py trace` mismatch marker; verified live post-restart. See llm-proxy `docs/issues/2026-07-07-langfuse-served-model-not-logged.md` (fixed). Operationalized as a one-command check 2026-07-07: **`lf.py mismatches`** (llm-proxy:`b72d0f6`, paginated scan, pre-capture traces counted as no-data) — first run: 300 scanned / 293 with model data / **0 mismatches**.
+*Verdict:* **silent Opus fallback REFUTED for local usage** → FND-14 (findings), FND-12 resolved, FT-9 done, FT-12 dropped as moot. Forward monitoring **SHIPPED same day** (user go-ahead): llm-proxy now captures `/message/model` as `served_model` — trace metadata `requested_model`/`served_model`, `lf.py find` SERVED column + `lf.py trace` mismatch marker; verified live post-restart. See llm-proxy `docs/issues/2026-07-07-langfuse-served-model-not-logged.md` (fixed). Operationalized as a one-command check 2026-07-07: **`lf.py mismatches`** (llm-proxy:`b72d0f6`, paginated scan, pre-capture traces counted as no-data) — first run: 300 scanned / 293 with model data / **0 mismatches**.
 ## Sources (reliability noted)
 
 **Official / primary:**

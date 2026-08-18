@@ -118,11 +118,22 @@ impl DefinitionIndex {
     ///
     /// Measured 2026-08-18: exactly one conflict on this corpus — `T`, declared by
     /// `fable-tuning-tasks.md` and also defined by `tool-usage-patterns.md`. Their token
-    /// spaces stay disjoint only because the latter spells its first thirteen entries
+    /// spaces stayed disjoint only because the latter spells its first thirteen entries
     /// zero-padded (`T-001`…`T-013`) while its later ones are `T-14`…`T-24`, and the
-    /// resolver matches token strings. Nothing recorded that invariant; allocating `T-14`
-    /// in the former, or giving a third claimant headings, breaks it into `Ambiguous` —
-    /// which resolves to nothing while moving no "undefined" count.
+    /// resolver matches token strings — an accident nothing recorded or enforced.
+    ///
+    /// **That conflict was fixed the same day, so this now reports 0 on the corpus:**
+    /// `fable-tuning-tasks` took `FT`; `tool-usage-patterns` kept `T` as the wider-cited
+    /// claimant. A 0 here is the healthy state, not dead wiring — the founding case lives
+    /// in the tests below, which is where a regression guard belongs anyway.
+    ///
+    /// The rename also settled what no count could: `T-1`…`T-12` had been binding ~65
+    /// citations that were never about fable tasks — three retired `T-N` ledgers plus
+    /// `artifact-augmentation-followups`, whose 14 row-only tasks resolved into fable's
+    /// namespace as silent wrong edges. Freeing the prefix turned those back into honest
+    /// danglings and `dangling` rose 477 → 542. **A falling `dangling` is not evidence of
+    /// repair when a namespace gains a definer**: "citations repaired" and "citations
+    /// mis-bound" move that number in the same direction.
     /// docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
     ///
     /// A declared prefix that defines nothing is deliberately silent here:
@@ -587,10 +598,12 @@ mod tests {
     /// A **declared** namespace with a second **active** definer is a claim being
     /// contradicted, and that pairing is the whole discriminator.
     ///
-    /// Measured 2026-08-18: this fires exactly once on the real corpus — `T`, owned by
+    /// Measured 2026-08-18: fired exactly once on the real corpus — `T`, owned by
     /// `fable-tuning-tasks.md` and squatted by `tool-usage-patterns.md`, whose token
-    /// spaces stay disjoint only because the latter spells its first thirteen entries
-    /// zero-padded. Nothing recorded that invariant, and two ordinary edits break it.
+    /// spaces stayed disjoint only because the latter spells its first thirteen entries
+    /// zero-padded. Nothing recorded that invariant, and two ordinary edits broke it.
+    /// Fixed the same day by renaming the fable ledger to `FT`, so the corpus reports 0
+    /// now and this fixture is the only surviving record of the shape.
     /// docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
     #[test]
     fn a_declared_prefix_with_a_second_active_definer_is_a_conflict() {

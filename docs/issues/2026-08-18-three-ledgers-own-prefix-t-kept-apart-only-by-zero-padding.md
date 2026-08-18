@@ -1,7 +1,7 @@
 ---
 id: '51c76e8c6289350b'
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: three ledgers own prefix T, and zero-padding is the only thing keeping their tokens apart'
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - namespace
 - latent
 topic: tracker-entry-identity
+closed: 2026-08-18
 ---
 
 # BUG: three ledgers own prefix `T`, kept apart only by zero-padding
@@ -136,17 +137,50 @@ have concluded `T-001` and `T-1` are the same entry and missed the very case it 
 A declared prefix that defines nothing is deliberately silent: `ledger_defines_nothing` owns that
 case, and such entries are uncitable regardless of who shares the namespace.
 
-### Still open
+### Step (3) was the wrong fix — the rename shipped instead
 
-- **(3) normalise the padding** in `tool-usage-patterns.md` (`T-001` → `T-1`), re-pointing the 16
-  external citations of `T-0NN` in the same commit. **Must come after (2), which it now does:**
-  normalising removes the accidental disjointness that is currently the only thing preventing a
-  collision, so the guard has to exist first. It does now.
-- **(1) the prose ceiling note** in `fable-tuning-tasks.md` remains a convention enforced by
-  prose — the shape SD-2 exists to remove. Treat it as a stopgap that (2) has now made
-  redundant for detection, though not for prevention: nothing stops an allocation, it is only
-  reported.
-- **(4) renaming `researcher`'s prefix** — handed off with the cross-repo tracker work.
+**Verified on the wire 2026-08-18 after `cargo rb` + `/mcp`. The prediction above held 4/4:**
+`counts.prefix_conflicts == 1`, and the single entry was `{prefix: "T", declared_by:
+["ad1af8262fdce357"], defined_by: ["ad1af8262fdce357", "f2ecdd76a6189efb"]}` —
+`fable-tuning-tasks` and `tool-usage-patterns` — on a live corpus of 1,060 artifacts. Neither
+named failure mode fired: not `>1` (discriminator leaking), not `0` (wiring not reaching the
+response). The unit fixtures prove the logic; this is the only thing that proves the logic
+survives real data.
+
+**Then step (3) was dropped, because checking it showed it was actively harmful.** Normalising
+`T-001`→`T-1` would give `tool-usage-patterns` a contiguous `T-1`…`T-24`, and this filing
+already recorded that `fable-tuning-tasks` holds `T-1`…`T-12` — so the normalisation would have
+made twelve tokens **Ambiguous**, which is *failure mode #1 of this very bug*, self-inflicted.
+Worse: `docs/trackers/artifact-augmentation-followups.md` keeps 21 row-only `T-N` tasks, eight of
+which (`T-14`…`T-21`) already mis-bind to `tool-usage-patterns` — normalising would have taken
+that to all 21. "The guard has to exist first" was true and insufficient: the guard **reports**,
+it does not prevent, so its existence never licensed creating the collision.
+
+**What shipped instead: `fable-tuning-tasks` surrendered the prefix, `T` → `FT`.**
+`tool-usage-patterns` has the stronger claim — `CLAUDE.md` hard-codes `id_prefix="T"` for id
+`f2ecdd76a6189efb`, it holds 24 entries against 12, and it is cited far more widely. Renamed
+across every surface the prefix was baked into: frontmatter (`entry_prefix: FT`, plus a
+`entry_high_water_FT: 12` that had never existed), the 12 defining headings, all 12 **params**
+entry ids, the `params_schema` pattern `^T-\d+$` → `^FT-\d+$`, the augmentation prompt, the
+title, and the citations in five other files — `fable-tuning-index`, `prompt-hamsa-audit-log`,
+`fable-tuning-findings`, `fable-tuning-research`, `skill-frictions`. Residual fable `T-N` across
+those six files: **0**. `tool-usage-patterns`' three `T-005` citations inside
+`prompt-hamsa-audit-log`: **untouched**.
+
+One mechanic worth recording: `params_schema` is validated against the **merged** result, so
+writing `FT-` ids while the stored pattern still said `^T-\d+$` is refused. Schema and data must
+move in a single `artifact_augment(merge=true, params_path=…, params_schema=…)` call — a prefix
+rename on an augmented ledger is inherently atomic, which is the right design but not obvious
+until the first attempt bounces.
+
+**The rename closes BOTH failure modes this file names — the padding fix would have closed
+neither.** #1 is gone because fable no longer owns `T`. #2 is gone because unpadded `T-1`/`T-2`
+now have no codescout definer at all (`tool-usage-patterns` spells those `T-001`/`T-002`), so
+`researcher/docs/trackers/langfuse-tracing-roadmap.md` can be backfilled without creating
+ambiguity. Item **(1)**, the prose ceiling note, is dissolved rather than fixed: `FT` has one
+definer and no ceiling, and that note now records the rename instead of a rule to obey.
+
+Still open, handed off: **(4) renaming `researcher`'s prefix** — no longer urgent, per #2.
 ## Tests added
 
 Four in `src/librarian/tools/link_scan/resolve.rs`, written before the method existed and watched
@@ -178,24 +212,36 @@ would have been churn. It becomes required the moment researcher's `T-1`/`T-2` g
 
 ## Resume
 
-**Not yet verified on the wire, and there is a falsifiable prediction to check.** `link_scan` runs
-in the MCP server and has no CLI subcommand, so it needs `cargo rb` + `/mcp` first.
+Nothing on this bug. `counts.prefix_conflicts` is **0** on the post-rename corpus, and that zero
+is now documented in `resolve.rs` as the *healthy* state — so a later reader who runs the check,
+gets nothing, and goes looking for the live `T` conflict this file describes does not conclude the
+wiring is dead. The founding case survives as a test fixture, which is where a regression guard
+belongs.
 
-**Prediction:** `counts.prefix_conflicts` is **1**, and the single entry is
-`{prefix: "T", declared_by: [<fable-tuning-tasks>], defined_by: [<fable-tuning-tasks>,
-<tool-usage-patterns>]}` as artifact ids. If it reports more than one, the discriminator leaks and
-the extra rows say where; if zero, the wiring does not reach the response. Recorded as a
-prediction rather than a result on purpose — the corpus table above came from grep, which is
-strong evidence about the data and none at all about the code path.
+One consequence was recorded rather than fixed, and it is the finding most worth carrying forward.
+Freeing `T` put project `dangling` **up**, 477 → 542. That is the correct direction: ~65
+`T-1`…`T-12` citations that were never about fable tasks — prose references in three retired
+`T-N` documents (`archive/i1-session-friction.md` alone has 57 mentions, `archive/i1-refactor-tasks.md`,
+`archive/goal-tracker-dogfood-log.md`), plus `artifact-augmentation-followups`' 14 row-only tasks —
+had been silently binding into fable's namespace as **wrong edges**, and they are honest danglings
+again.
 
-Then do **(3)**, the padding normalisation, which (2) now makes safe to attempt.
+Which means an earlier measurement in this work stream was partly measuring the wrong thing.
+`dangling` 548 → 471 was recorded as the BL-39 backfill working; part of that drop was citations
+being **mis-bound**, not repaired. Nothing in the report distinguished the two, because nothing
+can:
 
-Status is `investigating` rather than `fixed`: step (2) ships the detector, but the hazard this
-file reports — two ledgers one edit from colliding — is still present in the data. Detection is not
-the fix; (3) is.
+> **A falling `dangling` count is not evidence of repair when a namespace gains a definer.**
+> "Citations repaired" and "citations mis-bound" move that number in the same direction. Measure
+> a shared-prefix backfill by inspecting the *new edges*, not by watching `dangling` drop.
+
+The still-live half — `artifact-augmentation-followups`' eight rows mis-binding to
+`tool-usage-patterns`, which this rename correctly did not touch — is filed separately as
+`docs/issues/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md`.
 ## References
 
 - `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` (BL-39 — the backfill that surfaced this)
 - `docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md` (BL-41 — declared prefixes now widen the gate; archived `fixed` 2026-08-18)
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*
 - `docs/trackers/structural-debt-refactor.md` SD-2 (why a prose-enforced co-change contract is the shape to avoid)
+- `docs/issues/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md` (the row-token leak this investigation uncovered — still open, and the reason step (3) was dropped)
