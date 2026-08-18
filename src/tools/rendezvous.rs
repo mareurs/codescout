@@ -123,10 +123,16 @@ impl Rendezvous {
         if self.last_mtime == Some(mtime) {
             return None;
         }
-        self.last_mtime = Some(mtime);
+        // Commit the mtime only once the read AND parse both succeed. A poll
+        // landing mid-write (the hook writes non-atomically) can see a
+        // truncated file at this mtime; if we recorded it anyway, a truncated
+        // and a completed write sharing one mtime tick would make the server
+        // silently never see the completed stamp. Leaving `last_mtime`
+        // unchanged on failure makes the next poll retry this same mtime.
         let entry: Entry = std::fs::read_to_string(path)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())?;
+        self.last_mtime = Some(mtime);
         if entry.hook_at.is_some() {
             self.active = true;
         }
@@ -507,6 +513,53 @@ mod tests {
             r.poll(),
             None,
             "an unchanged mtime must short-circuit BEFORE the read"
+        );
+    }
+    #[test]
+    fn poll_retries_a_torn_write_once_repaired_at_the_same_mtime() {
+        // The hook writes its stamp non-atomically. A poll landing mid-write
+        // can read a truncated file at that mtime; if `poll` burned the mtime
+        // anyway, the eventual completed write sharing that same mtime tick
+        // would stay silently invisible until the slot moves to a new mtime.
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("old"));
+        stamp_as_hook(r.path().unwrap(), "new");
+        assert_eq!(r.poll().as_deref(), Some("new"));
+
+        // A poll lands mid non-atomic write: malformed JSON at a fresh mtime.
+        std::fs::write(r.path().unwrap(), "{{{{").unwrap();
+        filetime::set_file_mtime(
+            r.path().unwrap(),
+            filetime::FileTime::from_unix_time(3_000_000_000, 0),
+        )
+        .unwrap();
+        assert_eq!(r.poll(), None, "a torn read must not report a session");
+
+        // The write completes and repairs the file, but lands at the SAME
+        // mtime the torn read already saw (coarse mtime resolution can tick
+        // both writes into one bucket). This is the regression: without the
+        // fix, `poll` already burned this mtime on the failed parse and the
+        // repaired stamp is lost until the slot is rewritten again.
+        let repaired = Entry {
+            pid: std::process::id(),
+            ppid: 0,
+            started_at: chrono::Utc::now(),
+            cwd: String::new(),
+            session: Some("newer".to_string()),
+            hook_at: Some(chrono::Utc::now()),
+        };
+        std::fs::write(r.path().unwrap(), serde_json::to_string(&repaired).unwrap()).unwrap();
+        filetime::set_file_mtime(
+            r.path().unwrap(),
+            filetime::FileTime::from_unix_time(3_000_000_000, 0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            r.poll().as_deref(),
+            Some("newer"),
+            "a failed parse must not burn the mtime, or the repaired stamp is \
+             lost until the next mtime tick"
         );
     }
 

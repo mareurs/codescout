@@ -297,7 +297,7 @@ impl GuideLedger {
     /// for that to matter, and an MCP reconnect is kill-then-spawn, not overlap.
     ///
     /// Deleting on empty is load-bearing beyond tidiness: `is_empty()` is what
-    /// fires `SESSION_OPENING_GUIDE` (`src/tools/core/types.rs:692`), so a ledger
+    /// fires `SESSION_OPENING_GUIDE` (`src/tools/core/types.rs:703`), so a ledger
     /// emptied by `expire_idle` re-opens the session on its next load. That is
     /// intended for a client idle past its TTL — spec §7. Writing `{}` here
     /// instead would suppress the opener permanently.
@@ -959,7 +959,7 @@ mod tests {
     fn expiring_the_last_topic_deletes_the_file_so_the_session_opener_re_fires() {
         // DECISION, not an accident (spec §7, confirmed 2026-08-18): a fully
         // expired ledger re-opens the session. `is_empty()` is the opener's
-        // trigger (src/tools/core/types.rs:692), and persist deletes the file
+        // trigger (src/tools/core/types.rs:703), and persist deletes the file
         // when the map empties — so a reload is empty and the opener fires.
         // Pinned because both halves look like reasonable refactors: making
         // persist write `{}` instead of deleting would suppress the opener
