@@ -431,13 +431,23 @@ mod tests {
         assert_eq!(mode, 0o755, "exec bit must survive atomic_write");
     }
 
+    // `Path::is_absolute()` requires a drive or UNC prefix on Windows — a bare
+    // leading `/` has a root but no prefix, so it is NOT absolute there. Use a
+    // per-platform literal for every state_dir_* test that needs an absolute
+    // XDG value, on both the input and the expected output.
+    const ABS_XDG: &str = if cfg!(windows) {
+        r"C:\xdg\state"
+    } else {
+        "/xdg/state"
+    };
+
     #[test]
     fn state_dir_prefers_an_absolute_xdg_state_home() {
         let got = state_dir_from(
-            Some(std::ffi::OsString::from("/xdg/state")),
+            Some(std::ffi::OsString::from(ABS_XDG)),
             Some(PathBuf::from("/home/u")),
         );
-        assert_eq!(got, Some(PathBuf::from("/xdg/state")));
+        assert_eq!(got, Some(PathBuf::from(ABS_XDG)));
     }
 
     #[test]
@@ -460,5 +470,19 @@ mod tests {
     fn state_dir_is_none_when_neither_is_available() {
         // The caller degrades to an in-memory ledger rather than guessing a path.
         assert_eq!(state_dir_from(None, None), None);
+    }
+
+    #[test]
+    fn state_dir_uses_xdg_even_when_home_is_absent() {
+        // An absolute XDG_STATE_HOME must not be discarded just because
+        // HOME/USERPROFILE is unset (systemd user units, containers).
+        let got = state_dir_from(Some(std::ffi::OsString::from(ABS_XDG)), None);
+        assert_eq!(got, Some(PathBuf::from(ABS_XDG)));
+    }
+
+    #[test]
+    fn state_dir_is_none_when_xdg_relative_and_home_absent() {
+        let got = state_dir_from(Some(std::ffi::OsString::from("relative/state")), None);
+        assert_eq!(got, None);
     }
 }
