@@ -78,6 +78,32 @@ pub struct ServerEnv {
     pub librarian: crate::librarian::LibrarianEnv,
 }
 
+/// Ceiling for an operator-supplied `CODESCOUT_GUIDE_TTL_SECS`: 100 years, far
+/// past any plausible idle window and comfortably inside the range chrono can
+/// subtract from `Utc::now()` without overflowing.
+///
+/// `std::time::Duration::from_std` (the guard `expire_idle` already applies,
+/// `src/tools/guide_ledger.rs`) only rejects values adjacent to `u64::MAX` — it
+/// converts happily for anything chrono's own `TimeDelta` cannot represent
+/// below that. `chrono::DateTime::sub` is `checked_sub_signed(rhs).expect(...)`,
+/// which panics once the subtraction overflows chrono's range, so an
+/// unclamped huge value reaches a live panic band `from_std` does not cover —
+/// on the anonymous tier's per-request `tick()` path, not at startup. Clamping
+/// at the parse site (rather than in `expire_idle`, which this task does not
+/// own) means a malicious or fat-fingered env var degrades to "TTL effectively
+/// never fires" instead of unwinding every guide-eligible call.
+const MAX_GUIDE_TTL_SECS: u64 = 60 * 60 * 24 * 365 * 100;
+
+/// Parse `CODESCOUT_GUIDE_TTL_SECS`, clamped to [`MAX_GUIDE_TTL_SECS`]. `None`
+/// on anything unparseable — a typo'd env var falls back to the caller's
+/// default rather than erroring.
+fn parse_guide_idle_ttl(raw: &str) -> Option<std::time::Duration> {
+    raw.trim()
+        .parse::<u64>()
+        .ok()
+        .map(|secs| std::time::Duration::from_secs(secs.min(MAX_GUIDE_TTL_SECS)))
+}
+
 impl ServerEnv {
     /// Read the real process environment. The production entry point.
     pub fn from_env() -> Self {
@@ -98,8 +124,7 @@ impl ServerEnv {
             guide_hints_dir: None,
             guide_idle_ttl: std::env::var("CODESCOUT_GUIDE_TTL_SECS")
                 .ok()
-                .and_then(|v| v.trim().parse::<u64>().ok())
-                .map(std::time::Duration::from_secs),
+                .and_then(|v| parse_guide_idle_ttl(&v)),
             #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
         }
@@ -1779,6 +1804,34 @@ mod tests {
             guide_hints_dir: Some(dir.join("guide_hints")),
             ..Default::default()
         }
+    }
+
+    /// `100_000_000_000_000` secs is inside the measured live panic band:
+    /// `Duration::from_std`'s own guard only rejects values adjacent to
+    /// `u64::MAX`, but feeding this unclamped value into `Utc::now() - ttl`
+    /// panics inside chrono's `checked_sub_signed(...).expect(...)`. A clamp
+    /// that only special-cased `u64::MAX` would let this value straight
+    /// through — that split (one safe, one panicking, at opposite ends of the
+    /// u64 range) is exactly the trap this test pins against.
+    #[test]
+    fn parse_guide_idle_ttl_clamps_a_value_from_the_chrono_panic_band() {
+        let ttl = parse_guide_idle_ttl("100000000000000").expect("a valid u64 must parse");
+        assert!(
+            ttl <= std::time::Duration::from_secs(MAX_GUIDE_TTL_SECS),
+            "must be clamped to the 100-year ceiling, got {ttl:?}"
+        );
+
+        // Prove it end-to-end: feed the clamped value through the exact chrono
+        // subtraction `expire_idle` performs on every anonymous-tier `tick()`.
+        // An unclamped value here panics; a clamped one does not, and correctly
+        // reports nothing expired for a stamp inserted moments ago.
+        let mut ledger = crate::tools::guide_ledger::GuideLedger::anonymous(Some(ttl));
+        ledger.insert("librarian".to_string());
+        assert_eq!(
+            ledger.tick(),
+            0,
+            "a fresh stamp must not expire under a 100-year TTL"
+        );
     }
 
     async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
@@ -4581,6 +4634,95 @@ mod guide_hint_tests {
             "an anonymous session must never create or write the injected \
              per-user guide_hints directory"
         );
+    }
+
+    /// `:341-349` (the anonymous-arm construction) resolve `idle_ttl` from
+    /// `env.guide_idle_ttl.unwrap_or(DEFAULT_IDLE_TTL_SECS)`, gated by a
+    /// `!idle_ttl.is_zero()` guard, before ever calling `GuideLedger::anonymous`.
+    /// `GuideLedger::anonymous`'s own unit tests (in `guide_ledger.rs`) build a
+    /// `GuideLedger` directly and can't see whether *production* construction
+    /// ever actually reaches it with `Some(ttl)` — this test drives the real
+    /// `ServerEnv` → `CodeScoutServer::from_parts_with_env` path with NO
+    /// explicit `guide_idle_ttl` override, so the 2h default must survive
+    /// construction intact.
+    ///
+    /// Kills three independent mutations to the construction site, all of
+    /// which collapse the anonymous ledger to a permanently un-expiring one:
+    /// - `None => GuideLedger::anonymous(None)` (drop the ttl argument
+    ///   entirely) — no TTL ever reaches the ledger.
+    /// - `unwrap_or(Duration::ZERO)` — `idle_ttl` becomes zero, and the
+    ///   (unmutated) guard turns a zero ttl into `None` too.
+    /// - the guard inverted to `idle_ttl.is_zero().then_some(idle_ttl)` — for
+    ///   the non-zero default `idle_ttl`, `is_zero()` is `false`, so the
+    ///   inverted guard also yields `None`.
+    ///
+    /// A topic backdated 3h — past the 2h default — must re-arm under the
+    /// correct implementation and must NOT re-arm under any of the three.
+    #[tokio::test]
+    async fn anonymous_session_default_ttl_expires_a_stamp_backdated_past_two_hours() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+        let env = test_env(dir.path()); // no `guide_idle_ttl` override — exercises the default
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+
+        {
+            let mut ledger = server.guide_hints_emitted.lock();
+            ledger.insert("librarian".to_string());
+            ledger.backdate_for_test("librarian", chrono::Duration::hours(3));
+        }
+
+        let rearmed = server.guide_hints_emitted.lock().tick();
+        assert_eq!(
+            rearmed, 1,
+            "a topic backdated 3h past the 2h default TTL must re-arm"
+        );
+        assert!(!server.guide_hints_emitted.lock().contains("librarian"));
+    }
+
+    /// The `CODESCOUT_GUIDE_TTL_SECS=0` opt-out (`ServerEnv.guide_idle_ttl =
+    /// Some(Duration::ZERO)`) must mean "never expire, accepting starvation" —
+    /// not "expire on every tick." The plan explicitly rejected renaming it to
+    /// `=never` because the `=0` spelling's incidental other reading ("expire
+    /// immediately") is the one behavior that must NEVER happen: it would
+    /// re-arm every topic on every guide-eligible call, a token flood.
+    ///
+    /// Kills the guard-inverted mutation from the opposite direction the test
+    /// above exercises: with a non-zero default `idle_ttl`, inversion yields
+    /// `None` (caught above); with `idle_ttl` already zero, inversion instead
+    /// yields `Some(Duration::ZERO)`, which is the token-flood behavior this
+    /// test rules out directly.
+    #[tokio::test]
+    async fn anonymous_session_zero_ttl_opt_out_never_re_arms() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+        let env = ServerEnv {
+            guide_idle_ttl: Some(std::time::Duration::ZERO),
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+
+        {
+            let mut ledger = server.guide_hints_emitted.lock();
+            ledger.insert("librarian".to_string());
+            ledger.backdate_for_test("librarian", chrono::Duration::days(100));
+        }
+
+        let rearmed = server.guide_hints_emitted.lock().tick();
+        assert_eq!(
+            rearmed, 0,
+            "the =0 opt-out must never re-arm, however stale"
+        );
+        assert!(server.guide_hints_emitted.lock().contains("librarian"));
     }
 
     /// The compaction side of the fix: `/compact` summarizes the guide bodies

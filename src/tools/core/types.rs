@@ -694,7 +694,12 @@ pub trait Tool: Send + Sync {
             // topics the model plausibly no longer holds. Must run BEFORE
             // is_empty(), or an expiry that empties the ledger goes unseen until
             // the next call.
-            emitted.tick();
+            let rearmed_count = emitted.tick();
+            if rearmed_count > 0 {
+                tracing::debug!(
+                    "anonymous guide ledger idle TTL re-armed {rearmed_count} topic(s)"
+                );
+            }
             if emitted.is_empty() {
                 // Session opener. An empty ledger means this is the session's
                 // first guide-eligible call — or the first since an `activate`
