@@ -158,6 +158,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .iter()
             .map(|(i, ex)| (rows[*i].id.as_str(), rows[*i].status.as_str(), ex)),
     );
+    // Computed here rather than during resolution because it is a fact about the INDEX, not
+    // about any one citation — and it must be reported even when every citation currently
+    // resolves, which is exactly the `T` case. Artifact ids, consistent with `src_id` and
+    // `dst_ref` in the arms below; resolve one with `artifact(action="get", id=…)`.
+    let prefix_conflicts = index.prefix_conflicts();
     let mut corpus = resolve::Corpus::default();
     for row in &rows {
         corpus.ids.insert(row.id.clone());
@@ -282,12 +287,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "ambiguous": ambiguous_total,
             "dangling": dangling_total,
             "cross_repo": cross_repo_total,
+            "prefix_conflicts": prefix_conflicts.len(),
         },
         "edges_missing": edge_view(&d.to_add),
         "edges_stale": edge_view(&d.stale),
         "ambiguous": ambiguous,
         "dangling": dangling,
         "cross_repo": cross_repo,
+        // Latent rather than broken, so it sits beside the citation arms rather than in
+        // one: a declared namespace with a second active definer has no failing citation
+        // *yet*, and the arms above only ever report a citation that already resolves
+        // wrong. Unbounded on purpose — it fires once on this corpus, and a report that
+        // capped a single-digit list would hide the whole finding to save nothing.
+        "prefix_conflicts": prefix_conflicts,
         "unreadable": unreadable,
         "hint": if args.write {
             "edges written as rel=\"cites\" (scanner-owned). Re-run any time — idempotent."

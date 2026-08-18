@@ -20,12 +20,36 @@ pub struct DefinerRef {
     pub active: bool,
 }
 
-/// token → definers, plus the set of alpha prefixes with ≥1 definition
-/// anywhere in the corpus (the dangling gate).
+/// One id namespace claimed by a ledger and also defined by another active artifact.
+///
+/// Reported, never repaired: choosing between renaming a prefix, normalising a spelling,
+/// and committing to qualified citations is a content decision with different costs in each
+/// direction. See [`DefinitionIndex::prefix_conflicts`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PrefixConflict {
+    pub prefix: String,
+    /// Artifacts declaring `entry_prefix: <prefix>` — the claim.
+    pub declared_by: Vec<String>,
+    /// Every ACTIVE artifact defining at least one `<prefix>-N` token, claimants included.
+    pub defined_by: Vec<String>,
+}
+
+/// token → definers, plus the per-prefix ownership state the resolver needs.
+///
+/// `known_prefixes` is the dangling gate: every alpha prefix with ≥1 definition anywhere
+/// in the corpus, plus every prefix a ledger DECLARES via `entry_prefix` (BL-41).
+///
+/// `declared_by` and `active_definers` keep exactly what that flattening throws away —
+/// **who** claimed a namespace, and who actually defines inside it. That pairing is the
+/// only way to tell a contradicted claim from the blessed per-work-stream convention, so
+/// it cannot be recovered from `known_prefixes` afterwards. See
+/// [`DefinitionIndex::prefix_conflicts`].
 #[derive(Debug, Default)]
 pub struct DefinitionIndex {
     by_token: BTreeMap<String, Vec<DefinerRef>>,
     known_prefixes: BTreeSet<String>,
+    declared_by: BTreeMap<String, BTreeSet<String>>,
+    active_definers: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl DefinitionIndex {
@@ -45,6 +69,16 @@ impl DefinitionIndex {
                     });
                 if let Some(prefix) = def.token.split('-').next() {
                     idx.known_prefixes.insert(prefix.to_string());
+                    // Only ACTIVE definers, because an archive companion is the compaction
+                    // ladder's endpoint rather than a rival claimant — the resolver already
+                    // binds a token to its sole active definer. Counting archives here would
+                    // make `prefix_conflicts` fire on `R` and `U`, both of which keep one.
+                    if active {
+                        idx.active_definers
+                            .entry(prefix.to_string())
+                            .or_default()
+                            .insert(artifact_id.to_string());
+                    }
                 }
             }
             // A DECLARED namespace is a known one whether or not anything defines an entry
@@ -57,10 +91,61 @@ impl DefinitionIndex {
             // Regardless of `active`: an archived ledger's namespace is still a namespace,
             // and archived definers already resolve (`single_archived_definer_still_resolves`).
             // docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
-            idx.known_prefixes
-                .extend(ex.declared_prefixes.iter().cloned());
+            for prefix in &ex.declared_prefixes {
+                idx.known_prefixes.insert(prefix.clone());
+                idx.declared_by
+                    .entry(prefix.clone())
+                    .or_default()
+                    .insert(artifact_id.to_string());
+            }
         }
         idx
+    }
+
+    /// Prefixes where a **declared** namespace has more than one **active** definer.
+    ///
+    /// Both halves of that pairing are the discriminator, and dropping either makes the
+    /// check useless in a different way:
+    ///
+    /// - **Declared.** Eight session logs define `F-N` and none declares `entry_prefix`.
+    ///   That is the documented per-work-stream convention — each log owns its own counter
+    ///   and citations are qualified by file stem — so reporting it would flag a blessed
+    ///   pattern, and `ambiguous` already quantifies its real cost (~400 citations, 49 of
+    ///   50 sampled being F/W). A declaration is an author claiming exclusivity; declining
+    ///   to declare is declining to claim it.
+    /// - **Active.** `R` and `U` each keep an archive companion that legitimately defines
+    ///   their tokens. Counting those would fire twice more, both false.
+    ///
+    /// Measured 2026-08-18: exactly one conflict on this corpus — `T`, declared by
+    /// `fable-tuning-tasks.md` and also defined by `tool-usage-patterns.md`. Their token
+    /// spaces stay disjoint only because the latter spells its first thirteen entries
+    /// zero-padded (`T-001`…`T-013`) while its later ones are `T-14`…`T-24`, and the
+    /// resolver matches token strings. Nothing recorded that invariant; allocating `T-14`
+    /// in the former, or giving a third claimant headings, breaks it into `Ambiguous` —
+    /// which resolves to nothing while moving no "undefined" count.
+    /// docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
+    ///
+    /// A declared prefix that defines nothing is deliberately silent here:
+    /// `ledger_defines_nothing` owns that case, and its entries are uncitable regardless of
+    /// who else shares the namespace.
+    ///
+    /// Ordered by prefix — `BTreeMap`/`BTreeSet` throughout — so a report diffs cleanly
+    /// against a prior run, the same reason `doctor` orders by `abs_path`.
+    pub fn prefix_conflicts(&self) -> Vec<PrefixConflict> {
+        self.declared_by
+            .iter()
+            .filter_map(|(prefix, declarers)| {
+                let definers = self.active_definers.get(prefix)?;
+                if definers.len() < 2 {
+                    return None;
+                }
+                Some(PrefixConflict {
+                    prefix: prefix.clone(),
+                    declared_by: declarers.iter().cloned().collect(),
+                    defined_by: definers.iter().cloned().collect(),
+                })
+            })
+            .collect()
     }
 
     fn definers(&self, token: &str) -> &[DefinerRef] {
@@ -497,6 +582,94 @@ mod tests {
             ),
             Some(Outcome::Dangling)
         );
+    }
+
+    /// A **declared** namespace with a second **active** definer is a claim being
+    /// contradicted, and that pairing is the whole discriminator.
+    ///
+    /// Measured 2026-08-18: this fires exactly once on the real corpus — `T`, owned by
+    /// `fable-tuning-tasks.md` and squatted by `tool-usage-patterns.md`, whose token
+    /// spaces stay disjoint only because the latter spells its first thirteen entries
+    /// zero-padded. Nothing recorded that invariant, and two ordinary edits break it.
+    /// docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
+    #[test]
+    fn a_declared_prefix_with_a_second_active_definer_is_a_conflict() {
+        let owner = DocExtract {
+            declared_prefixes: vec!["T".to_string()],
+            ..ex_with_defs(&["T-1"])
+        };
+        let squatter = ex_with_defs(&["T-14"]);
+        let idx = DefinitionIndex::build([
+            ("fable-tasks", "active", &owner),
+            ("tool-usage", "active", &squatter),
+        ]);
+
+        let got = idx.prefix_conflicts();
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].prefix, "T");
+        assert_eq!(got[0].declared_by, vec!["fable-tasks".to_string()]);
+        assert_eq!(
+            got[0].defined_by,
+            vec!["fable-tasks".to_string(), "tool-usage".to_string()],
+            "both active definers must be named, so the reader knows who to talk to"
+        );
+    }
+
+    /// The false positive this check exists to avoid. Eight session logs define `F-N`
+    /// and **none declares `entry_prefix`** — that is the documented per-work-stream
+    /// convention, whose remedy is a file-stem-qualified citation rather than a rename.
+    /// Firing here would report a blessed pattern, and `ambiguous` already quantifies
+    /// its real cost (~400 citations, 49 of 50 sampled being F/W).
+    ///
+    /// Verified against the corpus, not assumed: of the nine prefixes declared in this
+    /// repo, none is `F` or `W`.
+    #[test]
+    fn undeclared_co_definers_are_not_a_conflict() {
+        let a = ex_with_defs(&["F-1", "F-2"]);
+        let b = ex_with_defs(&["F-1", "F-3"]);
+        let idx =
+            DefinitionIndex::build([("bugfix-log", "active", &a), ("release-log", "active", &b)]);
+        assert!(
+            idx.prefix_conflicts().is_empty(),
+            "nobody claimed F, so two definers of it is a convention, not a conflict"
+        );
+    }
+
+    /// An archive companion is the compaction ladder's endpoint, not a squatter: the
+    /// resolver already binds a token to its sole ACTIVE definer, and archiving is the
+    /// documented way to compact a ledger without destroying its definitions.
+    ///
+    /// This exclusion is load-bearing on real data rather than defensive — it is what
+    /// keeps `R` (`reconnaissance-patterns` + its archive) and `U`
+    /// (`codescout-usage-frictions` + its archive) quiet. Without it the check would
+    /// fire three times on this repo, two of them false.
+    #[test]
+    fn an_archived_co_definer_is_not_a_conflict() {
+        let live = DocExtract {
+            declared_prefixes: vec!["R".to_string()],
+            ..ex_with_defs(&["R-98"])
+        };
+        let archived = ex_with_defs(&["R-4"]);
+        let idx = DefinitionIndex::build([
+            ("recon-live", "active", &live),
+            ("recon-archive", "archived", &archived),
+        ]);
+        assert!(
+            idx.prefix_conflicts().is_empty(),
+            "the sole ACTIVE definer owns the namespace; its archive is not a rival"
+        );
+    }
+
+    /// A declared prefix nobody else touches is the healthy case, and asserting it keeps
+    /// the three tests above from passing on a method that returns empty unconditionally.
+    #[test]
+    fn a_declared_prefix_with_one_definer_is_not_a_conflict() {
+        let only = DocExtract {
+            declared_prefixes: vec!["SD".to_string()],
+            ..ex_with_defs(&["SD-1", "SD-2"])
+        };
+        let idx = DefinitionIndex::build([("structural-debt", "active", &only)]);
+        assert!(idx.prefix_conflicts().is_empty());
     }
 
     #[test]
