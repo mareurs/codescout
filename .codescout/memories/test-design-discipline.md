@@ -186,3 +186,49 @@ These three are semantic (a green suite hides them), so the durable catch is
 `cargo mutants --in-diff <range>` scoped to the diff at the pre-ship boundary — the only
 mechanism that flags a test reaching code without discriminating it. See `docs/RELEASE.md`
 Standard Ship Sequence.
+
+### Corollary: a surviving mutant is a hypothesis, not a finding — prove it with a throwaway probe
+
+`cargo mutants` (or a hand-applied mutation) tells you a mutant **survived**. It does not tell
+you *why*, and the two causes need opposite responses:
+
+- **a real coverage gap** — the behaviour differs and nothing observes it, or
+- **an equivalent mutant** — the behaviour does not differ at all, so no test can ever catch it.
+
+Reporting the second as the first sends someone hunting for a test that cannot exist. Dismissing
+the first as the second ships the gap. Reading the code harder does not separate them, because
+the whole reason the mutant survived is that the difference is not where anyone was looking.
+
+**The probe:** write a throwaway test that would only pass if the behavioural difference is real.
+Run it against HEAD — it must **pass**. Apply the mutation — it must **fail**. Then delete the
+probe and report either the demonstrated gap (handing over the probe as the fix) or the
+equivalent mutant with the argument for why no observable difference exists. If you cannot
+construct a probe that separates the two states, that is itself the answer.
+
+Measured 2026-08-19, guide-ledger Phase C Task 3. Nine mutations, eight killed. The survivor
+swapped the re-arm predicate's comparand from `AgentInner::default_workspace_root` to
+`Agent::project_root()` — the F-52 trap, which the task brief had named in advance as "the
+easiest way to get this task wrong". The full suite stayed green (33/33, 35/35, 59/59), which
+proves only that nothing looked. The reviewer then wrote a probe that focus-switched to a
+sub-project and re-activated the repo root by full path: **passed on HEAD, failed under the
+mutation**, while every shipped test stayed green throughout. That converted "a mutation
+survived" into "here is the behaviour nothing observes, and here is the test that observes it" —
+and it arrived with the fix already written and verified in both directions.
+
+Two things the same episode showed about *which* mutants deserve a probe:
+
+- **The dangerous survivors are the self-inflicting ones.** `ctx.agent.project_root()` is the
+  more obvious-looking call, so a future refactor reaches for it naturally; the failure is a
+  spurious re-arm on every root re-activation while a sub-project is focused — silent, and
+  exactly the waste the change existed to remove. A survivor whose mutation is *more* idiomatic
+  than the shipped code is worth a probe before anything else.
+- **Verify the mutation is on disk before believing the result.** Earlier in the same phase an
+  edit silently failed to land and the suite reported GREEN — indistinguishable from a real
+  coverage gap, and it points at writing a test for a gap that does not exist. `grep` a marker
+  inside the mutated region before running. A mutation you did not verify landed is not a
+  mutation you ran.
+
+Related: `docs/trackers/bug-fix-session-log.md` W-48 — the same phase's finding that a review
+strong enough to leave zero surviving mutants in the *code* still under-counted a
+documentation-defect class by 55%, because mutation testing has no mutant for "this comment's
+stated reason is now false."
