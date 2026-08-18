@@ -38,7 +38,7 @@
 
 use anyhow::{bail, Result};
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Paths that are always denied for read access (expanded from `~`).
 #[cfg(target_os = "linux")]
@@ -1248,21 +1248,47 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     // source unchecked. Quote-safety needs no extra work — `split_outside_quotes` carries
     // quote state across line breaks, so a newline inside "..." is data.
     // BUG docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md
-    let segments = split_outside_quotes(&stripped, &["&&", "||", ";", "|", "\n"]);
+    // Two-level split, because a `cd` moves the shell for what comes AFTER it and
+    // the gate has to know where "relative" now points. Sequential operators bound
+    // a *run* — the unit a `cd` can move — and a pipeline inside one run shares a
+    // single cwd, since `cd x | cmd` puts the cd in a subshell that cannot affect
+    // the other stage. Propagating cwd across a pipe would be a bypass rather than
+    // a carve-out.
+    // BUG docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
+    let runs = split_outside_quotes(&stripped, &["&&", "||", ";", "\n"]);
 
-    let blocked = segments.iter().find(|seg| {
-        // Only the *first token* of a segment is the actual command being executed.
-        // Matching against the first token (not the full segment string) prevents
-        // false positives from quoted arguments containing command names, e.g.:
-        //   git commit -m "feat: tail-50 of log, output_buffer.rs"
-        let first_token = shell_tokens(seg).into_iter().next().unwrap_or_default();
-        if !cmd_re.is_match(&first_token) {
-            return false;
+    // `run_command` starts at the project root, so that is the cwd until a `cd`
+    // says otherwise — which is exactly the old "relative is inside by
+    // construction" assumption, now written down as state instead of assumed.
+    let mut cwd = Cwd::At(project_root.to_path_buf());
+    let mut blocked: Option<String> = None;
+    'runs: for run in &runs {
+        let stages = split_outside_quotes(run, &["|"]);
+        // Only a `cd` that is a whole run moves the shell for later runs.
+        if stages.len() == 1 {
+            if let Some(next) = cd_effect(&stages[0], &cwd) {
+                cwd = next;
+                continue;
+            }
         }
-        // The file must live inside the project, because the hint routes to
-        // symbols/read_file and those resolve against the active project.
-        segment_reads_project_source(seg, ext_re, project_root)
-    })?;
+        for seg in &stages {
+            // Only the *first token* of a segment is the actual command being executed.
+            // Matching against the first token (not the full segment string) prevents
+            // false positives from quoted arguments containing command names, e.g.:
+            //   git commit -m "feat: tail-50 of log, output_buffer.rs"
+            let first_token = shell_tokens(seg).into_iter().next().unwrap_or_default();
+            if !cmd_re.is_match(&first_token) {
+                continue;
+            }
+            // The file must live inside the project, because the hint routes to
+            // symbols/read_file and those resolve against the active project.
+            if segment_reads_project_source(seg, ext_re, project_root, &cwd) {
+                blocked = Some(seg.clone());
+                break 'runs;
+            }
+        }
+    }
+    let blocked = blocked?;
 
     // Derive the hint from the specific command that triggered the block.
     let first_cmd = shell_tokens(blocked.as_str())
@@ -1300,7 +1326,60 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
     Some(hint)
 }
 
-/// True if `seg` names a source file that lives inside `project_root`.
+/// The shell's working directory for a segment, as far as the gate can tell.
+///
+/// [`Cwd::At`] is a directory the gate resolved completely; [`Cwd::Unknown`] is a
+/// `cd` it could not, and behaves exactly like the pre-`cd`-tracking gate — every
+/// relative token counts as in-project. Two variants rather than three because
+/// "no `cd` yet" is just `At(project_root)`: that is where `run_command` starts.
+enum Cwd {
+    At(PathBuf),
+    Unknown,
+}
+
+/// The cwd a `cd` segment produces, or `None` when `seg` is not a `cd` at all.
+///
+/// Only a target the gate can resolve completely yields [`Cwd::At`]; anything
+/// else yields [`Cwd::Unknown`], which keeps the old blocking verdict. The gate
+/// must open only on a move it fully understands — the point is to stop
+/// unfollowable refusals, not to widen shell access to project source.
+///
+/// A bare `cd` and `cd ~` mean `$HOME` and are deliberately left unresolved. The
+/// alternative makes this gate's verdict depend on the environment, and the only
+/// cost of not resolving them is that a rare command keeps being refused, which
+/// is the safe direction.
+fn cd_effect(seg: &str, cwd: &Cwd) -> Option<Cwd> {
+    let tokens = shell_tokens(seg);
+    if tokens.first().map(String::as_str) != Some("cd") {
+        return None;
+    }
+    // Bare `cd` → $HOME. Deliberately unresolved; see the doc comment.
+    let Some(target) = tokens.get(1) else {
+        return Some(Cwd::Unknown);
+    };
+    // `~`/`~/…` is $HOME again; `cd -` is the previous directory, which the gate
+    // does not track; `$VAR` and command substitution cannot be resolved at parse
+    // time at all.
+    if target.starts_with('~') || target == "-" || target.contains('$') || target.contains('`') {
+        return Some(Cwd::Unknown);
+    }
+    let path = Path::new(target.as_str());
+    if path.is_absolute() {
+        return Some(Cwd::At(path.to_path_buf()));
+    }
+    // A relative target is only as good as the base it joins onto, and `..` would
+    // need lexical normalisation before any later `starts_with` could be trusted.
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Some(Cwd::Unknown);
+    }
+    Some(match cwd {
+        Cwd::At(base) => Cwd::At(base.join(path)),
+        Cwd::Unknown => Cwd::Unknown,
+    })
+}
+
+/// True if `seg` names a source file that lives inside `project_root`, given the
+/// shell's effective `cwd` for this segment.
 ///
 /// The gate's remedy is *"use symbols / read_file instead"*, and both resolve
 /// against the **active project** — they cannot serve a path the index does not
@@ -1316,19 +1395,47 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
 /// still caught — the case the previous whole-segment scan existed to cover.
 ///
 /// (GF-3 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`.)
-fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path) -> bool {
-    shell_tokens(seg)
-        .iter()
-        .any(|tok| ext_re.is_match(tok) && path_is_within_project(tok, project_root))
+fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path, cwd: &Cwd) -> bool {
+    let tokens = shell_tokens(seg);
+    // Positive evidence that this segment searches somewhere else entirely: an
+    // operand — not an option — that is absolute and does not live under the root.
+    let targets_outside = tokens.iter().any(|tok| {
+        let p = Path::new(tok.as_str());
+        !tok.starts_with('-') && p.is_absolute() && !p.starts_with(project_root)
+    });
+    tokens.iter().any(|tok| {
+        if !ext_re.is_match(tok) {
+            return false;
+        }
+        // An option carrying an extension is a FILTER, not a file operand:
+        // nothing is read *from* `--include='*.mjs'`. Being relative, it used to
+        // force the in-project verdict on its own and refuse a sweep of a sibling
+        // repo. Discount it only when the segment says where it is really
+        // searching — absent that evidence the glob is the sole token naming the
+        // extension, and `grep -rn x src/ --include='*.rs'` genuinely is a
+        // project source read.
+        if tok.starts_with('-') && targets_outside {
+            return false;
+        }
+        path_is_within_project(tok, project_root, cwd)
+    })
 }
 
-/// Whether a path token resolves inside `project_root`.
+/// Whether a path token resolves inside `project_root`, given the shell's
+/// effective working directory for the segment.
 ///
 /// Conservative in the blocking direction: anything that cannot be resolved
 /// counts as inside, so an unparseable or exotic path keeps the pre-2026-08-16
-/// behaviour rather than silently opening the gate. Relative paths are inside by
-/// construction — `run_command` executes with the project root as its cwd.
-fn path_is_within_project(tok: &str, project_root: &Path) -> bool {
+/// behaviour rather than silently opening the gate.
+///
+/// `cwd` is what a preceding `cd` did. It starts at `project_root` — which is
+/// where `run_command` actually starts — so a relative token is inside by
+/// construction until something moves the shell, exactly the old behaviour.
+/// [`Cwd::Unknown`] means a `cd` the gate could not resolve, and also keeps the
+/// blocking verdict: the gate opens only on a move it fully understands.
+///
+/// BUG docs/issues/2026-08-17-source-gate-treats-relative-paths-after-cd-as-in-project.md
+fn path_is_within_project(tok: &str, project_root: &Path, cwd: &Cwd) -> bool {
     let expanded: PathBuf = match tok.strip_prefix("~/") {
         Some(rest) => match std::env::var_os("HOME") {
             Some(home) => PathBuf::from(home).join(rest),
@@ -1338,7 +1445,18 @@ fn path_is_within_project(tok: &str, project_root: &Path) -> bool {
         None => PathBuf::from(tok),
     };
     if expanded.is_relative() {
-        return true;
+        let Cwd::At(base) = cwd else {
+            return true;
+        };
+        // A `..` component would need lexical normalisation before `starts_with`
+        // could compare it correctly. Refuse to guess and keep blocking.
+        if expanded
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+        {
+            return true;
+        }
+        return base.join(&expanded).starts_with(project_root);
     }
     expanded.starts_with(project_root)
 }
@@ -2304,6 +2422,108 @@ mod tests {
         let root = Path::new("/home/u/work/myproj");
         assert!(check_source_file_access("cat main.rs", root).is_some());
         assert!(check_source_file_access("sed -n '1,5p' ./src/lib.rs", root).is_some());
+    }
+
+    #[test]
+    fn a_cd_out_of_the_project_makes_a_relative_source_read_reachable_again() {
+        // Same defect GF-3 removed for absolute paths, arriving by the other
+        // path form. `run_command` STARTS at the root, so a relative token was
+        // "inside by construction" — but `cd` moves the shell, and the gate
+        // already splits on `&&`, so the cd sits in the segment list the
+        // decision walks and was simply never consulted. The refusal named
+        // symbols/read_file, which resolve against the active project and
+        // cannot serve the file.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access("cd /tmp/scratch && awk '{print}' head.rs", root).is_none(),
+            "after cd out of the project a relative source path is not in the index"
+        );
+        assert!(
+            check_source_file_access("cd /tmp/scratch; cat lib.rs", root).is_none(),
+            "the carve-out is about the shell moving, not about which operator moved it"
+        );
+    }
+
+    #[test]
+    fn a_cd_that_stays_inside_the_project_still_blocks() {
+        // The control that a careless fix breaks: only a cd whose target LEAVES
+        // the root may open the gate. Moving around inside it changes nothing,
+        // because symbols/read_file can still serve the file.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access("cd /home/u/work/myproj/src && cat main.rs", root).is_some(),
+            "still inside the project — the remedy is followable, so keep refusing"
+        );
+    }
+
+    #[test]
+    fn a_cd_the_gate_cannot_resolve_keeps_blocking() {
+        // Conservative direction, restated for the new dimension: the gate opens
+        // only on a cd it fully understands. Everything else keeps the old
+        // verdict, so an unparseable target can never be a way through.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access("cd $SCRATCH && cat main.rs", root).is_some(),
+            "a variable target is not resolvable at parse time"
+        );
+        assert!(
+            check_source_file_access("cd .. && cat src/main.rs", root).is_some(),
+            "a parent traversal is not resolved lexically — keep blocking"
+        );
+        assert!(
+            check_source_file_access("cd && cat main.rs", root).is_some(),
+            "bare cd means $HOME; deliberately left unresolved to keep this hermetic"
+        );
+    }
+
+    #[test]
+    fn a_cd_inside_a_pipeline_does_not_move_the_shell_for_other_stages() {
+        // `cd x | cmd` runs the cd in a subshell — the other stage keeps the
+        // original cwd. Propagating cwd across a pipe would be a bypass rather
+        // than a carve-out, so cwd only advances when the cd is a whole run.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access("cd /tmp/scratch | cat src/main.rs", root).is_some(),
+            "a cd inside a pipeline must not move the gate's cwd"
+        );
+    }
+
+    #[test]
+    fn an_option_glob_does_not_force_the_in_project_verdict() {
+        // `--include='*.mjs'` is a FILTER pattern, not a file operand: nothing
+        // is read from it. It is relative, so the relative-token branch counted
+        // it as in-project and refused a sweep of a sibling repo whose search
+        // root was absolute and outside — with a hint (`grep(pattern, path)`)
+        // that resolves against the active project and therefore has no correct
+        // invocation for that repo at all.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access(
+                "grep -rn 'x' /home/u/work/otherrepo --include='*.mjs'",
+                root
+            )
+            .is_none(),
+            "a glob filter beside an out-of-project search root is not a project read"
+        );
+    }
+
+    #[test]
+    fn an_option_glob_still_counts_without_evidence_of_an_outside_target() {
+        // The discriminating control, and the reason the carve-out above is
+        // keyed on positive evidence rather than on "options are not paths".
+        // `grep -rn x src/ --include='*.rs'` genuinely reads project source, and
+        // the GLOB IS THE ONLY TOKEN THAT SAYS SO — `src/` carries no extension.
+        // Skipping option tokens outright would have opened exactly this hole
+        // while looking like a tidier rule.
+        let root = Path::new("/home/u/work/myproj");
+        assert!(
+            check_source_file_access("grep -rn 'x' src/ --include='*.rs'", root).is_some(),
+            "an in-project recursive grep is still a project source read"
+        );
+        assert!(
+            check_source_file_access("grep -rn 'x' --include='*.rs'", root).is_some(),
+            "no operand at all means the cwd, which is the project root"
+        );
     }
 
     #[test]

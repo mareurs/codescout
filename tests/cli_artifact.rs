@@ -71,16 +71,36 @@ fn artifact_find_semantic_without_embedder_reports_hint() {
 }
 
 #[test]
-fn artifact_get_missing_id_runs() {
+fn artifact_get_missing_id_errors_and_names_both_recovery_paths() {
     let tmp = TempDir::new().unwrap();
-    // Tool returns `null` for a missing artifact rather than erroring — smoke just
-    // exercises the clap → tool dispatch path without crashing.
+    // An unknown id is an ERROR, not an Ok(null). A null could not be told from an
+    // artifact that exists with an empty body, so the CLI printed "no such thing"
+    // and "found it, it's empty" identically — and as a SUCCESS.
+    //
+    // This test previously asserted `.success()` and carried a comment stating the
+    // null return as the contract, so it went red when 9a71357e fixed the tool.
+    // That is the CLI-side half of the same fix, not a separate regression.
     let assert = run_cmd(&tmp)
         .args(["artifact", "get", "definitely-not-a-real-id", "--json"])
         .assert()
-        .success();
-    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    assert!(!out.is_empty(), "expected some stdout payload; got empty");
+        .failure();
+    let err = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(
+        err.contains("definitely-not-a-real-id"),
+        "the error must name the id it could not resolve; got: {err}"
+    );
+    // Both branches, deliberately. A re-keyed id and a never-indexed one need
+    // opposite repairs, and the caller cannot choose without being told both
+    // exist — a single-branch hint sends every reader to `reindex`, which does
+    // not help the far more common case of an id changed by an archive move.
+    assert!(
+        err.contains("reindex"),
+        "must name the never-indexed repair; got: {err}"
+    );
+    assert!(
+        err.contains("include_archived"),
+        "must name the re-keyed repair; got: {err}"
+    );
 }
 
 #[test]
