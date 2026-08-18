@@ -183,36 +183,59 @@ which enumerates exactly which files recovered a link. That pairing is what the 
 
 ## Resume
 
-**Code is done and gated; the predicted measurement is NOT yet taken.** This bug file claims
-the project dangling total will RISE, and that claim is currently unverified — `link_scan` runs
-in the MCP server, there is no CLI subcommand for it, and the running server must be
-reconnected (`/mcp`) after `cargo rb` before the new gate is on the wire.
+**Measured 2026-08-18 on the wire** (`cargo rb` + `/mcp`; confirmed the server process itself
+was running the new code, not merely that a build existed — `librarian(action="doctor")`
+reported `params_behind_body`, BL-40's check, which shipped in the same binary).
 
-Pre-fix baseline, measured on the old binary immediately before the rebuild so the comparison
-is clean:
+| metric | pre-fix | post-fix | Δ |
+|---|---|---|---|
+| `dangling` | 548 | **471** | **−77** |
+| `ambiguous` | 410 | 411 | +1 |
+| `edges_desired` | 860 | 895 | +35 |
+| `edges_added` (write=true) | — | **44** | — |
+| `citations` | 3,649 | 3,718 | +69 |
+| `artifacts_scanned` | 1,055 | 1,056 | +1 |
 
-| metric | pre-BL-41 |
-|---|---|
-| `dangling` | **548** |
-| `ambiguous` | 410 |
-| `citations` | 3,649 |
-| `edges_added` | 0 |
-| `artifacts_scanned` | 1,055 |
+### The prediction in this file was WRONG, and the reason is worth more than the fix
 
-Note 548, not the 547 recorded at the previous session close; a peer session shares this
-machine-local catalog and one row moved between measurements. Not attributed — recorded as
-measured.
+This file said: *"Expect the project dangling total to RISE. That is the fix working, not a
+regression."* It fell by 77, and **BL-41's marginal contribution to that number is zero.**
 
-**Next action:** `/mcp`, then `librarian(action="link_scan")`, and compare. Two effects are
-confounded in that single number and should be reported separately:
+Not because the fix does not work — because it keys on the **declaration**, and there is no
+longer any prefix in this corpus that is declared and wholly undefined. Verified by inventory
+rather than inferred. Nine prefixes are declared in frontmatter — `GF`, `CAP`, `U`, `H`, `FND`,
+`T`, `R`, `SD`, `HY` — and every one has at least one defining heading (counted: 60 R, 46 U,
+14 HY, 11 SD, 8 GF, 7 H, 6 CAP, 18 FND, 12+24 T). (`entry_prefix` occurrences inside fenced
+examples in `docs/manual/` and an archived bug file are not declarations: the parser reads only
+a leading frontmatter block.)
 
-- BL-41 makes previously-suppressed namespaces reportable — pushes dangling **up**;
-- `c7bdfd22` gave 49 entries defining headings across four ledgers — pushes it **down**.
+The ledgers that WERE wholly undefined — `SD`, `GF`, `FND`, `T` — received their
+`entry_prefix` declaration and their defining headings **in the same commit** (`c7bdfd22`). So
+BL-41 never had a case to fire on: the population it would have surfaced was repaired in the
+same session that taught the gate to see it. The −77 dangling and the 44 edges belong entirely
+to that backfill, and `edges_added` — as this file already argued — is the clean read on it.
 
-So a flat total would be two real effects cancelling, not a no-op. `edges_added` is the clean
-read on the backfill half.
+### A coverage hole, now measured rather than predicted
 
-Do not archive this file until that measurement is recorded.
+The filed fix said option 1 "improves coverage without completing it" because not every ledger
+declares `entry_prefix`. That caveat is now a concrete instance:
+`stefanini/invest-europe/ie-pal-engine/docs/trackers/june-fixes-review-followups.md` holds 8
+`CR` entries, defines none of them, and **declares no `entry_prefix`** (grepped: 0 matches). So
+the gate still hides a wholly-broken namespace there — exactly the defect this bug reports,
+surviving its own fix.
+
+**Cheap completion:** declare `entry_prefix` on the remaining undefined ledgers. That is one
+frontmatter line each and it converts BL-41 from a recurrence guard into actual coverage. Both
+remaining ledgers are outside the working directories of the session that shipped this, so it
+needs the owner's go-ahead.
+
+### What the fix is actually worth
+
+Prospective, not retrospective: the next ledger created with `entry_prefix` and row-only
+entries will have its citations dangle **loudly** instead of silently, which is the failure
+this whole cohort exists to prevent. That is real value, and it is not what the metric in this
+file was written to measure. Recording the mismatch rather than reframing the prediction to fit
+the result.
 
 Fix SHA: `ff088630`, **`experiments`** — fast-forward path, so it is already the master-side SHA.
 ## References

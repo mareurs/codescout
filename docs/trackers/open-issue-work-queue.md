@@ -79,8 +79,9 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
 | BL-40 | 1 | every drift check asks whether the body kept up with params — nothing detects params falling behind a body that ran ahead | **done** `87f3b936` — fired twice on its first live run, incl. a second repo nobody had looked at; data repair split to BL-42 | `bde782f4cc52ac22` |
-| BL-41 | 1 | link_scan's dangling count is prefix-gated, so a namespace with zero definitions reports as healthy | **done** `ff088630` — code gated; the predicted dangling RISE is **not yet measured** (needs `/mcp`) | `52269554ea4f51a4` |
+| BL-41 | 1 | link_scan's dangling count is prefix-gated, so a namespace with zero definitions reports as healthy | **done** `ff088630` — measured on the wire: dangling 548 → 471, but BL-41's own contribution is **ZERO**; the prediction in the bug file was wrong. Coverage completion → BL-43 | `52269554ea4f51a4` |
 | BL-42 | 2 | DATA REPAIR: 16 entry rows exist in a tracker body and in no params row, so their ids were never allocated and a later `append_entry` can reissue them | open | `bde782f4cc52ac22` |
+| BL-43 | 1 | complete BL-41's coverage — a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate | open — one frontmatter line per ledger; do it with BL-39 step 4's remainder, same two files | `52269554ea4f51a4` |
 | BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **in-progress** — steps 0,1,2,3,5 done (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`). Step 5 found the real origin: `tracker_design`'s archetype **defaults**, incl. `task_list` — the archetype THIS queue uses — with no per-entry section at all. Step 4 substantially done — `doctor` `ledger_defines_nothing` **10 → 2**, `entry_without_definition` **3 → 1**. Backfilled: WIN `f04e4c17`, BL `0d101eb8`, PV `f5f602e6`, A `9703102c`, SD+GF+FND+T `c7bdfd22`, plus mirela G-6 and OTK-35 (uncommitted — user's checkout). Remaining: researcher `T`×2 and stefanini `CR`×8, both **outside this session's working dirs**; and `provenance-subsystem`'s 42 uncited PV, left undefined on purpose | `d34dfcd2cc718bd8` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 
@@ -254,6 +255,12 @@ The wiring is the load-bearing choice and it is not the one the bug file propose
 
 ### BL-42 — DATA REPAIR: 16 rows live in a body and in no params row, so their ids can be reissued
 **open** — surfaced by BL-40's new check on its first live run, so this is the fix proving itself rather than fresh breakage. `windows-platform-support.md` WIN-30, WIN-32..WIN-36 (6 of 35), left stale on purpose at the last session close so the check had something true to find; and `mirela/backend-kotlin/docs/trackers/solver-invariants.md` SI-59..SI-68 (10 of 68), **new and the more urgent**, because an unallocated id is silent corruption rather than a stale display. Remedy is `append_entry` / `update_entry` — **not** re-rendering the body, which would delete the newer record.
+### BL-43 — complete BL-41's coverage: an undeclared, undefined ledger is still invisible
+**open** — measured 2026-08-18, and it is the honest counterpart to BL-41's result. BL-41's marginal effect on the current corpus is **zero**: all nine declared prefixes (`GF`, `CAP`, `U`, `H`, `FND`, `T`, `R`, `SD`, `HY`) now have at least one defining heading, and `SD`/`GF`/`FND`/`T` got their declaration and their headings in the *same* commit (`c7bdfd22`), so the widened gate never had a case to fire on.
+
+The surviving hole is concrete rather than hypothetical: `stefanini/…/june-fixes-review-followups.md` holds 8 `CR` entries, defines none of them, and declares no `entry_prefix` — so a wholly-broken namespace is **still** invisible, which is the exact defect BL-41 reports, surviving its own fix. The bug file predicted this limit ("improves coverage without completing it"); it is now instantiated.
+
+Remedy is one frontmatter line per ledger. Both targets are outside the working dirs of the session that shipped BL-41, so it needs the owner's go-ahead — and it shares its two files with BL-39 step 4's remainder, so doing them together makes one citation sweep instead of two.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;
@@ -386,6 +393,42 @@ the user's own checkout, with 9 modified files from a concurrent session on
    the fix then is to qualify them as `fable-tuning-tasks:T-N` in the same commit.
 4. `provenance-subsystem`'s 42 uncited `PV` stay undefined on purpose — only 22 of 64 entries
    are cited, and the ledger's own convention is narrative only where a row is insufficient.
+#### Addendum — measured on the wire, and BL-41's prediction was wrong
+
+`cargo rb` + `/mcp`, then verified the **server process** was running the new code rather than
+trusting that a build existed: `librarian(action="doctor")` reported `params_behind_body`, which
+is BL-40's check and shipped in the same binary. Its counts matched the CLI exactly.
+
+| metric | pre-fix | post-fix | Δ |
+|---|---|---|---|
+| `dangling` | 548 | **471** | **−77** |
+| `ambiguous` | 410 | 411 | +1 |
+| `edges_desired` | 860 | 895 | +35 |
+| `edges_added` (write=true) | — | **44** | — |
+| `citations` | 3,649 | 3,718 | +69 |
+
+The 44 edges are materialized; the graph now holds **895** `cites` edges, which is a measured
+absolute rather than a running sum across sessions.
+
+**BL-41's bug file predicted the dangling total would RISE, and called that "the fix working".
+It fell by 77, and BL-41's contribution to the number is ZERO.** Not because the fix is broken
+— because it keys on the *declaration*, and no prefix in this corpus is any longer declared and
+wholly undefined. Verified by inventory, not inferred: nine declared prefixes, every one with
+≥1 defining heading. The four ledgers that WERE wholly undefined received their declaration and
+their headings in the same commit, so the widened gate never had a case to fire on. The −77 and
+the 44 edges belong entirely to the backfill.
+
+Recording the mismatch rather than reframing the prediction to fit the result. Two things follow.
+First, `edges_added` really is the clean read on backfill progress — as the file argued, and
+**`edges_missing` is its dry-run twin** (`write=false` leaves `edges_added` at 0, which is easy to
+misread as "nothing happened"). Second, BL-41's value is prospective: the next ledger created with
+`entry_prefix` and row-only entries dangles loudly instead of silently. Its retrospective coverage
+is incomplete, concretely so — filed as **BL-43**.
+
+Both bug files are left `fixed` and **NOT archived**, deliberately. BL-43 and BL-39's step-4
+remainder target the same two out-of-scope ledgers; archiving now would bury BL-43's rationale in
+a file nothing re-reads and force the 11-citation sweep (3 of them in Rust source) twice instead
+of once.
 ### 2026-08-18 (session close) — the citability chain, and what a later session should pick up
 
 One long session. Written here rather than in any `next` field because **`next` lives only in the
