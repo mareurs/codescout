@@ -591,7 +591,7 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 | 4a | `windows-platform-support.md` — 35 sections, 22 edges recovered | `f04e4c17` |
 | 4b | `open-issue-work-queue.md` — 39 sections, 33 edges recovered | `0d101eb8` |
 | 4c | `provenance-subsystem.md` — the 22 cited entries, −48 dangling | `f5f602e6` |
-| 4d | `prompt-hamsa-audit-log.md` — A-15…A-24, −27 dangling, 8 edges | `0a4f9a4a` |
+| 4d | `prompt-hamsa-audit-log.md` — A-15…A-24, −27 dangling, 8 edges | `9703102c` |
 
 **Running totals after 4 of 13 ledgers:** `ledger_defines_nothing` down from **10 violations to 8**;
 `entry_without_definition` down from **3 to 2**, and one of those two is the 42 deliberately left in
