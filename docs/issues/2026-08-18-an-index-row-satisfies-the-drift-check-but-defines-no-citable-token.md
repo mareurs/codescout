@@ -146,6 +146,45 @@ prose path already said. It also explains why the defect survived so long with n
 to notice — every message an author read was confident, specific, and locally consistent.
 ## Evidence
 
+### CORRECTION: `link_scan`'s dangling count cannot see the `ledger_defines_nothing` case at all
+
+This file says in several places that a row-only ledger's citations "resolve to nothing" and
+counts them as dangling — "117 dead `BL-N`", "129 dead `WIN-N`". **The damage figures are right;
+calling them dangling was wrong**, and the mechanism is worse than the original description.
+
+Verified in `src/librarian/tools/link_scan/resolve.rs`: `DefinitionIndex.known_prefixes` collects
+only prefixes with at least one **definition** anywhere in the corpus, and `prefix_is_known()`
+gates the dangling verdict on it (pinned by `dangling_is_prefix_gated`). So a prefix that is
+defined **nowhere** has its broken citations **suppressed** — treated as ordinary
+uppercase-hyphen-number prose, not as citations at all. The gate is sensible in itself: without
+it every `CI-2` or `PR-5` in prose would be reported broken.
+
+The consequence is that the two `doctor` checks sit on opposite sides of that gate:
+
+| case | prefix has definers? | citations appear in `dangling`? | does fixing it move the count? |
+|---|---|---|---|
+| `entry_without_definition` | yes | **yes** | yes — adding one `## A-25` heading took the project total 625 → 618 |
+| `ledger_defines_nothing` | no | **no, suppressed** | no — the WIN backfill left it at 621 → 621 |
+
+Measured on the WIN-N backfill (`758b37dc`'s check, fixed 2026-08-18): 129 citations across 27
+files were resolving to nothing, the project's dangling total was **621 before and 621 after**,
+and the recovery showed up instead as **22 new artifact→artifact edges** and `self_cites` 642 → 677.
+
+**Two things follow, and both matter for step 4.**
+
+1. **`dangling` is not a progress metric for this bug.** Half the population is invisible to it
+   in both directions. Measure with `doctor` (the ledger disappears from the report) and with
+   `edges_added` on a `link_scan(write=true)`, which enumerates exactly which files recovered a
+   link. That is what was used here.
+2. **The A-25 measurement recorded above is still valid, and now explains itself.** Prefix `A`
+   already had definers (`A-1`…`A-14`), so the gate was open and A-15…A-24's citations *were*
+   counted — which is why one heading moved 625 → 618. It was never evidence about the
+   `ledger_defines_nothing` half, and this file should not be read as if it were.
+
+So `ledger_defines_nothing` is the more dangerous of the two states, not the milder one: the write
+path is silent about it, the citation resolver is silent about it, and until 2026-08-18 nothing in
+the repo could see it.
+
 ### The population, in one tracker
 
 `docs/trackers/prompt-hamsa-audit-log.md` has body sections `## A-1` … `## A-14`, then

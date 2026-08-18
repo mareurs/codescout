@@ -100,6 +100,156 @@ to master — the tracker outlives them.
 | WIN-34 | path-handling | fixed | librarian `containing_root` could never match a catalog path on Windows, so `artifact(move)` and `artifact(delete)` failed with `no managed root contains <path>` for rows `create`/`find` handled fine. The catalog stores `abs_path` forward-slash-normalized and verbatim-prefixed (`//?/C:/Users/...`) — doctor's `check_backslash` enforces the forward slashes — while `current_project` keeps the native canonicalized spelling (`\\?\C:\Users\...`). Rust's Windows prefix parser matches literal backslashes only, so the first has no prefix component and the second parses as `VerbatimDisk('C')`; `Path::starts_with` compares components and can never bridge them. Now compares via `comparable_path()` (separators unified, verbatim prefix stripped; Windows only, since `\` is a legal filename byte on Unix) plus an explicit separator check preserving the security-relevant component boundary. Found by reading `catalog.db` directly, which falsified a symptom-consistent hypothesis in the bug file. doctor stayed green throughout because it polices the very convention that broke the comparison — a WIN-13-class spelling collision, and another unfalsifiable check | a8253b62 (experiments); docs/issues/archive/2026-08-07-artifact-move-cannot-resolve-source-in-subroot-workspace.md | 2026-08-07 |
 | WIN-35 | tooling | open | Python LSP unusable on this host: `pyright`/`pyright-langserver` in `~/.local/bin` are uv trampoline `.exe` shims that fail with `uv trampoline failed to spawn Python child process / permission denied (os error 5)` after ~35s, so `edit_code` times out with `LSP request timed out after 30s: initialize` on every `.py` file and Iron Law 2 is unsatisfiable for Python here (fall back to `edit_file`). Cause is **CyberArk EPM** application control blocking the trampoline from spawning its Python child — **not** the WIN-18 CrowdStrike quarantine vector, which an earlier revision of this entry wrongly assumed from the shared `os error 5` signature. The two are distinct: WIN-18 *deletes* a freshly written unsigned PE; CyberArk *denies execution* and leaves the file intact. Not fixable from codescout — needs a CyberArk policy exception for the trampoline + venv interpreter; mitigation is a non-trampoline pyright (npm / bundled node). Separately actionable in codescout: surface the child's stderr on LSP init failure — the 35s failure exceeds the 30s init timeout, so a permanent failure reads to the agent as a retryable cold start | session 2026-08-07 observation | 2026-08-07 |
 | WIN-36 | process-spawn | mitigated | Since WIN-32 every Windows spawn goes through Git Bash, so a host without Git for Windows cannot run commands **at all** — and the only diagnostic was the OS's bare `program not found`, which names neither the requirement nor the fix. Surfaced as 22 lib failures in the wine cross job on PR #10 (run `31220855460`); the three `windows-latest` cells pass because the GitHub runner ships Git. The fix is a mitigation **on purpose**: Git Bash stays a hard requirement, because falling back to `cmd /C` would re-open exactly what WIN-32 closed — the security layer tokenizing POSIX while the shell executes something else. The resolution chain is now a pure `resolve_git_bash(env, is_file)` returning `Option`, `shell_unavailable_hint()` turns `None` into a `RecoverableError` naming Git for Windows and `CODESCOUT_BASH`, and `run_command` preflights it before any spawn. The 22 wine failures are skipped as environmental, with the un-skip protocol in the workflow comment. Second-order finding: the not-installed branch was **untestable** — real env plus a real filesystem probe — which is why it shipped unexercised; three injected-probe tests now cover it, including the System32/WSL exclusion that was previously undecidable in a test. Root-cause close = install Git for Windows in the wine image and delete the skip block | docs/issues/2026-08-08-run-command-unusable-without-git-bash.md | 2026-08-08 |
+
+## Per-issue detail
+
+One section per WIN-N, and its only job is to **define the token**: `link_scan` derives a
+citable definition from a `## <ID> — <title>` heading and from nothing else, so before this
+section existed all 129 external citations of WIN-N resolved to nothing (measured 2026-08-18,
+`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
+Kept deliberately terse — the table above holds the full account; these are the landing spots a
+citation needs. Written from the **table**, not from `params`, because the two had diverged: see
+§ History 2026-08-18.
+
+### WIN-1 — run_command spawn hang and cmd.exe quote mangling
+`process-spawn` · **fixed** · 2026-06-08 · `docs/issues/archive/2026-06-08-windows-run-command-child-process-hang.md`
+An EDR grandchild held the pipe open, `.arg()` applied MSVC-CRT quoting, and inherited stdin blocked on a REPL.
+
+### WIN-2 — process kill and liveness shelled out to taskkill/tasklist
+`process-spawn` · **fixed** · 2026-06-09 · `9de846d4`
+Spawning under EDR to ask about a process; now Win32 `OpenProcess`/`TerminateProcess`/`GetExitCodeProcess`.
+
+### WIN-3 — three spawn sites unified behind one platform helper
+`process-spawn` · **fixed** · 2026-06-09 · `8c4c738f`
+All three `run_command` spawn sites plus `BackgroundKillGuard` routed through `platform::shell_command_configured`; `stdin=null` by default on both platforms.
+
+### WIN-4 — LSP binary name hardcoded to .cmd
+`lsp` · **fixed** · 2026-06-06 · `docs/issues/archive/2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md`
+The `.cmd` assumption held only for npm shims; the resolver now PATH-probes `.cmd`/`.exe`/`.bat`.
+
+### WIN-5 — LSP spawn timeout unbounded under EDR
+`lsp` · **deferred** · 2026-06-09 · `docs/trackers/archive/vdi-reliability-session-log.md` (F-3)
+`spawn()` is a synchronous `CreateProcessW` and needs `spawn_blocking`; the init handshake is already bounded.
+
+### WIN-6 — peer module does not compile on Windows
+`platform-gated` · **fixed** · 2026-06-09 · `5f8911b2`
+Unix domain sockets have no Windows equivalent here; the module is gated behind `cfg(unix)`.
+
+### WIN-7 — jemalloc-sys fails to build on MSVC
+`platform-gated` · **fixed** · 2026-05-24 · `docs/issues/archive/2026-05-24-ci-windows-jemalloc-build-fail.md`
+`tikv-jemalloc-sys` is now a `cfg(unix)` target dependency.
+
+### WIN-8 — umbrella members need the verbatim `\\?\` prefix
+`path-handling` · **mitigated** · 2026-06-08 · `%APPDATA%\librarian\workspace.toml`
+`canonicalize().starts_with` compares prefixed paths, so `workspace.toml` is written with verbatim *and* plain fallbacks.
+
+### WIN-9 — five real Windows lib failures, two of them product bugs
+`test-portability` · **fixed** · 2026-06-09 · `1d8cde48` (experiments)
+`detect_project_root` marker-shadowing and an `is_denied` verbatim deny-bypass were genuine defects; the other three were test fixes (open file handle, `/tmp` seed, canonical root).
+
+### WIN-10 — the running .exe is locked during rebuild
+`build-install` · **mitigated** · 2026-06-08 · `CLAUDE.md`
+No `~/.cargo` symlink on Windows either; the workflow is move the exe aside, rebuild in the background, `/mcp` reload.
+
+### WIN-11 — tool-count tests hardcoded the Unix count
+`test-portability` · **fixed** · 2026-06-09 · `5881ed09`
+22 including `peer`; now `cfg(unix)`-aware, 21 on Windows.
+
+### WIN-12 — companion hooks named consolidated-away tools
+`companion` · **fixed** · 2026-06-09 · `codescout-companion:71aceeb`
+Updated to `edit_code`/`edit_file`/`edit_markdown`/`create_file`.
+
+### WIN-13 — mixed-slash paths from librarian and guide_hint
+`path-handling` · **mitigated** · 2026-05-24 · `docs/issues/archive/2026-05-24-ci-windows-default-feature-failures.md`
+18 historical test failures traced to one spelling inconsistency — the same class WIN-34 later hit in the catalog.
+
+### WIN-14 — resolve_head_sha shelled out to git rev-parse
+`process-spawn` · **fixed** · 2026-06-09 · `bcc712ae` (experiments)
+An unbounded `.output()` with no timeout at every project activation — EDR hang risk; now libgit2 `revparse_single().short_id()`, like its sibling `probe_has_git_remote`.
+
+### WIN-15 — GPU probe spawned nvidia-smi at onboarding
+`process-spawn` · **fixed** · 2026-06-09 · `8ceb908f` (experiments)
+A synchronous `CreateProcessW` inside a 2s timeout that cannot preempt a hung spawn, stalling a tokio worker; now skipped on Windows unless `CODESCOUT_GPU_PROBE` is set.
+
+### WIN-16 — jobs=64 oversubscribed the 4-core VDI
+`build-install` · **mitigated** · 2026-06-09 · `20aa7df3` (experiments)
+64 EDR-taxed rustc processes on 4 cores; the hardcoded cap is gone so cargo auto-detects. The lld fast linker stays deferred — unverified on windows-gnu, plus WIN-18 quarantine risk.
+
+### WIN-17 — clippy -D warnings red from cfg(unix)-gated dead code
+`test-portability` · **fixed** · 2026-06-09 · `2f6e35c3` (experiments)
+Gating `peer` and `mux` left `is_codescout_kotlin_home`, five peer-serve methods and `parse_env_kv` dead, plus a `missing_const_for_thread_local` false positive in clippy 1.96.
+
+### WIN-18 — EDR quarantines freshly built unsigned binaries
+`build-install` · **open** · 2026-06-09 · session 2026-06-09 observation
+CrowdStrike deleted a 3-line hello-world exe as malware seconds after rustc wrote it. Large cargo outputs survive — the heuristic targets tiny isolated PEs. Avoid throwaway standalone exes. Distinct from WIN-35's CyberArk vector: this one *deletes* the file, CyberArk *denies execution*.
+
+### WIN-19 — .cmd preferred over .exe forced a cmd.exe shim
+`lsp` · **fixed** · 2026-06-12 · `vdi-windows 9cba50cb`, `368aa9df`
+Which re-opened WIN-1's EDR grandchild hazard; `.exe` is probed first now, and the logic plus five tests moved to `platform::mod` so they run on the Linux gate rather than only on Windows.
+
+### WIN-20 — temp files leaked on the spawn-error path
+`process-spawn` · **fixed** · 2026-06-12 · `docs/issues/archive/2026-06-12-windows-runcmd-tempfile-leak-spawn-error.md`
+`TmpfileGuard`s were built inside the future, so an early `?` from `spawn()` orphaned the `.keep()`d files in `%TEMP%`; guards are now created before the spawn and moved in.
+
+### WIN-21 — two ONNX backends enabled together broke the link
+`build-install` · **fixed** · 2026-06-12 · `vdi-windows 9cba50cb`
+`local-embed` (static) and `local-embed-dynamic` (dlopen) are mutually exclusive; enabling both handed `ort` conflicting features. A `cfg(all(...))` `compile_error!` now says so.
+
+### WIN-22 — EDR quarantines the downloaded onnxruntime.dll
+`build-install` · **mitigated** · 2026-06-12 · `docs/manual/src/configuration/embeddings-edr-windows.md`
+Same quarantine-on-write vector as WIN-18, breaking semantic search on the VDI. The fix is configuration, not code: default build, `[embeddings].url` pointed at the corporate endpoint, then reindex for the dimension change.
+
+### WIN-23 — unix-only test helpers broke the gnu warning-clean build
+`test-portability` · **fixed** · 2026-06-12 · `vdi-windows 8632093b`
+Seven helpers were live on unix but unused when test code compiles for windows-gnu, because every consumer is a `#[cfg(unix)]` test. Gating them unblocks a `-D warnings` gnu gate.
+
+### WIN-24 — legibility_scan's git_head shelled out to git rev-parse
+`process-spawn` · **fixed** · 2026-06-15 · `vdi-windows f22ed192`
+The same unbounded-`.output()` EDR hang class as WIN-14 — the git-spawn-elimination law reached `resolve_head_sha` and not this sibling. Found by an architecture review's whole-tree spawn grep, which is the lesson: a law applied by hand leaves the call sites nobody swept.
+
+### WIN-25 — collect_go_deps shelled out to go env GOMODCACHE
+`process-spawn` · **fixed** · 2026-06-15 · `vdi-windows 13534cbd`
+Same class again, and `go` has no library binding — so GOMODCACHE is re-derived purely from the environment, degrading to source-not-found rather than hanging when only `go env -w` set it.
+
+### WIN-26 — semantic_search hard-wired to Qdrant, which the VDI cannot run
+`retrieval-stack` · **fixed** · 2026-06-16 · `docs/plans/2026-06-16-two-stack-retrieval-lite.md`
+WIN-22's remote-embeddings fix was necessary but not sufficient without a daemon-free stack. Phases 0-4 all shipped to master; closed 2026-07-02 by a verify-open pass.
+
+### WIN-27 — first full wine suite showed 20 pre-existing failures
+`test-portability` · **open** · 2026-07-02 · `docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md`
+The 8-test `guide_hint` cluster was fixed 2026-07-05 and un-skipped; 12 remain skipped as emulation quirks.
+
+### WIN-28 — nine real-Windows failures, zero product defects
+`test-portability` · **fixed** · 2026-08-06 · `docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`
+Three root causes, all test-side: POSIX-shaped absolute literals that are not absolute on Windows, a mixed-separator expectation against an OS-shaped `CARGO_MANIFEST_DIR`, and a Unix-only siting assertion. CI run `31098286970` — 3283 passed, 0 failed.
+
+### WIN-29 — windows-gnu cross job red, a duplicate of WIN-28
+`ci` · **fixed** · 2026-08-06 · `docs/issues/archive/2026-08-06-windows-gnu-cross-job-red-undiagnosed.md`
+Confirmed twice: byte-identical failing set to the `windows-latest` nine, and green from the same fixture fixes with no MinGW- or wine-specific change. Reopen only if the cross job fails a test `windows-latest` passes.
+
+### WIN-30 — two Windows tests flaked on timing and turned a run red
+`ci` · **mitigated** · 2026-08-07 · `docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`
+`cold_start_over_budget_returns_none_but_keeps_warming` is fixed onto tokio's virtual clock (deterministic 25/25); `background_command_with_quotes_captures_output` is only mitigated — its poll no longer swallows the `Err` arm and the bound went 5s to 15s, but the intermittency was never reproduced.
+
+### WIN-32 — run_command ran via cmd /C, so the buffer-query workflow was unrunnable
+`process-spawn` · **fixed** · 2026-08-07 · `b142a514` (experiments)
+Iron Law 3's own `grep`/`tail` on `@cmd_*` refs could not run on Windows. Now Git Bash `bash -c`, with the System32 `bash.exe` skipped (that is the WSL launcher, 25-170x slower via `/mnt/c`), one POSIX tokenizer so the security layer parses what the shell executes, and a kill-on-close Job Object.
+
+### WIN-33 — MSYS path-conversion opt-out broke native git -C paths
+`process-spawn` · **fixed** · 2026-08-07 · `e4b86447` (experiments)
+A WIN-32 regression: `MSYS_NO_PATHCONV=1` disabled the rewriting that lets a *native* binary accept an MSYS path, so every `git -C /c/...` died. The justification was impossible — `sed`/`find` are MSYS binaries and never see the conversion. Its regression test asserts on the native side on purpose; a test driving only MSYS builtins passes either way, which is the green-check-that-cannot-fail that let it ship.
+
+### WIN-34 — containing_root could never match a catalog path on Windows
+`path-handling` · **fixed** · 2026-08-07 · `a8253b62` (experiments)
+`artifact(move)`/`artifact(delete)` failed with `no managed root contains <path>` for rows `create`/`find` handled fine: the catalog stores forward-slash verbatim paths while `current_project` keeps native canonical ones, and Rust's prefix parser matches literal backslashes only. `doctor` stayed green because it polices the very convention that broke the comparison — another unfalsifiable check.
+
+### WIN-35 — Python LSP unusable: uv trampoline blocked by CyberArk EPM
+`tooling` · **open** · 2026-08-07 · session 2026-08-07 observation
+`pyright` shims fail to spawn their Python child after ~35s, so `edit_code` times out on every `.py` file and Iron Law 2 is unsatisfiable for Python here. Not the WIN-18 vector — an earlier revision of the entry assumed that from the shared `os error 5`. Actionable in codescout: surface the child's stderr on init failure, since a 35s permanent failure past a 30s timeout reads as a retryable cold start.
+
+### WIN-36 — no Git for Windows means no commands at all
+`process-spawn` · **mitigated** · 2026-08-08 · `docs/issues/2026-08-08-run-command-unusable-without-git-bash.md`
+Since WIN-32 every Windows spawn goes through Git Bash, and the only diagnostic was the OS's bare `program not found`. Mitigated on purpose — falling back to `cmd /C` would re-open what WIN-32 closed. Second-order finding: the not-installed branch was untestable, which is why it shipped unexercised.
 ## Currently stable on Windows
 
 What works now (post the VDI reliability stream, on `experiments`):
@@ -167,10 +317,52 @@ When a Windows issue is found or its status changes:
    `update_entry` and cite the fixing commit (master-side SHA after cherry-pick)
    in `ref`.
 3. Re-sync the "## Issue index" table above with the render_template columns.
+3b. **Add a `### WIN-N — <title>` section under "## Per-issue detail".** This is not optional and
+   it is not the table: `link_scan` defines an entry token *only* from a
+   `## <ID> — <title>` heading, so a WIN-N that exists only as a params row and a table row
+   **cannot be cited by anything** — every reference to it resolves to nothing, silently.
+   Measured 2026-08-18 before this ledger was backfilled: 129 citations of WIN-N from 27 other
+   files, all dead. Keep the section short; the table carries the detail. Confirm with
+   `librarian(action="doctor")` — `ledger_defines_nothing` / `entry_without_definition`.
 4. For a brand-new incident, also open a `docs/issues/<date>-<slug>.md` and cite
    it in `ref`.
 
 ## History
+
+### 2026-08-18 — every WIN-N given a defining heading; params found lagging the table
+
+All 35 entries (WIN-1…WIN-36, no WIN-31) now have a `### WIN-N — <title>` section under
+§ *Per-issue detail*. Before this the ledger defined **no** WIN token anywhere, so every one of
+the **129 citations of WIN-N from 27 other files** resolved to nothing. `link_scan` now
+materialises **22 artifact→artifact edges** into this tracker that did not exist, from
+`release-promotion-session-log.md` (32 citations), `reconnaissance-patterns.md`,
+`codescout-usage-frictions.md`, an ADR, two plans, two specs and ten archived bug files.
+`librarian(action="doctor")` no longer reports this ledger at all.
+
+**The sections were written from the table, not from `params`, because the two had diverged —
+and params was the stale one.** Measured while doing the backfill: `params.issues` holds 29
+rows ending at WIN-29, with WIN-28 and WIN-29 both `open`; the committed table holds 35 rows
+ending at WIN-36, with WIN-28 and WIN-29 `fixed` and full post-mortems, plus WIN-30, WIN-32,
+WIN-33, WIN-34, WIN-35 and WIN-36 that params has never carried. Generating the sections from
+params would have published two wrong statuses and silently omitted six entries.
+
+That direction of drift is worth naming, because the tooling watches the other one.
+`update_entry`'s `snapshot_stale` and `doctor`'s `snapshot_drift` both ask *"has the body kept
+up with params?"*. Here the body ran ahead and params fell behind, which only `append_entry`'s
+`warning` field notices, and only at the moment of an append. **Params for WIN-28…WIN-36 are
+still stale — this pass deliberately did not rewrite them**, because six long summaries plus two
+status flips is its own task and folding it into a heading backfill would have hidden it.
+
+**Why the damage was invisible until 2026-08-18, verified in `resolve.rs`.** `link_scan`'s
+dangling verdict is *prefix-gated*: `DefinitionIndex.known_prefixes` collects only prefixes with
+at least one definition **anywhere in the corpus**, and `prefix_is_known` suppresses the dangling
+report for any prefix that has none. Because this ledger defined no WIN token at all, `WIN` was
+not a known prefix, so all 129 broken citations were **not counted as dangling** — they were
+suppressed as if `WIN-24` were an ordinary uppercase-hyphen-number string in prose. The project's
+dangling total sat at 621 before this backfill and 621 after it, unchanged, because those
+citations were never in it. The only surface that ever saw this was `doctor`'s
+`ledger_defines_nothing`
+(`docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
 
 ### 2026-08-07 — WIN-30 half fixed, half mitigated; one of WIN-27's twelve unknown wine failures explained
 
