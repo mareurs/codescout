@@ -198,7 +198,15 @@ mod tests {
 
     #[test]
     fn publish_keeps_the_entry_of_a_live_process() {
-        // Kills a mutation that collects the whole directory rather than dead pids.
+        // NOTE: this does NOT kill a "gc collects the whole directory" mutation —
+        // `publish()` unconditionally rewrites ITS OWN pid's entry right after
+        // `gc()` runs, so the final state here is identical whether gc preserved
+        // this file or deleted it and the rewrite recreated it. What this test
+        // actually kills is a "skip if a file already exists" mutation to the
+        // write step: the pre-seeded `session: "old"` must become `"new"`.
+        // `gc_does_not_remove_the_entry_of_an_unrelated_live_process` below is
+        // the one that proves gc itself preserves a live entry, using a pid that
+        // publish() does not also unconditionally rewrite.
         let dir = tempfile::tempdir().unwrap();
         let live = std::process::id();
         std::fs::write(
@@ -212,6 +220,50 @@ mod tests {
             e.session.as_deref(),
             Some("new"),
             "our own entry is rewritten"
+        );
+    }
+    #[test]
+    fn gc_does_not_remove_the_entry_of_an_unrelated_live_process() {
+        // Kills a mutation that drops the `process_alive` check in `gc` and
+        // removes every numeric-stem `.json` file unconditionally. That mutation
+        // passes every other test in this file: the empty-dir tests never seed a
+        // pre-existing file for gc to look at, `publish_collects_entries_...`
+        // wants the file gone either way, and `publish_keeps_the_entry_of_a_live_
+        // process` uses OUR OWN pid, whose entry gets rewritten unconditionally
+        // by `publish()` after `gc()` runs regardless of what gc did to it. A pid
+        // that is alive but is NOT our own is the only way to observe gc's
+        // liveness check in isolation.
+        let dir = tempfile::tempdir().unwrap();
+
+        #[cfg(unix)]
+        let mut other = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        #[cfg(windows)]
+        let mut other = std::process::Command::new("cmd")
+            .args(["/C", "timeout /T 5 /NOBREAK >NUL"])
+            .spawn()
+            .unwrap();
+        let other_pid = other.id();
+
+        std::fs::write(
+            dir.path().join(format!("{other_pid}.json")),
+            format!(
+                r#"{{"pid":{other_pid},"ppid":1,"started_at":"2026-01-01T00:00:00Z","cwd":"/","session":null,"hook_at":null}}"#
+            ),
+        )
+        .unwrap();
+
+        Rendezvous::publish(Some(dir.path().to_path_buf()), None);
+
+        let survived = dir.path().join(format!("{other_pid}.json")).exists();
+        let _ = other.kill();
+        let _ = other.wait();
+
+        assert!(
+            survived,
+            "gc must not remove a live, unrelated process's entry"
         );
     }
 
