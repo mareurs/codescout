@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- tests
+- hermeticity
+- guide-ledger
+- xdg
+closed: 2026-08-18
 opened: 2026-08-18
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [tests, hermeticity, guide-ledger, xdg]
-kind: bug
+severity: medium
 ---
 
 # BUG: a spawned-binary test points the guide-ledger GC at the developer's real state directory
@@ -150,32 +154,51 @@ content.
 
 ## Fix
 
-One line, in the test, no production change:
+Fixed on `experiments` in **`45918ca8`** — "fix(tests): redirect spawned-binary guide ledger off the real state dir". Two files, no production behaviour change.
+
+`tests/cross_process_write_lock.rs` — the spawn now carries both overrides:
 
 ```rust
+let state_dir = tempfile::tempdir().unwrap();
 let mut child = Command::new(&bin)
     .args(["start", "--project", project.to_str().unwrap()])
-    .env("XDG_STATE_HOME", &<a tempdir the test already holds>)
+    .env("XDG_STATE_HOME", state_dir.path())
+    .env_remove("CLAUDE_CODE_SESSION_ID")
 ```
 
-`Command::env` sets the **child's** environment; it does not call `std::env::set_var` and so does
-not violate the project's no-env-mutation-in-tests rule (concurrent `set_var` is UB —
-`docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`).
-Clearing `CLAUDE_CODE_SESSION_ID` on the child as well would close effect 3 independently of the
-directory.
+`state_dir` is bound to a **named local declared before `child`**, so it drops after it (Rust drops in reverse declaration order) and the directory outlives the process reading it. A `TempDir` bound to a temporary would be deleted at the end of that statement, leaving the child writing into a deleted path.
 
-Then widen the sentence at `src/server.rs:281-284` from "every test" to "every in-process test",
-or drop the qualifier once this is fixed and the universal is true again.
+`Command::env` / `env_remove` set the *child's* environment. Neither is `std::env::set_var`, so neither violates the no-env-mutation rule.
 
-Also worth a sweep while here: any other test that spawns the real binary inherits the same
-exposure. `grep -n "Command::new(&bin)" tests/` is the search.
+`src/server.rs:278-289` — the comment above the fallback now records that spawned-binary tests are covered by overriding `XDG_STATE_HOME` on the child rather than by `ServerEnv` injection, so the universal it states stays true and a future reader does not re-derive the same hole.
 
+**Sibling spawn sites swept and cleared.** `grep "Command::new" tests/**/*.rs` → 9 hits in 6 files. Only this one spawns a codescout server; `tests/librarian/mcp_integration.rs:91,105` spawn `librarian-mcp`, a binary that **no longer exists** (dissolved into the codescout crate — single `[[bin]]` target, no `src/bin/librarian-mcp.rs`, and that test carries `#[ignore = "requires standalone librarian binary which no longer exists post-dissolution"]`). The rest are `git`/`cargo`/`which`.
+
+No master-side SHA line: `git rev-list --left-right --count master...experiments` = `0 1022`, so `master` is a strict ancestor and promotion is a **fast-forward**. The `experiments` SHA above already is the master SHA; there is no second one to record.
+
+### Verification
+
+Gate green at the fix commit: 4137 passed, 0 failed, 45 ignored.
+
+The before/after `ls -la ~/.local/state/codescout/guide_hints/` captures are byte-identical across the target test — necessary but **not sufficient**, because a read + GC *scan* of the real directory leaves no filesystem trace either, and the pre-fix code passed this test too.
+
+So the fix carries **positive** evidence as well. The target test's own child only calls `edit_file` against a locked project, which is unlikely to trigger a guide hint, so a scratch probe drove the real binary through `initialize` → `notifications/initialized` → `tools/call workspace(activate)` with the same two overrides applied:
+
+```
+$ find <scratch-state-dir> -maxdepth 5
+<scratch-state-dir>/codescout/guide_hints/b496898b-af03-4f16-b956-568ea57c5c99.json
+```
+
+The ledger landed entirely inside the injected `XDG_STATE_HOME`, and under a **fresh uuid** rather than the developer's session id — which independently demonstrates that `env_remove("CLAUDE_CODE_SESSION_ID")` took effect. The real per-user directory gained no seventh file.
 ## Tests added
 
-None — bug is open. A fix should assert the child's ledger landed under the injected
-`XDG_STATE_HOME` rather than merely that the real directory was untouched, since the latter
-passes vacuously whenever nothing there is 35 days idle.
+**None — and this is a real residual gap, not a formality.** Stated plainly because the archive trigger requires a regression test and this fix does not have one.
 
+The fix *is* a change to a test, so there is nothing asserting the fix stays applied. Delete the two `.env` calls at `tests/cross_process_write_lock.rs` and the suite still passes: the target test's child never triggers a guide hint, so nothing observable changes, and the real-directory listing is unchanged either way because a read + 35-day GC scan leaves no trace.
+
+What a genuine regression test would need: spawn the binary with `XDG_STATE_HOME` pointed at scratch, complete an MCP handshake, make a call that *does* trigger a guide hint, and assert the ledger appears under the scratch path. The machinery exists — `mcp_handshake` is already in this test file, and the scratch probe under Verification is that test in script form. It was not committed as a test because doing so was outside the scope of the fix.
+
+**This file is therefore deliberately NOT archived.** `CLAUDE.md`'s archive trigger is "gate green plus a regression test"; the gate is green and the test is absent, so archiving it would misreport the state.
 ## Workarounds
 
 Set `XDG_STATE_HOME` to a scratch path in the shell before running the suite, which redirects the
@@ -183,12 +206,11 @@ spawned child along with everything else.
 
 ## Resume
 
-Apply the `.env("XDG_STATE_HOME", ..)` fix at `tests/cross_process_write_lock.rs:120`, run
-`cargo test --test cross_process_write_lock`, and confirm a ledger appears under the injected
-tempdir and not under `~/.local/state/codescout/guide_hints/`. Then run
-`grep -n "Command::new" tests/` to check whether any sibling test spawns the binary with the same
-exposure, and qualify or restore the universal at `src/server.rs:281-284`.
+The defect is fixed and verified; what remains is the guard.
 
+Promote the scratch probe under *Verification* into a committed regression test in `tests/cross_process_write_lock.rs`, reusing that file's existing `mcp_handshake` helper: spawn with `XDG_STATE_HOME` at a scratch dir, drive one tool call that triggers a guide hint, and assert a ledger appears under scratch and the real per-user directory is untouched. Then archive this file via `artifact(action="move", id=…, new_rel_path="docs/issues/archive/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md")` — never a bare `git mv` — and re-point any citation of this path or of id `ef800712655f97a4` in the same commit.
+
+Do **not** go looking for a master-side SHA: promotion is a fast-forward, so `45918ca8` is already it.
 ## References
 
 - `tests/cross_process_write_lock.rs:112-132` — the spawn
