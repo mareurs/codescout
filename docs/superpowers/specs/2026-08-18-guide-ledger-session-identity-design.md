@@ -441,32 +441,37 @@ Code sessions, the only harness with a session id to group by. Tier-2 clients ar
 shaped and their conversation cadence is unmeasured. The value is a config key
 (`CODESCOUT_GUIDE_TTL_SECS`), and this table is the method for re-scoring it once tier-2
 traffic exists.
-#### Open for Phase B: expiring the *last* topic re-fires the session opener
+#### Resolved 2026-08-18 (Phase B): expiring the *last* topic re-fires the session opener
 
 Surfaced 2026-08-18 by the Task 4 review; not a Phase A defect, and deliberately left
-unpinned there. Recorded here because Phase B is where it becomes observable.
+unpinned there. Resolved in Phase B (Task 3 of this plan): **accept** the behaviour.
 
 The chain: if `expire_idle` removes the final remaining topic, `persist` takes its
-empty-map branch and **deletes** the file (`src/tools/guide_ledger.rs:204-207`). The next
-`load` therefore yields an empty ledger, and `is_empty()` is the trigger for
-`SESSION_OPENING_GUIDE` (`src/tools/core/types.rs:693`) — so the orientation guide fires
-again.
+empty-map branch and **deletes** the file (`src/tools/guide_ledger.rs`, `persist`). The
+next `load` therefore yields an empty ledger, and `is_empty()` is the trigger for
+`SESSION_OPENING_GUIDE` (`src/tools/core/types.rs`, the `if emitted.is_empty()` branch) —
+so the orientation guide fires again.
 
-For a tier-2 client that has been idle past its TTL, re-orienting is arguably the *correct*
-behaviour: enough time has passed that the model plausibly no longer holds any of it, and
-the invariant is "degrade to re-sending, never to suppressing." But it is currently an
-emergent consequence of two independent branches rather than a decision, and nothing pins
-it.
+Decision: **accept**, not prevent. Rationale is the governing invariant that runs through
+this whole design — "degrade to re-sending, never to suppressing." For a client idle past
+its TTL, re-orienting is the correct behaviour, not a bug to route around: enough time has
+passed that the model plausibly holds none of the original orientation anyway, so
+re-sending it costs tokens once where suppressing it would fail silently. The rejected
+alternative — retaining a placeholder entry, or having `persist` write `{}` instead of
+deleting when the map empties — was considered and declined, because either would make
+`is_empty()` return false forever and suppress the opener permanently for that session.
 
-Phase B must choose explicitly and add a test either way:
+Pinned by
+`expiring_the_last_topic_deletes_the_file_so_the_session_opener_re_fires`
+(`src/tools/guide_ledger.rs`, `mod tests`), which expires a keyed ledger's only topic via
+`expire_idle` and asserts both that `persist` removes the file and that the next `load`
+comes back empty. `persist`'s own doc comment carries the same rationale at the point of
+the code it protects, so a future edit to the empty-map branch is warned twice: once by
+the doc comment, once by the test failing.
 
-- **Accept it** — document that a fully-expired ledger re-opens the session, and pin it with
-  a test that expires the last topic and asserts the opener fires on the next load.
-- **Prevent it** — have `expire_idle` retain at least the opener's own entry, or have
-  `persist` write `{}` rather than deleting when the map empties, so `is_empty()` stays
-  false. Note this interacts with §8's GC, which falls back to file mtime for an empty or
-  unparseable ledger.
-
+This interacts with §8's GC, which falls back to file mtime for an empty or unparseable
+ledger — unaffected by this decision, since GC only runs on ledgers other than the one
+being loaded.
 ### 8. GC
 
 A global directory accumulates across every project, so GC is part of the design rather
