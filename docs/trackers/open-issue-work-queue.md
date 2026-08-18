@@ -31,7 +31,7 @@ row says `open` and the bug says `fixed`, the bug is right and the row is stale.
 from here — and never treat the one-line `next` as the instruction. It is a pointer to that bug's
 `## Resume`, which carries the real next action along with the caveats.
 
-## Queue — rendered snapshot (2026-08-16)
+## Queue — rendered snapshot (2026-08-18)
 
 > **`params` is the source of truth; this table is a snapshot of it.** Params live in the librarian
 > catalog (`~/.local/share/librarian/catalog.db`), which is **not** in the repo — so without this
@@ -46,19 +46,19 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-3 | 1 | Tool schemas: stop advertising conditionally-required params as optional | **done, archived** | `02d2d9d8a7eeec2e` |
 | BL-4 | 1 | usage.db: derive the backfill gate from the taxonomy, not a hand-maintained integer | **done, archived** | `fc00c33f2403ae8a` |
 | BL-5 | 1 | librarian: split `tracker_design` so its guidance arrives inline | **done** | `3f88d49c38ced0c1` |
-| BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | open | `a9644b964edac789` |
-| BL-7 | 1 | Write-scope denial should name `approve_write` | open | `0a15c81150c4cce7` |
-| BL-8 | 2 | `truncate_compact` cuts from the tail, destroying the overflow signal | open | `c320b6564d1cb003` |
+| BL-6 | 1 | read_file: give the buffered full-read summary an incompleteness signal | **done** | `a9644b964edac789` |
+| BL-7 | 1 | Write-scope denial should name `approve_write` | **done** | `0a15c81150c4cce7` |
+| BL-8 | 2 | `truncate_compact` cuts from the tail, destroying the overflow signal | **done** | `c320b6564d1cb003` |
 | BL-9 | 2 | `server_instructions` arrives truncated mid-word, dropping the guide pointers | **done, archived** | `be057e5e9d7c4c16` |
 | BL-37 | 2 | Kotlin warnings / workspace table / Custom Instructions cannot fit the 2048-char instructions channel — ordering fixes the common case (shipped `30f3df81`); the two oversized blocks need a new carrier | open | `fd54f2ae3cc7bdc8` |
-| BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | open | `772fff5739620581` |
+| BL-10 | 2 | `audit_doc_refs` reads bare comment markers as file paths | **done** | `772fff5739620581` |
 | BL-11 | 2 | `context`/`workspace_state_at`/`link_scan` never dedup the worktree overlay | done | `d31233700ca979c2` |
 | BL-12 | 2 | worktree divergence guard covers writes but not reads | done | `c611a3dce4f05d45` |
 | BL-35 | 2 | `guard_worktree_write` is dead code in production (startup cwd sets the flag it gates on) | **done, archived** | `a742a50ea6723daf` |
 | BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording | blocked | `ab0b30dc9053aa6c` |
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | done | `1780acde047ffca2` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | done | `6902806f459fcf62` |
-| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | blocked | `403e3fad0356f171` |
+| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | open | `403e3fad0356f171` |
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | **done** — measured 0; its own bug file is gone | — |
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | **done, archived** | `3d733b00b134634c` |
@@ -67,7 +67,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-22 | 1 | `move` broke the `id == hash(abs_path)` invariant, so the next reindex cascade-deleted the history | **done, archived** | `18a637f59289192c` |
 | BL-23 | 3 | a moved artifact's frontmatter still asserts its pre-move id | **done, archived** | `61e2360408cb206b` |
 | BL-24 | 2 | usage.db records a sha that need not describe the built code, and drops the dirty bit | **done, archived** | `0cd1fe818951b232` |
-| BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | open | `cfcbee6f7d047a55` |
+| BL-25 | 1 | the 2200-byte cap evicts rules into `get_guide` topics nothing triggers — 7 of 10 guides (~46 KB) have no trigger at all | **done** | `cfcbee6f7d047a55` |
 | BL-26 | 2 | `get_guide("librarian-runtime")` says a move preserves the id; a move mints a new one — 2d8c7f39 repaired 3 of 4 copies | **done, archived** | `5d8584d109d876ea` |
 | BL-27 | 3 | `update_entry`'s entry-param guard only fires when `fields` is absent; send both and `entry` is dropped silently | **done, archived** | `d082f963f57bd76b` |
 | BL-28 | 3 | a directory named `--help` holding an initialised codescout project sits untracked in the repo root | **done, archived** | `ba6ab341eab97416` |
@@ -78,6 +78,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
+| BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — 26 of 66 tracker/bug files unprotected; plan at `docs/superpowers/plans/2026-08-18-ledger-aware-librarian-guard.md` | open | `88129ecc9c4c87a2` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -166,6 +167,41 @@ both from the 2026-08-15 tool-usage investigation. If picking by impact rather t
 there.
 
 ## History
+
+### 2026-08-18 — the shell-gate cluster closed, and the snapshot had drifted on six rows
+
+**Five bugs closed across two sessions**, none of which had a BL row — they were filed
+and fixed inside a day, faster than this queue turns over. `find`'s silent `count: 0`
+(`9d386566`), `chunk_id` collapsing duplicate chunks (`933af744`), the IL3 heredoc gap
+plus `find` dropping `rel_path` (`4fad1aa4`), the newline separator in both gates
+(`308014b5`), `artifact(get)` returning bare `null` (`9a71357e`), the source gate
+counting relative tokens as in-project (`be2d7781`), and worktree reads answering about
+the old checkout (`dd788ce1`). The IL3 advisory hook was deleted outright in
+`codescout-companion` 1.16.9 rather than corrected. All recorded in `CHANGELOG.md`
+(`fa107a6a`) — which had itself gone 27 commits without an update.
+
+**The snapshot was wrong on six rows.** BL-6, BL-7, BL-8, BL-10 and BL-25 read `open`
+here while params said `done`; BL-16 read `blocked` while params said `open`. So the
+committed file — the only copy that exists in git — advertised **eight** open items when
+four were live. That is BL-29 again, and worth stating plainly: every fix in this queue's
+history that flipped a row with `update_entry` aged this table by one row, and the drift
+is invisible until someone diffs params against the body. The check is
+`artifact(get, id="9a892c2a5976e296", entry_filter={"status":{"ne":"done"}})` — run it
+before trusting any "what's open" read of this section.
+
+**BL-38 added** for the ledger-aware librarian guard, which had a 770-line plan
+(`8a793791`, at `docs/superpowers/plans/`, not `docs/plans/`) and no row. It is the only remaining open bug whose defect is still actively
+producing damage rather than waiting on a decision.
+
+**BL-13 is no longer merely blocked.** The A-25 pre-registration landed (`e2fbefe2`) with
+a numeric ship/no-ship rule fixed *before* either arm runs — ship the clause only if arm A
+base is >= 3/10 and arm B clause is <= 1/10; arm A <= 1/10 is a ceiling and the 57
+characters get reverted. What remains is running the arms in `prompt-engineering`, not
+deciding anything here.
+
+**Verify-open pass run on the two rows whose bugs were absent from the open-bug query.**
+BL-16 (`403e3fad0356f171`) and BL-29 (`0694a4a9946e10fe`) are both genuinely `mitigated`,
+not zombie-open — clean, against this project's measured 75% zombie rate.
 
 ### 2026-08-16 — opened
 
