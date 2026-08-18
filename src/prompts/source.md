@@ -22,8 +22,6 @@ Subagents inherit these rules. Pass them along.
 - Know concept → semantic_search(query)
 - Exact string/regex → grep(pattern, glob, mode="files")
 - Who calls X → references(symbol, path) — NOT grep
-- Blast radius of a change → call_graph(symbol, path)
-- Files by glob → tree(glob="**/*.rs")
 - Structural code edit → edit_code | Text/import edit → edit_file
 - After workspace(activate, foreign) → activate home before turn end
 
