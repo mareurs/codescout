@@ -2718,6 +2718,68 @@ mod tests {
         assert_eq!(schema["properties"].as_object().unwrap().len(), 2);
     }
 
+    /// Forward guard: pins the PRESENCE of the routing clause, because this string is
+    /// the single most attractive compression target on the entire surface and the
+    /// analysis that finds it cannot see why it must stay.
+    ///
+    /// This one description is injected into all 24 pinnable tools, so it costs 179
+    /// chars x 24 = 4,296 on the wire — 7.6% of the surface for one sentence, and the
+    /// only 24x multiplier there is. An n-gram redundancy sweep ranks it FIRST. hamsa
+    /// A-28 nearly cut its last clause on exactly that reasoning and measured it
+    /// instead:
+    ///
+    /// | arm | description | passed |
+    /// |---|---|---|
+    /// | base | 132 chars, all three claims | **10/10** |
+    /// | treatment | 53 chars, routing clause dropped | 8/10 |
+    /// | control-null | description removed, knob kept | 9/10 |
+    /// | control-positive | + mandatory directive forbidding the pin | **0/10** |
+    ///
+    /// Every failure in the two cut arms was the SAME one, and none occurred in base:
+    /// the model reached for `workspace(action="activate", ...)`, which is GLOBAL and
+    /// clobbers a concurrently-working parent session — the exact condition the
+    /// per-call pin exists for. So `For concurrent subagents in different workspaces`
+    /// does not DESCRIBE the parameter, it DISPLACES a competing prior.
+    ///
+    /// The counts are small (10/10 vs 8/10 is Fisher p~0.47) and the disposition does
+    /// not rest on them. P-4 puts the burden on the DELETION to show it does not
+    /// regress; 8/10 against 10/10 does not discharge it. A cut that cannot prove
+    /// safety does not ship — it need not be proven harmful.
+    ///
+    /// Contrast `augment_schema_does_not_restate_the_merge_rule_per_field`, whose cut
+    /// DID ship: prose restating what a parameter NAME already implies is cargo cult
+    /// (A-27, 882 chars, 20/20 with zero statements and no cue). The discriminator is
+    /// not redundancy but function — does the sentence DESCRIBE the parameter, or
+    /// DISPLACE something the model would otherwise reach for?
+    ///
+    /// Shortening this string needs a NEW base arm (P-3), not a byte budget.
+    ///
+    /// Ledger: `docs/trackers/prompt-hamsa-audit-log.md` A-28.
+    /// Scenario: `prompt-engineering/scenarios/workspace-pin-routing/`.
+    #[test]
+    fn injected_workspace_description_keeps_the_routing_clause() {
+        let mut schema = serde_json::Map::new();
+        CodeScoutServer::inject_workspace_param(&mut schema);
+        let desc = schema["properties"]["workspace"]["description"]
+            .as_str()
+            .expect("injected workspace param must carry a description");
+
+        assert!(
+            desc.contains("concurrent subagents in different workspaces"),
+            "the routing clause is gone. A-28 measured its removal: 10/10 -> 8/10, and \
+             every failure was the model reaching for the globally-scoped \
+             workspace(action=\"activate\") instead of the per-call pin. It displaces a \
+             competing prior rather than describing the parameter, so it does not come \
+             out for bytes — re-cutting needs a new base arm. Got: {desc:?}"
+        );
+        assert!(
+            desc.contains("omit for the active project"),
+            "the default-behaviour clause is gone; A-28 tested dropping the ROUTING \
+             clause only, so cutting this one is a separate intervention needing its \
+             own arm. Got: {desc:?}"
+        );
+    }
+
     #[tokio::test]
     async fn all_tools_have_descriptions() {
         let (_dir, server) = make_server().await;
