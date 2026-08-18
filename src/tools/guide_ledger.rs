@@ -151,18 +151,24 @@ impl GuideLedger {
 
     /// Best-effort write-through. Persistence is an optimization, not a
     /// correctness requirement — failures are logged at debug, never raised.
+    ///
+    /// Writes go through `util::fs::write_utf8`, which stages to a sibling
+    /// `.tmp` and renames, so a reader can never observe a torn file.
+    ///
+    /// Deliberately NOT read-modify-write: merging the on-disk set back in would
+    /// resurrect exactly the topics `re_arm` and `expire_idle` just removed. The
+    /// in-memory map is authoritative for this process; last writer wins. Two
+    /// live processes sharing one session id would need to write simultaneously
+    /// for that to matter, and an MCP reconnect is kill-then-spawn, not overlap.
     fn persist(&self) {
         let Some(path) = &self.path else { return };
         if self.emitted.is_empty() {
             let _ = std::fs::remove_file(path);
             return;
         }
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
         match serde_json::to_string(&self.emitted) {
             Ok(json) => {
-                if let Err(e) = std::fs::write(path, json) {
+                if let Err(e) = crate::util::fs::write_utf8(path, &json) {
                     tracing::debug!("guide ledger persist failed ({}): {e}", path.display());
                 }
             }
@@ -366,6 +372,39 @@ mod tests {
             Some(&second_stamp),
             "the on-disk stamp must match the refreshed in-memory stamp, not the stale first one"
         );
+    }
+
+    #[test]
+    fn persist_never_leaves_a_partial_file_behind() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("nested").join("guide_hints");
+
+        let mut l = GuideLedger::load("sess-atomic", Some(hints.clone()));
+        l.insert("librarian".to_string());
+        l.insert("tracker-conventions".to_string());
+        drop(l);
+
+        // Parent directories are created by the writer.
+        let target = hints.join("sess-atomic.json");
+        assert!(
+            target.exists(),
+            "persist must create its parent directories"
+        );
+
+        // The atomic writer stages through a sibling `.tmp` and renames; no stray
+        // temp file may survive a successful write.
+        let leftovers: Vec<_> = std::fs::read_dir(&hints)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "stray temp files: {leftovers:?}");
+
+        // And the file that landed is complete, parseable JSON.
+        let raw = std::fs::read_to_string(&target).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("complete JSON");
+        assert_eq!(parsed.as_object().unwrap().len(), 2);
     }
 
     #[test]
