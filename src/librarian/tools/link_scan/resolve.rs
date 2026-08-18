@@ -47,6 +47,18 @@ impl DefinitionIndex {
                     idx.known_prefixes.insert(prefix.to_string());
                 }
             }
+            // A DECLARED namespace is a known one whether or not anything defines an entry
+            // in it. Learning prefixes from definitions alone cannot distinguish "not a
+            // namespace" (`UTF-8`, `SHA-256`, `CI-2` in prose — the noise the gate exists
+            // to suppress) from "a namespace that is wholly broken", and it resolved both
+            // to silence: a ledger whose every entry lived in an index row reported zero
+            // dangling against 129 live citations, none of which resolved.
+            //
+            // Regardless of `active`: an archived ledger's namespace is still a namespace,
+            // and archived definers already resolve (`single_archived_definer_still_resolves`).
+            // docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
+            idx.known_prefixes
+                .extend(ex.declared_prefixes.iter().cloned());
         }
         idx
     }
@@ -265,7 +277,7 @@ mod tests {
                     line: 1,
                 })
                 .collect(),
-            citations: vec![],
+            ..Default::default()
         }
     }
 
@@ -405,6 +417,85 @@ mod tests {
                 &corpus
             ),
             None
+        );
+    }
+
+    /// The fix. A ledger that DECLARES `entry_prefix: WIN` and defines nothing must
+    /// still have its citations reported. `known_prefixes` previously learned prefixes
+    /// only from definitions, so a wholly-undefined namespace was indistinguishable
+    /// from `UTF-8` in prose and every citation of it was suppressed — 129 live `WIN-N`
+    /// citations reporting as zero dangling, on a ledger where none of them resolved.
+    /// docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
+    #[test]
+    fn a_declared_prefix_dangles_even_though_nothing_defines_it() {
+        let ledger = DocExtract {
+            declared_prefixes: vec!["WIN".to_string()],
+            ..Default::default()
+        };
+        let idx = DefinitionIndex::build([("winledger", "active", &ledger)]);
+        assert_eq!(
+            resolve(
+                &cite("WIN-5", CitationKind::EntryToken),
+                "doc",
+                "",
+                &idx,
+                &Corpus::default()
+            ),
+            Some(Outcome::Dangling),
+            "the namespace is declared, so its citations are breakage — not noise"
+        );
+    }
+
+    /// The other side of the same condition: a declaration must not un-suppress
+    /// everything. Extraction is deliberately dumb about `UTF-8` / `SHA-256`
+    /// (`prose_acronyms_are_extracted_dumbly`) and the gate is the only thing keeping
+    /// them quiet, so widening it per-prefix must stay per-prefix.
+    #[test]
+    fn declaring_one_prefix_does_not_un_suppress_the_others() {
+        let ledger = DocExtract {
+            declared_prefixes: vec!["WIN".to_string()],
+            ..Default::default()
+        };
+        let idx = DefinitionIndex::build([("winledger", "active", &ledger)]);
+        assert_eq!(
+            resolve(
+                &cite("UTF-8", CitationKind::EntryToken),
+                "doc",
+                "",
+                &idx,
+                &Corpus::default()
+            ),
+            None,
+            "declaring WIN says nothing about UTF"
+        );
+    }
+
+    /// The wire, not the halves — a real body through the real extractor. This ledger's
+    /// entries live in index ROWS, which define nothing, so the declaration travelling
+    /// on `DocExtract` is the only thing that can make its citations reportable. Fails
+    /// if `extract` stops populating `declared_prefixes` or `build` stops reading it,
+    /// neither of which a unit test on either half alone can see.
+    #[test]
+    fn a_row_only_declared_ledger_is_reportable_end_to_end() {
+        let ledger = crate::librarian::tools::link_scan::extract::extract(
+            "---\nkind: tracker\nentry_prefix: WIN\n---\n\n| ID | title |\n| WIN-1 | a |\n",
+        );
+        assert!(
+            ledger.definitions.is_empty(),
+            "precondition: rows define nothing, so the gate has only the declaration \
+                 to go on — got {:?}",
+            ledger.definitions
+        );
+        let idx = DefinitionIndex::build([("winledger", "active", &ledger)]);
+        assert_eq!(
+            resolve(
+                &cite("WIN-1", CitationKind::EntryToken),
+                "doc",
+                "",
+                &idx,
+                &Corpus::default()
+            ),
+            Some(Outcome::Dangling)
         );
     }
 

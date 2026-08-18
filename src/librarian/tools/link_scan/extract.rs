@@ -63,6 +63,16 @@ pub struct Citation {
 pub struct DocExtract {
     pub definitions: Vec<Definition>,
     pub citations: Vec<Citation>,
+    /// The id namespaces this artifact's frontmatter DECLARES via `entry_prefix`.
+    ///
+    /// Not a definition and not a citation — a third, orthogonal channel, and the only
+    /// one that can tell a wholly-undefined ledger apart from an acronym in prose. It
+    /// rides on `DocExtract` rather than being threaded through
+    /// [`super::resolve::DefinitionIndex::build`]'s arguments precisely so no caller has
+    /// to remember to pass it: `extract` already holds the whole file text, frontmatter
+    /// included, so the wire cannot be forgotten.
+    /// docs/issues/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md
+    pub declared_prefixes: Vec<String>,
 }
 
 /// Entry token: `A-11`, `F-3`, `T-007`, `WIN-4`, `BUG-40`. Width-agnostic on
@@ -112,7 +122,17 @@ pub fn extract(text: &str) -> DocExtract {
         Err(_) => 0,
     };
 
-    let mut out = DocExtract::default();
+    // Frontmatter yields no definitions and no citations — the offset guard below drops
+    // every event inside it. It does, however, DECLARE the artifact's id namespaces, and
+    // that declaration is what lets the dangling gate tell a wholly-undefined ledger apart
+    // from `UTF-8` in prose. Read with the guard's own parser rather than a second one:
+    // `librarian_guard` compiles under `--no-default-features` where
+    // `librarian::frontmatter` does not exist, and the two readers' agreement on every
+    // YAML form is already pinned by `both_entry_prefix_readers_agree_on_every_yaml_form`.
+    let mut out = DocExtract {
+        declared_prefixes: crate::util::librarian_guard::declared_entry_prefixes(text),
+        ..Default::default()
+    };
     let mut seen_defs = std::collections::BTreeSet::new();
     let mut seen_cites = std::collections::BTreeSet::new();
 
@@ -295,6 +315,35 @@ mod tests {
             ex.citations.is_empty(),
             "frontmatter must not cite: {:?}",
             ex.citations
+        );
+    }
+
+    /// Frontmatter yields no definitions and no citations — but it does carry the
+    /// `entry_prefix` DECLARATION, and that declaration is the only thing that can
+    /// distinguish a wholly-undefined ledger from an acronym in prose.
+    #[test]
+    fn frontmatter_entry_prefix_is_read_as_a_declaration() {
+        let ex = extract("---\nkind: tracker\nentry_prefix: WIN\n---\n\nBody, no tokens.\n");
+        assert_eq!(ex.declared_prefixes, vec!["WIN".to_string()]);
+        assert!(
+            ex.definitions.is_empty(),
+            "a declaration is not a definition: {:?}",
+            ex.definitions
+        );
+    }
+
+    /// The discriminating negative: a prefix that merely APPEARS in frontmatter is not a
+    /// declaration. `tags: [A-11, F-3]` must stay silent, or the dangling gate would be
+    /// widened by any tracker that happens to tag itself with an entry id. YAML *forms*
+    /// of `entry_prefix` are covered where the parser lives, by
+    /// `both_entry_prefix_readers_agree_on_every_yaml_form`.
+    #[test]
+    fn frontmatter_declares_nothing_without_an_entry_prefix_key() {
+        let ex = extract("---\nid: 59ebeebb6ed05c89\ntags: [A-11, F-3]\n---\n\nBody.\n");
+        assert!(
+            ex.declared_prefixes.is_empty(),
+            "{:?}",
+            ex.declared_prefixes
         );
     }
 
