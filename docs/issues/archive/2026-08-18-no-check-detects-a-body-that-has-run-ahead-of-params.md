@@ -120,9 +120,11 @@ six-row divergence, so the one surface that could have reported it never ran.
    `in_body.difference(&claimed)` — the same two sets, subtracted the other way.
 2. **Ids only.** No status comparison; the id-set difference is exact and is what caught the
    WIN case.
-3. **The message names `append_entry` / `update_entry`** and says explicitly *"do NOT rewrite
-   the body from `params`, which would delete the newer record"*, because getting that
-   backwards is data loss rather than noise.
+3. **The message names a remedy** and says explicitly *"do NOT re-render the body from
+   `params`"*, because inheriting `snapshot_drift`'s remedy here is data loss rather than noise.
+   ⚠️ The remedy it first named — `append_entry` / `update_entry` — was **wrong**, and neither
+   tool can perform this repair; corrected in `8084f0ea`. See § *Correction* below before reading
+   any further clause of this section as current.
 
 Two design decisions, each pinned by a test rather than a comment:
 
