@@ -168,7 +168,7 @@ fn archetype_failure_table() -> Value {
             }
         },
         "render_template_example": "**Suite:** `{{ suite }}` — {{ failures|selectattr(\"status\",\"equalto\",\"fail\")|list|length }} failing / {{ failures|length }} total\n\n| id | status | owner | last seen | notes |\n|----|--------|-------|-----------|-------|\n{% for f in failures %}| {{ f.id }} | {{ f.status }} | {{ f.owner or \"—\" }} | {{ f.last_seen or \"—\" }} | {{ f.notes or \"\" }} |\n{% endfor %}",
-        "body_skeleton": "## Suite methodology\n\n_What the suite tests, how it runs, where results live._\n\n## Per-failure detail\n\n_Optional deeper notes per F-N when warranted._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
+        "body_skeleton": "## Suite methodology\n\n_What the suite tests, how it runs, where results live._\n\n## F-N — <title>\n\n_One section per failure, and NOT optional: this heading is the only thing that makes `F-N` citable — link_scan binds a token to `## <ID> — <title>` and a params row or a rendered table defines nothing. The render_template table is a reading surface in librarian(context), never a definition._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
         "prompt_template": "Maintain the F-N failure list. After each suite run (gather_from: file pointing at the latest junit/json report), update each failure's status, last_seen, and notes. Add new F-N entries for new failures (next free integer). Never delete an entry — mark fixed entries as pass with a notes line citing the commit. Body holds methodology and per-failure deep dives.",
         "entry_collection": "failures"
     })
@@ -309,8 +309,9 @@ fn archetype_task_list() -> Value {
             }
         },
         "render_template_example": "## Phase status\n\n| Phase | Title | Status |\n|------:|-------|--------|\n{% for p in phases %}| {{ p.n }} | {{ p.title }} | {{ p.status }} |\n{% endfor %}\n## Tasks\n\n| ID | Task | Status | Phase |\n|---:|------|--------|------:|\n{% for t in tasks %}| {{ t.id }} | {{ t.task }} | {{ t.status }} | {{ t.phase if t.phase is defined else \"—\" }} |\n{% endfor %}",
-        "body_skeleton": "## Why this initiative exists\n\n_Brief context._\n\n## Phase descriptions\n\n_For each phase: Why / Shape / Open questions / Acceptance._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
-        "prompt_template": "Maintain the phase + task tables. Mark tasks done as commits land (gather_from: git_log filtered by relevant paths). Add new tasks under the right phase as scope expands. Don't delete completed tasks — they're part of the record. Phase descriptions live in body, individual task one-liners stay in params."
+        "body_skeleton": "## Why this initiative exists\n\n_Brief context._\n\n## Phase descriptions\n\n_For each phase: Why / Shape / Open questions / Acceptance._\n\n## T-N — <title>\n\n_One section per task. This heading is the only thing that makes `T-N` citable — link_scan binds a token to `## <ID> — <title>`, and neither a params row nor the rendered table above defines one. A task list whose entries live only in rows has entries nothing can ever reference._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
+        "prompt_template": "Maintain the phase + task tables. Mark tasks done as commits land (gather_from: git_log filtered by relevant paths). Add new tasks under the right phase as scope expands. Don't delete completed tasks — they're part of the record. Phase descriptions live in body, individual task one-liners stay in params — but every task also gets its own `## T-N — <title>` section, which is what makes it citable.",
+        "entry_collection": "tasks"
     })
 }
 
@@ -477,7 +478,7 @@ fn archetype_constitution() -> Value {
             }
         },
         "render_template_example": "**Active rules:** {{ rules|selectattr(\"status\",\"equalto\",\"active\")|list|length }} / {{ rules|length }}\n\n| id | scope | title |\n|----|-------|-------|\n{% for r in rules %}| {{ r.id }} | {{ \"path-scoped\" if r.paths else \"global\" }} | {{ r.title }} |\n{% endfor %}",
-        "body_skeleton": "## Why this constitution exists\n\n_What domain these rules guard, and why prose alone wasn't enough._\n\n## Per-rule detail\n\n_`## C-N` sections: why / how to apply / evidence._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
+        "body_skeleton": "## Why this constitution exists\n\n_What domain these rules guard, and why prose alone wasn't enough._\n\n## Per-rule detail\n\n_One `## C-N — <title>` section per rule: why / how to apply / evidence. The dash-and-title is load-bearing — `## C-N` alone defines no citable token._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
         "prompt_template": "This tracker holds rules the agent must follow no matter what — single-tier, mechanically enforced (path-scoped rules via a PreToolUse deny, global rules via a UserPromptSubmit injection), never prose-trust alone. To act: if a tool call was denied citing a C-N rule, read that rule's body section before retrying. To maintain: add new C-N entries via the `append_entry` primitive (never hand-pick the next integer — see docs/superpowers/specs/2026-07-06-librarian-atomic-index-allocation-design.md); never delete an entry — supersede a wrong one with status=superseded plus a pointer to its replacement. This artifact's `tags` must include `\"constitution\"` for the enforcement hooks to find it.",
         "entry_collection": "rules"
     })
@@ -550,6 +551,7 @@ Set `entry_collection` to the params key holding your array of entry objects (e.
 ## Step 6 — Sketch the body skeleton
 
 - Each archetype has a `body_skeleton`. Use it.
+- **A `PREFIX-N` namespace means every entry needs its own `## <ID> — <title>` section** — the only shape `link_scan` reads as a definition. A params row, a `## T-4` missing the dash-and-title, and the `render_template` table (which renders into `librarian(context)`, never the file) all define nothing, so entries written that way can never be cited. `doctor` reports the gap; `get_guide("tracker-conventions")` has the measurements.
 - Body sections are written by humans (or AI in `artifact_refresh` synthesis), edited rarely.
 - Always include a **History** section for dated session blocks (`### YYYY-MM-DD — <event>`). This is the universal cross-project pattern.
 
@@ -763,6 +765,17 @@ mod tests {
         // headroom, down from ~41,000 pre-split. That margin is thin: growing the
         // system prompt or raising EXISTING_TRACKERS_CAP will re-break this, and
         // this assertion is what will say so.
+        //
+        // It said so, on 2026-08-18. Adding one Step 6 bullet about entry-defining
+        // headings took the response to 10,096 and broke this test; the bullet was cut
+        // to its essential rule (the measurements moved to
+        // `get_guide("tracker-conventions")`, which is where overflow belongs) and it
+        // now measures **9,898 bytes — about 102 bytes of headroom.**
+        //
+        // Treat 102 bytes as zero. The next addition of any size to SYSTEM_PROMPT has
+        // to pay for itself by cutting elsewhere, and the cut has to be argued rather
+        // than eyeballed. Re-measure by flipping this assertion to `bytes < 1` and
+        // reading the panic — the number is not printed on success.
         assert!(
             bytes < crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
             "tracker_design must arrive inline with a full catalog: {bytes} bytes \
@@ -983,6 +996,46 @@ mod tests {
             });
         }
     }
+
+    /// docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+    ///
+    /// An archetype that keeps id-bearing entries in `params` is teaching a LEDGER,
+    /// and a ledger's entries are citable only through `## <ID> — <title>`:
+    /// `link_scan` derives a definition from that heading shape and from nothing
+    /// else. A `body_skeleton` offering only prose sections therefore teaches a
+    /// tracker whose every entry is unreachable — and the `render_template` table
+    /// does not rescue it, because that output goes to `librarian(context)` and
+    /// never to the file.
+    ///
+    /// Not hypothetical. Measured 2026-08-18 across the catalog: 13 ledgers in five
+    /// repos had entries their body never defines, the largest at 64 of 68, and the
+    /// archetype library is where their shape came from.
+    ///
+    /// Keyed on each archetype's OWN `entry_collection` declaration rather than a
+    /// hardcoded name list, so a new archetype that declares one is covered without
+    /// anyone remembering to edit this test.
+    #[test]
+    fn every_archetype_with_an_entry_collection_teaches_where_the_defining_heading_goes() {
+        // The dash-and-title is the load-bearing half: `## C-N` alone defines
+        // nothing, which link_scan's own `heading_without_dash_separator_does_not_define`
+        // pins. So the skeleton has to show the full shape, not just the token.
+        let re = regex::Regex::new(r"#{2,6}\s+[A-Z]{1,3}-N\s+—\s+<title>").unwrap();
+        for arch in archetypes().as_array().unwrap() {
+            let Some(collection) = arch["entry_collection"].as_str() else {
+                continue;
+            };
+            let name = arch["name"].as_str().unwrap();
+            let skeleton = arch["body_skeleton"].as_str().unwrap_or("");
+            assert!(
+                re.is_match(skeleton),
+                "archetype '{name}' keeps entries in params (`{collection}`) but its \
+                     body_skeleton never shows a `## <PREFIX>-N — <title>` heading, so an author \
+                     following it writes a ledger whose entries nothing can cite. Skeleton was: \
+                     {skeleton}"
+            );
+        }
+    }
+
     #[test]
     fn failure_table_archetype_has_entry_collection_field() {
         let v = archetype_failure_table();

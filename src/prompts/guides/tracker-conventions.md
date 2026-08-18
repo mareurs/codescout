@@ -290,13 +290,34 @@ links to its own evidence, not session logs cross-talking.
 Do not hand-maintain an index table *alongside* body sections. Two formats for one
 entry is the defect that generates the rest: the index falls behind (13 orphaned
 bodies), and ids allocated by scanning one format collide with the other (9 twice-
-allocated ids). Pick one:
+allocated ids).
 
-- the **headings are the index** — nothing else to maintain; or
-- the index is **rendered from `params`** via `render_template`, and entries are
-  written with `append_entry` / `update_entry`.
+**The headings are the index.** That is the shape — not one of two. It is also the only
+shape in which entries are citable, because `link_scan` derives a definition from a
+`## <ID> — <title>` heading and from nothing else. A table row defines no token, so a
+ledger whose entries live only in rows has entries that **nothing can cite, ever**.
 
-A hand-written index is never the answer.
+This guide previously offered "the index is rendered from `params` via `render_template`"
+as an equal second option. It was withdrawn 2026-08-18 for two measured reasons:
+
+- **No `render_template` writes a body.** `render_params` has three callers: `context.rs`
+  projects into the `librarian(action="context")` bundle, `legibility_scan` renders one
+  compiled-in template keyed by file/symbol rather than by `PREFIX-N`, and a test. A
+  reader who attached a template and expected a table to appear in the file got nothing —
+  and hand-wrote the rows instead, which is how the option produced hand-maintained
+  indexes in practice.
+- **Rows are uncitable.** Measured across the catalog: 13 ledgers in five repos had
+  entries their body never defines, the largest at 64 of 68, and one ledger's entire
+  namespace resolved to nothing against 117 live citations.
+
+Keeping a rendered row table *in addition to* headings is fine — a table is a good
+reading surface. Just write it knowing it is hand-maintained and that the heading, not the
+row, is what makes the entry reachable.
+
+You do not have to take this on trust. `librarian(action="doctor")` reports
+`entry_without_definition` and `ledger_defines_nothing` per artifact, and
+`append_entry` / `update_entry` return `undefined_in_body` for an entry they just wrote
+that no heading defines.
 
 ### Required fields
 
@@ -333,13 +354,30 @@ The ladder is **live body → archived section (heading kept) → nothing furthe
 
 ### Make the tracker guarded
 
-Stamp the catalog id into the file's frontmatter as `id: <16-hex>`. The guard that
-routes writers through the artifact tools reads the file's **own text** for an `id:`
-line; the catalog derives ids from the path and does not need one. So a fully
-registered tracker with no `id:` line is completely unguarded — and an unguarded
-ledger accumulates hand-edits in arbitrary shapes, because no surface imposes one.
-The most structurally damaged tracker in this repo was precisely the one with no
-`id:` line.
+**Declare `entry_prefix`.** A ledger is guarded by that declaration alone — the guard
+treats a declared `entry_prefix` as one of three independent reasons a file is
+off-limits (`src/util/librarian_guard.rs`: augmented, stamped, or ledger), because the
+`PREFIX-N` counter is state only the server may advance. Nothing else is needed, and any
+YAML form works: `entry_prefix: R`, a block sequence, or `[F, W]`.
+
+**Do NOT stamp `id: <16-hex>` into a tracker's frontmatter to guard it.** This guide
+recommended exactly that until 2026-08-18, and the advice was wrong in a way worth
+knowing rather than just deleting:
+
+- It guards on **catalog membership**, the axis the guard's own pinned test rejects.
+  `a_catalogued_but_unaugmented_file_stays_directly_editable` argues that membership-
+  guarding would refuse `docs/RELEASE.md`, `CONTRIBUTING.md` and every ADR — all catalog
+  rows — and it names a prose tracker that `CLAUDE.md` documents `edit_markdown` for.
+  Stamping an id converts a file by hand into the case that test exists to forbid.
+- It was tried, and it broke a documented workflow. Stamping `id:` into
+  `reconnaissance-patterns.md` silently disabled `docs/TAXONOMY.md`'s `edit_markdown`
+  append path for R-N; confirmed by probe, reverted in `bb9a94d7`.
+
+The diagnosis the old advice rested on is still true — the guard reads the file's **own
+text**, so a registered tracker whose frontmatter says nothing is invisible to it. The
+remedy is the declaration, not the stamp. And **an artifact that owns no id namespace
+needs no guard**: a convention doc, an ADR, a finished session log has nothing a hand-edit
+can corrupt, and guarding it only makes routine edits ceremony.
 
 ## Querying with the librarian
 

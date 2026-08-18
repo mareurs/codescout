@@ -129,6 +129,14 @@ A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
 `artifact_augment(merge=true)` params patch only for a deliberate bulk rewrite —
 it replaces the collection rather than merging into it. Merge semantics + the full-array rule
 are in *Augmentation Lifecycle* below.
+
+**Read the heading literally: it means don't hand-maintain the *rows*, not that a table
+appears in the file.** `render_template` projects params into `librarian(action="context")`
+only — **nothing writes it to the body on disk.** Any table in the committed markdown is
+hand-written, and a table row defines no citable token: `link_scan` binds `PREFIX-N` to a
+`## <ID> — <title>` heading and to nothing else, so an entry that lives only in rows can
+never be cited. Give each entry a heading; keep the table too if it reads well.
+`get_guide("tracker-conventions")` § *One entry format, never two* has the measurements.
 ## Augmentation Lifecycle
 
 Augmentation attaches a persistent prompt to any artifact.
