@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 104
+entry_high_water_R: 105
 entry_prefix: R
 ---
 
@@ -280,6 +280,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-105 | 2026-08-18 | miss (human review) → rule | **A key derived from runtime state is a claim about that state's lifetime — enumerate the lifecycle events before proposing it.** Proposed parent-PID + parent-start-time as the agent-agnostic session key for the guide ledger and scouted it hard against ONE event (MCP subprocess respawn); never enumerated client *resume*, which restarts the parent while the conversation continues. The falsifying evidence was already in hand and unread | bug-fix-session-log:F-53; session 2c518eb6 spans 12 days / 9630 calls / 67 MCP procs under a 17h-old `claude` process; kin R-91, R-50 |
 | R-55b | 2026-08-08 | miss | A host-specific symptom accepted as the norm without sweeping the other hosts | 9 of 15 declared roots swept; all nine had zero untracked entries |
 | R-57b | 2026-08-08 | miss | An identifier's shape says nothing about whether the thing exists — check its declared root | caught by an unrelated tool response an hour after the claim was published |
 | R-58b | 2026-08-08 | hit | Before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure | `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` |
@@ -3055,6 +3056,46 @@ added `severity_legend` to `audit_doc_refs` and `7c218338` unified `link_scan`'s
 — so the honest test of this entry is whether self-describing output retires it. If it does,
 promote as a note on `docs/PROGRESSIVE_DISCOVERABILITY.md`'s legend pattern rather than as a
 discipline agents must remember.
+
+## R-105 — Miss: a derived identity key verified against ONE lifecycle event, generalised to "stable"
+
+**Verdict:** miss (human review) → rule · **Observed:** 2026-08-18, designing an agent-agnostic session key for the guide-hint ledger
+
+**Seam:** the lifecycle of the process a derived key is derived FROM — enumerated for one event (MCP subprocess respawn), never for the others (client resume / continue / fork / reparent).
+
+codescout's guide ledger keys per-conversation state so it survives the client respawning
+the stdio MCP subprocess. `CLAUDE_CODE_SESSION_ID` is Claude-Code-specific, so I proposed
+**parent PID + parent start-time** as the agent-agnostic fallback — and scouted it, at
+length: read the live process tree, confirmed every MCP server's parent is a harness
+process, confirmed the nested `codescout mux --socket …` children are LSP workers on a
+different code path that never build a ledger, and paired the PID with `/proc/<ppid>/stat`
+field 22 to defeat PID reuse. Every one of those checks is true. Every one is about the
+same single event — the subprocess respawn that motivated the design.
+
+The human partner named the case the scout never enumerated: **session resume**.
+`claude --resume` / `--continue` restarts the *client* process, so the PPID changes while
+the conversation continues. The falsifying evidence was already in hand and unread —
+session `2c518eb6` spans 2026-08-06 → 2026-08-18 (12 days, 9630 calls, 67 MCP processes)
+under a `claude` process started 2026-08-17 14:46, i.e. a 12-day conversation on a
+1-day-old parent, and its ledger file is still keyed by the unchanged session uuid. A PPID
+key would have dropped the ledger at every resume — the worst case to lose, because a
+restored conversation still holds the guide bodies in context.
+
+**The rule.** A key derived from runtime state is a claim about that state's *lifetime*.
+Before proposing one, enumerate the lifecycle events of the thing it is derived from and
+say what the key does at each — not only the event that motivated the design. For a
+process-derived key that is at minimum: child respawn, parent restart, parent death and
+reparent, fork, and reuse of the identifier. Thoroughly verifying the motivating event
+verifies the motivating event, and a scout that deep reads as coverage.
+
+**Promote-when:** a second instance of a derived key — identity, cache-invalidation, or
+dedup — proposed after verifying a single lifecycle event. At 2 datapoints, promote to
+SKILL.md Phase 1 as a seam class: *"deriving a key from runtime state → enumerate that
+state's lifecycle events before proposing it, not just the one that motivated it."*
+
+**Status:** open — 1 datapoint
+
+**Kin:** R-91 (state what a measurement cannot see before attaching a conclusion to it), R-50 (the view is not the set)
 
 ## Template for new entries
 

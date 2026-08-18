@@ -97,7 +97,10 @@ time_scope: open-ended
 | F-46 | 2026-08-15 | med-high | self-friction | fixed-verified | An existing integration test asserted `msg.contains("AST parse failed")` on a **syntactically perfect** fixture — it had been corroborating a false explanation of its own scenario since it was written, and made correcting the message look like a regression |
 | F-45 | 2026-08-15 | low | codescout-tool | wontfix-by-design | The `edit_file` string-literal residual I documented an hour earlier bit me writing the very next hint: prose containing `impl ` inside a string literal was refused. Cost one rephrase. Evidence FOR the deliberate over-block, not against it |
 | F-44 | 2026-08-14 | med | codescout-tool | fixed-verified (half) | `edit_file` and `edit_code` deadlock on "add a method to a trait impl nested in a test fn". `edit_file` half **fixed** in `138de7c5` (unanchored per-line keyword match — `via_trait ` matched `trait `); `edit_code` half open. **Two of my own claims in this entry were overstated and are corrected in its body** |
+| F-53 | 2026-08-18 | med | architectural | fixed-verified | Proposed a PPID-derived session key without enumerating client session-resume, which restarts the parent while the conversation continues — refuting evidence was already in hand and unread |
+| F-52 | 2026-08-18 | med | architectural | open | `Agent::project_root()` returns the FOCUSED SUB-PROJECT root, not the workspace root — wrong comparand for a "did the project change?" predicate |
 
+| F-54 | 2026-08-18 | med | process | mitigated | A dispatched subagent's full-suite run read a *concurrent* session's mid-edit working tree, saw a prompt-surface snapshot test fail, and reported it as a live failure — the shared-checkout analogue of the `src/prompts/README.md` shared-branch verify hazard |
 ## Wins Index
 
 
@@ -147,7 +150,9 @@ time_scope: open-ended
 | W-33 | 2026-08-14 | med | Mutate each new guard and check WHICH assertion fires | 3 mutations, 3 catches; one showed the control test correctly still passing (under- vs over-blocking arms), another showed two assertions cover distinct properties rather than restating one. Also surfaced that no warning catches a struct field that never existed | validated |
 | W-44 | 2026-08-16 | **high** | A sample from one language is not a sample of the corpus | Rust-only measurement said 56% of ref findings were dotted-identifier noise; the obvious fix was to suppress them. Every non-Rust file in the repo measured 5%. The same token is a Rust field AND a Python module — suppressing it globally would have deleted real refs from five languages while IMPROVING the metric that motivated it, since those refs were already `unknown`. Built `PathSyntax` instead; verified live: Rust unknown 56% → 0%, non-Rust byte-identical, resolved slightly up | validated |
 | W-43 | 2026-08-15 | **high** | A backlog row's instruction can outlive its own hypothesis; run the instruction | SD-3 claimed four over-budget `::call` handlers should give up a shared extraction, and in the same field admitted the shape was UNVERIFIED — read the other three first. Reading falsified it (two pairs, on a different axis) and found the duplication that IS there: a scope-resolution prologue written three times, one copy drifted, whose live effect is `librarian(context, scope="all")` crossing the umbrella boundary. Acting on the hypothesis would have refactored ~1460 lines toward a shape that does not exist, and buried two of the three real sites | validated |
+| W-45 | 2026-08-18 | med-high | Scout the change's own regression test AND the prose surface that documents the policy | `activate_project_resets_hints` (`server.rs:4292`) pins the exact policy being replaced, and activates the SAME root `make_server()` built the agent with — it inverts under the new policy and would have read as "your change is wrong" rather than "this test encodes the policy you replaced". Separately `workspace-state.md:51` documents the old mechanism and is `include_str!`'d into every session's context, so the code change alone ships a falsehood in an always-injected guide | validated |
 
+| W-46 | 2026-08-18 | high | Before rehoming state from per-project to per-user, scout whether the tests' hermeticity *depended* on the per-project path | Plan's verbatim code would have made `guide_ledger_survives_mcp_restart` pass on the first `cargo test` and fail on every run after — a self-poisoning test — and pointed a 35-day GC at the developer's real `~/.local/state` | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -3679,6 +3684,273 @@ reproduced red, not a tool call.
 `install_augmented_oracle`); precedent to copy verbatim: `src/heartbeat.rs:41-47`. Shipped
 in `29f0c015`; bug file
 `docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
+
+## F-52 — `Agent::project_root()` is the FOCUSED SUB-PROJECT root, not the workspace root
+
+**Observed:** 2026-08-18, designing the guide-ledger re-arm fix (make
+`workspace(action="activate")` stop wiping `guide_hints_emitted` on every call).
+
+**When:** About to specify the re-arm predicate — "clear only when the newly activated
+root differs from the current one" — and reaching for the obvious comparand.
+
+**Expected:** `ctx.agent.project_root().await` returns the root of the project the
+session is working in, so `project_root() != new_root` answers "did the project change?".
+This is what the name says and what `server.rs:249` (`let guide_project_root =
+agent.project_root().await`) uses it for.
+
+**Got (scouted reality):** `Agent::project_root` (`src/agent/mod.rs:1360-1363`) is
+`inner.default_workspace()?.focused_project_root().ok()` — the **focused sub-project**,
+not the workspace. Its own doc comment says so: *"even when the focused project is still
+`Dormant` (i.e. after `switch_focus` to a sub-project…)"*. In this repo the workspace has
+two projects (`codescout` at `.`, `codescout-embed` at `crates/codescout-embed`), so with
+focus on the latter, `project_root()` is `<repo>/crates/codescout-embed`. A subsequent
+`activate("<repo>")` — same workspace, same repo, no project change — would compare
+unequal and re-arm. The correct comparand is `AgentInner::default_workspace_root`
+(`src/agent/mod.rs:106`, already `pub`), which is what `Agent::activate:541` sets.
+
+Second half of the same seam: `ActivateProject::call` has two paths, and only one has a
+root at all. The bare-project-id **focus-switch** path (`src/tools/config/mod.rs:151-186`)
+returns early via `activate_within_workspace`, never reaching the full-activation path —
+so putting the predicate in the full-activation path alone gives "a sub-project focus
+switch never re-arms" for free, with no comparand needed for it.
+
+**Probable cause:** `project_root()` is named for the single-project era and kept its name
+through the Phase-1 multi-workspace registry (`docs/plans/2026-05-30-per-request-workspace-pinning.md`).
+Callers that want "the workspace" and callers that want "the focused project" both reach
+for it, and it silently serves only the second.
+
+**Workaround:** Compare the already-canonicalized `root` local in
+`ActivateProject::call:196` (`root.canonicalize().unwrap_or(root)`) against
+`inner.default_workspace_root`, read through the same `ctx.agent.inner.read().await` the
+focus-switch path already takes. Canonicalization on both sides is load-bearing and
+already handled — `Agent::activate:528` carries a comment recording a prior bug from
+exactly this omission (*"activate(\".\") would compare unequal to Agent::new's
+canonicalized home_root, making is_home false on the first re-activation and flipping to
+read-only"*).
+
+**Severity:** med — would have shipped a re-arm that mis-fires on any workspace with
+sub-projects, i.e. codescout itself. The symptom is the bug the change exists to fix,
+still happening, in the one repo where it would be tested by hand.
+
+**Status:** open — design decided, not yet implemented.
+
+**Fix idea / Pointer:** Design in progress this session; predicate belongs in
+`src/tools/config/mod.rs` full-activation path. Consider a `pub async fn
+default_workspace_root(&self)` accessor on `Agent` so the next caller does not repeat F-52.
+
+---
+
+## W-45 — Scout the change's own regression test before designing the change
+
+**Observed:** 2026-08-18, `/codescout-companion:reconnaissance` invoked mid-brainstorm,
+after the re-arm policy was decided but before any design doc or code was written.
+
+**Pattern:** When a change alters a **policy** (not a shape), grep the test suite for the
+test that pins the *current* policy, and grep the model-facing prompt surfaces for prose
+that *documents* it. Both are part of the change's blast radius, and neither shows up in a
+symbol-level scout of the code being edited.
+
+**Counterfactual:** Two concrete misses, both caught pre-implementation:
+
+1. `server::guide_hint_tests::activate_project_resets_hints` (`src/server.rs:4292-4318`)
+   asserts *"activate should reset emitted set; first post-activate call should re-emit"*.
+   It activates `dir.path()` — the **same** root `make_server()` (`src/server.rs:3822`)
+   built the agent with. Under the new policy that is a same-project re-activation, so the
+   test inverts. Implementing first would have produced a red test whose message reads
+   "your change is wrong" when the correct reading is "this test encodes the policy you
+   replaced" — the failure mode where a correct change gets reverted by its own suite. It
+   needs splitting into two tests (same-root keeps, different-root re-arms), not tweaking.
+
+2. `src/prompts/guides/workspace-state.md:51` states `guide_hints_emitted` is *"Cleared on
+   every activation … After a clear, the next of either re-emits."* That file is
+   `include_str!`'d at `src/prompts/mod.rs:445` and hard-injected into the model's context
+   as the `workspace-state` guide. Shipping the code change alone would have left the
+   model reading a false description of the mechanism, every session, in the guide whose
+   entire job is to describe activation semantics — self-inflicted doc-vs-code drift on a
+   model-facing surface, which no test catches (`prompts/mod.rs:1432` asserts topic ↔ body
+   *existence*, not content).
+
+**Confirming data points:**
+1. This session — policy change, 1 inverted regression test + 1 stale model-facing guide,
+   neither reachable from `symbols`/`references` on the code under edit.
+2. W-8 (this log) — `prompt_surfaces` cap gate caught a byte-budget violation on the same
+   family of `include_str!`'d surfaces; same lesson from the enforcement side.
+
+**Impact:** med-high — prevented one likely revert-the-correct-change cycle and one
+shipped falsehood in an always-injected guide.
+
+**Promote-when:** A second policy-shaped change (not shape-shaped) where the pinning test
+or the prose surface was the thing that drifted. At 2 datapoints, promote to the
+reconnaissance SKILL.md Phase 1 as a seam class: *"policy change → grep for the test that
+pins the old policy AND the prose surface that documents it."* Craft-shaped by the routing
+test — a test encoding the policy you are replacing is not codescout-specific.
+
+**Status:** validated — single datapoint, both gaps caught before any code was written.
+
+---
+
+## F-53 — Proposed a PPID-derived session key without enumerating client session-resume
+
+**Observed:** 2026-08-18, designing the agent-agnostic session key for the guide-hint
+ledger (same work stream as F-52 / W-45).
+
+**When:** The user added two requirements mid-brainstorm — the ledger must work in git
+worktrees and for agents other than Claude Code. `CLAUDE_CODE_SESSION_ID` is
+CC-specific, so a harness-agnostic fallback was needed.
+
+**Expected:** **Parent PID + parent start-time** is a sound agent-agnostic session key.
+I scouted it before proposing: read the live process tree, confirmed every MCP-server
+process has a harness process as its parent, confirmed the nested `codescout mux
+--socket …` children are LSP workers that never construct a `CodeScoutServer` (so they
+never compute a key), and paired the PID with `/proc/<ppid>/stat` field 22 against PID
+reuse.
+
+**Got:** The user pointed out **session resume**. `claude --resume <uuid>` /
+`--continue` restarts the *client* process — new PID — while the conversation, and
+its `CLAUDE_CODE_SESSION_ID`, continue unchanged. The refuting evidence was already in
+data I had pulled 20 minutes earlier and not read for this question: session
+`2c518eb6` spans 2026-08-06 → 2026-08-18 (12 days, 9630 calls, **67** MCP processes)
+under a `claude --resume 2c518eb6-…` process started 2026-08-17 14:46 — a 12-day
+conversation on a 1-day-old parent — and its ledger file is still keyed by the
+unchanged uuid.
+
+**Probable cause:** Every check I ran was aimed at the event that motivated the design
+(MCP subprocess respawn) and none at the other lifecycle events of the process being
+keyed on. The depth of the scout on that one event read as coverage of the key.
+
+**Workaround:** PPID+start-time demoted from "the agent-agnostic answer" to a
+last-resort rank above `uuid + warning`, with the resume hole documented at the call
+site. The primary chain becomes an explicit `CODESCOUT_SESSION_ID` env var plus a
+per-harness table selected by `clientInfo.name`; three research subagents were
+dispatched to establish what each non-CC harness actually exposes.
+
+**Severity:** med — would have shipped a fallback that silently loses the ledger on
+every resume, i.e. re-injects every guide into a conversation that demonstrably still
+holds them. Silent, and worst exactly where the state matters most.
+
+**Status:** fixed-verified — caught in design, before any spec or code was written.
+
+**Fix idea / Pointer:** R-105 in `docs/trackers/reconnaissance-patterns.md` carries the
+general rule (*a key derived from runtime state is a claim about that state's lifetime;
+enumerate the lifecycle events before proposing it*). Kin F-52, W-45.
+
+---
+
+## F-54 — A subagent's gate run read a concurrent session's mid-edit tree and reported a transient as a live failure
+
+**Observed:** 2026-08-18, subagent-driven execution of
+`docs/superpowers/plans/2026-08-18-guide-ledger-phase-a-storage.md`, Task 1 fix round 1.
+
+**When:** An implementer subagent ran the plan's mandated pre-commit gate
+(`cargo fmt && cargo clippy -- -D warnings && cargo test`) in the main checkout while a
+second Claude Code session was actively editing `src/prompts/` in the *same working
+tree*.
+
+**Expected:** The gate reports only on the dispatched task's own change
+(`src/util/fs.rs`).
+
+**Got:** `cargo test` reported `prompts::tests::prompt_surfaces_server_instructions_snapshot`
+failing. The implementer traced it correctly via `git log` to the other session's commit
+`32b34efa` ("revert(prompts): drop the IL1 overlap clause"), correctly declined to fix
+it, and reported `DONE` with the failure as a standing concern. But the failure was
+**transient**, not standing: the other session had `src/prompts/source.md` and its
+snapshot momentarily inconsistent on disk mid-edit. Controller re-ran at the same HEAD:
+that test passes and the full suite is green (4098 passed / 0 failed / 45 ignored).
+
+**Probable cause:** Two agents share one checkout. `cargo test` reads the *working tree*,
+not a commit, so any full-suite run is a race against every other session's unstaged
+edits. `src/prompts/README.md` already documents a "shared-branch verify hazard" for the
+prompt surfaces; this is the same hazard reached from the other direction — not a stale
+*branch*, but a mid-write *tree*. Nothing in the subagent dispatch warned about it, so
+the implementer had no frame for "failure outside my files ⇒ suspect a transient first".
+
+**Workaround:** Two layers, both cheap.
+1. Every implementer dispatch now carries: *a failing test in a file outside this plan's
+   three is another session's in-flight work — do not fix it, re-run once, report it as
+   an observation rather than a failure.*
+2. The controller re-runs the full gate itself at the task's HEAD before marking the task
+   complete, so a genuine regression cannot hide behind the same excuse.
+
+**Severity:** med — cost one controller verification cycle and produced a report that
+overstated the tree's health. The dangerous counterfactual is the inverse: an implementer
+that "helpfully" fixes or reverts another session's in-flight file. Layer 1 forbids it
+explicitly.
+
+**Status:** mitigated — dispatch clause added for Tasks 2-6; the underlying race is
+inherent to sharing a checkout and is not fixed.
+
+**Fix idea / Pointer:** The structural fix is a git worktree per work stream, which this
+session deliberately declined — `docs/architecture/companion-plugin.md` §"Concurrent
+multi-workspace" means worktree subagents must pin `workspace=<abs path>` on every
+codescout call, and `worktree-write-guard.sh` hard-denies write tools until an activate
+clears `.cs-worktree-pending`. That per-dispatch cost was judged higher than this
+per-incident one. Revisit if a second incident lands, or if an implementer ever *acts*
+on a foreign failure rather than reporting it. Related: [[F-52]] (same work stream);
+ledger `.superpowers/sdd/2026-08-18-guide-ledger-phase-a-storage/progress.md` Ruling 7.
+
+## W-46 — Rehoming state from per-project to per-user silently de-hermeticises the tests that relied on the project path
+
+**Observed:** 2026-08-18, pre-dispatch reconnaissance for Task 6 of
+`docs/superpowers/plans/2026-08-18-guide-ledger-phase-a-storage.md` (the guide-ledger
+Phase A plan), immediately before dispatching the final task's implementer.
+
+**Pattern:** When a change moves a component's storage from a **per-project** path to a
+**per-user / global** one, the per-project path is often the *only* thing making the
+existing tests hermetic — silently, because no test says so. Before dispatching, read the
+tests that construct the component and ask what supplies their isolation today. If the
+answer is "the tempdir that the production path happens to be derived from", the change
+removes their isolation and the plan needs an injection seam, not just a new path.
+
+Concretely, scout three things:
+1. the production binding being replaced, and what it derives from;
+2. every test that builds the component, and where *its* copy of that value comes from;
+3. whether the project forbids the obvious test escape hatch (here, a "no `std::env::set_var`
+   in tests" rule, so `$XDG_STATE_HOME` could not be redirected).
+
+**Counterfactual:** The plan's Task 6 said, verbatim:
+
+```rust
+let guide_hints_dir = crate::util::fs::per_user_state_dir()
+    .map(|d| d.join("codescout").join("guide_hints"));
+```
+
+Today's binding derives from `guide_project_root`, which in tests is a
+`tempfile::tempdir()`. The replacement reads the developer's real `$XDG_STATE_HOME`/`$HOME`.
+`guide_hint_tests::guide_ledger_survives_mcp_restart` (`src/server.rs:4328`) pins the
+session ids `"restart-survival-session"` and `"other-session"` so both incarnations key on
+one file, and its **first** assertion is `!…contains("librarian")` — "a fresh session starts
+with an empty ledger". Under the plan's code that file becomes
+`~/.local/state/codescout/guide_hints/restart-survival-session.json` and survives the run,
+so the test **passes once and fails on every subsequent `cargo test`**. A self-poisoning
+test is the worst failure shape available: green in the session that writes it, red for
+whoever pulls next, and it looks like *their* change broke it.
+
+Two aggravating factors the same scout surfaced: every other server-building test would
+write into one shared real directory; and because Task 5 had just made `GuideLedger::load`
+run a 35-day GC over its directory, the test suite would have been pointing a file-deleting
+sweep at the developer's real state directory on every server construction.
+
+**Confirming data points:**
+1. This session (Task 6, guide-ledger Phase A) — caught pre-dispatch; the fix was to add
+   `guide_hints_dir: Option<PathBuf>` to `ServerEnv`, whose own doc comment
+   (`src/server.rs:55-63`) already declares it to be "everything `from_parts` would
+   otherwise read from the process environment, captured as data so tests can inject it".
+   The seam already existed; the plan just did not use it.
+2. Same shape as [[F-3]]/[[W-2]] (2026-05-18): a pre-dispatch scout of the *tests* rather
+   than the production code caught a plan defect that would have cost subagent round-trips.
+
+**Impact:** high — the defect is not a compile error a subagent would bounce off; it
+produces a passing first run. It would have shipped, and surfaced days later as an
+unreproducible-on-my-machine failure.
+
+**Promote-when:** a third instance of "a plan's new production path silently removed a
+test's isolation" lands. At that point promote to CLAUDE.md as: *before changing where a
+component stores state, read the tests that build it and name what supplies their
+isolation.* Related: the `ServerEnv` injection pattern is already the project's answer and
+is documented on the struct — the gap is remembering to look for it.
+
+**Status:** validated — plan defect caught and corrected in the dispatch (controller
+Ruling 21) before any implementer ran.
 
 ## Template for new entries
 
