@@ -3,8 +3,10 @@ kind: tracker
 status: active
 title: Guide Ledger — Session Residuals 2026-08-18
 tags:
-  - guide-ledger
-  - session-log
+- guide-ledger
+- session-log
+entry_prefix: S
+entry_high_water_S: 14
 ---
 
 # Guide Ledger — Session Residuals (2026-08-18)
@@ -156,6 +158,85 @@ the master SHA, and the line sends a later session hunting for one that will nev
 Not filed as a bug because a concurrent session archived a *different* staleness in that
 same guide the same day (`docs/issues/archive/2026-08-18-tracker-conventions-guide-recommends-reverted-id-stamping.md`),
 so that surface has an active owner; route this to them rather than opening a competing file.
+
+### S-14 — Phase C measured on the wire after `cargo rb` + `/mcp` — all three lifecycles confirmed
+
+**Measured 2026-08-19 ~23:16–23:27 UTC**, release binary, server pid `1235465`
+(parent `claude --resume 55515bc5-…`). Each prediction was pre-registered *before* its
+observation, which is the only reason the two misses below are legible as misses rather
+than as things narrated after the fact as expected.
+
+**Trace A — reconnect (Task 4 + Task 2), ungated by design.** Server respawned 23:15:59
+and loaded the persisted ledger for this conversation, which held five topics. The
+startup re-arm removed exactly one:
+
+```
+librarian                     23:10:05   ← survived
+progressive-disclosure        22:58:53   ← survived
+symbol-navigation             22:58:09   ← survived
+tracker-conventions           23:02:15   ← survived
+project-activation-bootstrap  23:16:48   ← removed at construction, re-delivered
+```
+
+Four topics kept their **pre-restart timestamps**, so they were never re-sent. The first
+tool call after the restart re-delivered the bootstrap and nothing else.
+
+**This trace also measures Task 2, which is the point.** The ledger held **four** topics
+when the opener fired. Under the pre-Phase-C predicate `emitted.is_empty()` that is
+`false` → the opener is **suppressed**. So this is the original ~900K-token waste bug
+reproducing on live traffic and now behaving correctly. Mutations prove the tests would
+notice a regression; this proves the thing the tests are a proxy for.
+
+**Trace B — activate with the gate closed (Task 3, hookless path).** `hook_at: null` on
+the slot, measured four minutes after publish, so `rendezvous_active()` was false and
+`ActivateProject::call` took the `else` branch. `clear()` wiped all five topics and
+deleted the file; the opener on that same response re-inserted the bootstrap and
+recreated it:
+
+```
+{"project-activation-bootstrap":"…23:26:48"}                       ← immediately after activate
+{"project-activation-bootstrap":"…", "tracker-conventions":"…"}    ← after one artifact call
+```
+
+The A/B is clean: the **identical** `artifact(find, kind="bug")` call emitted **no guide**
+before the clear and a full guide body after it, with nothing changing but ledger state.
+Re-injection cost of the wipe, measured: `tracker-conventions` + `librarian` ≈ 15–20K
+tokens across the following three calls.
+
+**Two predictions missed, both worth keeping.**
+
+1. Predicted the ledger file would be *deleted*. It is deleted — and recreated in the
+   same call by the opener's insert. An intermediate state was described as the end
+   state. The observable end state of a blunt clear is a **one-topic file**, not a
+   missing one; anything asserting absence would read as a failure.
+2. Predicted the re-fired topic would be `librarian`. The next call re-fired
+   `tracker-conventions` instead — same tool, same arguments, because the topic is routed
+   from the **paths in the result** and bug-file paths route to the tracker guide.
+   `librarian` did re-fire, two calls later, on an `artifact(action="update")`. A
+   guide-delivery prediction has to name the topic the *result* selects, not the tool.
+
+**Standing gap, safe direction: the gate is closed for a window after every `/mcp`
+reconnect.** The new process publishes a fresh slot and Claude Code fires no
+`SessionStart` on reconnect, so nothing stamps `hook_at` until the next real session
+event. Task 4's startup re-arm is ungated so the reconnect itself is covered, but an
+`activate` inside that window blunt-clears instead of re-arming surgically. It degrades
+toward re-sending, so the governing invariant holds. This is the exact complement of the
+latch-open hazard filed at
+`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`: that
+one is the gate never closing, this one is the gate not opening.
+
+**Method note that cost three wrong readings before it was fixed.** "My" server was twice
+identified as the newest file by mtime under `servers/` and `guide_hints/`. There are
+**23 codescout processes** on this machine; both times that read another session's state,
+and the second time it was two steps from a phantom bug report about a session-id
+mismatch that did not exist. The reliable handle is the process tree — `$PPID` of any
+`run_command` resolves to the owning server by construction, and its parent names the
+conversation. Identity by timestamp is a heuristic that degrades silently as the machine
+gets busier; identity by parentage cannot pick the wrong one. Same failure as the
+rendezvous-slot miscount earlier the same session: a *plausible* selector standing in for
+an *identifying* one.
+
+**Status:** validated — measured end to end on the release binary.
 
 ## Declined — recorded so they are not re-raised
 
