@@ -1142,6 +1142,57 @@ pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collecti
         .collect()
 }
 
+/// Every `<id_prefix>-N` index an artifact's markdown body **defines as a citable
+/// token** — a heading of the shape `## <ID> — <title>`, and nothing else.
+///
+/// The narrower twin of [`body_claimed_indices`], and the two are *supposed* to
+/// disagree. `body_claimed_indices` answers "is this number taken", where an index
+/// row is valid evidence and over-counting is safe. This answers "can anything cite
+/// this entry", where a row is worth nothing: `link_scan`'s resolver binds a token to
+/// a defining heading, so a row-only entry is uncitable no matter how visible it is
+/// in the rendered table.
+///
+/// Conflating the two is the defect this exists to close. The drift advisories built
+/// on `body_claimed_indices` are satisfied by a row, so they fall silent at exactly
+/// the point where citations break — an entry reads as fully written while every
+/// reference to it resolves to nothing, forever, with nothing reporting it.
+/// Measured 2026-08-18: ten row-only `A-N` entries with 25 dead cross-file citations,
+/// and a params-rendered ledger with **zero** `BL-N` definitions against 117.
+/// See `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+///
+/// **Delegates to `link_scan::extract` on purpose — do not inline a regex here.**
+/// One definition rule in the codebase is the whole point. A second hand-copied
+/// approximation is the mechanism behind this bug, U-22 and U-44 alike: the rule
+/// changed in one place and the copy kept answering the old way. Delegating also
+/// buys the cmark-accurate cases a line regex gets wrong — fenced blocks, code-first
+/// headings, setext headings, frontmatter.
+///
+/// An **empty** set does not mean the body is broken: a params-canonical ledger that
+/// renders its index from `params` defines no token by construction, and that is a
+/// legitimate design. Callers must treat empty as "this ledger defines nothing" and
+/// not report per-entry breakage on every write.
+// `expect`, not `allow`: this lands one step ahead of its production consumer, and
+// `expect` FAILS the build once a caller appears — so the marker removes itself instead
+// of rotting here as a permanent exemption. The consumer is deliberately deferred:
+// whether a row-only entry is a defect at all depends on an unsettled design decision
+// (require a `render_template` to emit a definition, vs. teach the resolver to accept a
+// generated row), and under the second branch an advisory built on this would be wrong.
+// The predicate itself is correct either way, which is why it ships first.
+//
+// `cfg_attr(not(test))` because "unused" is configuration-dependent: the tests below DO
+// call it, so under `cfg(test)` the expectation is unfulfilled and `-D warnings` rejects
+// it via `unfulfilled_lint_expectations`. Only the lib build is genuinely missing a
+// caller, and that is the build the marker is for.
+#[cfg_attr(not(test), expect(dead_code))]
+pub(crate) fn body_defined_indices(body: &str, id_prefix: &str) -> std::collections::BTreeSet<u64> {
+    let want = format!("{id_prefix}-");
+    crate::librarian::tools::link_scan::extract::extract(body)
+        .definitions
+        .into_iter()
+        .filter_map(|d| d.token.strip_prefix(&want)?.parse::<u64>().ok())
+        .collect()
+}
+
 /// The heading level this ledger already uses for its `<id_prefix>-N` entry sections.
 ///
 /// `None` when the body line-anchors no such heading: a params-only tracker, an index of
@@ -1916,6 +1967,64 @@ mod tests {
         assert_eq!(
             body_claimed_indices(body, "F"),
             [3, 4, 5, 7].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn an_index_row_without_a_heading_is_claimed_but_not_defined() {
+        // The bug, on the exact fixture the test above pins. Four ids are CLAIMED,
+        // so the drift advisory stays quiet about all four; only ONE is DEFINED, so
+        // citations of the other three resolve to nothing, forever, with nothing
+        // reporting it. `F-7` and `F-4` are table rows; `F-5` is a heading with no
+        // ` — title`, which link_scan reads as a section ABOUT F-5 rather than a
+        // definition of it.
+        //
+        // Mutation check: make body_defined_indices accept rows and this goes red
+        // while body_claimed_indices_reads_headings_and_index_rows stays green.
+        // That pair is the whole point — the two predicates answer different
+        // questions and must be allowed to disagree.
+        let body =
+            "## F-3 — a\n\n| ID | x |\n| `F-7` | y |\n###### **F-5** z\n| [F-4](#f-4) | w |\n";
+        assert_eq!(
+            body_claimed_indices(body, "F"),
+            [3, 4, 5, 7].into_iter().collect()
+        );
+        assert_eq!(body_defined_indices(body, "F"), [3].into_iter().collect());
+    }
+
+    #[test]
+    fn defined_indices_delegate_to_link_scans_own_definition_rule() {
+        // NOT a re-implementation: body_defined_indices calls link_scan's `extract`,
+        // so every case below is already pinned by that module's own tests
+        // (heading_without_dash_separator_does_not_define, code_first_heading_does_not_define,
+        // fenced_blocks_are_skipped_inline_code_is_scanned).
+        //
+        // This test exists so that a later "optimisation" swapping the call for a
+        // local regex has to reproduce all of them. Re-approximating the rule in a
+        // second place is exactly how the two predicates drifted apart to begin
+        // with — a hand-copied predicate is the mechanism behind U-22 and U-44 too.
+        let body = concat!(
+            "## A-1 — defined\n",
+            "## A-2\n",
+            "### `A-3` — code-first\n",
+            "```\n## A-4 — inside a fence\n```\n",
+            "| A-5 | table row |\n",
+        );
+        assert_eq!(body_defined_indices(body, "A"), [1].into_iter().collect());
+    }
+
+    #[test]
+    fn body_defined_indices_is_empty_when_the_body_defines_nothing() {
+        // A params-rendered index defines NO token — measured 2026-08-18: zero BL-N
+        // definitions repo-wide against 117 cross-file citations. So "0 defined
+        // alongside N claimed" is a whole legitimate ledger shape, not per-entry
+        // breakage, and any advisory built on this predicate must not fire blanket
+        // on every write to such a tracker.
+        let body = "# Queue\n\n| ID | task |\n|---|---|\n| BL-1 | a |\n| BL-2 | b |\n";
+        assert!(body_defined_indices(body, "BL").is_empty());
+        assert_eq!(
+            body_claimed_indices(body, "BL"),
+            [1, 2].into_iter().collect()
         );
     }
 
