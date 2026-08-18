@@ -831,7 +831,7 @@ impl CodeScoutServer {
     /// companion *adds* enforcement; the server degrades without it.
     fn poll_rendezvous(&self) {
         // Two independent mutexes, never held together: the rendezvous guard is
-        // a temporary and drops at the end of this statement.
+        // scoped to the block below and drops before the ledger lock is taken.
         let (changed, active) = {
             let mut rv = self.rendezvous.lock();
             (rv.poll(), rv.is_active())
@@ -4933,6 +4933,11 @@ mod guide_hint_tests {
         assert!(
             server.guide_hints_emitted.lock().contains("librarian"),
             "no hook stamp ⇒ no re-arm; the server must not depend on the companion"
+        );
+        assert!(
+            !server.guide_hints_emitted.lock().rendezvous_active(),
+            "no hook stamp ⇒ the gate stays closed; a hardcoded `true` here \
+             would send Task 3 down the precise path on a hookless client"
         );
     }
 

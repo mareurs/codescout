@@ -104,7 +104,8 @@ impl Rendezvous {
     /// clear-on-every-activate behaviour has to stay. Shipping the precise
     /// predicate ungated would remove the accidental mitigation for `/clear`
     /// without supplying the real one. Public — and covered by this module's
-    /// own tests — ahead of that consumer, deliberately.
+    /// own tests — ahead of that consumer: `CodeScoutServer::poll_rendezvous`
+    /// now copies it onto `GuideLedger::rendezvous_active` on every request.
     pub fn is_active(&self) -> bool {
         self.active
     }
