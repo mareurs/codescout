@@ -14,7 +14,7 @@
 //! ephemeral (no path → no persistence); that is what the many internal/test
 //! `ToolContext` builders get for free, so they compile unchanged.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -30,8 +30,24 @@ pub struct GuideLedger {
     /// Per-session file (`<dir>/<session_id>.json`). `None` ⇒ ephemeral.
     path: Option<PathBuf>,
     emitted: BTreeMap<String, DateTime<Utc>>,
-    /// One-shot session notices that are NOT guide topics. (Unchanged — see the
-    /// original field docs for why this is deliberately separate and unpersisted.)
+    /// One-shot session notices that are NOT guide topics.
+    ///
+    /// Deliberately a SEPARATE set from `emitted`, and not persisted:
+    ///
+    /// - `emitted.is_empty()` is the session-opening guide's trigger in
+    ///   `Tool::call_content`. A sentinel key stashed in `emitted` would make
+    ///   that false and silently suppress `SESSION_OPENING_GUIDE` — for
+    ///   exactly the sessions a notice fires in, since notices fire on the
+    ///   first eligible call.
+    /// - keeping it out of `emitted` also keeps it out of the topic
+    ///   namespace, so a notice key can never collide with a future guide
+    ///   topic, and out of the persisted JSON — which now carries a
+    ///   `BTreeMap<String, DateTime<Utc>>`, so a notice key would need a
+    ///   meaningless delivery timestamp and would be read back as a topic
+    ///   by `read_entries`.
+    ///
+    /// Ephemeral by design: a notice describes this process's view of the
+    /// tree, not something the model has been taught.
     notices: HashSet<String>,
 }
 
@@ -94,13 +110,18 @@ impl GuideLedger {
         ledger
     }
 
-    /// Record a topic. Returns `true` if newly added (matching
-    /// `HashSet::insert`); persists only on a genuine insertion.
+    /// Record a topic, stamping it with the current time. Returns `true` if the
+    /// topic was newly added (matching `HashSet::insert`'s contract, which
+    /// `src/tools/guide.rs:92` relies on for its `first_fetch` signal).
+    ///
+    /// A repeat insert REFRESHES the stamp rather than preserving the original:
+    /// the stamp means "last delivered", because that is what `expire_idle`'s TTL
+    /// and the GC's idle-age both need. Persists unconditionally — the map changed
+    /// either way, and skipping the write on a repeat would let the in-memory
+    /// stamps drift ahead of the on-disk ones the GC reads.
     pub fn insert(&mut self, topic: String) -> bool {
         let added = self.emitted.insert(topic, Utc::now()).is_none();
-        if added {
-            self.persist();
-        }
+        self.persist();
         added
     }
 
@@ -168,9 +189,14 @@ fn read_entries(path: &Path) -> BTreeMap<String, DateTime<Utc>> {
     }
 }
 
+/// Best-effort: any conversion failure (a mtime chrono can't represent, or one
+/// that predates the Unix epoch) yields `None` rather than panicking, so the
+/// caller's `unwrap_or_else(Utc::now)` fallback is what actually fires.
 fn file_mtime(path: &Path) -> Option<DateTime<Utc>> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    Some(DateTime::<Utc>::from(modified))
+    let since_epoch = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    let secs = i64::try_from(since_epoch.as_secs()).ok()?;
+    Utc.timestamp_opt(secs, since_epoch.subsec_nanos()).single()
 }
 
 /// Session ids are uuids, but the env value / file fallback is untrusted — keep
@@ -243,11 +269,12 @@ mod tests {
         let hints = dir.path().join("guide_hints");
         std::fs::create_dir_all(&hints).unwrap();
         // The pre-2026-08-18 on-disk shape: a bare array, no timestamps.
-        std::fs::write(
-            hints.join("sess-legacy.json"),
-            r#"["librarian","tracker-conventions"]"#,
-        )
-        .unwrap();
+        let file = hints.join("sess-legacy.json");
+        std::fs::write(&file, r#"["librarian","tracker-conventions"]"#).unwrap();
+
+        // Ground truth: the file's own mtime. A `Utc::now()` fallback mutant
+        // would stamp strictly later than this, since load happens after write.
+        let expected = DateTime::<Utc>::from(std::fs::metadata(&file).unwrap().modified().unwrap());
 
         let l = GuideLedger::load("sess-legacy", Some(hints.clone()));
         assert!(
@@ -256,16 +283,15 @@ mod tests {
         );
         assert!(l.contains("tracker-conventions"));
 
-        // Every legacy topic is stamped with the file's mtime, so it is neither
-        // instantly expired nor immortal.
+        // Every legacy topic is stamped with the file's mtime — not load time,
+        // and not some other placeholder — so it is neither instantly expired
+        // nor immortal.
         let stamps = l.stamps_for_test();
         assert_eq!(stamps.len(), 2);
-        let now = chrono::Utc::now();
-        for (_topic, at) in stamps {
-            assert!(at <= now, "a stamp from mtime cannot be in the future");
-            assert!(
-                (now - at).num_seconds() < 60,
-                "a file written just now must stamp as just now"
+        for (topic, at) in stamps {
+            assert_eq!(
+                at, expected,
+                "legacy stamp for {topic} must come from mtime, not load time"
             );
         }
     }
@@ -275,8 +301,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let hints = dir.path().join("guide_hints");
 
+        let before = Utc::now();
         let mut l = GuideLedger::load("sess-new", Some(hints.clone()));
         assert!(l.insert("librarian".to_string()));
+        let after = Utc::now();
+
+        // insert() must stamp with the current time, not a placeholder — this
+        // is the primary producer of the stamps expiry/GC will consume.
+        let stamps = l.stamps_for_test();
+        assert_eq!(stamps.len(), 1);
+        let (topic, at) = &stamps[0];
+        assert_eq!(topic, "librarian");
+        assert!(
+            *at >= before && *at <= after,
+            "insert must stamp with now(): {at} not within [{before}, {after}]"
+        );
+
         drop(l);
 
         // On disk it is now an object, not an array.
@@ -284,8 +324,48 @@ mod tests {
         assert!(raw.starts_with('{'), "expected a stamped map, got: {raw}");
         assert!(raw.contains("librarian"));
 
+        // The persisted value carries the same stamp that was held in memory,
+        // not a re-derived or placeholder one.
+        let persisted: BTreeMap<String, DateTime<Utc>> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(persisted.get("librarian"), Some(at));
+
         let l2 = GuideLedger::load("sess-new", Some(hints));
         assert!(l2.contains("librarian"), "the new shape must reload");
+    }
+
+    #[test]
+    fn a_repeat_insert_refreshes_the_stamp_and_persists_it() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+        let file = hints.join("sess-refresh.json");
+
+        let mut l = GuideLedger::load("sess-refresh", Some(hints.clone()));
+        assert!(l.insert("librarian".to_string()), "first insert is new");
+        let first_stamp = l.stamps_for_test()[0].1;
+
+        // Force a measurable gap so a refreshed stamp is provably later.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        assert!(
+            !l.insert("librarian".to_string()),
+            "second insert on an existing topic is not newly-added"
+        );
+        let second_stamp = l.stamps_for_test()[0].1;
+        assert!(
+            second_stamp > first_stamp,
+            "a repeat insert must refresh the in-memory stamp (last-delivered semantics)"
+        );
+
+        // The refreshed stamp must reach disk even though the returned bool is
+        // `false` — a repeat insert still changed the map, and expire_idle/GC
+        // read the on-disk stamp, not just the in-memory one.
+        let raw = std::fs::read_to_string(&file).unwrap();
+        let persisted: BTreeMap<String, DateTime<Utc>> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            persisted.get("librarian"),
+            Some(&second_stamp),
+            "the on-disk stamp must match the refreshed in-memory stamp, not the stale first one"
+        );
     }
 
     #[test]
