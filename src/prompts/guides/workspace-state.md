@@ -60,6 +60,7 @@ Activation clears these per-session sets:
 - **Anonymous tier** — when no identity is obtainable (every other client, or Claude Code before the companion hook has run), the ledger lives in-process only, is never persisted, and re-arms automatically after an idle interval — so a second conversation in a long-lived process isn't starved of guides forever.
 
 A companion hook (Claude Code only) can refresh the keyed tier's id mid-process through a pid-keyed rendezvous slot the server publishes at construction. That is how the server detects `/clear`, which mints a new conversation id without restarting the MCP subprocess. The server stays fully correct without the hook: absent it, the ledger degrades to the anonymous tier's idle-TTL behavior rather than silently suppressing guides the new conversation has never seen.
+
 ## Path-relative annotation
 
 After `workspace(action="activate")`, path fields in responses resolve against
