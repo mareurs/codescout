@@ -223,6 +223,18 @@ All notable changes to codescout are documented here.
   `@cmd_*` recovery path the advisory lacked.
   See `docs/issues/archive/2026-08-17-il3-warn-hook-flags-bounded-lhs-pipes.md`.
 
+- **The per-session guide-hint ledger moved out of the project tree into per-user state.**
+  It now lives at `<per-user-state>/codescout/guide_hints/` — `$XDG_STATE_HOME`, else
+  `~/.local/state` — instead of `<project>/.codescout/guide_hints/`. Ledgers idle past 35
+  days are garbage-collected on load. **Nothing reads the old location**, and nothing will
+  ever clean it: the GC only walks the directory it is handed, which is now the per-user
+  one, so every project that ran codescout before this carries an orphaned
+  `.codescout/guide_hints/` holding one JSON file per session ever opened there. It is
+  unreachable data, gitignored, and safe to `rm -rf` with no migration step. The
+  `LedgerFile::Legacy` arm that survives handles the legacy *shape* (an unstamped
+  `Vec<String>`), not the legacy *location*. See `docs/state-protocol.md` §
+  *Backwards-compat fossils*.
+
 - **sqlite-vec indexes now live under the project root, not `$HOME`.** The store
   directory resolves as `CODESCOUT_SQLITE_DIR` if set, else
   `<project_root>/.codescout/embeddings/`, else — for callers with no project root at

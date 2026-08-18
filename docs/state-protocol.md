@@ -230,6 +230,36 @@ When I-10 lands, each of these is removed in `codescout-companion` v2.0; this do
 is updated to drop the fossil entries; and a one-time migration warning is printed if
 the legacy path is detected.
 
+### Not part of I-10 — `<project>/.codescout/guide_hints/`
+
+Orphaned data, not a fallback. The per-session guide-hint ledger used to live here; as of
+`17119957` it is written to `<per-user-state>/codescout/guide_hints/` instead
+(`per_user_state_dir()`, i.e. `$XDG_STATE_HOME` or `~/.local/state`).
+
+**Nothing reads the old location.** The only production resolver is `src/server.rs:290`,
+whose `or_else` fallback names `per_user_state_dir()` and has no in-project branch at all;
+when that returns `None` the ledger is ephemeral rather than project-backed.
+`GuideLedger::load` has exactly one production caller. The `LedgerFile::Legacy` arm in
+`src/tools/guide_ledger.rs` handles the legacy **shape** — a bare `Vec<String>` with no
+per-topic stamps — not the legacy **location**, and its own doc comment says those files
+"are abandoned, not migrated".
+
+Two consequences worth stating, because neither is visible from the code that moved:
+
+- The 35-day GC (`gc()`) only walks the directory it is handed, which is now the per-user
+  one. **Nothing will ever clean the old directories up.**
+- This is per-repo residue: *every* project that ran codescout before `17119957` has one,
+  each holding one JSON file per session ever opened there.
+
+Safe to delete at any time, with no migration step, because the data is unreachable:
+
+```
+rm -rf <project_root>/.codescout/guide_hints/
+```
+
+Recorded here rather than filed as a bug: the directory is gitignored, so this is local
+clutter with no correctness impact and nothing to regress.
+
 ## Known gaps in the contract (open work)
 
 - The `.buddy/<sid>/narrative.jsonl` schema is implicit — every JSONL entry contains
