@@ -4,7 +4,9 @@
 
 **Goal:** Teach `librarian_guard` the `entry_prefix` ledger declaration, so a prose ledger's `PREFIX-N` entry headings can only be written through the server's id allocator — while every other heading in that same file stays directly editable.
 
-**Architecture:** Two changes to `src/util/librarian_guard.rs`, in order. Task 1 adds a third predicate to the guard's existing union (stamped `id:` OR augmented OR **declares `entry_prefix`**), which closes the hole for any newly-created prose ledger. Task 2 then narrows that third arm alone from whole-file to heading-structural: `edit_markdown` refuses only edits whose target heading matches `^<PREFIX>-\d+`, so a typo fix elsewhere in a 3,000-line ledger is not a ceremony. The `id:` and augmented arms keep their whole-file semantics untouched.
+**Architecture:** Task 1 adds a third predicate to the guard's existing union in `src/util/librarian_guard.rs` (stamped `id:` OR augmented OR **declares `entry_prefix`**), which closes the hole for any newly-created prose ledger. Task 2 supplies the mechanism that keeps the guard's hand-rolled `entry_prefix` reader in agreement with the librarian's `serde_yml` one — a parity test over one corpus — because the feature boundary forces two readers and a doc comment is not a mechanism.
+
+The spec's heading-scoped guard is deliberately **not** built; Task 2's Alternatives section records why, with the measurement that killed it. Read that before proposing it again.
 
 **Tech Stack:** Rust, `regex`, `cargo test --lib`. No new dependencies.
 
@@ -31,12 +33,12 @@ These are corrections and hard limits established by reading the current code on
 
 | File | Responsibility | Change |
 |---|---|---|
-| `src/util/librarian_guard.rs` | The guard predicate and its decision. Owns `is_librarian_artifact`, `guard_with_oracle`, the oracle plumbing, and all guard tests. | Modify — add ledger parsing + a third union arm (Task 1), then a heading-scoped decision for that arm (Task 2). |
-| `src/tools/markdown/edit_markdown.rs` | The `edit_markdown` tool. Calls the guard at :1271 with `(path, file_content, Some(&resolved))`. | Modify in Task 2 only — pass the call's target headings to the guard. |
-| `src/tools/markdown/read_markdown.rs` | The `read_markdown` tool. Calls the guard at :507. | Modify in Task 2 only — pass `&[]` (a read addresses no heading for guard purposes). |
-| `src/tools/edit_file/mod.rs` | Text-level editing. Calls the guard at :692. | Modify in Task 2 only — pass `&[]` (no heading concept). |
+| `src/util/librarian_guard.rs` | The guard predicate and its decision. Owns `is_librarian_artifact`, `guard_with_oracle`, the oracle plumbing, and all guard tests. Compiles under `--no-default-features`. | Modify — add ledger parsing + a third union arm (Task 1); widen the ledger refusal hint (Task 2 Step 6). |
+| `src/librarian/catalog/augmentation.rs` | The allocator. Owns `ENTRY_PREFIX_KEY`, `allocate_entry_id`, `body_claimed_indices`. Feature-gated behind `librarian`. | Modify in Task 2 only — extract the inline `entry_prefix` match into a callable pure function, and add the parity test beside it. |
 
-No new files. The guard is ~400 lines including tests and stays one focused unit; splitting it would separate the predicate from the tests that pin its rationale.
+No new files, and **no signature changes**. `guard_not_librarian_managed` keeps its three-argument shape, so its three production call sites (`edit_markdown.rs:1271`, `read_markdown.rs:507`, `edit_file/mod.rs:692` — verified as the complete set; `grep` over `tests/` and `src/bin/` returns none) are untouched. That is a direct consequence of cutting the heading-scoped guard: the version of this plan that built it had to thread a fourth parameter through all three.
+
+The guard is ~400 lines including tests and stays one focused unit; splitting it would separate the predicate from the tests that pin its rationale.
 
 ---
 
@@ -355,161 +357,191 @@ guard must keep working under --no-default-features."
 
 ---
 
-### Task 2: The ledger arm guards entry headings, not the whole file
+### Task 2: Hold the two `entry_prefix` readers in agreement by test, not by comment
 
-Task 1 leaves a declared ledger wholly refused for `edit_markdown`. For an augmented file that is right — the file is a rendered snapshot, so any edit desynchronises it. For a ledger that is merely *declared*, it overshoots: the file IS where its state lives, and refusing a typo fix in `## The seven laws` of a 3,000-line ledger is the "ceremony" objection the spec raises against a whole-file guard.
+Task 1 creates a **second reader** of `entry_prefix`. The librarian already has one — `allocate_entry_id` parses it out of `fm.extra` via `serde_yml` (`src/librarian/catalog/augmentation.rs:798-802`). Task 1's `declared_entry_prefixes` hand-parses the same key from raw text, because it must compile under `--no-default-features` where `serde_yml` is absent.
 
-`edit_markdown` is heading-addressed, so the guard can decide mechanically. Refuse when a target heading names an entry (`^#{1,6} <PREFIX>-<N>`), allow otherwise.
+Two readers, one contract. That duplication is **unavoidable** — see Alternatives below — but the way Task 1 states it is not acceptable: its doc comment says *"Accepts all three YAML forms `allocate_entry_id` honours (…:798-802)"*, which is a co-change contract enforced by **prose**. A comment that says "mirrors X" or "kept in sync with X" is strictly worse than compiler-visible duplication: it proves someone knew and supplies no mechanism. This project has already paid for that exact shape four times (`docs/adrs/2026-07-25-embedding-transport-boundary.md`, where a root `reqwest` copy carried the comment *"Mirrors the codescout-embed RemoteEmbedder guard"* and cost 48 needlessly-compiled crates).
+
+This task supplies the mechanism: one corpus, both readers, asserted equal.
+
+**Alternatives considered and rejected** — record these so a later session does not re-litigate:
+
+- *Have the guard call `frontmatter::parse`.* Impossible: `librarian` is a Cargo feature and the guard compiles without it. This is a real boundary, not an oversight.
+- *Have `allocate_entry_id` call `declared_entry_prefixes` instead, leaving one reader.* Rejected. `allocate_entry_id` already parses `fm` because it needs `entry_high_water_<PREFIX>` from `fm.extra`. Reading prefixes via raw text while reading the mark via YAML makes one function read one frontmatter block two ways — a new inconsistency, not a removed one.
+- *A heading-scoped guard (the original Task 2).* **Cut, premise measured false.** It existed to answer the spec's objection that a whole-file guard makes a typo fix in a 3,000-line ledger a ceremony. Measured 2026-08-18: `artifact(action="update", id=…, patch={body_edits: [{heading, action: "edit", old_string, new_string}]})` is a section-scoped text swap that works on `docs/trackers/skill-frictions.md` — a catalog row with no `id:` and no augmentation — returning `old_string not found`, i.e. reaching the swap logic. Augmentation is not required. So the ergonomic gap the heading-scoping bought does not exist, and it would have cost a new parameter on a public function, three threaded call sites, a regex, and four tests, for a class of file with **zero current members**.
 
 **Files:**
-- Modify: `src/util/librarian_guard.rs` (new `headings` parameter; ledger-arm decision)
-- Modify: `src/tools/markdown/edit_markdown.rs:1268-1273` (pass target headings)
-- Modify: `src/tools/markdown/read_markdown.rs:507` and `src/tools/edit_file/mod.rs:692` (pass `&[]` — neither addresses headings)
-- Test: `src/util/librarian_guard.rs` `mod tests`
+- Modify: `src/librarian/catalog/augmentation.rs:798-802` (extract the inline `match` into a named pure function so it is callable from a test)
+- Test: `src/librarian/catalog/augmentation.rs` `mod tests` (the parity test — lives here because this is the side where both readers exist)
 
 **Interfaces:**
-- Consumes from Task 1: `declared_entry_prefixes(text) -> Vec<String>`, and the `ledger` arm of `guard_with_oracle`.
-- Produces:
-  - `pub fn guard_not_librarian_managed(path: &str, text: &str, abs_path: Option<&std::path::Path>, headings: &[&str]) -> Result<(), anyhow::Error>` — one new trailing parameter. Pass `&[]` from any caller that does not address headings; `&[]` keeps the whole-file refusal, which is the safe default.
-  - `pub(crate) fn targets_a_ledger_entry(text: &str, headings: &[&str]) -> bool`
+- Consumes from Task 1: `crate::util::librarian_guard::declared_entry_prefixes(text: &str) -> Vec<String>`.
+- Produces: `pub(crate) fn declared_prefixes_from_frontmatter(fm: Option<&Frontmatter>) -> Vec<String>` — the librarian-side reader, extracted verbatim from the existing inline `match` and returning owned `String`s so the two readers' return types compare directly.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing parity test**
 
-Add to the bottom of `mod tests` in `src/util/librarian_guard.rs`:
+Add to `mod tests` in `src/librarian/catalog/augmentation.rs`:
 
 ```rust
-    /// `edit_markdown` is heading-addressed, so the ledger arm can be precise: the
-    /// thing that must go through the allocator is an ENTRY, and an entry is a
-    /// heading naming `PREFIX-N`. Everything else in the file — the distillation
-    /// section, the reading guide, a typo in prose — is ordinary markdown the author
-    /// owns. Refusing all of it is the "ceremony" objection the spec raises against
-    /// a whole-file guard, and it is what trains authors to route around the guard.
+    /// The guard and the allocator each read `entry_prefix`, by different mechanisms,
+    /// and they must agree — a disagreement is silent in the dangerous direction: the
+    /// allocator honours a form the guard is blind to, so entries in that ledger can
+    /// be hand-written past the allocator with no error anywhere.
+    ///
+    /// Two readers is forced, not sloppy. `src/util/librarian_guard.rs` compiles under
+    /// `--no-default-features` where `serde_yml` does not exist, so it hand-parses;
+    /// this side already parses `fm` for `entry_high_water_<PREFIX>` and would be made
+    /// worse, not better, by reading one frontmatter block two ways. What is NOT
+    /// acceptable is holding the agreement in a doc comment — this project has paid
+    /// for prose-enforced co-change contracts before
+    /// (`docs/adrs/2026-07-25-embedding-transport-boundary.md`). This test is the
+    /// mechanism that comment stood in for.
     #[test]
-    fn a_ledger_refuses_entry_headings_and_permits_every_other_heading() {
-        struct NothingIsAugmented;
-        impl AugmentedArtifactOracle for NothingIsAugmented {
-            fn is_augmented(&self, _: &std::path::Path) -> bool {
-                false
-            }
-        }
-
-        let text = "---\nkind: tracker\nentry_prefix: R\nentry_high_water_R: 104\n---\n\n## The seven laws\n\n## R-104 — a lesson\n";
-        let abs = std::path::Path::new("/repo/docs/trackers/recon.md");
-        let display = "docs/trackers/recon.md";
-
-        // Refused: the heading names an entry, so writing it by hand would bypass
-        // the allocator and leave entry_high_water_R stale.
-        for heading in [
-            "## R-105 — a new lesson",
-            "## R-104 — a lesson",
-            "#### R-7 — deep heading",
-            "## `R-9` — backticked",
+    fn both_entry_prefix_readers_agree_on_every_yaml_form() {
+        for (label, doc) in [
+            ("scalar", "---\nkind: tracker\nentry_prefix: R\n---\n\n# L\n"),
+            (
+                "quoted scalar",
+                "---\nkind: tracker\nentry_prefix: 'HY'\n---\n\n# L\n",
+            ),
+            (
+                "double-quoted scalar",
+                "---\nkind: tracker\nentry_prefix: \"HY\"\n---\n\n# L\n",
+            ),
+            (
+                "inline flow",
+                "---\nkind: tracker\nentry_prefix: [F, W]\n---\n\n# L\n",
+            ),
+            (
+                "block sequence",
+                "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n# L\n",
+            ),
+            (
+                "sequence then sibling key",
+                "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\nentry_high_water_F: 3\n---\n\n# L\n",
+            ),
+            ("absent", "---\nkind: tracker\n---\n\n# L\n"),
+            ("bare key", "---\nkind: tracker\nentry_prefix:\n---\n\n# L\n"),
+            (
+                "empty string",
+                "---\nkind: tracker\nentry_prefix: ''\n---\n\n# L\n",
+            ),
+            (
+                "empty flow list",
+                "---\nkind: tracker\nentry_prefix: []\n---\n\n# L\n",
+            ),
+            ("no frontmatter at all", "# L\n\nentry_prefix: R\n"),
         ] {
-            assert!(
-                guard_with_oracle(display, text, Some(abs), Some(&NothingIsAugmented), &[heading])
-                    .is_err(),
-                "must refuse an entry heading: {heading}"
+            let (fm, _body) = crate::librarian::frontmatter::parse(doc).unwrap();
+            let librarian_side = declared_prefixes_from_frontmatter(fm.as_ref());
+            let guard_side = crate::util::librarian_guard::declared_entry_prefixes(doc);
+            assert_eq!(
+                librarian_side, guard_side,
+                "{label}: the allocator and the guard must read entry_prefix identically — \
+                 a form only one of them honours is a silent hole in the guard"
             );
         }
-
-        // Permitted: no target heading names an entry.
-        for heading in [
-            "## The seven laws",
-            "# Reconnaissance patterns",
-            "## Template for new entries",
-        ] {
-            assert!(
-                guard_with_oracle(display, text, Some(abs), Some(&NothingIsAugmented), &[heading])
-                    .is_ok(),
-                "a non-entry heading in a ledger must stay directly editable: {heading}"
-            );
-        }
     }
+```
 
-    /// The batch form edits several headings in one atomic call, so one entry
-    /// heading anywhere in the batch has to refuse the whole call — permitting it
-    /// because a sibling edit was innocent would write the entry anyway.
-    #[test]
-    fn one_entry_heading_in_a_batch_refuses_the_whole_call() {
-        struct NothingIsAugmented;
-        impl AugmentedArtifactOracle for NothingIsAugmented {
-            fn is_augmented(&self, _: &std::path::Path) -> bool {
-                false
-            }
-        }
+- [ ] **Step 2: Run the test to verify it fails**
 
-        let text = "---\nkind: tracker\nentry_prefix: R\n---\n\n## Index\n\n## R-9 — x\n";
-        let abs = std::path::Path::new("/repo/docs/trackers/recon.md");
-        assert!(
-            guard_with_oracle(
-                "docs/trackers/recon.md",
-                text,
-                Some(abs),
-                Some(&NothingIsAugmented),
-                &["## Index", "## R-10 — sneaked in"]
-            )
-            .is_err(),
-            "a batch containing one entry heading must be refused whole"
-        );
+Run: `cargo test --lib librarian::catalog::augmentation::tests::both_entry_prefix_readers_agree 2>&1`
+
+Expected: FAIL to compile — `cannot find function 'declared_prefixes_from_frontmatter' in this scope`.
+
+- [ ] **Step 3: Extract the librarian-side reader**
+
+In `src/librarian/catalog/augmentation.rs`, insert this immediately above `allocate_entry_id`:
+
+```rust
+/// The id namespaces a parsed frontmatter block declares via `entry_prefix`.
+///
+/// Extracted from `allocate_entry_id`'s body so it can be driven by
+/// `both_entry_prefix_readers_agree_on_every_yaml_form` alongside the guard's
+/// independent text-level reader. Returns owned `String`s rather than borrowed
+/// `&str` so the two readers' outputs compare directly in that test.
+///
+/// Scalar or sequence: a session log legitimately owns two namespaces (F-N
+/// frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
+/// `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
+/// counters stay independent either way.
+pub(crate) fn declared_prefixes_from_frontmatter(
+    fm: Option<&crate::librarian::frontmatter::Frontmatter>,
+) -> Vec<String> {
+    match fm.and_then(|f| f.extra.get(ENTRY_PREFIX_KEY)) {
+        Some(Value::String(s)) if !s.trim().is_empty() => vec![s.trim().to_string()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
     }
+}
+```
 
-    /// The relaxation belongs to the LEDGER arm alone. An augmented artifact's params
-    /// live in the catalog and the file is only a rendered snapshot, so a prose-only
-    /// edit desynchronises it just as much as an entry edit — and
-    /// `artifact(action="update", patch={body_edits: [...]})` already serves that
-    /// case without ceremony. A stamped id says the librarian wrote the file, which
-    /// the heading being edited does not change either.
+Then replace the inline `match` inside `allocate_entry_id` (currently at :798-802) with a call to it, keeping the surrounding comment:
+
+```rust
+    // Scalar or sequence: a session log legitimately owns two namespaces (F-N
+    // frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
+    // `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
+    // counters stay independent either way.
+    let declared = declared_prefixes_from_frontmatter(fm.as_ref());
+```
+
+The two uses below this line — `declared.is_empty()` and `declared.contains(&id_prefix)` — need adjusting for `Vec<String>` rather than `Vec<&str>`: `declared.contains(&id_prefix)` becomes `declared.iter().any(|d| d == id_prefix)`, and the error hint's `declared.join(", ")` works unchanged.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cargo test --lib librarian::catalog::augmentation::tests::both_entry_prefix_readers_agree 2>&1`
+
+Expected: PASS. If a case fails, the failing label names which YAML form the two readers disagree on — fix `declared_entry_prefixes` (Task 1's hand parser) to match the `serde_yml` reading, not the other way round: `serde_yml` defines what the file means.
+
+- [ ] **Step 5: Mutation-test the parity test**
+
+Temporarily delete the `("block sequence", …)` arm's handling from Task 1's `declared_entry_prefixes` — replace its block-sequence branch with `return Vec::new();` — then run:
+
+Run: `cargo test --lib librarian::catalog::augmentation::tests::both_entry_prefix_readers_agree 2>&1`
+
+Expected: FAIL naming `block sequence`. This is the exact hole the test exists to catch: the allocator would honour `entry_prefix:\n  - F` while the guard read the file as not-a-ledger. Restore and confirm PASS.
+
+- [ ] **Step 6: Improve Task 1's refusal hint**
+
+Task 1's ledger arm currently refuses with the generic artifact-tools hint. Since Task 2 is cut, that hint is the only thing routing an author who wanted to edit ledger prose. Replace the ledger branch's hint in `guard_with_oracle` so it names both cases:
+
+```rust
+    let hint = if ledger && !augmented && !is_librarian_artifact(text) {
+        "This file is a ledger — it owns a PREFIX-N id namespace.\n\
+         • Add an entry:  artifact(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
+           then write the section yourself with the id it returns.\n\
+         • Edit anything else (prose, a heading, a typo):\n\
+           artifact(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
+         action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
+            .to_string()
+    } else {
+        "Use artifact tools instead:\n\
+         • Read:   artifact(action=\"get\", id=\"<id>\")\n\
+         • Find:   artifact(action=\"find\", semantic=\"<topic>\")\n\
+         • Edit:   artifact(action=\"update\", id=\"<id>\", patch={...})\n\
+         Full guide: resources/read doc://librarian-guide"
+            .to_string()
+    };
+```
+
+Change `RecoverableError::with_hint`'s second argument to `hint`. Add a test asserting the ledger refusal names `append_entry` **and** `body_edits` — a single-branch hint is the failure mode being avoided, not a smaller version of it:
+
+```rust
+    /// A ledger's refusal is the only thing routing an author who wanted to edit its
+    /// prose, since the heading-scoped guard was cut as unnecessary. Both routes must
+    /// appear: `append_entry` for a new entry, `body_edits` for everything else. A
+    /// hint naming only one of them sends prose edits to the wrong tool.
     #[test]
-    fn heading_scoping_does_not_relax_the_augmented_or_stamped_arms() {
-        struct EverythingIsAugmented;
-        impl AugmentedArtifactOracle for EverythingIsAugmented {
-            fn is_augmented(&self, _: &std::path::Path) -> bool {
-                true
-            }
-        }
-        struct NothingIsAugmented;
-        impl AugmentedArtifactOracle for NothingIsAugmented {
-            fn is_augmented(&self, _: &std::path::Path) -> bool {
-                false
-            }
-        }
-
-        let abs = std::path::Path::new("/repo/docs/trackers/t.md");
-
-        // Augmented, and the heading is innocent prose.
-        let augmented_text = "---\nkind: tracker\nentry_prefix: R\n---\n\n## Prose\n";
-        assert!(
-            guard_with_oracle(
-                "docs/trackers/t.md",
-                augmented_text,
-                Some(abs),
-                Some(&EverythingIsAugmented),
-                &["## Prose"]
-            )
-            .is_err(),
-            "an augmented artifact stays wholly refused whatever heading is targeted"
-        );
-
-        // Stamped id, not a ledger, innocent heading.
-        let stamped_text = "---\nkind: bug\nid: 0123456789abcdef\n---\n\n## Summary\n";
-        assert!(
-            guard_with_oracle(
-                "docs/issues/b.md",
-                stamped_text,
-                Some(abs),
-                Some(&NothingIsAugmented),
-                &["## Summary"]
-            )
-            .is_err(),
-            "a stamped artifact stays wholly refused whatever heading is targeted"
-        );
-    }
-
-    /// A caller that does not address headings passes `&[]`, and the safe reading of
-    /// "no heading information" is the whole-file refusal — never a blanket permit.
-    /// `read_markdown` and `edit_file` are both in this position.
-    #[test]
-    fn no_heading_information_keeps_the_whole_file_refusal() {
+    fn a_ledger_refusal_names_both_the_entry_route_and_the_prose_route() {
         struct NothingIsAugmented;
         impl AugmentedArtifactOracle for NothingIsAugmented {
             fn is_augmented(&self, _: &std::path::Path) -> bool {
@@ -518,235 +550,62 @@ Add to the bottom of `mod tests` in `src/util/librarian_guard.rs`:
         }
 
         let text = "---\nkind: tracker\nentry_prefix: R\n---\n\n## Prose\n";
+        let abs = std::path::Path::new("/repo/docs/trackers/recon.md");
+        let err = guard_with_oracle("docs/trackers/recon.md", text, Some(abs), Some(&NothingIsAugmented))
+            .expect_err("a ledger must be guarded");
+        let re = err.downcast_ref::<RecoverableError>().unwrap();
+        let hint = re.hint().unwrap_or_default();
         assert!(
-            guard_with_oracle(
-                "docs/trackers/recon.md",
-                text,
-                Some(std::path::Path::new("/repo/docs/trackers/recon.md")),
-                Some(&NothingIsAugmented),
-                &[]
-            )
-            .is_err(),
-            "an empty heading list must not be read as permission"
+            hint.contains("append_entry"),
+            "the entry route must be named: {hint}"
+        );
+        assert!(
+            hint.contains("body_edits"),
+            "the prose route must be named: {hint}"
         );
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+`RecoverableError`'s hint accessor returns text only for the `Guidance::Hint` variant — read `src/tools/core/types.rs`'s `hint()` before asserting on it, and fall back to `err.to_string().contains(...)` if the accessor shape differs; the `Display` impl renders `"{message} — Hint: {text}"` and is the documented stable test contract.
 
-Run: `cargo test --lib util::librarian_guard 2>&1`
-
-Expected: FAIL to compile — `this function takes 4 arguments but 5 arguments were supplied` on every new call.
-
-- [ ] **Step 3: Add `targets_a_ledger_entry` and thread the parameter**
-
-Insert after `declared_entry_prefixes` in `src/util/librarian_guard.rs`:
-
-```rust
-/// `true` when any of `headings` names a `PREFIX-N` entry of a namespace this file
-/// declares.
-///
-/// The heading shape mirrors the heading half of
-/// `augmentation::body_claimed_indices` — `#{1,6}`, whitespace, optional
-/// backtick/bold/link wrapping, the prefix, a hyphen, digits, word boundary — so the
-/// guard and the allocator agree on what an entry is. Index-table rows are
-/// deliberately not matched: `edit_markdown` addresses headings.
-///
-/// An empty `headings` slice means the caller had no heading information, and the
-/// safe reading of that is "assume an entry" — a permit would be the guard failing
-/// open.
-pub(crate) fn targets_a_ledger_entry(text: &str, headings: &[&str]) -> bool {
-    let prefixes = declared_entry_prefixes(text);
-    if prefixes.is_empty() {
-        return false;
-    }
-    if headings.is_empty() {
-        return true;
-    }
-    prefixes.iter().any(|p| {
-        let esc = regex::escape(p);
-        let Ok(re) = regex::Regex::new(&format!(r"^#{{1,6}}[ \t]+[`*\[]*{esc}-\d+\b")) else {
-            // A prefix that will not compile is one the guard cannot reason about;
-            // refuse rather than permit.
-            return true;
-        };
-        headings.iter().any(|h| re.is_match(h.trim()))
-    })
-}
-```
-
-Then change the two signatures. `guard_not_librarian_managed`:
-
-```rust
-pub fn guard_not_librarian_managed(
-    path: &str,
-    text: &str,
-    abs_path: Option<&std::path::Path>,
-    headings: &[&str],
-) -> Result<(), anyhow::Error> {
-    let oracle = oracle();
-    guard_with_oracle(path, text, abs_path, oracle.as_deref(), headings)
-}
-```
-
-`guard_with_oracle` — add the parameter and narrow the ledger arm:
-
-```rust
-fn guard_with_oracle(
-    path: &str,
-    text: &str,
-    abs_path: Option<&std::path::Path>,
-    oracle: Option<&dyn AugmentedArtifactOracle>,
-    headings: &[&str],
-) -> Result<(), anyhow::Error> {
-    let augmented = matches!((abs_path, oracle), (Some(p), Some(o)) if o.is_augmented(p));
-    let stamped = is_librarian_artifact(text);
-    // The ledger arm is the only heading-scoped one. Augmentation means the file is
-    // not where its state lives, and a stamped id means the librarian wrote it —
-    // neither claim is about the section being edited, so neither narrows. What a
-    // ledger owns is its ID NAMESPACE, and only an entry heading touches that.
-    let ledger_entry = targets_a_ledger_entry(text, headings);
-    if !augmented && !stamped && !ledger_entry {
-        return Ok(());
-    }
-    let why = if augmented {
-        " (augmented — its params live in the catalog, and this file is only a \
-         rendered snapshot of them)"
-    } else if ledger_entry {
-        " (a ledger entry — PREFIX-N ids are allocated by the server, and a \
-         hand-written entry leaves the committed high-water mark stale)"
-    } else {
-        ""
-    };
-    let hint = if ledger_entry && !augmented && !stamped {
-        "This file's other headings are directly editable — only PREFIX-N entry \
-         headings are not. To add an entry:\n\
-         • Reserve: artifact(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
-         • Then write the section yourself with the id it returns."
-    } else {
-        "Use artifact tools instead:\n\
-         • Read:   artifact(action=\"get\", id=\"<id>\")\n\
-         • Find:   artifact(action=\"find\", semantic=\"<topic>\")\n\
-         • Edit:   artifact(action=\"update\", id=\"<id>\", patch={...})\n\
-         Full guide: resources/read doc://librarian-guide"
-    };
-    Err(RecoverableError::with_hint(
-        format!("'{path}' is a librarian-managed artifact{why} — do not read or edit it directly"),
-        hint,
-    )
-    .into())
-}
-```
-
-- [ ] **Step 4: Update the three call sites**
-
-`src/tools/markdown/edit_markdown.rs` — replace the guard call at :1271 with:
-
-```rust
-        // Collect the headings this call targets so the guard can scope a ledger's
-        // refusal to its PREFIX-N entries. Both shapes are covered: the single
-        // `heading` param and every element of the `edits` batch. A batch is atomic,
-        // so one entry heading anywhere in it refuses the whole call.
-        let mut target_headings: Vec<&str> = Vec::new();
-        if let Some(h) = input["heading"].as_str() {
-            target_headings.push(h);
-        }
-        if let Some(edits) = input["edits"].as_array() {
-            target_headings.extend(edits.iter().filter_map(|e| e["heading"].as_str()));
-        }
-        crate::util::librarian_guard::guard_not_librarian_managed(
-            path,
-            &file_content,
-            Some(&resolved),
-            &target_headings,
-        )?;
-```
-
-`src/tools/markdown/read_markdown.rs:507` — a read addresses no heading for guard purposes, and `&[]` keeps the existing whole-file refusal:
-
-```rust
-        crate::util::librarian_guard::guard_not_librarian_managed(path, &text, Some(&resolved), &[])?;
-```
-
-`src/tools/edit_file/mod.rs:692` — `edit_file` is text-level, with no heading concept. Read the actual argument expressions at that site before editing; the fourth argument `&[]` is the only addition:
-
-```rust
-    crate::util::librarian_guard::guard_not_librarian_managed(
-        path,
-        &text,
-        abs_path.as_deref(),
-        &[],
-    )?;
-```
-
-- [ ] **Step 5: Update Task 1's tests for the new arity**
-
-The four tests added in Task 1 and the three pre-existing oracle tests call `guard_with_oracle` with four arguments. Add `&[]` as the fifth to each — `&[]` preserves whole-file semantics, which is what each of those tests asserts. `a_catalogued_but_unaugmented_file_stays_directly_editable` must keep passing unchanged apart from that argument: its two files declare no `entry_prefix`, so `targets_a_ledger_entry` returns `false` regardless.
-
-Also update the three `guard_not_librarian_managed` call sites inside `mod tests` (lines 205, 214, 279) with a trailing `&[]`.
-
-- [ ] **Step 6: Run the tests to verify they pass**
-
-Run: `cargo test --lib util::librarian_guard 2>&1`
-
-Expected: PASS, every test in the module.
-
-- [ ] **Step 7: Mutation-test the heading scoping**
-
-Temporarily change `targets_a_ledger_entry`'s `if headings.is_empty() { return true; }` to `return false;`, then run:
-
-Run: `cargo test --lib util::librarian_guard::tests::no_heading_information_keeps_the_whole_file_refusal 2>&1`
-
-Expected: FAIL with `an empty heading list must not be read as permission`. Restore.
-
-Then temporarily change the same function's final `prefixes.iter().any(...)` expression to `false`, and run:
-
-Run: `cargo test --lib util::librarian_guard::tests::a_ledger_refuses_entry_headings_and_permits_every_other_heading 2>&1`
-
-Expected: FAIL with `must refuse an entry heading: ## R-105 — a new lesson`. Restore and re-run to confirm PASS.
-
-- [ ] **Step 8: Verify on the wire**
-
-Run: `cargo rb`, then `/mcp` to reconnect, then probe the real ledger — `docs/trackers/reconnaissance-patterns.md` is augmented, so it must stay wholly refused:
-
-```
-edit_markdown(path="docs/trackers/reconnaissance-patterns.md",
-              heading="## The seven laws (distilled 2026-08-16)",
-              action="edit", old_string="zzz-absent", new_string="x")
-```
-
-Expected: refused with `(augmented — ...)`. A permit here means Step 3's arm ordering regressed the augmented case.
-
-Then build the ledger-only case in the scratchpad (`entry_prefix: ZZ`, no `id:`, not augmented) and confirm both halves: an `## ZZ-N` heading refused with the `append_entry` hint, a `## Prose` heading permitted. Delete the probe file afterwards.
-
-- [ ] **Step 9: Run the full gate**
+- [ ] **Step 7: Run the full gate**
 
 Run: `cargo fmt && cargo clippy --all-targets -- -D warnings 2>&1 && cargo test --lib 2>&1`
 
-Expected: all green. `guard_not_librarian_managed` is public, so confirm no caller was missed: `grep -rn 'guard_not_librarian_managed' src/ tests/` should show only the sites this task edited.
+Expected: all green. Also confirm the lean build still compiles, since Task 1's whole constraint was the feature boundary:
 
-- [ ] **Step 10: Commit, then close the bug**
+Run: `cargo check --no-default-features 2>&1`
+
+Expected: clean. This is the check that would have caught a guard reaching into `crate::librarian`.
+
+- [ ] **Step 8: Commit, then close the bug**
 
 ```bash
 git status --short
-git commit --only src/util/librarian_guard.rs src/tools/markdown/edit_markdown.rs src/tools/markdown/read_markdown.rs src/tools/edit_file/mod.rs -m "fix(librarian-guard): scope a ledger's refusal to its PREFIX-N entry headings
+git commit --only src/librarian/catalog/augmentation.rs src/util/librarian_guard.rs -m "test(librarian-guard): hold both entry_prefix readers in agreement
 
-Task 1 left a declared ledger wholly refused for edit_markdown. That is right
-for an augmented file -- the file is a rendered snapshot, so any edit
-desynchronises it -- but overshoots for a merely-declared ledger, where the
-file IS where its state lives. Refusing a typo fix in a 3,000-line ledger is
-the ceremony objection the bug raises against a whole-file guard, and it is
-what trains authors to route around the guard.
+Task 1 added a second reader of entry_prefix -- hand-parsed in the guard,
+because src/util/ compiles under --no-default-features where serde_yml does
+not exist. Two readers is forced: allocate_entry_id already parses fm for
+entry_high_water_<PREFIX>, and reading one frontmatter block two ways would be
+a new inconsistency rather than a removed one.
 
-edit_markdown is heading-addressed, so the ledger arm now decides
-mechanically: a target heading matching ^#{1,6} PREFIX-N is refused with a
-hint naming append_entry; every other heading is directly editable. The
-augmented and stamped-id arms keep whole-file semantics -- neither claim is
-about the section being edited. Callers with no heading information pass &[],
-which keeps the refusal rather than failing open."
+What was not acceptable was holding the agreement in a doc comment. A
+mirrors-X comment is a co-change contract enforced by prose -- it proves
+someone knew and supplies no mechanism, which this project has already paid
+for (2026-07-25-embedding-transport-boundary.md). One corpus, both readers,
+asserted equal; mutation-verified by blinding the guard to block sequences and
+watching the parity test name that form.
+
+Also widens the ledger refusal hint to name both routes -- append_entry for a
+new entry, body_edits for prose -- since the heading-scoped guard was cut."
 ```
 
-Then update and archive the bug file. Its `## Status` section already carries one retraction; add what this plan established rather than rewriting it, and note that spec pieces 1 and 2 were found already shipped:
+Then update and archive the bug file. Its `## Status` section already carries one retraction; add what this plan established rather than rewriting it:
+
+- spec pieces 1 and 2 were found already shipped (`append_entry.rs:91`);
+- the hole was verified end-to-end, not inferred (the `entry_prefix: ZZ` probe);
+- the heading-scoped guard the spec's piece 3 asked for was **cut**, because `body_edits` already provides section-scoped editing on any catalog row — measured on `skill-frictions.md`, a row with no `id:` and no augmentation.
 
 ```
 artifact(action="update", id="88129ecc9c4c87a2",
@@ -757,14 +616,23 @@ artifact(action="move", id="88129ecc9c4c87a2",
 
 Read the returned new id from the `move` response and re-point every citation of the old id or old path in the same commit — `grep -rn '88129ecc9c4c87a2\|librarian-guard-blind-to-artifacts' . --include='*.md' --include='*.rs'`. Leave `docs/issues/archive/**` hits alone; those are historical snapshots.
 
+- [ ] **Step 9: File the guide's stale advice as its own bug**
+
+Do not fold this into the fix — it is a separate defect on a different surface, and it will mislead the next agent regardless of this plan.
+
+`get_guide("tracker-conventions")` § *Make the tracker guarded* currently says: *"Stamp the catalog id into the file's frontmatter as `id: <16-hex>`… a fully registered tracker with no `id:` line is completely unguarded."* That advice was tried and reverted in `bb9a94d7`: stamping an id silently disabled `docs/TAXONOMY.md`'s documented `edit_markdown` append path for R-N. The bug file this plan implements retracts the same advice in its own `## Status` section, but the guide — which is auto-injected on the first `artifact` call of every session — still recommends it.
+
+Open `docs/issues/<today>-tracker-conventions-guide-recommends-reverted-id-stamping.md` from `docs/issues/_TEMPLATE.md`, citing `bb9a94d7`, the guide section, and this plan. After Task 1 ships, the correct advice is *declare `entry_prefix`*, which guards the ledger without disabling anything.
 ---
 
 ## Self-Review
 
-**1. Spec coverage.** The spec's piece 3 ("Guard structurally, not per-file") is Tasks 1 and 2. Pieces 1 and 2 are covered by being explicitly ruled already-shipped in Global Constraints, with the file:line evidence — the spec's "NOT yet called from any MCP tool" claim is stale as of `append_entry.rs:91`. The spec's "or the declared index heading" clause is explicitly dropped in Global Constraints with the grep that shows no such concept exists. The spec's `## Fix options` 2 and 3 are marked withdrawn by the spec itself; this plan does not revive them.
+**1. Spec coverage.** The spec's pieces 1 and 2 are ruled already-shipped in Global Constraints, with file:line evidence — its "NOT yet called from any MCP tool" claim is stale as of `append_entry.rs:91`. Piece 3 splits: its *goal* (a ledger's ids can only come from the allocator) is Task 1; its *proposed mechanism* (heading-scoped refusal) is **cut**, with the measurement in Task 2's Alternatives. The spec's "or the declared index heading" clause is dropped in Global Constraints with the grep showing no such concept exists. The spec's `## Fix options` 2 and 3 are marked withdrawn by the spec itself; this plan does not revive them.
 
-**2. Placeholder scan.** No TBD/TODO. Every code step carries the literal code it needs.
+**2. Placeholder scan.** No TBD/TODO. Every code step carries the literal code it needs. Two steps deliberately end in a verification instruction rather than a code block (Task 2 Step 6's `hint()` accessor check, Step 8's citation re-point) — both name the exact file to read and the exact grep to run, which is the content an engineer needs there.
 
-**3. Type consistency.** `declared_entry_prefixes(text: &str) -> Vec<String>` is defined in Task 1 Step 3 and consumed in Task 2 Step 3 with that exact signature. `clean_prefix(raw: &str) -> Option<String>` is used by `declared_entry_prefixes` via `filter_map(clean_prefix)` (flow branch) and `clean_prefix(val).into_iter()` (scalar branch) — both valid for `Option<String>`. `targets_a_ledger_entry(text: &str, headings: &[&str]) -> bool` is defined and used consistently. `guard_with_oracle`'s arity goes 4→5 in Task 2, and Step 5 explicitly updates every Task 1 test and the three pre-existing ones — the arity change is the plan's one cross-task breakage and it is handled in its own step.
+**3. Type consistency.** `declared_entry_prefixes(text: &str) -> Vec<String>` (Task 1 Step 3) and `declared_prefixes_from_frontmatter(fm: Option<&Frontmatter>) -> Vec<String>` (Task 2 Step 3) return the same type, which is what lets the parity test `assert_eq!` them directly — that is the reason for the owned `String`, and Task 2 Step 3 says so. `clean_prefix(raw: &str) -> Option<String>` is used via `filter_map(clean_prefix)` and `clean_prefix(val).into_iter()`, both valid for `Option<String>`. Task 2 Step 3 also names the one knock-on the extraction causes: `declared.contains(&id_prefix)` must become `declared.iter().any(|d| d == id_prefix)` because the element type changes from `&str` to `String`.
 
-**One risk worth naming for the executor:** Task 1 ships a guard that refuses whole ledger files, and Task 2 relaxes it. If Task 2 is abandoned mid-plan, the tree is left stricter than it started for any ledger not carrying a stamped `id:` or an augmentation — which today is none of the five, so the blast radius is zero. Shipping Task 1 alone is therefore safe; shipping Task 2 alone is not, since it is a pure loosening of the arm Task 1 adds.
+**What this plan gained by being reviewed.** The first draft built the spec's heading-scoped guard. Reviewing it as architecture rather than as a task list killed that task on a measurement — `body_edits` already provides section-scoped editing on any catalog row, so the ergonomic gap it existed to close was not real — and surfaced a defect the draft had *introduced*: a doc comment asserting the guard "accepts all three YAML forms `allocate_entry_id` honours", which is a co-change contract with no enforcement. The plan is now one task smaller, changes no public signature, and the agreement that comment claimed is a test.
+
+**One risk worth naming for the executor.** Task 1 makes a future prose ledger wholly refused for `edit_markdown`, including its prose. Affected files today: zero — all five current ledgers are already guarded by a stamped `id:` or an augmentation. Task 2 Step 6 is what makes that refusal survivable, by naming the `body_edits` route in the hint. If you ship Task 1 without Step 6, an author who hits the refusal gets the generic artifact-tools hint and has to work out the prose route themselves. Ship Step 6 with Task 1 if you ship nothing else.
