@@ -560,38 +560,55 @@ A gap between those two counts is this bug. Repo-wide, `librarian(action="link_s
 
 ## Resume
 
-**Steps 0, 1, 2, 3 and 5 are done. Only step 4 — the backfill — is left.**
+**Steps 0, 1, 2, 3 and 5 are done. Step 4 is underway: 2 of 13 ledgers backfilled.**
 
 | step | what | SHA |
 |---|---|---|
-| 0 | decided branch (a); template validation dropped after measuring that no template writes an entry-token body | — |
-| 1 | `body_defined_indices`, delegating to `link_scan::extract` | `de4df2cd` |
-| 2 | `undefined_in_body` on `append_entry` / `update_entry` | `f19d5296` |
-| 3 | `doctor` checks `entry_without_definition` / `ledger_defines_nothing` | `758b37dc` |
-| 5 | guide + `librarian.md` + the archetype defaults that were the real origin | `d3c1e6ed` |
+| 0 | branch (a); template validation dropped after measuring that no template writes a body | — |
+| 1 | `body_defined_indices` | `de4df2cd` |
+| 2 | `undefined_in_body` on both entry-writing tools | `f19d5296` |
+| 3 | `doctor` — `entry_without_definition` / `ledger_defines_nothing` | `758b37dc` |
+| 5 | guide, `librarian.md`, and the `tracker_design` archetype defaults | `d3c1e6ed` |
+| 4a | `windows-platform-support.md` — 35 sections, 22 edges recovered | `f04e4c17` |
+| 4b | `open-issue-work-queue.md` — 39 sections, 33 edges recovered | `0d101eb8` |
 
-Step 5 was taken before step 4 on purpose — until the intake stopped teaching the losing shape,
-the backfill would have been cleaning up after a source still producing new cases. That turned out
-to matter more than expected: the origin was not the guide but `tracker_design`'s archetype
-**defaults**, and `task_list` — the archetype the `BL-N` queue itself uses — had no per-entry
-section at all. Fixing only the guide would have left every future `task_list` tracker broken by
-default.
+`ledger_defines_nothing` is down from **10 violations to 8**. **55 edges recovered** across the
+two ledgers, every one of them a reference that previously resolved to nothing.
 
-**Step 4 is the whole remaining job, and it is content work, not a sweep.** 13 ledgers across five
-repos (§ Evidence *The real magnitude*), largest `provenance-subsystem.md` at 64 of 68. Promoting a
-row to a headed section means writing that entry's title and body. Sequence by **citation damage**
-rather than row count: run `librarian(action="link_scan")`, count how many live citations each
-ledger's undefined entries actually have, and start where the dead links are. `doctor` confirms
-each ledger as it finishes, which is what makes the work checkable in pieces.
+### Remaining, ranked by the metric that actually works
 
-Two constraints to carry into it:
+Do **not** rank by `dangling` — § Evidence *CORRECTION* explains why it cannot see this. Rank by
+external citation count (`grep '\bPREFIX-[0-9]\+\b'` minus the owner's own), and confirm each
+ledger with `doctor` plus `link_scan`'s `edges_added`.
 
-- **`tracker_design`'s SYSTEM_PROMPT has ~102 bytes of inline headroom.** Any addition must pay for
-  itself with an argued cut; `default_response_fits_inline` is what will say so.
-- **`body_claimed_indices` also counts a heading inside a fenced block and a code-first
-  `` `A-3` `` heading.** Harmless for id allocation — over-claiming is safe by that function's own
-  argument — but the *claimed* set is not merely "defined plus rows", so do not write documentation
-  implying it is.
+| ledger | prefix | undefined | external cites |
+|---|---|---|---|
+| `provenance-subsystem.md` | PV | 64 of 68 | 35 |
+| SD + GF (`structural-debt-refactor`, `2026-08-16-iron-law-gate-firing-audit`) | SD, GF | 19 | ~36 combined |
+| `prompt-hamsa-audit-log.md` | A-15…A-24 | 10 | 25 |
+| `fable-tuning-findings.md` | FND | 18 | 19 |
+| `fable-tuning-tasks.md` | T | 12 | shares the `T` prefix — see below |
+| 4 ledgers in `researcher` / `mirela` / `stefanini` | LL, CR, G, T, OTK | 25 | not measured (other repos) |
+
+**`fable-tuning-tasks.md` needs a decision, not just a backfill.** Its prefix is `T`, which
+`tool-usage-patterns.md` already defines (T-001…T-24) and `researcher`'s
+`langfuse-tracing-roadmap.md` also uses. Adding `## T-N` headings there would create a second
+active definer and turn those tokens **ambiguous** rather than resolved — a different outcome from
+every other ledger here. Read § *Citing an entry* in `get_guide("tracker-conventions")` first; the
+fix is probably a fresh prefix, which is a rename, not a heading.
+
+### Two things learned doing 4a and 4b, worth carrying
+
+- **Check params against the committed table before generating anything.** In
+  `windows-platform-support.md` params lagged the body by six entries and two statuses, so
+  generating from params would have published `WIN-28`/`WIN-29` as `open` when both are fixed and
+  silently dropped `WIN-30`, `32`, `33`, `34`, `35`, `36`. The tooling only watches the other
+  direction — `snapshot_stale` and `snapshot_drift` both ask whether the *body* kept up.
+- **A backfill can raise `dangling`, and that is correct.** Opening a prefix gate exposes
+  citations that were suppressed while the prefix had no definer at all. 4b moved it 621 → 622.
+
+One caveat still standing: `body_claimed_indices` also counts a heading inside a fenced block and
+a code-first `` `A-3` `` heading, so the *claimed* set is not merely "defined plus rows".
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:91-97`, `:155-163` — the definition rule.
