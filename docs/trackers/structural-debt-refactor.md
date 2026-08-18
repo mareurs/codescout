@@ -12,6 +12,7 @@ tags:
 - librarian
 - audit-doc-refs
 topic: refactoring
+entry_prefix: SD
 ---
 
 ## Why this exists
@@ -71,9 +72,85 @@ those areas must state which lane actually built its tests.
 
 ## Findings
 
-_Per-entry detail sections live below as `### SD-N — <title>`. The live table is
-rendered from params at the top of the file._
+One `### SD-N — <title>` section per entry, below. **The heading is what makes the entry citable** — `link_scan` binds a token to a `## <ID> — <title>` heading and to nothing else, so an entry that lives only in a params row can never be cited, however complete the row is.
 
+**There is no rendered table in this file.** An earlier version of this note said the live table was "rendered from params at the top of the file". That was false in two ways: nothing writes `render_template` output to disk (it is projected into `librarian(action="context")` only), and this body carried no `### SD-N` sections either — so all 11 entries were uncitable while the note claimed both surfaces existed. Corrected 2026-08-18; mechanism in `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`.
+
+Each section carries the entry's disposition and its load-bearing measurement. The full `evidence` / `fix` / `notes` bodies live in `params`, which is machine-local and git-ignored — that gap is SD-11's own subject, and BL-29's. Read one with `artifact(action="get", id="38a17e4acf1f1fa1", entry_filter={"id": {"eq": "SD-10"}})`.
+
+### SD-1 — Archiving a bug file orphans its citations in Rust source; the doc-refs gate is markdown-only
+
+**Kind:** coverage-gap · **Severity:** med · **Status:** fixed · **Closed by:** `experiments:53796432` (sweep) + `experiments:450880c7` (gate) + `experiments:63b279ed` (bare-prose widening)
+
+111 unique bug files cited across 94 `.rs` files: 10 live, 95 moved to `docs/issues/archive/` with the citation left behind, 6 existing nowhere — 86% stale over 260 occurrences. The first figure (7 paths / 12 occurrences) was wrong by an order of magnitude, and the method is why: it came from running the markdown auditor over `--paths 'src/**/*.rs'`, which reads `tokio::sync::Semaphore` as a link. A second silent undercount the same day — a default-mode `grep` capped at 50 where `mode="files"` showed 266. The gate now reads documentation nodes from every grammar codescout has, as `get_ts_language`'s third consumer, with one predicate (`kind().contains("comment")`) covering all nine and one explicit special case for Python docstrings. Findings cap at med behind `cap_code_comment` so a contributor cannot break CI via a comment they never touched. Residual never-existed citations split out as SD-8; residual false positives as SD-9.
+
+### SD-2 — The LIKE-escape law has two implementations and one guard
+
+**Kind:** law-leak · **Severity:** med · **Status:** fixed · **Closed by:** `experiments:31609aa5`
+
+The Rust side had `escape_like_pattern` (`src/librarian/util.rs`) with 5 tests and a DRY gate asserting the idiom appears exactly once. The SQL side had a nested triple-`REPLACE` form verbatim at 4 sites, no guard, held together by "mirrors" comments. All 4 were CORRECT — maintenance debt, not a bug, and past the rule of three. The duplicated unit turned out LARGER than the row first described: the `|| '%' ESCAPE` tail is shared too, so what was copied four times is the whole strict-descendant predicate. Extracted as `descendant_path_like(root_expr)` beside `escape_like_pattern`. A const would not serve — `catalog::worktree::covering_conn` escapes a per-row COLUMN while the others escape a bound parameter, which is the entire reason a second SQL implementation existed. Nested-`REPLACE` occurrences across `src` went 5 → 1; mutation-verified twice, once by accident when the new gate caught the characterization test's own expected literal.
+
+### SD-3 — The four librarian `::call` handlers are the measured friction
+
+**Kind:** over-budget-body · **Severity:** med · **Status:** superseded (by SD-10)
+
+`legibility_scan` ranked `get.rs::call` (482 lines), `context.rs::call` (379), `find.rs::call` (327) and `update.rs::call` (272) all at score 68, tier 1, over the 2500-token budget. `get.rs` was the clearest case: a 482-line `call` above which sit four helpers totalling 34 lines — the cheap extractions were taken, the ones that would have cost thinking were not. Superseded by SD-10, whose mandated reading FALSIFIED this hypothesis: the duplication was real, elsewhere, and already broken.
+
+### SD-4 — The catalog boundary is a suggestion — tool handlers issue raw SQL
+
+**Kind:** boundary-leak · **Severity:** low · **Status:** blocked-on-decision
+
+12 files under `src/librarian/tools/` use `rusqlite` directly while `src/librarian/catalog/` ships 15+ modules for exactly that purpose. `get.rs` imports five catalog modules (`artifact`, `augmentation`, `entry_cite`, `links`, `observations`) AND raw `rusqlite`, then issues three ad-hoc queries. Partly defensible: `doctor.rs` holds 22 of the hits and IS the catalog drift scanner, so raw SQL is its subject matter. `get.rs` / `context.rs` / `event_create.rs` / `graph.rs` are ordinary read handlers with no such excuse.
+
+**Do NOT start.** This is a boundary question, not a refactor — it needs an architecture decision about which queries belong behind `catalog/` before any code moves.
+
+### SD-5 — The `catalog-sql-hazards` memory describes shipped work as a pending plan
+
+**Kind:** stale-surface · **Severity:** med · **Status:** fixed · **Closed by:** `experiments:121a2263`
+
+The memory carried a "(plan: extract `escape_like_pattern` + a grep `#[test]` …)" note for work that had already shipped — helper and gate both live. Stale a SECOND way that would have misled anyone who checked: it named `src/librarian/filter.rs:230-236` as the "canonical Rust-side idiom" and quoted the triple-replace inline, but that line is now a CALL to the helper and contains no `.replace` at all. The memory pointed at a call site and described it as the definition. Rewritten into two halves — Rust settled, SQL side routed to SD-2. Severity was on leverage rather than blast radius: memories are the first surface every agent reads and are advertised by name at session start, so a stale one actively routes work toward something already done.
+
+### SD-6 — Archiving a bug file makes its memory anchor report `Deleted`, not moved
+
+**Kind:** coverage-gap · **Severity:** med · **Status:** fixed · **Closed by:** `experiments:04891bd3`
+
+3 of 3 memory-anchor sidecars referencing a bug file pointed at the pre-archive path — 100%. `check_path_staleness` (`src/memory/anchors.rs:145`) branches on `!full.exists()` FIRST and pushes `AnchorStatus::Deleted`; only an existing file reaches the hash comparison that can yield `Changed`. So an archived bug file reports as DELETED, which is strictly false and strictly worse than `Changed`: `Changed` says "re-read this", `Deleted` says "the thing this memory was built on is gone". Content survives `git mv` byte-for-byte — proven by `claude-code-mcp-env`'s recorded hash matching `sha256sum` of the archived file exactly. Hash handling deliberately differs per sidecar, and one was left MISMATCHED on purpose: that content did change and nobody has reconciled the memory, so the mismatch is a true warning that must not be silenced to make a checklist green. Extends SD-1 to a machine-readable surface, and is the sharper half — prose drift reads wrong, this degrades a detector.
+
+### SD-7 — The tracker archetype can append an entry atomically but cannot update one
+
+**Kind:** boundary-leak · **Severity:** low · **Status:** open
+
+`artifact` dispatched `append_entry` and nothing else at entry grain, while `apply_merge_patch` replaces arrays wholesale — so flipping one row's status required re-sending the ENTIRE `items` array. Hit live while flipping SD-5 to `fixed` in this very tracker, and paid a third time closing SD-8, which required reconstructing SD-8's own row first because a naive rewrite would have deleted the row being closed. The asymmetry matters because status flipping IS the point of a status tracker: the operation the archetype performs most often is the one it does least safely. The shrink guard cannot catch it — a write that grows the file passes by construction.
+
+**Verify-open note (2026-08-18):** `artifact(action="update_entry", …)` now exists and merges named fields onto a single entry, refusing an unknown `entry_id` with the list of ids that do exist. Re-check this entry against the current dispatch before treating it as open — it looks like a zombie-open, but the reading has not been done.
+
+### SD-8 — Three source citations point at bug files that exist nowhere
+
+**Kind:** stale-surface · **Severity:** low · **Status:** fixed · **Closed by:** `experiments:c692f901`
+
+Split out of SD-1 when its sweep landed: of 111 unique cited bug files, 95 had merely moved and were repointed mechanically, 10 were live, and these 3 resolved to nothing in either location. Git history answered all three. `2026-07-13-semantic-search-misleading-stack-error-on-missing-env.md` was NEVER CREATED — `git log --diff-filter=A` across all refs returns nothing. `2026-03-24-kotlin-lsp-concurrent-instances.md` existed and was pruned as a duplicate in `c6184884`, exactly as CLAUDE.md records. The third was never a path at all: prose shorthand with a literal ellipsis. The never-created citation is DROPPED rather than replaced — both sites already carry prose giving the full reason, so the citation was ornament, and inventing a plausible substitute is what `dont-fabricate-commit-rationale` warns against. Verified by the gate rather than by eye, which is the point of having built it.
+
+### SD-9 — Two named false-positive classes on the new code-comment surface
+
+**Kind:** coverage-gap · **Severity:** low · **Status:** open
+
+Surfaced while verifying SD-8; both reported broken at med and neither is drift. (1) **Historical provenance** — `//! Moved from src/tools/symbol/path_helpers.rs (Phase 6.2)`. The path is absent BECAUSE the move happened, so the sentence is true and the citation unresolvable by design — exactly the family `cap_released_history` already exists for. (2) **Fixture filenames in test comments** — comments naming files the test creates in a tempdir (`ignored_big.rs`, `keep.rs`, `only_in_a.rs`, `node_modules/skip.js`); they never existed in the repo and never will. Neither class gates: both land at med behind `cap_code_comment`. A provenance cap would need prose-pattern matching on "moved from" / "renamed from", which is fragile; a fixture cap would need to know a path is created at runtime, which the scanner cannot see. These are the PRICE of the code-comment surface, not defects in it — recorded so a future session weighing "is this gate noisy?" has the numerator and the denominator instead of an impression.
+
+### SD-10 — The scope-resolution prologue is written three times; two are verbatim twins, the third is an undeclared choice
+
+**Kind:** law-leak · **Severity:** med · **Status:** fixed · **Closed by:** `experiments:649dc0a4`
+
+`find.rs:524` and `workspace_state_at.rs:98` opened with the same ~30-line block, verbatim down to the line-wrap position of the shared error string; `context.rs:56` carried only the first and last of its four steps. Because `apply_scope` maps `Scope::All` to no clause at all (`src/librarian/tools/scope.rs:75`), `context` ran UNFILTERED where the other two narrowed to umbrella member prefixes. MEASURED against the live server, not inferred from source: `artifact(find, scope=all)` reported `scope.applied=umbrella` while `librarian(context, scope=all)` reported `all` and returned an artifact belonging to a project outside the umbrella. Sharper still, `find`'s own overflow hint recommends `scope=all`, so the narrower meaning is what an agent learns and the wider one is what `context` delivers.
+
+The fix shape mattered: restoring the "missing" steps in `context.rs` would have BROKEN intended behaviour, so `resolve_scope(requested, current, policy)` declares the difference (`UmbrellaPolicy::Require` at `find` and `workspace_state_at`, `::Literal` at `context`) rather than erasing it. Three lessons worth keeping. (1) Instrument axis: `legibility_scan` ranks by per-symbol cost, so it can only see a law duplicated WITHIN one symbol — `workspace_state_at.rs` held one of the three copies and was never in the group. (2) Structural and behavioural findings have independent lifetimes: the behavioural half closed `wontfix` as intended while the duplication survived untouched, because it was measured as two verbatim copies rather than inferred from the symptom. (3) Test-shape followed the ruling, not the symptom — the planned parity test became WRONG once the divergence was blessed, so what shipped is a parity sweep asserting agreement on every input EXCEPT an explicit `all`, plus a discriminating-pair test. Both guards mutation-verified.
+
+### SD-11 — Augmented-tracker params are a citation surface the doc-ref gate cannot see
+
+**Kind:** coverage-gap · **Severity:** med · **Status:** open
+
+Measured while recording SD-10. Its params fields carry roughly ten `path:line` citations (`find.rs:524`, `workspace_state_at.rs:98`, `context.rs:56`, `scope.rs:75`, …); a grep of the on-disk file for `SD-10` returned 2 hits, BOTH from hand-written history prose and none from params. Augmented params live in the catalog `augmentation` table, not in the markdown file, and `render_template` output is produced at read time rather than written to disk — so every citation stored in params is outside `audit_doc_refs`' reach. Recorded, not fixed: no evidence yet of an actual rotted params citation, and none of the three candidate shapes is obviously cheap — (a) teach `audit_doc_refs` to read augmentation params from the catalog, which puts a DB dependency into a filesystem linter; (b) render params to disk on write, which changes the augmented-artifact contract and the body-shrink guard's arithmetic; (c) require params citations be duplicated into the prose body, a co-change contract enforced by convention — exactly the failure mode SD-2 was opened to remove. Directly bounds the value of SD-1: that work extended the gate from markdown prose to code comments, and this is the third surface — the one the project's most-cited trackers use. Only AUGMENTED trackers are affected; `bug-fix-session-log.md` and `reconnaissance-patterns.md` are plain markdown and fully scanned.
+
+**Note (2026-08-18):** this backfill is a partial, deliberate instance of option (c) — each entry's disposition and load-bearing measurement now reach git, while the full `evidence` / `fix` / `notes` bodies still do not. See also BL-29.
 ## History
 
 ### 2026-08-15 — stream opened

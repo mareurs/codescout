@@ -13,6 +13,7 @@ tags:
 - gate-correctness
 - agent-guidance
 topic: iron-law-gate-firing
+entry_prefix: GF
 ---
 
 # Iron-Law Gate Firing Audit — 2026-08-16
@@ -77,6 +78,59 @@ fetched — and GF-5 gives the structural reason it cannot be fetched at the one
 wanted. Recorded as a conflict, not a correction: the allowlist entry shipped **before** this
 measurement existed, and the call is the user's.
 
+## Findings — per-entry anchors
+
+> **Added 2026-08-18, headings only.** This audit's augmentation prompt tells readers to "read its body section" for a GF-N row, and told maintainers not to rewrite body sections. Both were right and they could not both be satisfied: no `GF-N` heading existed anywhere in this body, so `link_scan` bound none of the eight tokens and every citation of them resolved to nothing. These anchors add the missing definitions and nothing else — no number is re-run, no existing section is touched. Each entry's evidence stays where the audit put it, named below.
+>
+> Mechanism: `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`. A table row defines no token, which is why the index above could be complete and the entries still uncitable.
+
+### GF-1 — `git` is unconditionally unbounded, so half its IL-3 refusals are self-bounded
+
+**Severity:** high · **Status:** fixed `06a53ad3` · **Target:** `src/util/path_security.rs`
+
+50% of `git`'s IL-3 refusals were self-bounded — 24% of the whole family. An **incomplete fix** of `2026-05-18-il3-overtriggers-bounded-lhs`, whose remedy created this very list. Evidence: § *IL-3 `pipe_to_trimmer` — composition*; § *Prior art — this is an incomplete fix, not a new defect*; § *Refactor data pack — IL-3*.
+
+### GF-2 — The flag-conditional mechanism already existed for `grep`/`find`; `git` never got it
+
+**Severity:** high · **Status:** fixed `06a53ad3` (as `git_output_is_bounded`) · **Target:** `src/util/path_security.rs`
+
+The fix extends an existing mechanism rather than inventing one. Evidence: § *Refactor data pack — IL-3*.
+
+### GF-3 — `shell_on_source` refused paths where its own suggested remedy cannot serve
+
+**Severity:** med · **Status:** fixed `be4a679b` + `433100bd` — 43 of 111 retired · **Target:** `src/util/path_security.rs`
+
+23% of refusals were out-of-project paths where the suggested `symbols` alternative cannot serve, plus 16% `wc` — a count, not content. Evidence: § *IL-3 `shell_on_source` — composition (110)*.
+
+### GF-4 — Refusals teach the CALL, not the PREDICATE
+
+**Severity:** med · **Status:** fixed `ba591f12` (`refusal_predicate`, ~150 bytes per family) · **Target:** `src/prompts/mod.rs`
+
+96% immediate compliance and 3% immediate repeat against **47% per-session repeat** — the agent stops making *that* call and keeps making calls of that shape. Efficacy remains UNMEASURED until the repeat rate is re-run. Evidence: § *The Iron-Law population*; acceptance criteria in § *Baselines — for re-measurement*.
+
+### GF-5 — Guide delivery is success-path-only — premise wrong, finding still real
+
+**Severity:** high · **Status:** fixed `ba591f12` · **Target:** `src/server.rs`
+
+True of `call_content` (the `?`), false of the system: `call_tool_inner` already assembles both branches into one `CallToolResult`, so a second block on an error was always supported. Structural reason `iron-laws-detail` could not be fetched at the one moment it was wanted. Evidence: § *Guide reachability — the other end of the same finding* and its § *Resolved 2026-08-16 — `ba591f12`*.
+
+### GF-6 — IL-1 is the sick family on the learning axis
+
+**Severity:** med · **Status:** open · **Target:** `src/util/path_security.rs`
+
+71% per-session repeat, 7.4 refusals per session, worst session 33 refusals over 7 hours. The one finding here still open. Evidence: § *The Iron-Law population*; § *Baselines — for re-measurement*.
+
+### GF-7 — Negative result: IL-4/IL-5 repeat 0% across 18 sessions
+
+**Severity:** info · **Status:** closed · **Target:** —
+
+A total, file-intrinsic predicate teaches on first contact. **Do not "improve" these** — they are the regression control, and must stay at 0% after any IL-3 change. Evidence: § *The Iron-Law population*; § *Baselines — for re-measurement*.
+
+### GF-8 — `untrusted-content` fetched 0 times in 30 days
+
+**Severity:** med · **Status:** mitigated · **Target:** `src/prompts/mod.rs` `PULL_ONLY_GUIDE_TOPICS`
+
+Now DECLARED rather than silently missing: the allowlist marks it *"PENDING BL-25, candidate trigger is whichever surface first admits third-party text, not identified"*. Evidence: § *Guide reachability*; § *Reconciliation with BL-25 phase 1*, which also records the one rationale this audit and the allowlist disagree on.
 ## Corpus
 
 Single project (codescout), avoiding the project-confounding TU-N § Method caveats records.
