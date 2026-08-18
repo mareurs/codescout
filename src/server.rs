@@ -278,10 +278,10 @@ impl CodeScoutServer {
         // a project. See docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md §2.
         //
         // The `or_else` fallback below (real `per_user_state_dir()`) is deliberately
-        // untested: every test in this codebase sets `env.guide_hints_dir` so this
-        // branch never runs under `cargo test` — exercising it directly would mean
-        // touching the developer's real state directory, which is exactly what this
-        // injection point exists to prevent. See the audit table in the Task 6 report.
+        // untested: every test constructs its server with an injected
+        // `guide_hints_dir`, so no test reads, writes, or garbage-collects the real
+        // per-user state directory — exercising this branch directly would mean
+        // doing exactly that.
         let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
         });
@@ -1711,6 +1711,15 @@ mod tests {
     use crate::agent::Agent;
     use tempfile::tempdir;
 
+    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
+    /// ever reads, writes, or garbage-collects the real per-user state directory.
+    fn test_env(dir: &std::path::Path) -> ServerEnv {
+        ServerEnv {
+            guide_hints_dir: Some(dir.join("guide_hints")),
+            ..Default::default()
+        }
+    }
+
     async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempdir().unwrap();
         let codescout_dir = dir.path().join(".codescout");
@@ -1723,19 +1732,15 @@ mod tests {
         // `--no-default-features` / `--features local-embed`.
         #[cfg(feature = "librarian")]
         let env = ServerEnv {
-            guide_hints_dir: Some(dir.path().join("guide_hints")),
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
                 db: Some(codescout_dir.join("librarian.db")),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_env(dir.path())
         };
         #[cfg(not(feature = "librarian"))]
-        let env = ServerEnv {
-            guide_hints_dir: Some(dir.path().join("guide_hints")),
-            ..Default::default()
-        };
+        let env = test_env(dir.path());
 
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let lsp = LspManager::new_arc();
@@ -1746,10 +1751,7 @@ mod tests {
     async fn make_server_no_project() -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempfile::tempdir().unwrap();
         let agent = Agent::new(None).await.unwrap();
-        let env = ServerEnv {
-            guide_hints_dir: Some(dir.path().join("guide_hints")),
-            ..Default::default()
-        };
+        let env = test_env(dir.path());
         let server = CodeScoutServer::new_with_env(agent, env).await;
         (dir, server)
     }
@@ -3816,6 +3818,15 @@ mod guide_hint_tests {
     // (see `ServerEnv`), so these tests are isolated by construction rather than by
     // taking turns. They used to serialize only because they mutated process env.
 
+    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
+    /// ever reads, writes, or garbage-collects the real per-user state directory.
+    fn test_env(dir: &std::path::Path) -> ServerEnv {
+        ServerEnv {
+            guide_hints_dir: Some(dir.join("guide_hints")),
+            ..Default::default()
+        }
+    }
+
     /// Build a server with a per-test librarian workspace + catalog, INJECTED.
     ///
     /// This used to `set_var` LIBRARIAN_WORKSPACE / LIBRARIAN_DB behind an RAII guard.
@@ -3843,13 +3854,12 @@ mod guide_hint_tests {
         std::fs::write(&ws_path, "").unwrap();
 
         let env = ServerEnv {
-            guide_hints_dir: Some(dir.path().join("guide_hints")),
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
                 db: Some(dir.path().join("librarian.db")),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_env(dir.path())
         };
 
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -4368,12 +4378,11 @@ mod guide_hint_tests {
         // non-deterministic).
         let env_for = |session: &str| ServerEnv {
             cc_session_id: Some(session.to_string()),
-            guide_hints_dir: Some(dir.path().join("guide_hints")),
             librarian: crate::librarian::LibrarianEnv {
                 db: Some(dir.path().join("librarian.db")),
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_env(dir.path())
         };
         let build = |session: &'static str| {
             let dir_path = dir.path().to_path_buf();
@@ -4426,7 +4435,7 @@ mod guide_hint_tests {
     /// catches the third case (an injection silently dropped), which the negative
     /// assertion alone lets through as a false green.
     #[tokio::test]
-    async fn guide_ledger_does_not_live_under_the_project_root() {
+    async fn guide_ledger_lives_in_the_injected_dir_not_under_the_project_root() {
         let (dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "run_command");

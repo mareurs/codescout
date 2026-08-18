@@ -482,6 +482,18 @@ mod tests {
         }
         panic!("peer socket never came up");
     }
+    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
+    /// ever reads, writes, or garbage-collects the real per-user state directory.
+    ///
+    /// `dir` is deliberately a sibling tempdir, never a subdirectory of the served
+    /// workspace root: a read-only peer-serve test must not write into the tree it
+    /// serves.
+    fn test_env(dir: &std::path::Path) -> ServerEnv {
+        ServerEnv {
+            guide_hints_dir: Some(dir.join("guide_hints")),
+            ..Default::default()
+        }
+    }
 
     #[tokio::test]
     async fn hello_returns_capabilities_for_read_only_peer() {
@@ -489,13 +501,11 @@ mod tests {
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
         let sock = root.join("peer.sock");
+        let hints_dir = tempfile::tempdir().unwrap();
 
-        let (sr, ss) = (root.clone(), sock.clone());
+        let (sr, ss, hr) = (root.clone(), sock.clone(), hints_dir.path().to_path_buf());
         let handle = tokio::spawn(async move {
-            let env = ServerEnv {
-                guide_hints_dir: Some(sr.join("guide_hints")),
-                ..Default::default()
-            };
+            let env = test_env(&hr);
             let ctx = build_server_for_with_env(&sr, true, env).await.unwrap();
             let listener = bind_peer_socket(&ss).unwrap();
             accept_one(&listener, &ctx).await.unwrap();
@@ -529,11 +539,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let hints_dir = tempfile::tempdir().unwrap();
 
-        let env = ServerEnv {
-            guide_hints_dir: Some(root.join("guide_hints")),
-            ..Default::default()
-        };
+        let env = test_env(hints_dir.path());
         let ctx = build_server_for_with_env(&root, true, env).await.unwrap();
         let sec = ctx.server.agent_security_config().await;
         assert!(
@@ -549,13 +557,11 @@ mod tests {
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         let sock = root.join("peer.sock");
+        let hints_dir = tempfile::tempdir().unwrap();
 
-        let (sr, ss) = (root.clone(), sock.clone());
+        let (sr, ss, hr) = (root.clone(), sock.clone(), hints_dir.path().to_path_buf());
         let handle = tokio::spawn(async move {
-            let env = ServerEnv {
-                guide_hints_dir: Some(sr.join("guide_hints")),
-                ..Default::default()
-            };
+            let env = test_env(&hr);
             let ctx = build_server_for_with_env(&sr, true, env).await.unwrap();
             let listener = bind_peer_socket(&ss).unwrap();
             accept_one(&listener, &ctx).await.unwrap();
@@ -589,11 +595,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let hints_dir = tempfile::tempdir().unwrap();
         // read_only = FALSE on purpose: prove the allow-list (not read_only) is the wall.
-        let env = ServerEnv {
-            guide_hints_dir: Some(root.join("guide_hints")),
-            ..Default::default()
-        };
+        let env = test_env(hints_dir.path());
         let ctx = build_server_for_with_env(&root, false, env).await.unwrap();
 
         let cases: Vec<(&str, serde_json::Value, Option<&str>)> = vec![
@@ -652,10 +656,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
-        let env = ServerEnv {
-            guide_hints_dir: Some(root.join("guide_hints")),
-            ..Default::default()
-        };
+        let hints_dir = tempfile::tempdir().unwrap();
+        let env = test_env(hints_dir.path());
         let ctx = build_server_for_with_env(&root, true, env).await.unwrap();
         let handle = ctx
             .server
@@ -694,10 +696,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
-        let env = ServerEnv {
-            guide_hints_dir: Some(root.join("guide_hints")),
-            ..Default::default()
-        };
+        let hints_dir = tempfile::tempdir().unwrap();
+        let env = test_env(hints_dir.path());
         let ctx = build_server_for_with_env(&root, true, env).await.unwrap();
 
         let _ = handle_tool_call(
@@ -734,10 +734,8 @@ mod tests {
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
         let sock = root.join("peer.sock");
         let lock = root.join("peer.lock");
-        let env = ServerEnv {
-            guide_hints_dir: Some(root.join("guide_hints")),
-            ..Default::default()
-        };
+        let hints_dir = tempfile::tempdir().unwrap();
+        let env = test_env(hints_dir.path());
 
         let res = tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -760,10 +758,8 @@ mod tests {
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
         let sock = root.join("peer.sock");
         let lock = root.join("peer.lock");
-        let env = ServerEnv {
-            guide_hints_dir: Some(root.join("guide_hints")),
-            ..Default::default()
-        };
+        let hints_dir = tempfile::tempdir().unwrap();
+        let env = test_env(hints_dir.path());
 
         let held = std::fs::OpenOptions::new()
             .create(true)
@@ -793,13 +789,16 @@ mod tests {
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         let sock = root.join("peer.sock");
         let lock = root.join("peer.lock");
+        let hints_dir = tempfile::tempdir().unwrap();
 
-        let (sr, sk, lk) = (root.clone(), sock.clone(), lock.clone());
+        let (sr, sk, lk, hr) = (
+            root.clone(),
+            sock.clone(),
+            lock.clone(),
+            hints_dir.path().to_path_buf(),
+        );
         let serve = tokio::spawn(async move {
-            let env = ServerEnv {
-                guide_hints_dir: Some(sr.join("guide_hints")),
-                ..Default::default()
-            };
+            let env = test_env(&hr);
             // long idle so the serve stays up for the test duration
             let _ = run_with_lock(&sk, &lk, &sr, true, 30, env).await;
         });
@@ -854,12 +853,10 @@ mod tests {
         std::fs::create_dir_all(b.join("foreign_beta_dir")).unwrap();
 
         let sock = a.join("peer.sock");
-        let (sr, sk) = (a.clone(), sock.clone());
+        let dir_hints = tempfile::tempdir().unwrap();
+        let (sr, sk, hr) = (a.clone(), sock.clone(), dir_hints.path().to_path_buf());
         let serve = tokio::spawn(async move {
-            let env = ServerEnv {
-                guide_hints_dir: Some(sr.join("guide_hints")),
-                ..Default::default()
-            };
+            let env = test_env(&hr);
             let ctx = build_server_for_with_env(&sr, true, env).await.unwrap();
             let listener = bind_peer_socket(&sk).unwrap();
             let _ = accept_one(&listener, &ctx).await;

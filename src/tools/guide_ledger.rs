@@ -1,11 +1,13 @@
 //! Session-scoped guide-hint ledger with disk persistence.
 //!
-//! Tracks which `get_guide(topic)` topics have already been surfaced to the
-//! model in the current Claude Code conversation. The set is persisted to
-//! `.codescout/guide_hints/<session_id>.json` so it **survives MCP server
-//! restarts** — a `/mcp` reconnect re-spawns the codescout process, which would
-//! otherwise reborn an empty in-memory set and re-inject every guide body the
-//! conversation already holds. Fix for
+//! An in-memory map of `get_guide(topic)` topics already surfaced to the
+//! model in the current Claude Code conversation, each stamped with the time
+//! it was delivered. Optionally backed by a per-session JSON file in a
+//! caller-supplied directory (per-user state in production, a tempdir in
+//! tests) so the set **survives MCP server restarts** — a `/mcp` reconnect
+//! re-spawns the codescout process, which would otherwise reborn an empty
+//! in-memory set and re-inject every guide body the conversation already
+//! holds. Fix for
 //! `docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
 //!
 //! Keyed by `CLAUDE_CODE_SESSION_ID` (set by Claude Code in the MCP subprocess
@@ -204,7 +206,10 @@ impl GuideLedger {
     /// correctness requirement — failures are logged at debug, never raised.
     ///
     /// Writes go through `util::fs::write_utf8`, which stages to a sibling
-    /// `.tmp` and renames, so a reader can never observe a torn file.
+    /// `.tmp` and renames, so a reader can never observe a file torn by one of
+    /// *this process's* writes. This assumes a single writer per session id;
+    /// two live processes racing on the same fixed `.tmp` name is a distinct,
+    /// dismissed-as-unreachable case (see below).
     ///
     /// Deliberately NOT read-modify-write: merging the on-disk set back in would
     /// resurrect exactly the topics `re_arm` and `expire_idle` just removed. The
@@ -266,6 +271,12 @@ fn gc(dir: &Path, skip: &Path) {
 /// A legacy file has no per-topic stamps, so every topic inherits the file's
 /// mtime: the best available evidence of when those guides were delivered, and
 /// it keeps a freshly-migrated ledger from looking instantly expired.
+///
+/// The `LedgerFile::Legacy` arm is unreachable in normal production operation:
+/// legacy files only ever existed under the old `<project>/.codescout/guide_hints/`
+/// location, which the server no longer reads — those files are abandoned, not
+/// migrated. This arm only fires on a hand-copied file; it is kept as cheap
+/// forward-insurance, not as evidence that upgrade-migration works end to end.
 fn read_entries(path: &Path) -> BTreeMap<String, DateTime<Utc>> {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return BTreeMap::new();

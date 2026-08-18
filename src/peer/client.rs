@@ -102,19 +102,30 @@ mod tests {
     use crate::peer::server::{accept_one, bind_peer_socket, build_server_for_with_env};
     use crate::server::ServerEnv;
 
+    /// Test `ServerEnv` with the guide-hint ledger pinned inside `dir`, so no test
+    /// ever reads, writes, or garbage-collects the real per-user state directory.
+    ///
+    /// `dir` is deliberately a sibling tempdir, never a subdirectory of the served
+    /// workspace root: a read-only peer-serve test must not write into the tree it
+    /// serves.
+    fn test_env(dir: &std::path::Path) -> ServerEnv {
+        ServerEnv {
+            guide_hints_dir: Some(dir.join("guide_hints")),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn client_hello_then_tool_call() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
         let sock = root.join("peer.sock");
+        let hints_dir = tempfile::tempdir().unwrap();
 
-        let (sr, ss) = (root.clone(), sock.clone());
+        let (sr, ss, hr) = (root.clone(), sock.clone(), hints_dir.path().to_path_buf());
         let handle = tokio::spawn(async move {
-            let env = ServerEnv {
-                guide_hints_dir: Some(sr.join("guide_hints")),
-                ..Default::default()
-            };
+            let env = test_env(&hr);
             let ctx = build_server_for_with_env(&sr, true, env).await.unwrap();
             let listener = bind_peer_socket(&ss).unwrap();
             accept_one(&listener, &ctx).await.unwrap();
