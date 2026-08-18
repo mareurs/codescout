@@ -199,9 +199,12 @@ All three resume conditions are discharged. Recorded here because nothing re-rea
 3. **The citation resolves, end to end.** `librarian(action="link_scan")` on `experiments`:
    `edges_missing: 0`, `edges_stale: 0`, and the truncated `surface-compaction-session-log`
    row is **gone** from `cross_repo`. The three survivors are all genuine cross-repo
-   qualifiers (`prompt-engineering:OP-5`, `codescout:A-11`, `tracker-mgmt-redesign:TMR-7`),
+   references, qualified by `prompt-engineering`, `codescout` and `tracker-mgmt-redesign`,
    none truncated mid-stem — and `prompt-engineering` surviving whole is the positive
    control that the bound actually moved rather than the row merely disappearing.
+   (Their full `qualifier:PREFIX-N` forms are deliberately **not** reproduced here — quoting
+   a token *is* citing it, and the first draft of this section duly made the report read
+   `cross_repo: 6` against a world containing three.)
    `artifact(action="get", id="59ebeebb6ed05c89", links_rel="cites")` now reports
    `dst_id: 03464a8808345846` — precisely the edge this bug suppressed.
 
