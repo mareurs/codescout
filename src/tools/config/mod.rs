@@ -790,13 +790,19 @@ async fn build_activation_response(
     //     absent. Not corruption; git working as specified. But an agent reads
     //     the short list and concludes the fact was never recorded.
     //   * `.codescout/workspace.toml` is NOT tracked (.gitignore), so it is
-    //     absent here and sub-project discovery runs with defaults. Note the
-    //     precise mechanism: discovery is ALWAYS the manifest walk — there is no
-    //     second mode to "fall back" to. What the missing file removes is
-    //     `exclude_projects` and `discovery_max_depth`, so the walk stops
-    //     pruning. In this repo that alone takes the sub-project count from 2 to
-    //     9 (every `tests/fixtures/*`), because the only non-default setting is
-    //     `exclude_projects = ["fixtures"]`.
+    //     absent here. Note the precise mechanism: discovery is ALWAYS the
+    //     manifest walk — there is no second mode to "fall back" to. What the
+    //     missing file removes is `exclude_projects` and `discovery_max_depth`,
+    //     so the walk stops pruning. In this repo that alone took the
+    //     sub-project count from 2 to 9 (every `tests/fixtures/*`), because the
+    //     only non-default setting is `exclude_projects = ["fixtures"]`.
+    //
+    //     `load_discover_settings` now reads through to the MAIN checkout when
+    //     the worktree has no file of its own, so this half no longer diverges
+    //     by default — but it still can, when neither location has one. The
+    //     three topology states below distinguish those cases; do not collapse
+    //     them back into present/absent, which is what made the old hint assert
+    //     "ran with defaults" about a walk that had in fact inherited main's.
     //
     // Reporting the divergence is deliberately all this does. Whether a worktree
     // SHOULD share main's memories and topology is a separate, still-open
@@ -813,16 +819,27 @@ async fn build_activation_response(
             ),
         });
         let ws_toml = crate::config::workspace::workspace_config_path(&project_root_path);
-        if !ws_toml.exists() {
-            notice["topology"] = json!("inferred");
+        let main_has_ws = crate::util::path_security::worktree_main_root(&project_root_path)
+            .map(|m| crate::config::workspace::workspace_config_path(&m))
+            .is_some_and(|p| p.exists());
+        if ws_toml.exists() {
+            notice["topology"] = json!("configured");
+        } else if main_has_ws {
+            notice["topology"] = json!("inherited");
             notice["topology_hint"] = json!(
                 "No .codescout/workspace.toml here (it is gitignored, so it does not \
-                 travel into a worktree). Sub-project discovery ran with defaults — \
-                 no exclude_projects, depth 3 — so the project list is auto-detected, \
-                 not declared, and is likely wider than the main checkout's."
+                 travel into a worktree), so sub-project discovery read the MAIN \
+                 checkout's settings instead. exclude_projects and \
+                 discovery_max_depth match it, and so does the project list."
             );
         } else {
-            notice["topology"] = json!("configured");
+            notice["topology"] = json!("inferred");
+            notice["topology_hint"] = json!(
+                "Neither this worktree nor its main checkout has a \
+                 .codescout/workspace.toml, so sub-project discovery ran with \
+                 defaults — no exclude_projects, depth 3. The project list is \
+                 auto-detected, not declared."
+            );
         }
         result["worktree"] = notice;
     }
@@ -884,6 +901,10 @@ fn format_activate_project(result: &Value) -> String {
         parts.push(match wt.get("topology").and_then(|v| v.as_str()) {
             Some("inferred") => {
                 "linked worktree · memories + topology are this checkout's (topology inferred)"
+                    .to_string()
+            }
+            Some("inherited") => {
+                "linked worktree · memories are this checkout's · topology inherited from main"
                     .to_string()
             }
             _ => "linked worktree · memories are this checkout's".to_string(),

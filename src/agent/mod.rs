@@ -322,16 +322,38 @@ impl ActiveProject {
     }
 }
 
-/// Read `workspace.toml` (if present) and return the discovery depth and exclude list.
-/// Falls back to defaults (depth=3, no excludes) when the file is missing or unparseable.
+/// Read `workspace.toml` and return the discovery depth and exclude list.
+///
+/// From a linked worktree, reads through to the MAIN checkout when the worktree has
+/// no `workspace.toml` of its own. That file is gitignored, so it never travels into
+/// a worktree, and the plain fallback silently dropped `exclude_projects` there —
+/// sub-project discovery then walked into every `tests/fixtures/*` (measured 2 -> 9
+/// on this repo, `docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md`).
+///
+/// Read-through, not copy: carrying the settings needs no file-sync obligation. A
+/// worktree's own `workspace.toml` still wins, so a deliberate per-worktree
+/// configuration is never overridden. Falls back to `(3, vec![])` when neither
+/// location has a readable, parseable file.
 fn load_discover_settings(root: &std::path::Path) -> (usize, Vec<String>) {
-    let ws_path = crate::config::workspace::workspace_config_path(root);
-    if let Ok(content) = std::fs::read_to_string(&ws_path) {
-        if let Ok(ws) = toml::from_str::<crate::config::workspace::WorkspaceConfig>(&content) {
-            return (ws.workspace.discovery_max_depth, ws.exclude_projects);
+    if let Some(settings) = read_discover_settings(root) {
+        return settings;
+    }
+    if let Some(main) = crate::util::path_security::worktree_main_root(root) {
+        if let Some(settings) = read_discover_settings(&main) {
+            return settings;
         }
     }
     (3, vec![])
+}
+
+/// `Some` only when `root` holds a `workspace.toml` that both reads and parses;
+/// `None` collapses "missing" and "unparseable" into one case, as the caller's
+/// fallback always has.
+fn read_discover_settings(root: &std::path::Path) -> Option<(usize, Vec<String>)> {
+    let ws_path = crate::config::workspace::workspace_config_path(root);
+    let content = std::fs::read_to_string(&ws_path).ok()?;
+    let ws = toml::from_str::<crate::config::workspace::WorkspaceConfig>(&content).ok()?;
+    Some((ws.workspace.discovery_max_depth, ws.exclude_projects))
 }
 
 /// Resolve the short git HEAD SHA for a directory. Returns None if not a git
@@ -2949,5 +2971,87 @@ mod tests {
             roots_after.is_empty(),
             "session roots must clear on re-activation"
         );
+    }
+
+    /// Build `<tmp>/main` with a `workspace.toml`, plus a linked worktree at
+    /// `<tmp>/main/.worktrees/feat` whose `.git` is the `gitdir:` pointer file git
+    /// writes. Returns (tmpdir, main_root, worktree_root); the tmpdir must stay
+    /// alive for the paths to exist.
+    fn worktree_fixture(main_toml: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let tmp = tempdir().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".codescout")).unwrap();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(main.join(".codescout").join("workspace.toml"), main_toml).unwrap();
+
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+        (tmp, main, wt)
+    }
+
+    /// `.codescout/workspace.toml` is gitignored, so it never travels into a linked
+    /// worktree. Before this read-through, `load_discover_settings` fell back to
+    /// `(3, vec![])` there — dropping `exclude_projects` and letting sub-project
+    /// discovery walk into every `tests/fixtures/*` (measured 2 -> 9 on this repo).
+    ///
+    /// `discovery_max_depth` is deliberately 5, not the default 3: with 3 the depth
+    /// assertion would pass against the fallback and prove nothing.
+    #[test]
+    fn discover_settings_read_through_to_the_main_checkout_from_a_worktree() {
+        let (_tmp, _main, wt) = worktree_fixture(
+            "exclude_projects = [\"fixtures\"]\n[workspace]\nname = \"t\"\ndiscovery_max_depth = 5\n",
+        );
+
+        let (depth, exclude) = load_discover_settings(&wt);
+
+        assert_eq!(depth, 5, "worktree must inherit the main checkout's depth");
+        assert_eq!(
+            exclude,
+            vec!["fixtures".to_string()],
+            "worktree must inherit the main checkout's exclude_projects"
+        );
+    }
+
+    /// Read-through is a fallback, not an override: a worktree that has its own
+    /// `workspace.toml` keeps it. Without this, "inherit from main" would silently
+    /// outrank a deliberate per-worktree configuration.
+    #[test]
+    fn a_worktrees_own_workspace_toml_still_wins_over_the_main_checkouts() {
+        let (_tmp, _main, wt) = worktree_fixture(
+            "exclude_projects = [\"fixtures\"]\n[workspace]\nname = \"t\"\ndiscovery_max_depth = 5\n",
+        );
+        std::fs::create_dir_all(wt.join(".codescout")).unwrap();
+        std::fs::write(
+            wt.join(".codescout").join("workspace.toml"),
+            "exclude_projects = [\"local-only\"]\n[workspace]\nname = \"t\"\ndiscovery_max_depth = 7\n",
+        )
+        .unwrap();
+
+        let (depth, exclude) = load_discover_settings(&wt);
+
+        assert_eq!(depth, 7);
+        assert_eq!(exclude, vec!["local-only".to_string()]);
+    }
+
+    /// The read-through must key on being a linked worktree, not merely on the file
+    /// being absent — otherwise a plain project would start reading configuration
+    /// out of whatever directory happened to sit above it.
+    #[test]
+    fn discover_settings_fall_back_to_defaults_outside_a_worktree() {
+        let tmp = tempdir().unwrap();
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(plain.join(".codescout")).unwrap();
+        // A real main checkout: `.git` is a DIRECTORY, so there is no gitdir pointer.
+        std::fs::create_dir_all(plain.join(".git")).unwrap();
+
+        let (depth, exclude) = load_discover_settings(&plain);
+
+        assert_eq!(depth, 3);
+        assert!(exclude.is_empty());
     }
 }

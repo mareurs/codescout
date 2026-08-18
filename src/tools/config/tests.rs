@@ -819,6 +819,77 @@ async fn activating_a_linked_worktree_reports_the_divergence_it_creates() {
     );
 }
 
+/// The third topology state, and the one that stops the hint from lying. Since
+/// `load_discover_settings` reads through to the main checkout, a worktree whose
+/// main HAS a `workspace.toml` no longer diverges — reporting it as "inferred"
+/// with "ran with defaults" would assert something measurably false about the walk
+/// that just ran.
+///
+/// The discriminator against the sibling test above is one file: `main/.codescout/
+/// workspace.toml`. Nothing else differs.
+///
+/// docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+#[tokio::test]
+async fn a_worktree_whose_main_has_workspace_toml_reports_inherited_topology() {
+    let dir = tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+
+    // The one thing the sibling test does not do.
+    std::fs::create_dir_all(base.join("main/.codescout")).unwrap();
+    std::fs::write(
+        base.join("main/.codescout/workspace.toml"),
+        "exclude_projects = [\"fixtures\"]\n[workspace]\nname = \"t\"\ndiscovery_max_depth = 3\n",
+    )
+    .unwrap();
+
+    let wt = base.join("main/.worktrees/feat");
+    std::fs::create_dir_all(wt.join(".codescout")).unwrap();
+    std::fs::write(wt.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+    std::fs::write(
+        wt.join(".git"),
+        format!("gitdir: {}/main/.git/worktrees/feat\n", base.display()),
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(wt.clone())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ActivateProject
+        .call(serde_json::json!({"path": wt.to_string_lossy()}), &ctx)
+        .await
+        .unwrap();
+
+    let wt_block = result
+        .get("worktree")
+        .unwrap_or_else(|| panic!("no worktree block on a linked-worktree activation: {result}"));
+    assert_eq!(
+        wt_block["topology"], "inherited",
+        "the main checkout has a workspace.toml, so discovery read it rather than \
+         running with defaults, got: {wt_block}"
+    );
+    let hint = wt_block["topology_hint"].as_str().unwrap_or_default();
+    assert!(
+        hint.contains("MAIN"),
+        "the hint must say where the settings came from, got: {hint}"
+    );
+    assert!(
+        !hint.contains("ran with defaults"),
+        "reporting defaults here would be the exact falsehood this state exists to \
+         prevent, got: {hint}"
+    );
+}
+
 /// The other side: a plain checkout must not grow a worktree block, or the
 /// notice becomes noise in every ordinary session.
 #[tokio::test]
@@ -1024,6 +1095,39 @@ fn a_worktree_without_workspace_toml_marks_its_topology_inferred() {
     assert!(
         compact.contains("topology inferred"),
         "an inferred topology must say so, got: {compact}"
+    );
+}
+
+/// The compact line is what most callers actually read, so the third state has to
+/// reach it too. "inherited" must not fall through to the bare `_` arm — that would
+/// render identically to a worktree with its own declared workspace.toml, losing the
+/// one fact this state exists to convey.
+#[test]
+fn a_worktree_inheriting_its_topology_says_so_on_the_compact_line() {
+    let result = json!({
+        "status": "ok",
+        "project": "codescout",
+        "project_root": "/repo/.worktrees/feat",
+        "read_only": false,
+        "languages": ["rust"],
+        "index": {"status": "indexed"},
+        "worktree": {
+            "main_root": "/repo",
+            "topology": "inherited",
+            "topology_hint": "No .codescout/workspace.toml here ... read the MAIN checkout's ...",
+            "memories_are_this_checkouts": "2 memory topics come from THIS worktree's commit.",
+        },
+    });
+
+    let compact = format_activate_project(&result);
+
+    assert!(
+        compact.contains("topology inherited from main"),
+        "an inherited topology must say so, got: {compact}"
+    );
+    assert!(
+        !compact.contains("topology inferred"),
+        "inherited is not inferred — discovery used real settings, got: {compact}"
     );
 }
 
