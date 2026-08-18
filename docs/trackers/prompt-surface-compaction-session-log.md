@@ -11,7 +11,7 @@ topic: prompt-surfaces
 entry_prefix:
 - F
 - W
-entry_high_water_F: 2
+entry_high_water_F: 3
 entry_high_water_W: 1
 ---
 
@@ -34,6 +34,7 @@ entry_high_water_W: 1
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-08-18 | high | prompt-surface | fixed-verified | `append_entry`'s `anchor_heading` is implemented but not advertised in the `artifact` schema |
 | F-2 | 2026-08-18 | med | self-friction | fixed-verified | Read wire duplication as source duplication — the `workspace` param is injected once, not authored 24× |
+| F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — **experiment due 2026-09-02** |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -143,6 +144,66 @@ The parameter is real and load-bearing: `src/librarian/tools/append_entry.rs:34`
 **Promote-when:** A second session catches a generated-surface-vs-generator inference error pre-edit. At two datapoints, promote to `docs/trackers/reconnaissance-patterns.md`'s seven-laws distillation as a named clause under law A ("Ground truth is the artifact") — specifically that a *generated* artifact is ground truth about cost and about nothing else.
 
 **Status:** validated
+
+## F-3 — 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted
+
+**Observed:** 2026-08-18, tool-surface audit.
+
+**When:** Ranking compaction targets after joining the live `tools/list` payload against `usage.db`.
+
+**Got:** Ten tools carry **11,299 characters — 19.2% of the per-request surface — for 38 calls in 30 days**. Four have *zero* lifetime calls: `onboarding`, `approve_write`, `call_graph`, `library`.
+
+**Why this is not actionable as it stands:** zero calls is ambiguous. Either the tool is dead weight, or nothing routes to it. `src/prompts/README.md` rule 7 states the second reading outright — *"if a tool has near-zero calls despite being useful, the prompt isn't surfacing it"* — and trimming on the first reading saves bytes while foreclosing the fix. The usage data cannot separate the two, and no amount of re-reading it will.
+
+**Severity:** med — 19.2% of a per-request surface, but acting on the wrong reading is worse than waiting.
+
+**Status:** open — experiment running, due 2026-09-02.
+
+---
+
+### Pre-registration (written 2026-08-18, before any result)
+
+**Hypothesis.** `call_graph` and `tree` score ~0 because `server_instructions` never routes to them, not because they are useless. The suggestive correlation: **no tool with zero lifetime calls is named anywhere in `server_instructions`.** `references` is named and has 129 calls; `call_graph` serves the same domain, is arguably more useful for impact analysis, is named nowhere, and has 0.
+
+**Intervention.** Two quickref lines — `call_graph` and `tree` — landed in `ba16b16a`. Static slice 1,654 → 1,747 chars against its 1,900 cap. Live for the next **new** conversation against a rebuilt binary (`cargo rb`), not for a `/mcp` reconnect.
+
+**Baseline, all four active `usage.db` files, to 2026-08-18:**
+
+| project | call_graph | tree | references | symbols | total calls |
+|---|---:|---:|---:|---:|---:|
+| codescout | 0 | 10 | 129 | 2,614 | 25,826 |
+| claude-plugins | 0 | 0 | 2 | 9 | 386 |
+| prompt-engineering | 0 | 0 | 0 | 16 | 164 |
+| researcher | 0 | 3 | 0 | 26 | 329 |
+
+**`call_graph` is 0 across 26,705 calls in four projects** — including `researcher`, the most navigation-shaped workload available, whose second-most-used tool is `symbols`.
+
+**Controls.** `symbols` is the workload-presence control (high volume: did navigation work happen at all in the window?). `references` is the same-domain control (already routed, so it calibrates what "routed and used" looks like). Neither is touched by the intervention.
+
+**Metric.** Calls per tool with `called_at >= '2026-08-19'` — conservative, excluding the pre-change part of 2026-08-18.
+
+```sql
+SELECT tool_name, COUNT(*) FROM tool_calls
+WHERE called_at >= '2026-08-19'
+  AND tool_name IN ('call_graph','tree','references','symbols')
+GROUP BY tool_name ORDER BY 2 DESC;
+```
+
+Run it against each of the four DBs; `codescout_sha` is available if the window needs tightening to specific builds.
+
+**Decision rule, fixed in advance:**
+
+| Outcome | Reading | Action |
+|---|---|---|
+| `call_graph` > 0 | it was **unrouted** | keep the lines; the 19.2% question resolves toward *route, don't trim*, and the other 8 tools get the same treatment before any trim |
+| `call_graph` == 0 **and** `symbols` ≥ 200 | routed, navigation work happened, still unused | **evidence toward** dead weight — not a mandate; see the asymmetry below |
+| `symbols` < 200 | the window contained no navigation workload | **inconclusive** — extend the window, do not conclude |
+
+**Known weaknesses, stated up front rather than discovered later.** n ≈ 10 sessions over two weeks, one developer, one prompt surface, and 96.7% of all historical calls come from a single project. This design **cannot** separate "the tool is dead" from "this developer does not do impact analysis". It also cannot rule out that a quickref line is too weak an intervention where a worked example would not be.
+
+**The asymmetry is the honest reading, and it is pre-committed:** a positive result is strong (something changed when only routing changed); a null result is weak. **A null must never on its own authorise removing a tool** — the same law as `reconnaissance-patterns` R-3 → R-79, this ledger's most-repeated: a search that finds nothing is evidence about the search, and a negative result does not authorise a deletion. Removal needs a positive finding, measured, and preferably a second independent signal.
+
+**Fix idea / Pointer:** Re-run the query on or after 2026-09-02 and record the outcome against the table above. Spec: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md` § Revisit-when. Intervention commit `ba16b16a`; gate `598b92f2`.
 
 ## Template for new entries
 
