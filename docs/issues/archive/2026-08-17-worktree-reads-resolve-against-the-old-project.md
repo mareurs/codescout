@@ -1,7 +1,7 @@
 ---
-id: a508b4316b6183e0
+id: 3650e74d5331221e
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: after EnterWorktree, MCP writes are blocked until activate but reads are not — git reconnaissance silently answers about the old checkout, and the notice that says so sits beside the answer'
 tags:
 - worktree
@@ -156,17 +156,33 @@ Fix 2 has a cost worth stating: it makes a read fail where today it merely misle
 is more friction for the common single-checkout case. Note that `guard_worktree_write`
 already returns `Ok` immediately when no worktrees exist, so that case stays untouched.
 
+**Decided, 2026-08-18: Fix 3, not Fix 2.** Reconnaissance on `worktree_read_notice`
+(`src/tools/core/types.rs`) turned up its own doc comment arguing explicitly against
+refusing reads: *"Refusing reads would fire while the agent is still orienting — exactly
+when it cannot yet know which tree it wants — and a guard that fires before the caller can
+plausibly satisfy it trains callers to route around it."* That reasoning is sound and
+predates this bug; overriding it would need a stronger argument than "the notice is easy to
+miss," which Fix 3 addresses directly without touching the refusal question. Fix 1
+(`EnterWorktree` self-activates) remains the most complete fix but lives in a different
+repo (`codescout-companion`) — out of scope here, left as the open half.
+
 ## Tests added
 
-None yet. Planned:
+`a_worktree_notice_is_prefixed_into_stdout_when_the_response_carries_one`
+(`src/tools/core/tests.rs`) — an `EchoTool` returning `{"stdout": ...}` through
+`call_content` with an unchosen worktree present; asserts the sibling
+`_workspace_notice` field still appears AND the `stdout` field is prefixed with the
+same notice, verbatim tail preserved. Mutation-tested: replaced the prefix branch
+with a no-op, confirmed the test failed with the predicted message, restored the
+fix.
 
-- `enter_worktree_hook_activates_the_worktree_root_not_main` — hook-level, in
-  `codescout-companion`.
-- `run_command_refuses_when_worktrees_exist_and_no_project_chosen` — mirroring
-  `guard_worktree_write_refuses_when_only_resolved_at_startup`
-  (`src/tools/core/tests.rs`), and the guard's existing
-  `guard_worktree_write_allows_when_no_worktrees_exist` is the FP guard to keep green.
-
+Not added: a `run_command`-level integration test. The fix lives entirely in the
+shared `inject_notice` helper inside `Tool::call_content`, which is the one place
+every tool's response passes through — the existing sibling-field test
+(`a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen`) already
+exercises that same call path with the same `EchoTool` pattern, so a second test at
+the `run_command` shell layer would duplicate coverage of shell execution, not of
+this fix.
 ## Workarounds
 
 **Make `pwd` the first command after entering a worktree, and compare it to where you think
@@ -202,4 +218,3 @@ more durable outcome; the two are complementary rather than alternatives.
 - `get_guide("workspace-state")` § *The home/foreign distinction* — why `read_only=false` is
   required on the activation.
 - `src/tools/core/guards.rs` — `guard_worktree_write`, the precedent predicate.
-

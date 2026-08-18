@@ -1,7 +1,7 @@
 ---
 id: '70cd189fa2590af3'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the shell-on-source gate counts every relative path as in-project, so `cd <outside> && awk x.rs` is refused with a hint that cannot be followed — the residue of 433100bd'
 tags:
 - iron-law
@@ -9,6 +9,7 @@ tags:
 - path-security
 - il3
 - gate-firing
+closed: 2026-08-18
 opened: 2026-08-17
 owner: marius
 related:
@@ -218,31 +219,68 @@ rather than a file operand, and treating it as a path is what produces this inst
 
 ## Fix
 
-Not yet implemented. Resolve a relative token against the segment's **effective** cwd
-rather than the project root:
+**Shipped 2026-08-18, `be2d7781` (experiments).** Both causes, one predicate.
 
-- In `check_source_file_access`, the segments are already split on `&&`/`||`/`;`/`|`.
-  Track a leading `cd <path>` per segment (and across segments joined by `&&`, since
-  `cd x && cmd` is the common form) and pass that as the base for
-  `path_is_within_project`'s relative branch.
-- **Keep the blocking-direction bias.** No `cd` seen → relative still means inside. A `cd`
-  whose target is a variable, unresolvable, or itself relative-and-ambiguous → also inside.
-  The gate should only *open* on a `cd` it fully understands; the point is to stop
-  unfollowable refusals, not to widen shell access to source.
-- `cd` with no argument (`cd`, `cd ~`) resolves to `$HOME`, which is outside the project
-  for every real layout — treat it as a resolved target, not an unknown one.
+**1 — the shell can move.** `check_source_file_access` now splits twice: sequential
+operators (`&&`, `||`, `;`, newline) bound a *run*, the unit a `cd` can move, and a
+pipeline inside a run shares one cwd. `cd x | cmd` puts the `cd` in a subshell that
+cannot affect the other stage, so propagating cwd across a pipe would be a bypass
+rather than a carve-out. A new `Cwd` starts at `At(project_root)` — which is where
+`run_command` actually starts — so the old "relative is inside by construction" rule
+is now written down as state instead of assumed.
 
+`cd_effect` yields `Cwd::At` only for a target it resolves completely. A variable,
+`cd -`, a `..` component, and a relative `cd` from an already-unknown base all yield
+`Cwd::Unknown`, which keeps the old blocking verdict.
+
+**Deviation from §3 of the original proposal, deliberate.** Bare `cd` and `cd ~` mean
+`$HOME`; this file proposed treating them as *resolved*. They are left **unresolved**
+instead. Resolving them makes the gate's verdict depend on the environment, and this
+module has no `EnvGuard` and reads `HOME` directly — so a test pinning that branch
+would be non-hermetic. The only cost is that a rare command keeps being refused,
+which is the safe direction and consistent with the blocking bias the rest of the fix
+keeps.
+
+**2 — an option can carry an extension without naming a file.** `--include='*.mjs'`
+is a filter pattern; nothing is read from it. The carve-out is keyed on **positive
+evidence** — an operand that is absolute and outside the root — and *not* on "options
+are not paths".
+
+That distinction is load-bearing and was nearly missed. The tidier rule opens a hole:
+`grep -rn x src/ --include='*.rs'` genuinely reads project source, and the glob is the
+**only** token that says so, because `src/` carries no extension. Skipping option
+tokens outright would have silently stopped blocking it. The mutation below proves
+it rather than asserting it.
 ## Tests added
 
-None yet. Planned, alongside the existing `check_source_file_access_at_root` fixture
-(`src/util/path_security.rs:2233-2235`):
+Six, in `src/util/path_security.rs`, alongside the existing
+`check_source_file_access_at_root` fixture.
 
-- `cd_outside_project_then_relative_source_read_is_allowed` — RED today.
-- `cd_inside_project_then_relative_source_read_is_still_blocked` — guards the bias; must
-  stay green throughout, and is the one a careless fix breaks.
-- `unresolvable_cd_target_keeps_blocking` — `cd $DIR && cat x.rs` stays refused.
-- Mutation check: drop the `cd`-tracking and confirm only the first test goes red.
+**Two were RED before the change, four were green throughout.** The split matters:
+the green four are controls, not restatements — they pin behaviour a careless fix
+breaks, and a suite where every new test starts red would have had none.
 
+| Test | Before |
+|---|---|
+| `a_cd_out_of_the_project_makes_a_relative_source_read_reachable_again` | **RED** |
+| `an_option_glob_does_not_force_the_in_project_verdict` | **RED** |
+| `a_cd_that_stays_inside_the_project_still_blocks` | green |
+| `a_cd_the_gate_cannot_resolve_keeps_blocking` | green |
+| `a_cd_inside_a_pipeline_does_not_move_the_shell_for_other_stages` | green |
+| `an_option_glob_still_counts_without_evidence_of_an_outside_target` | green |
+
+**Three mutations, each producing exactly one distinct failure** — which is what
+shows the tests discriminate rather than merely co-occur with the fix:
+
+| Mutation | Red |
+|---|---|
+| `cd` tracking neutered (resolve, then discard the result) | `a_cd_out_of_the_project_…` only |
+| option carve-out disabled | `an_option_glob_does_not_force_…` only |
+| option carve-out made unconditional — *the naive fix* | `an_option_glob_still_counts_…` only |
+
+The third is the one worth keeping. It is not a mutation of the shipped code so much
+as a test of the design alternative, and it fails on the exact command the tidier
+rule would have stopped guarding.
 ## Workarounds
 
 Write the path **absolutely** — `awk '…' /home/…/tmp/x.rs` instead of `cd /home/…/tmp &&
@@ -254,16 +292,21 @@ command. Renaming the file to a non-source extension works but teaches the wrong
 
 ## Resume
 
-Edit `src/util/path_security.rs`: thread an effective-cwd parameter into
-`segment_reads_project_source` / `path_is_within_project`, derived from a leading `cd` in
-the segment chain that `check_source_file_access` already computes. Write
-`cd_outside_project_then_relative_source_read_is_allowed` first and watch it fail with
-`shell access to source files is blocked`.
+Code is done and gated (`cargo fmt --check`, `clippy --workspace --all-targets -D
+warnings`, `cargo test --workspace` — 4116 passed, 0 failed, 50 ignored).
 
-Then re-measure the population the way GF-3 did — count `il3_shell_on_source` refusals in
-`usage.db` whose command contains a `cd` to a path outside the project — so the entry
-records a size rather than an anecdote. GF-3's own number (25 of 111) came from that query.
+One step left, and it needs a rebuild the session cannot do to itself: **`cargo rb`
+then `/mcp`**, and re-run the reproduction from *Symptom* against the live server.
+Until then the running MCP binary still carries the old predicate, so probing this
+session's own `run_command` will show the OLD behaviour and read as a failed fix —
+the same trap `src/prompts/README.md` was corrected for on 2026-08-17.
 
+The two commands to run after the rebuild, and the verdict each must give:
+
+- `cd /tmp/scratch && awk '{print}' head.rs` → runs (was refused)
+- `grep -rn 'x' <abs-sibling-repo> --include='*.mjs'` → runs (was refused)
+- `cat src/main.rs` → still refused — the control; without it the first two are
+  equally consistent with the gate having been removed.
 ## References
 
 - `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` — GF-3, the audit this is the
