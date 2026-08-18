@@ -55,8 +55,17 @@ use crate::util::fs::to_forward_slash;
 pub struct ServerEnv {
     /// `CODESCOUT_PROBE` — registers the oversized-description probe tool.
     pub probe: bool,
-    /// `CLAUDE_CODE_SESSION_ID` — keys the persisted guide-hint ledger.
+    /// `CLAUDE_CODE_SESSION_ID` — correlation id for `usage.db`. NOT the ledger
+    /// key: see `session_id_explicit` / `harness_session_ids`, which resolve the
+    /// ledger's identity under different collision requirements.
     pub cc_session_id: Option<String>,
+    /// `CODESCOUT_SESSION_ID` — rank 1 of the ledger key chain. Trusted when set;
+    /// documented as unique-per-conversation, since a value pinned in MCP config
+    /// is constant across every conversation in that project.
+    pub session_id_explicit: Option<String>,
+    /// `(name, value)` for each of `session_key::HARNESS_SESSION_VARS` that is
+    /// set, in probe order. Captured as data so tests inject without `set_var`.
+    pub harness_session_ids: Vec<(&'static str, String)>,
     /// Overrides the per-user guide-hint ledger directory. `None` ⇒ derive it from
     /// `per_user_state_dir()`. Tests set this to a tempdir so they never touch — or
     /// depend on — the developer's real state directory.
@@ -78,6 +87,11 @@ impl ServerEnv {
                 .ok()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
+            session_id_explicit: std::env::var("CODESCOUT_SESSION_ID").ok(),
+            harness_session_ids: crate::tools::session_key::HARNESS_SESSION_VARS
+                .iter()
+                .filter_map(|name| std::env::var(name).ok().map(|v| (*name, v)))
+                .collect(),
             guide_hints_dir: None,
             #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
@@ -113,6 +127,15 @@ pub struct CodeScoutServer {
     /// — exactly the case the env var exists to disambiguate.
     /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
     cc_session_id: String,
+    /// Resolved conversation identity for the guide ledger. Distinct from
+    /// `cc_session_id`, which is usage-correlation only.
+    ///
+    /// Unread for now: Task 1 (this) only resolves and stores it. Tasks 2, 4
+    /// and 5 of the guide-ledger-phase-b-identity plan branch on it (the
+    /// Anonymous-tier ledger, idle re-arm, and eviction). Remove this
+    /// `allow` once a later task adds the first read.
+    #[allow(dead_code)]
+    session_key: crate::tools::session_key::SessionKey,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
@@ -231,7 +254,7 @@ impl CodeScoutServer {
             tools.push(Arc::new(crate::tools::probe::ProbeTool));
             tracing::warn!(
                 "CODESCOUT_PROBE=1 — registering __probe_description_cap__ \
-                 (debug-only; ~8.8KB description with sentinel markers)"
+                     (debug-only; ~8.8KB description with sentinel markers)"
             );
         }
         #[cfg(feature = "librarian")]
@@ -271,6 +294,20 @@ impl CodeScoutServer {
                     .filter(|s| !s.is_empty())
             })
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        // The ledger's key is resolved separately from the usage-correlation id
+        // above: usage tolerates a collision between two windows on one repo,
+        // the ledger does not. See the plan's Ruling 3 and spec §1.
+        let session_key = crate::tools::session_key::resolve(
+            env.session_id_explicit.clone(),
+            env.harness_session_ids.clone(),
+        );
+        if session_key.id().is_none() {
+            tracing::info!(
+                "no conversation id available (checked CODESCOUT_SESSION_ID and {:?}); \
+                     guide ledger is in-process only and re-arms after idle",
+                crate::tools::session_key::HARNESS_SESSION_VARS,
+            );
+        }
         // Per-USER state, not per-project: the ledger follows the conversation,
         // and one conversation can span worktrees, sub-projects and repos. Keeping
         // it under a project root made it depend on the companion plugin's
@@ -290,9 +327,10 @@ impl CodeScoutServer {
         let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
         });
-        let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(
-            crate::tools::guide_ledger::GuideLedger::load(&cc_session_id, guide_hints_dir),
-        ));
+        let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(match session_key.id() {
+            Some(id) => crate::tools::guide_ledger::GuideLedger::load(id, guide_hints_dir),
+            None => crate::tools::guide_ledger::GuideLedger::load("", None),
+        }));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
@@ -316,6 +354,7 @@ impl CodeScoutServer {
             guide_hints_emitted,
             session_id: uuid::Uuid::new_v4().to_string(),
             cc_session_id,
+            session_key,
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
@@ -3852,6 +3891,12 @@ mod guide_hint_tests {
     ///
     /// Injecting gives strictly BETTER isolation than the env guards did: the values
     /// are scoped to this one server, so tests need no `#[serial]` to keep them apart.
+    ///
+    /// Also injects a `session_id_explicit` — a fresh uuid per call — so every test
+    /// built through this helper gets a `SessionKey::Keyed` identity and the guide
+    /// ledger persists, matching this module's pre-`session_key` assumption that a
+    /// conversation id is always available. Tests of the `Anonymous` (no-identity)
+    /// tier construct `ServerEnv` directly instead of going through this helper.
     async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -3859,6 +3904,7 @@ mod guide_hint_tests {
         std::fs::write(&ws_path, "").unwrap();
 
         let env = ServerEnv {
+            session_id_explicit: Some(uuid::Uuid::new_v4().to_string()),
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
                 db: Some(dir.path().join("librarian.db")),
@@ -4378,11 +4424,12 @@ mod guide_hint_tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
 
-        // Pin the CC conversation id so both server incarnations key on the same
-        // persisted file (otherwise the fallback mints a random uuid and the test is
-        // non-deterministic).
+        // Pin the ledger key explicitly (CODESCOUT_SESSION_ID) so both server
+        // incarnations key on the same persisted file — the ledger no longer
+        // falls back to a random uuid, it goes Anonymous instead, which would
+        // make this test non-deterministic-by-omission rather than pass.
         let env_for = |session: &str| ServerEnv {
-            cc_session_id: Some(session.to_string()),
+            session_id_explicit: Some(session.to_string()),
             librarian: crate::librarian::LibrarianEnv {
                 db: Some(dir.path().join("librarian.db")),
                 ..Default::default()

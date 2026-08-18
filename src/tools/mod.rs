@@ -23,6 +23,7 @@ pub mod output;
 pub mod output_buffer;
 pub mod progress;
 pub mod semantic;
+pub mod session_key;
 pub mod symbol;
 pub mod usage;
 pub use usage::GetUsageStats;
