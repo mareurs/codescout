@@ -526,7 +526,7 @@ impl CodeScoutServer {
             props.entry("workspace").or_insert_with(|| {
                 serde_json::json!({
                     "type": "string",
-                    "description": "Optional. Absolute path of the workspace this call targets, pinning project resolution to it regardless of the session default. Omit to use the active project; set it when concurrent subagents operate on different workspaces."
+                    "description": "Absolute workspace path to resolve this call against; omit for the active project. For concurrent subagents in different workspaces."
                 })
             });
         }
@@ -2080,8 +2080,13 @@ mod tests {
     ///
     /// Spec: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
     /// Measured 2026-08-18 by `tool_surface_report_lengths` against this harness:
-    /// 27 tools, 8,521 description + 50,051 schema. Set as a hard ratchet at that
+    /// 27 tools, 8,521 description + 48,627 schema. Set as a hard ratchet at that
     /// value — there is deliberately zero headroom.
+    ///
+    /// It has already been paid down once. Declaring `anchor_heading` on `artifact`
+    /// cost +808 and breached the then-current 58,572; compressing the injected
+    /// `workspace` description (225 chars to 131, times 24 pinnable tools) returned
+    /// 2,232, and the constant was ratcheted to the new total rather than left slack.
     ///
     /// Take this number from the report test, never from an external probe. A
     /// scratch probe that re-serialised the payload with Python's `json.dumps`
@@ -2089,7 +2094,7 @@ mod tests {
     /// six-character ASCII escape, so the over-count tracked prose density and
     /// every per-tool delta came out a multiple of 5. `serde_json` emits UTF-8
     /// directly, as the wire does.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 58_572;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_148;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -2145,6 +2150,39 @@ mod tests {
             TOOL_SURFACE_CHAR_BUDGET,
             TOOL_SURFACE_CHAR_BUDGET.saturating_sub(total)
         );
+    }
+
+    /// `anchor_heading` shipped implemented and **unadvertised** in `5d5ed457`, so the
+    /// one `append_entry` path that structurally cannot produce an uncitable entry was
+    /// reachable only by first doing it the fallible way and reading the follow-up
+    /// hint. Nothing in the repo could have caught that: `all_tools_have_valid_schemas`
+    /// checks `is_object` and `type == "object"` only.
+    ///
+    /// This pins the instance. The general form — every field the server accepts is
+    /// advertised — wants the schema derived from `Args` via `schemars` (already a
+    /// dependency), deferred under rule-of-three; see the spec's Revisit-when.
+    ///
+    /// `docs/issues/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`
+    #[tokio::test]
+    async fn artifact_advertises_the_append_entry_section_writer() {
+        let (_dir, server) = make_server().await;
+        let artifact = server
+            .find_tool("artifact")
+            .expect("artifact tool is registered");
+        let schema = artifact.input_schema();
+        let props = schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .expect("artifact schema exposes properties");
+        for field in ["title", "body", "anchor_heading"] {
+            assert!(
+                props.contains_key(field),
+                "artifact does not advertise `{field}`, but append_entry accepts it \
+                 (src/librarian/tools/append_entry.rs). All three are required together \
+                 for the server to write the entry section; an agent that cannot see \
+                 them can only discover the path by getting it wrong first."
+            );
+        }
     }
 
     /// Guard against prompt-surface drift: every backticked snake_case identifier

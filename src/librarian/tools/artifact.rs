@@ -104,8 +104,8 @@ impl Tool for Artifact {
                 "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists. NOTE: a move MINTS A NEW ID (id = sha256(abs_path)); the artifact's events, links, observations and augmentation are grafted onto it and the old row is dropped. The response carries `id` (new), `previous_id`, `id_changed` and `history_grafted` — read the new id from there, re-point prose citing the old one, and never reuse a cached id across a move." },
                 "rel_path": { "type": "string", "description": "create: relative path for new file, e.g. 'docs/plans/my-plan.md' — relative to repo root, and NOT including the repo name (use the `repo` field for that). Also accepted on find as a shorthand, where it is lifted to filter={\"rel_path\": {\"contains\": <value>}} and the lift is reported under `corrections`." },
                 "repo": { "type": "string", "description": "create: workspace root name (git repo basename). Omit to infer from active project — rel_path is then treated as project-relative and the subdir prefix is prepended automatically." },
-                "title": { "type": "string", "description": "create: artifact title" },
-                "body": { "type": "string", "description": "create: markdown body" },
+                "title": { "type": "string", "description": "create: artifact title. append_entry: the new entry's title — with `body` + `anchor_heading`, the server writes the section itself." },
+                "body": { "type": "string", "description": "create: markdown body. append_entry: the new entry's section body — see `anchor_heading`." },
                 "owners": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -194,6 +194,10 @@ impl Tool for Artifact {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "append_entry: optional write-time citations. Each ref is a 16-hex artifact id, a `<slug>:<local>` entry id, or a unique rel_path. Creates entry_cite edges from the new entry atomically; an unresolvable/ambiguous ref aborts the whole call. Not supported from a worktree checkout."
+                },
+                "anchor_heading": {
+                    "type": "string",
+                    "description": "append_entry, prose ledgers: pass with `title` + `body` — all three or none, a partial set is refused naming what is missing — and the server writes the entry itself, formatting the heading as `## <ID> — <title>` at the ledger's own level and inserting it before this heading, in the same write that records the high-water mark. Prefer it to reserving an id and writing the section by hand: a heading missing its dash-and-title defines no token under link_scan, so every citation of the entry dangles. Must name a heading that exists verbatim; a bad anchor writes nothing at all."
                 }
             }
         })
