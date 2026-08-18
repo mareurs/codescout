@@ -720,6 +720,35 @@ pub fn entry_high_water_key(id_prefix: &str) -> String {
     format!("{ENTRY_HIGH_WATER_PREFIX}{id_prefix}")
 }
 
+/// The id namespaces a parsed frontmatter block declares via `entry_prefix`.
+///
+/// Extracted from [`allocate_entry_id`]'s body so it can be driven by
+/// `both_entry_prefix_readers_agree_on_every_yaml_form` alongside the guard's
+/// independent text-level reader
+/// (`crate::util::librarian_guard::declared_entry_prefixes`). Returns owned
+/// `String`s rather than borrowed `&str` so the two readers' outputs compare
+/// directly in that test.
+///
+/// Scalar or sequence: a session log legitimately owns two namespaces (F-N
+/// frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
+/// `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
+/// counters stay independent either way.
+pub(crate) fn declared_prefixes_from_frontmatter(
+    fm: Option<&crate::librarian::frontmatter::Frontmatter>,
+) -> Vec<String> {
+    match fm.and_then(|f| f.extra.get(ENTRY_PREFIX_KEY)) {
+        Some(Value::String(s)) if !s.trim().is_empty() => vec![s.trim().to_string()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Allocate the next `<id_prefix>-N` for a **ledger**: an artifact that declares
 /// `entry_prefix: <PREFIX>` in its frontmatter and keeps entries as
 /// `## PREFIX-N` body sections and/or `| PREFIX-N |` index rows.
@@ -795,11 +824,7 @@ pub fn allocate_entry_id(
     // frictions and W-N wins), so `entry_prefix: [F, W]` must be as valid as
     // `entry_prefix: R`. Reservations are keyed per (artifact, prefix), so the
     // counters stay independent either way.
-    let declared: Vec<&str> = match fm.as_ref().and_then(|f| f.extra.get(ENTRY_PREFIX_KEY)) {
-        Some(Value::String(s)) => vec![s.as_str()],
-        Some(Value::Array(items)) => items.iter().filter_map(|v| v.as_str()).collect(),
-        _ => Vec::new(),
-    };
+    let declared = declared_prefixes_from_frontmatter(fm.as_ref());
 
     if declared.is_empty() {
         return Err(RecoverableError::with_hint(
@@ -812,7 +837,7 @@ pub fn allocate_entry_id(
             ),
         ));
     }
-    if !declared.contains(&id_prefix) {
+    if !declared.iter().any(|d| d == id_prefix) {
         return Err(RecoverableError::with_hint(
             format!("allocate_entry_id: `{id_prefix}` is not declared by this ledger"),
             format!(
@@ -2378,6 +2403,68 @@ mod tests {
             vec!["R-42".to_string(), "R-43".to_string()],
             "concurrent allocations against a PROSE ledger must not collide"
         );
+    }
+
+    /// The guard and the allocator each read `entry_prefix`, by different mechanisms,
+    /// and they must agree — a disagreement is silent in the dangerous direction: the
+    /// allocator honours a form the guard is blind to, so entries in that ledger can
+    /// be hand-written past the allocator with no error anywhere.
+    ///
+    /// Two readers is forced, not sloppy. `src/util/librarian_guard.rs` compiles under
+    /// `--no-default-features` where `serde_yml` does not exist, so it hand-parses;
+    /// this side already parses `fm` for `entry_high_water_<PREFIX>` and would be made
+    /// worse, not better, by reading one frontmatter block two ways. What is NOT
+    /// acceptable is holding the agreement in a doc comment — this project has paid
+    /// for prose-enforced co-change contracts before
+    /// (`docs/adrs/2026-07-25-embedding-transport-boundary.md`, where a duplicated
+    /// `reqwest` client carried "Mirrors the codescout-embed RemoteEmbedder guard" and
+    /// cost 48 needlessly-compiled crates). This test is the mechanism that comment
+    /// stood in for.
+    #[test]
+    fn both_entry_prefix_readers_agree_on_every_yaml_form() {
+        for (label, doc) in [
+            ("scalar", "---\nkind: tracker\nentry_prefix: R\n---\n\n# L\n"),
+            (
+                "quoted scalar",
+                "---\nkind: tracker\nentry_prefix: 'HY'\n---\n\n# L\n",
+            ),
+            (
+                "double-quoted scalar",
+                "---\nkind: tracker\nentry_prefix: \"HY\"\n---\n\n# L\n",
+            ),
+            (
+                "inline flow",
+                "---\nkind: tracker\nentry_prefix: [F, W]\n---\n\n# L\n",
+            ),
+            (
+                "block sequence",
+                "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n# L\n",
+            ),
+            (
+                "sequence then sibling key",
+                "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\nentry_high_water_F: 3\n---\n\n# L\n",
+            ),
+            ("absent", "---\nkind: tracker\n---\n\n# L\n"),
+            ("bare key", "---\nkind: tracker\nentry_prefix:\n---\n\n# L\n"),
+            (
+                "empty string",
+                "---\nkind: tracker\nentry_prefix: ''\n---\n\n# L\n",
+            ),
+            (
+                "empty flow list",
+                "---\nkind: tracker\nentry_prefix: []\n---\n\n# L\n",
+            ),
+            ("no frontmatter at all", "# L\n\nentry_prefix: R\n"),
+        ] {
+            let (fm, _body) = crate::librarian::frontmatter::parse(doc).unwrap();
+            let librarian_side = declared_prefixes_from_frontmatter(fm.as_ref());
+            let guard_side = crate::util::librarian_guard::declared_entry_prefixes(doc);
+            assert_eq!(
+                librarian_side, guard_side,
+                "{label}: the allocator and the guard must read entry_prefix identically — \
+                 a form only one of them honours is a silent hole in the guard"
+            );
+        }
     }
 
     #[test]
