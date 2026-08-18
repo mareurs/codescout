@@ -99,10 +99,10 @@ impl Tool for Workspace {
         // This arm used to return SESSION_OPENING_GUIDE. That was already redundant:
         // `activate` clears the guide ledger inside `call()`, and `call_content`
         // re-checks it afterwards — a cleared ledger lacks SESSION_OPENING_GUIDE,
-        // so the opener's trigger (`!emitted.contains(SESSION_OPENING_GUIDE)`,
-        // src/tools/core/types.rs:703) fires regardless of what this returns.
-        // The re-arm is therefore unaffected, and `post_compact_rearms_guide_hints`
-        // covers it.
+        // so the opener's trigger (the `!emitted.contains(SESSION_OPENING_GUIDE)`
+        // check in `Tool::call_content`, `src/tools/core/types.rs`) fires
+        // regardless of what this returns. The re-arm is therefore
+        // unaffected, and `post_compact_rearms_guide_hints` covers it.
         //
         // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         Some("workspace-state")

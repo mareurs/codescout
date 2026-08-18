@@ -473,12 +473,15 @@ pub fn topic_body(topic: &str) -> Option<&'static str> {
 /// Delivered once per family per session via [`GuideLedger::notice_once`], which
 /// keeps the key out of the topic namespace — a sentinel in `emitted` would
 /// only suppress [`SESSION_OPENING_GUIDE`] if it collided with that literal
-/// topic string (the opener's trigger is
-/// `!emitted.contains(SESSION_OPENING_GUIDE)`, `src/tools/core/types.rs:703`);
-/// `notice_once` avoids that regardless, and also keeps the key out of the
-/// persisted stamp shape.
+/// topic string (the opener's trigger is the
+/// `!emitted.contains(SESSION_OPENING_GUIDE)` check in `Tool::call_content`,
+/// `src/tools/core/types.rs`); `notice_once` avoids that regardless, and
+/// also keeps the key out of the persisted stamp shape.
 ///
-/// (GF-4 / GF-5 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`.)
+/// (GF-4 / GF-5 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` —
+/// a 2026-08-16 snapshot that predates the predicate change above and still
+/// describes the `is_empty()` era; trust the mechanism described here, not
+/// that tracker's wording, for current behavior.)
 ///
 /// [`GuideLedger::notice_once`]: crate::tools::guide_ledger::GuideLedger::notice_once
 pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
