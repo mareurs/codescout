@@ -117,7 +117,8 @@ recording it.
 
 ## References
 
-- `CLAUDE.md` § Bug Tracking — the pending-master-SHA rule and the two promotion paths
-- `get_guide("tracker-conventions")` § Bug files — the archive trigger
-- `docs/RELEASE.md` — cherry-pick vs fast-forward
-
+- `CLAUDE.md` § Bug Tracking — the pending-master-SHA rule and the two promotion paths.
+- `get_guide("tracker-conventions")` § Bug files — the archive trigger.
+- `docs/RELEASE.md` — cherry-pick vs fast-forward.
+- [2026-08-19 run_command rewrites pipes inside heredoc content](2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md) — surfaced by this pass; would have written 53 broken resolution commands.
+- [2026-08-18 qualified citation silently truncated past 31 chars](archive/2026-08-18-qualified-citation-silently-truncated-when-file-stem-exceeds-31-chars.md) — sibling positional-identity failure, on the citation qualifier rather than the fix pointer.

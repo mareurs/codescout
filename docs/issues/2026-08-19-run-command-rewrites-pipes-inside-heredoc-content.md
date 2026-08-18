@@ -94,7 +94,5 @@ Option 2 is cheap and removes the whole class for the common case.
 
 ## References
 
-- `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md` — sibling
-- `docs/issues/2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md` — the pass
-  during which this surfaced
-
+- [2026-08-16 run_command backticks substituted in a quoted message](2026-08-16-run-command-backticks-substituted-in-quoted-message.md) — sibling defect, same root: `run_command` transforming shell metacharacters that are content rather than command structure.
+- [2026-08-19 archived fix SHAs orphan when experiments rebases](2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md) — the 53-file pass during which this surfaced.
