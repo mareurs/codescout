@@ -30,6 +30,12 @@ pub struct Entry {
 #[derive(Debug, Clone)]
 pub struct Rendezvous {
     path: Option<PathBuf>,
+    /// Last mtime we parsed at. `None` ⇒ never read.
+    last_mtime: Option<std::time::SystemTime>,
+    /// The session we currently believe we are serving.
+    current: Option<String>,
+    /// Set once a hook has written here.
+    active: bool,
 }
 
 impl Rendezvous {
@@ -40,12 +46,23 @@ impl Rendezvous {
     /// Write this process's slot, and collect slots whose process is gone.
     /// Best-effort throughout: a failure costs the `/clear` refresh, never
     /// correctness — the idle TTL and the next restart both still work.
+    ///
+    /// `current` is seeded with the session we just wrote, which is what makes
+    /// the FIRST [`poll`](Self::poll) quiet: it re-reads the file it wrote,
+    /// finds the same session, and reports no change. Seeding it `None` instead
+    /// would re-arm the ledger on every server start.
     pub fn publish(dir: Option<PathBuf>, session: Option<&str>) -> Self {
+        let inert = || Self {
+            path: None,
+            last_mtime: None,
+            current: None,
+            active: false,
+        };
         let Some(dir) = dir else {
-            return Self { path: None };
+            return inert();
         };
         if std::fs::create_dir_all(&dir).is_err() {
-            return Self { path: None };
+            return inert();
         }
         gc(&dir);
         let pid = std::process::id();
@@ -62,17 +79,66 @@ impl Rendezvous {
         let path = dir.join(format!("{pid}.json"));
         match serde_json::to_string(&entry) {
             Ok(json) => match crate::util::fs::write_utf8(&path, &json) {
-                Ok(()) => Self { path: Some(path) },
+                Ok(()) => Self {
+                    path: Some(path),
+                    last_mtime: None,
+                    current: entry.session,
+                    active: false,
+                },
                 Err(e) => {
                     tracing::debug!("rendezvous publish failed ({}): {e}", path.display());
-                    Self { path: None }
+                    inert()
                 }
             },
             Err(e) => {
                 tracing::debug!("rendezvous serialize failed: {e}");
-                Self { path: None }
+                inert()
             }
         }
+    }
+
+    /// Has a companion hook written into our slot?
+    ///
+    /// Phase C gates its re-arm predicate on this: without a rendezvous the
+    /// server cannot detect a conversation change, so the blunt
+    /// clear-on-every-activate behaviour has to stay. Shipping the precise
+    /// predicate ungated would remove the accidental mitigation for `/clear`
+    /// without supplying the real one. Public — and covered by this module's
+    /// own tests — ahead of that consumer, deliberately.
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Returns the new session id ONLY when it changed.
+    ///
+    /// Called on every guide-eligible request, so the unchanged path must stay
+    /// cheap: one `metadata` call, and no read or parse unless the mtime moved.
+    /// That is a cost budget, not an optimisation.
+    ///
+    /// Every I/O or parse failure yields `None` — a missing, truncated or
+    /// corrupt slot costs the `/clear` refresh, never correctness.
+    pub fn poll(&mut self) -> Option<String> {
+        let path = self.path.as_deref()?;
+        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+        if self.last_mtime == Some(mtime) {
+            return None;
+        }
+        self.last_mtime = Some(mtime);
+        let entry: Entry = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())?;
+        if entry.hook_at.is_some() {
+            self.active = true;
+        }
+        let session = entry.session?;
+        // A repeated stamp of the SAME session must be silent: every
+        // `SessionStart` stamps, `resume` included, and re-arming there would
+        // punish resuming a conversation.
+        if self.current.as_deref() == Some(session.as_str()) {
+            return None;
+        }
+        self.current = Some(session.clone());
+        Some(session)
     }
 }
 
@@ -368,5 +434,118 @@ mod tests {
             dir.path().join(format!("{dead}.txt")).exists(),
             "a numeric-stemmed but non-.json file must be left alone, even for a dead pid"
         );
+    }
+
+    /// Rewrite an entry the way the companion hook does: new session, hook_at set.
+    fn stamp_as_hook(path: &std::path::Path, session: &str) {
+        stamp_as_hook_at(path, session, 2_000_000_000);
+    }
+
+    /// `stamp_as_hook` with an explicit mtime, so a test can hold the mtime
+    /// still while changing the bytes underneath it.
+    fn stamp_as_hook_at(path: &std::path::Path, session: &str, mtime_secs: i64) {
+        let mut e: Entry = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        e.session = Some(session.to_string());
+        e.hook_at = Some(chrono::Utc::now());
+        std::fs::write(path, serde_json::to_string(&e).unwrap()).unwrap();
+        // mtime resolution is coarse on some filesystems; make the change visible
+        // deterministically rather than by sleeping.
+        filetime::set_file_mtime(path, filetime::FileTime::from_unix_time(mtime_secs, 0)).unwrap();
+    }
+
+    #[test]
+    fn poll_reports_a_session_written_by_the_hook() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("old"));
+        stamp_as_hook(r.path().unwrap(), "new");
+        assert_eq!(r.poll().as_deref(), Some("new"));
+        assert!(r.is_active(), "a hook stamp activates the rendezvous");
+    }
+
+    #[test]
+    fn poll_returns_none_when_nothing_changed() {
+        // Kills a mutation that re-arms on every call — which would wipe the
+        // ledger continuously and defeat the entire feature while looking fine.
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("old"));
+        stamp_as_hook(r.path().unwrap(), "new");
+        assert_eq!(r.poll().as_deref(), Some("new"));
+        assert_eq!(
+            r.poll(),
+            None,
+            "a second poll with no new write must be quiet"
+        );
+    }
+
+    #[test]
+    fn poll_ignores_a_stamp_repeating_the_session_we_already_have() {
+        // Every SessionStart stamps, including `resume` on an unchanged
+        // conversation. Re-arming there would punish resuming a session.
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("same"));
+        stamp_as_hook(r.path().unwrap(), "same");
+        assert_eq!(r.poll(), None);
+    }
+
+    #[test]
+    fn poll_does_not_re_read_when_the_mtime_is_unchanged() {
+        // The mtime check is a COST BUDGET, not an optimisation: `poll` runs on
+        // every guide-eligible request, so the unchanged path must be one
+        // `metadata` call with no read and no parse.
+        //
+        // Proven by making the file LIE: a third session id written back under
+        // the mtime we already recorded must stay invisible. Nothing else in
+        // this file kills a dropped short-circuit — the other tests all end in
+        // `None` either way, because a re-read finds the same session.
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("old"));
+        stamp_as_hook(r.path().unwrap(), "new");
+        assert_eq!(r.poll().as_deref(), Some("new"));
+
+        stamp_as_hook_at(r.path().unwrap(), "newer", 2_000_000_000);
+        assert_eq!(
+            r.poll(),
+            None,
+            "an unchanged mtime must short-circuit BEFORE the read"
+        );
+    }
+
+    #[test]
+    fn an_unstamped_entry_is_not_active_and_polls_quiet() {
+        // The no-companion path. Must degrade, never mis-fire.
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("s"));
+        assert!(!r.is_active());
+        assert_eq!(r.poll(), None);
+        // AFTER the poll too: `active` is only ever written inside `poll`, so a
+        // pre-poll assertion alone cannot see an unconditional `active = true`
+        // there — measured, not assumed (mutation M2b stayed green without this
+        // line). Phase C gates its re-arm predicate on `is_active`, so a slot
+        // that no hook ever touched reporting `true` would hand Phase C a
+        // rendezvous it does not have.
+        assert!(
+            !r.is_active(),
+            "reading an entry no hook has stamped must not activate it"
+        );
+    }
+
+    #[test]
+    fn a_path_less_rendezvous_polls_quiet_and_is_never_active() {
+        // No servers dir (or a publish failure) ⇒ the server simply never learns
+        // about a conversation change. The anonymous-tier idle TTL is what
+        // catches `/clear` then, one interval late.
+        let mut r = Rendezvous::publish(None, Some("s"));
+        assert!(!r.is_active());
+        assert_eq!(r.poll(), None);
+    }
+
+    #[test]
+    fn a_corrupt_or_deleted_entry_polls_quiet_rather_than_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("s"));
+        std::fs::write(r.path().unwrap(), "{{{{").unwrap();
+        assert_eq!(r.poll(), None);
+        std::fs::remove_file(r.path().unwrap()).unwrap();
+        assert_eq!(r.poll(), None);
     }
 }

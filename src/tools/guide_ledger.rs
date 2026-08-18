@@ -187,6 +187,41 @@ impl GuideLedger {
         }
     }
 
+    /// Point this ledger at a different conversation, discarding everything the
+    /// old one held. A new conversation holds nothing, so the re-arm is TOTAL —
+    /// the surgical twin is [`re_arm`](Self::re_arm), not this.
+    ///
+    /// The old session's file is left alone: it may still belong to a live
+    /// sibling process, and the 35-day GC collects it otherwise. Nothing is
+    /// persisted here either — [`persist`](Self::persist) on an empty map
+    /// DELETES the file, which on the freshly-adopted path would wipe the
+    /// incoming conversation's own ledger. The first `insert` writes it.
+    ///
+    /// An anonymous ledger has no path and stays path-less. Claude Code before
+    /// v2.1.154 runs the companion hook but does not set
+    /// `CLAUDE_CODE_SESSION_ID`, so the env chain yields `Anonymous` while a
+    /// session id still arrives through the rendezvous. Promoting
+    /// anonymous → keyed here would mean running GC and load against a
+    /// directory this process already decided not to touch; the session change
+    /// still re-arms correctly, and only cross-restart persistence is missing —
+    /// which that Claude Code version never had.
+    pub fn rekey(&mut self, session: &str) {
+        // Computed before the assignment: `self.path` is borrowed to reach its
+        // parent, and the borrow must end before the write.
+        let repointed = self
+            .path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|dir| dir.join(format!("{}.json", sanitize(session))));
+        if repointed.is_some() {
+            self.path = repointed;
+        }
+        self.emitted.clear();
+        // Notices re-arm with the guides, for the same reason `clear` re-arms
+        // them: the model on the other end has never been told.
+        self.notices.clear();
+    }
+
     /// Forget the named topics so they inject again, leaving every other topic
     /// in place. This is the surgical twin of [`clear`](Self::clear): a project
     /// switch re-teaches only the project-scoped guide, not the tool-contract
@@ -945,5 +980,113 @@ mod tests {
             reloaded.is_empty(),
             "a reloaded empty ledger must re-fire the opener"
         );
+    }
+
+    #[test]
+    fn rekey_repoints_the_path_and_forgets_every_topic() {
+        // A new conversation holds nothing, so the re-arm is TOTAL — not the
+        // surgical `re_arm(&[...])` a project switch uses.
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = GuideLedger::load("conv-a", Some(dir.path().to_path_buf()));
+        l.insert("librarian".to_string());
+        l.insert("progressive-disclosure".to_string());
+        assert!(dir.path().join("conv-a.json").exists());
+
+        l.rekey("conv-b");
+
+        assert!(l.is_empty(), "a new conversation holds nothing");
+        assert!(!l.contains("librarian"));
+        assert!(!l.contains("progressive-disclosure"));
+        assert_eq!(
+            l.path_for_test(),
+            Some(dir.path().join("conv-b.json").as_path()),
+            "storage repoints at the new conversation"
+        );
+        assert!(
+            dir.path().join("conv-a.json").exists(),
+            "the old session's file is left alone: it may still belong to a live \
+             sibling process, and the 35-day GC collects it otherwise"
+        );
+    }
+
+    #[test]
+    fn rekey_does_not_persist_over_the_new_sessions_file() {
+        // `persist()` on an empty map DELETES the file. Calling it from `rekey`
+        // would wipe the incoming conversation's own ledger — which may belong
+        // to a sibling process that is still serving it.
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = GuideLedger::load("conv-a", Some(dir.path().to_path_buf()));
+        std::fs::write(
+            dir.path().join("conv-b.json"),
+            r#"{"librarian":"2026-08-18T00:00:00Z"}"#,
+        )
+        .unwrap();
+        l.insert("librarian".to_string());
+
+        l.rekey("conv-b");
+
+        assert!(
+            dir.path().join("conv-b.json").exists(),
+            "rekey must not write (and therefore must not delete) the new key's file"
+        );
+    }
+
+    #[test]
+    fn rekey_clears_notices_so_the_new_conversation_is_told_again() {
+        // Notices are one-shot per conversation, like guides. A conversation
+        // that has never been told must be told — `clear` re-arms them for the
+        // same reason, and `rekey` is the stronger event.
+        let mut l = GuideLedger::default();
+        assert!(l.notice_once("worktree-read-root"));
+        assert!(!l.notice_once("worktree-read-root"));
+
+        l.rekey("conv-b");
+
+        assert!(
+            l.notice_once("worktree-read-root"),
+            "a new conversation has never been told"
+        );
+    }
+
+    #[test]
+    fn rekey_on_an_anonymous_ledger_clears_state_and_stays_path_less() {
+        // Claude Code before v2.1.154 runs the companion hook but does not set
+        // CLAUDE_CODE_SESSION_ID, so the env chain yields Anonymous while a
+        // session id still arrives through the rendezvous. Promoting
+        // anonymous -> keyed here would mean running GC and load against a
+        // directory this process already decided not to touch, so the ledger
+        // re-arms in memory and stays ephemeral. Only cross-restart persistence
+        // is missing, which that Claude Code version never had.
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("librarian".to_string());
+        assert!(l.notice_once("worktree-read-root"));
+
+        l.rekey("conv-b");
+
+        assert!(l.is_empty(), "the session change still re-arms every topic");
+        assert!(l.notice_once("worktree-read-root"));
+        assert!(
+            l.path_for_test().is_none(),
+            "an anonymous ledger stays path-less"
+        );
+    }
+
+    #[test]
+    fn rekey_sanitizes_the_session_id_it_is_handed() {
+        // The id arrives from a file some other process wrote, so it is exactly
+        // as untrusted as the env value `load` already sanitizes. Without the
+        // sanitize the ledger would escape its own directory.
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = GuideLedger::load("conv-a", Some(dir.path().to_path_buf()));
+
+        l.rekey("../../escape");
+
+        let p = l.path_for_test().expect("still keyed");
+        assert_eq!(
+            p.parent(),
+            Some(dir.path()),
+            "a sanitized basename cannot escape the ledger directory"
+        );
+        assert_eq!(p.file_name().unwrap(), "______escape.json");
     }
 }

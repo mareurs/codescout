@@ -181,8 +181,10 @@ pub struct CodeScoutServer {
     session_key: crate::tools::session_key::SessionKey,
     /// Pid-keyed rendezvous slot published at construction so a companion hook
     /// can stamp a fresh conversation id into an already-running server.
-    #[expect(dead_code, reason = "read by task 5 of guide-ledger-phase-b-identity")]
-    rendezvous: crate::tools::rendezvous::Rendezvous,
+    ///
+    /// Behind a `Mutex` because [`Rendezvous::poll`] memoizes the last mtime it
+    /// parsed at, and the request path only ever holds `&self`.
+    rendezvous: Arc<parking_lot::Mutex<crate::tools::rendezvous::Rendezvous>>,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
@@ -380,8 +382,9 @@ impl CodeScoutServer {
         let servers_dir = env.servers_dir.clone().or_else(|| {
             crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("servers"))
         });
-        let rendezvous =
-            crate::tools::rendezvous::Rendezvous::publish(servers_dir, session_key.id());
+        let rendezvous = Arc::new(parking_lot::Mutex::new(
+            crate::tools::rendezvous::Rendezvous::publish(servers_dir, session_key.id()),
+        ));
         let idle_ttl = env.guide_idle_ttl.unwrap_or(std::time::Duration::from_secs(
             crate::tools::guide_ledger::DEFAULT_IDLE_TTL_SECS,
         ));
@@ -807,6 +810,45 @@ impl CodeScoutServer {
             .await
     }
 
+    /// Notice a conversation change stamped into our rendezvous slot, and re-arm
+    /// the guide ledger for the new conversation.
+    ///
+    /// This is the `/clear` fix: Claude Code mints a new conversation id WITHOUT
+    /// respawning the MCP subprocess, so the server keeps serving the new
+    /// conversation under the old key and suppresses guides it should re-send.
+    /// The server has to be *told*, and the companion hook is what tells it.
+    /// docs/issues/2026-08-18-clear-leaves-mcp-session-id-stale.md
+    ///
+    /// Called from `call_tool_inner`, which is the single production funnel for
+    /// every tool call — MCP requests and peer-served ones alike (see
+    /// [`call_tool_by_name`](Self::call_tool_by_name)) — and therefore covers
+    /// every guide-eligible request, since `Tool::call_content` (where guide
+    /// delivery is decided) has no other production caller.
+    ///
+    /// Agent-agnostic: with no companion hook installed nothing ever stamps the
+    /// slot, [`Rendezvous::poll`] stays quiet forever, and the anonymous-tier
+    /// idle TTL is what eventually catches `/clear` — one interval late. The
+    /// companion *adds* enforcement; the server degrades without it.
+    fn poll_rendezvous(&self) {
+        // Two independent mutexes, never held together: the rendezvous guard is
+        // a temporary and drops at the end of this statement.
+        let changed = self.rendezvous.lock().poll();
+        if let Some(session) = changed {
+            tracing::info!(
+                session = %session,
+                "conversation changed via the rendezvous slot; re-arming the guide ledger"
+            );
+            self.guide_hints_emitted.lock().rekey(&session);
+        }
+    }
+
+    /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
+    /// call through the whole request path.
+    #[cfg(test)]
+    pub(crate) fn rendezvous_poll_for_test(&self) {
+        self.poll_rendezvous();
+    }
+
     /// Core tool dispatch, separated from the MCP trait method so tests can
     /// call it without constructing a `RequestContext`.
     ///
@@ -870,6 +912,14 @@ impl CodeScoutServer {
         {
             return Ok(err);
         }
+
+        // Before the ledger this request will consult: a `/clear` mints a new
+        // conversation id without respawning us, so the ledger has to be
+        // re-armed for it here rather than at construction.
+        // Before the ledger this request will consult: a `/clear` mints a new
+        // conversation id without respawning us, so the ledger has to be
+        // re-armed for it here rather than at construction.
+        self.poll_rendezvous();
 
         let mut ctx = self.build_context(progress, peer);
         ctx.workspace_override = workspace_override;
@@ -4757,6 +4807,171 @@ mod guide_hint_tests {
         assert!(
             !server3.guide_hints_emitted.lock().contains("librarian"),
             "a different session must not inherit another session's ledger"
+        );
+    }
+
+    #[tokio::test]
+    /// A new conversation holds nothing, so a session change re-arms the WHOLE
+    /// ledger — not just the project-scoped topic. This is the `/clear` fix:
+    /// docs/issues/2026-08-18-clear-leaves-mcp-session-id-stale.md.
+    ///
+    /// No `#[serial]`, no `set_var`: session id and directories are INJECTED.
+    async fn session_change_rearms_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let servers = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            servers_dir: Some(servers.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("progressive-disclosure".to_string());
+
+        // The companion hook stamps our slot with a DIFFERENT conversation.
+        let slot = servers.path().join(format!("{}.json", std::process::id()));
+        let mut entry: crate::tools::rendezvous::Entry =
+            serde_json::from_str(&std::fs::read_to_string(&slot).unwrap()).unwrap();
+        entry.session = Some("conv-B".to_string());
+        entry.hook_at = Some(chrono::Utc::now());
+        std::fs::write(&slot, serde_json::to_string(&entry).unwrap()).unwrap();
+        // Deterministic rather than sleep-dependent: `poll` short-circuits on an
+        // unchanged mtime, and mtime resolution is coarse on some filesystems.
+        filetime::set_file_mtime(&slot, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+
+        server.rendezvous_poll_for_test();
+
+        let ledger = server.guide_hints_emitted.lock();
+        assert!(
+            !ledger.contains("librarian"),
+            "a new conversation re-arms every topic"
+        );
+        assert!(
+            !ledger.contains("progressive-disclosure"),
+            "re-arm must be total, not just the project-scoped topic"
+        );
+        // Storage has to follow the conversation too. A plain `clear()` here
+        // would look identical to the two assertions above while leaving the
+        // ledger writing conv-B's topics into conv-A's file — which is the
+        // "degrade to SUPPRESSING" direction: resuming conv-A would then find
+        // guides marked delivered that it never received.
+        assert_eq!(
+            ledger.path_for_test(),
+            Some(dir.path().join("guide_hints").join("conv-B.json").as_path()),
+            "the ledger must repoint at the new conversation's file"
+        );
+    }
+
+    #[tokio::test]
+    /// The Agent-Agnostic half of the contract: with no companion hook writing
+    /// into the slot, the server must NOT re-arm. Guides stay suppressed for the
+    /// conversation that already received them, and the anonymous-tier idle TTL
+    /// is what eventually catches `/clear` — one interval late.
+    ///
+    /// Kills a mutation that re-arms on every poll, which no assertion in
+    /// `session_change_rearms_everything` can see.
+    async fn an_unstamped_slot_leaves_the_ledger_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let servers = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            servers_dir: Some(servers.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        server.rendezvous_poll_for_test();
+        server.rendezvous_poll_for_test();
+
+        assert!(
+            server.guide_hints_emitted.lock().contains("librarian"),
+            "no hook stamp ⇒ no re-arm; the server must not depend on the companion"
+        );
+    }
+
+    #[tokio::test]
+    /// The wiring itself: an ordinary tool call must poll the rendezvous.
+    ///
+    /// The two tests above drive `poll_rendezvous` directly, so deleting the
+    /// call from `call_tool_inner` — which is the entire point of the task —
+    /// leaves both of them green. This one goes through the real request path,
+    /// the same funnel MCP requests and peer-served calls both use.
+    async fn a_tool_call_polls_the_rendezvous_and_re_arms() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let servers = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            servers_dir: Some(servers.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        server
+            .guide_hints_emitted
+            .lock()
+            .insert("librarian".to_string());
+
+        let slot = servers.path().join(format!("{}.json", std::process::id()));
+        let mut entry: crate::tools::rendezvous::Entry =
+            serde_json::from_str(&std::fs::read_to_string(&slot).unwrap()).unwrap();
+        entry.session = Some("conv-B".to_string());
+        entry.hook_at = Some(chrono::Utc::now());
+        std::fs::write(&slot, serde_json::to_string(&entry).unwrap()).unwrap();
+        filetime::set_file_mtime(&slot, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+
+        let result = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+        assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+
+        assert!(
+            !server.guide_hints_emitted.lock().contains("librarian"),
+            "a tool call must poll the rendezvous and re-arm for the new conversation"
         );
     }
 
