@@ -344,3 +344,20 @@ on its own evidence rather than being folded in here.
   four-protection asymmetry on the params surface
 - `docs/trackers/2026-08-15-tool-usage-investigation.md` — the twin-tool defect class
 - `docs/trackers/open-issue-work-queue.md` — BL-21
+
+## Fix provenance
+
+- **SHA:** `a9a397a9` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `86dd5eae7995d05566b55f7b17abdac4cccb8d17` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 86dd5eae7995 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -111,3 +111,20 @@ line in `## Fix` with the master SHA and `git mv` this file to
 - `src/platform/windows.rs` (`lsp_binary_name`, `find_on_path`)
 - `src/lsp/client.rs:362-379` (spawn site)
 - `src/lsp/servers/mod.rs:23-30` (python LspServerConfig)
+
+## Fix provenance
+
+- **SHA:** `0930e3a6fc03` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `0154d92a312c8c9dccd6c0cfa3d48ac141492f4f` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 0154d92a312c /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

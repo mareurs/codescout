@@ -243,3 +243,20 @@ no second SHA to record.
 - `docs/trackers/windows-platform-support.md` § History 2026-08-18 — the measured divergence.
 - `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` —
   the sibling that found it, and whose step 4 nearly published from the stale side.
+
+## Fix provenance
+
+- **SHA:** `87f3b936` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4b01d47f3a38339d78c50c0ee56d0e775d59f9b2` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 4b01d47f3a38 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

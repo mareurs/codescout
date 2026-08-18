@@ -136,3 +136,20 @@ Fixed. Remaining: (1) live verify after `/mcp` reconnect — activate two kotlin
 - `src/lsp/servers/mod.rs:62-63` (fixed shared system-path + GRADLE_USER_HOME)
 - `docs/manual/src/concepts/kotlin-lsp-multiplexer.md` (§ Gradle Isolation — see R-11 gap)
 - Recon: `docs/trackers/reconnaissance-patterns.md` R-11
+
+## Fix provenance
+
+- **SHA:** `5436d06e` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `f26c428331b4744716dbf22d29fa2a063b1997f5` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep f26c428331b4 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

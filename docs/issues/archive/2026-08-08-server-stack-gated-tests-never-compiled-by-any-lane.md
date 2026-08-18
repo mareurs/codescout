@@ -168,3 +168,20 @@ harder than it looks and was not bundled here.
 - `Cargo.toml:198` — `server-stack = ["dep:qdrant-client"]`
 - `tests/retrieval_unit.rs` — `payload_roundtrip_preserves_fields`, the gated casualty
 - `src/retrieval/payload.rs` — `payload_to_map` / `map_to_payload`, gated and uncovered
+
+## Fix provenance
+
+- **SHA:** `cb96aa47` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `08023a852768b7472c7d2aca244811b4c3169991` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 08023a852768 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

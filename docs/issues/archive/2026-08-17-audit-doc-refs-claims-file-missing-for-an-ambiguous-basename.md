@@ -353,3 +353,20 @@ catch-up fixes, and one table would have caught every one of them.
 - `docs/issues/archive/2026-05-17-audit-doc-refs-basename-false-positives.md` — where
   `AmbiguousBasename` came from
 - `docs/trackers/tracker-hygiene-log.md` — HY-6 (`degraded` flag, same file), HY-13
+
+## Fix provenance
+
+- **SHA:** `201628f9` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `675d51e6d33f8f3f98ca56b60f9f51ef9209843f` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 675d51e6d33f /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

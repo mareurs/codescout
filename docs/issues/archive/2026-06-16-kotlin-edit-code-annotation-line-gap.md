@@ -194,3 +194,20 @@ first place.)
 - `src/tools/symbol/edit_code.rs` — `do_insert` (the "after" refuse path)
 - docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md (backtick normalization, prior layer)
 - docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md (sibling Kotlin AST issue)
+
+## Fix provenance
+
+- **SHA:** `eca9902ec3f3` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `323a61454a95839a3a298ca7995ec0d64da1e5a8` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 323a61454a95 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -309,3 +309,20 @@ Not yet cherry-picked to `master`.
   pin mis-routed structural inserts to the main repo instead of the worktree
   on all four implementer dispatches... each self-caught via git status and
   reverted cleanly."
+
+## Fix provenance
+
+- **SHA:** `3fca32db` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `9f7ccfbc9a9f456d6ef7018c007b09107124bffd` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 9f7ccfbc9a9f /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

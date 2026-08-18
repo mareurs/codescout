@@ -211,3 +211,20 @@ outstanding item.
   that makes CodeRankEmbed Q4_K_M the champion (37) and pins no-prefix as default
 - `.gitignore` — `/models/` added this session; the directory holds ~870 MB and
   was previously untracked-but-committable
+
+## Fix provenance
+
+- **SHA:** `52fcaf0118d9` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `ec239e797ea2e38659f06626176af3b0fbc170ce` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep ec239e797ea2 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

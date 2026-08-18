@@ -275,3 +275,20 @@ searching for a stray entry in those lists is the tell, not `grep '^- '`.
 - `src/tools/markdown/edit_markdown.rs:821-875` — `apply_frontmatter_mutation`, the caller
 - `src/librarian/frontmatter.rs` — the writer that produces the block sequences this breaks on
 - Occurrence: relocating `researcher/docs/issues/2026-07-27-researcher-rerank-score-scale-mismatch.md`
+
+## Fix provenance
+
+- **SHA:** `1a1f2c82` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `72a772ca7db3f0698bdd4e25088959121fe924e4` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 72a772ca7db3 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -225,3 +225,20 @@ branch, behaving as designed.
 - `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md` — BL-23, the repair this is a defect in
 - `src/librarian/frontmatter.rs:180-185` — `update_in_place`
 - `src/librarian/tools/mv.rs` — `repair_frontmatter_id`, the shared helper both callers use
+
+## Fix provenance
+
+- **SHA:** `858f22ec` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `cff60f0c64369d4ad8f9a8831abf9e20145c2b8c` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep cff60f0c6436 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

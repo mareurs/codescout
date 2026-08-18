@@ -143,3 +143,20 @@ Fix + regression tests landed and verified in the working tree. Next: commit on 
 - Surfaced by `/analyze-usage` on MRV-poc; see `docs/usage-reports/2026-07-01-usage-analysis.md`.
 - Prior json_path bugs (different facets): `docs/issues/2026-05-09-read-file-json-path-array-elements.md`, `docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md`
 - Parser: `src/tools/file_summary/file_summary.rs:485` (`parse_json_path_segments`), `:520` (`parse_bracket`)
+
+## Fix provenance
+
+- **SHA:** `a751457b8404` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `54ed5c101061966e4270241c066af70de8d7310d` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 54ed5c101061 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

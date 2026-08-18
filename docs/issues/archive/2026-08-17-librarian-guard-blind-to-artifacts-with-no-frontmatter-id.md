@@ -260,3 +260,20 @@ One follow-up, filed separately rather than folded in:
 auto-injects on the first `artifact` call of every session, so the disproved advice sits on
 a louder surface than the retraction. With this fix shipped, the correct advice is *declare
 `entry_prefix`*.
+
+## Fix provenance
+
+- **SHA:** `9ac00440` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4e15440ec4dfdcd95ce5b9d5c623e95b8a27792f` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 4e15440ec4df /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

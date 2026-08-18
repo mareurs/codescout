@@ -148,3 +148,20 @@ pinning.
 - `docs/manual/src/concepts/kotlin-lsp-multiplexer.md` (mux concurrency claims)
 - `src/lsp/mux/mod.rs:14,20` (per-path mux keying — drives the LSP-churn secondary effect)
 - Recon: `docs/trackers/reconnaissance-patterns.md` R-11 (doc-vs-reality gaps)
+
+## Fix provenance
+
+- **SHA:** `5436d06e` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `f26c428331b4744716dbf22d29fa2a063b1997f5` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep f26c428331b4 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

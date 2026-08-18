@@ -443,3 +443,20 @@ their own, indexed, then search one for a symbol that exists only in the other.
 - `docs/conventions/test-env-isolation.md` — option A doctrine; option B is banned
 - `docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md` — same class, lock files
 - `docs/issues/2026-07-XX` sibling: `/tmp` probe rows leaking into the shared global catalog
+
+## Fix provenance
+
+- **SHA:** `6e1fa4fa` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `19cb71bb316fb48ef8380634732aa1a766898459` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 19cb71bb316f /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

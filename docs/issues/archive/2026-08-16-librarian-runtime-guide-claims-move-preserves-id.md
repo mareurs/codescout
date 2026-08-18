@@ -197,3 +197,20 @@ the next build.
 - `docs/issues/archive/2026-08-15-iron-laws-detail-guide-claims-cat-on-source-is-allowed.md` (B-9, same shape)
 - `docs/trackers/reconnaissance-patterns.md` § R-89 (build/process freshness)
 - commit `2d8c7f39` — the three-of-four correction that motivated this file
+
+## Fix provenance
+
+- **SHA:** `2d8c7f39` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `02d35a27b9e6baada8d5a07cc47a5c19fef8d546` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 02d35a27b9e6 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -203,3 +203,20 @@ twice.
 - `docs/issues/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md` — the native-Windows failures, possibly the same root cause
 - `docs/trackers/windows-platform-support.md` — WIN-N issue index
 - CI run: https://github.com/mareurs/codescout/actions/runs/30852803569
+
+## Fix provenance
+
+- **SHA:** `7938d68b` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `29abeee1494bbeec1c5ece4421adf94078ce903f` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 29abeee1494b /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

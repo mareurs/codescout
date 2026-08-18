@@ -267,3 +267,20 @@ a hidden directory still returns empty. If that becomes worth changing it is a b
   sibling false-negative, same defect class
 - `docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md` — the session this
   surfaced in
+
+## Fix provenance
+
+- **SHA:** `3bfa4025` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `d8394178dbc6fb41f641a2cccef987304b183baf` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep d8394178dbc6 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

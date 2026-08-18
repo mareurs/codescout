@@ -87,3 +87,20 @@ Concrete next action: in `codescout-embed`, trace the `embed_batch` (or equivale
 - Defensive fix commit: `d482ca8a` on `experiments`.
 - Related: bug-tracker.md #5 (UNIQUE constraint), #7 (cascade-delete data loss) — same commit fixes all three reindex failure modes.
 - Upstream investigation: open in `codescout-embed` crate.
+
+## Fix provenance
+
+- **SHA:** `d482ca8a` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `64437a0708a58f3cf8bfca23dda720b0fb97cb2c` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 64437a0708a5 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -182,3 +182,20 @@ slot is the canonical verification path for symbol_lsp tests.
   - `docs/issues/2026-05-24-ci-rust-analyzer-missing.md` (fixed
     `621732a6` — added rust-analyzer component; other LSPs were not
     addressed)
+
+## Fix provenance
+
+- **SHA:** `4e475bad` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `cfb31d2dffcc4e527866d1722baa30796ad6d213` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep cfb31d2dffcc /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

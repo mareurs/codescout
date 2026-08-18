@@ -253,3 +253,20 @@ build rendered `5 matches in 5 files` / `Showing 5 of 5 matches across 5 files.`
 
 - `docs/trackers/bistriceanu/index.md` § B-5
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — overflow-hint contract (Pattern 1: concrete + copy-paste-ready)
+
+## Fix provenance
+
+- **SHA:** `4b77dff5` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `94060caafbba9983dd860c939c42628de4d00755` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 94060caafbba /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

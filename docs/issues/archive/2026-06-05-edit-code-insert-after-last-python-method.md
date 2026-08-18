@@ -202,3 +202,20 @@ fix is at the three call sites.
 - `src/symbol/edit.rs::clamp_range_to_parent` — shared replace-path clamp (potential same off-by-one, untested).
 - `docs/issues/archive/2026-05-02-edit-code-insert-mid-function.md` — sibling bug, distinct mechanism (Rust, AST-fail → refusal).
 - MRV-poc usage analysis that surfaced this: `docs/usage-reports/2026-06-05-usage-analysis-mrv-poc.md`.
+
+## Fix provenance
+
+- **SHA:** `c99d4228e42f` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `c433d6895de5606f7b0026ca5de48ad16d5593c7` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep c433d6895de5 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

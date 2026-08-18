@@ -282,3 +282,20 @@ the helper works, not that anything uses it.
 - `docs/issues/archive/2026-06-04-edit-file-old-string-miss-no-closest-match.md` — the precedent that a
   bare rejection is a defect when the tool holds what the caller needs
 - `docs/issues/archive/2026-07-10-artifact-filter-inversion-misleading-hint.md` — fixed; why the `eq` rows are excluded
+
+## Fix provenance
+
+- **SHA:** `99fa967f` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `e8bb1dfad8db671c4a152454fd75fcb22beabd45` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep e8bb1dfad8db /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

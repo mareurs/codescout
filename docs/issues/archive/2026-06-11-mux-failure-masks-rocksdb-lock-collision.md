@@ -485,3 +485,20 @@ contend. Two candidate additions were evaluated against the change-scenario test
   `docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md` (multi-instance shared home).
 - NOTE: CLAUDE.md cites `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`, which does
   not exist at that path (doc-ref drift — flag for `audit_doc_refs`).
+
+## Fix provenance
+
+- **SHA:** `b2115c4f` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `307b6a0c3462ed4485df3fb802288a9a99552d67` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 307b6a0c3462 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

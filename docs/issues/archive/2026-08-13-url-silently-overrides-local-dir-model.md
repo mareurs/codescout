@@ -274,3 +274,20 @@ guard widens without that provenance — which is the intended tripwire, not an 
 - `tests/cli_artifact.rs:18-24` — prior art documenting the dotenv trap
 - `docs/trackers/local-onnx-embedding-session-log.md` — F-1 / W-2, the guard-unbound pattern
 - `docs/superpowers/specs/2026-08-11-local-onnx-embedding-query-path-design.md` — Approach A
+
+## Fix provenance
+
+- **SHA:** `6e1fa4fa` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `19cb71bb316fb48ef8380634732aa1a766898459` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 19cb71bb316f /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

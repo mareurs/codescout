@@ -166,3 +166,20 @@ N/A — fixed and archived.
 - `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md` —
   the fix this field was added for, and the claim that is now half wrong
 - `docs/trackers/tracker-hygiene-log.md` — HY-12
+
+## Fix provenance
+
+- **SHA:** `dc2d1dd8` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `ce8d0d4af37812a8212f8e39ba5486248fa0abd1` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep ce8d0d4af378 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

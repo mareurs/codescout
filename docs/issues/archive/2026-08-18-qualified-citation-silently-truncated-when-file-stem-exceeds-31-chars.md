@@ -217,3 +217,20 @@ pending-master-SHA line: there is no second SHA for a later session to hunt for.
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*
 - `docs/trackers/prompt-hamsa-audit-log.md` A-27 — the citation that surfaced it
 - `docs/trackers/prompt-surface-compaction-session-log.md` — the affected ledger
+
+## Fix provenance
+
+- **SHA:** `338f8ea7` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `cf11ad85aaba64c6d6c55ef78b7989c3633a268f` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep cf11ad85aaba /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

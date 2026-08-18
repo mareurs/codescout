@@ -499,3 +499,20 @@ SHA is the master SHA — no second SHA to record.
 - `docs/issues/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md` — BL-20
 - `docs/issues/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md` — BL-21
 - `docs/trackers/open-issue-work-queue.md` — BL-22
+
+## Fix provenance
+
+- **SHA:** `a9a397a9` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `86dd5eae7995d05566b55f7b17abdac4cccb8d17` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 86dd5eae7995 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

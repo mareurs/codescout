@@ -328,3 +328,20 @@ showing that would refuse `docs/RELEASE.md` and the whole documentation set.
 - `src/util/librarian_guard.rs:31-45` — `is_librarian_artifact`
 - `docs/issues/archive/2026-08-16-edit-file-replace-all-bypasses-the-librarian-guard.md` — the coverage measurement this reframes
 - `docs/trackers/tool-usage-patterns.md` § T-22 — the session observation that surfaced it
+
+## Fix provenance
+
+- **SHA:** `29f0c015` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `c20b640347f311ff0516bde7bd5529edad95adae` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep c20b640347f3 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

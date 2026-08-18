@@ -139,3 +139,20 @@ N/A — shipped to master (`a96af3ae`) and archived to `docs/issues/archive/`.
 - `src/librarian/tools/context.rs:11` — stale (2-element) definition
 - `docs/trackers/codescout-lessons-2026-05-20-session-log.md:581-583` — prior note on the find.rs half
 - Surfaced during 2026-05-25 brainstorm on agent-memory integration (Approach C, temporal/forgetting piece — adding `expired` to the hidden set would inherit this drift).
+
+## Fix provenance
+
+- **SHA:** `772c92b6` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `88e8229cfa6d5ea3d769647d8b8910f748fa418e` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 88e8229cfa6d /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

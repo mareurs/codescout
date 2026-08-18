@@ -112,3 +112,20 @@ family are now loud.
   same defect from the `read_file(json_path="$.body")` angle.
 - `docs/trackers/bug-fix-session-log.md` W-21 — the ID-collision incident this enables;
   failure #2 of its two-part counterfactual.
+
+## Fix provenance
+
+- **SHA:** `97a36905` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `aae3aa06cd71039abb6f8a26402c3a5bc8c281b2` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep aae3aa06cd71 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -242,3 +242,20 @@ show what the real data looks like.
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` § Pattern 1 — hints must name a usable parameter
 - PR #10 review, 2026-08-08 — surfaced by the librarian-correctness reviewer; confirmed
   here against live data rather than the 25-row test fixture
+
+## Fix provenance
+
+- **SHA:** `6f261da9` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `4323669256772174afffff114fc62c7ff0b21e4a` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 432366925677 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

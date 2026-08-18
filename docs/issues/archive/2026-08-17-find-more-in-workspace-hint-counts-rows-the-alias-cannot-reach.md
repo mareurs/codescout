@@ -229,3 +229,20 @@ expansion, which is the corrected contract.
 - `src/librarian/tools/find.rs:934-990` — the umbrella-scope test
 - `docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md` — parent bug, sub-finding #2
 - `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md` — the same alias seen from the other side (`librarian(context)` drops the alias entirely); marked `wontfix`
+
+## Fix provenance
+
+- **SHA:** `9cdb2f50` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `70ab4fdfbf6f9d4c8f13786865419d651f580585` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 70ab4fdfbf6f /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

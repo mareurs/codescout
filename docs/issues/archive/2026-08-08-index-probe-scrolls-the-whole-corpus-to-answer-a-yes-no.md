@@ -203,3 +203,20 @@ would let the cost property be asserted rather than reasoned about.
 - `src/tools/config/mod.rs:480-491` — `resolve_first_probe`, the deliberate no-cache-on-timeout
 - `src/retrieval/qdrant.rs:161-205` — `project_index_stats`, the exhaustive scroll
 - `.cargo/config.toml` — `rb = "build --release --features server-stack"`, why this ships untested
+
+## Fix provenance
+
+- **SHA:** `7c1d026e` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `0eed286c91294d12310a8dfc719781a69947342a` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 0eed286c9129 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

@@ -104,3 +104,20 @@ Update/extend the `format_read_file_*` tests in `src/tools/edit_file/tests.rs`.
 - `src/tools/read_file.rs` — `format_read_file`, line-range branch in `call`.
 - `docs/trackers/output-form-text-compaction.md` — the OutputForm::Text work that
   exposed this (`40c4b828`).
+
+## Fix provenance
+
+- **SHA:** `40c4b828` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `da4d6f29cac299759ee2d45f9c3fd7aed130aae5` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep da4d6f29cac2 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

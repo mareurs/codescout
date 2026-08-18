@@ -143,3 +143,20 @@ elapses between event_create calls. The flake is CI-specific.
 - Sibling rot surfaced same CI run:
   - `docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md`
   - `docs/issues/2026-05-24-ci-test-matrix-undercount.md` (fixed in `621732a6`)
+
+## Fix provenance
+
+- **SHA:** `621732a6` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `84376e30ca6a0ffc4c43bd0ebce4eb749797a6ec` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 84376e30ca6a /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

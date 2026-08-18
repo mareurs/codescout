@@ -118,3 +118,20 @@ Fixed on branch `experiments`, commit `d3842c7c` ("fix(librarian): honor topic o
 - `src/librarian/tools/create.rs` — `Args` struct, `call()`.
 - `src/librarian/tools/artifact.rs` — `input_schema()`.
 - `src/librarian/tools/update.rs` — where `topic` IS an accepted `patch` key (the working workaround path).
+
+## Fix provenance
+
+- **SHA:** `61a800af6570` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `8e2ef7bc84c872dc8b7fdd32f9544524d5e19637` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 8e2ef7bc84c8 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

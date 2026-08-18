@@ -64,3 +64,20 @@ N/A — fixed.
 
 - Originally tracked as **BUG-056** in `docs/TODO-tool-misbehaviors.md` (deprecated 2026-05-09; superseded by per-file system).
 - Fix commit: `e406218` on `experiments`.
+
+## Fix provenance
+
+- **SHA:** `e406218` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `0951182a71b5dca7b43bf853a1027137422cbcba` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 0951182a71b5 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

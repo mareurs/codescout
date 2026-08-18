@@ -340,3 +340,20 @@ misread-the-signal trap as the original bug.
   place, and why this went unnoticed
 - Catalog repair context: catalog was ~8 weeks stale on this machine
   (`catalog.db` is machine-local, bulk-built 2026-05-29)
+
+## Fix provenance
+
+- **SHA:** `52fcaf0118d9` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `ec239e797ea2e38659f06626176af3b0fbc170ce` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep ec239e797ea2 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

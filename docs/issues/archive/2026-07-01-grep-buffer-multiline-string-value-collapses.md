@@ -160,3 +160,20 @@ Fix + regression test landed and verified in the working tree. Next: commit on `
 - Prior variant (fixed, archived): `docs/issues/archive/2026-05-09-grep-buffer-false-negatives.md`
 - Code: `src/tools/grep.rs:456` (`grep_in_buffer`), regression test at `src/tools/grep.rs:734`
 - Progressive-disclosure buffer model: `get_guide("progressive-disclosure")`
+
+## Fix provenance
+
+- **SHA:** `a751457b8404` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `54ed5c101061966e4270241c066af70de8d7310d` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 54ed5c101061 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

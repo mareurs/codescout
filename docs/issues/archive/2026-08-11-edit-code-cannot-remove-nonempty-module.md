@@ -253,3 +253,20 @@ Three lessons, all about how this file reasoned rather than what it found:
 
 - `.superpowers/sdd/2026-08-11-local-onnx-embedding-query-path/task-7-report.md` § "Surprises / tool friction worth recording"
 - `src/retrieval/client.rs` — the file the relocation was performed on
+
+## Fix provenance
+
+- **SHA:** `138de7c5` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `1b1ea9445b01743d677128529f094cbbf98d8d07` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 1b1ea9445b01 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

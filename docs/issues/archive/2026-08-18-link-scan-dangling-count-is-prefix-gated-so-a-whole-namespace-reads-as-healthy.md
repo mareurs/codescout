@@ -252,3 +252,20 @@ Fix SHA: `ff088630`, **`experiments`** — fast-forward path, so it is already t
 - `docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`
   § Evidence *CORRECTION* — the four-ledger measurement table, and where this was first mistaken for
   a dangling population.
+
+## Fix provenance
+
+- **SHA:** `ff088630` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `dea28b059fe77ee568b7fd12e1074380ae4e85b2` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep dea28b059fe7 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

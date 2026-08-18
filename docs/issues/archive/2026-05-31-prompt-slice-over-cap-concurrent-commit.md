@@ -107,3 +107,20 @@ shared branch re-measure the slice on current HEAD.
 - `src/prompts/README.md` rule 8 — the cap-remediation discipline.
 - `docs/architecture/mcp-channel-caps.md` — why ~2 KB truncation happens.
 - Fix commit `66bfd45c`; lesson commit `92eb2a3c`.
+
+## Fix provenance
+
+- **SHA:** `b13c8c66` (master-reachable) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `9ee8bf19566169c38bd7ac856af2a864bb1d0cb0` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 9ee8bf195661 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

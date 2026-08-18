@@ -272,3 +272,20 @@ that needs a new instrument, not a re-run.
 - `66db4c70` — deleted `src/embed/index.rs`, the path that embedded the header, and its test
 - `docs/issues/2026-07-27-ast-chunker-no-minimum-chunk-size.md` — the bug whose
   "tiny chunks carry almost no retrievable signal" argument this defect compounds
+
+## Fix provenance
+
+- **SHA:** `15fa5692` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `de7015d05c220fa33c9ac400d65f5ca22190e9a4` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep de7015d05c22 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.

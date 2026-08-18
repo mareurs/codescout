@@ -113,3 +113,20 @@ Fixed on branch `experiments`, commit `a5743870` ("fix(librarian): remove phanto
 - Sibling finding from the same sweep, same root mechanism: `docs/issues/2026-07-13-artifact-create-drops-topic.md` (id `8dfa0da20703f46c`).
 - `src/librarian/tools/artifact.rs` — `input_schema()`.
 - `src/librarian/tools/update.rs` — `Args`, `UpdatePatch`, `call()`.
+
+## Fix provenance
+
+- **SHA:** `d3842c7c62de` (experiments-only) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `fd9580ed4b19c646b65453f4f6231e1402378c33` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep fd9580ed4b19 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several
+branches (cherry-pick) and any of them is the fix. Recorded 2026-08-19.
