@@ -1,12 +1,9 @@
 ---
-id: null
 kind: tracker
 status: active
 title: Artifact augmentation - followups and enhancement roadmap
-owners: []
-tags: []
-topic: null
-time_scope: null
+entry_high_water_AA: 21
+entry_prefix: AA
 ---
 
 # Artifact augmentation — followups
@@ -39,30 +36,103 @@ Skipped for now (in brainstorm but deferred):
 
 | ID | Task | Status | Phase | Notes |
 |---:|------|--------|------:|-------|
-| T-1 | Merge `feat/artifact-augmentation` → `experiments` | done | 0 | Merged 2026-05-01 as `3765e1b`. |
-| T-2 | Add `render_template` column to `artifact_augmentation` (schema v4) | done | 1 | Migration v4 in `catalog::run_migrations` (idempotent). |
-| T-3 | Add `params_schema` column (JSON Schema text) | done | 1 | Validates on both `artifact_augment` (initial) and `artifact_update_params` (merge). |
-| T-4 | Render integrated into `librarian_context` (chose embed over separate tool) | done | 1 | `tools/render.rs` + injection between `[LIVE]` header and body. |
-| T-5 | `librarian_context` uses rendered output for trackers w/ template | done | 1 | `render_template_projects_params_into_context` + error-surface test. |
-| T-6 | Spike: pick template engine (`minijinja` vs `handlebars-rust`) | done | 1 | Picked `minijinja` per user. |
-| T-7 | Tests: schema-validate-on-update, template-render, fall-through when absent | done | 1 | 287 lib tests (was 267); 20 new across `schema_validate`, `render`, `update_params`, `augment`, `context`, `catalog`. |
-| T-8 | Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface | done | 1 | Shipped as `augmentation-render-template.md`. |
-| T-9 | `artifact_refresh_stale` tool — shipped + verified | done | 2 | `crates/librarian-mcp/src/tools/refresh_stale.rs`, 6 tests. |
-| T-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | done | 3 | Detailed spec written 2026-05-02 — see Phase 3 section. |
-| T-19 | `GatherSource::ConfigValue` implementation | done | 3 | Implemented 2026-05-02 — commit `00e57f7` on `experiments`. 7 tests, TOML/YAML/JSON + git blame annotation. |
-| T-11 | `append_mode` design — where does the date come from? cap policy? | done | 4 | Detailed spec written 2026-05-02 — see Phase 4 section. |
-| T-20 | `append_mode` + history cap implementation | done | 4 | Implemented 2026-05-02 — commit `5a2797c` on `experiments`. 13 tests: catalog roundtrip, augment tool, trim_history unit (4), update integration (4), refresh hint. |
-| T-12 | `kind: experiment` schema + auto-discovery from filesystem | open | 5 |  |
-| T-13 | New tool `tracker_design` (archetype-driven) | done | 1.5 | `tools/tracker_design.rs`. |
-| T-14 | 6 archetypes: deployment_state, failure_table, metric_baseline, audit_issues, reflective, task_list | done | 1.5 | All 6 shipped. |
-| T-15 | `system_prompt` teaching markdown (archetype selection, prompt-writing, schema discipline, anti-patterns) | done | 1.5 | ~3.5KB; covers 7 steps + anti-patterns. |
-| T-16 | Inline existing-trackers list (cap 30, overflow hint) | done | 1.5 | `EXISTING_TRACKERS_CAP=30`, hint references `artifact_find`. |
-| T-17 | Tests: response structure + each archetype's example params validates against its example schema | done | 1.5 | 5 tests including self-consistency (schema↔example) and template-renders-against-example. |
-| T-18 | Register `tracker_design` in `tools/mod.rs::all_tools` + prompt-surface mention | done | 1.5 | Tool selection table row + augmentation-and-refresh section paragraph. |
-| T-21 | Guard merge-patch against unknown top-level params keys when no `params_schema` is set | open | 6 | `artifact_augment(merge=true)` silently stores unknown/new keys as dead no-ops (RFC 7396) → stranded data. See Phase 6. |
+| AA-1 | Merge `feat/artifact-augmentation` → `experiments` | done | 0 | Merged 2026-05-01 as `3765e1b`. |
+| AA-2 | Add `render_template` column to `artifact_augmentation` (schema v4) | done | 1 | Migration v4 in `catalog::run_migrations` (idempotent). |
+| AA-3 | Add `params_schema` column (JSON Schema text) | done | 1 | Validates on both `artifact_augment` (initial) and `artifact_update_params` (merge). |
+| AA-4 | Render integrated into `librarian_context` (chose embed over separate tool) | done | 1 | `tools/render.rs` + injection between `[LIVE]` header and body. |
+| AA-5 | `librarian_context` uses rendered output for trackers w/ template | done | 1 | `render_template_projects_params_into_context` + error-surface test. |
+| AA-6 | Spike: pick template engine (`minijinja` vs `handlebars-rust`) | done | 1 | Picked `minijinja` per user. |
+| AA-7 | Tests: schema-validate-on-update, template-render, fall-through when absent | done | 1 | 287 lib tests (was 267); 20 new across `schema_validate`, `render`, `update_params`, `augment`, `context`, `catalog`. |
+| AA-8 | Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface | done | 1 | Shipped as `augmentation-render-template.md`. |
+| AA-9 | `artifact_refresh_stale` tool — shipped + verified | done | 2 | `crates/librarian-mcp/src/tools/refresh_stale.rs`, 6 tests. |
+| AA-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | done | 3 | Detailed spec written 2026-05-02 — see Phase 3 section. |
+| AA-19 | `GatherSource::ConfigValue` implementation | done | 3 | Implemented 2026-05-02 — commit `00e57f7` on `experiments`. 7 tests, TOML/YAML/JSON + git blame annotation. |
+| AA-11 | `append_mode` design — where does the date come from? cap policy? | done | 4 | Detailed spec written 2026-05-02 — see Phase 4 section. |
+| AA-20 | `append_mode` + history cap implementation | done | 4 | Implemented 2026-05-02 — commit `5a2797c` on `experiments`. 13 tests: catalog roundtrip, augment tool, trim_history unit (4), update integration (4), refresh hint. |
+| AA-12 | `kind: experiment` schema + auto-discovery from filesystem | open | 5 |  |
+| AA-13 | New tool `tracker_design` (archetype-driven) | done | 1.5 | `tools/tracker_design.rs`. |
+| AA-14 | 6 archetypes: deployment_state, failure_table, metric_baseline, audit_issues, reflective, task_list | done | 1.5 | All 6 shipped. |
+| AA-15 | `system_prompt` teaching markdown (archetype selection, prompt-writing, schema discipline, anti-patterns) | done | 1.5 | ~3.5KB; covers 7 steps + anti-patterns. |
+| AA-16 | Inline existing-trackers list (cap 30, overflow hint) | done | 1.5 | `EXISTING_TRACKERS_CAP=30`, hint references `artifact_find`. |
+| AA-17 | Tests: response structure + each archetype's example params validates against its example schema | done | 1.5 | 5 tests including self-consistency (schema↔example) and template-renders-against-example. |
+| AA-18 | Register `tracker_design` in `tools/mod.rs::all_tools` + prompt-surface mention | done | 1.5 | Tool selection table row + augmentation-and-refresh section paragraph. |
+| AA-21 | Guard merge-patch against unknown top-level params keys when no `params_schema` is set | open | 6 | `artifact_augment(merge=true)` silently stores unknown/new keys as dead no-ops (RFC 7396) → stranded data. See Phase 6. |
 
 Status legend: `open` / `in-progress` / `done` / `blocked` / `dropped`
 
+## Tasks — per-entry anchors
+
+> **Added 2026-08-18.** No `T-N` heading ever existed in this body, so `link_scan` never bound any
+> of these 21 tokens to a definition here. They were still body text, though, and 8 of them
+> (`T-14`..`T-21`) resolved as CITATIONS into `tool-usage-patterns.md`'s real `T-14`..`T-21`
+> entries — a false edge, confirmed live via `include_links=true`, not a shared-namespace
+> conflict (this file never declared `entry_prefix: T`). Renamed `T` → `AA` in the same pass to
+> remove the leak and give these 21 tasks their own citable headings for the first time. Numbers
+> are unchanged — `T-7` is now `AA-7`. Mechanism and evidence:
+> `docs/issues/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md`.
+
+### AA-1 — Merge `feat/artifact-augmentation` → `experiments`
+`phase 0` · **done** · Merged 2026-05-01 as `3765e1b`.
+
+### AA-2 — Add `render_template` column to `artifact_augmentation` (schema v4)
+`phase 1` · **done** · Migration v4 in `catalog::run_migrations` (idempotent).
+
+### AA-3 — Add `params_schema` column (JSON Schema text)
+`phase 1` · **done** · Validates on both `artifact_augment` (initial) and `artifact_update_params` (merge).
+
+### AA-4 — Render integrated into `librarian_context` (chose embed over separate tool)
+`phase 1` · **done** · `tools/render.rs` + injection between `[LIVE]` header and body.
+
+### AA-5 — `librarian_context` uses rendered output for trackers w/ template
+`phase 1` · **done** · `render_template_projects_params_into_context` + error-surface test.
+
+### AA-6 — Spike: pick template engine (`minijinja` vs `handlebars-rust`)
+`phase 1` · **done** · Picked `minijinja` per user.
+
+### AA-7 — Tests: schema-validate-on-update, template-render, fall-through when absent
+`phase 1` · **done** · 287 lib tests (was 267); 20 new across `schema_validate`, `render`, `update_params`, `augment`, `context`, `catalog`.
+
+### AA-8 — Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface
+`phase 1` · **done** · Shipped as `augmentation-render-template.md`.
+
+### AA-9 — `artifact_refresh_stale` tool — shipped + verified
+`phase 2` · **done** · `crates/librarian-mcp/src/tools/refresh_stale.rs`, 6 tests.
+
+### AA-10 — `GatherSource::ConfigValue` design (which formats? key path syntax?)
+`phase 3` · **done** · Detailed spec written 2026-05-02 — see Phase 3 section.
+
+### AA-19 — `GatherSource::ConfigValue` implementation
+`phase 3` · **done** · Implemented 2026-05-02 — commit `00e57f7` on `experiments`. 7 tests, TOML/YAML/JSON + git blame annotation.
+
+### AA-11 — `append_mode` design — where does the date come from? cap policy?
+`phase 4` · **done** · Detailed spec written 2026-05-02 — see Phase 4 section.
+
+### AA-20 — `append_mode` + history cap implementation
+`phase 4` · **done** · Implemented 2026-05-02 — commit `5a2797c` on `experiments`. 13 tests: catalog roundtrip, augment tool, trim_history unit (4), update integration (4), refresh hint.
+
+### AA-12 — `kind: experiment` schema + auto-discovery from filesystem
+`phase 5` · **open**
+
+### AA-13 — New tool `tracker_design` (archetype-driven)
+`phase 1.5` · **done** · `tools/tracker_design.rs`.
+
+### AA-14 — 6 archetypes: deployment_state, failure_table, metric_baseline, audit_issues, reflective, task_list
+`phase 1.5` · **done** · All 6 shipped.
+
+### AA-15 — `system_prompt` teaching markdown (archetype selection, prompt-writing, schema discipline, anti-patterns)
+`phase 1.5` · **done** · ~3.5KB; covers 7 steps + anti-patterns.
+
+### AA-16 — Inline existing-trackers list (cap 30, overflow hint)
+`phase 1.5` · **done** · `EXISTING_TRACKERS_CAP=30`, hint references `artifact_find`.
+
+### AA-17 — Tests: response structure + each archetype's example params validates against its example schema
+`phase 1.5` · **done** · 5 tests including self-consistency (schema↔example) and template-renders-against-example.
+
+### AA-18 — Register `tracker_design` in `tools/mod.rs::all_tools` + prompt-surface mention
+`phase 1.5` · **done** · Tool selection table row + augmentation-and-refresh section paragraph.
+
+### AA-21 — Guard merge-patch against unknown top-level params keys when no `params_schema` is set
+`phase 6` · **open** · `artifact_augment(merge=true)` silently stores unknown/new keys as dead no-ops (RFC 7396) → stranded data. See Phase 6.
 ## Phase 1 — `render_template` + `params_schema` (active)
 
 ### Why
@@ -253,7 +323,7 @@ Keep the **N most recent** sections (top of file = newest). Trim by scanning for
 ## Phase 6 — merge-patch unknown-key guard (proposed)
 
 ### Why
-`artifact_augment(merge=true, params={...})` is RFC 7396 merge-patch. When the augmentation has a `params_schema`, `merge_params()` validates and rejects violations (T-3). But when **no `params_schema` is set** — the common case for hand-authored trackers — merge accepts **any** top-level key silently: an unknown or mistyped key is stored verbatim as a dead no-op the augmentation never applies. Arrays also replace wholesale (RFC 7396), so an agent intending an entry-grain array edit who passes a helper key gets neither an error nor an effect.
+`artifact_augment(merge=true, params={...})` is RFC 7396 merge-patch. When the augmentation has a `params_schema`, `merge_params()` validates and rejects violations (AA-3). But when **no `params_schema` is set** — the common case for hand-authored trackers — merge accepts **any** top-level key silently: an unknown or mistyped key is stored verbatim as a dead no-op the augmentation never applies. Arrays also replace wholesale (RFC 7396), so an agent intending an entry-grain array edit who passes a helper key gets neither an error nor an effect.
 
 **Observed 2026-07-05** in a downstream project (MRV-poc `retrieval-experiments` tracker; augmentation had no `params_schema`): prior sessions tried to prepend to the `recent_experiments[]` array by passing sibling keys `recent_experiments_prepend` / `recent_experiments_pending_prepend`, and to patch other collections via `open_blockers_add` / `ship_gate_3_supersedes`. **None applied** — the target arrays never changed; four dead keys accumulated holding 3 stranded experiment entries + a ship-gate note + a blocker. The failure is fully silent: no warning, no error, and the call returns `"ok"`. Recovery required manually spotting the stray keys, rescuing their contents into the real arrays, and nulling the dead keys.
 
@@ -262,7 +332,7 @@ On `artifact_augment(merge=true)` / `artifact_update_params`, when a top-level p
 
 ### Acceptance
 - [ ] `artifact_augment(merge=true)` with a new top-level key not in current params (no schema) returns a `param_warnings` entry naming the key.
-- [ ] With a `params_schema` present, behaviour unchanged (schema validation already covers this via T-3).
+- [ ] With a `params_schema` present, behaviour unchanged (schema validation already covers this via AA-3).
 - [ ] Opt-in strict flag (or `additionalProperties:false`) rejects the unknown key with a `RecoverableError` that names it + gives the array-replace guidance.
 - [ ] Doc note in `augmentation-render-template.md`: “to change an array, replace it wholesale under its exact key; use `null` to delete; a new sibling key is a silent no-op.”
 
