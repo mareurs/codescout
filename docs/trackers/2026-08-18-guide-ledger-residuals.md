@@ -21,7 +21,9 @@ Open follow-ups from the guide-ledger Phase A work stream (12 commits,
   duplicate those here.
 - `docs/issues/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md` —
   fixed but deliberately unarchived; its `## Resume` owns the missing regression test.
-- `docs/issues/2026-08-18-clear-leaves-mcp-session-id-stale.md` — open; Phase B closes it.
+- `docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md` — fixed and
+  archived by Phase B Task 7 (`experiments` `5bdb7f45..feb845aa`; companion
+  `codescout-companion:b8ffa8b`).
 - `docs/issues/archive/2026-08-18-global-config-dir-accepts-relative-xdg-config-home.md`
   — was out of scope for this stream; fixed and archived 2026-08-18 as `b17987b8`
   (`experiments`), independently of the guide-ledger work.

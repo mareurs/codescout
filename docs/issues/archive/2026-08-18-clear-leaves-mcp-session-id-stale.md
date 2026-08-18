@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-18
-closed:
+closed: 2026-08-18
 severity: high
 owner: marius
 related: []
@@ -272,29 +272,42 @@ predicate must be surgical rather than total.
 
 ## Fix
 
-Not yet implemented. The server cannot observe the change on its own — a running process's
-environment is immutable from outside — so the id has to be delivered in-band. Options, in
-the order they should be considered:
+Implemented in Phase B of the guide-ledger session-identity design
+(`docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`). Summary —
+full mechanism in the spec:
 
-1. **Companion `SessionStart` hook rendezvous (Claude-Code-specific enforcement, permitted
-   by the Agent-Agnostic Design convention).** The hook fires on `/clear` with the new
-   session id and writes it where the running server can read it. The rendezvous path must
-   be keyed per **server process**, not per project — a per-project file is exactly what the
-   2026-08-16 bug was, and two concurrent windows on one repo would collide again. Keying it
-   by the server's own pid works because the pid is a valid rendezvous *within one process
-   lifetime*, even though it is useless as a durable identity.
-   Note the ordering constraint: MCP `initialize` runs **before** `SessionStart`, so
-   hook-mints/server-reads cannot work at startup — the server must publish its pid first
-   and the hook write into that slot.
-2. **Idle-TTL re-arm as a harness-independent backstop**, since no other MCP client exposes
-   conversation identity at all and several reuse one server process across conversations.
-3. **Degrade to re-sending, never to suppressing** — the invariant that makes both of the
-   above safe when identity is uncertain.
+1. **Ranked session-key resolution** (rank 1 `CODESCOUT_SESSION_ID`, rank 2 known-harness
+   env vars including `CLAUDE_CODE_SESSION_ID`, rank 3 a per-request `_meta` key, rank 4
+   none) replaces the single construction-time env read at `src/server.rs:250-262`.
+2. **Two-tier ledger.** Keyed tier persists per conversation id (survives `/mcp`
+   reconnects, no idle TTL — the rendezvous below is the detection mechanism). Anonymous
+   tier is in-process only, never persisted, and re-arms after a 2-hour idle TTL
+   (`CODESCOUT_GUIDE_TTL_SECS`) when no identity is obtainable.
+3. **Companion `SessionStart` hook rendezvous.** The server publishes a pid-keyed slot at
+   `$XDG_STATE_HOME/codescout/servers/<pid>.json` at construction (MCP `initialize` runs
+   before `SessionStart`, so the server must publish first); `session-start.mjs` stamps the
+   live session id into the matching slot on every `source`, including `"clear"`. The
+   server polls the slot **before** consulting the ledger on each tool call and, on a
+   detected change, re-arms the **whole** ledger (not just the project-scoped topic) and
+   switches to the new key.
 
+**Fix SHA (`experiments`):** `5bdb7f45..feb845aa`.
+**Companion hook:** `codescout-companion:b8ffa8b`.
+
+`git rev-list --left-right --count master...experiments` → `0\t1066` (measured
+2026-08-18): `0` on the left means `master` is a strict ancestor of `experiments`, so
+promotion is a **fast-forward** — the `experiments` SHA range above already is the
+eventual `master` range, with no separate master-side SHA to mint or record.
 ## Tests added
 
-None yet.
-
+- `session_change_rearms_everything` (`src/server.rs:4821`) — a new conversation id
+  re-arms the WHOLE ledger, not just the project-scoped topic.
+- `a_tool_call_polls_the_rendezvous_and_re_arms` (`src/server.rs:4934`) — pins that the
+  rendezvous poll runs **before** the ledger is consulted, so a detected session change
+  takes effect on the *same* response rather than one call late.
+- Companion side: `codescout-companion:b8ffa8b` added rendezvous assertions to
+  `hooks/session-start.test.sh` — cross-window isolation, full-field round-trip, and the
+  `hook_at` wire format.
 ## Workarounds
 
 Run `workspace(action="activate", …)` after `/clear` — its unconditional ledger wipe
@@ -303,13 +316,10 @@ if the in-flight re-arm change ships without item 1 of the Fix.
 
 ## Resume
 
-Decide the Fix item 1 mechanism before the guide-ledger re-arm change lands, because that
-change removes the current accidental mitigation. Concrete next action: check whether
-`codescout-companion`'s `hooks/session-start.mjs` receives the session id on
-`source: "clear"` (it already reads `source` at line 253 for the post-compact branch), and
-whether `hooks.json` needs a new registration or the existing `SessionStart` entry suffices.
-Then decide the rendezvous path under `$XDG_STATE_HOME/codescout/`.
-
+N/A — fixed. Fast-forward promotion applies (`git rev-list --left-right --count
+master...experiments` → `0` on the left, measured 2026-08-18), so there is no
+pending-master-SHA to record: the `experiments` SHA above already is the eventual
+`master` SHA. No further action.
 ## References
 
 - `src/server.rs:73-76`, `src/server.rs:250-262` — single-read of `CLAUDE_CODE_SESSION_ID`

@@ -11,11 +11,19 @@ hash = "d8430752d7a990667cfef66e6008f67af497d91db88805026046650ad858379b"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "142f4adda8d8c0b4094bbc8e2925539810b4a3474d86fa286069c91973406a56"
+hash = "2e870cdfcb89901cbfd21ad944f4c802171069439c23aa4dc7390495bf946f1e"
 
 [[anchors]]
 path = "docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md"
 hash = "43b019d243b2e9730a4de1e4a7587096f72eefba31f034a7f07260b90e0ebf60"
+
+[[anchors]]
+path = "docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md"
+hash = "a23f18c8cc3a46b4b4063b1bfed867fdcb98b64098931bede5162a1cb0b5c42a"
+
+[[anchors]]
+path = "docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md"
+hash = "6f9c98efe92cfd5e88e370ee47e357c7c1c6d3492516a53056f1e95537dc5fa5"
 
 [[anchors]]
 path = "docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md"

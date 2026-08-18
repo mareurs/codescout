@@ -82,3 +82,71 @@ for correctness anyway: codescout's side was fixed 2026-06-14
 (`docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md`),
 and emission is now strictly opt-in on a client-supplied token, which is the
 correct MCP behaviour regardless of how the client reacts.
+
+## Session/conversation lifecycle vs. MCP subprocess respawn (guide-ledger Phase B, 2026-08-18)
+
+Measured 2026-08-18 while designing the guide-hint ledger's session-identity fix
+(`docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md`). The bug this
+fixed: `docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md`.
+
+### Lifecycle matrix (measured 2026-08-18)
+
+| Event | New session id? | Subprocess respawns? | Key correct? | Evidence |
+|---|---|---|---|---|
+| `/mcp` reconnect | no | yes | ✅ | 67 processes under one id |
+| `/compact` | no | no | ✅ | 71,891-record / 137.5 MB transcript, **1** distinct `session_id` over 12 days |
+| `claude --resume <id>` | no | yes | ✅ | 12-day session on a 17h-old client process |
+| `--fork-session` | yes | yes | ✅ | `44c01c0f` forked from `28ea039a`; both recorded |
+| **`/clear`** | **yes** | **no** | ❌ (pre-fix) | 8 calls, 1 MCP process, 2 conversations, all attributed to the first |
+
+The load-bearing fact: `/clear` is the **only** one of these five events that mints a new
+conversation id **without** respawning the stdio MCP subprocess. Every other event either
+keeps the id stable or respawns the process (which naturally re-reads env at construction).
+A server that resolves `CLAUDE_CODE_SESSION_ID` once at construction is therefore correct
+for four of five lifecycle events and silently wrong for the fifth — and wrong in the
+*suppression* direction (serves the new conversation under the old id), which is the unsafe
+direction for anything gated on "have I already told you this."
+
+### What Phase B changed
+
+Fixed on `experiments` (server-side commits `5bdb7f45`..`feb845aa`; companion hook
+`codescout-companion:b8ffa8b`). Summary — full design in the spec above:
+
+- **Session key resolution is now a ranked chain, not a single env read.** Rank 1
+  `CODESCOUT_SESSION_ID` (ours, documented as caller-must-ensure-uniqueness-per-conversation)
+  → rank 2 known-harness env vars (`CLAUDE_CODE_SESSION_ID` today) → rank 3 a per-request
+  `_meta` key (not sent by any client yet, wired for future use) → rank 4 none, which drops
+  to the anonymous tier. Ranks 1/2/4 resolve once at construction; rank 3 is checked
+  per-request and overrides for that call only.
+- **Two tiers**, because the clients differ in kind:
+  - **Keyed tier** — a conversation id is obtainable. Ledger persists to
+    `$XDG_STATE_HOME/codescout/guide_hints/<sanitize(session)>.json` (map of topic →
+    delivery timestamp, replacing the old bare `Vec<String>` shape). Full dedup, re-armed on
+    project switch and compaction, **no idle TTL** — the rendezvous (below) is the intended
+    mechanism for detecting a conversation change, not a timer.
+  - **Anonymous tier** — no identity obtainable (every non-Claude-Code client, or Claude
+    Code before the companion hook runs). In-process only, never persisted, topics re-arm
+    after a **2-hour idle TTL** (`CODESCOUT_GUIDE_TTL_SECS`). Starvation is the default risk
+    here (a long-lived process serving conversation #2 forever under conversation #1's
+    ledger), so a short TTL is the correct trade — a spurious re-arm costs one re-injection;
+    silence costs every guide for every later conversation. The governing invariant
+    throughout: **degrade to re-sending, never to suppressing.**
+- **Companion rendezvous closes the `/clear` gap specifically.** MCP `initialize` runs
+  *before* Claude Code's `SessionStart` hook, so the server can't get the new id at startup
+  — it publishes first, the hook writes second. At construction the server writes
+  `$XDG_STATE_HOME/codescout/servers/<pid>.json` = `{pid, ppid, start_time, cwd, session}`;
+  `session-start.mjs` fires on every `source` (including `"clear"`), finds the slot whose
+  `ppid` is on its own process ancestry, and stamps the current session id into it. The
+  server re-reads its own entry when the file's mtime changes. **Keyed by server pid**,
+  deliberately — a per-project file was the 2026-08-16 attribution bug's shape, and two
+  concurrent windows on one repo would collide again under it.
+  On a detected session change the server re-arms the **whole** ledger (not just the
+  project-scoped topic) and switches to the new key — regression-pinned by
+  `session_change_rearms_everything` (`src/server.rs`). The poll runs **before** the ledger
+  is consulted on each tool call, so the re-arm takes effect on the *same* response, not one
+  call late — pinned by `a_tool_call_polls_the_rendezvous_and_re_arms` (`src/server.rs`).
+- **The server is fully correct without the hook.** No companion installed → the key never
+  refreshes → the anonymous-tier idle TTL is what eventually catches a `/clear`, one interval
+  late instead of immediately. This is the Agent-Agnostic Design contract in practice:
+  Claude-Code-specific enforcement is additive, and its absence degrades gracefully rather
+  than breaking other harnesses.
