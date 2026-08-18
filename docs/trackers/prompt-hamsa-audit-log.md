@@ -867,5 +867,9 @@ transferable heuristic is narrower and safer:
 > When a parameter name already carries the semantics, prose restating them per-field is
 > the first thing to measure for removal.
 
-Related: [[F-4]] (why this entry used the two-step write path), and the surface
+Related: `prompt-surface-compaction-session-log:F-4` (why this entry used the two-step
+write path) — qualified by file stem, because `F-N` is namespaced per work stream and a
+bare token has ten definers, which `link_scan` reports as ambiguous rather than
+guessing. (Writing the bare form here to illustrate the point would itself have created
+the ambiguity being described — it did, on the first attempt, and the scan caught it.) And the surface
 measurement in `docs/trackers/prompt-surface-compaction-session-log.md`.

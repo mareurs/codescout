@@ -93,9 +93,28 @@ fn id_re() -> &'static Regex {
 /// Cross-repo citation: `codescout:A-11`, `prompt-engineering:L-14`.
 /// Recognized so the entry-token scan can skip the embedded token; edges
 /// cannot span workspaces, so these become report-only findings.
+///
+/// The qualifier bound is generous ON PURPOSE, because when it is too small this
+/// pattern does not fail — it SLIDES. `-` is a non-word character, so there is a `\b`
+/// before every hyphen-separated segment, and the engine takes the leftmost position
+/// from which the whole pattern matches. A stem longer than the bound therefore yields
+/// a SHORTER qualifier that names no file, which resolves to a legitimate-looking
+/// `cross_repo` row and never becomes an edge — while `edges_missing` stays 0, so the
+/// report reads as clean.
+///
+/// That is not hypothetical: at `{1,30}` (31 chars) the same-repo citation
+/// `prompt-surface-compaction-session-log:F-4` (37) was captured as
+/// `surface-compaction-session-log:F-4` and silently dropped. `-session-log` alone is 12
+/// characters, and one other ledger in this repo missed the old cap by exactly one.
+/// See `docs/issues/archive/2026-08-18-qualified-citation-silently-truncated-when-file-stem-exceeds-31-chars.md`.
+///
+/// 120 clears every stem in the repo (longest today: 90) with headroom. It cannot
+/// over-match into prose: the pattern still requires `:` immediately followed by an
+/// entry token, so a longer allowance only extends a run of `[a-z0-9_-]` that is
+/// already adjacent to a `:PREFIX-N`.
 fn cross_repo_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\b[a-z][a-z0-9_-]{1,30}:[A-Z]{1,3}-\d+\b").unwrap())
+    RE.get_or_init(|| Regex::new(r"\b[a-z][a-z0-9_-]{1,119}:[A-Z]{1,3}-\d+\b").unwrap())
 }
 
 /// Definition shape: heading's first text starts with an entry token followed
@@ -434,6 +453,42 @@ mod tests {
         assert!(
             tokens(&ex, CitationKind::EntryToken).is_empty(),
             "embedded token must be masked"
+        );
+    }
+
+    /// Regression: a qualifier longer than the bound must be captured WHOLE.
+    ///
+    /// The failure this pins is not a non-match, it is a SLIDE. `-` is a non-word
+    /// character, so every hyphen-separated segment starts at a `\b`, and the engine
+    /// takes the leftmost position from which the whole pattern matches. Under the old
+    /// `{1,30}` bound a 37-character stem yielded the 30-character suffix
+    /// `surface-compaction-session-log:F-4` — a qualifier naming no file, correctly
+    /// classified `cross_repo`, and therefore never turned into an edge. `edges_missing`
+    /// stayed 0 throughout, so nothing in the report distinguished it from a deliberate
+    /// cross-repo reference.
+    ///
+    /// Asserting on the captured STRING rather than the count is the point: a
+    /// count-only assertion passes on the truncated capture, which is exactly how the
+    /// defect survived.
+    #[test]
+    fn long_file_stem_qualifier_is_captured_whole_not_truncated_to_a_suffix() {
+        // 37 characters — the real ledger stem that surfaced this.
+        let stem = "prompt-surface-compaction-session-log";
+        assert_eq!(stem.len(), 37, "fixture stem length is load-bearing");
+
+        let text = format!("Related: {stem}:F-4 for the write path.\n");
+        let ex = extract(&text);
+
+        assert_eq!(
+            tokens(&ex, CitationKind::CrossRepoToken),
+            vec![format!("{stem}:F-4")],
+            "the qualifier must be captured whole; a shorter capture means the bound \
+             truncated it into a qualifier that names no file, which resolves to a \
+             report-only cross_repo row and silently loses the edge"
+        );
+        assert!(
+            tokens(&ex, CitationKind::EntryToken).is_empty(),
+            "embedded token must still be masked"
         );
     }
 
