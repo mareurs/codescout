@@ -132,9 +132,13 @@ pub struct CodeScoutServer {
     ///
     /// Unread for now: Task 1 (this) only resolves and stores it. Tasks 2, 4
     /// and 5 of the guide-ledger-phase-b-identity plan branch on it (the
-    /// Anonymous-tier ledger, idle re-arm, and eviction). Remove this
-    /// `allow` once a later task adds the first read.
-    #[allow(dead_code)]
+    /// Anonymous-tier ledger, idle re-arm, and eviction). `expect` (not
+    /// `allow`) so `unfulfilled_lint_expectations` fires the moment a later
+    /// task adds the first read, instead of riding silently forever.
+    #[expect(
+        dead_code,
+        reason = "read by tasks 2/4/5 of guide-ledger-phase-b-identity"
+    )]
     session_key: crate::tools::session_key::SessionKey,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
@@ -254,7 +258,7 @@ impl CodeScoutServer {
             tools.push(Arc::new(crate::tools::probe::ProbeTool));
             tracing::warn!(
                 "CODESCOUT_PROBE=1 — registering __probe_description_cap__ \
-                     (debug-only; ~8.8KB description with sentinel markers)"
+                 (debug-only; ~8.8KB description with sentinel markers)"
             );
         }
         #[cfg(feature = "librarian")]
@@ -4509,6 +4513,60 @@ mod guide_hint_tests {
                 .map(|mut e| e.next().is_some())
                 .unwrap_or(false),
             "the ledger must land in the injected per-user directory"
+        );
+    }
+
+    /// Inverse of the test above: with no identity available at all, the ledger
+    /// must stay fully in-process and must never touch the injected per-user
+    /// directory. `make_server()` always injects an identity (`session_id_explicit`),
+    /// so this test builds its own `ServerEnv` directly — the one path in this
+    /// module that deliberately withholds one.
+    ///
+    /// Kills the mutation `None => GuideLedger::load("anonymous", guide_hints_dir)`:
+    /// that keeps `session_key` reading `Anonymous` (so a bare identity assertion
+    /// alone would not catch it) while persisting every anonymous conversation
+    /// under one constant, shared file — letting one conversation's emitted set
+    /// suppress another's guides, exactly what "degrade to re-sending, never to
+    /// suppressing" forbids.
+    #[tokio::test]
+    async fn no_identity_ledger_never_touches_the_injected_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+        let env = ServerEnv {
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+
+        // Not asserted directly: `server.session_key` is not read anywhere yet
+        // (Task 1 only stores it — see the `#[expect(dead_code)]` on the field),
+        // and a test-side read here would satisfy that expectation early and
+        // mask the day a later task's *production* code first reads it. The
+        // ledger-placement assertions below are what this test is for.
+
+        // Drive a guide-eligible call — the session opener fires on the first
+        // call of any kind (see `Tool::call_content`), the same trigger the
+        // positive-dir test above relies on.
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let _ = tool
+            .call_content(json!({"command": "echo hi"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            !server.guide_hints_emitted.lock().is_empty(),
+            "the session opener must still fire in-memory for an anonymous session"
+        );
+
+        let injected = dir.path().join("guide_hints");
+        assert!(
+            !injected.exists(),
+            "an anonymous session must never create or write the injected \
+             per-user guide_hints directory"
         );
     }
 
