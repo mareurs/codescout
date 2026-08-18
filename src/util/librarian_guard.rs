@@ -85,27 +85,53 @@ fn guard_with_oracle(
     abs_path: Option<&std::path::Path>,
     oracle: Option<&dyn AugmentedArtifactOracle>,
 ) -> Result<(), anyhow::Error> {
-    // Two independent reasons a file is off-limits, and neither implies the other:
-    // a stamped frontmatter id says the librarian wrote this file; augmentation says
-    // the file is not where its state lives. An augmented tracker can carry no id at
-    // all, and a plain bug file carries one without being augmented.
+    // Three independent reasons a file is off-limits, and none implies another: a
+    // stamped frontmatter id says the librarian wrote this file; augmentation says
+    // the file is not where its state lives; a declared `entry_prefix` says the file
+    // owns an id namespace whose counter only the server may advance. An augmented
+    // tracker can carry no id at all, a plain bug file carries one without being
+    // augmented, and a prose ledger is routinely neither.
     let augmented = matches!((abs_path, oracle), (Some(p), Some(o)) if o.is_augmented(p));
-    if !augmented && !is_librarian_artifact(text) {
+    let stamped = is_librarian_artifact(text);
+    let ledger = !declared_entry_prefixes(text).is_empty();
+    if !augmented && !ledger && !stamped {
         return Ok(());
     }
     let why = if augmented {
         " (augmented — its params live in the catalog, and this file is only a \
          rendered snapshot of them)"
+    } else if ledger {
+        " (a ledger — it declares an entry_prefix, and its PREFIX-N ids are \
+         allocated by the server)"
     } else {
         ""
     };
-    Err(RecoverableError::with_hint(
-        format!("'{path}' is a librarian-managed artifact{why} — do not read or edit it directly"),
+    // A ledger that is NEITHER augmented nor stamped is the class this guard newly
+    // covers, and it is the only one whose file is still where its state lives — so
+    // its refusal must route two different intents, not one. An entry goes through
+    // the allocator; anything else (prose, a typo, a heading) is an ordinary edit
+    // that `body_edits` performs section-scoped. Naming only the first would send
+    // every prose edit to the wrong tool, and a guard whose hint cannot be followed
+    // is what trains callers to route around it.
+    let hint = if ledger && !augmented && !stamped {
+        "This file is a ledger — it owns a PREFIX-N id namespace.\n\
+         • Add an entry:  artifact(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
+         \x20 then write the section yourself with the id it returns.\n\
+         • Edit anything else (prose, a heading, a typo):\n\
+         \x20 artifact(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
+         action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
+            .to_string()
+    } else {
         "Use artifact tools instead:\n\
          • Read:   artifact(action=\"get\", id=\"<id>\")\n\
          • Find:   artifact(action=\"find\", semantic=\"<topic>\")\n\
          • Edit:   artifact(action=\"update\", id=\"<id>\", patch={...})\n\
-         Full guide: resources/read doc://librarian-guide",
+         Full guide: resources/read doc://librarian-guide"
+            .to_string()
+    };
+    Err(RecoverableError::with_hint(
+        format!("'{path}' is a librarian-managed artifact{why} — do not read or edit it directly"),
+        hint,
     )
     .into())
 }
@@ -125,6 +151,87 @@ pub fn is_librarian_artifact(text: &str) -> bool {
         }
     }
     false
+}
+
+/// The id namespaces a file's frontmatter declares via `entry_prefix`, or empty
+/// when it declares none.
+///
+/// A **ledger** — an artifact owning a `PREFIX-N` id namespace — is the third
+/// reason a markdown file is librarian-managed, and it is orthogonal to the other
+/// two. It carries no stamped `id:` (the catalog derives ids from the path and does
+/// not need one) and needs no augmentation: `allocate_entry_id`'s own error hint
+/// tells authors "No augmentation and no entry_collection are needed". So the
+/// documented way to create a ledger produced a file both existing predicates were
+/// blind to, and its entry headings could be hand-written straight past the
+/// allocator — which is how the R-N ledger came to reuse nine ids.
+///
+/// **Hand-parsed, not `serde_yml`, on purpose.** `librarian` is a Cargo feature
+/// (`src/lib.rs:32`), and this guard compiles and must keep working under
+/// `--no-default-features`, where `crate::librarian::frontmatter` does not exist.
+/// That is also why [`is_librarian_artifact`] hand-parses `id:`.
+///
+/// Accepts all three YAML forms `allocate_entry_id` honours
+/// (`src/librarian/catalog/augmentation.rs`) — scalar, inline flow, and block
+/// sequence — because quoting and flow style are properties of whichever writer last
+/// emitted the file, never of the artifact. Making protection depend on that accident
+/// is exactly the quoted-id defect (BL-33). That agreement is held by
+/// `both_entry_prefix_readers_agree_on_every_yaml_form`, beside the allocator: two
+/// readers are forced by the feature boundary, so the parity is enforced by a test
+/// rather than by this sentence.
+pub(crate) fn declared_entry_prefixes(text: &str) -> Vec<String> {
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return Vec::new();
+    };
+    let mut lines = rest.lines();
+    while let Some(line) = lines.next() {
+        if line == "---" {
+            return Vec::new();
+        }
+        let Some(val) = line.strip_prefix("entry_prefix:") else {
+            continue;
+        };
+        let val = val.trim();
+        // Inline flow: `entry_prefix: [F, W]`.
+        if let Some(inner) = val.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+            return inner.split(',').filter_map(clean_prefix).collect();
+        }
+        // Scalar: `entry_prefix: R`.
+        if !val.is_empty() {
+            return clean_prefix(val).into_iter().collect();
+        }
+        // Block sequence: the key's value is the indented `- F` lines that follow.
+        // Stops at the first line that is not one, so a sibling key cannot be
+        // swallowed as a list item.
+        let mut out = Vec::new();
+        for next in lines {
+            if next == "---" {
+                break;
+            }
+            let t = next.trim_start();
+            let Some(item) = t.strip_prefix("- ") else {
+                break;
+            };
+            if next.len() == t.len() {
+                // Not indented — a top-level sequence, so this key is not its parent.
+                break;
+            }
+            out.extend(clean_prefix(item));
+        }
+        return out;
+    }
+    Vec::new()
+}
+
+/// One declared prefix, unquoted and validated. `None` for anything that is not a
+/// usable namespace — empty after trimming, or carrying characters the entry-token
+/// grammar (`\b[A-Z]{1,3}-\d+\b`) cannot represent.
+///
+/// The validation is load-bearing rather than defensive: an empty prefix would make
+/// every numbered heading in the file read as an entry.
+fn clean_prefix(raw: &str) -> Option<String> {
+    let p = strip_matching_quotes(raw.trim()).trim();
+    let ok = !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_uppercase());
+    ok.then(|| p.to_string())
 }
 
 /// `true` for a librarian id — exactly 16 lowercase hex characters — accepting
@@ -398,6 +505,237 @@ mod tests {
             Arc::ptr_eq(&read_from(&slot).expect("still installed"), &second),
             "a later install must REPLACE the earlier one — a discarded second install \
              makes the guard's behaviour depend on which server was built first"
+        );
+    }
+
+    /// A prose ledger declares its id namespace in frontmatter and needs no
+    /// augmentation and no stamped id — `allocate_entry_id`'s own error hint says
+    /// exactly that ("No augmentation and no entry_collection are needed"). So the
+    /// documented way to create a ledger produced a file both existing predicates
+    /// were blind to, and its `PREFIX-N` headings could be hand-written straight
+    /// past the allocator.
+    ///
+    /// Verified before this test existed: a `entry_prefix: ZZ` file with
+    /// `entry_high_water_ZZ: 3` accepted an `## ZZ-4` heading via `edit_markdown`
+    /// and left the mark at 3, which is the input compaction later reads back to
+    /// reissue `ZZ-4`.
+    /// docs/issues/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md
+    #[test]
+    fn a_declared_ledger_is_guarded_with_no_id_and_no_augmentation() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        let text = "---\nkind: tracker\nstatus: active\nentry_prefix: ZZ\nentry_high_water_ZZ: 3\n---\n\n## ZZ-3 — an entry\n";
+        assert!(
+            !is_librarian_artifact(text),
+            "precondition: no stamped id for the text predicate to find"
+        );
+
+        let abs = std::path::Path::new("/repo/docs/trackers/probe-ledger.md");
+        let err = guard_with_oracle(
+            "docs/trackers/probe-ledger.md",
+            text,
+            Some(abs),
+            Some(&NothingIsAugmented),
+        )
+        .expect_err("a declared ledger must be guarded");
+        let re = err.downcast_ref::<RecoverableError>().unwrap();
+        assert!(
+            re.message.contains("librarian-managed artifact"),
+            "got: {}",
+            re.message
+        );
+    }
+
+    /// A session log legitimately owns two namespaces (F-N frictions, W-N wins), and
+    /// YAML serialises one key three different ways depending only on which writer
+    /// last touched the file. `allocate_entry_id` honours all three
+    /// (`src/librarian/catalog/augmentation.rs:798-802`); a guard that honoured
+    /// fewer would make protection depend on that formatting accident — the same
+    /// mistake the quoted-id bug made (BL-33).
+    #[test]
+    fn every_yaml_form_of_entry_prefix_is_recognised() {
+        for (label, text, want) in [
+            (
+                "scalar",
+                "---\nkind: tracker\nentry_prefix: R\n---\n\n# L\n",
+                vec!["R"],
+            ),
+            (
+                "block sequence",
+                "---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n# L\n",
+                vec!["F", "W"],
+            ),
+            (
+                "inline flow",
+                "---\nkind: tracker\nentry_prefix: [F, W]\n---\n\n# L\n",
+                vec!["F", "W"],
+            ),
+            (
+                "quoted scalar",
+                "---\nkind: tracker\nentry_prefix: 'HY'\n---\n\n# L\n",
+                vec!["HY"],
+            ),
+        ] {
+            assert_eq!(
+                declared_entry_prefixes(text),
+                want.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                "{label}: entry_prefix must parse whatever YAML form it was written in"
+            );
+        }
+    }
+
+    /// The declaration is a FRONTMATTER fact. A tracker that merely discusses
+    /// `entry_prefix` in its prose — every convention doc in `docs/` does — owns no
+    /// namespace, and inferring one from body text would make every such doc a
+    /// ledger. Same boundary `allocate_entry_id` draws by scanning `fm.extra`
+    /// rather than the document.
+    #[test]
+    fn entry_prefix_outside_frontmatter_declares_nothing() {
+        for (label, text) in [
+            (
+                "after the closing delimiter",
+                "---\nkind: tracker\n---\n\n# Guide\n\nDeclare it with `entry_prefix: R`.\n",
+            ),
+            (
+                "no frontmatter block at all",
+                "# Guide\n\nentry_prefix: R\n",
+            ),
+        ] {
+            assert!(
+                declared_entry_prefixes(text).is_empty(),
+                "{label}: only a frontmatter key declares a ledger"
+            );
+        }
+    }
+
+    /// An empty or valueless declaration is not a namespace. Returning a prefix here
+    /// would let the entry-heading regex match every numbered heading in the file.
+    #[test]
+    fn a_valueless_entry_prefix_declares_nothing() {
+        for (label, text) in [
+            (
+                "bare key",
+                "---\nkind: tracker\nentry_prefix:\n---\n\n# L\n",
+            ),
+            (
+                "empty string",
+                "---\nkind: tracker\nentry_prefix: ''\n---\n\n# L\n",
+            ),
+            (
+                "empty flow list",
+                "---\nkind: tracker\nentry_prefix: []\n---\n\n# L\n",
+            ),
+        ] {
+            assert!(
+                declared_entry_prefixes(text).is_empty(),
+                "{label}: a valueless declaration owns no namespace"
+            );
+        }
+    }
+
+    /// A ledger's refusal is the only thing routing an author who wanted to edit its
+    /// prose — the heading-scoped guard the bug proposed was cut, because `body_edits`
+    /// already performs a section-scoped swap on any catalog row (measured on
+    /// `skill-frictions.md`, a row with no `id:` and no augmentation). So both routes
+    /// must appear: `append_entry` for a new entry, `body_edits` for everything else.
+    /// A hint naming only one of them is the failure mode being avoided, not a
+    /// smaller version of it.
+    #[test]
+    fn a_ledger_refusal_names_both_the_entry_route_and_the_prose_route() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        let text = "---\nkind: tracker\nentry_prefix: R\n---\n\n## Prose\n";
+        let abs = std::path::Path::new("/repo/docs/trackers/recon.md");
+        let err = guard_with_oracle(
+            "docs/trackers/recon.md",
+            text,
+            Some(abs),
+            Some(&NothingIsAugmented),
+        )
+        .expect_err("a ledger must be guarded");
+        let re = err.downcast_ref::<RecoverableError>().unwrap();
+        let hint = re.hint().unwrap_or_default();
+        assert!(
+            hint.contains("append_entry"),
+            "the entry route must be named: {hint}"
+        );
+        assert!(
+            hint.contains("body_edits"),
+            "the prose route must be named: {hint}"
+        );
+    }
+
+    /// The widened hint belongs to the ledger arm alone. An augmented artifact's file
+    /// is a rendered snapshot of catalog params, so `body_edits` is the ONLY correct
+    /// route there and offering `append_entry` beside it would be wrong; a stamped id
+    /// says the librarian wrote the file, which the ledger routing does not describe
+    /// either. Both keep the original generic hint.
+    #[test]
+    fn the_ledger_hint_does_not_leak_into_the_augmented_or_stamped_arms() {
+        struct EverythingIsAugmented;
+        impl AugmentedArtifactOracle for EverythingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                true
+            }
+        }
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        let abs = std::path::Path::new("/repo/docs/trackers/t.md");
+
+        // Augmented AND a declared ledger — augmentation wins, generic hint.
+        let augmented_ledger = "---\nkind: tracker\nentry_prefix: R\n---\n\n## Prose\n";
+        let err = guard_with_oracle(
+            "docs/trackers/t.md",
+            augmented_ledger,
+            Some(abs),
+            Some(&EverythingIsAugmented),
+        )
+        .expect_err("an augmented artifact must be guarded");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            !hint.contains("append_entry"),
+            "an augmented file's params live in the catalog — append_entry is not its \
+             route: {hint}"
+        );
+
+        // Stamped id, not a ledger — generic hint.
+        let stamped = "---\nkind: bug\nid: 0123456789abcdef\n---\n\n## Summary\n";
+        let err = guard_with_oracle(
+            "docs/issues/b.md",
+            stamped,
+            Some(abs),
+            Some(&NothingIsAugmented),
+        )
+        .expect_err("a stamped artifact must be guarded");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            !hint.contains("append_entry"),
+            "a stamped non-ledger owns no id namespace: {hint}"
         );
     }
 }
