@@ -1,7 +1,7 @@
 ---
 status: fixed
 opened: 2026-08-18
-closed:
+closed: 2026-08-19
 severity: medium
 owner: marius
 related: []
@@ -12,9 +12,8 @@ kind: bug
 # BUG: a qualified citation is silently truncated when the file stem exceeds 31 characters
 
 > **Status: fixed** — root cause identified, one-line parser fix, regression test
-> mutation-verified in an isolated worktree. Not yet archived: the full gate and the
-> live-MCP verification are blocked on an unrelated concurrent build failure. See
-> **Resume**.
+> mutation-verified in an isolated worktree. Gate, live binary, and the end-to-end
+> citation are all verified on `experiments` as of 2026-08-19 — see **Verification**.
 ## Summary
 
 `link_scan`'s cross-repo token regex caps the qualifier at 31 characters. A citation
@@ -138,7 +137,8 @@ Considered and rejected: renaming the ledger to fit. That trades a one-line pars
 for a rename that re-keys the artifact (`id = sha256(abs_path)`), breaks every existing
 citation of its path and id, and leaves the cap in place for the next author.
 
-Fix SHA: see the commit that archives this file (branch **`experiments`**).
+Fix SHA: **`6d0145e1`**, branch **`experiments`**. The promotion path is fast-forward, so
+this is also the `master` SHA — there is no second one to record.
 ## Tests added
 
 `long_file_stem_qualifier_is_captured_whole_not_truncated_to_a_suffix` —
@@ -170,21 +170,44 @@ Cite by **rel_path** instead of a qualified entry token
 (`docs/trackers/prompt-surface-compaction-session-log.md`), which resolves and creates an
 edge. This is what A-27's *Related* line does for the surface measurement.
 
-## Resume
+## Verification — 2026-08-19
 
-Root cause, fix and regression test are all landed and verified in isolation. What is
-**not** yet done, and why this file is not archived:
+All three resume conditions are discharged. Recorded here because nothing re-reads
+`archive/`, and because two of the three could only be believed after checking what
+*substrate* answered them.
 
-1. Full `cargo test` gate green in the main checkout — currently blocked by the
-   concurrent session's in-flight `src/tools/guide_ledger.rs` edits, not by anything
-   here. Re-run once that tree compiles.
-2. `cargo rb` + `/mcp` reconnect. **`librarian(action="link_scan")` runs inside the live
-   MCP server**, which is still the pre-fix build — so the fix is not observable through
-   the tool until the release binary is rebuilt. Do not read a stale `cross_repo` row as
-   evidence the fix failed.
-3. Then re-run `librarian(action="link_scan", write=true)` and confirm A-27's *Related*
-   line in `docs/trackers/prompt-hamsa-audit-log.md` moves out of `cross_repo` and
-   materializes a `cites` edge to `03464a8808345846`.
+1. **Gate green.** `cargo test --no-fail-fast` at `7ca4e8c1`: **4222 passed, 45 ignored,
+   1 failed**. The single failure is
+   `tools::guide::tests::get_guide_large_topic_returns_full_body_inline_not_buffered` —
+   unrelated to this fix, bisected to `d9be8835`, filed separately at
+   `docs/issues/2026-08-18-get-guide-large-topic-splits-into-two-blocks-since-d9be8835.md`.
+   The targeted suite is clean on its own: `cargo test link_scan` → **46/46**, including
+   `long_file_stem_qualifier_is_captured_whole_not_truncated_to_a_suffix`.
+
+   *Substrate note.* A concurrent session held an uncommitted mutation in
+   `src/tools/config/mod.rs` while the first run compiled, and reverted it before the
+   second. The full run recompiled after that revert (`Compiling …; Finished in 1.42s`),
+   so 4222/1 is measured on clean `HEAD` — not on the mutant. Unchecked, the identical
+   numbers would have been reported about a tree nobody has.
+
+2. **The live binary carries the fix.** `~/.cargo/bin/codescout` →
+   `target/release/codescout`, rebuilt 2026-08-19 01:26 — about three hours after the fix
+   commit `6d0145e1` (2026-08-18 22:11). `link_scan` runs *inside* the MCP server, so this
+   had to be established before any tool output could count as evidence in either
+   direction.
+
+3. **The citation resolves, end to end.** `librarian(action="link_scan")` on `experiments`:
+   `edges_missing: 0`, `edges_stale: 0`, and the truncated `surface-compaction-session-log`
+   row is **gone** from `cross_repo`. The three survivors are all genuine cross-repo
+   qualifiers (`prompt-engineering:OP-5`, `codescout:A-11`, `tracker-mgmt-redesign:TMR-7`),
+   none truncated mid-stem — and `prompt-engineering` surviving whole is the positive
+   control that the bound actually moved rather than the row merely disappearing.
+   `artifact(action="get", id="59ebeebb6ed05c89", links_rel="cites")` now reports
+   `dst_id: 03464a8808345846` — precisely the edge this bug suppressed.
+
+Promotion path is **fast-forward** (`git rev-list --left-right --count master...experiments`
+→ `0	1104`), so the `experiments` SHA above already *is* the `master` SHA. Deliberately no
+pending-master-SHA line: there is no second SHA for a later session to hunt for.
 ## References
 
 - `src/librarian/tools/link_scan/extract.rs:98` — the regex
