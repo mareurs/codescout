@@ -9,6 +9,10 @@
 //! in-memory set and re-inject every guide body the conversation already
 //! holds. Fix for
 //! `docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md`.
+//! One deliberate exception since 2026-08-18: the constructor re-arms the
+//! session-opening topic alone on any non-empty reloaded ledger, so that one
+//! guide body is re-sent on every reconnect regardless of project — see
+//! `CodeScoutServer::from_parts_with_env`.
 //!
 //! Keyed by `CLAUDE_CODE_SESSION_ID` (set by Claude Code in the MCP subprocess
 //! env since v2.1.154) — per-process, so concurrent CC windows on one project

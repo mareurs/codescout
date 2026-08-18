@@ -191,10 +191,12 @@ needed by its task indicates the parent underbriefed.
 
 **Substrate fact this compensates for:** the `guide_hints_emitted`
 ledger is process-wide and shared across the parent and its subagents,
-persisted per session so it survives `/mcp` restarts. Once the parent
-triggers a topic hint, NO subagent receives that hint independently — the
-ledger says "already delivered." Iron Law 6 is the only channel that
-delivers parent-known context to subagents.
+persisted per session so most topics survive `/mcp` restarts (the
+session-opening topic is a deliberate exception — server construction
+re-arms it on every reconnect; see `get_guide("workspace-state")`).
+Once the parent triggers a topic hint, NO subagent receives that hint
+independently — the ledger says "already delivered." Iron Law 6 is the
+only channel that delivers parent-known context to subagents.
 
 **Recursion:** applies at every spawn boundary. Grandparent →
 parent → child each pass context downward; intermediate agents do

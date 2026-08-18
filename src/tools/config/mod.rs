@@ -314,8 +314,11 @@ impl Tool for ProjectStatus {
         if parse_bool_param(&input["post_compact"]) {
             ctx.lsp.shutdown_all().await;
             // Re-arm guide hints: compaction summarized the guide bodies out
-            // of context, so allow them to re-inject. A bare /mcp restart keeps
-            // them (persisted ledger); only compaction clears. See
+            // of context, so allow them to re-inject. A bare /mcp restart
+            // re-arms the session-opening guide only, on any non-empty
+            // reloaded ledger (see `CodeScoutServer::from_parts_with_env`,
+            // src/server.rs) — every other topic survives a restart.
+            // Compaction clears everything. See
             // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md.
             ctx.guide_hints_emitted.lock().clear();
             tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");

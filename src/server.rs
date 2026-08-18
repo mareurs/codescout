@@ -332,7 +332,9 @@ impl CodeScoutServer {
         ));
         // Persisted guide-hint ledger keyed by the Claude Code conversation id,
         // so it survives /mcp restarts within one conversation instead of
-        // re-injecting every guide body. Prefer CLAUDE_CODE_SESSION_ID (set in
+        // re-injecting every guide body — except the session-opening guide,
+        // which the non-empty-ledger re-arm below deliberately re-sends on
+        // every reconnect. Prefer CLAUDE_CODE_SESSION_ID (set in
         // the MCP subprocess env since CC v2.1.154; per-process, so concurrent
         // CC windows don't collide), fall back to the companion's
         // .codescout/cc_session_id file, then a random uuid. See
@@ -5879,8 +5881,10 @@ mod guide_hint_tests {
 
     /// The compaction side of the fix: `/compact` summarizes the guide bodies
     /// out of context, so `workspace(post_compact=true)` must clear the ledger to
-    /// let them re-inject (a bare `/mcp` restart keeps them via persistence; only
-    /// compaction re-arms).
+    /// let them re-inject. A bare `/mcp` restart is not the same event: it
+    /// re-arms the session-opening guide only, on any non-empty reloaded ledger
+    /// (see the constructor's re-arm below); every other topic survives a
+    /// restart, but compaction clears them all.
     #[tokio::test]
     async fn post_compact_rearms_guide_hints() {
         let (_dir, server) = make_server().await;
