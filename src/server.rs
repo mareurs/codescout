@@ -2012,6 +2012,141 @@ mod tests {
         }
     }
 
+    // ---------- Tool surface budget (spec 2026-08-18-tool-surface-budget-design) ----------
+
+    /// Reproduce the tool surface exactly as `list_tools` advertises it.
+    ///
+    /// `list_tools` does three things between a tool's raw `input_schema()` and the
+    /// wire: filters on `availability(&caps)`, injects the `workspace` pin for
+    /// `pinnable()` tools, and pairs each schema with its description. A budget
+    /// computed from bare `input_schema()` would miss ~6.2 KB of injected `workspace`
+    /// prose and count tools the client never sees — measuring a string nobody
+    /// receives, which is exactly the defect
+    /// `prompts::redesign_invariants::production_render_fits_the_client_channel`
+    /// exists to prevent on the sibling surface. **Keep this in step with
+    /// `list_tools` or the gate is decorative.**
+    ///
+    /// Measured against ALL capabilities true: that is the maximal advertised
+    /// surface, and the only one that must be guaranteed to fit.
+    ///
+    /// Returns `(name, description_chars, schema_chars)` per advertised tool.
+    fn advertised_surface(server: &CodeScoutServer) -> Vec<(String, usize, usize)> {
+        let caps = crate::tools::ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: true,
+            has_libraries: true,
+        };
+        server
+            .tools
+            .iter()
+            .filter(|t| t.availability(&caps).is_available(&caps))
+            .map(|t| {
+                let schema = t.input_schema();
+                let mut schema_obj = schema.as_object().cloned().unwrap_or_default();
+                if t.pinnable() {
+                    CodeScoutServer::inject_workspace_param(&mut schema_obj);
+                }
+                let schema_chars = Value::Object(schema_obj).to_string().chars().count();
+                (
+                    t.name().to_string(),
+                    t.description().chars().count(),
+                    schema_chars,
+                )
+            })
+            .collect()
+    }
+
+    /// Characters of authored tool text delivered on **every request of every session**.
+    ///
+    /// Descriptions were already capped per tool (300 chars, 1800 for the librarian
+    /// family) and the surface still reached ~59K characters, because **a per-item cap
+    /// does not bound a sum**: growth moved sideways into `input_schema()`, which no
+    /// test had ever measured, and N items may each sit at their own limit. So the
+    /// budget lives on the payload, where the cost is actually paid.
+    ///
+    /// The cost is recurring, not one-time. Measured 2026-08-18 across four Claude Code
+    /// sessions (three models): **100.0% of input reads are cache hits**, so this block
+    /// is re-read on every request for the life of a session — ~5% of a long session's
+    /// cached prefix and ~10% of a short one's.
+    ///
+    /// Characters, not bytes — same reasoning as `CLIENT_INSTRUCTIONS_CHAR_LIMIT`, where
+    /// a byte comparison over-counted an em-dash-dense surface and stayed green while
+    /// shipping truncated.
+    ///
+    /// **Do not raise this number. Find the bytes.** When a tool needs a new parameter,
+    /// pay for it — trim a param description that duplicates `get_guide`, or drop prose
+    /// the schema does not need. Lower it whenever a trim frees room.
+    ///
+    /// Spec: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
+    /// Measured 2026-08-18 by `tool_surface_report_lengths` against this harness:
+    /// 27 tools, 8,521 description + 50,051 schema. Set as a hard ratchet at that
+    /// value — there is deliberately zero headroom.
+    ///
+    /// Take this number from the report test, never from an external probe. A
+    /// scratch probe that re-serialised the payload with Python's `json.dumps`
+    /// (`ensure_ascii=True`) read 58,882 — it expands each em-dash into a
+    /// six-character ASCII escape, so the over-count tracked prose density and
+    /// every per-tool delta came out a multiple of 5. `serde_json` emits UTF-8
+    /// directly, as the wire does.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 58_572;
+
+    #[tokio::test]
+    async fn tool_surface_under_budget() {
+        let (_dir, server) = make_server().await;
+        let rows = advertised_surface(&server);
+        let total: usize = rows.iter().map(|(_, d, s)| d + s).sum();
+        assert!(
+            total <= TOOL_SURFACE_CHAR_BUDGET,
+            "advertised tool surface is {total} chars across {} tools; budget is {}. \
+             Do NOT raise the budget — find the bytes. Run \
+             `cargo test --lib tool_surface_report_lengths -- --nocapture` for the \
+             per-tool map. See \
+             docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md.",
+            rows.len(),
+            TOOL_SURFACE_CHAR_BUDGET,
+        );
+    }
+
+    /// Companion to `tool_surface_under_budget` — no assertions, prints the per-tool
+    /// map so a breach names *where* the bytes went. A budget that reports only a total
+    /// tells an author to give up rather than to choose. Do NOT delete for having no
+    /// assertions; observability is its purpose.
+    ///
+    /// `cargo test --lib tool_surface_report_lengths -- --nocapture`
+    #[tokio::test]
+    async fn tool_surface_report_lengths() {
+        let (_dir, server) = make_server().await;
+        let mut rows = advertised_surface(&server);
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1 + r.2));
+
+        let desc_total: usize = rows.iter().map(|r| r.1).sum();
+        let schema_total: usize = rows.iter().map(|r| r.2).sum();
+        let total = desc_total + schema_total;
+
+        println!(
+            "\n  {:<22}{:>8}{:>9}{:>9}",
+            "tool", "desc", "schema", "total"
+        );
+        println!("  {}", "-".repeat(48));
+        for (name, d, s) in &rows {
+            println!("  {:<22}{:>8}{:>9}{:>9}", name, d, s, d + s);
+        }
+        println!("  {}", "-".repeat(48));
+        println!(
+            "  {:<22}{:>8}{:>9}{:>9}",
+            format!("TOTAL ({} tools)", rows.len()),
+            desc_total,
+            schema_total,
+            total
+        );
+        println!(
+            "  budget {}, headroom {}",
+            TOOL_SURFACE_CHAR_BUDGET,
+            TOOL_SURFACE_CHAR_BUDGET.saturating_sub(total)
+        );
+    }
+
     /// Guard against prompt-surface drift: every backticked snake_case identifier
     /// in `server_instructions.md`, `onboarding_prompt.md`, and the generated
     /// `build_system_prompt_draft` output must resolve to a real registered tool
