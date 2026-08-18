@@ -66,6 +66,17 @@ pub struct GuideLedger {
     notices: HashSet<String>,
     /// Anonymous tier only. `None` ⇒ never expire by time.
     idle_ttl: Option<std::time::Duration>,
+    /// Has a companion hook ever stamped this server's rendezvous slot?
+    ///
+    /// Copied in from `Rendezvous::is_active()` by `poll_rendezvous` on every
+    /// request. It lives here rather than on `ToolContext` because the ledger is
+    /// what it gates and is already reachable from every tool, where
+    /// `Rendezvous` is not (126 `ToolContext` construction sites).
+    ///
+    /// Latching: once a hook has reported in, it has reported in. Survives
+    /// `clear` and `rekey`, neither of which says anything about whether a hook
+    /// is installed.
+    rendezvous_active: bool,
 }
 
 /// Accepts both on-disk shapes. `untagged` is unambiguous here because a JSON
@@ -94,6 +105,7 @@ impl GuideLedger {
             emitted,
             notices: HashSet::new(),
             idle_ttl: None,
+            rendezvous_active: false,
         }
     }
 
@@ -105,6 +117,7 @@ impl GuideLedger {
             emitted: Default::default(),
             notices: HashSet::new(),
             idle_ttl,
+            rendezvous_active: false,
         }
     }
 
@@ -141,6 +154,16 @@ impl GuideLedger {
     /// `prompts::SESSION_OPENING_GUIDE`.
     pub fn is_empty(&self) -> bool {
         self.emitted.is_empty()
+    }
+
+    /// Record whether the rendezvous has reported in. See the field's docs.
+    pub fn set_rendezvous_active(&mut self, active: bool) {
+        self.rendezvous_active = active;
+    }
+
+    /// Is it safe to re-arm surgically rather than bluntly? See the field's docs.
+    pub fn rendezvous_active(&self) -> bool {
+        self.rendezvous_active
     }
 
     /// A ledger that behaves as if the session has already opened.
@@ -1088,5 +1111,45 @@ mod tests {
             "a sanitized basename cannot escape the ledger directory"
         );
         assert_eq!(p.file_name().unwrap(), "______escape.json");
+    }
+
+    #[test]
+    fn a_fresh_ledger_reports_no_rendezvous() {
+        // The gate must default CLOSED. A ledger that reports an active
+        // rendezvous it never had would let Task 3 take the precise path on a
+        // client where conversation changes are invisible — silently starving
+        // the new conversation, which is the one thing the invariant forbids.
+        let l = GuideLedger::anonymous(None);
+        assert!(!l.rendezvous_active());
+    }
+
+    #[test]
+    fn the_rendezvous_flag_round_trips() {
+        let mut l = GuideLedger::anonymous(None);
+        l.set_rendezvous_active(true);
+        assert!(l.rendezvous_active());
+    }
+
+    #[test]
+    fn rekey_preserves_the_rendezvous_flag() {
+        // A session change means a NEW conversation, not a new server. The hook
+        // that stamped our slot is still installed, so the gate must stay open
+        // across a rekey — closing it would drop the whole feature the first
+        // time /clear fires, which is exactly when it is needed.
+        let mut l = GuideLedger::anonymous(None);
+        l.set_rendezvous_active(true);
+        l.rekey("conv-B");
+        assert!(l.rendezvous_active(), "rekey must not close the gate");
+    }
+
+    #[test]
+    fn clear_preserves_the_rendezvous_flag() {
+        // Same reasoning for the blunt path: clearing what the ledger holds
+        // says nothing about whether a hook is installed.
+        let mut l = GuideLedger::anonymous(None);
+        l.set_rendezvous_active(true);
+        l.insert("librarian".to_string());
+        l.clear();
+        assert!(l.rendezvous_active(), "clear must not close the gate");
     }
 }

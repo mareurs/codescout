@@ -832,13 +832,18 @@ impl CodeScoutServer {
     fn poll_rendezvous(&self) {
         // Two independent mutexes, never held together: the rendezvous guard is
         // a temporary and drops at the end of this statement.
-        let changed = self.rendezvous.lock().poll();
+        let (changed, active) = {
+            let mut rv = self.rendezvous.lock();
+            (rv.poll(), rv.is_active())
+        };
+        let mut led = self.guide_hints_emitted.lock();
+        led.set_rendezvous_active(active);
         if let Some(session) = changed {
             tracing::info!(
                 session = %session,
                 "conversation changed via the rendezvous slot; re-arming the guide ledger"
             );
-            self.guide_hints_emitted.lock().rekey(&session);
+            led.rekey(&session);
         }
     }
 
@@ -5024,6 +5029,57 @@ mod guide_hint_tests {
         assert!(
             !server.guide_hints_emitted.lock().contains("librarian"),
             "a tool call must poll the rendezvous and re-arm for the new conversation"
+        );
+    }
+
+    #[tokio::test]
+    /// Phase C's first production caller of `Rendezvous::is_active()`: an
+    /// ordinary tool call must copy it onto the ledger, not just poll for a
+    /// session change. Task 3's re-arm predicate gates on
+    /// `GuideLedger::rendezvous_active()`, so this proves the wiring reaches it
+    /// through the real request path, not just through a direct unit call.
+    async fn a_tool_call_copies_rendezvous_activity_onto_the_ledger() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let servers = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            servers_dir: Some(servers.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        assert!(
+            !server.guide_hints_emitted.lock().rendezvous_active(),
+            "no hook has stamped our slot yet"
+        );
+
+        let slot = servers.path().join(format!("{}.json", std::process::id()));
+        let mut entry: crate::tools::rendezvous::Entry =
+            serde_json::from_str(&std::fs::read_to_string(&slot).unwrap()).unwrap();
+        entry.hook_at = Some(chrono::Utc::now());
+        std::fs::write(&slot, serde_json::to_string(&entry).unwrap()).unwrap();
+        filetime::set_file_mtime(&slot, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+
+        let result = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+        assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+
+        assert!(
+            server.guide_hints_emitted.lock().rendezvous_active(),
+            "an ordinary tool call must copy Rendezvous::is_active onto the ledger"
         );
     }
 
