@@ -140,15 +140,23 @@ mod tests {
             )),
             // Mid-session, not a bare default: the session opener fires on the
             // first guide-eligible call of a truly empty ledger and appends a
-            // second content block to `call_content`'s response. Verified safe
-            // for every test in this module: only
+            // second content block to `call_content`'s response. Only
             // `get_guide_large_topic_returns_full_body_inline_not_buffered` goes
-            // through `call_content` (everything else calls `GetGuide::call`
-            // directly, whose body/note never depend on whether the opener's
-            // own topic is already in the ledger), and that is the one test
-            // this change exists for — see its doc comment. Opener delivery
-            // itself is covered by `server::guide_hint_tests`, per
-            // `GuideLedger::mid_session`'s own doc comment.
+            // through `call_content`, and that is the test this seeding exists
+            // for — see its doc comment.
+            //
+            // Note for whoever extends this module: the seeded topic IS
+            // `SESSION_OPENING_GUIDE` ("project-activation-bootstrap"), so for
+            // `get_guide_returns_project_activation_bootstrap_body` the seed
+            // makes `first_fetch` false and `GetGuide::call` returns the
+            // "already fetched" note rather than the "Don't re-call" one. The
+            // BODY is byte-identical across both branches, which is all that
+            // test asserts on — but a note assertion added here would be
+            // reading the seeded branch, not the fresh one. Both note branches
+            // are covered explicitly by `repeat_fetch_keeps_body_and_flags_static`
+            // on an unaffected topic. Opener delivery itself is covered by
+            // `server::guide_hint_tests`, per `GuideLedger::mid_session`'s own
+            // doc comment.
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
                 crate::tools::guide_ledger::GuideLedger::mid_session(),
             )),
@@ -219,11 +227,13 @@ mod tests {
         // without GetGuide's `force_inline()` override, call_content's overflow
         // branch would divert it to the output buffer and return only a ref handle.
         //
-        // Uses the shared `ctx()`, which starts mid-session — this test measures
-        // the SHAPE of the primary content block, and the session opener (fires
-        // on the first guide-eligible call of a fresh ledger) appends a second,
-        // unrelated content block. Starting from an empty ledger would make this
-        // test measure the opener instead of the property it's named for.
+        // Uses the shared `ctx()`, which starts mid-session, so the session
+        // opener does not append its extra content block here. That seeding is
+        // belt-and-braces rather than load-bearing: `call_content` builds
+        // `blocks = vec![primary]` and only then pushes any guide block, so
+        // `content.first()` is this tool's own output whatever the ledger
+        // holds. The shape assertions below are what actually carry the guard —
+        // an empty ledger would leave them green.
         let g = GetGuide::new();
         let ctx = ctx().await;
 

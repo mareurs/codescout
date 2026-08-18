@@ -10,8 +10,8 @@ A single call to `activate_project(path=...)` flips the server's active
 project to the given root. The call has these side effects, in order:
 
 1. **Resolves the path.** Bare project IDs (no `/`) inside a workspace
-   are focus-switches — they return early and never reach the steps
-   below, including the ledger touch in step 2. Absolute paths trigger
+   are focus-switches — they skip step 2 entirely (the ledger is never
+   touched), then still run steps 3–5 and return. Absolute paths trigger
    full activation: path must be an existing directory or you get a
    `RecoverableError` (`isError: false`, sibling calls survive) —
    raised *before* step 2, so a malformed or nonexistent path leaves
