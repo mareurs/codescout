@@ -2105,6 +2105,6 @@ this symbol not exist" investigation.
 worktree should be `pwd`, and its output compared to where you think you are. One token of
 output, and it is the only thing in the response that cannot be about the wrong tree.
 
-**Filed:** `docs/issues/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
+**Filed:** `docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
 
-**Status:** open.
+**Status:** mitigated — fix idea 3 (prefix the notice into `stdout`, not just a sibling field) landed in `src/tools/core/types.rs`'s `inject_notice`. Fix idea 2 (guard reads outright) was deliberately rejected: `worktree_read_notice`'s own doc comment already argues against refusing reads mid-orientation, and that reasoning holds. Fix idea 1 (`EnterWorktree` self-activates) remains open and lives in `codescout-companion`, a different repo — not done here.

@@ -628,6 +628,50 @@ async fn a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen() {
     );
 }
 
+/// The sibling `_workspace_notice` field sits next to a plausible `stdout`
+/// answer and loses attention to it — measured twice in one session in
+/// docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md.
+/// `run_command`'s response is the one shape with a top-level `stdout`
+/// string, so the notice must also land inside it, unmissably.
+#[tokio::test]
+async fn a_worktree_notice_is_prefixed_into_stdout_when_the_response_carries_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+
+    let tool = EchoTool {
+        result: serde_json::json!({"stdout": "3ecb8730 some commit subject", "exit_code": 0}),
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+
+    assert!(
+        text.contains("_workspace_notice"),
+        "the sibling field must still be present: {text}"
+    );
+    let stdout_field: String = serde_json::from_str::<serde_json::Value>(&text).unwrap()["stdout"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        stdout_field.starts_with('⚠'),
+        "the notice must be prefixed into stdout, not just live in a sibling field: {stdout_field}"
+    );
+    assert!(
+        stdout_field.ends_with("3ecb8730 some commit subject"),
+        "the original stdout must be preserved verbatim after the prefix: {stdout_field}"
+    );
+}
+
 /// The other half of the pair: once the caller HAS chosen, the notice has
 /// nothing to ask for and must not fire at all — not even once.
 #[tokio::test]

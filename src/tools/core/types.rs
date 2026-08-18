@@ -745,6 +745,17 @@ pub trait Tool: Send + Sync {
 
         fn inject_notice(val: &mut Value, notice: &str) {
             if let Some(obj) = val.as_object_mut() {
+                // `run_command`'s answer IS the primary content the caller reads —
+                // a sibling `_workspace_notice` field next to a plausible `stdout`
+                // reads as metadata, and the plausible answer wins attention (see
+                // docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md).
+                // Prepend into `stdout` too, when present, so the warning sits in
+                // the channel that is actually read. No other tool's response
+                // shape carries a top-level `stdout` string.
+                if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
+                    let prefixed = format!("⚠ {notice}\n\n{stdout}");
+                    obj.insert("stdout".to_string(), Value::String(prefixed));
+                }
                 obj.insert(
                     "_workspace_notice".to_string(),
                     Value::String(notice.to_string()),
