@@ -114,14 +114,32 @@ and worktree *enumeration* now live in one place that no feature gates.
 
 ### Still open — the semantic question
 
-1. **Follow the main checkout for both.** Resolve `.codescout/` against the main
-   worktree's root. Matches how the librarian catalog already treats a worktree
-   (overlay onto main, fork on first write). Costs: a worktree can no longer hold
-   memories about its own in-flight work.
-3. **Carry `workspace.toml` into new worktrees.** Now known to be narrower than
-   originally written: it is not "restore a discovery mode", it is "carry
-   `exclude_projects` + `discovery_max_depth`". Fixes topology only, leaves
-   memories diverging, and adds a file-sync obligation nothing else has.
+**The topology half is closed.** `1869adcb` makes `load_discover_settings` read
+through to the main checkout's `workspace.toml` when the worktree has none. That is
+option 3's *goal* without option 3's cost: the filed objection was "adds a file-sync
+obligation nothing else has", and carrying the settings turns out not to require
+copying the file. A worktree's own `workspace.toml` still wins, so a deliberate
+per-worktree configuration is never overridden.
+
+The activation notice moved with it, or it would have begun asserting something
+false. Topology is now three states rather than two:
+
+| State | Meaning |
+|---|---|
+| `configured` | the worktree has its own `workspace.toml` |
+| `inherited` | it has none, the main checkout does, discovery used main's (**new**) |
+| `inferred` | neither has one — the original "ran with defaults" text, now actually true |
+
+**What remains is one question, about memories only:**
+
+1. **Should a worktree serve the main checkout's memories?** Resolve
+   `.codescout/memories/` against the main worktree's root, matching how the
+   librarian catalog already treats a worktree (overlay onto main, fork on first
+   write). Cost: a worktree can no longer hold memories about its own in-flight
+   work. This is a semantic call, not an implementation problem.
+
+Option 3 is now spent — do not re-raise "carry `workspace.toml` into new
+worktrees", which is what shipped, by read-through rather than by copy.
 
 The librarian's worktree overlay (`get_guide("librarian")` § Worktree overlay)
 remains the precedent to read before deciding: it answered this question for
@@ -153,15 +171,19 @@ the worktree by hand.
 
 ## Resume
 
-**Mitigated, not fixed.** The divergence is reported; whether it *should* exist
-is undecided, and that decision is the remaining work. Options 1 and 3 above are
-mutually exclusive; option 2 has shipped and forecloses neither.
+**Still mitigated, and now for one reason rather than two.** The topology half is
+fixed (`1869adcb`, `experiments`); the memory half is the remaining work, and it is
+a decision rather than an implementation — see § Still open.
 
-Do not re-derive the mechanism — and in particular do not trust the original
-wording of § Root cause, which is corrected in place. The topology half is a
-missing `exclude_projects` list, not a missing discovery mode, and that makes
-option 3 substantially cheaper than this file first implied.
+Do not re-derive the mechanism. In particular do not trust the original wording of
+§ Root cause, which is corrected in place: the topology half was a missing
+`exclude_projects` list, not a missing discovery mode.
 
-Still true, and still the reason not to treat the two halves as one bug:
-memories diverge because a file IS tracked; topology diverges because a
-different file is NOT.
+Still true, and still the reason the two halves are not one bug: memories diverge
+because a file **is** tracked; topology diverged because a different file is **not**.
+That asymmetry is why one half could be fixed by reading through to main and the
+other cannot be — there is nothing to read through *to*, since the worktree's
+memories are present, just older.
+
+Promotion is a fast-forward, so the `experiments` SHA above already is the master
+SHA; deliberately no pending-master-SHA line.

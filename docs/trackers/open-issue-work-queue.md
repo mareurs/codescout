@@ -58,7 +58,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-13 | 3 | IL1: run subtract-and-measure on the step-3 wording — ran as hamsa A-25, clause LOST (base 10/10, clause 8/10 vs a ≤ 1/10 ship bar), reverted at `32b34efa` behind an inverted guard | **done, archived** | `b4d48dbfecc205c9` |
 | BL-14 | 3 | read_file: `force=true` silently discarded on whole-file reads | done | `1780acde047ffca2` |
 | BL-15 | 3 | Read-only metadata commands (wc/ls/stat) blocked on source paths | done | `6902806f459fcf62` |
-| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (option 2 shipped; 1-vs-3 open) | open | `403e3fad0356f171` |
+| BL-16 | 3 | Worktree activation diverges memory set and sub-project topology (topology CLOSED `1869adcb`; memories = option 1, a semantic call) | open | `403e3fad0356f171` |
 | BL-17 | 4 | Reconcile a bug sitting in `archive/` while still marked `status: open` | **done** — measured 0; its own bug file is gone | — |
 | BL-18 | 1 | `artifact(create)`: `augment` silently discarded five of its seven fields | **done** | `29f1ddf259562b7f` |
 | BL-19 | 1 | Overflow envelopes with no compact summary waste a whole call | **done, archived** | `3d733b00b134634c` |
@@ -180,8 +180,18 @@ See `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-d
 **done**
 
 ### BL-16 — worktree activation diverges memory set and sub-project topology
-**open** — option 2 shipped; the 1-vs-3 choice is still open.
 
+**open** — but for one half rather than two. The **topology** half is closed
+(`1869adcb`): `load_discover_settings` reads through to the main checkout's
+`workspace.toml` when the worktree has none, which is option 3's goal without its
+file-sync cost, and the activation notice gained a third topology state
+(`inherited`) so it stops claiming discovery "ran with defaults" about a walk that
+inherited main's.
+
+What remains is **option 1 only**, and it is a decision rather than an
+implementation: should a worktree serve the MAIN checkout's memories (the
+librarian-overlay precedent — overlay onto main, fork on first write) or its own
+commit's? Option 3 is spent; do not re-raise it.
 ### BL-17 — reconcile a bug that sits in archive/ while still marked status: open
 **done** — measured 0 instances; the bug file it was filed against is itself gone.
 
