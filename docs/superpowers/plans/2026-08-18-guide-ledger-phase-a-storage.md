@@ -831,6 +831,16 @@ Add to `mod guide_hint_tests` in `src/server.rs`:
 Run: `cargo test --lib guide_hint_tests::guide_ledger_does_not_live_under_the_project_root`
 Expected: FAIL — the directory exists, because construction still points at the project root.
 
+> **Historical record — the test shipped under a different name.** The whole-branch review
+> found this test asserted only the *absence* of a project-tree ledger, which a mutation
+> forcing `guide_hints_dir` to `None` would also satisfy, so a positive assertion was added
+> and the test renamed to
+> `guide_ledger_lives_in_the_injected_dir_not_under_the_project_root`
+> (`src/server.rs:4443`). **The filter above now matches zero tests and exits 0** — a false
+> green if you replay it. Use the current name. The step text is left as written because the
+> plan is a record of what was planned, not of what shipped; see
+> `docs/trackers/2026-08-18-guide-ledger-residuals.md` § S-08.
+
 - [ ] **Step 3: Write the implementation**
 
 In `src/server.rs`, replace the `guide_hints_dir` binding (currently lines 263-265):

@@ -59,15 +59,31 @@ holding the file back only grows a pile of `fixed`-but-unarchived bugs that no q
 ever surfaces (`artifact(action="find", kind="bug", status="open")` filters on
 `status`, not on path).
 
-Two things the file MUST carry when archived experiments-only, because nothing
-re-reads `archive/`:
+The file MUST carry the fix SHA when archived experiments-only, because nothing
+re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orphans on
+rebase and an unlabelled one in `archive/` becomes an untraceable string.
 
-- the fix SHA, **labelled `experiments`** — an `experiments` SHA orphans on rebase,
-  so an unlabelled SHA in `archive/` becomes an untraceable string;
-- a `## Resume` line stating that the **master-side** SHA still has to be recorded
-  after cherry-pick.
+**Whether it ALSO needs a pending-master-SHA `## Resume` line depends on how the fix
+will reach `master`. Only one of the two paths needs it** — check before writing it:
+
+| Path | Resume line? | Why |
+|---|---|---|
+| **cherry-pick** | **yes** | A new SHA is minted on `master` and the `experiments`-side original orphans on the next rebase. Nothing re-reads `archive/` to repair it, so the line is the only prompt. |
+| **fast-forward** | **no** | `master` moves onto the exact commits, so the `experiments` SHA already **is** the master SHA. Writing the line sends a later session hunting for one that will never exist. |
+
+```
+git rev-list --left-right --count master...experiments
+```
+
+A `0` on the left means `master` is a strict ancestor and fast-forward is available.
+Both paths are specified in `docs/RELEASE.md`; `docs/issues/_TEMPLATE.md` carries the
+same table.
 
 Check where a SHA actually lives with `git branch --contains <fix-sha>`.
+
+(Measured 2026-08-08: 24 archived bug files carry the cherry-pick form, written before
+that cohort's path was settled as fast-forward. They are stale instructions, not open
+debt — the SHA in each is already correct. Do not sweep them.)
 
 Archive through the catalog — `artifact(action="move", id=…,
 new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
