@@ -248,6 +248,31 @@ happened to be editing, and the sweep found the ones I was not.
 `A-15 … A-24` independently and agreed **exactly** with the manual `grep '^#{1,4} A-(1[5-9]|2[0-9]) '`
 run recorded above. Two methods, one answer, on a population of ten — which is the strongest
 evidence available here that `body_defined_indices` means what it claims to.
+### Verified on the wire after `/mcp`, not only in tests (2026-08-18)
+
+Every surface this bug touches was re-checked through the live MCP server on the rebuilt
+binary. Recorded here rather than in the queue's `next` field, because that field lives only
+in the machine-local catalog — BL-29's defect — so a note written there is in no repo.
+
+| surface | result |
+|---|---|
+| `librarian(doctor)` | reproduces the CLI run **exactly**: hamsa 10 of 25 naming A-15…A-24, `provenance-subsystem` 64 of 68, `or-tools-knowledge` 1 of 35, plus 10 `ledger_defines_nothing` |
+| `librarian(tracker_design, archetype="task_list")` | serves the corrected `## T-N — <title>` skeleton, the citability sentence in `prompt_template`, and the `entry_collection: "tasks"` it had been missing |
+| `get_guide("tracker-conventions")` | both rewritten sections live — *One entry format, never two* ("the headings are the index … not one of two") and *Make the tracker guarded* ("Declare `entry_prefix`" / "Do NOT stamp `id:`") |
+| `get_guide("librarian")` | the new *"nothing writes it to the body on disk"* paragraph auto-injected on the session's first `artifact` call |
+| `update_entry` on `BL-39` | **`undefined_in_body` fired**, with the whole-ledger message, **alongside `snapshot_stale`** |
+
+That last row is the one worth keeping. Both advisories arrived on one response, which is the
+orthogonality claim demonstrated rather than asserted: the row half said the committed table
+lags the catalog, and the citation half said no `BL-N` heading exists at all. A single
+`snapshot_missing` could never have carried both, and "add the row" — the only thing it knew how
+to say — is what let this go dark.
+
+The `Defined` → silent branch was **not** probed live, deliberately: doing so would have meant a
+contrived write to a real tracker purely to observe an absence. It is covered by
+`patching_an_entry_that_has_its_own_heading_reports_no_citation_gap`, which was
+mutation-verified (forcing `undefined_in_body_note` to `None` reddened both positive tests and
+left that one green).
 ### Why an author lands here without noticing
 
 The tracker's documented append flow is three steps — allocate, row, body — and only the
