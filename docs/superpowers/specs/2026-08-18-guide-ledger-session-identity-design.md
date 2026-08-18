@@ -472,6 +472,7 @@ the doc comment, once by the test failing.
 This interacts with §8's GC, which falls back to file mtime for an empty or unparseable
 ledger — unaffected by this decision, since GC only runs on ledgers other than the one
 being loaded.
+
 ### 8. GC
 
 A global directory accumulates across every project, so GC is part of the design rather
