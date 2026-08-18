@@ -251,13 +251,29 @@ the advisory; that is two round-trips spent on a false positive.
 
 ## Resume
 
-One step remains and it is not scriptable: **cold-restart all three Claude Code
-instances** (or `/reload-plugins` per instance). Hooks resolve `installPath` at
-launch, so a resume is not enough — until then a running session still loads the
-1.16.8 cache and will keep emitting the warning.
+**Nothing. Verified live on the wire 2026-08-18** after `/reload-plugins` bound the
+1.16.9 cache in this instance.
 
-The three `claude-plugins` commits are **local on `main`, not pushed**
-(`NO_PUSH=1`). Push is the maintainer's call.
+Discriminating pair, run back to back in the session that shipped the fix:
+
+| Probe | Before | After |
+|---|---|---|
+| `ls docs/issues/ \| head -5` — bounded LHS, legal | ran **+ IL3 warning** | ran, **silent** |
+| `git show HEAD:CHANGELOG.md \| grep -n 'Unreleased'` — unbounded LHS, real violation | BLOCKED | **BLOCKED**, full `@cmd_*` recovery text |
+
+Both halves were needed. The first alone would equally describe a fix that had
+simply disabled IL3; the second proves the server's enforcement is untouched and
+still emits the better message the deletion argument rested on. The first probe is
+the same command shape that produced the false positive quoted in *Symptom*.
+
+Remaining, and both the maintainer's call:
+
+- The three `claude-plugins` commits are **local on `main`, not pushed**
+  (`NO_PUSH=1`).
+- The other two Claude Code instances (`~/.claude`, `~/.claude-kat`) still need
+  `/reload-plugins` or a cold restart. Their install records and caches are already
+  at 1.16.9 — only the running processes are stale, and each binds `installPath` at
+  launch.
 ## References
 
 - `docs/trackers/codescout-usage-frictions.md` — U-44 (this friction), U-22 (the same
