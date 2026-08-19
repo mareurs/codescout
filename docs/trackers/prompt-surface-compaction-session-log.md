@@ -8,7 +8,7 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 6
+entry_high_water_F: 7
 entry_high_water_W: 13
 entry_prefix:
 - F
@@ -78,6 +78,7 @@ entry_prefix:
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 | F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
 | F-5 | 2026-08-19 | high | self-friction | fixed-verified | A guard that names the invariant but never exercises it — forcing the gate open left 62/62 passing; "mutation-tested" is a per-ASSERTION claim, not a per-commit one |
+| F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
 ## Wins Index
 
@@ -594,9 +595,34 @@ demonstrably not the control; the control is refusing to state a count that a `h
 `limit`, or a hand-picked sample produced. Three hand-measurements of one question gave
 three different answers before the tool gave the fourth.
 
-**Status:** validated — 3 datapoints, all 2026-08-18/19, each with the wrong answer
-available and plausible. Datapoint 3 also self-refutes the "just remember it" reading of
-this entry.
+**Datapoints 5, 6 and 7 (2026-08-19, evening) — all three AFTER this entry was written,
+validated, and quoted.** (5) `grep -c patch-id` reported 7 unanchored records; the
+structured predicate found 9, because two files mention patch-ids in prose and one of those
+two is the bug file whose SUBJECT is patch-ids. (6) `grep -c 'SHA'` counted the WORD, so the
+three heaviest decoy carriers scored zero and were never opened — "three" where the
+population held eight. The filter selected *against* the population it was characterising.
+(7) `commit_like_hashes` paired backticks across the whole file, and one stray backtick
+inside a fenced `grep` pattern voided every hash after it — "7 of 9" where the answer is
+8 of 9.
+
+**Promoted 2026-08-19 to all three CLAUDE.md profiles** as *"Measurement — Never State a
+Count Your Instrument Did Not Measure"*. The promotion criterion ("at 3, promote to
+CLAUDE.md") had fired at datapoint 3 and sat unharvested for a day while the failure
+recurred three more times; measured at promotion time, `calibrat|instrument|measurement|sampl`
+returned **0 across all three files**. Two of the three profiles were also missing the
+Mutation-apply block entirely — this session ran on one of them, and applied mutation
+discipline only because codescout's project-instructions path happens to point at the third
+profile's copy. All three are now byte-identical (`md5 08f0ef6cb534`).
+
+The promoted wording moves the control from the measurement step to the **publication**
+step, because this entry's own evidence is that the measurement step is where it is not
+noticed: running a command *feels* like verification, so Conclude Last's "open the artifact
+or run the command" never fires — the command ran, it just measured the wrong thing.
+
+**Status:** promoted-to-permanent-docs — 7 datapoints, all 2026-08-18/19, each with the
+wrong answer available and plausible. Datapoints 3, 5, 6 and 7 all post-date the entry and
+refute the "just remember it" reading of it. See [[F-7]] for the meta-failure the
+unharvested criterion belongs to.
 
 ## W-5 — When several records make the same mistake, fix the generator — the records were obeying it
 
@@ -1269,6 +1295,59 @@ name which fixture died — a mutation that kills nothing has found a coverage h
 redundant test.*
 
 **Status:** validated — one datapoint, with the second fixture as its artifact.
+
+## F-7 — A fired `Promote-when` is a zombie win, and nothing queries for one
+
+**Observed:** 2026-08-19, answering the operator's question *"is this a systemic failure?"*
+after a seventh instance of [[W-4]]'s mechanism in two days.
+
+**When:** Checking the *installation* surface rather than re-reading the error log — which
+is what turned an impression into two verified gaps.
+
+**Expected:** a validated entry whose promotion criterion has fired reaches the surface that
+changes behaviour.
+
+**Got — two gaps, both measured at the moment of the question:**
+
+1. **W-4's criterion fired and was never harvested.** It reads *"at 3, promote to
+   `CLAUDE.md`"*; it had 4 datapoints and `Status: validated`. Probe across all three
+   profiles: `grep -ci 'calibrat|instrument|measurement|sampl'` returned **0, 0, 0**. It had
+   reached nothing, while the failure recurred three more times that evening.
+2. **The one lesson that WAS promoted reached one profile of three.**
+   `.claude/CLAUDE.md` was 115 lines and carried the Mutation-apply block;
+   `.claude-sdd/CLAUDE.md` and `.claude-kat/CLAUDE.md` were 97 lines without it, and
+   **byte-identical to each other** — so this was one un-propagated write, not gradual drift.
+
+The second is the sharper one. **This session ran on `.claude-sdd`**, the profile missing
+the block, and applied mutation discipline all evening only because codescout's
+project-instructions path happens to resolve to `/home/marius/.claude/CLAUDE.md`, injecting
+the other profile's copy as a second file. On a repo without that coincidence, the discipline
+behind every verified result of this session is simply absent — and nothing would have said so.
+
+**Probable cause:** fix-then-forget, which this project has already measured on two other
+surfaces and not on this one. `get_guide("tracker-conventions")` records **39 of 57** entries
+in one ledger with fired criteria unharvested over three months; CLAUDE.md's verify-open
+cadence records a **75%** zombie-open rate for bug entries. Capture is excellent — session
+logs, promote-when criteria, bug files, three `doctor` checks shipped today. Installation has
+no gate at all: a criterion that fires emits no event, matches no query, and trips no CI
+signal. `Status:` is the only field that would make it harvestable, and nothing reads it for
+this purpose.
+
+**Severity:** high — this is the mechanism by which every *other* lesson silently fails to
+take effect, including the ones that would have caught the seven instances in W-4. A capture
+system with no installation step converts effort into archaeology.
+
+**Status:** mitigated — W-4 promoted to all three profiles as *"Measurement — Never State a
+Count Your Instrument Did Not Measure"*, the Mutation-apply block synced to the two that
+lacked it, and all three files are now byte-identical (`md5 08f0ef6cb534`, 157 lines). The
+general gap is unfixed: nothing stops the next fired criterion going the same way.
+
+**Fix idea / Pointer:** a `doctor` check for fired-but-unharvested criteria, on the pattern
+that worked three times today — `terminal_status_with_caveat` made a stated caveat queryable,
+`archived_fix_sha_unresolvable` a broken anchor, `terminal_status_without_fix_anchor` a
+missing one. Filed as `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`.
+A profile-divergence check is the cheaper half and may not need `doctor` at all: three files
+that should be byte-identical have an md5.
 
 ## Template for new entries
 
