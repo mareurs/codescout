@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-19
-closed:
+closed: 2026-08-19
 severity: low
 owner: marius
 related: []
@@ -93,27 +93,44 @@ counterpart in the failing test.
    mode too.
 
 ## Fix
-Not yet implemented. Add the same `EnvGuard::set("CODESCOUT_EMBEDDER_URL",
-"http://unused.invalid")` pattern (or equivalent) that
-`semantic_memory_store_bootstrap_times_out_on_hung_qdrant` already uses, so
-`memory_embedder_is_built_from_the_shared_code_embedder` forces the cheap
-HTTP branch and actually reaches its `Arc::ptr_eq` assertion regardless of
-build features or host state.
 
+Added `let _embedder_url = EnvGuard::set("CODESCOUT_EMBEDDER_URL", "http://unused.invalid");`
+to `agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`
+(`src/agent/mod.rs:2318`, inside the function body starting `src/agent/mod.rs:2305`),
+mirroring the sibling test's guard pattern
+(`semantic_memory_store_bootstrap_times_out_on_hung_qdrant`, `src/agent/mod.rs:2241-2288`)
+exactly — same `EnvGuard::set` call, same `let _<name> = ...` RAII binding so the guard
+restores the original env var on drop at the end of the test.
+
+This forces `build_embedder` (`src/retrieval/client.rs:260-296`) down the cheap remote/HTTP
+branch instead of falling through to `default_embed_model()`'s
+`"local:AllMiniLML6V2Q"` (`src/config/project.rs:347-349`), which requires the `local-embed`
+feature and/or cached ONNX weights.
+
+Verified on `experiments` @ `66ed27dea7f48557ddfa25886527f5d6c1a7ccaa`:
+
+```
+cargo +1.97.1-x86_64-pc-windows-gnu test --release --features server-stack --lib agent::tests::memory_embedder_is_built_from_the_shared_code_embedder -- --nocapture
+```
+
+- Before the fix: panicked at `src/agent/mod.rs:2309:84` exactly as described in Symptom.
+- After the fix: `test agent::tests::memory_embedder_is_built_from_the_shared_code_embedder ... ok`
+  — confirmed this is the real pass (not just avoiding the panic): the test body's only
+  assertion, `Arc::ptr_eq(&adapter.0, &seen_client_embedder)`, executes and succeeds, along
+  with the two `.expect()` calls preceding it (`test_seen_client_embedder` capture,
+  `CodeDenseAdapter` downcast).
+
+Fast-forward branch — no separate master SHA to record.
 ## Tests added
-N/A — not yet fixed; this bug file *is* about the test itself.
 
+No new test — the existing test itself was the defect (missing `EnvGuard`); it now passes for real, exercising its actual `Arc::ptr_eq` assertion. See `## Fix` for the confirming test output.
 ## Workarounds
 Set `CODESCOUT_EMBEDDER_URL` to any reachable (or even unreachable, per the
 sibling test's pattern) HTTP endpoint before running this specific test.
 
 ## Resume
-Add the missing `EnvGuard` to
-`agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`
-(`src/agent/mod.rs`, near line 2309), mirroring
-`semantic_memory_store_bootstrap_times_out_on_hung_qdrant`
-(`src/agent/mod.rs:2241-2288`).
 
+Fixed. N/A.
 ## References
 - `src/agent/mod.rs:1845-1860` (`memory_embedder`)
 - `src/agent/mod.rs:2241-2288` (sibling test with the correct guard pattern)

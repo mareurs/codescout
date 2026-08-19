@@ -169,6 +169,10 @@ windows-sys = { version = "0.61", features = [
     # `bash -c`) running, which is how a cancelled run_command kept going.
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # ToolHelp snapshot walk: Windows has no getppid(), so parent_pid() (used
+    # by the rendezvous hook match) finds this process's PROCESSENTRY32W entry
+    # in a full-system snapshot and reads th32ParentProcessID off it.
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 
 [features]
