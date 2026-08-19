@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// One server's slot. `session` is what the server reads back; `hook_at` is how
-/// it knows a hook — rather than only itself — has written here.
+/// it knows a hook — rather than only itself — has written for this conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub pid: u32,
@@ -23,7 +23,15 @@ pub struct Entry {
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub cwd: String,
     pub session: Option<String>,
-    /// Set by the companion hook. `None` ⇒ no rendezvous is active.
+    /// Written by the companion hook, or carried forward by [`Rendezvous::publish`]
+    /// from a predecessor slot for the SAME conversation. `None` ⇒ no rendezvous is
+    /// active.
+    ///
+    /// The inheritance is what makes this field mean "a hook has stamped a slot for
+    /// this CONVERSATION" rather than "for this PROCESS". Hook installation is a
+    /// property of the conversation; keying it to a process lost the fact on every
+    /// `/mcp` reconnect. See
+    /// docs/issues/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
     pub hook_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -64,6 +72,10 @@ impl Rendezvous {
         if std::fs::create_dir_all(&dir).is_err() {
             return inert();
         }
+        // BEFORE `gc`, which is the only window in which the predecessor still
+        // exists: a `/mcp` reconnect kills the old server and starts this one, so
+        // by the time `gc` reaps dead-process slots the evidence is gone.
+        let inherited = inherited_stamp(&dir, session);
         gc(&dir);
         let pid = std::process::id();
         let entry = Entry {
@@ -74,7 +86,7 @@ impl Rendezvous {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
             session: session.map(str::to_string),
-            hook_at: None,
+            hook_at: inherited,
         };
         let path = dir.join(format!("{pid}.json"));
         match serde_json::to_string(&entry) {
@@ -83,7 +95,7 @@ impl Rendezvous {
                     path: Some(path),
                     last_mtime: None,
                     current: entry.session,
-                    active: false,
+                    active: inherited.is_some(),
                 },
                 Err(e) => {
                     tracing::debug!("rendezvous publish failed ({}): {e}", path.display());
@@ -97,7 +109,8 @@ impl Rendezvous {
         }
     }
 
-    /// Has a companion hook written into our slot?
+    /// Has a companion hook written for this CONVERSATION — into our slot, or into a
+    /// predecessor slot this one inherited from across a `/mcp` reconnect?
     ///
     /// Phase C gates its re-arm predicate on this: without a rendezvous the
     /// server cannot detect a conversation change, so the blunt
@@ -160,6 +173,52 @@ fn parent_pid() -> u32 {
     // No getppid here. The hook walks ancestry itself, so a zero degrades to
     // "never matched" rather than to a WRONG match — the safe direction.
     0
+}
+
+/// The newest stamp any slot for `session` carries.
+///
+/// This is what makes a `/mcp` reconnect survivable. The server publishes a fresh
+/// slot at construction with no stamp, and the ONLY writer of `hook_at` is the
+/// companion's `SessionStart` hook — which does not fire on a reconnect. Without
+/// this, `is_active()` reports false for the rest of the conversation with no path
+/// back, and `ActivateProject::call` then takes its blunt `GuideLedger::clear()`
+/// branch on every activation, re-sending every guide the conversation already holds.
+///
+/// Matched on the SESSION id, never on pid or cwd: a pid is useless as durable
+/// identity (see this module's own doc) and cwd would wrongly inherit between two
+/// conversations in one repo — the 2026-08-16 attribution bug, in a new place.
+///
+/// Absent a companion the scan finds nothing, so a hookless client keeps the blunt
+/// behaviour exactly as before. That default is load-bearing: the keyed tier carries
+/// no idle TTL (`GuideLedger::load` sets `idle_ttl: None`), so for such a client the
+/// blunt clear is the ONLY thing standing between a `/clear` and permanent guide
+/// starvation.
+///
+/// docs/issues/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
+fn inherited_stamp(dir: &Path, session: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
+    let session = session?;
+    let mut newest: Option<chrono::DateTime<chrono::Utc>> = None;
+    for entry in std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        // Best-effort per slot: an unreadable or half-written neighbour costs this
+        // one inheritance, never the publish.
+        let Some(e) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Entry>(&t).ok())
+        else {
+            continue;
+        };
+        if e.session.as_deref() != Some(session) {
+            continue;
+        }
+        if let Some(at) = e.hook_at {
+            newest = Some(newest.map_or(at, |n: chrono::DateTime<chrono::Utc>| n.max(at)));
+        }
+    }
+    newest
 }
 
 /// Remove slots whose process is gone. Marked cleanup, not discovery — see
@@ -601,5 +660,108 @@ mod tests {
         assert_eq!(r.poll(), None);
         std::fs::remove_file(r.path().unwrap()).unwrap();
         assert_eq!(r.poll(), None);
+    }
+
+    /// What a previous server for a conversation left behind, optionally stamped.
+    fn seed_predecessor(dir: &std::path::Path, pid: u32, session: &str, stamped: bool) {
+        let e = Entry {
+            pid,
+            ppid: 1,
+            started_at: chrono::Utc::now(),
+            cwd: "/tmp".to_string(),
+            session: Some(session.to_string()),
+            hook_at: stamped.then(chrono::Utc::now),
+        };
+        std::fs::write(
+            dir.join(format!("{pid}.json")),
+            serde_json::to_string(&e).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn publish_inherits_the_stamp_from_a_predecessor_slot_for_the_same_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let dead = a_dead_pid();
+        seed_predecessor(dir.path(), dead, "sess-1", true);
+
+        let r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+
+        assert!(
+            r.is_active(),
+            "a reconnect must not lose the fact that a hook is installed for this \
+             conversation"
+        );
+        let mine = entry_at(dir.path(), std::process::id()).unwrap();
+        assert!(
+            mine.hook_at.is_some(),
+            "the stamp is carried into the new slot, so a SECOND reconnect inherits too"
+        );
+        assert!(
+            entry_at(dir.path(), dead).is_none(),
+            "the predecessor is still collected — the scan must run BEFORE gc, not \
+             instead of it"
+        );
+    }
+
+    #[test]
+    fn publish_does_not_inherit_a_stamp_from_a_different_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_predecessor(dir.path(), a_dead_pid(), "someone-elses-session", true);
+
+        let r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+
+        assert!(
+            !r.is_active(),
+            "inheriting across conversations would let one window's hook vouch for \
+             another's — the 2026-08-16 attribution bug in a new place"
+        );
+        assert!(entry_at(dir.path(), std::process::id())
+            .unwrap()
+            .hook_at
+            .is_none());
+    }
+
+    #[test]
+    fn publish_stays_inactive_when_no_predecessor_was_stamped() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_predecessor(dir.path(), a_dead_pid(), "sess-1", false);
+
+        let r = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+
+        assert!(
+            !r.is_active(),
+            "a client with no companion keeps the blunt clear: the keyed tier carries no \
+             idle TTL, so that default is the only thing between a /clear and permanent \
+             guide starvation"
+        );
+    }
+
+    #[test]
+    fn a_reconnect_keeps_the_rendezvous_active() {
+        // The real sequence: the server publishes, the SessionStart hook stamps, that
+        // server dies on `/mcp`, and a new one publishes. Only the pid differs between
+        // the two — and a test cannot change its own — so the first slot is renamed onto
+        // a dead pid to stand in for "that process is gone".
+        let dir = tempfile::tempdir().unwrap();
+        let r1 = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+        assert!(!r1.is_active(), "unstamped at first publish, as before");
+        stamp_as_hook(r1.path().unwrap(), "sess-1");
+
+        let dead = a_dead_pid();
+        std::fs::rename(
+            dir.path().join(format!("{}.json", std::process::id())),
+            dir.path().join(format!("{dead}.json")),
+        )
+        .unwrap();
+
+        let r2 = Rendezvous::publish(Some(dir.path().to_path_buf()), Some("sess-1"));
+
+        assert!(
+            r2.is_active(),
+            "before this fix a reconnect reported inactive for the rest of the \
+             conversation, and every workspace(activate) then cleared the whole guide \
+             ledger — ~59-67 KB of guides re-sent into a context already holding them"
+        );
     }
 }
