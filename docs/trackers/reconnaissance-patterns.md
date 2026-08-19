@@ -2106,11 +2106,18 @@ footnote to it.
 
 
 
-**Status:** promote-when **FIRED** 2026-08-16 — fourth instance, raised from another
+**Promote-when fired:** 2026-08-16 — fourth instance, raised from another
 session (`28ea039a`, commit `5917e37e`: a committed claim about shipped guidance that
-rested on a stale build). Full adjudication is the **Promote-when** line above; this
-field only normalizes it. Added by the 2026-08-16 disposition sweep — the entry was
+rested on a stale build). **Harvested 2026-08-20**; the disposition is the `**Status:**`
+line at the top of this entry. Added by the 2026-08-16 disposition sweep — the entry was
 already adjudicated in prose, which is exactly why a `^**Status:**` grep did not see it.
+
+> **Relabelled 2026-08-20 from a second `**Status:**` line.** Measured across all live
+> trackers, this was the **only** entry of 149 carrying two — and by then they disagreed:
+> the top read `promoted-to-permanent-docs`, this one still read `FIRED`. Which one a
+> field-presence scan reports depends only on whether it takes the first match or the last,
+> and neither choice is wrong in a way the scan could detect. One disposition field per
+> entry; a fired-criterion datapoint is evidence, so it keeps its own label.
 ## R-90 — Miss ×2: two sessions, one working tree — `git add -A` silently annexes the other's staged work
 
 **Verdict:** miss, twice in one day. Both times the content survived and the
