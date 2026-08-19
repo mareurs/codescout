@@ -8,7 +8,7 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 7
+entry_high_water_F: 8
 entry_high_water_W: 13
 entry_prefix:
 - F
@@ -78,6 +78,7 @@ entry_prefix:
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 | F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
 | F-5 | 2026-08-19 | high | self-friction | fixed-verified | A guard that names the invariant but never exercises it — forcing the gate open left 62/62 passing; "mutation-tested" is a per-ASSERTION claim, not a per-commit one |
+| F-8 | 2026-08-20 | high | process | mitigated | The `git add -A` prohibition existed, was measured, and still did not reach the moment of committing — and the mitigation I switched to is itself the documented anti-pattern one rung up |
 | F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
 ## Wins Index
@@ -1373,6 +1374,65 @@ that worked three times today — `terminal_status_with_caveat` made a stated ca
 missing one. Filed as `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`.
 A profile-divergence check is the cheaper half and may not need `doctor` at all: three files
 that should be byte-identical have an md5.
+
+## F-8 — The `git add -A` prohibition existed, was measured, and still did not reach the moment of committing
+
+**Observed:** 2026-08-20, during compaction prep — checking whether the concurrent-session
+hazard warranted an entry, and finding the rule already written.
+
+**When:** Twelve commits across one long bug-closing stream, on a checkout shared with at
+least two other agent sessions (two commits landed at 22:31 between mine at 22:14 and 22:49;
+four untracked bug files appeared later; the catalog reported five linked worktrees).
+
+**Expected — what I did:** `git add -A` for the first four commits. Noticed the hazard
+mid-session on spotting commits I had not made, and switched to
+`git add <explicit paths> && git commit`.
+
+**Got — what the repo already said**, in `docs/RELEASE.md` § *Concurrent-Work Rules*, live
+and detailed:
+
+- *"stage explicit paths, **never `git add -A`**, while another session has uncommitted work
+  in the same tree"* — violated 4×.
+- *"**Staging explicit paths is not enough — the index is shared too. Commit with a pathspec,
+  in one command.** … Use `git commit -- <paths>` instead: a pathspec on `git commit` implies
+  `--only`"* — violated 8×.
+
+The second is the sharp one: **the mitigation I congratulated myself on switching to is
+itself the documented anti-pattern, one rung up.** `git add` then `git commit` leaves a
+window in which a peer's own commit sweeps the shared index.
+
+**Cost this time: zero, and by luck.** Audited all twelve with `git show --name-only` — every
+commit contains only my files. The concurrent session happened to have nothing uncommitted at
+each of the four `git add -A` moments. What it looks like when the luck runs out is measured
+in the rule itself (2026-08-18): seven staged files swept into a peer's commit `62533fee`
+whose subject names only their own work, then dropped back into the working tree by their
+next `--amend`, leaving the briefly-holding commit unreachable.
+
+**Probable cause:** the rule lives in `docs/RELEASE.md`, which is read when *shipping*, not
+when *committing*. Nothing surfaces it at `git commit` time. I grepped that file's headings
+once this session and never opened the section — there was no reason to, because committing
+is not shipping.
+
+**Severity:** high — silent, misattributing, and no review catches it: the resulting diff
+looks intentional, and the commit message describes one of its files.
+
+**Status:** mitigated — behaviour corrected for the remainder of the session, zero harm
+confirmed by audit. The general gap is untouched.
+
+**Relation to [[F-7]] — this is its sharper half, and it inverts the diagnosis.** F-7 says
+capture works and *installation* doesn't: lessons get written beautifully and never reach a
+permanent surface. F-8 is the opposite case and the worse one — the lesson **was** on a
+permanent surface, precise, measured, carrying a worked example with SHAs, and it still did
+not reach the point of use. So promotion is necessary and **not sufficient**. What is missing
+is not a place to write the rule but a **trigger at the moment of the act**, which is what a
+hook is for and what a document structurally cannot be.
+
+**Fix idea / Pointer:** codescout-companion already gates `Bash`; a PreToolUse warning on
+`git add -A` / bare `git add .` when `git worktree list` shows more than one tree fires at
+exactly the right moment. Deliberately **not** filed as a bug — one datapoint, and the
+appetite for building checks was spent at n=1 on the promotion audit
+(`docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`).
+Recorded here so a second instance has something to join.
 
 ## Template for new entries
 
