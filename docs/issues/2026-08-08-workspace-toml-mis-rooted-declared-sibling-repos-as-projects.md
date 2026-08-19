@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/archive/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md, docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md]
 tags: [workspace, memory, config, windows]
 kind: bug
-unverified: no regression test; recurrence NOT prevented (c0bdeec7 validates ids against this same file); the doctor declared-root guard named in Resume is unimplemented; all three fix actions were on a gitignored file, so nothing here is verifiable on experiments
+unverified: no regression test for the config state itself; recurrence is now DETECTABLE but not prevented (doctor's declared_root_missing reports; c0bdeec7 still validates ids against this same file); all three fix actions were on a gitignored file, so the repair half is not verifiable on experiments
 ---
 
 # BUG: a mis-rooted `.codescout/workspace.toml` declared eight sibling repos as projects of this workspace — the second cause behind the eight VDI directories, and one `c0bdeec7` does not cover
@@ -192,14 +192,30 @@ If those disagree, the file is mis-rooted and writes are going somewhere unexpec
 
 ## Resume
 
-Implement the `doctor` check: for each `[[project]]` in the active workspace config,
-assert `<workspace_root>/<relative_root>` exists and is a directory; report each failure
-with the declared root and the resolved absolute path. Site it next to the existing
-`abs_path_outside_managed_roots` check (`src/librarian/tools/doctor.rs`) — same class of
-defect, catalog/config state that no compile or test gate sees. Then re-check the other
-machine: the same file is per-machine, and it is the one place a wrong root cannot be
-reviewed.
+**DONE 2026-08-19** — `f632e7ef`, patch-id `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`.
+`scan_declared_project_roots` in `src/librarian/tools/doctor.rs` emits
+`declared_root_missing` for every `[[project]]` whose declared root is not a directory
+under the root owning the config, sited next to `abs_path_outside_managed_roots` as this
+section asked. All eight entries from 2026-07-07 would have fired it. Six tests, six
+mutations applied and run, zero surviving. Verified live against this host's real config
+(`declared: 1, missing: 0`).
 
+Two things the implementation had to decide that this section did not specify — recorded
+because they change what a green result means:
+
+- **The base is read from the same variable as the config**, never derived independently.
+  Otherwise a mis-rooted config gets validated against the root it was mis-rooted *from*,
+  and passes — which would have made this very defect green.
+- **A linked worktree is skipped, and says so.** The config is gitignored, so it does not
+  travel into `git worktree add` and discovery there inherits main's copy. The skip is
+  stated in `catalog_health.declared_roots.note`; so are unreadable and unparseable
+  configs. A silent zero would be indistinguishable from a clean bill of health.
+
+**Still open:** the check REPORTS, it does not prevent — deliberately, per CAP-7 open
+decision 1 (the measured cause of codescout's unarchived-bug pile is an unsatisfiable
+gate). And this file's own second Resume item stands: **the other machine has not been
+re-checked.** The config is per-machine and gitignored, so the Windows VDI's copy is
+still unreviewed by anyone; run `codescout doctor` there.
 ## References
 
 - `docs/issues/archive/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md` — Resume item 2, which this answers

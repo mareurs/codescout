@@ -617,7 +617,8 @@ authors look is not a convention).
 
 ## CAP-7 — Make record decay detectable — three doctor checks so corrections travel
 
-**Status:** open — proposed 2026-08-19, substrate checked, not implemented.
+**Status:** open — proposed 2026-08-19. **Check 3 shipped 2026-08-19**
+(`f632e7ef`, patch-id `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`); checks 1 and 2 open.
 
 ### The ask
 
@@ -632,8 +633,15 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
 2. **`terminal_status_with_caveat`** — a bug file whose `status` is terminal
    (`fixed`/`mitigated`/`wontfix`) *and* whose `unverified:` field is non-empty. This is the
    population the canonical triage query hides by construction.
-3. **`declared_root_missing`** — for each `[[project]]` in the active workspace config,
-   assert `<workspace_root>/<relative_root>` exists and is a directory.
+3. ~~**`declared_root_missing`**~~ — **SHIPPED 2026-08-19**, `f632e7ef` / patch-id
+   `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`. For each `[[project]]` in the workspace
+   config, `<config_owner_root>/<declared_root>` must be a directory. Open decision 4 was
+   settled as its leaning said: only the checkout's OWN config is read, and every skip
+   (linked worktree, absent / unreadable / unparseable config) is stated in
+   `catalog_health.declared_roots.note` rather than passing silently. Absolute roots are
+   rejected separately — `Path::join` discards the base for an absolute path, so they would
+   otherwise be validated against themselves. Six mutations applied and run; one survived
+   (`is_dir()` → `exists()`, 5/5 green) and was closed with a sixth test.
 
 ### Substrate check (2026-08-19)
 
@@ -706,13 +714,21 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
 
 ### Resume
 
-1. Read `src/librarian/tools/doctor.rs` around `scan_undefined_entries` for the finding
-   shape and the per-check registration point.
-2. Implement check 3 first — it needs no git. It DOES need its own config read and open
-   decision 4 settled; read the corrected substrate check above before starting.
-3. Then check 2 (frontmatter read, no git), then check 1 (needs `git2`).
-4. Each check needs a test that observes a *planted* violation, applied and run — not a
-   coverage argument. See `CLAUDE.md` § mutation-apply discipline.
+1. Read `scan_declared_project_roots` (`src/librarian/tools/doctor.rs`) — check 3, shipped.
+   It is now the nearest sibling for checks 1 and 2 in every respect that matters here:
+   finding shape, registration point in `call`, a `catalog_health` sub-object that reports
+   what was NOT checked, and a hint that surfaces the count.
+2. Next: check 2 (`terminal_status_with_caveat`) — frontmatter read, no git. Note it needs
+   something check 3 did not: a way to enumerate bug files. `artifact(kind="bug")` rows are
+   in the catalog, so this is a SQL scan plus a frontmatter parse, closer to
+   `scan_undefined_entries` than to check 3. Verify that before designing — the last two
+   substrate assumptions on this entry were both wrong.
+3. Then check 1 (`archived_fix_sha_unresolvable`) — needs `git2`.
+4. Each check needs tests that observe a *planted* violation, and then **N mutations
+   actually applied and run**, with the observed surviving count reported. Not a coverage
+   argument. See `CLAUDE.md` § mutation-apply discipline — and note that on check 3 the
+   discipline paid: the one mutation that survived was on the branch the check's own spec
+   sentence names ("exists **and is a directory**"), which reasoning had marked as covered.
 
 ## CAP-8 — Content-addressed identity — a "gram" for entries, and stored-not-derived ids for artifacts
 
