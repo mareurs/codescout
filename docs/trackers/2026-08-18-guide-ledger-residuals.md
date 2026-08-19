@@ -6,7 +6,7 @@ tags:
 - guide-ledger
 - session-log
 entry_prefix: S
-entry_high_water_S: 14
+entry_high_water_S: 15
 ---
 
 # Guide Ledger — Session Residuals (2026-08-18)
@@ -237,6 +237,66 @@ rendezvous-slot miscount earlier the same session: a *plausible* selector standi
 an *identifying* one.
 
 **Status:** validated — measured end to end on the release binary.
+
+### S-15 — The gated surgical path measured — completes S-14's matrix, and settles what opens the gate
+
+**Measured 2026-08-19 09:59–10:02 UTC**, release binary, server pid `2773111`. S-14 left two
+cells unmeasured because a `/mcp` reconnect never stamps the rendezvous slot. A **full Claude Code
+restart** does, which made them reachable.
+
+**What actually opens the gate — settled, not inferred.** The slot was stamped
+`hook_at: 09:59:11.744Z` against `started_at: 09:59:11.574Z` — **170 ms** after the server
+published it. So the companion `SessionStart` hook fires on a CC restart and not on a `/mcp`
+reconnect, where S-14 measured four minutes of `hook_at: null`. That is the exposure window for
+S-14's standing gap, now bounded: **reconnect-only sessions run gate-closed until the next real
+session event.**
+
+**Cell 3 — gate open, same project → total no-op.** The exact A/B against S-14's Trace B: same
+call, same project, opposite gate state.
+
+| | S-14 (gate closed) | here (gate open) |
+|---|---|---|
+| `hook_at` | `null` | stamped +170 ms |
+| ledger effect | all 5 topics wiped | **nothing touched** |
+| guide emitted | `project-activation-bootstrap` | `workspace-state` |
+
+The differing guide is mechanism, not noise. Closed-gate wiped the ledger, so the opener's
+`!contains(SESSION_OPENING_GUIDE)` fired and pre-empted the tool's own topic. Open-gate left the
+bootstrap in place, the opener was satisfied, and the tool's own *novel* topic surfaced instead.
+
+**Cell 4 — gate open, genuine switch → surgical re-arm.** Activated `/home/marius/work/mirela`
+(read-only), then restored home. Both directions are genuine switches, so `re_arm(PROJECT_SCOPED)`
+ran twice. Survivor timestamps were **byte-identical** across both:
+
+```
+librarian                     2026-08-18T23:28:46.979521412Z   ← unchanged through both switches
+tracker-conventions           2026-08-18T23:27:17.886261079Z   ← unchanged
+workspace-state               2026-08-19T10:00:33.077869167Z   ← unchanged (52s old at first switch)
+project-activation-bootstrap  10:01:25 → 10:01:49              ← re-armed and re-delivered, twice
+```
+
+Three topics survived two project switches; exactly one was re-armed each time. **This is the
+behaviour Phase C was built for, and it had never been observed outside a test until now.**
+
+**Full matrix, all four cells now measured on live traffic:**
+
+| | gate closed | gate open |
+|---|---|---|
+| **reconnect** | bootstrap only re-armed (ungated by design) | same — Task 4 is deliberately ungated |
+| **activate, same project** | **wipes everything** (S-14 Trace B) | **no-op** |
+| **activate, switched** | wipes everything | **bootstrap only** |
+
+**Prediction miss — third instance of one error class, now named.** Predicted "no guide fires at
+all" on the same-project activate. `workspace-state` fired: a topic never delivered this session,
+surfacing on first touch, entirely independent of the re-arm logic. The two S-14 misses were the
+same shape inverted — naming a topic the call did not select, then assuming no topic would be
+selected. **A guide-delivery prediction requires two facts, and each miss supplied one:** which
+topic *this call* selects (routed from the tool AND its result paths), and whether that topic is
+already in the ledger. Neither alone predicts anything. Worth pinning because the ledger's whole
+observable surface is guide deliveries, so every future claim about it needs both halves.
+
+**Status:** validated — all four cells measured on the release binary; supersedes nothing in S-14,
+completes it.
 
 ## Declined — recorded so they are not re-raised
 
