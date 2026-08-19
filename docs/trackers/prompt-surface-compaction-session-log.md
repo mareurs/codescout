@@ -1075,6 +1075,30 @@ buffer returned 0 — but that buffer caps `dangling` and `ambiguous` at 50 rows
 against populations of 538 and 423. A zero from a truncated sample is evidence about the
 sample. The conclusion rests on the direct id comparison instead.
 
+**Correction, 2026-08-19 (later the same day).** The measurement above is accurate as
+scoped — *cited by any other file* — but the gloss drawn from it, that the 42 undefined
+entries are entries nothing references, is **too strong**. It never checked the ledger's
+own body. Measured directly:
+
+| token | occurrences in the ledger | defining heading |
+|---|---:|---:|
+| `PV-12` | 8 | 0 |
+| `PV-3` | 3 | 0 |
+| `PV-20` | 2 | 0 |
+| `PV-1`, `PV-9` | 1 each | 0 |
+
+So at least five undefined entries are cited in the ledger's own prose — `PV-12` eight
+times, including inside a section heading. A reader following any of them lands nowhere.
+Those are **real** navigational breaks, not policy.
+
+What survives unchanged: the ledger's define-on-citation convention is real and documented,
+no *external* citation dangles, and the diagnostic still asserted a cause it could not
+observe. What does not survive: "add 42 headings" was wrong, but so is "add none" — the
+correct answer is the partition the filed bug proposes, and this measurement is now the
+strongest argument for building it. The truncated `link_scan` buffer could not have settled
+this either way, which is the sampling trap noted below biting a second time on the same
+question.
+
 **Counterfactual:** obeying the finding adds 42 headings to an 1100-line tracker for
 entries nothing references, contradicts the file's documented convention at 42 places, and
 then *silences the diagnostic* — so the false premise becomes invisible and permanent.

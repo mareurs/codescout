@@ -187,24 +187,75 @@ contradict it at 42 places. When a new `PV-N` is cited from another file, add it
 to § *Defining sections for cited entries* at that moment, which is what the convention
 already says.
 
+## Substrate resolved, and a measurement that changes the stakes (2026-08-19)
+
+**The hazard this file recorded as blocking does not exist.** *Resume* worried that a
+citation-aware check would have to read `entry_cite`, which only `link_scan(write=true)`
+materializes, making `doctor` report against a stale graph. It does not have to:
+
+- `link_scan::extract(body) -> DocExtract { definitions, citations, declared_prefixes }`
+  is a **pure function over a document body**. Citations come out of it directly, computed
+  fresh, with no table involved and nothing to go stale.
+- That is already the pattern. `body_defined_indices` — which `scan_undefined_entries`
+  uses for the *definition* half — calls the same `extract`, pinned by
+  `defined_indices_delegate_to_link_scans_own_definition_rule`. The citation half would
+  use the same door.
+
+The real cost is I/O, not staleness: `params_backed_ledgers` reads each ledger's body with
+`std::fs::read_to_string`, and bodies are not in SQL, so a corpus-wide citation sweep means
+reading every artifact file (~1075). That is what `link_scan` already does per run. It is
+affordable **if it runs only when there is something to check** — compute the undefined set
+first, and read the corpus only when it is non-empty.
+
+### The measurement that changes the stakes
+
+This file argued the finding was pure policy, on the evidence that no *external* citation
+of an undefined `PV-N` exists. That evidence was real but incomplete — it never looked in
+the ledger's own body:
+
+| token | occurrences in `provenance-subsystem.md` | defining heading |
+|---|---:|---:|
+| `PV-12` | 8 | 0 |
+| `PV-3` | 3 | 0 |
+| `PV-20` | 2 | 0 |
+| `PV-1`, `PV-9` | 1 each | 0 |
+
+`PV-12` is cited eight times, once inside a section heading, and defines nothing. A reader
+following it lands nowhere. **So the partition would not merely re-label 42 entries as
+benign — it would separate roughly five real navigational breaks from ~37 that are the
+ledger's documented convention working as intended.** That is a far better outcome than
+either "add 42 headings" or "add none", and it is the argument for option 1 over option 2.
+
+One design decision this forces: **self-citations count.** `link_scan` reports `self_cites`
+separately (843 of 3883) because it creates no self-edges, but a citation that resolves to
+nothing is a broken reference whether or not it came from the same file. Every instance
+above is a self-citation, and every one of them is a real break.
 ## Resume
 
-Pick one, then implement:
+**Option 1 (citation-aware partition) is now the clear choice, and it is unblocked** — see
+§ *Substrate resolved* above. Options 2 and 3 are recorded below as what was considered.
 
-1. **Citation-aware partition** (preferred) — split the finding into cited-but-undefined
-   (defect, ids named) and uncited-but-undefined (informational count only). Resolve the
-   substrate hazard above first.
-2. **Message-only fix** (cheap) — drop *"This ledger defines its other entries, so these
-   are omissions"*, since the check has no evidence for it. Keeps the count, removes the
-   false instruction. Does not help a reader decide whether to act.
-3. **Per-ledger opt-out** — let a ledger declare `entry_definition_policy: on_citation`
-   in frontmatter and have the check honour it. Cheapest correct behaviour for this file,
-   but it puts the burden on every ledger author and only works once they know.
+Shape:
 
-Whichever is chosen, add a regression fixture with a ledger whose undefined entries are
-uncited, and one whose undefined entry IS cited, and assert the two are reported
-differently — a single-fixture test cannot tell them apart.
+1. Compute the undefined set per ledger, as today. If it is empty everywhere, do no extra
+   work — that is the healthy case and must stay cheap.
+2. Otherwise read each artifact body once and run `link_scan::extract`, collecting the set
+   of cited entry tokens across the corpus. Count self-citations.
+3. Partition each ledger's undefined ids into **cited** (a real dangling reference — name
+   these ids first, they are the actionable finding) and **uncited** (an informational
+   count; may be a define-on-citation convention working correctly).
+4. Regression fixtures must include a ledger whose undefined entry IS cited and one whose
+   undefined entries are not, asserted to report **differently**. A single fixture cannot
+   tell the two apart, which is the whole point of the change.
 
+The alternatives, kept because they were considered rather than overlooked:
+
+- **Message-only** — shipped already in `4ffd2803` as the honest interim: the finding now
+  discloses that it does not read the citation graph instead of asserting omission.
+- **Per-ledger opt-out** (`entry_definition_policy: on_citation` in frontmatter) — cheapest
+  correct behaviour for one file, but it asks every ledger author to know the key exists,
+  and the measurement above shows the policy ledger *still* has real breaks a per-ledger
+  exemption would hide.
 ## References
 
 - `src/librarian/tools/doctor.rs` — `scan_undefined_entries`, and the doc comment stating
