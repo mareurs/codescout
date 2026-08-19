@@ -47,6 +47,14 @@
 //!    so the detail names the roots tried. Skipped when no roots are
 //!    configured, and for rows already flagged by
 //!    `abs_path_must_be_absolute`.
+//! 9. `declared_root_missing` — every `[[project]]` in `.codescout/workspace.toml`
+//!    must declare a `root` that resolves to a directory under the root owning
+//!    that file. The only check here that reads config rather than catalog, and
+//!    the only defect class that is unreviewable by construction: the file is
+//!    gitignored, so a wrong root reaches no diff. Added after a mis-rooted
+//!    config declared eight sibling repos as sub-projects for a month while
+//!    `activate` kept reporting the real tree. Skipped, loudly, in a linked
+//!    worktree — see `scan_declared_project_roots`.
 //!
 //! Deferred to a follow-up: NFC unicode normalization, orphan
 //! `artifact_augmentation` rows (the FK already cascades on artifact
@@ -167,9 +175,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // section for nothing.
     let roots = super::managed_roots(ctx);
 
+    // Config state rather than catalog state: this reads `.codescout/workspace.toml` off
+    // disk and touches no connection, so it runs outside the lock alongside
+    // `managed_roots` rather than widening the critical section.
+    let (declared_root_violations, declared_roots_health) = scan_declared_project_roots(ctx);
+
     let cat = ctx.catalog.lock();
     let mut all_violations: Vec<Violation> = Vec::new();
 
+    all_violations.extend(declared_root_violations);
     all_violations.extend(scan_artifact_paths(&cat.conn, &roots)?);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
@@ -312,6 +326,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             c.old_root, c.new_root, c.old_root, c.new_root
         ));
     }
+    if let Some(n) = declared_roots_health
+        .get("missing")
+        .and_then(Value::as_u64)
+        .filter(|n| *n > 0)
+    {
+        hint_parts.push(format!(
+            "declared_root_missing fired {n} time(s): .codescout/workspace.toml declares \
+             sub-project root(s) that are not directories. That file is gitignored and \
+             per-machine, so no diff or review will surface it — repair it there. \
+             Cross-repo grouping belongs in an [[umbrella]], not a [[project]]."
+        ));
+    }
     let health_hint = hint_parts.join(" ");
 
     let mut catalog_health = serde_json::Map::new();
@@ -337,6 +363,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             json!(outside_by_project),
         );
     }
+    // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
+    // absent/unreadable/unparseable config) stays distinguishable from a pass.
+    catalog_health.insert("declared_roots".to_string(), declared_roots_health);
     catalog_health.insert("hint".to_string(), json!(health_hint));
 
     Ok(json!({
@@ -951,6 +980,173 @@ fn check_outside_managed_roots(id: &str, abs_path: &str, roots: &[PathBuf]) -> O
             suffix
         ),
     ))
+}
+
+/// `declared_root_missing`: a `[[project]]` in `.codescout/workspace.toml` declares a
+/// `root` that does not resolve to a directory under the root that owns the file.
+///
+/// Sited beside [`check_outside_managed_roots`] because it is the same class of defect —
+/// config state that no compile step, no test and no review ever sees. It is worse in one
+/// respect: the file is gitignored, so it is per-machine and never appears in a diff.
+///
+/// **The failure it exists to catch, measured.**
+/// `docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`:
+/// a config authored for a `$HOME`-rooted session was persisted into `<repo>/.codescout/`,
+/// so eight *sibling repos* stood declared as sub-projects of this workspace with roots
+/// relative to the wrong base. All eight had `relative_root != "."`, so
+/// [`crate::workspace::Workspace::memory_dir_for_project`] routed their memory writes into
+/// `<repo>/.codescout/projects/<id>/memories` — answering the wrong question correctly, for
+/// a month. `workspace(action="activate")` reported repo-rooted discovery the whole time, so
+/// the two views of "what projects exist" disagreed and nothing said so out loud.
+///
+/// **Why the base and the config are read from one variable.** Declared `root` values are
+/// relative to whichever directory owns the file. Candidate roots are probed in
+/// [`super::managed_roots`] order (`git_root`, then `abs_path`) and the FIRST one actually
+/// holding a `.codescout/workspace.toml` becomes the base every declaration is joined onto.
+/// Deriving a base independently of the file is how a mis-rooted config gets validated
+/// against the root it was mis-rooted *from*, and passes.
+///
+/// **A linked worktree is skipped on purpose.** The file is gitignored, so it does not
+/// travel into `git worktree add`; discovery there falls back to the main checkout's copy —
+/// the state `project_status` already labels `topology: "inherited"`. Reporting main's
+/// declarations from each worktree would multiply one defect by the number of checkouts, and
+/// the operator cannot repair it from here in any case. The skip is *stated* in
+/// `catalog_health.declared_roots.note` rather than applied silently: a check that goes quiet
+/// without saying why is indistinguishable from a check that passed, which is the
+/// misleading-green this module exists to prevent. Unreadable and unparseable configs are
+/// reported the same way, and for the same reason.
+///
+/// Reports only; there is no `fix=`. The right value for a wrong `root` is a fact about the
+/// operator's disk layout, not something a repair can derive.
+fn scan_declared_project_roots(ctx: &ToolContext) -> (Vec<Violation>, Value) {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return (
+            Vec::new(),
+            json!({
+                "config": Value::Null,
+                "note": "no active project resolved, so no workspace config was located — \
+                         declared project roots were NOT checked",
+            }),
+        );
+    };
+
+    let mut candidates: Vec<&Path> = vec![cp.git_root.as_path()];
+    if cp.abs_path != cp.git_root {
+        candidates.push(cp.abs_path.as_path());
+    }
+    let located = candidates.into_iter().find_map(|root| {
+        let path = crate::config::workspace::workspace_config_path(root);
+        path.is_file().then_some((root, path))
+    });
+
+    let Some((base, config_path)) = located else {
+        let note = if cp.main_root.is_some() {
+            "no .codescout/workspace.toml in this linked worktree, so sub-project discovery \
+             inherits the MAIN checkout's copy (the file is gitignored and does not travel). \
+             Declared roots are main's to check — run doctor from the main checkout. NOT \
+             checked here."
+        } else {
+            "no .codescout/workspace.toml under the active project, so nothing declares \
+             sub-project roots — nothing to check"
+        };
+        return (Vec::new(), json!({"config": Value::Null, "note": note}));
+    };
+
+    let config_display = crate::util::fs::RepoPath::from_path(&config_path).into_string();
+    let text = match std::fs::read_to_string(&config_path) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                Vec::new(),
+                json!({
+                    "config": config_display,
+                    "note": format!(
+                        "unreadable ({e}) — declared roots were NOT checked. This is not a pass."
+                    ),
+                }),
+            )
+        }
+    };
+    let cfg: crate::config::workspace::WorkspaceConfig = match toml::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                Vec::new(),
+                json!({
+                    "config": config_display,
+                    "note": format!(
+                        "unparseable ({e}) — declared roots were NOT checked. This is not a pass."
+                    ),
+                }),
+            )
+        }
+    };
+
+    let base_display = crate::util::fs::RepoPath::from_path(base).into_string();
+    let mut out = Vec::new();
+    for entry in &cfg.projects {
+        let declared = Path::new(&entry.root);
+
+        // Absolute roots are checked first and separately, because `Path::join` DISCARDS the
+        // base when the joined path is absolute — so an absolute declaration would be
+        // validated against itself and pass, which is precisely the cross-repo
+        // mis-declaration the field cannot express. Cross-repo grouping is an `[[umbrella]]`.
+        if declared.is_absolute() {
+            out.push(Violation::new(
+                "declared_root_missing",
+                None,
+                config_display.clone(),
+                format!(
+                    "[[project]] id = \"{}\" declares an ABSOLUTE root = \"{}\". Sub-project \
+                     roots are relative to the directory owning this file ({base_display}); an \
+                     absolute value escapes the workspace, and a sibling repo declared this way \
+                     routes every per-project memory write for `{}` into \
+                     `<workspace>/.codescout/projects/{}/memories`. Cross-repo grouping belongs \
+                     in an [[umbrella]], not a [[project]].",
+                    entry.id, entry.root, entry.id, entry.id
+                ),
+            ));
+            continue;
+        }
+
+        let resolved = base.join(declared);
+        if resolved.is_dir() {
+            continue;
+        }
+        let what = if resolved.exists() {
+            "exists but is not a directory"
+        } else {
+            "does not exist"
+        };
+        out.push(Violation::new(
+            "declared_root_missing",
+            None,
+            config_display.clone(),
+            format!(
+                "[[project]] id = \"{}\" declares root = \"{}\", which resolves to `{}` — that \
+                 path {what}. Per-project memory for `{}` still routes to \
+                 `<workspace>/.codescout/projects/{}/memories`, so writes land under a project \
+                 root that is not there, while discovery reports the real tree — the two views \
+                 of \"what projects exist\" disagree and nothing else says so. Either the entry \
+                 is stale, or this config was authored for a different workspace root and \
+                 persisted here; see \
+                 docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md. \
+                 The file is gitignored, so no diff or review will ever show it to anyone.",
+                entry.id,
+                entry.root,
+                crate::util::fs::RepoPath::from_path(&resolved).into_string(),
+                entry.id,
+                entry.id
+            ),
+        ));
+    }
+
+    let health = json!({
+        "config": config_display,
+        "declared": cfg.projects.len(),
+        "missing": out.len(),
+    });
+    (out, health)
 }
 
 fn scan_commits_git_root(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
@@ -4129,5 +4325,258 @@ mod tests {
             entry_collection: Some(entry_collection.to_string()),
             refreshed_at_commit: None,
         }
+    }
+
+    // ---- declared_root_missing ----------------------------------------------------
+
+    fn write_workspace_toml(root: &std::path::Path, body: &str) {
+        let dir = root.join(".codescout");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("workspace.toml"), body).unwrap();
+    }
+
+    fn declared_ctx(abs_path: std::path::PathBuf, git_root: std::path::PathBuf) -> ToolContext {
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path,
+            git_root,
+            main_root: None,
+            umbrella: None,
+        });
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(cp)
+            .build()
+    }
+
+    async fn doctor_at(root: std::path::PathBuf) -> Value {
+        let ctx = declared_ctx(root.clone(), root);
+        call(&ctx, json!({})).await.unwrap()
+    }
+
+    fn violations_named<'a>(out: &'a Value, check: &str) -> Vec<&'a Value> {
+        out["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["check"] == check)
+            .collect()
+    }
+
+    /// Two declarations that resolve and one that does not.
+    ///
+    /// The two good entries are not decoration: a check that fired on every declaration
+    /// would pass a test that only planted a bad one, and `root = "."` is the entry every
+    /// real config carries.
+    #[tokio::test]
+    async fn declared_root_missing_fires_only_on_the_root_that_is_not_a_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join("crates").join("real-subproject")).unwrap();
+        write_workspace_toml(
+            &root,
+            r#"
+[workspace]
+name = "fixture"
+
+[[project]]
+id = "root"
+root = "."
+
+[[project]]
+id = "real"
+root = "crates/real-subproject"
+
+[[project]]
+id = "ghost"
+root = "work/elsewhere/ghost"
+"#,
+        );
+
+        let out = doctor_at(root).await;
+        let fired = violations_named(&out, "declared_root_missing");
+        assert_eq!(
+            fired.len(),
+            1,
+            "only the missing root may fire; `.` and an existing subdir must not: {fired:#?}"
+        );
+        let detail = fired[0]["detail"].as_str().unwrap();
+        assert!(detail.contains("\"ghost\""), "names the id: {detail}");
+        assert!(
+            detail.contains("work/elsewhere/ghost"),
+            "names the declared root: {detail}"
+        );
+        let health = &out["catalog_health"]["declared_roots"];
+        assert_eq!(
+            health["declared"], 3,
+            "counts every declaration, not just the failures"
+        );
+        assert_eq!(health["missing"], 1);
+        assert!(
+            out["catalog_health"]["hint"]
+                .as_str()
+                .unwrap()
+                .contains("declared_root_missing"),
+            "the hint must surface it — a finding nobody is pointed at is not a report"
+        );
+    }
+
+    /// The `Path::join` trap. Joining an ABSOLUTE declared root onto the base DISCARDS the
+    /// base, so an absolute declaration would be validated against itself and pass. The
+    /// decoy here is a directory that really exists outside the workspace — the exact
+    /// shape of the bug this check was written for, where sibling repos stood declared as
+    /// sub-projects — so the only thing that can make this fail is the `is_absolute`
+    /// branch actually running.
+    #[tokio::test]
+    async fn declared_root_missing_fires_on_an_absolute_root_even_though_it_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sibling = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        assert!(sibling.path().is_dir(), "the decoy must really exist");
+        let elsewhere = sibling.path().to_str().unwrap().replace('\\', "/");
+        write_workspace_toml(
+            &root,
+            &format!(
+                "[workspace]\nname = \"fixture\"\n\n\
+                 [[project]]\nid = \"sibling-repo\"\nroot = \"{elsewhere}\"\n"
+            ),
+        );
+
+        let out = doctor_at(root).await;
+        let fired = violations_named(&out, "declared_root_missing");
+        assert_eq!(
+            fired.len(),
+            1,
+            "an absolute root must never pass by being joined onto itself: {fired:#?}"
+        );
+        let detail = fired[0]["detail"].as_str().unwrap();
+        assert!(detail.contains("ABSOLUTE"), "says what is wrong: {detail}");
+        assert!(
+            detail.contains("[[umbrella]]"),
+            "names where a sibling repo belongs: {detail}"
+        );
+    }
+
+    /// A declared root that resolves to a FILE. The spec is "exists and is a directory",
+    /// and only the second half is load-bearing here — a `root` pointing at a file routes
+    /// every per-project write under a path that can never hold a directory.
+    ///
+    /// Added because the mutation `is_dir()` -> `exists()` survived the first four tests:
+    /// every fixture used a root that was absent entirely, so the distinction the check
+    /// claims to make was never once executed. Observed, not reasoned — 5/5 stayed green
+    /// under the mutation before this test existed.
+    #[tokio::test]
+    async fn declared_root_missing_fires_when_the_root_exists_but_is_a_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(root.join("not-a-dir"), "i am a file").unwrap();
+        write_workspace_toml(
+            &root,
+            "[workspace]\nname = \"fixture\"\n\n\
+             [[project]]\nid = \"impostor\"\nroot = \"not-a-dir\"\n",
+        );
+
+        let out = doctor_at(root).await;
+        let fired = violations_named(&out, "declared_root_missing");
+        assert_eq!(
+            fired.len(),
+            1,
+            "a file is not a project root, however present it is: {fired:#?}"
+        );
+        let detail = fired[0]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("exists but is not a directory"),
+            "distinguishes this from an absent path, since the two need different fixes: \
+             {detail}"
+        );
+    }
+
+    /// A skip must not read as a pass. A linked worktree carries no config of its own —
+    /// the file is gitignored and does not travel — so discovery inherits main's and this
+    /// check reports nothing. The `note` is the only thing separating that from a clean
+    /// bill of health.
+    #[tokio::test]
+    async fn declared_roots_states_the_worktree_skip_instead_of_reporting_a_pass() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        // Deliberately no .codescout/workspace.toml.
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: root.clone(),
+            git_root: root,
+            main_root: Some(std::path::PathBuf::from("/main/checkout")),
+            umbrella: None,
+        });
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(cp)
+            .build();
+
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(violations_named(&out, "declared_root_missing").is_empty());
+        let health = &out["catalog_health"]["declared_roots"];
+        assert!(health["config"].is_null());
+        let note = health["note"].as_str().unwrap();
+        assert!(note.contains("worktree"), "names the reason: {note}");
+        assert!(
+            note.contains("NOT checked"),
+            "says it did not check, not that it passed: {note}"
+        );
+    }
+
+    /// The misleading-green case: zero violations, and no reason to believe zero. A config
+    /// that cannot be parsed is reported as unchecked rather than left silent.
+    #[tokio::test]
+    async fn declared_roots_marks_an_unparseable_config_as_unchecked_not_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        write_workspace_toml(&root, "this is not = = toml [[[\n");
+
+        let out = doctor_at(root).await;
+        assert!(violations_named(&out, "declared_root_missing").is_empty());
+        let note = out["catalog_health"]["declared_roots"]["note"]
+            .as_str()
+            .unwrap();
+        assert!(note.contains("unparseable"), "{note}");
+        assert!(note.contains("NOT checked"), "{note}");
+        assert!(note.contains("not a pass"), "{note}");
+    }
+
+    /// The base and the config come from ONE variable. Here the config lives at the
+    /// project root while `git_root` is an ancestor carrying none, and a same-named
+    /// `decoy/` directory exists under the git root only — so resolving against the wrong
+    /// base would find something and pass.
+    ///
+    /// That is not hypothetical symmetry: validating a mis-rooted config against the root
+    /// it was mis-rooted *from* is precisely how the original defect went unnoticed for a
+    /// month.
+    #[tokio::test]
+    async fn declared_roots_resolve_against_the_directory_owning_the_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git_root = tmp.path().to_path_buf();
+        let project = git_root.join("sub").join("project");
+        std::fs::create_dir_all(project.join("inner")).unwrap();
+        std::fs::create_dir_all(git_root.join("decoy")).unwrap();
+        write_workspace_toml(
+            &project,
+            "[workspace]\nname = \"fixture\"\n\n\
+             [[project]]\nid = \"inner\"\nroot = \"inner\"\n\n\
+             [[project]]\nid = \"decoy\"\nroot = \"decoy\"\n",
+        );
+
+        let ctx = declared_ctx(project, git_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        let fired = violations_named(&out, "declared_root_missing");
+        assert_eq!(
+            fired.len(),
+            1,
+            "`inner` resolves under the config's own directory; `decoy` exists only under \
+             the git root and must fire: {fired:#?}"
+        );
+        assert!(fired[0]["detail"].as_str().unwrap().contains("\"decoy\""));
+        assert!(
+            out["catalog_health"]["declared_roots"]["config"]
+                .as_str()
+                .unwrap()
+                .contains("sub/project"),
+            "reports the config it actually read, so the base is auditable"
+        );
     }
 }
