@@ -483,6 +483,11 @@ pub(crate) mod tests {
         /// event row but before inserting edges. Used by the transaction-rollback
         /// test below to verify atomicity. Thread-local so parallel tests
         /// running on different threads do not race on a shared flag.
+        //
+        // clippy 1.96+ (Windows toolchain) false-positives `missing_const_for_thread_local`
+        // here even though the initializer already uses `const { ... }`. Scoped allow,
+        // same false-positive as `next_monotonic_id`'s GENERATOR above.
+        #[allow(clippy::missing_const_for_thread_local)]
         pub(super) static INJECT_FAIL_AFTER_EVENT_INSERT: std::cell::Cell<bool> =
             const { std::cell::Cell::new(false) };
     }

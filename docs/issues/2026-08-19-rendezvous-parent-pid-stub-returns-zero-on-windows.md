@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-19
-closed:
+closed: 2026-08-19
 severity: medium
 owner: marius
 related: []
@@ -89,27 +89,77 @@ experiments fast-forward, not long-standing.
    still open — see Fix.
 
 ## Fix
-Not yet implemented. Two candidate directions:
-(a) Implement real Windows PPID detection (`CreateToolhelp32Snapshot` +
-`PROCESSENTRY32` walk, or the `sysinfo` crate if already a dependency) so
-the hook-matching feature actually works on Windows.
-(b) If the feature is intentionally POSIX-only for now, gate the test
-`#[cfg(unix)]` and document that the Windows rendezvous hook-match is a
-known no-op until (a) lands.
+Implemented direction (a): real Windows PPID detection via a
+`CreateToolhelp32Snapshot` + `Process32FirstW`/`Process32NextW` walk
+(`windows-sys`'s `Win32_System_Diagnostics_ToolHelp` bindings — Windows has
+no `getppid()`, so the parent PID has to be read off this process's own
+`PROCESSENTRY32W` entry in a full-process snapshot).
 
+`Cargo.toml`: added the `Win32_System_Diagnostics_ToolHelp` feature to the
+existing `[target.'cfg(windows)'.dependencies] windows-sys` entry.
+
+`src/tools/rendezvous.rs:159-193` (replacing the old `0` stub):
+```rust
+#[cfg(windows)]
+fn parent_pid() -> u32 {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let pid = std::process::id();
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return 0;
+    }
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+    let mut ppid = 0u32;
+    unsafe {
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32ProcessID == pid {
+                    ppid = entry.th32ParentProcessID;
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    ppid
+}
+```
+The `snapshot == INVALID_HANDLE_VALUE` / "this process not found in its own
+snapshot" paths still return `0`, preserving the original stub's safe
+"never matched" degradation for the failure case — only the success path
+changed from always-`0` to an actual PPID.
+
+Fixed on `experiments`, base commit `66ed27dea7f48557ddfa25886527f5d6c1a7ccaa`
+(fast-forward branch — no separate master SHA needed, per this repo's
+CLAUDE.md git-workflow section).
 ## Tests added
-N/A — not yet fixed.
+No new test — the existing
+`tools::rendezvous::tests::publish_records_the_parent_pid_the_hook_matches_on`
+(`src/tools/rendezvous.rs:240-247`) is the regression test; it now exercises
+real Windows PPID detection instead of failing against the old stub.
 
+Verified 2026-08-19 (Windows, `1.97.1-x86_64-pc-windows-gnu`, release +
+`server-stack`):
+```
+test tools::rendezvous::tests::publish_records_the_parent_pid_the_hook_matches_on ... ok
+```
 ## Workarounds
 None; the rendezvous PID-hook match silently never fires on Windows
 (degrades to "never matched" per the stub's own design intent, not a crash).
 
 ## Resume
-Decide (a) vs (b) above with the person who owns the rendezvous/companion
-hook feature, then either implement Windows PPID detection in
-`src/tools/rendezvous.rs:158-163` or add `#[cfg(unix)]` to the test at
-`src/tools/rendezvous.rs:240-247` and document the Windows gap.
-
+Fixed. N/A.
 ## References
 - `src/tools/rendezvous.rs:153-163` (parent_pid, both platform branches)
 - `src/tools/rendezvous.rs:240-247` (the failing test)

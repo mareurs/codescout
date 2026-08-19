@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-19
-closed:
+closed: 2026-08-19
 severity: low
 owner: marius
 related: []
@@ -84,6 +84,65 @@ the outside-roots sample stable and its remainder reachable", 2026-08-14) —
 part of the experiments fast-forward, never previously exercised on a
 Windows host/toolchain.
 
+## Fix
+
+`outside_roots_group` (`src/librarian/tools/doctor.rs:831-843`, now 831-847)
+rewritten to do string-only prefix extraction — `path.split('/')` plus a
+`Vec<&str>`/`.join("/")` rebuild, with no `std::path::Path`/`PathBuf`
+anywhere in the function. Same idea as `to_forward_slash` (`src/util/fs.rs`)
+but string-native from the start, since `to_forward_slash` itself takes a
+`&Path` and would have re-introduced the exact same separator hazard.
+
+Before:
+```rust
+fn outside_roots_group(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let mut prefix = std::path::PathBuf::new();
+    for comp in p.components() {
+        if comp.as_os_str() == "docs" {
+            return prefix.to_string_lossy().into_owned();
+        }
+        prefix.push(comp);
+    }
+    p.parent()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+```
+
+After:
+```rust
+fn outside_roots_group(path: &str) -> String {
+    let mut segments: Vec<&str> = path.split('/').collect();
+    if let Some(docs_idx) = segments.iter().position(|s| *s == "docs") {
+        return segments[..docs_idx].join("/");
+    }
+    if segments.len() > 1 {
+        segments.pop();
+        let joined = segments.join("/");
+        if joined.is_empty() && path.starts_with('/') {
+            "/".to_string()
+        } else {
+            joined
+        }
+    } else {
+        String::new()
+    }
+}
+```
+
+Verified on Windows (`1.97.1-x86_64-pc-windows-gnu`):
+```
+test librarian::tools::doctor::tests::outside_roots_group_uses_the_project_prefix_before_docs ... ok
+test librarian::tools::doctor::tests::outside_roots_group_falls_back_to_the_parent_without_a_docs_component ... ok
+test librarian::tools::doctor::tests::outside_roots_by_project_counts_elided_rows_too ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 4030 filtered out; finished in 0.11s
+```
+`cargo fmt` run on the file — no further changes.
+
+Fixed on `experiments`, base commit `66ed27dea7f48557ddfa25886527f5d6c1a7ccaa`
+(fast-forward branch — no separate master SHA needed).
 ## Hypotheses tried
 1. **Hypothesis:** Windows `PathBuf` round-tripping silently normalizes
    separators, breaking a function contractually meant to stay POSIX-style.
@@ -92,16 +151,10 @@ Windows host/toolchain.
    **Verdict:** confirmed.
    **Evidence link:** Root cause section above.
 
-## Fix
-Not yet implemented. `outside_roots_group` should operate on the path as a
-plain string (split on `/` directly, or normalize with the project's
-existing `to_forward_slash` helper — see `src/util/fs.rs`) instead of
-routing through `std::path::Path`/`PathBuf`, since the function's own
-contract says it isn't doing real filesystem-path work.
-
 ## Tests added
-N/A — not yet fixed. The two existing tests (`doctor.rs:2482-2508`,
-`doctor.rs:2540-2551`) already cover this once corrected.
+The two existing tests (`doctor.rs:2482-2508`, `doctor.rs:2540-2551`)
+already covered this once corrected — no new tests were needed; see
+`## Fix` below for the confirming test run.
 
 ## Workarounds
 None needed for correctness on POSIX hosts (the bug is Windows-only); on
@@ -109,11 +162,8 @@ Windows, the "outside roots" doctor report's grouping/counts are unreliable
 until fixed.
 
 ## Resume
-Rewrite `outside_roots_group` (`src/librarian/tools/doctor.rs:831-843`) to
-do string-only prefix extraction (no `std::path::Path`/`PathBuf`), matching
-the pattern the project's `to_forward_slash` helper already uses elsewhere.
-Re-run the two cited tests to confirm.
 
+Fixed. N/A.
 ## References
 - `src/librarian/tools/doctor.rs:831-843` (`outside_roots_group`)
 - `src/librarian/tools/doctor.rs:264` (map-key call site)

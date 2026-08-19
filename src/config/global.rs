@@ -241,11 +241,28 @@ mod tests {
     // writes are GONE rather than coordinated. See
     // docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
+    /// Build a path that is genuinely absolute on the host running the test.
+    /// `PathBuf::is_absolute()` requires a drive letter/UNC prefix on Windows, so the
+    /// POSIX-only `/tmp/...` literals these tests used to hardcode are NOT absolute
+    /// there and `global_config_dir_from`'s `is_absolute()` filter (see its doc
+    /// comment above) rejects them, falling through to `home` (`None` in these
+    /// tests) and panicking the `.unwrap()`. See
+    /// docs/issues/2026-08-19-windows-native-test-suite-posix-path-assumptions.md.
+    #[cfg(windows)]
+    fn test_abs_path(name: &str) -> PathBuf {
+        PathBuf::from(r"C:\tmp").join(name)
+    }
+
+    #[cfg(not(windows))]
+    fn test_abs_path(name: &str) -> PathBuf {
+        PathBuf::from("/tmp").join(name)
+    }
+
     #[test]
     fn config_dir_prefers_xdg_config_home() {
-        let dir =
-            global_config_dir_from(Some(OsStr::new("/tmp/xdg-test-codescout")), None).unwrap();
-        assert_eq!(dir, PathBuf::from("/tmp/xdg-test-codescout/codescout"));
+        let xdg = test_abs_path("xdg-test-codescout");
+        let dir = global_config_dir_from(Some(xdg.as_os_str()), None).unwrap();
+        assert_eq!(dir, xdg.join("codescout"));
     }
 
     #[test]
@@ -256,12 +273,10 @@ mod tests {
 
     #[test]
     fn config_dir_xdg_wins_over_home() {
-        let dir = global_config_dir_from(
-            Some(OsStr::new("/tmp/xdg")),
-            Some(OsStr::new("/tmp/fake-home")),
-        )
-        .unwrap();
-        assert_eq!(dir, PathBuf::from("/tmp/xdg/codescout"));
+        let xdg = test_abs_path("xdg");
+        let home = test_abs_path("fake-home");
+        let dir = global_config_dir_from(Some(xdg.as_os_str()), Some(home.as_os_str())).unwrap();
+        assert_eq!(dir, xdg.join("codescout"));
     }
 
     #[test]
@@ -294,12 +309,9 @@ mod tests {
 
     #[test]
     fn env_path_derives_from_config_dir() {
-        let dir =
-            global_config_dir_from(Some(OsStr::new("/tmp/xdg-test-codescout")), None).unwrap();
-        assert_eq!(
-            dir.join(".env"),
-            PathBuf::from("/tmp/xdg-test-codescout/codescout/.env")
-        );
+        let xdg = test_abs_path("xdg-test-codescout");
+        let dir = global_config_dir_from(Some(xdg.as_os_str()), None).unwrap();
+        assert_eq!(dir.join(".env"), xdg.join("codescout").join(".env"));
     }
 
     #[test]

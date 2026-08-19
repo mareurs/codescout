@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-19
-closed:
+closed: 2026-08-19
 severity: medium
 owner: marius
 related: []
@@ -102,14 +102,48 @@ create.rs — absent.
    `to_forward_slash`.
 
 ## Fix
-Not yet implemented. Change `src/librarian/tools/create.rs:368` from
-`row.abs_path.display().to_string()` to go through
-`crate::util::fs::to_forward_slash`, matching every sibling tool.
+
+Applied at `src/librarian/tools/create.rs:368` (function `call`), `experiments` branch, commit `66ed27dea7f48557ddfa25886527f5d6c1a7ccaa` (fast-forward to `master` per this repo's CLAUDE.md — no separate master SHA to record).
+
+Before:
+```rust
+let mut result = json!({"id": id, "abs_path": row.abs_path.display().to_string()});
+```
+
+After:
+```rust
+let mut result =
+    json!({"id": id, "abs_path": crate::util::fs::to_forward_slash(&row.abs_path)});
+```
+
+This matches the pattern already used by every sibling librarian tool (`mv.rs`, `context.rs`, `doctor.rs`, `get.rs`, `reindex.rs`, `util.rs`). Checked the rest of `call()`'s response-construction block for other un-normalized path fields — `abs_path` was the only path field emitted in that function's JSON response, so no other gap was found nearby.
 
 ## Tests added
-N/A — not yet fixed. The existing test
+
+No new test — the existing test
 (`src/server.rs`, `guide_hint_tests::an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`)
-already covers this once corrected.
+already covered this. Confirmed green after the fix:
+
+**Follow-up correction (2026-08-19):** the `to_forward_slash` fix also flipped
+`abs_path` from native-separator to forward-slash on Windows for every
+caller, which broke two OTHER pre-existing tests in the same file that
+hardcoded the old native-separator expectation:
+`librarian::tools::create::tests::creates_with_inferred_repo` (a
+`starts_with` check against a raw, non-normalized `TempDir` path) and
+`creates_with_subdir_prepend` (an `assert_eq!` against
+`PathBuf::join(...).to_string_lossy()`, also native-separator). Both fixed
+by normalizing the test's expected/comparison value through the same
+`crate::util::fs::to_forward_slash` helper. All 23 tests in
+`librarian::tools::create::tests` pass:
+```
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 4010 filtered out; finished in 0.18s
+```
+
+```
+test server::guide_hint_tests::an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4032 filtered out; finished in 0.52s
+```
 
 ## Workarounds
 None; on Windows, creating a tracker artifact does not surface the
@@ -117,11 +151,7 @@ None; on Windows, creating a tracker artifact does not surface the
 — only the guide-routing hint is affected.
 
 ## Resume
-Apply `to_forward_slash` at `src/librarian/tools/create.rs:368`, matching
-the pattern in `mv.rs`/`context.rs`/`doctor.rs`/`get.rs`/`reindex.rs`/`util.rs`.
-Re-run the cited test to confirm. Also worth checking whether other
-recently-added `create.rs` response fields have the same gap.
-
+Fixed. N/A.
 ## References
 - `src/librarian/tools/create.rs:368` (the missing normalization)
 - `src/librarian/adapter.rs:182-205` (`relevant_guide_topic`)

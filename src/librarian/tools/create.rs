@@ -365,7 +365,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         super::worktree::ensure_registration(&cat, cp)?;
     }
 
-    let mut result = json!({"id": id, "abs_path": row.abs_path.display().to_string()});
+    let mut result =
+        json!({"id": id, "abs_path": crate::util::fs::to_forward_slash(&row.abs_path)});
     if a.kind == "tracker" && a.augment.is_none() {
         result["tracker_hint"] = json!(
             "Tracker created without augmentation. \
@@ -1014,8 +1015,11 @@ mod tests {
         .unwrap();
         let abs = result["abs_path"].as_str().unwrap();
         assert!(abs.ends_with("docs/inferred.md"), "got: {abs}");
+        // abs_path is forward-slash normalized (crate::util::fs::to_forward_slash);
+        // path is a raw TempDir PathBuf, native-separator on Windows, so it must be
+        // normalized the same way before the prefix comparison.
         assert!(
-            abs.starts_with(path.to_string_lossy().as_ref()),
+            abs.starts_with(&crate::util::fs::to_forward_slash(&path)),
             "got: {abs}"
         );
     }
@@ -1046,7 +1050,10 @@ mod tests {
         .unwrap();
         let abs = result["abs_path"].as_str().unwrap();
         let expected = proj_path.join("docs/foo.md");
-        assert_eq!(abs, expected.to_string_lossy());
+        // abs_path is forward-slash normalized (crate::util::fs::to_forward_slash);
+        // PathBuf::join + to_string_lossy stays native-separator on Windows, so
+        // `expected` needs the same normalization before comparing.
+        assert_eq!(abs, crate::util::fs::to_forward_slash(&expected));
     }
 
     #[tokio::test]

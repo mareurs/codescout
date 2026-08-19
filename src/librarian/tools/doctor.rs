@@ -829,17 +829,21 @@ fn count_dead_root(
 /// so a truncated sample can still account for every row it dropped, and it
 /// never decides whether a row is a violation.
 fn outside_roots_group(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    let mut prefix = std::path::PathBuf::new();
-    for comp in p.components() {
-        if comp.as_os_str() == "docs" {
-            return prefix.to_string_lossy().into_owned();
-        }
-        prefix.push(comp);
+    let mut segments: Vec<&str> = path.split('/').collect();
+    if let Some(docs_idx) = segments.iter().position(|s| *s == "docs") {
+        return segments[..docs_idx].join("/");
     }
-    p.parent()
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
+    if segments.len() > 1 {
+        segments.pop();
+        let joined = segments.join("/");
+        if joined.is_empty() && path.starts_with('/') {
+            "/".to_string()
+        } else {
+            joined
+        }
+    } else {
+        String::new()
+    }
 }
 
 /// Pulls every `(id, abs_path)` row once and runs six per-row checks

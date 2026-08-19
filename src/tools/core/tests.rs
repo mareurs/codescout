@@ -612,8 +612,13 @@ async fn a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen() {
         first.contains("_workspace_notice"),
         "the first read must say which tree it resolved against, got: {first}"
     );
+    // `first` is JSON-serialized tool output, so any backslash in the path has
+    // been escaped as `\\`. Path::display() renders a raw single-backslash form
+    // on Windows, which can never match a `.contains()` against escaped JSON —
+    // escape the same way the serializer did before comparing.
+    let wt_json_escaped = wt.display().to_string().replace('\\', "\\\\");
     assert!(
-        first.contains(&wt.display().to_string()),
+        first.contains(&wt_json_escaped),
         "the notice must name the worktree the caller might mean, got: {first}"
     );
     assert!(
