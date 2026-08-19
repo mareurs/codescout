@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 6
-entry_high_water_W: 8
+entry_high_water_W: 9
 ---
 
 > **Work stream:** began as an audit of codescout's four prompt surfaces (`tools/list`,
@@ -75,6 +75,7 @@ entry_high_water_W: 8
 | W-6 | 2026-08-19 | high | Diff a tool's full report against the baseline a document recorded; account for every delta before reading the field you came for | Verification had already SUCCEEDED at its stated purpose — stopping there would have missed an unguarded write into a concurrent session's worktree, and left CAP-8's load-bearing "3 artifacts" figure standing while wrong | validated |
 | W-7 | 2026-08-19 | med | Write the verification recipe at archive time — command, field, and the value that counts as proof — before the opportunity to run it exists | A post-hoc "check the ledger looks right" is satisfied by a cleared-then-refilled ledger, the exact state being disproved; the decisive evidence (a stamp OLDER than the slot holding it) was only noticed because the recipe named both fields to compare | validated |
 | W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
+| W-9 | 2026-08-19 | high | Treat retiring a bookkeeping rule as a schema migration over the record corpus — sweep for text that forward-references the retired step | Three fix pointers sat one rebase from orphaned, with the patch-id that would survive unrecorded because recording it WAS the retired step; all three were invisible to triage because terminal status is what the query filters out, and the measured recovery cost on the ten files this already happened to is 2–153 ambiguous candidates | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -882,6 +883,75 @@ settled."* One entry is not yet a rate.
 
 **Status:** validated — 4 datapoints within one entry, but only one entry; the
 cross-entry claim is what the promotion criterion tests.
+
+## W-9 — Retiring a rule orphans every record that was waiting on it — and terminal status hides them from every triage query
+
+**Observed:** 2026-08-19, first work after compaction. `librarian(action="doctor")`'s
+`terminal_status_with_caveat` returned 8 findings. Three were bug files whose fix pointer
+was a *promise* rather than a value.
+
+**Pattern:** When a project retires a bookkeeping rule, treat it as a schema migration
+over the existing record corpus, not as a doc edit. Sweep for records whose text is a
+**forward reference to the retired step** — those references are now permanently
+unfulfillable, and nothing will ever prompt anyone to revisit them.
+
+The three forms found, all in files whose `status:` was already terminal:
+
+| File | What it said | What was there |
+|---|---|---|
+| `audit-doc-refs-gate-hides-its-own-cause` | "Experiments-branch SHA: recorded on commit" | no value |
+| `run-command-unusable-without-git-bash` | "Fix SHA: `experiments` — recorded once the branch merges" | no value |
+| `frontmatter-id-mismatch-asserts-one-cause` | "the fix SHA **below** is already the master-side SHA" | no SHA below |
+
+The third is the sharpest: a claim about the document's own contents that the document
+falsifies. None of the three is a lie — each was true-pending when written, and CLAUDE.md
+retired the step that would have made it true.
+
+**Why nothing caught them:** every one was `fixed` or `mitigated`, so the canonical triage
+query — `kind="bug"` with status in `open`/`investigating` — could not reach any of them.
+Terminal status is precisely what makes a record invisible, so **a rule retirement lands
+hardest on the records that are already "done"** and softest on the ones anyone is
+watching.
+
+**Counterfactual:** all three fix commits are `experiments`-only (`git branch --contains`
+shows no `master` on any). `experiments` is rebased after every ship, so `45669701`,
+`3f8a43e7` and `51dd9368` were each **one rebase from being orphaned** — and the patch-id
+that survives a rebase had not been recorded either, because recording it *was* the
+retired step. Measured 2026-08-19 on this repo: 10 of 63 archived bug files had already
+lost their SHA exactly this way, and subject-keyword recovery on those ten returned 2–153
+ambiguous candidates. These three would have been numbers 11, 12 and 13, with no recovery
+path left.
+
+**What made them findable:** Layer 1 (`unverified:`) put the caveat in a *field*; Layer 2
+(`terminal_status_with_caveat`) made a query read it. Neither layer knows anything about
+rule retirement — the caveat's **author** already knew, and the check only stopped what
+they wrote from being invisible. That is the legibility thesis paying out once, on a real
+corpus, in a form no other surface would have produced. Recovered and recorded in
+`c420e2df`; `archived_fix_shas` coverage moved `scanned` 54 → 57, `unresolvable` 0.
+
+**Related observation (diagnostic design):** establishing that the three CAP-7 checks were
+live could not be done from the violations map. `summary.by_check` lists only checks that
+*fired*, so "check absent" and "check found zero" are character-identical in it — check 1
+was missing from the map because it found zero unresolvable pointers. Only
+`catalog_health.archived_fix_shas`, which reports **coverage** (`scanned`, `skipped`,
+`unresolvable`) rather than findings, distinguishes the two. A clean diagnostic should
+report the denominator, not just the numerator.
+
+**Confirming data points:**
+
+1. This entry (2026-08-19) — 3 of 8 `terminal_status_with_caveat` findings were
+   orphaned-by-retirement, recovered inside their last window.
+2. Pending: the next rule change that lands on an existing record corpus.
+
+**Impact:** high — three fix pointers recovered while still recoverable; each would
+otherwise have joined a population with a measured 2–153-candidate recovery cost.
+
+**Promote-when:** a second rule retirement is found to have left orphaned records behind.
+At 2 datapoints, promote to CLAUDE.md as: *"When retiring a bookkeeping rule, sweep the
+record corpus for text that forward-references the retired step — terminal-status records
+will not surface in any triage query."*
+
+**Status:** validated — single datapoint, acted on and committed (`c420e2df`).
 
 ## Template for new entries
 
