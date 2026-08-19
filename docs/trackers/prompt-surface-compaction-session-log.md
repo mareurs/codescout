@@ -1342,7 +1342,32 @@ Count Your Instrument Did Not Measure"*, the Mutation-apply block synced to the 
 lacked it, and all three files are now byte-identical (`md5 08f0ef6cb534`, 157 lines). The
 general gap is unfixed: nothing stops the next fired criterion going the same way.
 
-**Fix idea / Pointer:** a `doctor` check for fired-but-unharvested criteria, on the pattern
+**Correction, same evening — the title overstates it, and the truth is worse.** Tracing where
+the Mutation-apply rule came from turned up
+`eduplanner-ui docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`, which
+carries a **`Promotion status`** section: every `W-N` checked at archive time against the
+target surface itself and marked *already promoted* (text quoted verbatim), *UNFIRED*, or
+*FIRED but not yet applied*. Its `W-4` is logged as fired-and-unapplied with the exact text
+to promote. **The audit exists and it worked.** "Nothing queries for one" was asserted
+without checking the sibling repo — R-3's law, committed while filing a bug about unchecked
+claims.
+
+So the defect is narrower and more recursive: **the audit convention itself was never
+promoted.** `promotion status` appears in **0 of 9** codescout session logs and **0 times**
+in `docs/templates/session-log.md` — the generator they are all copied from, which does
+mention `Promote-when` twice. Nine trackers collect criteria with no audit step because the
+template never had one. That is [[W-5]] verbatim: fix the generator, the records were obeying
+it.
+
+And the failure that actually bit was not a missed firing. The audit caught the firing; the
+*application* went to one profile of three, because the audit concluded "not found in the
+user's global CLAUDE.md" — **singular** — and nothing re-checked. The remaining gap is
+naming every instance of a multi-instance target, not detecting the fired state.
+
+**Fix idea / Pointer:** the generator fix is **done** — `docs/templates/session-log.md` now
+carries a `Promotion status` section and a `promotion-due` win status, so the fired state is
+representable and queryable rather than only narratable. What remains is a `doctor` check for
+fired-but-unharvested criteria, on the pattern
 that worked three times today — `terminal_status_with_caveat` made a stated caveat queryable,
 `archived_fix_sha_unresolvable` a broken anchor, `terminal_status_without_fix_anchor` a
 missing one. Filed as `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`.

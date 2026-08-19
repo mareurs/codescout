@@ -37,6 +37,40 @@
 
 ---
 
+## Promotion status
+
+**Audited:** <YYYY-MM-DD>, against the target surface itself — opened and read,
+not recalled.
+
+One line per `W-N` (and any `F-N` with a `Fix idea` bound for a permanent
+surface). Check the **target**, not the entry: a `Promote-when` that fired is
+invisible from inside the tracker, because `Status: validated` reads as healthy
+either way. Record one of:
+
+- **already promoted, no action** — quote the promoted text verbatim and name
+  where it landed, so the next reader verifies instead of re-deriving.
+- **UNFIRED, carried forward** — restate the criterion and the current datapoint
+  count.
+- **FIRED but not yet applied** — the one that leaks. Name the exact target
+  surface and the exact text to add. This is an action item, not a note; set the
+  entry's `Status:` to `promotion-due` so a query can find it.
+
+> ⚠️ **Name every instance of the target, not the target's type.** This machine
+> runs three Claude Code profiles (`~/.claude`, `~/.claude-sdd`,
+> `~/.claude-kat`), each with its own `CLAUDE.md`. An audit that concluded
+> *"not found in the user's global CLAUDE.md"* — singular — led to a promotion
+> that reached one file of three on 2026-08-18. The session that found the gap
+> was running on a profile **without** the rule, and applied it only because
+> another profile's copy happened to be injected as project instructions. Three
+> files that should be byte-identical have an md5; compare them.
+
+Run this when the work stream wraps, **and** whenever a criterion fires
+mid-stream — an audit that only happens at archive time is one that happens
+after the lesson was needed. Prior art: `eduplanner-ui`
+`docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`, whose
+audit correctly caught its own `W-4` as fired-and-unapplied and named the exact
+text to promote.
+
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -133,7 +167,8 @@ Codified so the Index column means the same thing across sessions.
 | Status | Meaning |
 |---|---|
 | `validated` | Pattern confirmed by ≥1 counterfactual data point. Default for entries with evidence. |
-| `promoted-to-permanent-docs` | Moved into CLAUDE.md, an ADR, a skill, or another permanent surface. Session log keeps the pointer. |
+| `promotion-due` | `Promote-when` has **fired** and the text is not yet on the target surface. An action item, not a resting state. Exists because `validated` cannot distinguish "criterion not yet met" from "criterion met, nobody harvested it" — and both read as healthy, which is how a lesson sits unpromoted while the failure it describes recurs. |
+| `promoted-to-permanent-docs` | Moved into CLAUDE.md, an ADR, a skill, or another permanent surface. Session log keeps the pointer — and, for a multi-instance target, names every instance it landed in. |
 | `archived` | Pattern no longer load-bearing — either the underlying system changed or the discipline became automatic. |
 
 ---

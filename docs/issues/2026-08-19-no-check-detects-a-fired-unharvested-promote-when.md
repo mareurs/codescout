@@ -29,18 +29,38 @@ severity: high
 
 Session-log entries carry a `**Promote-when:**` line naming the condition under which the
 lesson graduates to a permanent surface (`CLAUDE.md`, an ADR, a skill). When that condition
-fires, nothing notices. The entry keeps `Status: validated`, which reads as healthy, and the
-lesson stays where only its own work stream can see it.
+fires, **codescout** notices nothing: the entry keeps `Status: validated`, which reads as
+healthy, and the lesson stays where only its own work stream can see it.
 
-This is the third surface in this project to leak the same way, and the first two are already
-measured:
+> **Corrected 2026-08-19, hours after filing.** This section first read *"nothing notices"*,
+> unqualified. That was false, and asserted without checking the sibling repos — a claim of
+> absence from an unchecked scope, which is exactly `reconnaissance-patterns` R-3 (*a search
+> that finds nothing is evidence about the search, not about the world*). Something does
+> notice, it is described below, and it works.
 
-| surface | leak | measured |
-|---|---|---|
-| bug files | fixed-then-not-archived | **75%** zombie-open in one tracker (CLAUDE.md, verify-open cadence) |
-| tracker entries | `Status:` absent, so a fired criterion is unharvestable | **39 of 57** over three months (`get_guide("tracker-conventions")`) |
-| **fired `Promote-when`** | **criterion met, never executed** | **this file** |
+**The remedy already exists as a practice, in another repo.**
+`eduplanner-ui`'s `docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`
+carries a **`Promotion status`** section: at archive time each `W-N` is checked *against the
+target surface itself*, and recorded as *already promoted* (with the promoted text quoted
+verbatim), *UNFIRED, carried forward*, or *FIRED but not yet applied*. Its own `W-4` is
+logged as:
 
+> **W-4 — FIRED but not yet applied, carried forward as an action item.** Already at 6
+> datapoints … Target is **CLAUDE.md / global review guidance** … *"A review that reports
+> findings without observed mutation pass/fail counts has not verified anything."* Not found
+> in either the project or the user's global CLAUDE.md as of 2026-08-18.
+
+That audit did its job — it caught the fired state and named the exact text. The lesson was
+then promoted, and is the Mutation-apply discipline now in `CLAUDE.md`.
+
+So this bug is narrower and more embarrassing than filed: **the audit convention itself was
+never promoted.** Measured 2026-08-19 — `promotion status` appears in **0 of 9** codescout
+session logs and **0 times** in `docs/templates/session-log.md`, the generator they are all
+copied from, which does mention `Promote-when` twice. Nine trackers accumulate promotion
+criteria with no audit step because the template never had one.
+
+That is `prompt-surface-compaction-session-log:W-5` exactly — *when several records make the
+same mistake, fix the generator; the records were obeying it*.
 ## Symptom (Effect)
 
 Measured 2026-08-19 on `docs/trackers/prompt-surface-compaction-session-log.md`:
@@ -91,23 +111,30 @@ needs surfacing is not representable.
 
 ## Fix ideas
 
-1. **A disposition value that names the fired state** — `promotion-due` between `validated`
-   and `promoted-to-permanent-docs`. Cheap, and it makes the state queryable with the
-   `entry_filter` machinery that already exists. It relies on an author noticing the
-   criterion fired, which is the weak link, but it is strictly better than no representation.
-2. **A `doctor` check: `promotion_due_unharvested`.** Report entries whose `Status:` is
-   `validated` and whose confirming-datapoint count has reached the number named in their
-   `Promote-when` line. Parsing "at 3" out of prose is fragile — prefer a structured
-   `promote_at: 3` alongside the prose, and have the check compare it to a datapoint count.
-   Report-only: deciding a lesson is ready is judgement, not repair.
-3. **A profile-divergence check, which is the cheaper half and may not need `doctor` at
-   all.** Three files that should be byte-identical have an md5. A pre-flight comparison of
-   `~/.claude*/CLAUDE.md` would have caught the Mutation-apply gap the day it was written,
-   and is a handful of lines in a hook rather than a catalog check.
+**0. Port the `Promotion status` convention into `docs/templates/session-log.md`.** Zero
+code, and it is the generator fix that reaches all nine logs and every future one. **Done
+2026-08-19** — plus a `promotion-due` win status, so the fired state is representable at all.
+The three below are what remains after it.
 
-Sequenced, 3 first: it is the smallest, catches the failure mode with the sharpest live
-consequence, and needs no schema change.
+1. **The audit is manual and archive-time-only.** eduplanner-ui's ran when the work stream
+   wrapped, which is after the point where the lesson was needed — its `W-4` fired at 6
+   datapoints well before archive. The template now says to run it whenever a criterion
+   fires mid-stream, but nothing enforces that.
+2. **A `doctor` check: `promotion_due_unharvested`.** Report entries with
+   `Status: validated` whose datapoint count has reached the number their `Promote-when`
+   names. Parsing *"at 3"* out of prose is fragile — prefer a structured `promote_at: 3`
+   beside the prose and compare against a counted field. Report-only: judging a lesson ready
+   is judgement, not repair. Cheaper now that `promotion-due` exists, since the check can
+   simply report entries that *should* carry it.
+3. **A profile-divergence check — the cheapest half, and it needs no `doctor` work.** Three
+   files that should be byte-identical have an md5. The failure this bug is named for was
+   not the audit missing a fired criterion; the audit caught it. It was the promotion
+   landing in **one profile of three**, because the audit wrote *"the user's global
+   CLAUDE.md"* — singular — and nothing re-checked. A hook comparing `~/.claude*/CLAUDE.md`
+   would have caught it the day it was written.
 
+Sequenced 3 first among the remainder: smallest, no schema change, and it addresses the
+failure mode that actually bit.
 ## Prior art in this repo
 
 The pattern that worked three times on 2026-08-19: take a fact that lived only in prose and
@@ -127,4 +154,3 @@ That framing is itself from `get_guide("tracker-conventions")`:
   entry that sat unharvested)
 - `get_guide("tracker-conventions")` § *Required fields* — the 39-of-57 measurement
 - `src/librarian/tools/doctor.rs` — the three checks this one would sit beside
-
