@@ -186,12 +186,61 @@ Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `car
   delimiter suppresses all expansion). This is what unblocked `92fee6a5`.
 - Single-quote the whole `-m` argument.
 
+## Corpus measurement — 2026-08-19 (the gate's pre-registered blocker, discharged)
+
+Ran the measurement this file demanded before any gate could be designed: *"measure how
+often a `git commit -m` in the corpus legitimately wants substitution (expected: never)"*.
+Source: `.codescout/usage.db`, `tool_calls.input_json`, 9,790 `run_command` calls.
+
+| Population | n |
+|---|---:|
+| `run_command` calls total | 9,790 |
+| …containing `git commit` | 748 |
+| …of those, containing a backtick | **291** |
+| …of the 291, using a heredoc (`<<`) | 283 (97.3%) |
+| …of the 291, using `commit -F` | 122 |
+| …of the 291, in the exposed shape (`commit -m`, no heredoc) | **2** |
+| …legitimately wanting substitution | **0** |
+
+**The answer to the pre-registered question is "never", as expected** — zero of 291 wanted
+substitution. Backtick contents are markdown citations: field names (`extra`, `kind`,
+`id:`), tool names (`symbols`, `append_entry`), status values (`fixed`, `mitigated`), and
+commands quoted as prose (`cargo rb`, `git status`).
+
+**But the naive gate would still have been wrong, and this is the design finding.** The
+risk is not false-positive *intent*, it is false-positive **exposure**: 283 of the 291 put
+their backticks inside a heredoc, where the shell never evaluates them. A gate that refuses
+"`git commit` containing a backtick" would reject 289 correct commands to catch 2. It must
+fire only on a backtick in **shell-evaluated position** — outside single quotes, outside a
+quoted heredoc, not backslash-escaped. `posix_tokenize` in `src/util/path_security.rs`
+already does quote-aware tokenization and is already trusted for gating.
+
+**The harm is confirmed in permanent history, not hypothetical.** Of the two exposed calls:
+
+- One had its backticks **backslash-escaped** by the author (`` \` ``) — the workaround
+  already in use, and evidence the trap is known.
+- The other, `tool_calls.id` 31292, wrote `` per memory `conventions` § Environment-Agnostic
+  Tuning `` and committed as `da5176d5`. That commit's message, line 35, reads:
+
+  > model rather than a default, per memory  § Environment-Agnostic Tuning.
+
+  **`conventions` is gone**, leaving the double space where the substitution returned empty.
+  The shell ran `conventions`, found no such command, spliced in nothing. `outcome` was
+  recorded `success` and no diagnostic fired, because none could: this is the silent-mangle
+  half the *Fix* section names as the one the shipped diagnostic is blind to by
+  construction. It is still in the history and cannot be corrected without a rewrite.
+
+**Frequency, stated honestly:** 1 confirmed mangle in 9,790 calls. Low, and the reason is
+that the house convention (heredoc to a file, then `commit -F`) is already immune — that
+convention, not the tool, is what has been preventing this. The gate's value is that it
+stops depending on every author knowing the convention, and its remedy hint writes itself,
+because the safe pattern is already what 97% of the corpus does.
 ## Resume
 
-The diagnostic is in. What remains is the **detection gate**, and its blocker is unchanged:
-measure how often a `git commit -m` in the corpus legitimately wants substitution (expected:
-never) before refusing on shape. `.codescout/usage.db` `tool_calls.input_json` holds the
-commands — the same source the IL-gate firing audit used.
+The diagnostic is in. **The blocker is discharged** — see § *Corpus measurement* above. The
+answer is "never" (0 of 291), so refusing on shape is safe *provided* the shape test is
+quote-aware: 283 of the 291 protect their backticks in a heredoc and must not be flagged.
+What remains is building the gate itself.
 
 Two notes for whoever takes it:
 

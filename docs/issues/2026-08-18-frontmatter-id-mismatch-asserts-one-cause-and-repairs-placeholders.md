@@ -13,7 +13,6 @@ tags:
 - cross-repo
 topic: catalog-drift
 closed: 2026-08-18
-unverified: the on-the-wire 3/3 split check named in Resume has not been re-run since the rebuild — the split is asserted by unit tests, but the live MCP surface was not re-probed after the binary was rebuilt.
 ---
 
 # BUG: `frontmatter_id_mismatch` asserts one cause, and its repair would overwrite a placeholder
@@ -191,9 +190,21 @@ catch this, because the templates are visible by name in the preview.
 
 ## Resume
 
-Nothing outstanding on the code. Verify on the wire after the next `cargo rb` + `/mcp`: the six
-`frontmatter_id_mismatch` rows should split **3 / 3** between the two check names, and the three
-non-id rows should be the two ADR/FDR template placeholders plus the `meetings-reranker` slug.
+Nothing outstanding on the code. **The on-the-wire probe ran and passed, 2026-08-19**, against a
+binary rebuilt at 15:12 and a live `librarian(action="doctor")` call. Every value the probe
+pre-registered matched:
+
+| Pre-registered | Observed |
+|---|---|
+| six rows split 3 / 3 across the two check names | `frontmatter_id_mismatch` 3, `frontmatter_id_is_not_a_catalog_id` 3 |
+| non-id row 1 — an ADR template placeholder | `eduplanner-ui/docs/adr/templates/adr-template.md` declares `ADR-{NUMBER}` |
+| non-id row 2 — an FDR template placeholder | `eduplanner-ui/docs/adr/templates/fdr-template.md` declares `FDR-{NUMBER}` |
+| non-id row 3 — the `meetings-reranker` slug | `lang-pal-engine/…/2026-05-16-meetings-reranker-design.md` declares `meetings-reranker` |
+
+Worth noting how cheap this was to settle: the probe named the command, the fields and the
+exact values that would count as proof, so it was discharged from `doctor` output collected
+for an unrelated reason — with nothing left to argue about. A vaguer "check it still looks
+right" would have needed its own investigation.
 
 Still open, and deliberately so: **whether those templates belong in the catalog at all.** Option
 (3) is a per-repo `.codescout/librarian.toml` classifier decision in repos this session does not
