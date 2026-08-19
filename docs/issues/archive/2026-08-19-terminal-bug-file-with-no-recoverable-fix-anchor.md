@@ -56,12 +56,20 @@ population's.
 | `2026-08-18-companion-test-suite-stamped-live-rendezvous-slots.md` | fixed | 2 |
 | `2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md` | fixed | 2 |
 | `2026-08-07-edit-code-remove-ast-repair-over-deletes.md` | fixed | 1 |
+| `2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md` | fixed | 1 |
 | `2026-08-18-no-check-detects-a-params-row-stale-relative-to-its-body.md` | mitigated | 0 |
-| `2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md` | fixed | 0 |
 
-The hashes are real commits — environments, siblings, quoted work — just not the fix. Only
-two records are plainly hash-free, so the *misleading* shape is the rule and the honest
-blank is the exception. That inverts the fix: the finding's main job is not to report
+The hashes are real commits — environments, siblings, quoted work — just not the fix.
+**Exactly one record is plainly hash-free**, so the *misleading* shape is not the rule with
+an exception; it is very nearly the whole population.
+
+**Corrected twice, and both corrections are the same mistake at different scales.** The
+first table said *three*, from a probe that counted the WORD "SHA" rather than hashes — so
+the three heaviest carriers scored zero and were never opened. The second said *seven*,
+because `commit_like_hashes` paired backticks across the whole file and a lone backtick
+inside a fenced `grep` pattern inverted every span after it (`fea7101e`). Each instrument
+measured a property adjacent to the one being reasoned about, and each produced a plausible
+number with no error. That inverts the fix: the finding's main job is not to report
 absence but to say **the hashes you can see are not the anchor**.
 
 One entry is worth naming on its own. `2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md`

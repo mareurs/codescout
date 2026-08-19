@@ -9,7 +9,7 @@ tags:
 - compaction
 topic: prompt-surfaces
 entry_high_water_F: 6
-entry_high_water_W: 12
+entry_high_water_W: 13
 entry_prefix:
 - F
 - W
@@ -93,6 +93,7 @@ entry_prefix:
 | W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
 | W-9 | 2026-08-19 | high | Treat retiring a bookkeeping rule as a schema migration over the record corpus — sweep for text that forward-references the retired step | Three fix pointers sat one rebase from orphaned, with the patch-id that would survive unrecorded because recording it WAS the retired step; all three were invisible to triage because terminal status is what the query filters out, and the measured recovery cost on the ten files this already happened to is 2–153 ambiguous candidates | validated |
 | W-10 | 2026-08-19 | med | Reset one well-known element rather than everything — the survivor set is the only evidence the reset was correct | A cleared ledger and an inherited one both present as re-injection, so neither is distinguishable from the outside; because exactly one topic re-arms by design, one-of-five proved 58,963 bytes had been inherited before any state file was opened | validated |
+| W-13 | 2026-08-19 | med | When one fix carries two separable behaviours, mutate them separately and name which fixture died | M6b passed the fixture written to pin its property — once fences were skipped that fixture's remaining backticks were incidentally even, so per-line pairing had zero discriminating coverage while looking fully covered | validated |
 | W-12 | 2026-08-19 | med | Choose a sweep predicate by what it must DISTINGUISH, not by what it must find — a presence check scores a wrong-value defect as healthy | `grep -c SHA` returns ≥1 for 7 of the 9 unanchored records — the hashes are environments and siblings, never the fix — and the `grep -c patch-id` used to measure THIS entry scored two more as anchored on prose mentions | validated |
 | W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
 ---
@@ -1185,8 +1186,10 @@ only that file would have left every other live terminal record unanchored.
 produced by a presence check — `grep -c patch-id` — which scored two records as anchored on
 prose mentions, one of them a bug file whose SUBJECT is patch-ids. Measured by the shipped
 `terminal_status_without_fix_anchor` against the structured `- **SHA:**` form: **9** live
-terminal records lack an anchor, and **7 of the 9** carry commit-like hashes with none
-declared as the fix. The misleading shape is the majority, not a sub-case — which inverts
+terminal records lack an anchor, and **8 of the 9** carry commit-like hashes with none
+declared as the fix. (Its first run said *seven* — a parity bug in the check's own hash
+heuristic, fixed in `fea7101e`. Three instruments, three answers, each one measuring
+something adjacent to the question. See [[W-13]].) The misleading shape is the majority, not a sub-case — which inverts
 what the finding's wording has to do. An entry warning against presence-checks, measured
 with one, twice.
 
@@ -1223,6 +1226,49 @@ zero survivors.
 
 **Status:** validated — three datapoints in this log, the third contributing a distinct
 mechanism. Awaiting the promotion criterion.
+
+## W-13 — A fixture can pass a mutation of the very property it was written to pin — only applying the mutation shows it
+
+**Observed:** 2026-08-19, fixing a parity bug in `commit_like_hashes`
+(`src/librarian/tools/doctor.rs`) an hour after shipping it in `375225cc`.
+
+**Pattern:** When one fix carries two separable behaviours, mutate them **separately**, and
+check which fixture each mutation kills. A fixture written for behaviour B can pass B's
+mutation because some incidental property of the fixture masks it — and it will look like
+coverage right up until the mutation is actually applied.
+
+**Counterfactual:** The fix had two parts: skip fenced blocks, and pair backticks per line
+instead of across the whole file. One fixture was written for both, built from the real
+failing document. **M6a** (disable fence detection) killed it. **M6b** (pair globally over
+the non-fenced text) did **not** — it passed, because once fences are removed that fixture's
+remaining backticks happen to be *even*, so global and per-line pairing agree on it.
+
+So the per-line half — the defence against a stray backtick in **prose**, where no fence can
+help — had zero discriminating coverage while appearing fully covered. A second fixture
+(`commit_like_hashes_confines_a_stray_prose_backtick_to_its_own_line`) exists only because
+M6b was run rather than reasoned about; under the mutant it returns `[]` instead of the hash.
+
+This is a step beyond the CLAUDE.md mutation rule as written. That rule answers *"do the
+tests catch this?"*. This answers *"does the test I wrote FOR this property actually
+discriminate it?"* — and a fixture drawn from a real failing document is exactly the kind
+most likely to carry incidental properties that mask one of its own assertions, because it
+was never designed, only copied.
+
+**Confirming data points:**
+
+1. This entry — M6b passed the fixture written to pin its property; caught only by applying it.
+2. Pending: any future case where a mutation of a named behaviour leaves its own fixture green.
+
+**Impact:** med — no shipped defect, because the mutation was applied. The counterfactual is
+a silent coverage hole in a heuristic whose failure mode is a plausible number and no error,
+which is precisely how the parity bug reached `master`-bound code in the first place.
+
+**Promote-when:** a second instance. Then promote to CLAUDE.md as a clause on the existing
+mutation rule: *when a change carries two separable behaviours, mutate each separately and
+name which fixture died — a mutation that kills nothing has found a coverage hole, not a
+redundant test.*
+
+**Status:** validated — one datapoint, with the second fixture as its artifact.
 
 ## Template for new entries
 
