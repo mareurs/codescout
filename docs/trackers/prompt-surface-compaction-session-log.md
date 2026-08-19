@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 6
-entry_high_water_W: 9
+entry_high_water_W: 10
 ---
 
 > **Work stream:** began as an audit of codescout's four prompt surfaces (`tools/list`,
@@ -76,6 +76,7 @@ entry_high_water_W: 9
 | W-7 | 2026-08-19 | med | Write the verification recipe at archive time — command, field, and the value that counts as proof — before the opportunity to run it exists | A post-hoc "check the ledger looks right" is satisfied by a cleared-then-refilled ledger, the exact state being disproved; the decisive evidence (a stamp OLDER than the slot holding it) was only noticed because the recipe named both fields to compare | validated |
 | W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
 | W-9 | 2026-08-19 | high | Treat retiring a bookkeeping rule as a schema migration over the record corpus — sweep for text that forward-references the retired step | Three fix pointers sat one rebase from orphaned, with the patch-id that would survive unrecorded because recording it WAS the retired step; all three were invisible to triage because terminal status is what the query filters out, and the measured recovery cost on the ten files this already happened to is 2–153 ambiguous candidates | validated |
+| W-10 | 2026-08-19 | med | Reset one well-known element rather than everything — the survivor set is the only evidence the reset was correct | A cleared ledger and an inherited one both present as re-injection, so neither is distinguishable from the outside; because exactly one topic re-arms by design, one-of-five proved 58,963 bytes had been inherited before any state file was opened | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -952,6 +953,70 @@ record corpus for text that forward-references the retired step — terminal-sta
 will not surface in any triage query."*
 
 **Status:** validated — single datapoint, acted on and committed (`c420e2df`).
+
+## W-10 — A partial reset is self-evidencing — the one topic deliberately re-armed on reconnect is the integrity probe for the other four
+
+**Observed:** 2026-08-19, a `/mcp` reconnect after a rebuild, same conversation
+(`a8acb1cf`). Second live verification of the rendezvous-inheritance fix (archived bug
+`3e0f11d4875f0075`).
+
+**Pattern:** When a subsystem resets state on an event, resetting **exactly one
+well-known element** rather than all-or-nothing makes the reset externally verifiable.
+Afterwards, *"that element re-armed AND its siblings did not"* is a signature only a
+correct partial reset can produce. A full reset destroys the evidence that would
+distinguish it from a correct inherit-then-retrigger — both look like re-injection.
+
+**Read off the tool responses, before opening any state file:**
+
+- `artifact(find, kind="bug", …)` returned **no** `_guide_hint`. The identical call before
+  the reconnect emitted two (`librarian`, `tracker-conventions`).
+- `run_command` **did** carry `_guide_hint` for `project-activation-bootstrap`.
+- One re-armed, four preserved is only reachable if the ledger reloaded **non-empty**,
+  because the server re-arms the session-opening topic *only* on a non-empty reloaded
+  ledger. So the re-injection that looks like a failure is the proof of success.
+
+**Confirmed at the bytes afterwards:**
+
+- Slot `3285244.json` — `started_at` `10:56:25.703Z`, `hook_at` **`09:54:19.791Z`**: a
+  stamp 62 minutes older than the slot carrying it, which no fresh stamp can produce. The
+  same value was observed on slot `2759601` at `09:57:46Z` earlier the same day, so
+  inheritance is **transitive across at least two directly-observed server generations
+  spanning ~4 hours**, not the single hop the first verification established.
+- Predecessor slot `3166062.json` is absent — gc ran *after* the inheritance read, which
+  is the ordering the fix depends on (`inherited_stamp` before `gc` in `publish`).
+- Ledger `a8acb1cf-….json` — four topics stamped 10:42–10:47 (pre-reconnect),
+  `project-activation-bootstrap` stamped 10:56:54 (post).
+
+**Measured saving:** 58,963 bytes not re-sent — `librarian` 20,545, `tracker-conventions`
+24,918, `workspace-state` 10,355, `symbol-navigation` 3,145 — against 2,507 re-sent.
+95.9% suppressed. The topic that must re-arm is also the **cheapest of the five**, which
+is what makes the deliberate exception affordable; had the session-opening topic been the
+24 KB one, the exception would have cost more than it protects.
+
+**Counterfactual:** without the fix every reconnect clears the ledger, so all five
+re-inject — and verification becomes impossible *in both directions*, because a cleared
+ledger and an inherited one both present as re-injection. The fix does not merely save
+bytes; it is what makes the state observable at all.
+
+**Confirming data points:**
+
+1. 2026-08-19, first verification — one hop, slot `2759601`, recorded with W-7's
+   pre-written recipe.
+2. This entry — second reconnect, after a rebuild. Transitivity established, and the
+   one-of-five signature was read off tool responses before any file was opened.
+
+**Impact:** med — the fix was already validated; what this adds is a standing probe that
+costs nothing to run and a design rule that generalises beyond this subsystem.
+
+**Promote-when:** a third subsystem gains an event-triggered reset. Promote to the
+reconnaissance patterns as: *"When designing a reset, reset one well-known element rather
+than everything — the survivor set is the only evidence the reset was correct."*
+
+**Status:** validated — 2 datapoints.
+
+**Incidental:** the rebuild was functionally a no-op. `doctor` returns identical results
+across it (`scanned` 57, `unresolvable` 0, same `by_check`), and the source tree has not
+moved since `b34bf10e` — the two commits after it are docs-only.
 
 ## Template for new entries
 
