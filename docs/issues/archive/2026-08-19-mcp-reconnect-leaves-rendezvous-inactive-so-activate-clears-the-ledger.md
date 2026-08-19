@@ -1,7 +1,7 @@
 ---
-id: c6d0a5e7eb66fad0
+id: 3e0f11d4875f0075
 kind: bug
-status: open
+status: fixed
 title: A /mcp reconnect leaves the rendezvous permanently inactive, so the next workspace(activate) clears the whole guide ledger and every guide re-emits
 owners:
 - marius
@@ -10,6 +10,11 @@ tags:
 - rendezvous
 - companion-plugin
 - context-cost
+closed: 2026-08-19
+opened: 2026-08-19
+owner: marius
+severity: medium
+unverified: 'not verified live: this conversation has no stamped predecessor to inherit from, so the effect is only observable after the next SessionStart stamps the slot; the equivalent-mutation caveat on active-at-publish is recorded under Tests'
 ---
 
 # BUG: a `/mcp` reconnect makes the rendezvous inactive forever, and the next `activate` wipes the guide ledger
@@ -168,38 +173,71 @@ false after any reconnect, which the doc does not say.
 
 ## Fix ideas
 
-Not yet decided; each is a different trade.
+**SHIPPED 2026-08-19** — `4800c297`, patch-id `180be7f0724a10c93f9778712b346f922554871e`.
 
-1. **Re-stamp on reconnect.** Give the companion a hook that fires on MCP
-   connect/reconnect, or have `session-start.mjs`'s stamping logic run from a second
-   trigger. Cleanest if such a trigger exists — needs checking against the Claude Code
-   hook surface, not assumed.
-2. **Let the server infer the hook's presence rather than its stamp.** `active` currently
-   means "a hook wrote here". A conversation that was *ever* stamped under this session id
-   could persist that fact next to the ledger, so a reconnect inherits `active: true`
-   instead of resetting it. Cheap, and the failure mode is the current behaviour.
-3. **Narrow the blunt branch.** `led.clear()` on *every* activate is heavier than the
-   `/clear` risk requires: the danger is a *new conversation* under a stale key, which a
-   same-project re-activation is not. Re-arming `PROJECT_SCOPED` on `switched` and doing
-   nothing otherwise would still handle `/clear` at the next genuine switch, and the idle
-   TTL remains the backstop. Needs weighing against the starvation invariant that
-   `a_fresh_ledger_reports_no_rendezvous` exists to protect — **that test's comment is the
-   argument against this option, and should be read before taking it.**
+The fix taken is a refinement of option 2 that needs no new on-disk shape: `publish()`
+scans for a predecessor slot carrying the **same session id** and carries its `hook_at`
+forward. That widens the field's meaning from *"a hook stamped THIS PROCESS's slot"* to
+*"a hook stamped a slot for this CONVERSATION"* — which is the grain it should always have
+had, since hook installation is a property of the conversation.
 
+The scan runs **before `gc`**, which is the only window in which the predecessor still
+exists: a reconnect kills the old server, so `gc` reaps that slot in the very same call.
+Matched on session id, never pid or cwd — a pid is useless as durable identity, and cwd
+would let one window's hook vouch for another's in the same repo.
+
+**Option 2 as originally written** (persist the flag beside the ledger) was passed over for
+a concrete reason: `src/server.rs` already warns that adding a field to the ledger file
+means *"a third on-disk shape plus migration from two predecessors"*. Inheriting from a
+slot that already exists costs neither.
+
+**Option 1** (a companion hook trigger on MCP reconnect) was passed over as unverified —
+it assumes Claude Code exposes such an event, which was not checked — and because a
+plugin-side fix leaves hookless clients unchanged.
+
+**Option 3 is UNSAFE, and the reason is sharper than the original flag.**
+`GuideLedger::load` sets `idle_ttl: None`, so **the keyed tier has no TTL backstop at
+all** — only `anonymous()` takes one. For a keyed client with no companion, a `/clear` is
+invisible *and* nothing ever expires, which makes the blunt clear the only thing between
+it and permanent guide starvation. That is what
+`a_fresh_ledger_reports_no_rendezvous` exists to protect, and it holds. Absent a companion
+this fix inherits nothing, so the blunt default is preserved byte for byte.
 ## Tests
 
-Whatever the fix, it needs a test that *observes* the state across a simulated reconnect —
-construct a server, stamp the slot, drop it, construct a second server against the same
-ledger dir, and assert what survives. Then mutations applied and run, with the observed
-surviving count reported (`CLAUDE.md` § mutation-apply discipline). The existing
-`a_tool_call_polls_the_rendezvous_and_re_arms` covers the poll, not the reconnect.
+Four in `src/tools/rendezvous.rs`:
 
+- `publish_inherits_the_stamp_from_a_predecessor_slot_for_the_same_conversation` — also
+  asserts the predecessor is *still collected*, pinning that the scan runs before `gc`
+  rather than instead of it.
+- `publish_does_not_inherit_a_stamp_from_a_different_conversation` — the discriminator.
+- `publish_stays_inactive_when_no_predecessor_was_stamped` — the hookless default.
+- `a_reconnect_keeps_the_rendezvous_active` — end to end: publish, stamp as the hook does,
+  rename the slot onto a dead pid (a test cannot change its own), publish again.
+
+**Mutations applied and run: 4. Killed: 4. Load-bearing kills: 3.**
+
+| Mutation | Observed |
+|---|---|
+| scan moved after `gc` | KILLED — the ordering is the whole trick |
+| session check dropped | KILLED by the cross-conversation discriminator |
+| inherited stamp not persisted | KILLED — and only because the test asserts persistence; without it, a fix surviving exactly ONE reconnect would have passed |
+| `active: false` at publish | KILLED, but **equivalent in production** — `poll_rendezvous` runs before the ledger is read on every request, and `poll()` would set the flag itself. Killed by assertion of intent, not by consequence. |
+
+The fourth is recorded rather than counted, because reporting 4/4 would overstate the
+coverage this suite actually has.
 ## Resume
 
-Investigated only — no fix attempted. Effect 1 is correct and should stay. Decide among
-the three fix ideas for effect 2; option 2 looks cheapest and safest, but option 1 is the
-only one that makes the flag mean what it says.
+Fixed; unit-verified, **not** verified live — see `unverified:`.
 
+The reason is worth knowing rather than just noting: this conversation's chain is already
+broken. Its current slot carries `hook_at: null` and there is no stamped predecessor for
+session `a8acb1cf-…`, so the next `/mcp` inherits nothing and the server stays inactive.
+The fix becomes observable here only once a SessionStart (`/clear`, `/compact`, or a fresh
+launch) stamps a slot — from that point every later reconnect carries it forward.
+
+**To verify live:** after a SessionStart has stamped the slot, `/mcp`, then check
+`hook_at` is non-null in `~/.local/state/codescout/servers/<new pid>.json`, and that a
+`workspace(activate)` no longer re-injects guides the conversation already holds.
 ## References
 
 - `src/tools/rendezvous.rs` — `Entry.hook_at`, `Rendezvous::publish`, `poll`, `is_active`

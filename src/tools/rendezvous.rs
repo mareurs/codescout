@@ -31,7 +31,7 @@ pub struct Entry {
     /// this CONVERSATION" rather than "for this PROCESS". Hook installation is a
     /// property of the conversation; keying it to a process lost the fact on every
     /// `/mcp` reconnect. See
-    /// docs/issues/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
+    /// docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
     pub hook_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -194,7 +194,7 @@ fn parent_pid() -> u32 {
 /// blunt clear is the ONLY thing standing between a `/clear` and permanent guide
 /// starvation.
 ///
-/// docs/issues/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
+/// docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md
 fn inherited_stamp(dir: &Path, session: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
     let session = session?;
     let mut newest: Option<chrono::DateTime<chrono::Utc>> = None;
