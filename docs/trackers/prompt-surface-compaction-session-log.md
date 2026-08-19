@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 6
-entry_high_water_W: 6
+entry_high_water_W: 7
 ---
 
 > **Work stream:** auditing codescout's four prompt surfaces (`tools/list`,
@@ -48,6 +48,7 @@ entry_high_water_W: 6
 | W-4 | 2026-08-19 | high | Calibrate a hand-built instrument against a known-good one on the overlapping population before extending it | Six instrument defects, each producing a plausible number and no error — 80% of scanned files were worktree duplicates, and the first patch-id test silently did nothing while exiting 0 | validated |
 | W-5 | 2026-08-19 | high | When N records share a defect, fix the surface that instructed them before repairing any of them | Would have caveated 3 bug files while leaving 6 live instruction surfaces teaching the same rule to the next author | validated |
 | W-6 | 2026-08-19 | high | Diff a tool's full report against the baseline a document recorded; account for every delta before reading the field you came for | Verification had already SUCCEEDED at its stated purpose — stopping there would have missed an unguarded write into a concurrent session's worktree, and left CAP-8's load-bearing "3 artifacts" figure standing while wrong | validated |
+| W-7 | 2026-08-19 | med | Write the verification recipe at archive time — command, field, and the value that counts as proof — before the opportunity to run it exists | A post-hoc "check the ledger looks right" is satisfied by a cleared-then-refilled ledger, the exact state being disproved; the decisive evidence (a stamp OLDER than the slot holding it) was only noticed because the recipe named both fields to compare | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -711,6 +712,72 @@ clock.
 
 **Status:** validated — single datapoint, defect filed and tracker claim corrected in the
 same pass. Awaiting the promotion criterion.
+
+## W-7 — Write the verification recipe at archive time — a predicate fixed before the opportunity arrives cannot be rationalised after it
+
+**Observed:** 2026-08-19, archiving
+`docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md`
+with the fix shipped but not observable yet, then executing the recorded check hours later
+when a restart and a `/mcp` finally made it observable.
+
+**Pattern:** when a fix cannot be verified at the moment it ships, do not archive it with
+*"verify later"*. **Write the recipe: the exact command, the exact field, and the exact
+value that would count as proof.** Then run it verbatim when the opportunity arrives.
+
+What went into the `## Resume` section at archive time:
+
+> *"To verify live: after a SessionStart has stamped the slot, `/mcp`, then check `hook_at`
+> is non-null in `~/.local/state/codescout/servers/<new pid>.json`, and that a
+> `workspace(activate)` no longer re-injects guides the conversation already holds."*
+
+That is a **pre-registered predicate**. It names the artifact, the field, and the two
+observations — one structural, one behavioural — before any of them could be seen.
+
+**Counterfactual — two costs, and the second is the dangerous one.**
+
+1. **Re-derivation.** By the time the chance came, the session had been through a
+   compaction, a server crash, a `cargo rb`, a Claude Code restart and a `/mcp`. Without
+   the recipe, "verify the fix" would have meant re-reading `publish`, re-deciding which
+   file to look at and re-deriving what a passing state looks like. With it: one command.
+
+2. **A post-hoc predicate is satisfiable.** This is the real value. *"Check the ledger
+   looks right"* is met by many states — including a ledger that was cleared and then
+   refilled by the very guides the check is supposed to prove were **not** re-sent. The
+   pre-registered form is not: it demands `hook_at` non-null **in the new pid's slot**, and
+   the decisive evidence turned out to be something no post-hoc reading would have thought
+   to look for — a stamp of `09:54:19.791Z` sitting in a slot published at `09:57:46.355Z`.
+   **A stamp older than the slot holding it** is unforgeable proof of inheritance, and the
+   only reason it was noticed is that the recipe said to compare those two fields.
+
+**Confirming data points:**
+
+1. This session — the recipe was executed verbatim and both halves passed, with the
+   discriminating evidence (the timestamp gap) falling out of the comparison it prescribed.
+2. The same discipline is already validated one domain over: `CLAUDE.md` records that every
+   pre-registration in `prompt-hamsa-audit-log` must make failures spot-readable **before a
+   count is believed**. That is this pattern applied to evals; this is it applied to a fix.
+   The shared claim is that a predicate fixed in advance is worth more than the same
+   predicate chosen once the result is visible.
+
+**Impact:** med — it did not prevent a wrong outcome here, it prevented an *unfalsifiable*
+one. The fix was correct either way; what the recipe bought was proof rather than a
+plausible reading, at roughly zero marginal cost (three sentences written while the context
+was already loaded).
+
+**Limit, stated because it is not yet tested.** The opportunity arrived in the same session
+that wrote the recipe, so the harder claim — that a *later* session inherits the check and
+runs it correctly — is unproven. Nothing here shows the recipe survives handoff, only that
+it survives a few hours and several restarts.
+
+**Promote-when:** a **different session** (or agent) executes an archive-time verification
+recipe it did not write, and the check is decisive without re-derivation. At that point
+promote to `docs/issues/_TEMPLATE.md` as a standing `## Resume` rule: *when a fix ships
+unverifiable, record the command, the field, and the value that would count as proof —
+never "verify later".* Until then this is one self-executed datapoint and should not be
+generalised into the template.
+
+**Status:** validated — single datapoint, executed and decisive, with the cross-session
+claim explicitly not yet established.
 
 ## Template for new entries
 
