@@ -12,22 +12,47 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 6
-entry_high_water_W: 7
+entry_high_water_W: 8
 ---
 
-> **Work stream:** auditing codescout's four prompt surfaces (`tools/list`,
-> `server_instructions`, the `get_guide` corpus, onboarding) for correctness and
-> byte cost, then compacting the largest.
+> **Work stream:** began as an audit of codescout's four prompt surfaces (`tools/list`,
+> `server_instructions`, the `get_guide` corpus, onboarding) for correctness and byte cost.
+> **It grew, 2026-08-19, into the record-legibility work** — the finding that this project
+> does not have a truthfulness problem (authors write their caveats) but a **legibility**
+> one: the caveats live in prose and no query reads them.
+>
+> **State at the 2026-08-19 compaction:**
+>
+> - **Layer 1 — shipped.** The `unverified:` frontmatter field, across `CLAUDE.md`,
+>   `docs/TAXONOMY.md`, `docs/issues/_TEMPLATE.md` and the `tracker-conventions` guide.
+>   Plus SHA + patch-id provenance on 54 bug files.
+> - **Layer 2 — shipped, complete.** All three `doctor` checks proposed by CAP-7:
+>   `declared_root_missing` (`f632e7ef`), `terminal_status_with_caveat` (`067ced2c`),
+>   `archived_fix_sha_unresolvable` (`b34bf10e`). CAP-7 carries the table and the substrate
+>   corrections.
+> - **Layer 3 — not started.** Content-addressed identity lives in **CAP-8**
+>   (`docs/trackers/capability-proposals.md`), which carries its own open decisions, a
+>   substrate correction, and prior art at
+>   `docs/superpowers/specs/2026-07-17-tracker-entry-graph-stage2-design.md`. Its payoff
+>   figures are marked **upper bounds** — read that caveat before quoting them.
+>
+> **What is open elsewhere** (each carries its own `## Resume`, so nothing is owed here):
+> the rendezvous latch bug `54a70b49f6f26681`, which this session's `4800c297` **widened**
+> by voiding its `/mcp` workaround; `run_command` rewriting pipes inside heredocs
+> (`d5cb0c41335b2610`); `grep`'s silent zero on an absolute glob (`8036fbf1666e1603`).
+> `librarian(action="doctor")` now reports 8 `terminal_status_with_caveat` findings — that
+> list is the fastest way back into this work.
 >
 > **This is a guarded ledger** — `entry_prefix: [F, W]` is declared in frontmatter,
 > so `edit_markdown` is refused. Append via
 > `artifact(action="append_entry", id_prefix="F"|"W", title=…, body=…,
 > anchor_heading="## Template for new entries")` and let the server write the
 > heading. Status vocabulary is the one in `docs/templates/session-log.md`.
+> **Wins Index rows are ascending** — append after the last row; prepending to a
+> named row put W-7 above W-6 and then W-8 above W-7, twice in one session.
 >
 > Predecessors (both archived): `archive/prompt-guide-refactor-session-log.md`,
 > `archive/mcp-prompt-redesign-session-log.md`.
-
 ## Index
 
 | ID | Date | Severity | Category | Status | Title |
@@ -49,6 +74,7 @@ entry_high_water_W: 7
 | W-5 | 2026-08-19 | high | When N records share a defect, fix the surface that instructed them before repairing any of them | Would have caveated 3 bug files while leaving 6 live instruction surfaces teaching the same rule to the next author | validated |
 | W-6 | 2026-08-19 | high | Diff a tool's full report against the baseline a document recorded; account for every delta before reading the field you came for | Verification had already SUCCEEDED at its stated purpose — stopping there would have missed an unguarded write into a concurrent session's worktree, and left CAP-8's load-bearing "3 artifacts" figure standing while wrong | validated |
 | W-7 | 2026-08-19 | med | Write the verification recipe at archive time — command, field, and the value that counts as proof — before the opportunity to run it exists | A post-hoc "check the ledger looks right" is satisfied by a cleared-then-refilled ledger, the exact state being disproved; the decisive evidence (a stamp OLDER than the slot holding it) was only noticed because the recipe named both fields to compare | validated |
+| W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -521,8 +547,25 @@ tool's output all need an independent check before they carry weight.** Pairs wi
 `prompt-surface-compaction-session-log:W-3` (name the substrate before quoting the verdict);
 that one is about *which world* was measured, this one about *whether the ruler is straight*.
 
-**Status:** validated — 2 datapoints this session, both with the wrong answer available and
-plausible.
+3. **Recurrence the same day, 2026-08-19 — and the important one, because knowing the rule
+   did not prevent it.** Investigating the rendezvous defect, the slot directory was listed
+   with `ls -la … | head -10` and the **cap was reported as the population**: "7 slots, 3
+   repos". There are 9, and one of the two the cap hid carried the very `hook_at` stamp
+   whose universal absence the finding asserted. The claim "every slot is unstamped" was
+   published on truncated output, and only the operator asking *"but the rendezvous is
+   present here, right?"* falsified it.
+
+   That error was committed **while writing the bug file that cites this entry**. So the
+   datapoint is not another instance of the failure — it is evidence about the *remedy*:
+   holding the rule in mind is not the control. The control is a habit at the call site,
+   because `head`/`limit`/`take` is where the instrument gets shortened, and nothing about
+   that line looks like a measurement decision. Codescout's own tools already model the fix
+   — `grep` says "a floor, not a count" when it caps — which is exactly the discipline a
+   hand-rolled `| head` skips.
+
+**Status:** validated — 3 datapoints, all 2026-08-18/19, each with the wrong answer
+available and plausible. Datapoint 3 also self-refutes the "just remember it" reading of
+this entry.
 
 ## W-5 — When several records make the same mistake, fix the generator — the records were obeying it
 
@@ -778,6 +821,67 @@ generalised into the template.
 
 **Status:** validated — single datapoint, executed and decisive, with the cross-session
 claim explicitly not yet established.
+
+## W-8 — Scout the substrate even when the record says there is nothing to design — on one entry it was wrong 4 times out of 4
+
+**Observed:** 2026-08-19, implementing all three `doctor` checks proposed by CAP-7 in
+`docs/trackers/capability-proposals.md`, scouting each one before writing code.
+
+**Pattern:** a tracker entry's own account of the substrate is the part most likely to be
+wrong, and being *told* it needs no verification is not evidence that it doesn't. **Scout
+before designing, every time — including, especially, when the entry says the design is
+settled.**
+
+**The measurement, which is what makes this more than a restatement of reconnaissance.**
+CAP-7 carried a `### Substrate check` section, written the same day by an author with the
+code open. Four substrate claims were load-bearing enough to check before implementing.
+**All four were wrong:**
+
+| # | The entry said | Reality |
+|---|---|---|
+| 1 | check 3 is *"fully specified… nothing needs designing"* | `doctor` cannot reach the `[[project]]` list at all — `ctx.workspace` is a **different type with the same name** (`prompt-surface-compaction-session-log:F-6`) |
+| 2 | *(implicitly)* a linked worktree is an edge case | The config is gitignored, so a worktree inherits main's — a decision, not an edge case, and one that would have shipped wrong-but-green |
+| 3 | *"10 of **63** archived bug files"* | The archived corpus is **350**. The 63 was a subset quoted as a population |
+| 4 | *(implicitly)* archived files are scannable for a fix SHA | Only **54** carry a structured pointer; the other 296 use prose naming *reproduction* commits and one explicitly exonerated suspect |
+
+**Counterfactual, and it is not uniform across the four.** Two were merely expensive: #1
+fails to compile, #3 mis-sizes an estimate. Two would have **shipped a confidently wrong
+tool**:
+
+- #2 would have produced a check that reports on the wrong config in five worktrees, green
+  and silent.
+- #4 is the worst. A hex sweep over prose would have emitted *"declared fix SHA `12707fe`
+  no longer resolves"* about a commit whose own file says **"Refactor 12707fe is
+  INNOCENT."** A diagnostic that libels an exonerated commit is worse than no diagnostic,
+  because someone will act on it.
+
+**Why the author was not careless.** This is the part worth carrying. CAP-7's substrate
+check was written *by the same process that later found it wrong*, hours apart, with no
+intervening change to the code. The claims were not guesses — they were readings of a
+neighbouring artifact (the bug file, the earlier measurement) that were true **about that
+artifact** and false about the substrate. A substrate claim decays the moment it is copied
+out of the thing it describes; it is not a fact, it is a citation of one.
+
+**Confirming data points:**
+
+1. This session — 4 of 4, on one entry, in one day.
+2. That entry's own augmentation prompt already said so: *"The `Substrate check` line in
+   each entry is the load-bearing part… Re-verify it before acting on an entry; substrate
+   moves and a stale check turns a proposal into a wrong instruction."* The prompt was
+   right and the section it guards was wrong anyway — which is the argument for scouting as
+   a **step**, not as a disposition.
+
+**Impact:** high — two of the four would have shipped an incorrect diagnostic, and
+diagnostics are believed.
+
+**Promote-when:** a second entry (any tracker, any project) where ≥2 substrate claims fail
+verification in one pass. At 2 datapoints, promote to `CLAUDE.md` alongside the
+mutation-apply discipline as: *"A record's substrate claim is a citation, not a fact.
+Re-derive it from the code before building on it, even when the record says it is
+settled."* One entry is not yet a rate.
+
+**Status:** validated — 4 datapoints within one entry, but only one entry; the
+cross-entry claim is what the promotion criterion tests.
 
 ## Template for new entries
 
