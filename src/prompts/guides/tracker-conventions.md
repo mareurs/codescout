@@ -37,6 +37,23 @@ The librarian classifier auto-recognizes the file on next reindex.
 `closed:` stays empty at creation — fill in `YYYY-MM-DD` only when
 status flips to `fixed` / `mitigated` / `wontfix`.
 
+**`unverified:` — the caveat, made queryable.** Add it whenever the `status` overstates
+what was actually established: no regression test, root cause not addressed, a claim not
+re-checked since a rebuild, a fix applied only to a gitignored file, or a blocker that has
+since become an obsolete rule. **Absence means nothing outstanding — never add it empty**,
+because presence is what a query filters on.
+
+Why it exists, measured 2026-08-19: of 16 terminal-but-unarchived bug files, **14 stated
+their blocker in prose** and none of it was reachable by a query. That is how
+`find(kind="bug", status="open")` — the triage query this guide and the activation
+bootstrap both prescribe — came to hide a `fixed` record whose own body read *"Tests
+added: None, and this is the gap worth naming rather than excusing"* and *"does not
+prevent recurrence"*, for a defect class CLAUDE.md describes as redirecting every
+per-project memory write into the wrong repo with no review able to catch it.
+
+The system's scarce resource is not candour; it is **legibility**. Authors already write
+the caveat. Write it where a query can read it.
+
 **Trigger rules — open a bug file for ANY bug noticed during work:**
 
 - ✓ User explicitly asks ("log this", "open a tracker")
@@ -62,6 +79,22 @@ ever surfaces (`artifact(action="find", kind="bug", status="open")` filters on
 The file MUST carry the fix SHA when archived experiments-only, because nothing
 re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orphans on
 rebase and an unlabelled one in `archive/` becomes an untraceable string.
+
+**And record a `patch-id` next to it, because the sentence above describes a wound with
+no remedy.** `git show <sha> | git patch-id --stable` is a content hash of the commit's
+diff: it is invariant under rebase and cherry-pick, so it still finds the change after the
+SHA dies. Measured 2026-08-19 — **10 of 63** archived bug files had already lost their fix
+pointer (objects absent from the object DB, not merely unreferenced; subject-keyword
+recovery returned 2–153 ambiguous candidates), and 37 more were one rebase away. Across
+3594 commits there were **zero genuine patch-id collisions**; all 104 duplicates were the
+same change on two branches, which is the anchor working. Resolve one with redirects, not
+pipes — Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep <first-12-of-patch-id> /tmp/patch-ids.txt
+```
 
 **Whether it ALSO needs a pending-master-SHA `## Resume` line depends on how the fix
 will reach `master`. Only one of the two paths needs it** — check before writing it:

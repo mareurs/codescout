@@ -49,6 +49,18 @@ Status field semantics:
   `closed:` stays empty at creation — fill in YYYY-MM-DD only when
   status flips to fixed/mitigated/wontfix.
 
+Optional `unverified:` — the caveat, made queryable:
+  Add `unverified: '<what is NOT established>'` to frontmatter whenever the
+  record's status overstates what was actually verified: no regression test,
+  root cause not addressed, a claim not re-checked since a rebuild, a fix
+  applied only to a gitignored file, or a blocker that turned out to be an
+  obsolete rule. ABSENCE means nothing outstanding — do not add it empty,
+  because presence is the signal a query filters on.
+  Why it exists: measured 2026-08-19, 14 of 16 terminal-but-unarchived bug
+  files stated their blocker in prose, where no query reads. That is how
+  find(kind="bug", status="open") came to miss a `fixed` record whose own
+  body said "Tests added: None" and "does not prevent recurrence".
+
 Archive trigger: move the file into docs/issues/archive/ once the fix is
 verified on experiments — gate green plus a regression test. Reaching
 master is NOT required; experiments is never deleted.
@@ -121,8 +133,30 @@ to the Evidence subsection). Append; never delete rejected ones — they
 are how future-me avoids re-walking dead ends.*
 
 ## Fix
-*Plan first, implementation second. When implemented, list **master-side** commit SHAs (after cherry-pick, run `git rev-parse HEAD` on master — NOT the experiments-side original, which orphans after rebase; see CLAUDE.md § "After cherry-pick"). Include where the actual change lives (e.g. `src/server.rs:202-358`). If "Fix" is just a workaround, say so explicitly and keep status `mitigated`, not `fixed`.*
 
+*Plan first, implementation second. Include where the actual change lives (e.g.
+`src/server.rs:202-358`). If "Fix" is just a workaround, say so explicitly and keep status
+`mitigated`, not `fixed`.*
+
+*Record **two** identifiers for the fix commit, because they fail differently:*
+
+- ***SHA** — positional. It names a commit's place in a branch's history, and dies if
+  `experiments` is rebased. Label which branch it is on.*
+- ***patch-id** — `git show <sha> | git patch-id --stable`, a content hash of the diff.
+  It survives rebase **and** cherry-pick. Measured 2026-08-19 across 3594 commits: zero
+  genuine collisions, and all 104 duplicate patch-ids were the same change on two
+  branches. 10 archived bug files had already lost their fix pointer to a rebase.*
+
+*Do **not** unconditionally chase a master-side SHA. Check the promotion path first:*
+
+```
+git rev-list --left-right --count master...experiments
+```
+
+*A `0` on the left means `master` is a strict ancestor, promotion is a **fast-forward**,
+and the `experiments` SHA already **is** the master SHA — there is no second one, and
+waiting for it strands the file forever. Only a cherry-pick mints a new SHA worth
+recording later.*
 ## Tests added
 *Regression test name + `path:line`. If the test is intentionally absent,
 say why (timing-dependent, env-specific, manual-only). Empty `Tests added`

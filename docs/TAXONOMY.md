@@ -18,8 +18,18 @@ follow the links for the controlling convention.
 
 A **declared ledger** carries `entry_prefix: <PREFIX>` in its frontmatter (committed,
 so it survives a fresh clone) and gets server-assigned ids from
-`artifact(action="append_entry", id=…, id_prefix=…)`. Five are declared today: R, U,
-H, HY, CAP. The rest still hand-allocate; F/W deliberately so, see HY-10.
+`artifact(action="append_entry", id=…, id_prefix=…)`. **Thirteen are declared today** (measured 2026-08-19 by
+reading `entry_prefix:` out of every frontmatter block): AA, CAP, F, FND, FT, GF, H, HY,
+R, S, SD, U, W.
+
+> ⚠️ **F and W now appear among the declared prefixes, which contradicts the F/W row
+> below.** One session log declared `entry_prefix: [F, W]`. That is a real, unresolved
+> contradiction between this document and the corpus — not a typo here. Decide it
+> deliberately before adding more: declaring F/W makes them dangling-checked but gives one
+> token many definers; leaving them undeclared keeps ambiguity. Measured 2026-08-19 across
+> 10 repos in 2 umbrellas: **33% of cross-file entry citations are ambiguous** and F/W are
+> the dominant contributors (`F-1` alone has 169 definers). codescout at 28% is among the
+> healthiest — this is a property of the per-file `PREFIX-N` convention, not a local defect.
 
 | Prefix | Lives in | Captures | Append tool | Promotes to |
 |---|---|---|---|---|
@@ -33,7 +43,7 @@ H, HY, CAP. The rest still hand-allocate; F/W deliberately so, see HY-10.
 | **A-N** | `docs/trackers/prompt-hamsa-audit-log.md` (craft-level twin in `claude-plugins/docs/trackers/`) | Prompt-audit record from a Hamsa audit: named gap, recommended move, prediction, confidence, outcome (filled when evidence lands) | Per the tracker's maintenance convention (`## A-N — <title>` section + Index row) | Hamsa SKILL.md heuristic / buddy memory when the finding generalizes |
 | **PV-N** | `docs/trackers/provenance-subsystem.md` (augmented artifact `e12cd7e0060ed9b8`) | Provenance/attribution **programme** state: measurement verdicts vs pre-registered kill conditions, standing design decisions, hazards not to rediscover, open decisions, buildable work. Typed `finding \| gap \| decision \| hazard \| task` | `artifact(action="append_entry", id_prefix="PV", entry_collection="items", entry={...})` — atomic monotonic id; query with `entry_filter` | Implementation plan (`docs/plans/`) once phase moves past MEASUREMENT; a `decision` flips to `settled` in place |
 | **CAP-N** | `docs/trackers/capability-proposals.md` (augmented artifact `01291679a5ee4707`) | **Pre-plan** proposal for a codescout capability we do not have: the ask, a substrate check citing what exists today at `path:line` and what is genuinely missing, and the open decisions. Reflective — judgment, not gathering | Append a `## CAP-N` section above `## Anti-goals` + an Index row, via `artifact(action="update", patch={body_edits: [...]})` | A spec + plan under `docs/superpowers/` once it has tasks and a file structure; or `rejected` in place with the reason kept |
-| **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` once the fix is verified on `experiments` — reaching master is NOT required. Label the SHA `experiments` and keep a Resume note that the master-side SHA is still owed (it orphans on rebase); the ship sequence's step 4 reconciles it. Move via `artifact(action="move", …)`, never `git mv` |
+| **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` once the fix is verified on `experiments` — reaching master is NOT required. Record the SHA **labelled with its branch** *and* its `git patch-id --stable` — the SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash of the diff and survives rebase and cherry-pick. **A pending-master-SHA Resume note is for CHERRY-PICKS ONLY.** Check the path first with `git rev-list --left-right --count master...experiments`: a `0` on the left means fast-forward, the `experiments` SHA already **is** the master SHA, and the note strands the file waiting for one that will never exist. Measured 2026-08-19: 10 archived files had already lost their fix pointer to a rebase, and 3 live files were waiting on a master SHA under a fast-forward promotion — all three were following the instruction this sentence replaces. Move via `artifact(action="move", …)`, never `git mv` |
 
 ## Work-stream-specific prefixes (not durable taxonomy slots)
 
@@ -47,8 +57,26 @@ in its own header; they don't need slots here.
   spec uses D-1 through D-N for the decisions enumerated in that document.
 
 If you find yourself wanting to introduce a new project-wide prefix, ask first
-whether it really earns a slot or whether it's a variant of one of the seven
-above.
+whether it really earns a slot or whether it's a variant of one of the **eleven**
+in the table above.
+
+### Measured drift — 2026-08-19
+
+The table documents 11 prefixes. **29 are actually defining entries** in this repo
+(counted by `## PREFIX-N — title` headings, which is the only shape `link_scan` reads as a
+definition). **17 of them have no row in that table.** By number of files defining each:
+
+| Prefix | Definers | Prefix | Definers |
+|---|---:|---|---:|
+| `C` | 10 | `TMR`, `SD`, `BL` | 1 each |
+| `ADR` | 4 | `TU`, `GF`, `DF` | 1 each |
+| `BUG-N` (token, not the slug row) | 3 | `B`, `AB`, `I` | 1 each |
+| `LIMIT`, `L`, `AA`, `FND`, `FT` | 1 each | | |
+
+This list is a **snapshot, not a slot allocation** — several are one-off spec-local
+namespaces that correctly do not earn a row. It is recorded so the next reader knows the
+table is a subset of reality rather than assuming an unlisted prefix is a mistake. Re-derive
+it rather than trusting this table to stay current.
 
 ## How to choose
 
@@ -136,7 +164,11 @@ Every closure that cites a git commit must use one of these shapes — bare SHAs
 - `(<repo>:<sha>)` — cross-repo fix; repo prefix names which repo's SHA. E.g. `(claude-plugins:bd20a8a)`. Branch context is master unless further qualified.
 - `(in-place)` — for files outside git (e.g. `~/.claude/CLAUDE.md`). No SHA citation.
 
-When a fix shipped only to experiments and later cherry-picks to master, update the citation from `(experiments:<sha>, not-yet-on-master)` to `(master:<new-sha>)`. Both reads remain in the tracker's history via citation-history footnote.
+When a fix shipped only to experiments and later **cherry-picks** to master, update the citation from `(experiments:<sha>, not-yet-on-master)` to `(master:<new-sha>)`. Both reads remain in the tracker's history via citation-history footnote.
+
+**Under a fast-forward promotion there is nothing to update** — `master` moves onto the exact commits, so the `experiments` SHA already is the master SHA. Check which path applies (`git rev-list --left-right --count master...experiments`; a `0` on the left means fast-forward) before promising a later update that will never come due.
+
+**Prefer a patch-id alongside any SHA.** `git show <sha> | git patch-id --stable` is a content hash of the diff: it survives rebase and cherry-pick, where a SHA does not. Measured 2026-08-19 across 3594 commits — zero genuine collisions, and all 104 duplicate patch-ids were the same change appearing on two branches, which is the anchor working rather than failing.
 
 Policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md) — surface 1.
 
