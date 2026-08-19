@@ -1786,13 +1786,18 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 /// ledger's entry format is the subject. Emitting the latter per-entry would be N
 /// findings that all say the same thing.
 ///
-/// **What `entry_without_definition` cannot see: whether anything cites the entry.** It
-/// compares `params` ids against body-defined ids and stops, so it reads a ledger that
-/// defines on demand as one that forgot. Measured 2026-08-19 on `provenance-subsystem.md`:
-/// 42 undefined entries, **zero of them cited**, and the ledger's own body documents
-/// define-on-citation three lines above its first entry heading. The message now says what
-/// the check knows instead of asserting omission; the citation-aware split is still open in
-/// docs/issues/2026-08-19-entry-without-definition-asserts-omission-without-checking-citations.md
+/// **The finding is partitioned on whether anything actually cites the entry**, because
+/// without that split it reads a ledger that defines on demand as one that forgot.
+/// `corpus_cited_tokens` supplies the cited set; ids that are cited AND undefined are named
+/// first, since they are the half a reader can act on.
+///
+/// Three hand-measurements of one ledger gave three answers — "42 omissions", "zero cited",
+/// "roughly five cited" — and the check gave the fourth by reading the whole population
+/// rather than a sample of it: **33 cited, 9 uncited** on `provenance-subsystem.md`. The
+/// uncited 9 are the define-on-citation convention its body documents, working as intended.
+/// The other 33 are real dangling references. That spread is why this check measures instead
+/// of inferring, and why the message says which of the two it is reporting. History:
+/// docs/issues/archive/2026-08-19-entry-without-definition-asserts-omission-without-checking-citations.md
 ///
 /// **NOT gated on `body_keeps_snapshot`, and that is the design decision here.** That
 /// gate is right for the row question — a params-canonical tracker mentions a few ids
@@ -3834,7 +3839,9 @@ mod tests {
         // An earlier wording asserted "these are omissions — add a heading for each" on no
         // evidence at all. Measured 2026-08-19 on `provenance-subsystem.md`, that would have
         // had a reader add 42 headings against a define-on-citation convention stated in the
-        // ledger's own body — while missing the ~5 entries there that ARE cited and broken.
+        // ledger's own body — while saying nothing about which of them were actually broken.
+        // The shipped check answers that: 33 cited, 9 uncited. An earlier revision of this
+        // very comment guessed "~5" from an eight-token sample; the population disagreed.
         assert!(
             v[0].detail.contains("citation graph"),
             "the finding must say the split is measured rather than assumed: {}",

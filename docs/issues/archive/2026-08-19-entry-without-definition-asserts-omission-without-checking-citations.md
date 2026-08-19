@@ -1,5 +1,5 @@
 ---
-id: '6962d98218162987'
+id: 10d7e46375cc3053
 kind: bug
 status: fixed
 title: 'BUG: entry_without_definition asserts the entries are omissions without checking whether anything cites them'
@@ -134,30 +134,37 @@ not on that grep.
 
 ## Fix
 
-**Partially applied.** The unsupported assertion is removed from both surfaces; the
-citation-aware split remains open — see *Resume*.
+**Shipped in two commits.** The first removed an unsupported claim; the second is what makes
+the finding actionable, and neither subsumes the other.
 
-Applied:
+`4ffd2803` — the honest interim. The assertion is removed from **both** surfaces:
 
 - `scan_undefined_entries` (`src/librarian/tools/doctor.rs`). The finding no longer says
   *"This ledger defines its other entries, so these are omissions — add a heading for
-  each."* It now states what the check knows and what it does not: the entries carry no
-  heading, so any citation of them **would** resolve to nothing; whether any exists is
-  something this check cannot tell, because it does not read the citation graph; and a
-  define-on-citation ledger is already correct, so check before adding headings.
+  each."* It states what the check knows and what it does not.
 - `undefined_in_body_note` (`src/librarian/catalog/augmentation.rs`) — the **write-path**
   twin carried the same leap (*"so this one is an omission"*). Found by sweeping for the
   phrase rather than repairing only the surface that reported the problem. Softened the
   same way, and the observable half — *"This ledger defines its other entries"* — is
   **kept**, because it is a fact the code checks. Only the inference drawn from it was
   unsupported, and separating the two is what let the existing test that pins that phrase
-  keep passing.
+  keep passing. `5a72304c` never revisits this file, so this commit is not superseded.
 - Both messages said *"every citation of it resolves to nothing"*, which presupposes that
   citations exist. Now *"any citation … would resolve to nothing"*.
 
-Not applied: the partition on whether an undefined entry is actually cited. That is the
-change that would let a reader *act* on the finding, and it needs the substrate decision
-recorded in *Resume*.
+`5a72304c` — the citation-aware partition, option 1 from *Resume*. `scan_undefined_entries`
+splits each ledger's undefined ids into **cited** (a reference that resolves to nothing
+today — named first, because it is the half a reader can act on) and **uncited** (an
+informational count that may be a define-on-citation convention working correctly), and
+emits a different message for each.
+
+- New `corpus_cited_tokens` collects cited entry tokens across every artifact body via
+  `link_scan::extract` — the same pure function `body_defined_indices` already uses for the
+  definition half, which is what keeps the two halves agreeing on what a citation *is*.
+- **Lazy.** The sweep runs only when some ledger has a non-empty undefined set, so a healthy
+  catalog pays nothing for a check that finds nothing.
+- Counts the file-stem-qualified form (`CrossRepoToken`) as well as bare `EntryToken`, and
+  counts self-citations — see the closing note of § *Substrate resolved*.
 ## Tests added
 
 Three fixtures, differing by **one index row**, because a single fixture cannot tell an
@@ -251,30 +258,21 @@ nothing is a broken reference whether or not it came from the same file. Every i
 above is a self-citation, and every one of them is a real break.
 ## Resume
 
-**Option 1 (citation-aware partition) is now the clear choice, and it is unblocked** — see
-§ *Substrate resolved* above. Options 2 and 3 are recorded below as what was considered.
+**Closed.** Option 1 shipped in `5a72304c` — see § *Fix* and § *Fix provenance*. Options 2
+and 3 are kept below as what was considered, not as open work.
 
-Shape:
-
-1. Compute the undefined set per ledger, as today. If it is empty everywhere, do no extra
-   work — that is the healthy case and must stay cheap.
-2. Otherwise read each artifact body once and run `link_scan::extract`, collecting the set
-   of cited entry tokens across the corpus. Count self-citations.
-3. Partition each ledger's undefined ids into **cited** (a real dangling reference — name
-   these ids first, they are the actionable finding) and **uncited** (an informational
-   count; may be a define-on-citation convention working correctly).
-4. Regression fixtures must include a ledger whose undefined entry IS cited and one whose
-   undefined entries are not, asserted to report **differently**. A single fixture cannot
-   tell the two apart, which is the whole point of the change.
-
-The alternatives, kept because they were considered rather than overlooked:
-
-- **Message-only** — shipped already in `4ffd2803` as the honest interim: the finding now
-  discloses that it does not read the citation graph instead of asserting omission.
+- **Message-only** — shipped first, in `4ffd2803`, as the honest interim: the finding
+  disclosed that it does not read the citation graph rather than asserting omission. Option
+  1 supersedes its `doctor.rs` half; its `augmentation.rs` half still stands alone.
 - **Per-ledger opt-out** (`entry_definition_policy: on_citation` in frontmatter) — cheapest
   correct behaviour for one file, but it asks every ledger author to know the key exists,
-  and the measurement above shows the policy ledger *still* has real breaks a per-ledger
-  exemption would hide.
+  and the measurement in § *The measurement that changes the stakes* shows the policy ledger
+  *still* has real breaks a per-ledger exemption would have hidden.
+
+**Surfaced here, deliberately not repaired here:** `docs/trackers/provenance-subsystem.md`
+carries **33 genuine dangling `PV-N` references**, measured by the shipped check rather than
+by hand. That is a worklist against that ledger, not a defect in `doctor`, and it belongs to
+whoever next works that tracker.
 ## References
 
 - `src/librarian/tools/doctor.rs` — `scan_undefined_entries`, and the doc comment stating
@@ -284,3 +282,28 @@ The alternatives, kept because they were considered rather than overlooked:
 - `get_guide("tracker-conventions")` § *Entry headings — the definition rule*
 - `docs/issues/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md` —
   false-positive source any citation-aware check inherits
+
+
+## Fix provenance
+
+Two anchors, because the fix is two commits and neither covers the other's file.
+
+| commit | covers | patch-id |
+|---|---|---|
+| `5a72304c` (`experiments`) | the citation-aware partition in `doctor.rs` | `e9f8df63b9113a5b4073deebc5501a2cb623287a` |
+| `4ffd2803` (`experiments`) | the write-path twin in `augmentation.rs` | `c6beb5f60c30e7d637d218819f688d8ffdd0f56d` |
+
+The SHAs are positional and do not survive a rebase of `experiments`. The patch-ids are
+content hashes of the diffs and survive rebase and cherry-pick.
+
+If a SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes — Iron
+Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep e9f8df63b911 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.
