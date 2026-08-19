@@ -173,5 +173,6 @@ before it lands will be scoped to one profile of three.
 - `/home/marius/agents/llm-proxy/.claude/skills/claude-traces/scripts/cc.py:145-166` —
   `aggregate_usage`; `:23-24` — `CLAUDE_DIR`/`PROJECTS_DIR`; `:168-174` — `estimate_cost`
 - `.claude/skills/claude-traces` — this repo's symlink into the above
-- `docs/issues/2026-08-20-friction-target-omits-command-and-file-path.md` — sibling
-  measurement-instrument defect found in the same pass
+- `docs/issues/archive/2026-08-20-friction-target-omits-command-and-file-path.md` — sibling
+  measurement-instrument defect found in the same pass (fixed + archived 2026-08-20,
+  `db76f69a`)

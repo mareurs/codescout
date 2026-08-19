@@ -143,7 +143,12 @@ Three confounds must be handled every time, and a fourth is unhandled:
   four open questions. Items 1-2 (attribution fix, `S-A OR S-B`) are prerequisites; 3-5 each
   have an open decision. **Start at the attribution bug, not the detector.**
 - **Bugs**: six filed 2026-08-20 in `66654f53` (patch-id
-  `8ddbe5e10a9851ec7b7db241e4590b51956a09df`), all `status: open` under `docs/issues/2026-08-20-*`.
+  `8ddbe5e10a9851ec7b7db241e4590b51956a09df`) under `docs/issues/2026-08-20-*`. **Five still
+  open; one fixed and archived** — the `friction_target` alias gap, fixed in `db76f69a`
+  (patch-id `bac32905dd0eb7ebb2fc156cb651723cbd2be00a`). That fix added `file_path` and
+  `rel_path` only: `command`-addressed calls (438 rows) remain target-less **by decision**,
+  and historical rows were **not** backfilled, so any attribution figure computed over rows
+  written before `db76f69a` still understates coverage.
 - **Tool-usage lessons**: `tool-usage-patterns:T-25` (corrected, with the decay story) and
   `T-26` (grep-vs-structured-telemetry, with false-positive rates).
 - **Prior art that must be read first**: `2026-08-15-tool-usage-investigation:TU-7` and

@@ -1,16 +1,16 @@
 ---
+kind: bug
 status: open
+tags:
+- usage-db
+- err-family
+- taxonomy
+closed: null
 opened: 2026-08-20
-closed:
-severity: low
 owner: marius
 related:
-  - docs/issues/2026-08-20-friction-target-omits-command-and-file-path.md
-tags:
-  - usage-db
-  - err-family
-  - taxonomy
-kind: bug
+- docs/issues/archive/2026-08-20-friction-target-omits-command-and-file-path.md
+severity: low
 ---
 
 # BUG: the largest unclassified error message — the worktree/activate write block — has no err_family, and unclassified is where friction concentrates

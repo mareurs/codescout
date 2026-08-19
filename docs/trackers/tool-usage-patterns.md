@@ -699,8 +699,11 @@ would close it.
 
 **Instruments filed as bugs:**
 `docs/issues/2026-08-20-cc-py-cost-double-counts-split-assistant-entries.md` (2.1-2.6x cost
-inflation), `docs/issues/2026-08-20-friction-target-omits-command-and-file-path.md` (38% of
-errors unattributable),
+inflation),
+`docs/issues/archive/2026-08-20-friction-target-omits-command-and-file-path.md` (**52.5%**
+of errors unattributable — the "38%" first recorded here was relayed without recomputation;
+the alias half is fixed and archived in `db76f69a`, the `command` half is target-less by
+decision),
 `docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
 (30.9% of rows mis-attributed).
 ## Prompt improvement candidates
