@@ -377,6 +377,7 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     // `file not found:` is claimed by its tool-scoped arm well above this.
     if msg.starts_with("path not found:")
         || msg.starts_with("file not found:")
+        || msg.contains("no file to edit at")
         || msg.contains("No such file or directory")
     {
         return Some("path_not_found");
@@ -387,6 +388,8 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
         || msg.contains("unknown field ")
         || msg.contains("unknown repo ")
         || msg.contains("unknown id ")
+        || msg.contains("unknown topic ")
+        || msg.contains("invalid at=")
         || msg.contains("is not a bug status")
     {
         return Some("unknown_enum_value");
@@ -420,6 +423,87 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if tool_name == "edit_markdown" && msg.contains("only supports .md files") {
         return Some("edit_markdown_wrong_ext");
     }
+    // ---- 2026-08-20 extension: the librarian surface and one write gate ----
+    // Measured on codescout's own DB: 73 of 1,139 errors unclassified, and the
+    // population is two concentrations rather than a tail — 49% the artifact/librarian
+    // API surface, 31% a single worktree write gate. Coverage by tool says the same:
+    // run_command 0.2% unclassified and read_markdown/grep/references 0%, against
+    // artifact 37.5% and memory/symbols ~50%. The taxonomy maps where someone did the
+    // work, not which errors are hard.
+    //
+    // NOT a friction ranking: the unclassified bucket's immediate-repeat rate is 2.8%
+    // against a ~4-5% corpus average, so these are among the healthiest errors here.
+    // Classified because an unnamed family cannot be counted, trended, or given a
+    // `refusal_predicate` — see `capability-proposals:CAP-9` for why the opposite claim
+    // (NULL as a 1.97x friction bucket) did not reproduce.
+
+    // The largest single member (23) — one gate, four write tools.
+    if msg.contains("git worktrees detected") {
+        return Some("worktree_activate_required");
+    }
+    // One repair — declare `entry_collection` — reached from three call sites (9).
+    // Splitting by entry point would scatter a single fix across three families.
+    if msg.contains("entry_filter set but") || msg.contains("without an `entry_collection`") {
+        return Some("entry_collection_missing");
+    }
+    // Frontmatter field passed through `extra` that the schema already models (6).
+    if msg.contains("must not contain frontmatter field") {
+        return Some("extra_models_reserved_field");
+    }
+    // Schema rejection on an entry write (5) — well-formed call, out-of-range value.
+    // Anchored on the verb so a hint merely naming `params_schema` cannot match.
+    if msg.contains("violates params_schema") || msg.contains("violate params_schema") {
+        return Some("params_schema_violation");
+    }
+    // Ledger identity missing (4). MUST precede `artifact_not_augmented`: one of these
+    // messages also says "has no augmentation", and the repair here is to declare the
+    // ledger, not merely to augment. Pinned by an ordering guard in
+    // `normalize_err_family_maps_the_2026_08_20_unclassified_head`.
+    if msg.contains("allocate_entry_id:") {
+        return Some("ledger_not_declared");
+    }
+    if msg.contains("no augmentation for artifact") {
+        return Some("artifact_not_augmented");
+    }
+    // Tool-scoped (4): `memory` named a topic/section/project that does not exist and
+    // listed the valid ones. Scoped so no other tool's "not found" lands here.
+    if tool_name == "memory"
+        && (msg.contains("no sections matched")
+            || msg.contains(" not found")
+            || msg.starts_with("No project "))
+    {
+        return Some("memory_target_not_found");
+    }
+    // Two parameters that cannot both be set (3). Distinct from read_markdown's
+    // tool-scoped `read_markdown_param_conflict`, which is claimed far above.
+    if msg.contains("at most one of") {
+        return Some("mutually_exclusive_params");
+    }
+    // append_entry's parameter sent to update_entry, or an empty patch (3).
+    if msg.contains("is append_entry's parameter") || msg.contains("`fields` is empty") {
+        return Some("entry_patch_param_misuse");
+    }
+    // Two json_path failures that are neither `json_path_unsupported` (syntax rejected)
+    // nor `json_path_key_miss` (key absent from the shape). Wrong buffer KIND and wrong
+    // value SHAPE each have their own repair, so they get their own families.
+    if msg.contains("json_path is only supported on") {
+        return Some("json_path_wrong_buffer_kind");
+    }
+    if msg.contains("needs an array, found") || msg.contains("out of bounds for array") {
+        return Some("json_path_shape_mismatch");
+    }
+    // Retryable-as-is, which none of the other LSP families are: the server is coming
+    // up, so the same call succeeds shortly. lsp_not_running/lsp_disconnect both mean
+    // the call must change or the server must be repaired.
+    if msg.contains("is still starting") {
+        return Some("lsp_still_starting");
+    }
+    // A security-class gate (1), tagged so it is visible in the ranking rather than
+    // invisible in the NULL bucket — TU-7's lesson applied to a guard doing its job.
+    if msg.contains("escapes project root") {
+        return Some("cwd_escapes_root");
+    }
+
     // Missing / conditionally-required params (38, the largest family). Kept LAST
     // because its shapes are the broadest: any earlier arm that also matches is
     // by definition the more specific reading.
@@ -445,12 +529,17 @@ const ERR_FAMILIES: &[&str] = &[
     "ambiguous_heading",
     "ambiguous_name_path",
     "ambiguous_old_string",
+    "artifact_not_augmented",
     "ast_extent_fail",
     "buffer_ref_expired",
+    "cwd_escapes_root",
     "destructive_replace_blocked",
     "edit_markdown_wrong_ext",
     "edit_stale_match",
     "edit_would_break_syntax",
+    "entry_collection_missing",
+    "entry_patch_param_misuse",
+    "extra_models_reserved_field",
     "heading_not_found",
     "il1_read_overlaps_symbol",
     "il2_structural_edit",
@@ -461,13 +550,20 @@ const ERR_FAMILIES: &[&str] = &[
     "invalid_line_range",
     "invalid_regex",
     "json_path_key_miss",
+    "json_path_shape_mismatch",
     "json_path_unsupported",
+    "json_path_wrong_buffer_kind",
+    "ledger_not_declared",
     "librarian_managed_artifact",
     "lsp_disconnect",
     "lsp_index_locked",
     "lsp_not_running",
+    "lsp_still_starting",
+    "memory_target_not_found",
     "missing_required_param",
+    "mutually_exclusive_params",
     "mux_startup_fail",
+    "params_schema_violation",
     "path_not_found",
     "read_markdown_file_not_found",
     "read_markdown_invalid_line_range",
@@ -479,6 +575,7 @@ const ERR_FAMILIES: &[&str] = &[
     "symbol_not_found",
     "target_already_exists",
     "unknown_enum_value",
+    "worktree_activate_required",
     "write_scope_denied",
 ];
 
@@ -2058,6 +2155,213 @@ mod tests {
                 normalize_err_family(tool_name, msg),
                 want,
                 "tool={tool_name} msg={msg}"
+            );
+        }
+    }
+
+    /// The 2026-08-20 unclassified head, measured on codescout's own `usage.db`:
+    /// 73 of 1,139 errors carried no family.
+    ///
+    /// The population is not a general "untaught" tail — it is two concentrations.
+    /// **49% is the librarian/artifact API surface** and **31% is a single worktree
+    /// write gate**. Coverage by tool makes the same point: `run_command` sits at 0.2%
+    /// unclassified and `read_markdown`/`grep`/`references` at 0%, against `artifact`
+    /// 37.5% and `memory`/`symbols` ~50%. The taxonomy is a map of where someone did the
+    /// work, not of which errors are hard.
+    ///
+    /// Do NOT read this as a friction ranking. Measured the same day, the unclassified
+    /// bucket's immediate-repeat rate is **2.8%** against a ~4-5% corpus average — these
+    /// are among the *healthiest* errors here, and an earlier claim that
+    /// `err_family IS NULL` carried a 1.97x friction lift did not reproduce
+    /// (`capability-proposals:CAP-9`, correction of 2026-08-20). Classification is worth
+    /// doing because an unnamed family cannot be counted, trended, or given a
+    /// `refusal_predicate` — not because it is where the pain is.
+    #[test]
+    fn normalize_err_family_maps_the_2026_08_20_unclassified_head() {
+        let cases = [
+            // The single largest member — 23 hits across four write tools, one gate.
+            (
+                "edit_markdown",
+                "Write blocked: git worktrees detected but workspace(action='activate') \
+                 has not been called. Worktrees: [/home/u/p/.claude/worktrees/x]",
+                Some("worktree_activate_required"),
+            ),
+            (
+                "create_file",
+                "Write blocked: git worktrees detected but workspace(action='activate') \
+                 has not been called.",
+                Some("worktree_activate_required"),
+            ),
+            // One repair — "declare entry_collection" — reached from three call sites,
+            // so one family. Splitting by entry point would scatter a single fix.
+            (
+                "artifact",
+                "entry_filter set but this artifact is not augmented — declare \
+                 entry_collection on its augmentation, or retrofit it",
+                Some("entry_collection_missing"),
+            ),
+            (
+                "artifact",
+                "entry_filter set but the augmentation has no entry_collection — declare \
+                 which params array holds the filterable rows",
+                Some("entry_collection_missing"),
+            ),
+            (
+                "artifact",
+                "append_entry: `entry` fields cannot be stored without an \
+                 `entry_collection` — hint: This ledger has no params array",
+                Some("entry_collection_missing"),
+            ),
+            (
+                "artifact",
+                "extra must not contain frontmatter field(s) the schema already models: \
+                 status — hint: pass `status=` as its own parameter instead.",
+                Some("extra_models_reserved_field"),
+            ),
+            // Schema rejection on a write — the value is well-formed and out of range.
+            (
+                "artifact",
+                "update_entry: patched entry violates params_schema: /tasks/38/status: \
+                 \"partial\" is not one of [\"open\",\"in-progress\",\"done\"]",
+                Some("params_schema_violation"),
+            ),
+            (
+                "artifact_augment",
+                "merged params violate params_schema: /tasks/0/id: \"T-1\" does not match \
+                 \"^FT-[0-9]+$\"",
+                Some("params_schema_violation"),
+            ),
+            // ORDERING GUARD: this message contains "has no augmentation", which
+            // `artifact_not_augmented` also matches. The repair here is "declare the
+            // ledger", so `ledger_not_declared` must win — it is placed first, and this
+            // case fails if that order is ever reversed.
+            (
+                "artifact",
+                "allocate_entry_id: artifact `c43df94e69ca915f` has no augmentation — \
+                 hint: A ledger must be declared before ids can be allocated",
+                Some("ledger_not_declared"),
+            ),
+            (
+                "artifact",
+                "allocate_entry_id: `/p/docs/trackers/x.md` does not declare an entry_prefix",
+                Some("ledger_not_declared"),
+            ),
+            (
+                "artifact_augment",
+                "no augmentation for artifact '5696563f06b2c222' — call artifact_augment first",
+                Some("artifact_not_augmented"),
+            ),
+            // Tool-scoped: `memory` names a thing that does not exist and lists the valid
+            // ones. Scoped so no other tool's "not found" is swallowed by this arm.
+            (
+                "memory",
+                "no sections matched — hint: available sections: Module Structure (src/)",
+                Some("memory_target_not_found"),
+            ),
+            (
+                "memory",
+                "topic 'nonexistent-topic' not found — hint: no memory topics exist yet",
+                Some("memory_target_not_found"),
+            ),
+            (
+                "memory",
+                "No project 'zz-not-a-project'. — hint: Valid project ids: codescout",
+                Some("memory_target_not_found"),
+            ),
+            (
+                "artifact",
+                "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` \
+                 may be set",
+                Some("mutually_exclusive_params"),
+            ),
+            (
+                "artifact",
+                "update_entry: `entry` is append_entry's parameter — this action takes \
+                 `fields`",
+                Some("entry_patch_param_misuse"),
+            ),
+            (
+                "artifact",
+                "update_entry: `fields` is empty — there is nothing to patch",
+                Some("entry_patch_param_misuse"),
+            ),
+            // Three json_path failures that are NOT `json_path_unsupported` (which means
+            // the SYNTAX was rejected) and NOT `json_path_key_miss` (the key is absent).
+            // Wrong buffer KIND and wrong value SHAPE have their own repairs.
+            (
+                "read_file",
+                "json_path is only supported on @tool_* refs, not '@cmd_0fd3b8c1'",
+                Some("json_path_wrong_buffer_kind"),
+            ),
+            (
+                "read_file",
+                "json_path '[*]' needs an array, found object",
+                Some("json_path_shape_mismatch"),
+            ),
+            (
+                "read_file",
+                "index 5 out of bounds for array of length 5 — hint: Use an index in 0..5",
+                Some("json_path_shape_mismatch"),
+            ),
+            // Distinct from lsp_not_running / lsp_disconnect: the server is coming up and
+            // the call is retryable as-is, which none of the other LSP families are.
+            (
+                "symbols",
+                "language server for 'markdown' is still starting and there is no \
+                 tree-sitter fallback for this language",
+                Some("lsp_still_starting"),
+            ),
+            // A guard, tagged so it is visible in the ranking rather than invisible in the
+            // NULL bucket — the TU-7 lesson applied to a security-class gate.
+            (
+                "run_command",
+                "cwd '/home/u/other/hooks' escapes project root",
+                Some("cwd_escapes_root"),
+            ),
+            // --- extensions to EXISTING families, not new ones ---
+            (
+                "get_guide",
+                "unknown topic 'edit_code' — hint: available topics: error-handling",
+                Some("unknown_enum_value"),
+            ),
+            (
+                "artifact",
+                "body_edits[0]: invalid at=\"end\"; expected 'end-of-section' (default) \
+                 or 'after-heading-line'",
+                Some("unknown_enum_value"),
+            ),
+            (
+                "edit_file",
+                "no file to edit at /p/.superpowers/sdd/x/t.md",
+                Some("path_not_found"),
+            ),
+            // --- regression guards: the new arms must not steal existing families ---
+            (
+                "read_markdown",
+                "combined headings span 142 lines — exceeds inline threshold",
+                Some("read_markdown_overflow_threshold"),
+            ),
+            (
+                "read_file",
+                "path segment 'summary' not found — hint: Available keys: content",
+                Some("json_path_key_miss"),
+            ),
+            (
+                "edit_file",
+                "old_string not found in file",
+                Some("edit_stale_match"),
+            ),
+            (
+                "run_command",
+                "IL3 violation — piped `cargo test` to a log-trimmer. BLOCKED.",
+                Some("il3_pipe_to_trimmer"),
+            ),
+        ];
+        for (tool, msg, want) in cases {
+            assert_eq!(
+                normalize_err_family(tool, msg),
+                want,
+                "tool={tool} msg={msg}"
             );
         }
     }
