@@ -425,7 +425,16 @@ and the anchor still resolves — a verbatim quote would have needed re-syncing 
 
 ## R-4 — Grep undercounts struct-field construction sites by 2-3×
 
-**Status:** promoted — verdict `miss` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`, D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The promotion was recorded **nowhere in this ledger** — not in the entry, not in the Index verdict; only the skill knew. Surfaced by the 2026-08-20 verify-open sweep.
+**Status:** open — verdict `miss` (Index row). Not promoted; not back-cited in the served
+`SKILL.md`.
+
+**Corrected 2026-08-20, hours after being set wrong by this same sweep.** An earlier pass this
+day marked this entry `promoted` on the strength of `grep -c 'R-4'` against the skill returning
+1. That predicate counts **any mention**. The single hit is an eval-fixture list — *"the six
+MISS cases (R-2, R-4, R-8, R-10, R-19, R-23) as a hard regression gate"* — which records that
+this entry is a **test case for** the skill, the opposite of a lesson promoted **into** it.
+Naming what the predicate literally counts, then comparing that to the question, is the
+control that was skipped. Same error hit [[R-8]] and [[R-87]].
 
 **Verdict:** miss
 
@@ -494,7 +503,12 @@ storage" to SKILL.md. Currently 1/2.
 
 ## R-8 — Miss: `edit_markdown(action='replace')` shape unverified on marker-bearing section
 
-**Status:** promoted — verdict `miss → proposal` (Index row), but the proposal has in fact landed. **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`, D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index still says `proposal`; surfaced by the 2026-08-20 verify-open sweep.
+**Status:** open — verdict `miss → proposal` (Index row). The proposal has **not** landed; not
+back-cited in the served `SKILL.md`.
+
+**Corrected 2026-08-20**, same error as [[R-4]]: marked `promoted` on a `grep -c` that counts
+any mention, where the sole hit is the eval-fixture regression-gate list. The Index's
+`proposal` was right all along.
 
 **Verdict:** miss → proposal
 
@@ -838,7 +852,22 @@ closing the bug class."
 
 **Promote-when:** a second instance where a comparative / cross-project analysis presents a home-project shape claim that a later scout refutes → promote a Phase-1 Scout bullet: "Before presenting a recommendation that asserts how the home project currently works, scout the cited symbol/contract against current code — comparative analysis is not an exemption." (Note: R-14's own promote-when wants a second *stale dated-memory* instance specifically; this entry is adjacent, not that second datapoint.)
 
-**Status:** open — **3 datapoints** (2 this session: a hit then a miss; + 1 cross-session retroactive hit 2026-06-21, see Recurrence above — re-confirmed all three shapes, caught line-citation drift). The 3rd does **not** advance the promote-when (it confirmed, did not refute) and does **not** verify skill efficacy (recon was again user-invoked, not auto-fired) — efficacy still N=0. **Acted 2026-06-09 (user decision):** rejected the project-local CLAUDE.md route as too narrow for a systemic lesson; instead tightened the recon SKILL.md `When NOT to Use` Read-only-Q&A exemption to draw the *describe-vs-assert* line (Hamsa-audited — a cut/bound, not an added trigger; `claude-plugins` working tree, uncommitted). This front-runs the cross-session-3rd caveat by deliberate choice (recurrence-after-documentation judged strong enough). **Efficacy unverified — N=0**: no behavioral eval (`docs/evals/reconnaissance-output.md` not yet authored); the existing trigger eval scores the description string, not body guidance, so it does not measure this change. Formal sync flow (PR + pinned SKILL.md commit SHA + skill version) still pending a commit.
+**Status:** promoted — the SKILL.md change described below **did land**. This line's closing
+sentence, *"Formal sync flow … still pending a commit"*, was true when written and has been
+false ever since; nothing re-read it.
+
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ When NOT to Use — the *describe-vs-assert* cut, back-cited as `(R-19)`. D11-verified
+2026-08-20 in the served `1.16.14` cache, 1 occurrence.
+
+**Fourth datapoint for the conditional-disposition class** — with `bug-fix-session-log:F-3`
+(*"after plan edit lands this turn"*), `:F-17` (*"planned"*) and `:F-44` (*"should be
+updated"*). A disposition field should record what **is**; intent belongs in a `Fix idea` /
+`Next` line where nothing reads it as state. Found 2026-08-20 while correcting three
+mislabelled promotions in this same ledger — the audit that produced the error also produced
+the datapoint.
+
+**Original assessment, unchanged — 3 datapoints** (2 this session: a hit then a miss; + 1 cross-session retroactive hit 2026-06-21, see Recurrence above — re-confirmed all three shapes, caught line-citation drift). The 3rd does **not** advance the promote-when (it confirmed, did not refute) and does **not** verify skill efficacy (recon was again user-invoked, not auto-fired) — efficacy still N=0. **Acted 2026-06-09 (user decision):** rejected the project-local CLAUDE.md route as too narrow for a systemic lesson; instead tightened the recon SKILL.md `When NOT to Use` Read-only-Q&A exemption to draw the *describe-vs-assert* line (Hamsa-audited — a cut/bound, not an added trigger; `claude-plugins` working tree, uncommitted). This front-runs the cross-session-3rd caveat by deliberate choice (recurrence-after-documentation judged strong enough). **Efficacy unverified — N=0**: no behavioral eval (`docs/evals/reconnaissance-output.md` not yet authored); the existing trigger eval scores the description string, not body guidance, so it does not measure this change. Formal sync flow (PR + pinned SKILL.md commit SHA + skill version) still pending a commit.
 
 **Source:** `src/tools/output_buffer.rs:251`, `src/tools/core/types.rs:435`, `src/retrieval/sync.rs:34`, `src/tools/run_command/tests.rs:2034` (line numbers refreshed 2026-06-21; symbol names are the stable anchors); this session's headroom cross-pollination analysis. Kin: R-14.
 
@@ -1906,7 +1935,13 @@ mechanism design), R-59 (a repo artifact that already knew the answer, unconsult
 
 ## R-87 — Hit: before designing an abstraction, scout for the dispatch point that already exists
 
-**Status:** promoted — verdict `hit` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`, D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. Like [[R-4]], the promotion was recorded **nowhere in this ledger** — not in the entry, not in the Index verdict; only the skill knew. Surfaced by the 2026-08-20 verify-open sweep.
+**Status:** open — verdict `hit` (Index row). Not promoted; the skill mentions this entry only
+as a **cross-reference inside another entry's bullet** — *"(R-87 is the same law's *hit*: the
+scout …)"* — which is someone else's promotion citing this one as kin.
+
+**Corrected 2026-08-20**, same error as [[R-4]] and [[R-8]]: a mention-counting predicate stood
+in for "has its own promoted bullet". Three of the five entries that pass flagged `promoted`
+were wrong; only [[R-41]] and [[R-42]] were real.
 
 **Observed:** 2026-08-15, SD-1b. Asked how to generalise doc-ref extraction
 across "the other supported languages" and how to "abstract it away".
