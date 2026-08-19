@@ -1450,7 +1450,22 @@ summary) is project-shaped and belongs in the `reconnaissance` memory instead.
 
 ## R-51 — Miss: an instrument that writes into the corpus it measures
 
-**Status:** open — verdict `miss → rule, promote-ready` (Index row), lifted 2026-08-20 by the verify-open sweep. **`promote-ready` is a fired criterion that nothing harvested** — the exact state `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` is about, found by the sweep that bug provoked. Not back-cited in the served `SKILL.md`. Candidate for the next promotion pass.
+**Status:** promoted 2026-08-20 — verdict `miss → rule, promote-ready` (Index row). The
+`promote-ready` mark had stood since **2026-08-04, sixteen days**, and nothing ever queried
+for that state.
+
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the served `1.16.14` cache: back-cited as
+*"(R-51, the complement of R-50, in codescout's `docs/trackers/reconnaissance-patterns.md`.)"*,
+1 occurrence. The bullet carries **both** forms this entry's verdict asked for — where output
+*happens* to land, and whether the system's own emissions re-enter its input — plus the
+self-confirming-trailer corollary.
+
+This entry is the concrete answer to the re-open criterion on
+`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`: *"re-open … if
+an unharvested `Promote-when` is found to have cost something."* It was found by the sweep
+that bug provoked, and it had been sitting in plain sight, marked ready, in a field no query
+read.
 
 **Date:** 2026-08-03 · **Verdict:** miss → rule · **Kin:** R-50 (complement), R-10 (completeness scout)
 
@@ -2576,7 +2591,36 @@ craft-shaped half and belongs in the `reconnaissance` memory topic.
 
 ## R-95 — A deferral rationale is a claim, and it is the least-audited kind
 
-**Status:** open — verdict `hit ×5 → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. **Five datapoints** recorded in the verdict, which is the highest count of any unpromoted entry in this ledger and above most `Promote-when` thresholds. Not back-cited in the served `SKILL.md`. Strongest candidate for the next promotion pass.
+**Status:** promoted 2026-08-20 — verdict `hit ×5 → rule` (Index row). The criterion fired
+the same day this entry was surfaced by the verify-open sweep, which had found it carrying no
+`**Status:**` line at all.
+
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the served `1.16.14` cache: back-cited as
+*"(R-95 + R-92 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"*, 1 occurrence,
+all three profiles byte-identical at 37817 bytes.
+
+**Promote-when FIRED 2026-08-20 — second cluster.** The criterion asks for *"one more cluster
+where a deferral rationale is falsified on contact"* — a **cluster**, not a datapoint count.
+Worth stating plainly: the sweep that surfaced this entry first called it ready on the
+strength of `hit ×5`, and that is **not what the criterion asks** — all five are one cluster.
+Characterising readiness by a count without reading the criterion is the same shape as the
+measurement rule this ledger keeps re-earning. The criterion fired on different evidence.
+
+The second cluster is this project's own
+`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`, closed
+`wontfix` on four rationales, every one falsified within 24 hours:
+
+| Filed rationale | Measured 2026-08-20 |
+|---|---|
+| "the precise version needs a **schema change**" | one markdown field (`**Promoted-to:**`) in `docs/templates/session-log.md`. Zero code. |
+| "plus a retroactive **back-fill**" — cited as the cost justifying deferral | 13 entries in one pass, every destination still recoverable — and the back-fill **found** three defects ([[F-17]], [[F-44]], `release-promotion-session-log:F-1`) plus five unrecorded promotions. It was the payoff, not the cost. |
+| "a candidate population of **101 entries** for the naive check, which is noise" | the 101 counted `Status: validated`; the precise population was **13** claims. The noise was a property of the predicate, not of the problem. |
+| "the generalisation … was **the agent's**, not a response to repeated cost" | `tracker-hygiene-log:HY-11`, filed 2026-08-17 and marked *user-raised*, had already specified the same detector under the same name, `D11`. |
+
+Nine rationales across two clusters, every one inflating in the direction that justified
+stopping. That direction is this entry's structural claim, and it now holds in a second work
+stream, a different domain, and a different author.
 
 **Verdict:** hit ×5 in one cluster → rule
 

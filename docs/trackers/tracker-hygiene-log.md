@@ -1177,11 +1177,30 @@ For R-4 and R-87 **only the skill knew**. Worth adding as a D11 second direction
 with no ledger record is as invisible as a ledger record with no promotion, and the
 back-citation makes it mechanically detectable in both directions.
 
-**Two promotion candidates, left as findings.** [[R-51]] carries `promote-ready` in its
-verdict — a fired criterion nothing harvested, which is precisely what
-`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` is about, found
-by the sweep that bug provoked. [[R-95]] sits at **five datapoints** unpromoted, the highest
-count of any unpromoted entry in the ledger and above most `Promote-when` thresholds.
+**Two promotion candidates — both harvested the same day, in `claude-plugins` `1.16.14`.**
+
+- [[R-51]] carried `promote-ready` in its verdict, set **2026-08-04 and unharvested for
+  sixteen days**, because nothing queries that state. That is the concrete answer to the
+  re-open criterion on
+  `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` — *"an
+  unharvested `Promote-when` found to have cost something"* — produced by the sweep that bug
+  provoked.
+- [[R-95]] promoted, and **the reasoning in this entry's first draft was wrong about why.**
+  It read *"five datapoints … above most `Promote-when` thresholds"*, which characterises
+  readiness by a count without reading the criterion. R-95's criterion is *"one more **cluster**
+  where a deferral rationale is falsified on contact"*, and all five datapoints are one
+  cluster — so the count could never have fired it. **Corrected 2026-08-20**, in the same
+  sweep, by opening the entry. Naming what a number counts and comparing that to the question
+  is the rule this project keeps re-earning, and this is another instance of missing it while
+  writing about legibility.
+
+  The criterion did fire, on different evidence: this project's own promote-when bug, closed
+  `wontfix` on four rationales, all falsified within 24 hours — a *"schema change"* that was
+  one markdown field, a *"retroactive back-fill"* that was 13 entries and **found** three
+  defects rather than costing anything, *"101 entries … which is noise"* whose precise
+  population was 13, and *"the generalisation was the agent's, not a response to repeated
+  cost"* refuted by **this very ledger's** [[HY-11]], filed two days earlier and marked
+  *user-raised*, already naming `D11`.
 
 **One zombie corrected.** `bug-fix-session-log:F-3` read *"open → fixed-verified after plan
 edit lands this turn"* for **94 days**; the edit landed that afternoon. The reconnaissance
