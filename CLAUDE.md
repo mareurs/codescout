@@ -17,6 +17,18 @@ Two behaviors are load-bearing and easy to skip:
 - **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. Archive via `artifact(action="move", …)`, never a bare `git mv`.
 - **Record the fix SHA *and* its patch-id — never a pending-master-SHA line.** `git show <sha> | git patch-id --stable`. The SHA is positional and dies when `experiments` is rebased (which happens after every ship); the patch-id is a content hash of the diff and survives rebase *and* cherry-pick. Record the pair once at fix time: there is no promotion path to check and nothing owed later. (Measured 2026-08-19: 10 of 63 archived bug files had already lost their SHA to a rebase; zero patch-id collisions across 3594 commits. Many archived files still carry the older master-SHA-owed form — stale instructions, not open debt; do not sweep them.)
 
+**Run the reproduction before reading the fix plan — the plan is a hypothesis about the
+reproduction.** Not to confirm the bug exists; to find out what the plan is actually about.
+Promoted 2026-08-20 from `bug-fix-session-log:W-32` at four datapoints (with W-30). In one
+2026-08-14 sweep it changed the fix three times: a bug filed as "top-level `extra` dropped"
+was **five** params dropped by one mechanism, so a per-field fix would have shipped the same
+defect a seventh time; a `delete` bug's severity turned on which key *neighboured* it
+(scalar above → loud invalid YAML, sequence above → silent corruption), and only reproduction
+separates them; and once the fix direction **inverted** — measuring fastembed's real 512-token
+ceiling showed the prescribed change would over-chunk large-context models against a hard cap,
+so deleting the dead code, not promoting it, was correct. Case 3 would have introduced a bug;
+case 1 would have left four siblings broken behind a passing test.
+
 **Open a bug file for ANY bug noticed during work** — including incidental bugs we won't fix and tool quirks/misbehaviors. *Not* for pure typos (commit message suffices) or feature ideas/refactors (→ `docs/trackers/` or `docs/plans/`). Don't append to retired surfaces (`docs/archive/old-trackers/*`) — open a new `docs/issues/<date>-<slug>.md`.
 ## Session Intelligence Trackers
 

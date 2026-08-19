@@ -2779,7 +2779,11 @@ would have left four siblings broken behind a passing test.
 section: *"run the reproduction before reading the fix plan — the plan is a hypothesis
 about the reproduction."*
 
-**Status:** validated — promote next session.
+**Status:** promoted-to-permanent-docs — landed 2026-08-20 in `CLAUDE.md` § Bug Tracking.
+Promoted text, verbatim, so a later reader can verify without re-deriving it: *"Run the
+reproduction before reading the fix plan — the plan is a hypothesis about the reproduction."*
+All three counterfactuals carried across with it. ("promote next session" stood unharvested
+for six days; found by the sweep in `prompt-surface-compaction-session-log:F-7`.)
 
 ## W-33 — Mutating each new regression test, and finding the pair discriminates
 
@@ -3008,7 +3012,12 @@ narrower, truer entry in one pass instead of two.
 
 **Promote-when:** already at two independent datapoints. **Routing: craft-shaped, so the recon SKILL and not codescout memory** — "a trait method added to correct a behaviour gets no default impl, so the compiler enumerates the implementors" is true in any language with default trait/interface methods and would not mislead another project. (Only the *instances* — `known_dim`, `embed_document` — are project facts, and they live here in the tracker.) Sync-flow it as a one-line rule; do not spend a slot in the ~10-rule memory cap on a general lesson.
 
-**Status:** validated.
+**Status:** promoted-to-permanent-docs — landed 2026-08-20 in
+`claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as a
+bullet opening verbatim: *"A trait or interface method added to CORRECT a behaviour gets no
+default implementation — then the compiler enumerates the implementors."* Routed to the
+SKILL and **not** codescout memory, exactly as this entry's Promote-when argued: the rule is
+craft-shaped, and the ~10-rule memory cap is for project facts.
 
 ## W-37 — Mutation-test the test, not only the code
 

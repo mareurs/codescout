@@ -301,7 +301,16 @@ tags:
 
 **Reusable template:** the identical move clears the `LspClientOps` cluster (10 collisions in `client.rs`) — captured as a Dzo verdict in the backlog. One relocation → 10 cleared.
 
-**Promote-when:** a second target where a same-file trait-forwarder collision blocks a needed body refactor and the move-first sequence resolves it. At 2 datapoints, promote to a recon/refactor rule: *"before refactoring a method body, a `count_symbols_by_name_path` > 1 means a trait forwarder shares the name_path and `edit_code` is blocked — relocate the trait-impl block first."* Craft-shaped (Rust trait-impl pattern) → reconnaissance memory / skill, not a one-off.
+**Promote-when:** ~~DECLINED 2026-08-20 — the rule this would promote is false.~~ Triaged in
+the `F-7` sweep and declined on this entry's **own** CORRECTION below: `edit_code` resolves
+the qualified `impl Trait for Type/method` form, so the body was editable in place and the
+collision was never a real block; the defect class itself was removed (W-5, ADR
+`docs/adrs/2026-06-13-drop-name-collision-defect.md`). Promoting it would have shipped
+"relocate the trait-impl block first" as standing guidance for a block that does not exist.
+Kept as the worked example of why a fired criterion is a *proposal*, not a debt. Original
+criterion follows.
+
+~~a second target where a same-file trait-forwarder collision blocks a needed body refactor and the move-first sequence resolves it. At 2 datapoints, promote to a recon/refactor rule: *"before refactoring a method body, a `count_symbols_by_name_path` > 1 means a trait forwarder shares the name_path and `edit_code` is blocked — relocate the trait-impl block first."* Craft-shaped (Rust trait-impl pattern) → reconnaissance memory / skill, not a one-off.~~
 
 **Impact:** high — closed the first full loop AND produced a reusable, tested template for the largest remaining collision cluster.
 
