@@ -7,7 +7,7 @@ owner: marius
 related: ["56b725405a9c36d1", "21f6d21b3bf82c30"]
 tags: [librarian, audit_doc_refs, ci, progressive-disclosure, silent-cap]
 kind: bug
-unverified: the ordering regression test is OWED, not written (Resume item 1); no fix-SHA value appears anywhere in the file, only the promise 'recorded on commit'; and the 'master-side SHA still needs recording after cherry-pick' wait is OBSOLETE — master...experiments reports 0 on the left, so promotion is fast-forward and no second SHA will ever exist
+unverified: the ordering regression test is OWED, not written (Resume item 1) — the reordering is covered only indirectly, by tests that assert the cap and the exit code are unchanged, so a mutation reversing the sort key would not be caught.
 ---
 
 # BUG: audit_doc_refs exits 1 but its 50-finding cap hides every finding that caused it
@@ -149,11 +149,11 @@ let shown_findings: Vec<_> = ranked.iter().take(cap).map(|f| finding_to_json(f))
 `hint` now states that the shown findings are ordered most-severe-first, so a
 reader knows the absence of a high finding in the window is meaningful.
 
-Experiments-branch SHA: recorded on commit (this change ships with the
-extractor-precision work). **No master-side SHA is owed** — that rule was retired
-2026-08-19. Record the SHA and its patch-id at fix time and the pair stays
-resolvable whichever way the fix reaches master; see `docs/RELEASE.md`
-§ *Citing a fix: SHA + patch-id*.
+Shipped in `45669701` on `experiments`, alongside the extractor-precision work — that
+commit's own message names the change: *"Ranking by (unresolved, severity) before
+truncating makes the gate self-explaining"*. SHA and patch-id are recorded under
+§ *Fix provenance* at the end of this file; **no master-side SHA is owed**, that rule
+was retired 2026-08-19 (see `docs/RELEASE.md` § *Citing a fix: SHA + patch-id*).
 
 ## Tests added
 
@@ -207,3 +207,24 @@ Two follow-ups, both small:
   cite that nonexistent name — see the drift backlog.)
 - `docs/issues/archive/2026-08-06-docs-ref-drift-backlog-across-eleven-subdirs.md` — the
   remaining population, including the wrong-guide-name citations above.
+
+## Fix provenance
+
+- **SHA:** `45669701` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `78c85eb6dbf0036f27f1b69c2292cded5e43680d` — content hash of the diff; survives rebase and cherry-pick.
+
+Recovered 2026-08-19 by pickaxe — `git log -S 'ranked.sort_by_key' -- src/librarian/tools/audit_doc_refs/`
+— after the original entry recorded only the promise "recorded on commit" and never the
+value. The commit is an omnibus close of six bugs; `--stat` scoped to the subsystem
+confirms it carries the `build_response` ranking change. If the SHA stops resolving,
+recover by patch-id. Use redirects, not pipes: Iron Law 3 blocks an unbounded
+`git log -p` piped to a trimmer.
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 78c85eb6dbf0 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.

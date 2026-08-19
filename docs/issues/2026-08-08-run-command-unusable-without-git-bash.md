@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md]
 tags: [windows, process-spawn, ci, wine]
 kind: bug
-unverified: "the line 'Fix SHA: experiments — recorded once the branch merges' is OBSOLETE — master...experiments reports 0 on the left, so promotion is a fast-forward and the experiments SHA already IS the master SHA; nothing further will ever be recordable. Windows-only fix, never exercised on this host."
+unverified: Windows-only fix, never exercised on this host — its tests are cfg(windows), and the wine CI image still ships without Git for Windows, so the 22-test skip block stands. Root cause (install Git in the image, drop the skip block) is unaddressed, which is why this is mitigated rather than fixed.
 ---
 
 # BUG: `run_command` is dead on a Windows host with no Git Bash, and says only "program not found"
@@ -144,7 +144,8 @@ security layer tokenizes POSIX while the shell executes something else.
   the un-skip protocol (install Git in the image, drop the block wholesale) in the
   comment.
 
-Fix SHA: `experiments` — recorded once the branch merges.
+Fix: `3f8a43e7` on `experiments`. SHA and patch-id are recorded under § *Fix provenance*
+at the end of this file; nothing further is owed.
 
 Root-cause close would be installing Git for Windows in the wine image, which retires the
 skip block. Until then this stays `mitigated`: the tool now refuses legibly, but a
@@ -186,3 +187,22 @@ added here and confirm the cross job goes green.
 - `docs/trackers/windows-platform-support.md` — WIN-32 (the Git Bash routing), WIN-36 (this)
 - `docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md` — WIN-27, the other wine skip list
 - PR https://github.com/mareurs/codescout/pull/10, run `31220855460`
+
+## Fix provenance
+
+- **SHA:** `3f8a43e7` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `07f841e618a6e3e78419a1c3885d3a499c540ff9` — content hash of the diff; survives rebase and cherry-pick.
+
+Recovered 2026-08-19 by pickaxe — `git log -S 'shell_unavailable_hint' -- src/platform/` —
+after the original line promised a value that was never written back. If the SHA stops
+resolving, recover the commit by patch-id. Use redirects, not pipes: Iron Law 3 blocks an
+unbounded `git log -p` piped to a trimmer.
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 07f841e618a6 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.

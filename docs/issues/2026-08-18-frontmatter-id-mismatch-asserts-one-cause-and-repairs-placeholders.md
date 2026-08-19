@@ -13,7 +13,7 @@ tags:
 - cross-repo
 topic: catalog-drift
 closed: 2026-08-18
-unverified: 'the text states ''the fix SHA below is already the master-side SHA'' but NO fix SHA appears anywhere in this file — the only 7-12 hex token present is the environment pin 282586b1. The mandatory archive field is asserted-present and absent. Also: the on-the-wire 3/3 split check named in Resume has not been re-run since the rebuild.'
+unverified: the on-the-wire 3/3 split check named in Resume has not been re-run since the rebuild — the split is asserted by unit tests, but the live MCP surface was not re-probed after the binary was rebuilt.
 ---
 
 # BUG: `frontmatter_id_mismatch` asserts one cause, and its repair would overwrite a placeholder
@@ -205,8 +205,10 @@ explained it and the concurrent session's commits touched unrelated files. Most 
 admitting two rows — recorded as unexplained rather than guessed, and now cheaper to answer,
 since the two check names separate the populations.
 
-Fast-forward path (`master...experiments` is `0` on the left), so the fix SHA below is already the
-master-side SHA and there is no second one to record.
+Fast-forward path (`master...experiments` is `0` on the left), so the `experiments` SHA already
+is the master-side SHA and there is no second one to record. The SHA and its patch-id are
+recorded under § *Fix provenance* at the end of this file — the earlier wording here pointed
+at "the fix SHA below", a value that was never actually written down.
 ## References
 
 - `src/librarian/tools/doctor.rs` — `check_frontmatter_id_matches_catalog`, and the
@@ -215,3 +217,24 @@ master-side SHA and there is no second one to record.
   placeholder hazard for the other keys
 - `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md` (BL-23 — why the repair exists)
 - `docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md` (why stamping an `id:` changes guard behaviour)
+
+## Fix provenance
+
+- **SHA:** `51dd9368` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `1abe058fd3e3b16da23af4fbf00fc0f358c92ac8` — content hash of the diff; survives rebase and cherry-pick.
+
+Recovered 2026-08-19 from `git log -- src/librarian/tools/doctor.rs`; the commit subject
+— *"fix(doctor): split frontmatter_id_mismatch, and stop the repair eating placeholders"* —
+names both halves of this bug. Recorded after `terminal_status_with_caveat` flagged the
+file for asserting a fix SHA it did not contain. If the SHA stops resolving, recover by
+patch-id. Use redirects, not pipes: Iron Law 3 blocks an unbounded `git log -p` piped to a
+trimmer.
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 1abe058fd3e3 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.
