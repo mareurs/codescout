@@ -55,19 +55,54 @@ one after a server crash). Re-emitted guides and their sizes:
 
 ## Evidence
 
-**Every rendezvous slot on this machine is unstamped** — 7 slots, 3 repos, back to
-2026-08-18:
+> **CORRECTION 2026-08-19, same session.** The first version of this section read *"Every
+> rendezvous slot on this machine is unstamped — 7 slots, 3 repos, back to 2026-08-18"*,
+> which implied the hook is broken. **Both halves were wrong**, and the corrected evidence
+> makes the diagnosis narrower and stronger.
+>
+> - **The population was 9, not 7.** It was listed with `ls -la … | head -10` and the
+>   truncation was read as the count. Same instrument defect as
+>   `prompt-surface-compaction-session-log:W-4` — a capped output reported as a population.
+> - **The hook is not broken; it demonstrably works.** Slot `2354686.json` carries
+>   `hook_at: "2026-08-19T09:22:26.064Z"`.
+>
+> The rendezvous is fully *present* for this server — directory, and our own slot. Only the
+> **stamp** is missing, and `is_active()` keys on the stamp alone.
+
+**The rendezvous exists for this server.** `run_command`'s own ancestry confirms the slot
+belongs to us:
+
+```
+pid=2539054 comm=sh        ppid=2299571
+pid=2299571 comm=codescout ppid=1865696     <- this server; slot is servers/2299571.json
+pid=1865696 comm=claude    ppid=4157971
+```
 
 ```
 servers/2299571.json  {"pid":2299571,"ppid":1865696,"started_at":"2026-08-19T09:08:29Z",
                        "cwd":".../codescout","session":"a8acb1cf-…","hook_at":null}
 ```
 
-`hook_at: null` on all of them. `Entry.hook_at`'s own doc: *"Set by the companion hook.
-`None` ⇒ no rendezvous is active."*
+`Entry.hook_at`'s own doc: *"Set by the companion hook. `None` ⇒ no rendezvous is
+active."* Present slot, absent stamp — and only the stamp is read.
+
+**The confirming case, and the reason this is reconnect-specific.** One slot on this
+machine IS stamped:
+
+```
+servers/2354686.json  {"pid":2354686,"ppid":95916,"started_at":"2026-08-19T09:13:34Z",
+                       "cwd":".../MRV-poc","session":"d91e823b-…",
+                       "hook_at":"2026-08-19T09:22:26.064Z"}
+```
+
+Published at 09:13:34, stamped at 09:22:26 — **nine minutes later**, in a different window.
+That gap is a SessionStart (a `/clear` or `/compact`) firing against an *already-existing*
+slot, which is exactly the ordering `session-start.mjs` documents. It proves the stamping
+path works end to end, and isolates the defect to the one event that creates a slot with
+no SessionStart behind it: a `/mcp` reconnect.
 
 **The ledger confirms the wipe.** `~/.local/state/codescout/guide_hints/a8acb1cf-….json`
-after the reconnect holds only four topics, **every stamp later than the server's
+after the reconnect holds only four topics, **every stamp later than this server's
 `started_at` of 09:08:29Z**:
 
 ```json
@@ -79,15 +114,15 @@ after the reconnect holds only four topics, **every stamp later than the server'
 emitted earlier in the same conversation. Nothing survived the reconnect.
 
 **The ancestry filter is not the cause, and was ruled out rather than assumed.** The
-hook's `ownAncestry()` walks its own pid chain and requires `ancestry.has(e.ppid)`. The
+hook's `ownAncestry()` walks its own pid chain and requires `ancestry.has(e.ppid)`. Our
 slot's `ppid` is 1865696, which is `claude --resume a8acb1cf-…` — the hook's own parent.
-The match would succeed. The hook is correct; it simply never runs again.
+The match would succeed. The hook is correct; it simply never runs again for this
+conversation.
 
 **The timing is the whole story.** Claude Code (pid 1865696) started 11:15:41 local. This
 MCP server started 12:08:29 local — 53 minutes later, from a reconnect. SessionStart fired
 once, at 11:15:41, against a server process that no longer exists and whose slot has since
 been garbage-collected by `Rendezvous::publish`'s own `gc(&dir)`.
-
 ## Root cause
 
 The rendezvous gate is **per-server-process**, but the only thing that opens it is a
@@ -174,4 +209,3 @@ only one that makes the flag mean what it says.
 - `../claude-plugins/codescout-companion/hooks/session-start.mjs` — the only writer of
   `hook_at`; `ownAncestry()` at line 128
 - `get_guide("workspace-state")` § Per-session state reset — the doc this contradicts
-
